@@ -36,8 +36,9 @@ export interface McpBridgeOptions {
   db: ClawbooDb
   /** The calling agent (recorded in broker audit + approvals; the TeamChat author). */
   agentId?: string
-  /** Which servers to attach. */
-  enable: { tasks: boolean; memory: boolean; tools: boolean; teamchat?: boolean }
+  /** Which servers to attach. `tasks: 'read'` attaches only the board's read
+   *  tools (list_tasks/get_task) — visibility without engine-racing writes. */
+  enable: { tasks: boolean | 'read'; memory: boolean; tools: boolean; teamchat?: boolean }
   /**
    * The run's authoritative memory scope — bound onto the in-process Memory
    * server so native saves are team-shared + reads team-limited, matching the
@@ -82,7 +83,26 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
   const db = opts.db
   const clients: InMemoryMcpClient[] = []
   if (enable.tasks)
-    clients.push(await connectInMemoryClient(createTasksServer(db), 'clawboo-native'))
+    clients.push(
+      await connectInMemoryClient(
+        createTasksServer(db, {
+          readOnly: enable.tasks === 'read',
+          // Same binding the Memory + TeamChat servers get: the run's team is
+          // authoritative, so a bare `list_tasks` returns THIS team's board
+          // (the agent is never told its own teamId to pass). The agentId
+          // additionally enables the mid-run inbox piggyback.
+          ...(opts.memoryScope?.teamId || opts.agentId
+            ? {
+                boundScope: {
+                  ...(opts.memoryScope?.teamId ? { teamId: opts.memoryScope.teamId } : {}),
+                  ...(opts.agentId ? { agentId: opts.agentId } : {}),
+                },
+              }
+            : {}),
+        }),
+        'clawboo-native',
+      ),
+    )
   if (enable.memory) {
     // A real provider (not null) so native-authored facts store vectors and
     // native interactive search is hybrid — matching every other runtime.

@@ -22,6 +22,7 @@ import {
   getAncestors,
   getComments,
   getReadyTasks,
+  listExecutions,
   getTask,
   linkDep,
   listTasks,
@@ -212,6 +213,22 @@ export function createServerBoardClient(db: ClawbooDb): BoardClient {
         return getReadyTasks(db, { teamId }) as BoardTask[]
       } catch {
         return []
+      }
+    },
+
+    async listExecutions(
+      taskId,
+    ): Promise<Array<{ id: string; status: string; executorType?: string }> | null> {
+      try {
+        return listExecutions(db, taskId).map((e) => ({
+          id: e.id,
+          status: e.status,
+          executorType: e.executorType,
+        }))
+      } catch {
+        // NOT `[]` — see the interface note. An unreadable ledger must not read
+        // as an empty one, or a transient sqlite error re-fires stopped work.
+        return null
       }
     },
 

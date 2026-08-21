@@ -89,7 +89,7 @@ Every coordination action, a task created, a delegation routed, a run started, a
 
 ## Design rationale and trade-offs
 
-**One process, local-first.** Bundling the server, SPA, database, and MCP spine into a single `npx`-launched process is what makes "screenshot-shareable in five minutes" achievable: no infra to provision, no account to create. The cost is that scaling beyond one machine is not a turn of a config knob; the single SQLite data-access layer is the deliberate seam where a future SQLite→Postgres or multi-tenant move would land (the coordination, registry, and governance tables, 17 of the 27, already carry a dormant `tenant_id` column).
+**One process, local-first.** Bundling the server, SPA, database, and MCP spine into a single `npx`-launched process is what makes "screenshot-shareable in five minutes" achievable: no infra to provision, no account to create. The cost is that scaling beyond one machine is not a turn of a config knob; the single SQLite data-access layer is the deliberate seam where a future SQLite→Postgres or multi-tenant move would land (the coordination, registry, and governance tables, 18 of the 28, already carry a dormant `tenant_id` column).
 
 **Board-canonical over narration-only.** Making SQLite the source of truth for coordination buys durability (state survives a restart), race-freedom (the atomic claim), and recoverability (the reconciliation passes), at the cost of a second persistence layer beside each runtime's own session state. The alternative, treating a chat transcript as authority, can't be transactionally claimed, can't survive a refresh, and can't tell a crashed run from a slow one.
 

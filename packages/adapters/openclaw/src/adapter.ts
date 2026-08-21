@@ -76,6 +76,9 @@ export class OpenClawAdapter implements RuntimeAdapter {
       worktrees: false,
       resume: true,
       toolApproval: true,
+      // `writeContext` sets an AGENT FILE on the Gateway. The running session
+      // does not re-read it, so it never reaches a live run.
+      steerable: false,
       models: [],
       // Native-preservation seam: a CONNECTED SUBSTRATE — runs ride the LIVE
       // Gateway session over this adapter's long-lived client; the one-shot

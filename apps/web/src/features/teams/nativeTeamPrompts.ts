@@ -39,12 +39,15 @@ export const NATIVE_SPECIALIST_PROMPT =
   'reasonable assumption and note it rather than asking. Save durable facts to ' +
   'the shared memory so your teammates can build on them.'
 
-/** The native tool surface for a CreateTeamModal team — trust-first: the leader
- *  (and specialists) do NOT get the Tasks MCP (the server engine owns the board;
- *  a leader `create_task`/`claim_task` would orphan/409). Memory + tools stay on. */
+/** The native tool surface for a CreateTeamModal team. The server engine owns
+ *  board WRITES (a model `create_task`/`claim_task` would orphan/409), so tasks
+ *  attach read-only — full board visibility, no engine races. TeamChat is on:
+ *  it powers the conversation's automatic peer-inbox pull, the team's only
+ *  mid-run awareness channel, and the author identity is bound server-side
+ *  (anti-spoof). */
 export const NATIVE_TEAM_TOOLS = {
   memory: true,
   tools: true,
-  tasks: false,
-  teamchat: false,
+  tasks: 'read',
+  teamchat: true,
 } as const

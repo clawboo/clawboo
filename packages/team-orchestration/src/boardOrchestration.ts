@@ -19,7 +19,11 @@ import type { RuntimeEvent } from '@clawboo/executor'
 import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
-import { buildTaskUpdateMessage, type TaskUpdateOutcome } from './taskUpdate'
+import {
+  buildTaskUpdateMessage,
+  type OutstandingDelegation,
+  type TaskUpdateOutcome,
+} from './taskUpdate'
 
 import {
   parseStructuredDelegations,
@@ -28,6 +32,7 @@ import {
   detectDelegationIntent,
   type SessionsSendParams,
 } from './delegationTags'
+import { SYSTEM_TURN, type TurnOrigin } from './turnOrigin'
 
 /**
  * A source task at this ancestor-depth (or deeper) may not spawn children —
@@ -48,6 +53,47 @@ export const REFLECT_WINDOW_MS = 3000
  * `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS` watchdog.
  */
 export const DELEGATION_IDLE_TIMEOUT_MS = 8 * 60_000
+
+/** Durable auto-refire cap: the ready-pump re-fires a released delegation at most
+ *  until its execution ledger holds this many rows. The ledger IS the counter —
+ *  process-restart safe, unlike the in-memory failure breaker it complements. */
+export const MAX_AUTO_FIRES = 3
+
+/**
+ * The ledger side of the fire policy (mirrored by @clawboo/db's
+ * `isLedgerAutoFireable` for the server pump's scan — the two MUST agree, and a
+ * contract test asserts they do over one shared fixture table):
+ *   • empty ledger → never delivered (fresh, deferred, MCP-created) → fire;
+ *   • last run `running` → someone owns it → leave it;
+ *   • last run `cancelled` → the user STOPPED it → never auto-refire
+ *     (a human re-queues it deliberately);
+ *   • TRAILING streak of consecutive non-succeeded runs ≥ MAX_AUTO_FIRES →
+ *     permafailing → park (a success in between resets the streak);
+ *   • otherwise (timed_out / failed / orphaned) → infra death, not intent →
+ *     re-fire.
+ *
+ * Pure and module-scoped rather than a closure: it depends on nothing but its
+ * argument, and the mirror can only be tested if both halves are reachable.
+ */
+export function ledgerAllowsAutoFire(execs: Array<{ status: string }>): boolean {
+  if (execs.length === 0) return true
+  const last = execs[execs.length - 1]!.status
+  if (last === 'running' || last === 'cancelled') return false
+  let trailing = 0
+  for (let i = execs.length - 1; i >= 0; i--) {
+    const s = execs[i]!.status
+    if (s === 'succeeded' || s === 'cancelled') break
+    trailing += 1
+  }
+  return trailing < MAX_AUTO_FIRES
+}
+
+/** The idle allowance while a delegate sits INSIDE one tool call (call seen, no
+ *  result yet). A build/test/install can legitimately run silent far past the
+ *  8-min window — the runtime emits `tool-call`, then nothing until the result —
+ *  and failing it there kills exactly the long-running work teams exist for.
+ *  Still bounded: a tool call that outlives even this ceiling is failed. */
+export const OPEN_TOOL_CALL_TIMEOUT_MS = 3 * DELEGATION_IDLE_TIMEOUT_MS
 
 /**
  * Consecutive failures of the SAME (target, task) after which re-delegation is
@@ -80,9 +126,14 @@ const FAIL_REASON_LABEL: Record<FailReason, string> = {
   timeout: 'Went silent (timed out with no response)',
 }
 
+// `cancelled` is RESERVED for user intent: the fire policy reads a cancelled
+// last run as "the user stopped this — never auto-refire". A done:aborted that
+// reaches failForSession is by definition NOT a clean user Stop (stopChangedFor
+// routes those to releaseClaimed) — it's a wedge abort, an idle-guard kill, a
+// session teardown: infrastructure death, which must stay refireable → 'failed'.
 const FAIL_EXEC_STATUS: Record<FailReason, CompleteExecutionOutcome['status']> = {
   error: 'failed',
-  aborted: 'cancelled',
+  aborted: 'failed',
   max_turns: 'failed',
   timeout: 'timed_out',
 }
@@ -121,6 +172,17 @@ export interface BoardChange {
   /** Report-up summary recorded on done (shown on the projection card). */
   summary?: string
 }
+
+/**
+ * How a narration line should be surfaced. `reflect` is routine orchestration
+ * narration (the per-task "✓ completed" marker, the batched `[Task Update]`
+ * envelope) — the board card is already its user-facing surface, so a host may
+ * legitimately send it to a tracelog. `alert` is a coordination FAILURE the
+ * user or leader would otherwise never learn about (delivery exhausted after
+ * `MAX_REFLECT_ATTEMPTS`); a host must surface it somewhere a person will see.
+ * Typed so the host routes on a discriminator, never by matching prose.
+ */
+export type NarrationKind = 'reflect' | 'alert'
 
 const EMPTY: ExtractedSignals = { parallel: [], plan: [] }
 const SESSIONS_SEND_NAME_RE = /sessions[._]send/i
@@ -251,14 +313,39 @@ export interface BoardOrchestratorDeps {
   sessionKeyForAgent: (agentId: string) => string | null
   /** Recover the agentId that owns a sessionKey. */
   agentIdForSession: (sessionKey: string) => string | null
-  /** Deliver a message to a session (nudge-queued adapter.start under the hood). */
-  deliver: (targetSessionKey: string, targetAgentId: string, task: string) => Promise<void>
+  /**
+   * Deliver a message to a session (nudge-queued adapter.start under the hood).
+   *
+   * `origin` is REQUIRED, not inferred: the host used to work out whether a turn
+   * was a delegated worker's or the user-facing leader's by asking this engine
+   * whether the session still had a task, and that answer goes stale the instant
+   * `completeForSession` forgets the session. See {@link TurnOrigin}.
+   */
+  deliver: (
+    targetSessionKey: string,
+    targetAgentId: string,
+    task: string,
+    origin: TurnOrigin,
+  ) => Promise<void>
   /** Monotonic stop generation; in-flight work bails when it changes. */
   stopGen: () => number
+  /**
+   * Is THIS process actively driving a run on `sessionKey` right now? Consulted
+   * only by {@link BoardOrchestrator.detachTask}, which must never free a session
+   * that still has a live run: freeing it would let the ready-pump start a SECOND
+   * concurrent run on it, breaking the one-run-per-session invariant.
+   *
+   * The host answers from the same map it already uses for liveness (the server's
+   * `abortMap`), rather than a marker maintained for this question alone — that
+   * map is populated only after `adapter.start` resolves and cleared on BOTH the
+   * terminal and no-terminal paths, so it cannot leak a permanent "busy" that
+   * would make detach refuse forever. Omitted ⇒ never busy.
+   */
+  isSessionBusy?: (sessionKey: string) => boolean
   /** A board mutation the orchestrator made (projection-store feed). Optional. */
   onBoardChange?: (change: BoardChange) => void
   /** Append a visible narration entry to a session's transcript. Optional. */
-  narrate?: (sessionKey: string, text: string) => void
+  narrate?: (sessionKey: string, text: string, kind?: NarrationKind) => void
   /**
    * Compact a child's report-up summary before it becomes a board comment /
    * `[Task Update]`. Pass-through-safe + failure-preserving.
@@ -289,6 +376,14 @@ export interface BoardOrchestratorDeps {
     targetAgentName: string
     task: string
   }) => Promise<'allow_once' | 'allow_always' | 'deny' | 'expired' | 'timeout'>
+  /**
+   * Abort a session's LIVE run (the host wires it to its abort map). Called when
+   * the engine fails a delegation whose run may still be executing — the idle
+   * watchdog and a session-close — so a failed task never leaves a zombie run
+   * burning tokens behind it. Optional + best-effort: the drain idle guard is
+   * the outer backstop for a run that ignores the abort.
+   */
+  abortSession?: (sessionKey: string) => void
   /** Injectable clock for the idle watchdog (tests). Defaults to `Date.now`. */
   now?: () => number
 }
@@ -316,6 +411,38 @@ export interface BoardOrchestrator {
    * ready (so a refresh / team re-open resumes a stalled plan).
    */
   resume(): Promise<void>
+  /**
+   * Make a user Stop DURABLE, synchronously with the Stop itself — never
+   * contingent on the aborts' `done:aborted` round-trip (a restart or a lost
+   * terminal would otherwise reclassify stopped work as infra death, and the
+   * dispatch pump would refire the very cascade the user halted). Cancels the
+   * open execution of every tracked run and tombstones every not-yet-fired
+   * ready delegation with a created-and-cancelled execution row — the durable
+   * "user stopped this" marker the fire policy reads. The host calls this from
+   * its Stop handler, alongside (not instead of) the aborts. NOT called on
+   * dispose/shutdown — parked work is promised to resume.
+   */
+  markStopped(): Promise<void>
+  /**
+   * Forget the session currently tracking `taskId`, because the task was
+   * released OUT OF BAND — by the stale sweep, an orphan reap, or a human moving
+   * the card. Without this the engine keeps a session mapped to work nobody is
+   * running: `fireTask` refuses every re-fire on `sessionToTask.has(...)`, and
+   * the idle watchdog eventually fails a task no process owns, cancelling its
+   * dependents. Both are permanent, and both read to the user as the delegate
+   * going silent.
+   *
+   * REFUSES (returns false) while the host reports a live run on that session —
+   * see `isSessionBusy`. Returns false too when no session is tracking the task,
+   * which is the common case and not an error.
+   *
+   * Deliberately NOT the same thing as gating `resume()`'s attach: `markStopped`
+   * iterates `sessionToTask` to tombstone tracked work, so refusing to attach
+   * after a restart would make a user Stop a silent no-op for the whole sweep
+   * window. Detaching on the release keeps that arm populated until the board
+   * itself says the work is no longer owned.
+   */
+  detachTask(taskId: string): boolean
   /** Drop all in-memory tracking + timers (team switch / teardown). */
   reset(): void
 }
@@ -336,6 +463,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const processed = new Map<string, number>() // dedupe key → insertion ts (age-reaped; bounds memory)
   const intentMissed = new Map<string, number>() // "didn't parse" nudge key (run:source) → ts (age-reaped)
   const lastActivityAt = new Map<string, number>() // child session → last event ts (watchdog)
+  const openToolCall = new Set<string>() // sessions currently inside a tool call (longer idle allowance)
   const recentlyTerminated = new Map<string, number>() // child session → terminal ts (late-replay guard)
   const failureCounts = new Map<string, number>() // `${target}:${task}` → consecutive failures (loop breaker)
 
@@ -381,14 +509,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   }
 
   // ── sourceDelegationId codec ────────────────────────────────────────────────
-  // The durable task carries its target agent (for pump-firing a deferred / plan
-  // step after a refresh) and its delegator (the reduce-point recipient, recovered
-  // by `resume` so a mid-chain delegator isn't re-routed to the leader). Segments
-  // use `:agent:`/`:reflectTo:` markers; agent ids + run ids never contain a colon,
+  // The durable task carries its target agent (for pump-firing after a release /
+  // restart) and its delegator (the reduce-point recipient, recovered by `resume`
+  // so a mid-chain delegator isn't re-routed to the leader). Segments use
+  // `:agent:`/`:reflectTo:` markers; agent ids + run ids never contain a colon,
   // so `[^:]+` decodes each unambiguously (and an OLD `:agent:`-only sdid still
-  // decodes its agent). Only `:agent:`-bearing tasks are pump-fireable — a plain
-  // delegation (delivered once at spawn) deliberately omits it so a stop/server
-  // release never re-fires it.
+  // decodes its agent). EVERY delegation now carries `:agent:` — plain ones
+  // included — so a sweep/orphan release is re-fireable instead of stranding the
+  // work forever ("delegated, waiting" with nothing coming). What used to make
+  // omission necessary — "a stop/server release must never re-fire it" — is now
+  // enforced where the distinction actually lives: the ready-pump's fire policy
+  // reads the task's execution ledger, and a `cancelled` last run (the user-Stop
+  // outcome `releaseClaimed` records) is never auto-refired.
   const sdidAgent = (sdid: string): string | null => sdid.match(/:agent:([^:]+)/)?.[1] ?? null
   const sdidReflectTo = (sdid: string): string | null =>
     sdid.match(/:reflectTo:([^:]+)/)?.[1] ?? null
@@ -417,10 +549,45 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     sessionStartGen.has(sessionKey) && sessionStartGen.get(sessionKey) !== deps.stopGen()
 
   /** Drop all in-memory tracking for a session's current task. */
-  const forgetSession = (sessionKey: string): void => {
+  /** See {@link BoardOrchestrator.detachTask}. */
+  const detachTask = (taskId: string): boolean => {
+    let found: string | null = null
+    for (const [sessionKey, tid] of sessionToTask) {
+      if (tid === taskId) {
+        found = sessionKey
+        break
+      }
+    }
+    if (!found) return false
+    // A live run still owns this session; freeing it would let the pump start a
+    // second one beside it. The run's own terminal will release it shortly, and
+    // a task released underneath a live run already degrades to the documented
+    // late-result comment path.
+    if (deps.isSessionBusy?.(found)) return false
+    // Drop the tracking WITHOUT arming the late-replay guard. A detach is an
+    // out-of-band release (stale sweep, orphan reap, a human moving the card),
+    // the agent's session is usually still alive, and `recentlyTerminated` would
+    // silently drop every <delegate>/<plan> it emits for the next 60s: the exact
+    // silent-loss failure detach exists to prevent. The guard is for RUN
+    // terminals, where a stale summary really can replay.
+    dropSessionTracking(found)
+    // The exec this task was tracking is whatever closed it (the sweep's
+    // `timed_out`). Keeping the id would let a later terminal complete a row that
+    // is already terminal — refused, but misleading.
+    taskToExec.delete(taskId)
+    return true
+  }
+
+  /** Tracking teardown alone, no replay guard. Callers that observed a RUN
+   *  terminal want `forgetSession`, which also arms `recentlyTerminated`. */
+  const dropSessionTracking = (sessionKey: string): void => {
     sessionToTask.delete(sessionKey)
     sessionStartGen.delete(sessionKey)
     lastActivityAt.delete(sessionKey)
+    openToolCall.delete(sessionKey)
+  }
+  const forgetSession = (sessionKey: string): void => {
+    dropSessionTracking(sessionKey)
     recentlyTerminated.set(sessionKey, now())
   }
 
@@ -554,8 +721,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       teamId: deps.teamId,
       assigneeRuntime: 'openclaw',
       ...(sourceTaskId ? { parentTaskId: sourceTaskId } : {}),
+      // `:agent:` on EVERY delegation (deferred or not) — the target must be
+      // recoverable from the durable row so a sweep/orphan release is
+      // re-fireable. Stop-vs-refire is the pump policy's job (exec ledger).
       sourceDelegationId: encodeSdid(runId, {
-        ...(deferred ? { agentId: signal.targetAgentId } : {}),
+        agentId: signal.targetAgentId,
         reflectTo: delegatorAgentId,
       }),
     })
@@ -619,7 +789,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return task.id
     }
     try {
-      await deps.deliver(targetSk, signal.targetAgentId, signal.task)
+      await deps.deliver(targetSk, signal.targetAgentId, signal.task, {
+        kind: 'delegation',
+        fromAgentId: reflectTargetFor(task.id),
+      })
     } catch {
       // Delivery rejected (the agent never received the task) — fail it now rather
       // than waiting out the 8-minute watchdog.
@@ -776,7 +949,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return
     }
     try {
-      await deps.deliver(targetSk, agentId, description)
+      await deps.deliver(targetSk, agentId, description, {
+        kind: 'delegation',
+        fromAgentId: reflectTargetFor(taskId),
+      })
     } catch {
       await failForSession(
         targetSk,
@@ -786,19 +962,81 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
   }
 
+  /** Tasks already alerted as parked (cap-hit) — one alert per engine lifetime. */
+  const parkAlerted = new Set<string>()
+  /** Same-session fires deferred out of a mid-terminal drain (see pumpReady). */
+  const deferredFires = new Set<ReturnType<typeof setTimeout>>()
+
   /**
-   * Fire every now-ready plan step (a step whose blocker just completed =
-   * auto-unblock). `getReadyTasks` returns only `status='todo'` + deps-satisfied;
-   * the target is resolved from the durable task (so a refresh resumes it) and
-   * the atomic claim-409 is the final double-fire arbiter.
+   * Fire every now-ready delegation (a fresh/deferred one, a plan step whose
+   * blocker completed, or a sweep/orphan-released one). `getReadyTasks` returns
+   * only `status='todo'` + deps-satisfied; the target is resolved from the
+   * durable task (so a refresh/restart resumes it) and the atomic claim-409 is
+   * the final double-fire arbiter.
+   *
+   * `completingSessionKey`: the session whose terminal we are INSIDE, when the
+   * pump runs from completeForSession/failForSession. A fire for that SAME
+   * session must not be delivered inline — the delivery would queue on the home
+   * mutex the completing drain still holds until it returns, a circular wait
+   * that only the acquire timeout breaks (10 minutes, then a wrongful failure).
+   * Those fires are deferred one macrotask, by which point the drain has
+   * returned and the mutex is free.
    */
-  async function pumpReady(): Promise<void> {
+  async function pumpReady(completingSessionKey?: string | null): Promise<void> {
     const ready = await deps.board.getReadyTasks(deps.teamId)
     for (const task of ready) {
       const agentId = targetForTask(task)
-      if (!agentId) continue // not a plan step we can fire
+      if (!agentId) continue // not a delegation we can fire
+      const execs = await deps.board.listExecutions(task.id)
+      // An UNREADABLE ledger is not an empty one. `[]` is the strongest signal a
+      // task may fire, so collapsing a read failure into it would auto-fire work
+      // the user Stopped. Skip the task this pass; the pump runs again.
+      if (execs === null) continue
+      if (!ledgerAllowsAutoFire(execs)) {
+        // Tell the leader ONCE when the cap parks a task — a silently-parked
+        // delegation is precisely the "sits forever, nobody told" failure mode.
+        const last = execs[execs.length - 1]?.status
+        if (last !== 'cancelled' && last !== 'running' && !parkAlerted.has(task.id)) {
+          parkAlerted.add(task.id)
+          const leaderSk = deps.leaderAgentId()
+            ? deps.sessionKeyForAgent(deps.leaderAgentId()!)
+            : null
+          if (leaderSk)
+            deps.narrate?.(
+              leaderSk,
+              `“${task.title ?? task.id}” failed ${MAX_AUTO_FIRES} times in a row and was parked — it will not be retried automatically. Review it on the board.`,
+              'alert',
+            )
+        }
+        continue
+      }
       if (!taskTitle.has(task.id) && task.title) taskTitle.set(task.id, task.title)
-      await fireTask(task.id, agentId, (task.description as string | undefined) ?? task.title ?? '')
+      const description = (task.description as string | undefined) ?? task.title ?? ''
+      const targetSk = deps.sessionKeyForAgent(agentId)
+      if (completingSessionKey && targetSk === completingSessionKey) {
+        const t = setTimeout(() => {
+          deferredFires.delete(t)
+          // Deferred out of a mid-terminal drain, so nothing is awaiting this:
+          // a rejection here would be an unhandled one, and the delegation it
+          // was meant to start would simply never happen, silently.
+          void fireTask(task.id, agentId, description).catch((err: unknown) => {
+            const leaderId = deps.leaderAgentId()
+            const leaderSk = leaderId ? deps.sessionKeyForAgent(leaderId) : null
+            if (leaderSk)
+              deps.narrate?.(
+                leaderSk,
+                `A queued delegation to ${nameOf(agentId)} could not be started: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+                'alert',
+              )
+          })
+        }, 0)
+        ;(t as { unref?: () => void }).unref?.()
+        deferredFires.add(t)
+        continue
+      }
+      await fireTask(task.id, agentId, description)
     }
   }
 
@@ -849,14 +1087,36 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // A Stop mid-flush suppresses the remaining groups' narration AND delivery —
       // the user halted; don't append stale [Task Update]s or re-amplify after Stop.
       if (deps.stopGen() !== startGen) return
-      const message = buildTaskUpdateMessage(group)
+      // What is this recipient STILL waiting on? Read off the board rather than
+      // tracked in memory, so it survives a restart and counts work fired by any
+      // path. Not-yet-terminal means `todo` or `in_progress`: a `blocked` task is
+      // not going to report on its own, and counting it would tell the delegator
+      // to keep waiting on something that needs a human.
+      const outstanding: OutstandingDelegation[] = []
+      const toAgentId = deps.agentIdForSession(toSk)
+      if (toAgentId) {
+        const settled = new Set(group.map((i) => i.title ?? ''))
+        for (const t of await deps.board.listTasks(deps.teamId).catch(() => [])) {
+          const sdid = typeof t.sourceDelegationId === 'string' ? t.sourceDelegationId : ''
+          if (sdidReflectTo(sdid) !== toAgentId) continue
+          if (t.status !== 'todo' && t.status !== 'in_progress') continue
+          const title = typeof t.title === 'string' ? t.title : undefined
+          // A task in this very batch is reporting now, not outstanding.
+          if (title && settled.has(title)) continue
+          outstanding.push({
+            by: nameOf(sdidAgent(sdid)),
+            ...(title ? { title: title.length > 60 ? title.slice(0, 60) + '…' : title } : {}),
+          })
+        }
+      }
+      const message = buildTaskUpdateMessage(group, outstanding)
       // Visible narration (board→chat) + context delivery to the recipient. The
       // narration is the user-facing signal even if the delivery itself fails.
       deps.narrate?.(toSk, message)
       const toId = deps.agentIdForSession(toSk)
       if (toId) {
         try {
-          await deps.deliver(toSk, toId, message)
+          await deps.deliver(toSk, toId, message, SYSTEM_TURN)
         } catch {
           // Delivery rejected (a transient chat.send failure) — re-queue for a
           // bounded retry rather than silently dropping the recipient's update
@@ -867,9 +1127,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             for (const item of group) reflectQueue.push({ ...item, attempts })
             armReflectTimer()
           } else {
+            // Retries exhausted: the recipient will NEVER get these updates. That
+            // is a real coordination failure, not routine narration — mark it
+            // `alert` so the host surfaces it to the user instead of filing it in
+            // a tracelog nobody reads.
             deps.narrate?.(
               toSk,
               `${group.length} task update(s) could not be delivered to this session — the results are on the board.`,
+              'alert',
             )
           }
         }
@@ -909,12 +1174,26 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           error: 'result arrived after the task was released/reassigned',
         })
       }
+      // The work itself must survive the refusal: the child DID produce a result,
+      // and discarding it means a re-delegation redoes finished work. Preserve it
+      // as a comment on the task (comments aren't status-gated), clearly marked as
+      // late, so the next claimant — or the leader — starts from it.
+      if (trimmed) {
+        await deps.board.addComment(
+          taskId,
+          `[late result — the task had been released before this arrived] ${trimmed}`,
+          'agent',
+          agentId ?? undefined,
+        )
+      }
       if (!stopped)
         enqueueReflection({
           toAgentId: reflectTargetFor(taskId),
           by,
           title,
-          summary: `${by}'s result for “${title ?? 'the task'}” arrived after the task was released/reassigned — it was not recorded. Re-check the board or re-delegate if it's still needed.`,
+          summary: trimmed
+            ? `${by}'s result for “${title ?? 'the task'}” arrived after the task was released/reassigned. The result was preserved as a comment on the task — review it before re-delegating; the work may already be done.`
+            : `${by}'s result for “${title ?? 'the task'}” arrived after the task was released/reassigned — it was not recorded. Re-check the board or re-delegate if it's still needed.`,
           outcome: 'error',
         })
       taskReflectTo.delete(taskId)
@@ -960,7 +1239,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     taskReflectTo.delete(taskId)
     taskTitle.delete(taskId)
     // Auto-unblock: fire any plan step whose blocker just completed (not after Stop).
-    if (!stopped) await pumpReady()
+    // Same-session follow-ups defer one macrotask (see pumpReady) — this call
+    // runs inside the completing drain, which still holds the home mutex.
+    if (!stopped) await pumpReady(sessionKey)
   }
 
   /**
@@ -979,6 +1260,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   ): Promise<void> {
     const taskId = sessionToTask.get(sessionKey)
     if (!taskId) return // not a tracked delegation (e.g. the leader's own turn)
+    // Failing a task whose RUN may still be live (the idle watchdog, a session
+    // close) must also KILL that run: without this, a watchdog-failed delegate
+    // kept executing invisibly — a zombie burning tokens whose eventual result
+    // could only land as a '[late result]' comment. Best-effort; the drain idle
+    // guard remains the backstop for a run that ignores the abort.
+    deps.abortSession?.(sessionKey)
     // A Stop since this delegation started suppresses the amplifying tail (the
     // failure reflection + ready-pump). A genuine user-Stop ABORT never reaches
     // here (onEvent routes it to a clean release); this guard only covers an
@@ -1036,7 +1323,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       })
     taskReflectTo.delete(taskId)
     taskTitle.delete(taskId)
-    if (!stopped) await pumpReady()
+    if (!stopped) await pumpReady(sessionKey)
   }
 
   /** Fail any delegated child idle past the watchdog window (never left standing).
@@ -1048,14 +1335,27 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     for (const [k, ts] of intentMissed) if (ts <= tnow - PROCESSED_TTL_MS) intentMissed.delete(k)
     for (const [s, ts] of recentlyTerminated)
       if (ts <= tnow - RECENTLY_TERMINATED_TTL_MS) recentlyTerminated.delete(s)
-    const cutoff = tnow - DELEGATION_IDLE_TIMEOUT_MS
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
-      if (ts <= cutoff && sessionToTask.has(sk)) stale.push(sk)
+      // A session inside a tool call (build/test/install) is legitimately silent
+      // — grant it the longer allowance instead of executing it at 8 minutes.
+      const allowance = openToolCall.has(sk)
+        ? OPEN_TOOL_CALL_TIMEOUT_MS
+        : DELEGATION_IDLE_TIMEOUT_MS
+      if (ts <= tnow - allowance && sessionToTask.has(sk)) stale.push(sk)
     }
     for (const sk of stale) {
-      const mins = Math.round(DELEGATION_IDLE_TIMEOUT_MS / 60_000)
-      await failForSession(sk, 'timeout', `No response from the delegate for ${mins} minutes.`)
+      const wasInToolCall = openToolCall.has(sk)
+      const mins = Math.round(
+        (wasInToolCall ? OPEN_TOOL_CALL_TIMEOUT_MS : DELEGATION_IDLE_TIMEOUT_MS) / 60_000,
+      )
+      await failForSession(
+        sk,
+        'timeout',
+        wasInToolCall
+          ? `The delegate has been inside one tool call for over ${mins} minutes with no result.`
+          : `No response from the delegate for ${mins} minutes.`,
+      )
     }
   }
 
@@ -1075,6 +1375,19 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     for (const t of all) {
       const assignee = typeof t.assigneeAgentId === 'string' ? t.assigneeAgentId : null
       if (t.status === 'in_progress' && assignee) {
+        // Only attach a task that actually HAS a live ENGINE-OWNED run:
+        //  • no running exec (claimed-but-runless / mid-handoff) → an 8-min
+        //    clock nothing refreshes — a guaranteed false `blocked`;
+        //  • a running exec from the EXECUTOR runner (claude-code/codex/native
+        //    one-shot — anything not the engine's own 'openclaw' fire) → the
+        //    engine will never observe its events, so the watchdog would
+        //    falsely fail a healthy heartbeat-governed run at 8 minutes.
+        const execs = await deps.board.listExecutions(t.id)
+        // Unknown ledger ⇒ don't attach a watchdog we cannot justify.
+        if (execs === null) continue
+        const last = execs[execs.length - 1]
+        if (!last || last.status !== 'running') continue
+        if (last.executorType !== undefined && last.executorType !== 'openclaw') continue
         const sk = deps.sessionKeyForAgent(assignee)
         if (sk && !sessionToTask.has(sk)) {
           sessionToTask.set(sk, t.id)
@@ -1102,7 +1415,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
 
     // Any observed event = the delegate is alive; refresh the idle watchdog so a
     // slow-but-working agent (streaming deltas / tool calls) is never swept.
-    if (sessionToTask.has(sessionKey)) lastActivityAt.set(sessionKey, now())
+    if (sessionToTask.has(sessionKey)) {
+      lastActivityAt.set(sessionKey, now())
+      // Track whether the session sits inside a tool call: `tool-call` opens the
+      // window, `tool-result` closes it, and any terminal clears it (a run can
+      // end mid-call on abort/error). The sweep grants an open call the longer
+      // OPEN_TOOL_CALL_TIMEOUT_MS allowance.
+      if (event.kind === 'tool-call') openToolCall.add(sessionKey)
+      else if (event.kind === 'tool-result' || event.kind === 'done' || event.kind === 'error')
+        openToolCall.delete(sessionKey)
+    }
 
     if (event.kind === 'done') {
       if (event.reason === 'success') {
@@ -1209,11 +1531,55 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
   }
 
+  /** See the interface. Durable-Stop writer — runs alongside the host's aborts. */
+  async function markStopped(): Promise<void> {
+    // Pending deferred fires would start NEW runs after the Stop — kill them
+    // first (they were scheduled pre-Stop, so their gen check would pass).
+    for (const t of deferredFires) clearTimeout(t)
+    deferredFires.clear()
+    // Tracked runs: cancel the open execution NOW; the abort's later
+    // done:aborted → releaseClaimed completeExecution no-ops (terminals are
+    // immutable) and still releases the task row. A RESUME-ATTACHED run has no
+    // taskToExec entry (the exec was created before the restart) — resolve its
+    // trailing running exec from the board so a post-restart Stop still sticks.
+    // And RELEASE the task row here too: if the process dies before the abort
+    // terminals land, a cancelled-exec + in_progress-task combination has no
+    // running exec for any sweep to reap — it would strand forever. The release
+    // is idempotent with the later releaseClaimed.
+    for (const [, taskId] of sessionToTask) {
+      const execId = taskToExec.get(taskId)
+      if (execId) {
+        await deps.board.completeExecution(execId, { status: 'cancelled' })
+      } else {
+        const execs = await deps.board.listExecutions(taskId)
+        const last = execs?.[execs.length - 1]
+        if (last && last.status === 'running')
+          await deps.board.completeExecution(last.id, { status: 'cancelled' })
+      }
+      await deps.board.updateStatus(taskId, 'todo')
+    }
+    // Not-yet-fired delegations: tombstone with a created-and-cancelled exec so
+    // the fire policy (and the server scan) read them as user-stopped.
+    const ready = await deps.board.getReadyTasks(deps.teamId)
+    for (const task of ready) {
+      if (!targetForTask(task)) continue // not auto-firable — no tombstone needed
+      const execs = await deps.board.listExecutions(task.id)
+      // On an unknown ledger, tombstone anyway. This path errs toward "the user
+      // stopped it": a duplicate cancelled row is harmless (the task stays
+      // stopped), a missing one lets the pump re-fire it.
+      if (execs && execs.length > 0 && execs[execs.length - 1]!.status === 'cancelled') continue
+      const exec = await deps.board.createExecution(task.id, 'openclaw')
+      if (exec) await deps.board.completeExecution(exec.id, { status: 'cancelled' })
+    }
+  }
+
   return {
     onEvent,
     sweepStaleSessions,
     onSessionClosed,
     resume,
+    markStopped,
+    detachTask,
     taskForSession: (sessionKey) => sessionToTask.get(sessionKey) ?? null,
     reset() {
       // Best-effort: deliver any pending reflection BEFORE tearing down, so a
@@ -1235,8 +1601,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       processed.clear()
       intentMissed.clear()
       lastActivityAt.clear()
+      openToolCall.clear()
       recentlyTerminated.clear()
       failureCounts.clear()
+      parkAlerted.clear()
+      for (const t of deferredFires) clearTimeout(t)
+      deferredFires.clear()
     },
   }
 }

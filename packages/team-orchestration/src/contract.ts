@@ -23,13 +23,16 @@ import type { RuntimeEvent } from '@clawboo/executor'
 import {
   createBoardOrchestrator,
   DELEGATION_IDLE_TIMEOUT_MS,
+  MAX_AUTO_FIRES,
   MAX_DELEGATION_FAILURES,
   MAX_SPAWN_DEPTH,
+  OPEN_TOOL_CALL_TIMEOUT_MS,
   REFLECT_WINDOW_MS,
   type BoardChange,
   type DelegationSignal,
   type KnownAgent,
 } from './boardOrchestration'
+import type { TurnOrigin } from './turnOrigin'
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
 
 // ─── The board-agnostic inspection + control surface ──────────────────────────
@@ -38,6 +41,8 @@ import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardCl
 // synchronous (the fake reads its Map; the real wrapper reads the DB / recorded
 // calls); control methods simulate external actors (a stale-sweep release, a
 // pre-seeded resumable task) portably across both boards.
+export type SeedExecState = 'none' | 'running-openclaw' | 'running-executor'
+
 export interface CascadeBoard extends BoardClient {
   /** Tasks created via `createTask`, in call order (source of dynamic ids). */
   readonly created: readonly BoardTask[]
@@ -74,6 +79,18 @@ export interface CascadeBoard extends BoardClient {
     title: string
     sourceDelegationId: string | null
     assigneeAgentId: string
+    /**
+     * The ledger state behind the seeded row. Defaults to `running-openclaw`, a
+     * live ENGINE-owned run, which is the only shape `resume()` may attach.
+     *   - `none`: claimed but runless (mid-handoff) — attaching starts an 8-min
+     *     watchdog clock nothing refreshes, so it is a guaranteed false `blocked`.
+     *   - `running-executor`: a live run owned by the EXECUTOR runner, whose
+     *     events the engine never sees — attaching would fail a healthy
+     *     heartbeat-governed run at 8 minutes.
+     * Both must be SKIPPED. Before this option existed both fakes hardcoded a
+     * running `openclaw` exec, so deleting either guard failed nothing.
+     */
+    exec?: SeedExecState
   }): string
   /** Release any held resource (temp DB). */
   dispose?(): void | Promise<void>
@@ -123,6 +140,19 @@ function toolCallEvent(runId: string, name: string, input: unknown): RuntimeEven
     seq: 1,
   }
 }
+function toolResultEvent(runId: string, name: string): RuntimeEvent {
+  return {
+    kind: 'tool-result',
+    toolCallId: 'tc',
+    name,
+    output: 'ok',
+    isError: false,
+    runId,
+    sessionId: null,
+    ts: 1,
+    seq: 1,
+  }
+}
 
 type DelegationResolution = 'allow_once' | 'allow_always' | 'deny' | 'expired' | 'timeout'
 interface HarnessOpts {
@@ -141,9 +171,11 @@ interface HarnessOpts {
   sessionKeyForAgent?: (id: string) => string | null
   /** When set, `deliver` rejects for these target agent ids (delivery-failure tests). */
   deliverRejectsFor?: Set<string>
+  /** Sessions the HOST reports as having a live run (the server's abortMap). */
+  busySessions?: Set<string>
 }
 
-type Delivered = { sessionKey: string; agentId: string; task: string }
+type Delivered = { sessionKey: string; agentId: string; task: string; origin: TurnOrigin }
 const reflections = (delivered: Delivered[]): Delivered[] =>
   delivered.filter((d) => d.task.startsWith('[Task Update]'))
 const deliveredTo = (
@@ -151,6 +183,19 @@ const deliveredTo = (
   agentId: string,
 ): string[] => delivered.filter((d) => d.agentId === agentId).map((d) => d.task)
 const idsOf = (board: CascadeBoard): string[] => board.created.map((t) => t.id)
+
+/** A task's ledger, asserting the read SUCCEEDED. `listExecutions` returns null
+ *  when the ledger cannot be read, which every caller must treat as "unknown"
+ *  rather than "empty" — so a contract test that silently accepted null would be
+ *  asserting against the wrong thing. Fail loudly here instead. */
+const ledgerOf = async (
+  board: CascadeBoard,
+  taskId: string,
+): Promise<Array<{ id: string; status: string; executorType?: string }>> => {
+  const execs = await board.listExecutions(taskId)
+  expect(execs).not.toBeNull()
+  return execs!
+}
 
 // ─── The contract ─────────────────────────────────────────────────────────────
 
@@ -164,6 +209,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     delivered: Delivered[]
     changes: BoardChange[]
     narrations: { sessionKey: string; text: string }[]
+    aborted: string[]
     orchestrator: ReturnType<typeof createBoardOrchestrator>
   } {
     const board = harness.makeBoard()
@@ -171,18 +217,21 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     const delivered: Delivered[] = []
     const changes: BoardChange[] = []
     const narrations: { sessionKey: string; text: string }[] = []
+    const aborted: string[] = []
     const orchestrator = createBoardOrchestrator({
+      abortSession: (sessionKey) => aborted.push(sessionKey),
       teamId: 't1',
       board,
       known: () => KNOWN,
       leaderAgentId: () => 'leader',
       sessionKeyForAgent: opts?.sessionKeyForAgent ?? ((id) => sk(id)),
       agentIdForSession,
-      deliver: async (sessionKey, agentId, task) => {
+      deliver: async (sessionKey, agentId, task, origin) => {
         if (opts?.deliverRejectsFor?.has(agentId)) throw new Error('delivery rejected')
-        delivered.push({ sessionKey, agentId, task })
+        delivered.push({ sessionKey, agentId, task, origin })
       },
       stopGen: opts?.stopGen ?? (() => 0),
+      isSessionBusy: (sessionKey) => opts?.busySessions?.has(sessionKey) ?? false,
       onBoardChange: (c) => changes.push(c),
       narrate: (sessionKey, text) => narrations.push({ sessionKey, text }),
       ...(opts?.caps ? { caps: opts.caps } : {}),
@@ -193,7 +242,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         : {}),
       ...(opts?.now ? { now: opts.now } : {}),
     })
-    return { board, delivered, changes, narrations, orchestrator }
+    return { board, delivered, changes, narrations, aborted, orchestrator }
   }
 
   // Fake timers gate ONLY the reflection batcher's debounce; the board calls
@@ -300,7 +349,14 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.taskCount()).toBe(1)
       expect(board.claims).toHaveLength(1)
       expect(board.execCount).toBe(1)
-      expect(delivered).toEqual([{ sessionKey: sk('a2'), agentId: 'a2', task: 'fix it' }])
+      expect(delivered).toEqual([
+        {
+          sessionKey: sk('a2'),
+          agentId: 'a2',
+          task: 'fix it',
+          origin: { kind: 'delegation', fromAgentId: 'leader' },
+        },
+      ])
     })
 
     it('drives the full cascade from a `delegate` tool-call (native signal): create → claim → deliver → report-up → [Task Update]', async () => {
@@ -314,7 +370,14 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.taskCount()).toBe(1)
       expect(board.claims).toHaveLength(1)
       expect(board.execCount).toBe(1)
-      expect(delivered).toEqual([{ sessionKey: sk('a2'), agentId: 'a2', task: 'fix it' }])
+      expect(delivered).toEqual([
+        {
+          sessionKey: sk('a2'),
+          agentId: 'a2',
+          task: 'fix it',
+          origin: { kind: 'delegation', fromAgentId: 'leader' },
+        },
+      ])
       // The child completes → status done + a report-up comment.
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Fixed it — patched auth.ts.'))
       const t1 = idsOf(board)[0]!
@@ -499,6 +562,24 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       ).toBe(true)
     })
 
+    it('stamps WHY each turn is happening, so the host never has to guess', async () => {
+      // The host used to work this out from `taskForSession`, which goes stale the
+      // instant `completeForSession` forgets the session — so a reflection landing
+      // on an agent whose own task had just finished was framed as the team lead's
+      // turn, complete with the leader coordination block and the user's intro.
+      const { delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+      )
+      const task = delivered.find((d) => d.agentId === 'a2')!
+      expect(task.origin).toEqual({ kind: 'delegation', fromAgentId: 'leader' })
+
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)[0]!.origin).toEqual({ kind: 'system' })
+    })
+
     it('a leader done emits no board mutation and no reflection (echo-loop guard)', async () => {
       const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(sk('leader'), doneEvent('rL', 'Here is the combined synthesis.'))
@@ -543,11 +624,14 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.statusUpdates).not.toContainEqual({ taskId: t1, status: 'done' })
     })
 
-    it('an aborted child done closes the execution as cancelled', async () => {
+    it('a NON-STOP aborted done closes the execution as failed (cancelled = user intent only)', async () => {
+      // An abort that reaches failForSession is a wedge/guard kill, not a clean
+      // user Stop (those route through releaseClaimed) — it must ledger as
+      // infrastructure death so the fire policy keeps the task refireable.
       const { board, orchestrator } = await delegate(makeHarness())
       await orchestrator.onEvent(sk('a2'), failedDoneEvent('r2', 'aborted', ''))
       const t1 = idsOf(board)[0]!
-      expect(board.completed[0]!.outcome.status).toBe('cancelled')
+      expect(board.completed[0]!.outcome.status).toBe('failed')
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
     })
 
@@ -600,6 +684,275 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       clock += DELEGATION_IDLE_TIMEOUT_MS - 1
       await orchestrator.sweepStaleSessions()
       expect(board.statusUpdates.some((s) => s.status === 'blocked')).toBe(false)
+    })
+
+    it('the watchdog ABORTS the zombie run it fails — never just the board row', async () => {
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { aborted, orchestrator } = h
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // The failed delegation's live run was killed, not left burning invisibly.
+      expect(aborted).toEqual([sk('a2')])
+    })
+
+    it('an OPEN tool call earns the longer idle allowance (a silent build is not dead)', async () => {
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { board, orchestrator } = h
+
+      // The delegate enters one long tool call (a build/test) and goes silent.
+      await orchestrator.onEvent(sk('a2'), toolCallEvent('r2', 'run_command', { cmd: 'build' }))
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // NOT failed at the 8-min window — the call is still open.
+      expect(board.statusUpdates.some((s) => s.status === 'blocked')).toBe(false)
+
+      // But the allowance is a ceiling, not immunity.
+      clock += OPEN_TOOL_CALL_TIMEOUT_MS
+      await orchestrator.sweepStaleSessions()
+      const t1 = idsOf(board)[0]!
+      expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
+      expect(board.completed[0]!.outcome.status).toBe('timed_out')
+    })
+
+    it('a tool RESULT closes the window — silence after it gets the normal timeout', async () => {
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { board, orchestrator } = h
+
+      await orchestrator.onEvent(sk('a2'), toolCallEvent('r2', 'run_command', { cmd: 'build' }))
+      await orchestrator.onEvent(sk('a2'), toolResultEvent('r2', 'run_command'))
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      const t1 = idsOf(board)[0]!
+      expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
+    })
+
+    it('a result that lands after the task was released is preserved as a comment', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, delivered, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      // The server stale-sweep releases the task out from under the (still
+      // tracked) session — the next `done` must not fake-complete it, but the
+      // work itself must survive.
+      board.forceRelease(t1)
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Here is the finished patch'))
+      expect(board.statusUpdates).not.toContainEqual({ taskId: t1, status: 'done' })
+      expect(
+        board.comments.some(
+          (c) =>
+            c.taskId === t1 && /late result/i.test(c.body) && c.body.includes('finished patch'),
+        ),
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)[0]!.task).toMatch(/preserved as a comment/i)
+    })
+
+    it('the pump re-fires a sweep-released delegation after an engine restart', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1)
+
+      // The process died: the sweep timed out the run and released the task
+      // (exactly reconcileStaleInProgress's two writes); the engine's memory is
+      // gone.
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      orchestrator.reset()
+      // The server dispatch pump rebuilds the engine and pumps it.
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(2)
+      expect(board.statusOf(t1)).toBe('in_progress')
+    })
+
+    it('an out-of-band release DETACHES the session, so a RESIDENT engine can re-fire it', async () => {
+      // Every other sweep-release scenario calls `reset()` first, which clears
+      // `sessionToTask` and hides this entirely. The real ordering has no reset:
+      // the engine is still resident (a user message, or the boot pump waking it)
+      // when the sweep releases the task underneath it. `fireTask` then refuses
+      // forever on `sessionToTask.has(targetSk)`, the 8-minute watchdog later
+      // moves the task to `blocked`, and its dependents are cancelled — a
+      // permanent stall caused by the restart, reported as the delegate going
+      // silent.
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1)
+      // The engine is tracking this session RIGHT NOW. That is the precondition.
+      expect(orchestrator.taskForSession(sk('a2'))).toBe(t1)
+
+      // The sweep's exact two writes, with the engine still live.
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      // In production the release publishes `task_released` on the board lifecycle
+      // bus and the app-side subscriber makes exactly this call, before pumping
+      // (see boardLifecycleSubscribers). The engine has no bus of its own, so the
+      // contract states the wiring it depends on explicitly.
+      expect(orchestrator.detachTask(t1)).toBe(true)
+
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(2)
+      expect(board.statusOf(t1)).toBe('in_progress')
+    })
+
+    it('a DETACHED session still delegates, detach must not arm the late-replay guard', async () => {
+      // Detach is an out-of-band release: the sweep freed the task, but the
+      // agent's session is usually STILL ALIVE. `forgetSession` also arms
+      // `recentlyTerminated`, and via that path a detach silently dropped every
+      // <delegate>/<plan> the live agent emitted for the next 60 seconds: the
+      // same silent-loss failure detach exists to prevent. The guard is for run
+      // TERMINALS, where a stale summary really can replay.
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      expect(orchestrator.detachTask(t1)).toBe(true)
+
+      // The SAME live session immediately delegates. Before the fix this event
+      // hit the recently-terminated early-return and vanished without record.
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r9', '<delegate to="@Design Boo">follow-up work</delegate>'),
+      )
+      const created = board.created.map((t) => t.title)
+      expect(created).toContain('follow-up work')
+    })
+
+    it('detach REFUSES while a live run still owns the session (no second concurrent run)', async () => {
+      // One run per session is load-bearing. If a release detached a session that
+      // still has a run streaming on it, the ready-pump would claim the task again
+      // and start a SECOND run beside the first. The host answers this from the
+      // same map it uses for liveness, so a refusal can never become permanent.
+      const busy = new Set([sk('a2')])
+      const h = makeHarness({ busySessions: busy })
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      board.forceRelease(t1)
+      expect(orchestrator.detachTask(t1)).toBe(false)
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1) // no second fire
+
+      // The late terminal still takes the documented late-result path, because the
+      // mapping was preserved: the work is recorded, not fake-completed.
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Here is the finished patch'))
+      expect(board.statusUpdates).not.toContainEqual({ taskId: t1, status: 'done' })
+      expect(board.comments.some((c) => c.taskId === t1 && /late result/i.test(c.body))).toBe(true)
+      // The terminal itself then frees the session, so nothing is left pinned:
+      // the refusal delays the detach, it does not replace it.
+      expect(orchestrator.taskForSession(sk('a2'))).toBeNull()
+    })
+
+    it('a released task no longer pins its session, so the watchdog cannot fail it', async () => {
+      // The downstream half of the same bug: while the stale mapping survives, the
+      // idle watchdog still owns the session and fails a task nobody is running,
+      // which cancel-chains every dependent step of the plan.
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      orchestrator.detachTask(t1)
+
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // Detached ⇒ the watchdog has nothing to fail. Without the detach this is
+      // `blocked`, which is terminal for the chain hanging off it.
+      expect(board.statusOf(t1)).not.toBe('blocked')
+    })
+
+    it('a user-STOPPED delegation is never auto-refired by the pump', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      // The Stop path's durable trace: the exec completes `cancelled`, the task
+      // releases to todo (releaseClaimed's exact writes).
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'cancelled' })
+      board.forceRelease(t1)
+      orchestrator.reset()
+      await orchestrator.resume()
+      // The pump saw the cancelled last run and left it alone — a human re-queues.
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(1)
+      expect(board.statusOf(t1)).toBe('todo')
+    })
+
+    it('markStopped makes a Stop durable — tracked AND not-yet-fired work survives a restart stopped', async () => {
+      const h = makeHarness()
+      const { board, orchestrator } = h
+      // Two delegations to one agent: A fires immediately, B defers (serial).
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">task A</delegate><delegate to="@Bug Boo">task B</delegate>',
+        ),
+      )
+      const [tA, tB] = idsOf(board)
+
+      // User hits Stop: the host aborts runs AND calls markStopped. The durable
+      // trace must exist NOW — not after the abort terminals land.
+      await orchestrator.markStopped()
+      const execsA = await ledgerOf(board, tA!)
+      expect(execsA[execsA.length - 1]!.status).toBe('cancelled')
+      const execsB = await ledgerOf(board, tB!)
+      expect(execsB[execsB.length - 1]!.status).toBe('cancelled')
+
+      // Restart (abort terminals never landed): the pump must not refire either.
+      board.forceRelease(tA!)
+      orchestrator.reset()
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === tA)).toHaveLength(1)
+      expect(board.claims.filter((id) => id === tB)).toHaveLength(0)
+    })
+
+    it('a permafailing delegation stops being auto-fed at MAX_AUTO_FIRES', async () => {
+      const h = makeHarness()
+      await delegate(h)
+      const { board, orchestrator } = h
+      const t1 = idsOf(board)[0]!
+
+      // Fail-and-release cycles (infra death, not user Stop) until the ledger
+      // holds MAX_AUTO_FIRES executions.
+      for (;;) {
+        const execs = await ledgerOf(board, t1)
+        if (execs.length >= MAX_AUTO_FIRES) break
+        const last = execs[execs.length - 1]!
+        await board.completeExecution(last.id, { status: 'timed_out' })
+        board.forceRelease(t1)
+        orchestrator.reset()
+        await orchestrator.resume()
+      }
+      const fires = board.claims.filter((id) => id === t1).length
+      // One more release cycle: the cap holds, no further fire.
+      const execs = await ledgerOf(board, t1)
+      await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
+      board.forceRelease(t1)
+      orchestrator.reset()
+      await orchestrator.resume()
+      expect(board.claims.filter((id) => id === t1)).toHaveLength(fires)
+      expect(board.statusOf(t1)).toBe('todo')
     })
 
     it('onSessionClosed fails a still-in-flight delegation; later calls are no-ops', async () => {
@@ -804,6 +1157,9 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(deliveredTo(delivered, 'a2')).toEqual(['task A'])
 
       await orchestrator.onEvent(sk('a2'), doneEvent('rA', 'A done'))
+      // The follow-up for the SAME agent defers one macrotask (the completing
+      // drain still holds the agent's home mutex when the pump runs inline).
+      await vi.advanceTimersByTimeAsync(1)
       expect(deliveredTo(delivered, 'a2')).toEqual(['task A', 'task B'])
 
       await orchestrator.onEvent(sk('a2'), doneEvent('rB', 'B done'))
@@ -960,6 +1316,104 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const refl = reflections(delivered)
       expect(refl.some((r) => r.sessionKey === sk('a2'))).toBe(true)
       expect(refl.some((r) => r.sessionKey === sk('leader'))).toBe(false)
+    })
+
+    it('a batched reflection tells the delegator what is STILL outstanding', async () => {
+      // Two delegations from one turn, one answer. Without the count the leader
+      // cannot tell "both are in" from "one is in and one is still running", so it
+      // either waits on finished work or synthesizes a partial answer as complete.
+      const h = makeHarness()
+      const { board, delivered, orchestrator } = h
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">fix the parser</delegate>' +
+            '<delegate to="@Design Boo">draft the empty state</delegate>',
+        ),
+      )
+      expect(idsOf(board)).toHaveLength(2)
+
+      // Only Bug Boo reports.
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'parser fixed'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+      const refl = reflections(delivered).find((r) => r.sessionKey === sk('leader'))
+      expect(refl).toBeDefined()
+      expect(refl!.task).toMatch(/Still outstanding: 1/)
+      expect(refl!.task).toContain('Design Boo')
+    })
+
+    it('says nothing about outstanding work when everything has reported', async () => {
+      // The quiet case has to stay quiet: a header line on every single-delegation
+      // reflection would be noise on the most common path.
+      const h = makeHarness()
+      const { delivered, orchestrator } = h
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix it</delegate>'),
+      )
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const refl = reflections(delivered)[0]
+      expect(refl).toBeDefined()
+      expect(refl!.task).not.toMatch(/Still outstanding/)
+    })
+
+    it('resume attaches ONLY a live engine-owned run: a runless row is skipped', async () => {
+      // Claimed but with no running exec (mid-handoff). Attaching would start an
+      // 8-minute watchdog clock nothing can refresh, so the task would be failed
+      // to `blocked` for no reason. It must be left alone.
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'claimed but runless',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'none',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      // Never attached ⇒ the watchdog cannot see it ⇒ it is untouched.
+      expect(board.statusOf(t)).toBe('in_progress')
+      expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
+    })
+
+    it('resume attaches ONLY a live engine-owned run: an EXECUTOR-owned run is skipped', async () => {
+      // A running exec the executor runner owns (codex/claude-code/native one-shot).
+      // The engine never observes its events, so attaching would falsely fail a
+      // perfectly healthy heartbeat-governed run at the 8-minute mark.
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'executor-owned run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-executor',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('in_progress')
+      expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
+    })
+
+    it('resume DOES attach an engine-owned run (the guards are not just "skip everything")', async () => {
+      // The positive control for the two skips above. Without it, deleting the
+      // attach entirely would also make them pass.
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'engine-owned run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-openclaw',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('blocked')
     })
   })
 }

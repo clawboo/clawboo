@@ -28,26 +28,26 @@ The server-level posture defaults (from `defaults.ts`):
 
 The referenced package-local defaults (the safety backstops and housekeeping timers):
 
-| Default                                  | Value                   | Why                                                              | Override                              |
-| ---------------------------------------- | ----------------------- | ---------------------------------------------------------------- | ------------------------------------- |
-| Breaker: max tool iterations             | `30`                    | Hard ceiling on settled tool-calls per run                       | `breakerConfig` (per-run)             |
-| Breaker: repeat-failure threshold        | `3`                     | Consecutive identical-tool failures before halt                  | `breakerConfig` (per-run)             |
-| Breaker: no-progress threshold           | `6`                     | Consecutive results with no new output before halt               | `breakerConfig` (per-run)             |
-| Breaker: token-velocity ceiling          | `200000` tok/min        | Only egregious runaways trip it                                  | `breakerConfig` (per-run)             |
-| Breaker: velocity min window             | `15000 ms`              | An early burst can't false-trip a short run                      | `breakerConfig` (per-run)             |
-| Breaker: repeat-policy-denied threshold  | `2`                     | Consecutive identical denial codes before halt                   | `breakerConfig` (per-run)             |
-| Session rotation watermark               | `85%` of context window | Rotate to a fresh session before exhausting context              | `maxRotations` (per-run)              |
-| Session rotation chain cap               | `3` successors          | Bounds the successor chain per task                              | `maxRotations` (per-run)              |
-| Approval TTL                             | `86400000 ms` (24 h)    | Abandoned pending approvals auto-expire                          | `CLAWBOO_APPROVAL_TTL_MS`             |
-| Approval reaper interval                 | `3600000 ms` (1 h)      | How often the reaper sweeps                                      | `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` |
-| MCP probe interval                       | `60000 ms`              | MCP liveness health-probe cadence                                | `CLAWBOO_MCP_PROBE_MS`                |
-| Worktree GC age                          | `72 h`                  | Reap worktrees older than this (if their task isn't locked)      | (fixed constant)                      |
-| Worktree GC max count                    | `25`                    | Reap oldest beyond this count                                    | (fixed constant)                      |
-| Board stale-task TTL                     | `3600000 ms` (60 min)   | "Nobody is watching" backstop for an orphaned `in_progress` task | `CLAWBOO_BOARD_STALE_TTL_MS`          |
-| Board stale sweep interval               | `300000 ms` (5 min)     | How often the backstop runs                                      | `CLAWBOO_BOARD_STALE_SWEEP_MS`        |
-| Board capped create: children per parent | `24`                    | Bounds an agent looping on raw board creation                    | (fixed constant)                      |
-| Board capped create: nesting depth       | `2`                     | The same ancestor-chain ceiling as the delegation depth cap      | (fixed constant)                      |
-| Board capped create: root rate           | `30 / 5 min`            | Bounds an agent looping on parentless `create_task`              | (fixed constant)                      |
+| Default                                  | Value                   | Why                                                         | Override                              |
+| ---------------------------------------- | ----------------------- | ----------------------------------------------------------- | ------------------------------------- |
+| Breaker: max tool iterations             | `30`                    | Hard ceiling on settled tool-calls per run                  | `breakerConfig` (per-run)             |
+| Breaker: repeat-failure threshold        | `3`                     | Consecutive identical-tool failures before halt             | `breakerConfig` (per-run)             |
+| Breaker: no-progress threshold           | `6`                     | Consecutive results with no new output before halt          | `breakerConfig` (per-run)             |
+| Breaker: token-velocity ceiling          | `200000` tok/min        | Only egregious runaways trip it                             | `breakerConfig` (per-run)             |
+| Breaker: velocity min window             | `15000 ms`              | An early burst can't false-trip a short run                 | `breakerConfig` (per-run)             |
+| Breaker: repeat-policy-denied threshold  | `2`                     | Consecutive identical denial codes before halt              | `breakerConfig` (per-run)             |
+| Session rotation watermark               | `85%` of context window | Rotate to a fresh session before exhausting context         | `maxRotations` (per-run)              |
+| Session rotation chain cap               | `3` successors          | Bounds the successor chain per task                         | `maxRotations` (per-run)              |
+| Approval TTL                             | `86400000 ms` (24 h)    | Abandoned pending approvals auto-expire                     | `CLAWBOO_APPROVAL_TTL_MS`             |
+| Approval reaper interval                 | `3600000 ms` (1 h)      | How often the reaper sweeps                                 | `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` |
+| MCP probe interval                       | `60000 ms`              | MCP liveness health-probe cadence                           | `CLAWBOO_MCP_PROBE_MS`                |
+| Worktree GC age                          | `72 h`                  | Reap worktrees older than this (if their task isn't locked) | (fixed constant)                      |
+| Worktree GC max count                    | `25`                    | Reap oldest beyond this count                               | (fixed constant)                      |
+| Board stale-task TTL                     | `180000 ms` (3 min)     | Six missed 30 s heartbeats: the owning drain is gone        | `CLAWBOO_BOARD_STALE_TTL_MS`          |
+| Board stale sweep interval               | `60000 ms` (60 s)       | How often the sweep runs                                    | `CLAWBOO_BOARD_STALE_SWEEP_MS`        |
+| Board capped create: children per parent | `24`                    | Bounds an agent looping on raw board creation               | (fixed constant)                      |
+| Board capped create: nesting depth       | `2`                     | The same ancestor-chain ceiling as the delegation depth cap | (fixed constant)                      |
+| Board capped create: root rate           | `30 / 5 min`            | Bounds an agent looping on parentless `create_task`         | (fixed constant)                      |
 
 <Tip>
 Per-run overrides (`breakerConfig`, `maxRotations`, `disableMemoryAutoInject`) are fields on the `POST /api/runtimes/:id/run` body. Process-level overrides are env vars; see [Environment variables](/reference/environment-variables).
@@ -118,16 +118,18 @@ Two ceilings bound raw board growth on the board's capped create path, reached t
 
 Several best-effort background passes run at boot and on an interval. None blocks boot; all are unref'd. They are env-overridable except the worktree GC limits (fixed constants).
 
-**Approval reaper.** Abandoned pending approvals expire after `CLAWBOO_APPROVAL_TTL_MS` (default 24 h) and any task they blocked is unblocked. The reaper runs one pass at boot plus a singleton interval set by `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` (default 1 h).
+**Approval reaper.** Abandoned pending approvals expire after `CLAWBOO_APPROVAL_TTL_MS` (default 24 h) and any task they blocked is unblocked, except a task carrying a non-promotable verification verdict, which stays `blocked` for its human. The reaper runs one pass at boot plus a singleton interval set by `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` (default 1 h).
 
 **MCP liveness supervisor.** The in-process MCP servers are pre-warmed at boot and health-probed every `CLAWBOO_MCP_PROBE_MS` (default 60 s), rebuilding on failure with backoff.
 
 **Worktree GC.** At boot, stale worktrees are reaped: those older than 72 h, plus the oldest beyond a 25-count limit, but only if their task is not locked (`in_progress` / `in_review`), and commit-before-drop means no uncommitted work is lost. The 72 h age and 25 count are fixed constants in `@clawboo/worktrees`.
 
-**Board stale-task sweep.** A backstop for an `in_progress` task orphaned by a server restart or crash. It runs one pass at boot plus an interval set by `CLAWBOO_BOARD_STALE_SWEEP_MS` (default 5 min), releasing a task whose `updatedAt` is older than `CLAWBOO_BOARD_STALE_TTL_MS` (default 60 min). The TTL is deliberately long; `tasks.updatedAt` is frozen at claim time and is not a liveness signal, so the orchestrator's own 8-minute idle watchdog (swept every 30 s, server-side) fails a hung delegate long before this fires. This sweep only needs to catch tasks whose owning orchestrator is gone for good.
+**Board dispatch pump.** Delegation-derived work no longer waits for a user message. The pump scans for teams holding fireable delegations or undelivered mailbox rows and wakes their orchestrator, 10 s after boot and then every `CLAWBOO_DISPATCH_PUMP_MS` (default 60 s). The board lifecycle bus already pushes on every relevant mutation, so this interval is the durable backstop and the boot-resume path rather than the primary trigger. A task whose last run was `cancelled` is never auto-fired: that is the durable marker of a user Stop, and only a human re-queues it.
+
+**Board stale-task sweep.** Releases an `in_progress` task whose owner has stopped proving it is alive. It runs one pass at boot plus an interval set by `CLAWBOO_BOARD_STALE_SWEEP_MS` (default 60 s), releasing a task whose `updatedAt` is older than `CLAWBOO_BOARD_STALE_TTL_MS` (default 3 min). The short TTL is safe because `updatedAt` is a real liveness signal: every drain that claims a task heartbeats the row every 30 s on a timer for as long as it owns it, so 3 minutes is six missed beats. The orchestrator's own 8-minute idle watchdog (swept every 30 s, server-side) still covers the different case of a delegate that is alive but has gone quiet.
 
 <Warning>
-The board stale TTL is a backstop, not a liveness signal. Lowering it risks falsely releasing a long-but-active run, because `tasks.updatedAt` does not advance during a run. Tune it down only if you have abandoned-task accumulation and accept that risk.
+The TTL is only as trustworthy as the heartbeat. A drain that claims a task without beating it will have its live work swept mid-run, so if you add a code path that claims a board task, give it a `startTaskHeartbeat` too. Lowering the TTL below a few beat intervals has the same effect. The TTL also has a ceiling: keep it, plus the sweep interval, under the orchestrator's 8-minute idle watchdog. The sweep is what publishes `task_released`, and that release is what detaches a stale session from the engine, so a TTL tuned past that window lets the watchdog reach the phantom session first, fail the task to `blocked`, and cancel its dependent plan steps.
 </Warning>
 
 ## See also

@@ -164,7 +164,7 @@ A client-side heuristic decides which delegations are risky (matching obviously 
 2. **Otherwise, a pending approval is created** and the handler _blocks_ on a poll loop until the leader resolves it via the existing Approvals UI, or until the TTL or the waiter deadline expires.
 3. **The resolution decides.** `allow_once` or `allow_always` lets the delegation proceed; anything else (`deny`, `expired`, `timeout`) skips the delegation, leaving a system comment and a reflection so the leader can revise or reassign.
 
-The poll loop is what makes a forgotten approval **time out rather than deadlock**: each approval carries an `expiresAt`, the waiter has its own deadline, and a durable TTL reaper atomically expires abandoned pending approvals on an interval (and unblocks the linked board task). Until a leader is identified, no approval is requested.
+The poll loop is what makes a forgotten approval **time out rather than deadlock**: each approval carries an `expiresAt`, the waiter has its own deadline, and a durable TTL reaper atomically expires abandoned pending approvals on an interval (and unblocks the linked board task, unless a non-promotable verification verdict is what holds it `blocked`). Until a leader is identified, no approval is requested.
 
 <Info>
 The client REST call **fails closed**. If the approval endpoint is unreachable, the request maps to `timeout` (a non-approving resolution), never `allow_once`. The whole point of the gate is human sign-off for a destructive action, so an unreachable endpoint must not auto-approve. Only *risky* delegations reach this path, so the strictness can never deadlock ordinary team work.

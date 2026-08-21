@@ -11,7 +11,7 @@
 // and the REST gating 404 when no runtime flag is set.
 
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -25,11 +25,17 @@ import { HermesAdapter, type HermesDriver, type HermesNativeEvent } from '@clawb
 import { resolveClawbooDir } from '@clawboo/config'
 import {
   claimTask,
+  completeExecutionProcess,
+  createExecutionProcess,
   createTask,
+  enqueueInbox,
+  listUndeliveredInbox,
+  getWorkspaceForTask,
   getBudget,
   getComments,
   getTask,
   listEvents,
+  listExecutions,
   listGovernanceAudit,
   setBudgetLimit,
 } from '@clawboo/db'
@@ -76,6 +82,9 @@ const FULL_CAPS: Capabilities = {
 class FakeRunnerAdapter implements RuntimeAdapter {
   readonly participantKind = 'agent' as const
   startedOpts: StartOpts | null = null
+  /** Test seam: run something at the instant the adapter starts, e.g. close the
+   *  ledger row out from under the run exactly as the stale sweep does. */
+  onStart: (() => void) | null = null
 
   constructor(
     readonly id: string,
@@ -92,6 +101,7 @@ class FakeRunnerAdapter implements RuntimeAdapter {
   }
   async start(_t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
     this.startedOpts = opts
+    this.onStart?.()
     return { adapterId: this.id, sessionKey: opts.sessionKey, runId: null }
   }
   events(run: RunHandle): AsyncIterable<RuntimeEvent> {
@@ -171,6 +181,195 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(result.summary).toContain('Implemented and verified')
     // The runner injected an MCP availability note into the prompt context.
     expect(fake.startedOpts?.context ?? '').toContain('MCP')
+  })
+
+  it('a re-dispatch after an INTERRUPTED attempt is told, and told what is unknown', async () => {
+    // The tombstone strings the recovery writers have always produced were read
+    // back to nobody, so a re-dispatch started cold and could redo a side effect
+    // the dead attempt had already performed.
+    const db = getDb()
+    const taskId = newCodeTask()
+    // A prior attempt that was killed mid-run, WITH evidence it did something.
+    const prior = createExecutionProcess(db, { taskId, executorType: 'codex' })
+    completeExecutionProcess(db, prior.id, {
+      status: 'timed_out',
+      error: 'stale: no heartbeat within the watchdog window',
+      afterCommit: 'abc1234',
+    })
+
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'picked up where it left off')
+    const result = await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+    expect(result.ok).toBe(true)
+    const ctx = fake.startedOpts?.context ?? ''
+    expect(ctx).toMatch(/interrupted/i)
+    expect(ctx).toMatch(/no heartbeat/) // the actual tombstone reason
+    expect(ctx).toMatch(/outcome .* is unknown/i)
+
+    // And it rides the CONTEXT tier, never the STABLE one. The stable tier is the
+    // prefix-cached part, so a per-attempt note there would bust the cache on
+    // every run of every task. `assembleTiers` emits stable first, so the note
+    // appearing after the task block is what proves it is not in the prefix.
+    // (Asserting on `opts.message` would prove nothing: the assembled prompt is
+    // delivered on `opts.context` in full.)
+    expect(ctx.indexOf('# Task: Implement the thing')).toBe(0)
+    expect(ctx.indexOf('interrupted')).toBeGreaterThan(ctx.indexOf('do it'))
+  })
+
+  it('records the unknown outcome in the DURABLE handoff, not just the prompt', async () => {
+    // The prompt note reaches the agent about to redo the work. The handoff is
+    // what a LATER cross-runtime pickup reads, and it wrote `[]` unconditionally,
+    // so the interruption was dropped the moment the run clocked out. Silence
+    // there reads as "it did not happen".
+    const db = getDb()
+    const taskId = newCodeTask()
+    const prior = createExecutionProcess(db, { taskId, executorType: 'codex' })
+    completeExecutionProcess(db, prior.id, {
+      status: 'timed_out',
+      error: 'stale: no heartbeat within the watchdog window',
+    })
+
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'carried on')
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+      keepForResume: true, // pause, so the handoff is the deliverable
+    })
+
+    const ws = getWorkspaceForTask(db, taskId)
+    expect(ws?.worktreePath).toBeTruthy()
+    const raw = await readFile(path.join(String(ws!.worktreePath), 'AGENT_HANDOFF.json'), 'utf8')
+    const handoff = JSON.parse(raw) as { brokenOrUnverified: string[] }
+    expect(handoff.brokenOrUnverified.join('\n')).toMatch(/UNKNOWN/)
+    expect(handoff.brokenOrUnverified.join('\n')).toMatch(/no heartbeat/)
+
+    // And an UNINTERRUPTED task's handoff stays clean. `brokenOrUnverified` is
+    // read as a to-do list by whoever picks the worktree up; an entry on every
+    // pause would train the reader to skip the field.
+    const cleanTaskId = newCodeTask()
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => new FakeRunnerAdapter('codex', FULL_CAPS, 'paused'),
+      taskId: cleanTaskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+      keepForResume: true,
+    })
+    const cleanWs = getWorkspaceForTask(db, cleanTaskId)
+    const cleanRaw = await readFile(
+      path.join(String(cleanWs!.worktreePath), 'AGENT_HANDOFF.json'),
+      'utf8',
+    )
+    expect((JSON.parse(cleanRaw) as { brokenOrUnverified: string[] }).brokenOrUnverified).toEqual(
+      [],
+    )
+  })
+
+  it('splits the mailbox into addressed and ambient on the EXECUTOR path too', async () => {
+    // The same mailbox must not render two different ways depending on which path
+    // woke the agent. This path had no test at all for the digest, so the split
+    // going in here is asserted rather than assumed.
+    const db = getDb()
+    const taskId = newCodeTask()
+    const update = enqueueInbox(db, {
+      agentId: 'codex-1',
+      teamId: 'team-1',
+      kind: 'task_update',
+      body: 'your sub-task finished: parser done',
+    })
+    const fyi = enqueueInbox(db, {
+      agentId: 'codex-1',
+      teamId: 'team-1',
+      kind: 'signal',
+      body: 'Design Boo is touching the same file',
+    })
+
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'ok')
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+    const ctx = fake.startedOpts?.context ?? ''
+    const addressedAt = ctx.indexOf('[Addressed to you')
+    const ambientAt = ctx.indexOf('[Ambient')
+    expect(addressedAt).toBeGreaterThan(-1)
+    expect(ambientAt).toBeGreaterThan(addressedAt)
+    expect(ctx.slice(addressedAt, ambientAt)).toContain('parser done')
+    expect(ctx.slice(ambientAt)).toContain('touching the same file')
+    // Both rendered → both marked, from the one union.
+    // Per-id: each enqueued row must be gone, not merely "the list is empty".
+    const undelivered = listUndeliveredInbox(db, 'codex-1', { teamId: 'team-1' }).map((r) => r.id)
+    for (const id of [update.id, fyi.id]) expect(undelivered).not.toContain(id)
+    expect(undelivered).toEqual([])
+  })
+
+  it('a refused ledger close emits NO execution_completed, and names the real reason', async () => {
+    // Two findings in one path. (a) completeExecutionProcess returns null when the
+    // row is already terminal — a stale sweep got there first — and the emit fired
+    // regardless, telling obs "succeeded" while the ledger said "timed_out".
+    // (b) updateStatus refuses for three different reasons and all three were
+    // reported to the board as "the task had been released", which is false for
+    // the verification gate.
+    const db = getDb()
+    const taskId = newCodeTask()
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'done at last')
+
+    // Close this run's ledger row out from under it, mid-flight, exactly as the
+    // stale sweep does.
+    fake.onStart = () => {
+      const live = listExecutions(db, taskId).find((e) => e.status === 'running')
+      if (live)
+        completeExecutionProcess(db, live.id, {
+          status: 'timed_out',
+          error: 'stale: no heartbeat within the watchdog window',
+        })
+    }
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+
+    // The ledger keeps the sweep's verdict…
+    expect(listExecutions(db, taskId).map((e) => e.status)).toContain('timed_out')
+    expect(listExecutions(db, taskId).map((e) => e.status)).not.toContain('succeeded')
+    // …and obs was not told a different story.
+    const completed = listEvents(db, { taskId }).filter(
+      (e) => e.kind === 'execution_completed' && String(e.data ?? '').includes('succeeded'),
+    )
+    expect(completed).toEqual([])
+  })
+
+  it('a CLEAN first attempt gets no interruption note (no noise)', async () => {
+    const taskId = newCodeTask()
+    const fake = new FakeRunnerAdapter('codex', FULL_CAPS, 'done')
+    await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+    })
+    expect(fake.startedOpts?.context ?? '').not.toMatch(/interrupted/i)
   })
 
   it('refuses a second claim with 409 and never retries', async () => {

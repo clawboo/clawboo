@@ -21,6 +21,7 @@
     "@clawboo/adapter-claude-code": "workspace:*",
     "@clawboo/adapter-codex": "workspace:*",
     "@clawboo/adapter-hermes": "workspace:*",
+    "@clawboo/adapter-mock": "workspace:*",
     "@clawboo/adapter-native": "workspace:*",
     "@clawboo/adapter-openclaw": "workspace:*",
     "@clawboo/agent-registry": "workspace:*",

@@ -101,10 +101,10 @@ The board is the dispatcher; the task's worktree is the durable, on-disk world. 
 
 ### Classes
 
-| Name         | Contract                                                                                                                                       |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GitError`   | `Error` subclass thrown on non-zero git exit; carries `readonly stderr: string` and `readonly args: string[]`.                                 |
-| `KeyedMutex` | Per-key async mutex (`run<T>(key, fn): Promise<T>`) serializing ops that share a key (a worktree path); a failed op does NOT poison the chain. |
+| Name         | Contract                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GitError`   | `Error` subclass thrown on non-zero git exit; carries `readonly stderr: string` and `readonly args: string[]`.                                                                                                                                                                                                                                                                                             |
+| `KeyedMutex` | Per-key async mutex (`run<T>(key, fn, opts?: { acquireTimeoutMs?: number }): Promise<T>`) serializing ops that share a key (a worktree path); a failed op does NOT poison the chain. `acquireTimeoutMs` bounds the WAIT, not the op: a caller stuck behind a wedged holder rejects with `MutexAcquireTimeoutError` instead of queueing forever, and the key stays held until that holder actually settles. |
 
 ## Used by
 

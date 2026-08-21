@@ -20,10 +20,20 @@ import {
   createExecutionProcess,
   getAncestors,
   getTask,
+  getTaskVerification,
+  classifyAttempts,
+  getWorkspaceForTask,
+  listExecutions,
+  listUndeliveredInbox,
+  INBOX_BUDGET_CHARS,
+  packInboxRows,
+  splitInboxByAddressing,
+  markInboxDelivered,
   recordRotation,
   recordSpend,
   releaseTask,
   scrubResultSummary,
+  startTaskHeartbeat,
   updateStatus,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -33,9 +43,11 @@ import { mkdir } from 'node:fs/promises'
 import { compactToolResultMarkdown } from '@clawboo/compaction'
 import {
   DEFAULT_ROTATION,
+  DEFAULT_RUN_SILENT_TIMEOUT_MS,
   resolveRuntimeIntegration,
   rotateSession,
   shouldRotate,
+  withIdleTimeout,
   type Capabilities,
   type RunHandle,
   type RuntimeAdapter,
@@ -54,6 +66,7 @@ import {
   type BreakerTrip,
 } from '@clawboo/governance'
 import { classifyError, isHarnessBug } from '@clawboo/obs'
+import { buildTurnEnvelope } from '@clawboo/team-orchestration'
 import {
   isolationForTask,
   isWorktreeRegistered,
@@ -64,6 +77,9 @@ import {
 } from '@clawboo/worktrees'
 
 import { budgetPreflight } from './budgetPreflight'
+import { getMcpAttachSecret } from './mcpAttachSecret'
+import { buildResumeNote } from './resumeNote'
+import { verifyMaxAttempts } from './verification'
 import { DEFAULTS } from './defaults'
 import { describeDegradations, planDegradations } from './degradation'
 import { buildMemoryGuidance } from './memoryGuidance'
@@ -112,6 +128,14 @@ export const MAX_SPAWN_DEPTH = DEFAULT_MAX_DEPTH
 // run for the SAME (runtime, agent) through this ONE shared instance, not a fork.
 export const homeDispatchMutex = new KeyedMutex()
 
+/** Bound on WAITING for an agent's home-dispatch mutex. The holder is bounded by
+ *  the drain idle guard, so a healthy queue always advances; a waiter that still
+ *  can't acquire within this window is stuck behind a wedged holder — reject with
+ *  a typed error (surfaced as a run-start failure → the delegator is told)
+ *  instead of freezing this agent's chat/1:1/routines forever. */
+export const HOME_MUTEX_ACQUIRE_MS =
+  Number(process.env['CLAWBOO_HOME_MUTEX_ACQUIRE_MS']) || 10 * 60_000
+
 export interface RunTaskInput {
   db: ClawbooDb
   /** Build the adapter for this run, given the resolved run context. */
@@ -146,6 +170,11 @@ export interface RunTaskInput {
   /** Disable run-start memory auto-injection. Default off (inject on). Eval runs
    *  set this so seeded facts don't perturb deterministic baselines. */
   disableMemoryAutoInject?: boolean
+  /** INTERNAL (the verification fix loop): >0 marks a re-dispatch of a task this
+   *  runner already owns after a verify FAIL — the claim is skipped (the fix
+   *  loop keeps the task `in_progress` by design, so a fresh claim would 409)
+   *  and the verdict's structured {what, why, howToFix} rides the prompt. */
+  fixCycle?: number
   /** Max successor sessions per task before rotation gives up (bounds the chain).
    *  Falls back to DEFAULT_ROTATION.maxRotations. */
   maxRotations?: number
@@ -178,6 +207,10 @@ export type RunTaskResult =
       costUsd: number | null
       usedWorktree: boolean
       degradations: string[]
+      /** Verification FAILED and parked the task `in_progress` — the wrapper's
+       *  fix loop re-dispatches (outside the home mutex) or, on exhaustion,
+       *  writes the parked alert. Inner runs only REPORT; the wrapper decides. */
+      needsVerifyFix?: boolean
     }
 
 function defaultCompact(text: string): string {
@@ -312,9 +345,11 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
     : null
   // Tracks whether the atomic claim landed, so an UNEXPECTED throw below can put
   // the task back instead of leaving it wedged in `in_progress` until the stale
-  // sweep. Every expected outcome already releases on its own path.
+  // sweep. Every expected outcome already releases on its own path. Shared across
+  // fix cycles: a cycle re-dispatches the SAME claim, so the newest cycle's
+  // execution row is the one a throw has to close.
   const claimState: ClaimState = { claimed: false }
-  const run = (): Promise<RunTaskResult> =>
+  const run = (attempt: RunTaskInput): Promise<RunTaskResult> =>
     withTaskSpan(
       {
         db: input.db,
@@ -325,7 +360,7 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
         parentTraceparent: input.parentTraceparent ?? null,
         parentSpanId: parentTaskId ? spanIdFor(parentTaskId) : null,
       },
-      (span) => runTaskInner(input, span, claimState),
+      (span) => runTaskInner(attempt, span, claimState),
     )
 
   // Probe capabilities once (constructing the adapter is side-effect-free — no
@@ -339,8 +374,44 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
     resolveRuntimeIntegration(probe.capabilities()).home.kind === 'persistent'
       ? runtimeIdentityHomePath(probe.id, input.assigneeAgentId)
       : null
+  const runOnce = (attempt: RunTaskInput): Promise<RunTaskResult> =>
+    homeKey
+      ? homeDispatchMutex.run(homeKey, () => run(attempt), {
+          acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
+        })
+      : run(attempt)
+
+  // The liveness beat is owned HERE — outside the mutex — so one interval spans
+  // the mutex wait, the run, and every fix cycle, and the `finally` guarantees
+  // it stops on EVERY exit including a throw. (A leaked beat kept a parked task
+  // eternally fresh: the sweep could never reclaim it while the process lived.)
+  // Pre-claim beats no-op via the in_progress + assignee guard.
+  const stopBeat = startTaskHeartbeat(input.db, input.taskId, {
+    assigneeAgentId: input.assigneeAgentId,
+  })
   try {
-    return await (homeKey ? homeDispatchMutex.run(homeKey, run) : run())
+    let result = await runOnce(input)
+    // ── The verification fix loop — OUTSIDE the mutex ─────────────────────────
+    // Each fix cycle acquires the home mutex FRESH. (The first version recursed
+    // from inside the mutex-holding run; KeyedMutex is not reentrant, so cycle 1
+    // queued behind its own caller, waited out the acquire timeout, and threw —
+    // the quality loop never ran once on a persistent-home runtime.)
+    //
+    // The bound comes from `verifyMaxAttempts()`, the SAME reader the verdict uses,
+    // so the loop and the policy can no longer disagree about when the budget is
+    // spent (they did: 1 here against 3 there, which made exhaustion unreachable).
+    // It is a belt, not the brake: exhaustion now yields a `blocked` terminal, and
+    // `needsVerifyFix` is only set for an `in_progress` one, so the loop ends on
+    // its own. Parking is announced where that terminal is decided
+    // (`actOnTaskWorkspace`), unconditionally — not here, where it depended on a
+    // status write having succeeded.
+    const maxFix = Math.max(0, verifyMaxAttempts() - 1)
+    let cycle = 0
+    while (result.ok && result.needsVerifyFix && cycle < maxFix) {
+      cycle++
+      result = await runOnce({ ...input, fixCycle: cycle })
+    }
+    return result
   } catch (err) {
     // Safety net for an UNEXPECTED throw (a driver blowing up, a disk error mid-run):
     // without this the task keeps its claim and sits `in_progress` with no runner
@@ -368,6 +439,8 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
       }
     }
     throw err
+  } finally {
+    stopBeat()
   }
 }
 
@@ -430,20 +503,32 @@ async function runTaskInner(
     return { ok: false, reason: 'budget_paused' }
   }
 
-  // Atomic claim — a lost claim is a conflict and is NEVER retried.
-  const claim = claimTask(db, taskId, assigneeAgentId, runtimeId)
-  if (!claim.ok) return { ok: false, reason: 'conflict' }
-  // From here the task is ours; an unexpected throw must release it (see the
-  // safety net in runTaskOnRuntime).
+  if (!input.fixCycle) {
+    // Atomic claim — a lost claim is a conflict and is NEVER retried.
+    const claim = claimTask(db, taskId, assigneeAgentId, runtimeId)
+    if (!claim.ok) return { ok: false, reason: 'conflict' }
+  } else {
+    // Fix re-dispatch of a task this runner already owns (verify FAIL keeps it
+    // `in_progress`): verify ownership instead of claiming. Anything else —
+    // released, reassigned, human-moved — means the fix loop lost the task.
+    const cur = getTask(db, taskId)
+    if (!cur || cur.status !== 'in_progress' || cur.assigneeAgentId !== assigneeAgentId)
+      return { ok: false, reason: 'conflict' }
+  }
+  // From here the task is ours (freshly claimed, or re-verified for a fix cycle);
+  // an unexpected throw must release it (see the safety net in runTaskOnRuntime).
   claimState.claimed = true
 
   const exec = createExecutionProcess(db, {
     taskId,
     executorType: runtimeId,
-    runReason: degr.resumeViaHandoff ? 'resume-via-handoff' : 'run',
+    runReason: input.fixCycle ? 'verify-fix' : degr.resumeViaHandoff ? 'resume-via-handoff' : 'run',
   })
   // Share it with the outer safety net so an unexpected throw can close the row
-  // instead of leaving it `running` with no runner behind it.
+  // instead of leaving it `running` with no runner behind it. (The liveness beat
+  // is owned by the runTaskOnRuntime wrapper — one interval spanning the mutex
+  // wait, this run, and any fix cycles, stopped in a finally so no exit path can
+  // leak it.)
   claimState.execId = exec.id
   emitEvent(db, {
     kind: 'execution_started',
@@ -464,20 +549,24 @@ async function runTaskInner(
   // run is refused and the task released for a human to fix the repo path.
   if (!workspace.ok) {
     addComment(db, taskId, `[blocked: no isolation] ${workspace.reason}`, 'system')
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'failed',
       error: `workspace_unavailable: ${workspace.reason}`,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: { execId: exec.id, status: 'failed', error: 'workspace_unavailable' },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: { execId: exec.id, status: 'failed', error: 'workspace_unavailable' },
+      })
     releaseTask(db, taskId)
     return { ok: false, reason: 'workspace_unavailable' }
   }
@@ -501,8 +590,22 @@ async function runTaskInner(
   // degradation notes [+ a rotation handoff note when resuming a rotated session])
   // → volatile (the auto-injected memory). The handoff is the cross-runtime carrier.
   const resumeCtx = resume ? formatResumeContext(resume) : ''
+  // TeamChat is only named when the run is TEAM-SCOPED. The attach URL carries
+  // the author binding from `scope.teamId`; with no team there is no binding, so
+  // the server falls back to identity-from-tool-args — prompting `team_chat_post`
+  // on such a run would be inviting a post whose author is whatever the model
+  // says it is. A teamless task simply has no room to post to.
   const mcpNote = input.mcpBaseUrl
-    ? 'You have clawboo Tasks / Memory / Tools available over MCP — use them to read shared context, claim/update board tasks, and record decisions. Report a concise summary when done.'
+    ? [
+        'You have clawboo Tasks / Memory / Tools available over MCP — use them to read shared context, claim/update board tasks, and record decisions.',
+        'You are one agent working a shared board: check `list_tasks` before starting so you do not duplicate a teammate.',
+        task.teamId
+          ? 'Use `team_chat_post` to tell your team when you finish something significant or discover something that changes their work (a wrong assumption, a shared file you changed, a blocker), and `team_chat_subscribe` to catch up on what they posted while you were busy.'
+          : '',
+        'Report a concise summary when done.',
+      ]
+        .filter(Boolean)
+        .join(' ')
     : 'Report a concise summary when done.'
   const degrNotes = describeDegradations(degr)
   const memoryGuidance = buildMemoryGuidance(runtimeId, Boolean(input.mcpBaseUrl))
@@ -514,10 +617,68 @@ async function runTaskInner(
   ]
     .filter(Boolean)
     .join('\n\n')
+  // The verification fix note (fix-cycle runs only): the critic's structured
+  // {what, why, howToFix} is the whole point of the re-dispatch — the one agent
+  // that can fix the failure finally SEES why it failed.
+  const fixNote = input.fixCycle
+    ? (() => {
+        const v = getTaskVerification(db, taskId)
+        // The structured error lives on the ATTEMPT (each cycle records one) —
+        // the latest attempt is the failure this re-dispatch exists to fix.
+        const se = v?.attempts[v.attempts.length - 1]?.structuredError ?? null
+        return se
+          ? `## Verification failed — fix this before finishing\nWhat: ${se.what}\nWhy: ${se.why}\nHow to fix: ${se.howToFix}`
+          : '## Verification failed — read the latest verification comment on this task and fix it before finishing.'
+      })()
+    : ''
+
+  // Interrupted-work note: the PREVIOUS attempt's tombstone, read back to the one
+  // agent that can act on it. A killed run leaves `orphaned:` / `stale:` on its
+  // ledger row and nothing ever showed that to anybody, so a re-dispatch started
+  // cold and could redo a side effect the dead attempt had already performed.
+  // Suppressed on a fix cycle (that re-dispatch carries its own verdict note).
+  // EXCLUDE this run's own row. It was opened moments ago and is still
+  // `running`, so leaving it in makes the newest attempt look like an ordinary
+  // in-flight one and the previous crash is never seen.
+  const priorAttempts = classifyAttempts(listExecutions(db, taskId).filter((e) => e.id !== exec.id))
+  const resumeNote =
+    buildResumeNote({
+      attempts: priorAttempts,
+      hasWorktree: Boolean(getWorkspaceForTask(db, taskId)),
+      ...(input.fixCycle ? { fixCycle: input.fixCycle } : {}),
+    }) ?? ''
+
+  // Since-you-were-away digest: undelivered mailbox rows for this assignee ride
+  // the run's context; marked delivered only after the run actually starts.
+  const inboxRows = listUndeliveredInbox(db, assigneeAgentId, {
+    teamId: task.teamId ?? null,
+    limit: 20,
+  })
+  // Split by addressing, exactly as the team-chat path does. The SAME mailbox
+  // must not render two different ways depending on which path woke the agent —
+  // that is how an agent learns that one framing means something and the other
+  // does not. One budget across both sections; only rendered rows get marked
+  // (the delivery guarantee lives in packInboxRows).
+  const inboxSplit = splitInboxByAddressing(inboxRows)
+  const packedAddressed = packInboxRows(inboxSplit.addressed, INBOX_BUDGET_CHARS)
+  const packedAmbient = packInboxRows(
+    inboxSplit.ambient,
+    INBOX_BUDGET_CHARS - packedAddressed.usedChars,
+  )
+  const renderedDigest = {
+    includedIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
+  }
+  const inboxDigest =
+    buildTurnEnvelope({
+      addressed: packedAddressed.bodies.length ? [{ text: packedAddressed.bodies.join('\n') }] : [],
+      ambient: packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : [],
+    }) ?? ''
   const assemblePrompt = (handoffNote: string): string =>
     assembleTiers({
       stable: `# Task: ${task.title}\n\n${task.description ?? ''}`,
-      context: [baseContext, handoffNote].filter(Boolean).join('\n\n'),
+      context: [baseContext, resumeNote, fixNote, handoffNote, inboxDigest]
+        .filter(Boolean)
+        .join('\n\n'),
       volatile: memoryBlock,
     }).prompt
 
@@ -545,7 +706,11 @@ async function runTaskInner(
     mcpBaseUrl: input.mcpBaseUrl ?? null,
     // The run's authoritative memory scope — bound onto the shared Memory MCP so
     // saves are team-shared + reads team-limited (matches the injection scope).
-    memoryScope: { teamId: task.teamId ?? null, agentId: assigneeAgentId },
+    memoryScope: {
+      teamId: task.teamId ?? null,
+      agentId: assigneeAgentId,
+      attachSecret: getMcpAttachSecret(db),
+    },
     homeDir,
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),
   }
@@ -564,6 +729,15 @@ async function runTaskInner(
       },
     )
   let run = await startRun(baseSessionKey, assemblePrompt(''))
+  // The run started with the digest in its context — mark the RENDERED rows
+  // delivered (truncated-out rows stay undelivered by design).
+  if (renderedDigest.includedIds.length > 0) {
+    try {
+      markInboxDelivered(db, renderedDigest.includedIds, 'digest')
+    } catch {
+      /* best-effort; undelivered rows simply ride the next digest */
+    }
+  }
 
   // External cancellation (the dispatch client disconnected): abort the live run
   // so it (and its subprocess) doesn't keep going. `run` is reassigned on
@@ -640,6 +814,14 @@ async function runTaskInner(
   const callSig = new Map<string, string>() // toolCallId → signature (failure correlation)
   let stopForBreaker: BreakerTrip | null = null
 
+  // Drain idle guard: a wedged iterator (hung provider call, dead subprocess with
+  // an open pipe) must not hang this drain forever — it holds the claim and the
+  // agent's home mutex. Silence past the ceiling aborts the run; the wrapper's
+  // grace window lets the abort surface a terminal through the normal paths.
+  const silentMs =
+    Number(process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']) || DEFAULT_RUN_SILENT_TIMEOUT_MS
+  let silentTimeout = false
+
   // Session-rotation loop (BETWEEN runs — the runtime owns its
   // inner turn loop, so clawboo's unit is the run boundary). Drive the run to its
   // terminal `done`; if it ran out of room (an explicit `max_turns`, or a non-
@@ -666,8 +848,21 @@ async function runTaskInner(
     // yields zero recorded spend — the budget ledger would then under-count real
     // money with no signal at all. Surfaced after the loop.
     let sawSpend = false
+    // Did the adapter surface a real `done` terminal (possibly inside the idle
+    // guard's grace window)? Gates the synthetic "runtime silent" diagnosis.
+    let sawTerminal = false
 
-    for await (const ev of adapter.events(run)) {
+    for await (const ev of withIdleTimeout(adapter.events(run), {
+      idleMs: silentMs,
+      onIdle: async () => {
+        silentTimeout = true
+        try {
+          await adapter.abort(run)
+        } catch {
+          /* the guard's grace window ends the stream regardless */
+        }
+      },
+    })) {
       if (ev.kind === 'text-delta') {
         if (ev.channel !== 'reasoning') lastText += ev.text
       } else if (ev.kind === 'cost') {
@@ -854,6 +1049,7 @@ async function runTaskInner(
           }
         }
       } else if (ev.kind === 'done') {
+        sawTerminal = true
         doneReason = ev.reason
         summary = ev.summary || lastText
         if (ev.costUsd != null) {
@@ -894,6 +1090,19 @@ async function runTaskInner(
     // External cancel forces the aborted terminal regardless of how the runtime
     // mapped the kill — so a disconnected-client run releases cleanly to `todo`.
     if (stopForCancel) doneReason = 'aborted'
+
+    // A silent-timeout abort is a FAILURE with a stated cause, never a clean
+    // abort (that would release the task with no trace of why) — and never a
+    // rotation candidate (the runtime is wedged, not out of room). But the grace
+    // window exists precisely so the adapter can surface its OWN terminal after
+    // the abort: when one arrived, it carries the true cause, and overwriting
+    // it with "runtime silent" erases the real reason from the ledger and the
+    // board comment.
+    if (!stopForCancel && silentTimeout && !sawTerminal) {
+      doneReason = 'error'
+      summary = `runtime silent: no events for ${Math.round(silentMs / 60_000)} minutes — the run was aborted by the drain idle guard`
+      break
+    }
 
     // A budget / breaker / cancel trip ends the task here — never rotate over a stop.
     if (stopForBudget || stopForBreaker || stopForCancel) break
@@ -987,30 +1196,34 @@ async function runTaskInner(
       `Auto-paused: ${stopForBudget} budget reached. Raise the cap (or resume) to continue.`,
       'system',
     )
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'cancelled',
       error: `budget_paused:${stopForBudget}`,
       costUsd,
       inputTokens,
       outputTokens,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: {
-        execId: exec.id,
-        status: 'cancelled',
-        error: `budget_paused:${stopForBudget}`,
-        costUsd,
-        inputTokens,
-        outputTokens,
-      },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: {
+          execId: exec.id,
+          status: 'cancelled',
+          error: `budget_paused:${stopForBudget}`,
+          costUsd,
+          inputTokens,
+          outputTokens,
+        },
+      })
     releaseTask(db, taskId)
     return {
       ok: true,
@@ -1052,30 +1265,34 @@ async function runTaskInner(
       `[stopped: ${reason}] ${stopForBreaker.detail} Released to todo for re-planning.`,
       'system',
     )
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'cancelled',
       error: `circuit_broken:${reason}`,
       costUsd,
       inputTokens,
       outputTokens,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: {
-        execId: exec.id,
-        status: 'cancelled',
-        error: `circuit_broken:${reason}`,
-        costUsd,
-        inputTokens,
-        outputTokens,
-      },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: {
+          execId: exec.id,
+          status: 'cancelled',
+          error: `circuit_broken:${reason}`,
+          costUsd,
+          inputTokens,
+          outputTokens,
+        },
+      })
     releaseTask(db, taskId)
     return {
       ok: true,
@@ -1098,26 +1315,31 @@ async function runTaskInner(
   const reported = compact(safeSummary) || '(no summary)'
   const success = doneReason === 'success'
   let status: string
+  let needsVerifyFix = false
 
   if (success) {
     addComment(db, taskId, reported, 'agent', assigneeAgentId)
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'succeeded',
       summary: reported,
       costUsd,
       inputTokens,
       outputTokens,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: { execId: exec.id, status: 'succeeded', costUsd, inputTokens, outputTokens },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: { execId: exec.id, status: 'succeeded', costUsd, inputTokens, outputTokens },
+      })
     if (cwd) {
       // Persist the run's native session id (best-effort) so the next SAME-
       // runtime dispatch can resume it natively. The `!== sessionKey` filter
@@ -1140,7 +1362,20 @@ async function runTaskInner(
         handoffFrom: assigneeAgentId,
         runtime: runtimeId,
         completedSubtasks: input.keepForResume ? [] : [reported],
-        brokenOrUnverified: [],
+        // An interrupted attempt is recorded as UNKNOWN rather than dropped.
+        // Silence reads as "it did not happen", which is how a cross-runtime
+        // pickup ends up redoing a side effect the dead attempt already
+        // performed. Carry the prior handoff's own list too: this run
+        // reconstructed it from the worktree, and rewriting `[]` over it loses
+        // everything an earlier runtime flagged.
+        brokenOrUnverified: [
+          ...(priorAttempts.lastKind === 'crash'
+            ? [
+                `A previous attempt was interrupted (${priorAttempts.lastCrashReason ?? 'no reason recorded'}) and the outcome of whatever it was doing is UNKNOWN — verify before redoing anything with a side effect.`,
+              ]
+            : []),
+          ...(resume?.broken ?? []),
+        ],
         nextBestStep: input.keepForResume ? reported : '',
         commands: { init: './init.sh', verify: '', start: '' },
         evidence: {},
@@ -1171,33 +1406,60 @@ async function runTaskInner(
           r.ok && r.action === 'complete'
             ? r.taskStatus
             : (getTask(db, taskId)?.status ?? 'unknown')
+        // A verify FAIL parks the task back `in_progress` with NO run. This
+        // inner run only REPORTS it (needsVerifyFix on the result) — the
+        // runTaskOnRuntime wrapper re-dispatches OUTSIDE the home mutex (an
+        // in-mutex recursion self-deadlocked: KeyedMutex is not reentrant) or,
+        // on exhaustion, writes the durable parked alert.
+        if (status === 'in_progress' && r.ok && r.action === 'complete') needsVerifyFix = true
       }
     } else {
-      updateStatus(db, taskId, 'done')
-      status = 'done'
+      const promoted = updateStatus(db, taskId, 'done')
+      if (promoted.ok) {
+        status = 'done'
+      } else {
+        // `updateStatus` refuses for THREE different reasons and they are not the
+        // same story. `illegal_transition` is the release/requeue case. But
+        // `verification_required` means the gate held the promotion — the task was
+        // never released, and saying so is simply false. `not_found` means the row
+        // is gone. One message for all three misreports two of them, and this
+        // comment is the durable record a human reads later.
+        const why =
+          promoted.reason === 'verification_required'
+            ? 'the verification gate has not passed it'
+            : promoted.reason === 'not_found'
+              ? 'the task no longer exists'
+              : 'the task had been released before this run finished'
+        addComment(db, taskId, `[late result — ${why}] ${safeSummary || '(no output)'}`, 'system')
+        status = getTask(db, taskId)?.status ?? 'todo'
+      }
     }
   } else {
     addComment(db, taskId, `Run ${doneReason}: ${safeSummary || '(no output)'}`, 'system')
-    completeExecutionProcess(db, exec.id, {
+    // BIND the result. `completeExecutionProcess` refuses (returns null) when
+    // the row is already terminal — a stale sweep got there first. Emitting
+    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: doneReason === 'aborted' ? 'cancelled' : 'failed',
       error: safeSummary || doneReason,
       costUsd,
     })
-    emitEvent(db, {
-      kind: 'execution_completed',
-      traceId: span.traceId,
-      spanId: span.spanId,
-      taskId,
-      teamId: task.teamId,
-      agentId: assigneeAgentId,
-      runtime: runtimeId,
-      data: {
-        execId: exec.id,
-        status: doneReason === 'aborted' ? 'cancelled' : 'failed',
-        error: safeSummary || doneReason,
-        costUsd,
-      },
-    })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: {
+          execId: exec.id,
+          status: doneReason === 'aborted' ? 'cancelled' : 'failed',
+          error: safeSummary || doneReason,
+          costUsd,
+        },
+      })
     if (doneReason === 'error') {
       // A terminal `done{reason:'error'}` carries no code — classify the message;
       // an unmappable failure is an UNKNOWN class → a harness bug → alert (AC5).
@@ -1267,5 +1529,6 @@ async function runTaskInner(
     costUsd,
     usedWorktree: cwd != null,
     degradations: degrNotes,
+    ...(needsVerifyFix ? { needsVerifyFix: true } : {}),
   }
 }

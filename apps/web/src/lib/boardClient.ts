@@ -136,6 +136,26 @@ export const boardClient: BoardClient = {
     }
   },
 
+  async listExecutions(taskId) {
+    try {
+      const r = await fetch(`/api/board/${encodeURIComponent(taskId)}/executions`)
+      // `null`, not `[]` — an unreachable server means the ledger is UNKNOWN, and
+      // an empty ledger is what tells the fire policy a task may auto-fire. See
+      // the note on BoardClient.listExecutions.
+      if (!r.ok) return null
+      const body = (await r.json()) as {
+        executions?: Array<{ id: string; status: string; executorType?: string }>
+      }
+      return (body.executions ?? []).map((e) => ({
+        id: e.id,
+        status: e.status,
+        executorType: e.executorType,
+      }))
+    } catch {
+      return null
+    }
+  },
+
   async listTasks(teamId) {
     try {
       const r = await fetch(`/api/board?teamId=${encodeURIComponent(teamId)}`)

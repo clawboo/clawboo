@@ -28,7 +28,7 @@ import { createRoutinesTicker, type RoutinesTickerDeps } from '../ticker'
 let dir: string
 let db: ClawbooDb
 
-const noopLog = { info: () => {}, error: () => {} }
+const noopLog = { info: () => {}, warn: () => {}, error: () => {} }
 
 function register(overrides: Partial<Parameters<typeof registerScheduledRun>[1]> = {}) {
   const result = registerScheduledRun(db, {

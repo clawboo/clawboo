@@ -17,7 +17,6 @@ import {
 } from '@clawboo/db'
 import {
   blockingFindings,
-  DEFAULT_MAX_FIX_CYCLES,
   nextCycleDecision,
   verificationStatusFor,
   type CriticVerdict,
@@ -93,15 +92,45 @@ function structuredErrorFor(det: DeterministicResult, critic: CriticVerdict): St
 /**
  * Run the gate + critic for a task currently in `in_review`, persist the typed
  * verdict, and return it. Does NOT change the task status — the caller
- * (`actOnTaskWorkspace`) maps `pass → done`, `fail → in_progress`,
- * `completed_with_debt → done` (debt bypasses the gate by policy).
+ * (`actOnTaskWorkspace`) maps `pass → done`, `fail` with attempts remaining →
+ * `in_progress`, and both an exhausted budget and `completed_with_debt` →
+ * `blocked`. Debt does NOT bypass the gate: it is produced only at exhaustion,
+ * and exhaustion is a human terminal.
  */
+/** Fix cycles when `CLAWBOO_MAX_FIX_CYCLES` is unset. */
+const DEFAULT_FIX_CYCLES = 1
+
+/**
+ * How many verification ATTEMPTS a task gets in total, initial plus fixes.
+ *
+ * ONE reader of `CLAWBOO_MAX_FIX_CYCLES`, because there used to be two and they
+ * disagreed: this module defaulted to the governance package's 3 while the
+ * executor's re-dispatch loop defaulted to 1, so attempts topped out at 2 and the
+ * inner policy's `mark_debt` exit — which only fires at exhaustion — was
+ * unreachable. A failing task therefore parked `in_progress`, a status the board
+ * reads as "someone is working on this" when nobody is.
+ *
+ * The env var counts FIX cycles, so attempts is one more than it. `0` disables the
+ * fix loop (a single attempt); an unparseable value falls back to the default
+ * rather than to `NaN`.
+ */
+export function verifyMaxAttempts(): number {
+  const raw = process.env['CLAWBOO_MAX_FIX_CYCLES']
+  if (raw === undefined || raw.trim() === '') return DEFAULT_FIX_CYCLES + 1
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_FIX_CYCLES + 1
+  return Math.floor(n) + 1
+}
+
 export async function verifyTask(input: VerifyTaskInput): Promise<VerificationResult> {
   const { db, taskId } = input
   const task = getTask(db, taskId)
   const prior = getTaskVerification(db, taskId)
   const priorAttempts = prior?.attempts ?? []
-  const maxCycles = input.maxFixCycles ?? DEFAULT_MAX_FIX_CYCLES
+  // `maxFixCycles` is an ATTEMPT budget here (it always was — it went straight to
+  // `nextCycleDecision` as `maxCycles`). Callers that pass it keep their meaning;
+  // absent, the budget comes from the one shared reader.
+  const maxAttempts = input.maxFixCycles ?? verifyMaxAttempts()
 
   const det = await runDeterministicGate({
     worktreePath: input.worktree.worktreePath,
@@ -138,7 +167,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
 
   if (attemptStatus === 'fail') {
     structuredError = structuredErrorFor(det, critic)
-    if (nextCycleDecision({ attempt: attemptNumber, maxCycles }) === 'mark_debt') {
+    if (nextCycleDecision({ attempt: attemptNumber, maxCycles: maxAttempts }) === 'mark_debt') {
       status = 'completed_with_debt'
       for (const f of blockingFindings(critic)) {
         debtNotes.push({

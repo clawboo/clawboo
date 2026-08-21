@@ -19,6 +19,7 @@ import path from 'node:path'
 import {
   claimTask,
   createDb,
+  createExecutionProcess,
   createTask,
   getTask,
   listTasks,
@@ -26,7 +27,11 @@ import {
   type ClawbooDb,
   type TaskStatus,
 } from '@clawboo/db'
-import { runCascadeContract, type CascadeBoard } from '@clawboo/team-orchestration/contract'
+import {
+  runCascadeContract,
+  type CascadeBoard,
+  type SeedExecState,
+} from '@clawboo/team-orchestration/contract'
 import type {
   BoardClient,
   BoardTask,
@@ -98,6 +103,11 @@ class RealCascadeBoard implements CascadeBoard {
   getTask(taskId: string): Promise<TaskDetail | null> {
     return this.real.getTask(taskId)
   }
+  listExecutions(
+    taskId: string,
+  ): Promise<Array<{ id: string; status: string; executorType?: string }> | null> {
+    return this.real.listExecutions(taskId)
+  }
   async createExecution(taskId: string, executorType: string): Promise<ExecutionRef | null> {
     const ref = await this.real.createExecution(taskId, executorType)
     if (ref) this.execCount += 1
@@ -147,6 +157,7 @@ class RealCascadeBoard implements CascadeBoard {
     title: string
     sourceDelegationId: string | null
     assigneeAgentId: string
+    exec?: SeedExecState
   }): string {
     const t = createTask(this.db, {
       teamId: TEAM,
@@ -154,6 +165,15 @@ class RealCascadeBoard implements CascadeBoard {
       sourceDelegationId: input.sourceDelegationId ?? undefined,
     })
     claimTask(this.db, t.id, input.assigneeAgentId)
+    // A refresh scenario normally has a live ENGINE run behind the row; the
+    // other two shapes exist so the resume guards are actually exercised.
+    const exec = input.exec ?? 'running-openclaw'
+    if (exec !== 'none') {
+      createExecutionProcess(this.db, {
+        taskId: t.id,
+        executorType: exec === 'running-executor' ? 'codex' : 'openclaw',
+      })
+    }
     return t.id
   }
   dispose(): void {

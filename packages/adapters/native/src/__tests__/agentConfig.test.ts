@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   agentConfigSchema,
+  COORDINATION_TOOLSET,
   DEFAULT_AGENT_CONFIG,
   envVarForProvider,
+  isFrozenTeamToolset,
   KNOWN_PROVIDERS,
   NATIVE_PROVIDER_ENV_VARS,
   parseAgentConfig,
@@ -31,6 +33,53 @@ describe('agentConfig', () => {
     expect(parseAgentConfig(JSON.stringify({ id: '' }))).toBeNull()
     expect(parseAgentConfig('{not json')).toBeNull()
     expect(parseAgentConfig(null)).toBeNull()
+  })
+
+  it("accepts tasks:'read' as a toolset mode", () => {
+    const cfg = {
+      ...DEFAULT_AGENT_CONFIG,
+      tools: { memory: true, tools: true, tasks: 'read', teamchat: true },
+    }
+    const result = agentConfigSchema.safeParse(cfg)
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.tools.tasks).toBe('read')
+  })
+
+  it('never coerces a stored toolset on load (the repair is a one-shot, not a load-time override)', () => {
+    const frozen = {
+      ...DEFAULT_AGENT_CONFIG,
+      tools: { memory: true, tools: true, tasks: false, teamchat: false },
+    }
+    const parsed = parseAgentConfig(JSON.stringify(frozen))
+    expect(parsed?.tools).toEqual(frozen.tools)
+  })
+
+  it('recognizes the frozen signature on the COORDINATION axes only', () => {
+    // memory / tools are orthogonal and user-toggleable, so they must not gate
+    // the repair — an owner who once disabled the memory MCP still gets fixed.
+    const frozen = [
+      { memory: true, tools: true, tasks: false, teamchat: false },
+      { memory: false, tools: true, tasks: false, teamchat: false },
+      { memory: true, tools: false, tasks: false, teamchat: false },
+      { memory: true, tools: true, tasks: false, teamchat: false, custom: ['svc'] },
+    ]
+    for (const tools of frozen) expect(isFrozenTeamToolset(tools)).toBe(true)
+  })
+
+  it('leaves any toolset with a live coordination axis alone', () => {
+    const deliberate = [
+      { memory: true, tools: true, tasks: true, teamchat: false },
+      { memory: true, tools: true, tasks: false, teamchat: true },
+      { memory: true, tools: true, tasks: 'read' as const, teamchat: true },
+    ]
+    for (const tools of deliberate) expect(isFrozenTeamToolset(tools)).toBe(false)
+  })
+
+  it('COORDINATION_TOOLSET is the schema-valid repair target', () => {
+    const cfg = { ...DEFAULT_AGENT_CONFIG, tools: { ...COORDINATION_TOOLSET } }
+    expect(agentConfigSchema.safeParse(cfg).success).toBe(true)
+    expect(COORDINATION_TOOLSET.tasks).toBe('read')
+    expect(COORDINATION_TOOLSET.teamchat).toBe(true)
   })
 
   it('keeps participantKind an open set (no enum)', () => {

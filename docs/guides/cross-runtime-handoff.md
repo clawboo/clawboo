@@ -115,10 +115,10 @@ The runner's `acquireWorkspace` finds the existing active worktree for the task 
 
 Because step 3 dropped `keepForResume`, runtime B finishes the run through the normal completion path: the runner runs the worktree `complete` action, which decides clean-vs-retain by diffing the checkout against its baseline (the system-of-record bookkeeping files are excluded from that diff):
 
-| Diff vs baseline | What happens                                                                                                                               | Terminal status                                                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Empty            | No deliverable: worktree + branch removed                                                                                                  | `done` (verification gate intentionally bypassed)                                                                              |
-| Non-empty        | Worktree retained, the [verification](/concepts/verification) gate runs (deterministic build/test/lint, plus an optional read-only critic) | `pass` → `done` · `completed_with_debt` over a green gate → `done` · debt over a red gate → `blocked` · `fail` → `in_progress` |
+| Diff vs baseline | What happens                                                                                                                               | Terminal status                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Empty            | No deliverable: worktree + branch removed                                                                                                  | `done` (verification gate intentionally bypassed)                                                                                 |
+| Non-empty        | Worktree retained, the [verification](/concepts/verification) gate runs (deterministic build/test/lint, plus an optional read-only critic) | `pass` → `done` · `fail` with attempts left → `in_progress` · `fail` at the attempt budget, and `completed_with_debt` → `blocked` |
 
 Only a promotable verdict moves `in_review → done`. See [Verification](/concepts/verification) and the [`PATCH .../workspace` complete action](/reference/rest-api/board#patch-apiboardtaskidworkspace).
 

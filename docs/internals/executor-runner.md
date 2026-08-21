@@ -76,7 +76,7 @@ flowchart TD
 
 Everything that can refuse the dispatch without mutating the board runs _before_ the claim, so a misrouted or over-budget call never opens an execution row or spawns a process. In order:
 
-1. **Aborted waiter.** A run can sit queued behind a same-identity dispatch in the home mutex for the whole duration of the prior run. If the caller disconnected meanwhile (its `AbortController` fired), the runner bails and returns `conflict` before the claim, so a dead waiter never mutates the board.
+1. **Aborted waiter.** A run can sit queued behind a same-identity dispatch in the home mutex for up to `CLAWBOO_HOME_MUTEX_ACQUIRE_MS` (10 minutes by default); a waiter still stuck past that is behind a wedged holder and rejects with a typed `MutexAcquireTimeoutError` instead of queueing forever. If the caller disconnected meanwhile (its `AbortController` fired), the runner bails and returns `conflict` before the claim, so a dead waiter never mutates the board.
 2. **Task existence** → `not_found`.
 3. **Depth bound.** Recursion is bounded via the board's ancestor chain: a task whose ancestor count is **past** `MAX_SPAWN_DEPTH` (2) is refused with `too_deep`. This is the single-reduce-point invariant; children never fan out past the depth ceiling.
 
@@ -91,9 +91,9 @@ The runtime class drives integration depth *by construction*. The runner branche
 
 ### The atomic claim
 
-The claim is a single conditional UPDATE through the board's `claimTask`. A lost claim returns `{ ok: false }` and the runner returns `conflict`, **never retried**. A conflict means another runtime legitimately owns the task; a retry would either no-op or fight for taken work. This is the same never-retry-a-409 rule the board itself enforces; see [the board](/concepts/the-board#the-atomic-claim).
+The claim is a single conditional UPDATE through the board's `claimTask`. A lost claim returns `{ ok: false }` and the runner returns `conflict`, **never retried**. A conflict means another runtime legitimately owns the task; a retry would either no-op or fight for taken work. This is the same never-retry-a-409 rule the board itself enforces; see [the board](/concepts/the-board#the-atomic-claim). A verification fix cycle is the one dispatch that does not claim: it re-dispatches a task this runner already owns, so it verifies ownership instead (still `in_progress`, still this assignee) and returns `conflict` when anything else has moved the task.
 
-Immediately after a successful claim the runner opens an `execution_processes` row (the per-run ledger crash recovery reads on restart) and emits an `execution_started` observability event. The run reason on the exec row is `resume-via-handoff` when the runtime can't resume natively, otherwise `run`.
+Immediately after a successful claim the runner opens an `execution_processes` row (the per-run ledger crash recovery reads on restart) and emits an `execution_started` observability event. The run reason on the exec row is `verify-fix` on a verification fix cycle, `resume-via-handoff` when the runtime can't resume natively, otherwise `run`.
 
 ### Worktree acquisition
 
@@ -109,11 +109,11 @@ Either way, the runner reconstructs the cold-resume `ResumeState` from the workt
 
 The prompt is assembled with `assembleTiers` from `@clawboo/executor/tiers` into three tiers, ordered so the frozen content forms the cacheable prefix and only the volatile tail changes per turn:
 
-| Tier       | Content                                                                                                                        | Why this tier                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `stable`   | The task title + description (`# Task: …`)                                                                                     | The cacheable head, identical across rotations.     |
-| `context`  | The resume handoff + an MCP-availability note + memory guidance + degradation notes (+ a rotation handoff note on a successor) | Per-run but stable across turns.                    |
-| `volatile` | The auto-injected memory block                                                                                                 | The only tail that varies; never the cached prefix. |
+| Tier       | Content                                                                                                                                                                                                                            | Why this tier                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `stable`   | The task title + description (`# Task: …`)                                                                                                                                                                                         | The cacheable head, identical across rotations.     |
+| `context`  | The resume handoff + an MCP-availability note + memory guidance + degradation notes (+ the critic's `{what, why, howToFix}` note on a fix cycle, a rotation handoff note on a successor, and the since-you-were-away inbox digest) | Per-run but stable across turns.                    |
+| `volatile` | The auto-injected memory block                                                                                                                                                                                                     | The only tail that varies; never the cached prefix. |
 
 **Memory auto-injection** (`buildMemoryInjection`) seeds the most-relevant team facts for the task into the volatile tier so a runtime begins with the team's accumulated knowledge without having to call the [Memory MCP](/concepts/memory) tool (it still can, for more). It reuses the exact `SqliteMemoryStore` + embedding-provider stack the `/api/memory` REST surface uses, is bounded by a character budget (so the seed never crowds out the real instruction), is recall-sanitized (a candidate fact that trips the injection scanner is dropped, so a poisoned "fact" can't smuggle instructions) and scrubbed of secrets, and is a no-op when memory is empty; a fresh install injects nothing. It's computed once and reused across rotations. A task can opt out via `disableMemoryAutoInject` (eval runs set this so seeded facts don't perturb deterministic baselines).
 
@@ -175,13 +175,13 @@ After the loop, exactly one terminal branch runs.
 - The agent comment + `succeeded` execution row are written and `execution_completed` emitted.
 - **With a worktree:** the native session id is persisted into `AGENT_HANDOFF.json` (best-effort, filtering the late-bind fallback so a `--resume` isn't poisoned). If `keepForResume`, the task is released to `todo` (a pause; another runtime resumes from the handoff). Otherwise `actOnTaskWorkspace(taskId, 'complete')` runs the **verification gate**, which routes the terminal status:
 
-  | Verdict                                               | Terminal status                                                                 |
-  | ----------------------------------------------------- | ------------------------------------------------------------------------------- |
-  | empty diff                                            | `done` (no deliverable to verify)                                               |
-  | `pass`                                                | `done`                                                                          |
-  | `completed_with_debt` over a green deterministic gate | `done`                                                                          |
-  | `completed_with_debt` over a red deterministic gate   | `blocked` (routed to a human; a failing build/test gate is not auto-promotable) |
-  | `fail`                                                | `in_progress` (reverted with a structured `{what, why, howToFix}` fix note)     |
+  | Verdict                                             | Terminal status                                                                                              |
+  | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+  | empty diff                                          | `done` (no deliverable to verify)                                                                            |
+  | `pass`                                              | `done`                                                                                                       |
+  | `completed_with_debt` (produced only at exhaustion) | `blocked` (routed to a human with a system comment and a delegator notice; only a clean `pass` lands `done`) |
+  | `fail` with attempts left                           | `in_progress` (reverted with a structured `{what, why, howToFix}` fix note, re-dispatched as a fix cycle)    |
+  | `fail` at the attempt budget                        | `blocked` (the fix loop is exhausted; the budget is `CLAWBOO_MAX_FIX_CYCLES` + 1, default 2)                 |
 
   The critic that produces the verdict reuses _this run's adapter factory_ on a detached, push-less checkout with a fresh session and **no builder `homeDir`**; builder ≠ judge at the run level. An operator can also make the judge a different model via `CLAWBOO_REVIEWER_MODEL`. See [Verification](/concepts/verification).
 

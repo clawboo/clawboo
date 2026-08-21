@@ -106,7 +106,7 @@ http://127.0.0.1:18790/api/mcp/memory?scopeTeamId=<team-id>&scopeAgentId=<agent-
 | `scopeAgentId`  | Binds to that agent within the team |
 | `scopeTenantId` | Reserved tenant scope               |
 
-When the scope params are present, the MCP session is bound at `initialize` and stays bound for that session. Absent params mean unbound (legacy behavior, identity comes from tool args). Only the `memory` URL carries scope params; `tasks` and `tools` URLs stay bare.
+When the scope params are present, the MCP session is bound at `initialize` and stays bound for that session. Absent params mean unbound (legacy behavior, identity comes from tool args). The `tasks` URL carries `scopeTeamId` and `scopeAgentId` too: the team binding forces `list_tasks` to that team and makes `get_task` refuse another team's ids, and the agent binding is what lets undelivered mailbox rows ride the tool response. Only the `tools` URL stays bare.
 
 ### 4. Bind the TeamChat author (the anti-spoof binding)
 

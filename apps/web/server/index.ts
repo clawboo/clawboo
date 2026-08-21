@@ -7,7 +7,14 @@ import cors from 'cors'
 import { createAccessGate, createGatewayProxy, createOriginGuard } from '@clawboo/gateway-proxy'
 import { loadSettings } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
-import { reconcileOrphans, reconcileStaleInProgress, seedBuiltinTools } from '@clawboo/db'
+import {
+  listAgentsWithUndeliveredInbox,
+  reapOrphanInbox,
+  listTeamsWithFireableDelegations,
+  reconcileOrphans,
+  reconcileStaleInProgress,
+  seedBuiltinTools,
+} from '@clawboo/db'
 
 import { apiRouter } from './api/index'
 import { attachIdentity } from './lib/auth'
@@ -16,7 +23,10 @@ import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/s
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
+import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
+import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
+import { getTeamOrchestrator } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { getRegistry } from './lib/agentSource'
 import {
@@ -28,6 +38,19 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 import { mountSpa } from './lib/serveSpa'
+
+/** A duration env var, defaulted and BOUNDED to a positive integer. The bare
+ *  `Number(...) || fallback` pattern rejects 0/''/NaN but accepts a negative,
+ *  so one mistyped value became either an instant mass-reap (negative TTL) or a
+ *  1ms hot timer loop (negative interval clamped by setInterval). */
+function positiveIntEnv(name: string, fallback: number): number {
+  // Bounded ABOVE too: Node clamps a timer delay past 2^31-1 ms down to 1ms, so
+  // an oversized value would become the exact hot loop this helper exists to
+  // prevent. ~24.8 days is beyond any sane duration here; take the fallback.
+  const MAX_TIMER_MS = 2_147_483_647
+  const n = Number(process.env[name])
+  return Number.isFinite(n) && n >= 1 && n <= MAX_TIMER_MS ? Math.floor(n) : fallback
+}
 
 // ── Loggers ─────────────────────────────────────────────────────────────────
 
@@ -275,12 +298,17 @@ async function main() {
   }
 
   // ── Durable board: orphan reconciliation ────────────────────────────────────
-  // Any execution left 'running' belonged to a process that died with a previous
-  // server. Mark them failed + release their tasks so nothing is stuck. The
-  // recovery tombstone makes this idempotent (no infinite auto-resume).
-  // Best-effort; never blocks boot.
+  // Liveness-aware: only a `running` execution that has STOPPED heartbeating
+  // (task updatedAt stale past the shared TTL) is reaped — a still-beating run
+  // belongs to a live process (a second clawboo on this state dir, or the old
+  // server's drains during a fast dev restart) and must not be murdered at boot.
+  // A run that truly died with the previous server either is already stale here
+  // or goes stale within the TTL, where the interval sweep below releases it.
+  // The recovery tombstone keeps the reap idempotent. Best-effort; never blocks
+  // boot. Shares CLAWBOO_BOARD_STALE_TTL_MS with the sweep.
   try {
-    const { reconciled } = reconcileOrphans(getDb())
+    const staleAfterMs = positiveIntEnv('CLAWBOO_BOARD_STALE_TTL_MS', 3 * 60_000)
+    const { reconciled } = reconcileOrphans(getDb(), { staleAfterMs })
     if (reconciled > 0) {
       log.info({ reconciled }, 'Board: reconciled orphaned executions on startup')
     }
@@ -311,6 +339,19 @@ async function main() {
   // user disable. Best-effort; never blocks boot.
   safeStart('tools-registry-seed', () => seedBuiltinTools(getDb()))
 
+  // ── Coordination-toolset repair (one-shot) ──────────────────────────────────
+  // Agents created before the coordination overhaul were frozen with
+  // `{tasks:false, teamchat:false}`, which switched off the whole coordination
+  // plane: the peer-inbox pull became a no-op and a leader couldn't read its own
+  // board. New agents ship the right surface, but `ensureSchema` only reconciles
+  // COLUMNS — nothing rewrites a frozen row's data — so repair them once, here.
+  // Guarded by a settings flag, so a user who later turns these tools off keeps
+  // them off.
+  safeStart('coordination-toolset-upgrade', () => {
+    const repaired = upgradeFrozenToolsets(getDb())
+    if (repaired > 0) log.info({ repaired }, 'repaired coordination toolset on existing agents')
+  })
+
   // ── Default-native Boo Zero ─────────────────────────────────────────────────
   // Ensure a native-first install has its runtime-neutral universal leader — a
   // teamless clawboo-native Boo Zero — so native teams get a real coordinator and the
@@ -332,25 +373,30 @@ async function main() {
   safeStart('approval-reaper', () => startApprovalReaper({ log }))
 
   // ── Board stale-task sweep ──────────────────────────────────────────────────
-  // Backstop for an `in_progress` task whose driving client view closed (the
-  // in-browser idle watchdog only runs while the team chat is mounted). One pass
-  // at boot + a generous-TTL interval so an abandoned/hung delegate doesn't sit
-  // forever. TTL is intentionally long (not the client's 8-min watchdog) because
-  // `tasks.updatedAt` is frozen at claim time — it is NOT a liveness signal for
-  // the in-browser OpenClaw path, which has no server-side exec heartbeat (the
-  // executor never writes the tasks row mid-run). So this is purely a "nobody is
-  // watching" backstop: a LIVE client's 8-min watchdog (refreshed on every agent
-  // event) fails a hung delegate long before this fires, and a re-mounted client's
-  // `resume()` re-attaches an orphaned in_progress task and re-runs the watchdog.
-  // The only client this sweep must catch is one that is gone and never returns;
-  // the TTL is kept well beyond any realistic single delegate turn so a long-but-
-  // active run is not falsely swept (and a rare false sweep is now handled
-  // gracefully — completeForSession refuses to fake-complete a task released out
-  // from under it). 60 min default; tune with CLAWBOO_BOARD_STALE_TTL_MS.
-  // Best-effort, unref'd.
+  // Liveness is now PROVEN, not inferred: EVERY drain that claims a task
+  // heartbeats the row. There are three — the executor runner, the team
+  // orchestrator's serverDeliver, and the routines dispatcher — and a fourth
+  // must beat too or its live work gets swept here. `startTaskHeartbeat` bumps
+  // `tasks.updatedAt` every TASK_HEARTBEAT_MS (30s) on a TIMER, not on event
+  // traffic, so a working-but-silent run keeps proving itself, and it beats once
+  // immediately so worktree acquisition can't read as stale. That turns this
+  // sweep from an
+  // hour-scale guess into a minutes-scale fact: an `in_progress` task whose
+  // updatedAt is older than the TTL has had NO observing drain for several beat
+  // intervals — its process died or its drain wedged — so releasing it to `todo`
+  // is safe, and a run that keeps beating is never falsely swept, however long
+  // it works. (A rare late completion is preserved: completeForSession refuses
+  // the fake-complete and parks the result as a task comment.) 3 min default
+  // (6 missed beats); tune with CLAWBOO_BOARD_STALE_TTL_MS. Best-effort, unref'd.
   safeStart('board-stale-sweep', () => {
-    const ttlMs = Number(process.env['CLAWBOO_BOARD_STALE_TTL_MS']) || 60 * 60_000
-    const intervalMs = Number(process.env['CLAWBOO_BOARD_STALE_SWEEP_MS']) || 5 * 60_000
+    // KEEP THIS BELOW `DELEGATION_IDLE_TIMEOUT_MS` (8 min). The sweep is what
+    // publishes `task_released`, which is what detaches a stale session from the
+    // engine (see boardLifecycleSubscribers). If the TTL is tuned past the idle
+    // watchdog, the watchdog reaches a phantom session FIRST, fails the task to
+    // `blocked` and cancel-chains its dependents — the exact permanent stall the
+    // detach exists to prevent. A guard test pins the relationship.
+    const ttlMs = positiveIntEnv('CLAWBOO_BOARD_STALE_TTL_MS', 3 * 60_000)
+    const intervalMs = positiveIntEnv('CLAWBOO_BOARD_STALE_SWEEP_MS', 60_000)
     const sweep = (): void => {
       try {
         const { reconciled } = reconcileStaleInProgress(getDb(), ttlMs)
@@ -361,6 +407,51 @@ async function main() {
     }
     sweep()
     setInterval(sweep, intervalMs).unref()
+  })
+
+  // ── Board dispatch pump ─────────────────────────────────────────────────────
+  // "todo means WILL run": delegation-derived work (an `:agent:`-marked task —
+  // deferred, plan-step, or released by the stale sweep / orphan reap) no longer
+  // waits for a user message to rebuild its team's engine. The pump scans for
+  // teams holding fireable delegations and pumps each team orchestrator —
+  // lazily (re)building it, which also makes a server restart a PAUSE for
+  // in-flight cascades instead of amnesia (`resume()` re-attaches + fires).
+  // What actually runs is decided by the ENGINE's fire policy (deps satisfied;
+  // a user-Stopped task — `cancelled` last execution — is never auto-refired;
+  // MAX_AUTO_FIRES caps a permafailing one), and the atomic claim-409 arbitrates
+  // any race with a live engine. Human/board-created cards WITHOUT the marker
+  // stay manual by design. Best-effort, unref'd.
+  safeStart('board-dispatch-pump', () => {
+    const pumpMs = positiveIntEnv('CLAWBOO_DISPATCH_PUMP_MS', 60_000)
+    const mcpBase = `http://127.0.0.1:${port}`
+    // The bus subscribers make pushes immediate; this interval is the durable
+    // BACKSTOP (and the boot-resume path: the first pass rebuilds every team
+    // holding fireable work OR undelivered mail, so a restart is a pause).
+    registerBoardLifecycleSubscribers({ mcpBaseUrl: mcpBase })
+    const pump = (): void => {
+      try {
+        const db = getDb()
+        const wake = new Set(listTeamsWithFireableDelegations(db))
+        // Teams whose agents hold undelivered mailbox rows: waking the team
+        // rebuilds its orchestrator; the rows ride the next run's digest (or,
+        // for a team that stays idle, wait for the next user turn — waking is
+        // about the ORCHESTRATOR being resident again after a restart).
+        // Retention first: drop rows for recipients that no longer exist (and
+        // stale rows past the cutoff) so the scan below never wakes a ghost.
+        reapOrphanInbox(db)
+        for (const a of listAgentsWithUndeliveredInbox(db)) if (a.teamId) wake.add(a.teamId)
+        for (const teamId of wake) {
+          getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase })
+            .pump()
+            .catch((err: unknown) => log.error({ err, teamId }, 'Board: dispatch pump failed'))
+        }
+      } catch (err) {
+        log.error({ err }, 'Board: dispatch pump scan failed (non-fatal)')
+      }
+    }
+    // First pass shortly after boot (let the registry / Boo Zero bootstrap land).
+    setTimeout(pump, 10_000).unref()
+    setInterval(pump, pumpMs).unref()
   })
 
   // ── Agent registry (AgentSource) ────────────────────────────────────────────

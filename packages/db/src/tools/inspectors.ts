@@ -7,8 +7,41 @@
 import { scanForInjection } from './injection'
 import type { ChainOutcome, Inspector, InspectorDecision, ToolCall } from './types'
 
-/** SECURITY — hard-deny calls whose args carry malicious / destructive content. */
-export const securityInspector: Inspector = (call): InspectorDecision => {
+/**
+ * SECURITY — deny calls whose args carry malicious content.
+ *
+ * `scanForInjection` was written for a different job: its own header says it
+ * scans "a user-installed skill's text … before it can register or run", where
+ * every byte is about to be EXECUTED. Reusing it verbatim on arbitrary tool args
+ * imported an assumption that does not hold — a tool argument is not a program,
+ * and whether a destructive string in one matters depends entirely on what the
+ * tool does with it.
+ *
+ * The consequence was live and reachable: `echo { message: 'reminder: never run
+ * rm -rf / on the server' }` came back
+ * `denied: security:destructive:recursive-delete-root`. An agent could not
+ * discuss a destructive command with its teammates, and the denial is not free —
+ * the native conversation surfaces a brokered denial as `policy_denied`, which the
+ * circuit breaker counts, so talking about the work moved the agent toward a
+ * tripped breaker.
+ *
+ * The split:
+ *   • `destructive` / `exfil` attack the MACHINE, and need something to run them.
+ *     On a tool that declares `risk: 'safe'` — no side effects, by the descriptor's
+ *     own assertion — nothing can. Those are MENTIONS, so they are observed rather
+ *     than denied.
+ *   • `injection` attacks the MODEL, and content IS the vector: `note` writes to
+ *     memory that is injected into a later prompt. Unchanged, on every tool.
+ *   • Anything not explicitly `risk: 'safe'` — including a descriptor that declares
+ *     no risk at all — is unchanged. Fail closed on the ones we cannot vouch for.
+ *
+ * ⚠ THIS IS A SPEED BUMP, NOT A SECURITY BOUNDARY. It matches literal strings, so
+ * a single backslash walks past it: `r\m -rf /` is permitted today and still is.
+ * Normalizing away that obfuscation is real work with real false-positive risk,
+ * and it is worth doing only once clawboo has an exec-style tool for it to guard —
+ * there is none today.
+ */
+export const securityInspector: Inspector = (call, descriptor): InspectorDecision => {
   let blob = ''
   try {
     blob = JSON.stringify(call.args)
@@ -19,8 +52,10 @@ export const securityInspector: Inspector = (call): InspectorDecision => {
   const blocking = findings.find(
     (f) => f.severity === 'destructive' || f.severity === 'exfil' || f.severity === 'injection',
   )
-  if (blocking) return { kind: 'deny', reason: `security:${blocking.severity}:${blocking.pattern}` }
-  return { kind: 'allow' }
+  if (!blocking) return { kind: 'allow' }
+  const reason = `security:${blocking.severity}:${blocking.pattern}`
+  const isMention = descriptor?.risk === 'safe' && blocking.severity !== 'injection'
+  return isMention ? { kind: 'observe', reason: `mention:${reason}` } : { kind: 'deny', reason }
 }
 
 /** SCOPE — deny tools on the caller's blocklist (e.g. delegation primitives a
@@ -85,14 +120,21 @@ export async function runInspectors(
   inspectors: Inspector[] = defaultInspectors,
 ): Promise<ChainOutcome> {
   const args: Record<string, unknown> = { ...call.args }
+  // What a stricter reading would have refused. Carried to the caller so the audit
+  // row records it — an observation that only ever reached a local variable would
+  // be indistinguishable from never having looked.
+  const observations: string[] = []
+  const withObs = <T extends object>(o: T): T =>
+    observations.length > 0 ? { ...o, observations } : o
   for (const inspect of inspectors) {
     const decision = await inspect({ name: call.name, args }, descriptor, ctx)
     if (decision.kind === 'deny') return { decision: 'deny', reason: decision.reason }
     if (decision.kind === 'require_approval') {
-      return { decision: 'require_approval', message: decision.message, args }
+      return withObs({ decision: 'require_approval' as const, message: decision.message, args })
     }
     if (decision.kind === 'rewrite') Object.assign(args, decision.args)
+    if (decision.kind === 'observe') observations.push(decision.reason)
     // 'allow' → continue
   }
-  return { decision: 'allow', args }
+  return withObs({ decision: 'allow' as const, args })
 }

@@ -71,4 +71,8 @@ export {
   isDetached,
   isWorktreeRegistered,
   KeyedMutex,
+  // Exported because callers have to be able to CATCH it. The acquire timeout
+  // was added without this, so the one rejection class the mutex can now produce
+  // was unreachable by name and every caller swallowed it as a generic error.
+  MutexAcquireTimeoutError,
 } from './git'

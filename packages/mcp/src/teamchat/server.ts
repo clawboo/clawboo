@@ -24,6 +24,7 @@ import {
 } from '@clawboo/db'
 import { z } from 'zod'
 
+import { withInboxPiggyback } from '../piggyback'
 import { buildServer, jsonResult, textResult, type Server, type ToolDef } from '../shared'
 import { formatPeerPost } from './format'
 
@@ -190,5 +191,15 @@ export function createTeamChatServer(db: ClawbooDb, opts: TeamChatServerOptions 
     })
   }
 
-  return buildServer('clawboo-teamchat', tools)
+  // Mid-run inbox piggyback: a bound peer's undelivered mailbox rows ride the
+  // next tool response. `team_chat_subscribe` is skipped — its first block is
+  // machine-parsed (the native conversation JSON.parses it) and its OWN job is
+  // already peer delivery.
+  const served = bound
+    ? withInboxPiggyback(tools, db, bound.agentId, {
+        teamId: bound.teamId,
+        skipNames: new Set(['team_chat_subscribe']),
+      })
+    : tools
+  return buildServer('clawboo-teamchat', served)
 }

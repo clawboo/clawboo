@@ -184,7 +184,7 @@ curl 'http://localhost:18790/api/board/<task-id>'
 ## Troubleshooting
 
 <Warning>
-**A task is stuck in "In progress" forever.** `tasks.updated_at` is not a per-event liveness heartbeat, so the panel can't tell a long run from a dead one by itself. The server orchestrator's own 8-minute idle watchdog fails a silent delegate (and keeps running with the browser closed); a stale sweep is the restart/crash backstop (60-minute default TTL). See [the board's reconciliation](/concepts/the-board#orphan-and-stale-reconciliation).
+**A task is stuck in "In progress" forever.** `tasks.updated_at` **is** a liveness heartbeat: the drain that owns the task beats the row every 30 s on a timer, so a stale sweep releases it after `CLAWBOO_BOARD_STALE_TTL_MS` (default 3 minutes, six missed beats) once the owner is gone. The server orchestrator's own 8-minute idle watchdog covers the other case, a delegate that is alive but has gone silent (and it keeps running with the browser closed). See [the board's reconciliation](/concepts/the-board#orphan-and-stale-reconciliation).
 </Warning>
 
 <Warning>

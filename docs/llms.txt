@@ -35,7 +35,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Scheduling](concepts/scheduling.md): Routines — Clawboo's durable team-task scheduler, its rebuildable ticker, the two cron domains, the one-firing-owner invariant, and the error-halts policy.
 - [Teams and planes](concepts/teams-and-planes.md): How teams group agents, and the split between the shared coordination plane and each runtime's private plane.
 - [The board](concepts/the-board.md): Clawboo's durable, transactional task-coordination substrate — state machine, atomic claim, dependencies, and crash recovery.
-- [Verification](concepts/verification.md): Builder≠judge — a deterministic gate plus an independent read-only critic that make "done" mean verified, with completed_with_debt as a graceful exit.
+- [Verification](concepts/verification.md): Builder≠judge — a deterministic gate plus an independent read-only critic that make "done" mean verified, with an exhausted fix loop routed to blocked for a human.
 - [Worktrees and handoff](concepts/worktrees-and-handoff.md): The per-task git-worktree system-of-record and the runtime-agnostic AGENT_HANDOFF.json that lets one runtime pick up another's work.
 
 ## Runtimes
@@ -83,7 +83,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Reference](reference/index.md): Index of Clawboo's factual reference — REST API, CLI, configuration, env vars, database schema, MCP tools, marketplace catalog, events, and packages.
 - [CLI reference](reference/cli.md): The clawboo launcher (find-or-start, version-aware attach) and its backup/stop/restart subcommands, plus the four bundled MCP stdio bins.
 - [Configuration reference](reference/configuration.md): settings.json schema, the ~/.clawboo state directory, every file Clawboo owns, and OpenClaw interop reads.
-- [Database schema reference](reference/database-schema.md): The 27 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
+- [Database schema reference](reference/database-schema.md): The 28 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
 - [Environment variables](reference/environment-variables.md): Every environment variable Clawboo reads — state paths, ports, secrets, runtime keys, OpenClaw interop, logging, and operational tuning.
 - [Orchestration events and error taxonomy](reference/events-and-errors.md): Reference for the append-only orchestration event kinds and the runtime error classification used across observability.
 - [Marketplace catalog reference](reference/marketplace-catalog.md): The agent and team catalog — schemas, ID convention, zero-loss invariant, three sources with pinned SHAs, and the codegen/ingestion pipeline.

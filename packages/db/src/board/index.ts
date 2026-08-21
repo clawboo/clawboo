@@ -8,7 +8,8 @@
 //
 // Named rather than `export *`: tsup keeps a workspace dependency external, and a
 // star re-export of an external module leaves downstream bundlers unable to resolve
-// the names statically (esbuild fails the apps/web server build).
+// the names statically (esbuild fails the apps/web server build). Local modules
+// below are safe to star-export — they are bundled, not external.
 export {
   TASK_STATUSES,
   canTransition,
@@ -18,6 +19,8 @@ export {
   legalTargets,
 } from '@clawboo/board-core'
 export type { TaskStatus } from '@clawboo/board-core'
+export * from './attempts'
+export * from './events'
 export * from './repository'
 export * from './contention'
 export * from './schemas'

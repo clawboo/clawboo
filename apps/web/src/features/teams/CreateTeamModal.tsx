@@ -697,7 +697,8 @@ export function CreateTeamModal({
             // The native harness drives behavior from execConfig.systemPrompt (it
             // does NOT read AGENTS.md), so the delegate contract lives HERE — the
             // leader is taught the `delegate` tool by name (no `<delegate>` XML) +
-            // gets tasks:false; provider/model are auto-resolved server-side from
+            // gets the coordination surface (board reads + team room, board WRITES
+            // stay engine-owned); provider/model are auto-resolved server-side from
             // the connected key (via the modelTier hint).
             // A picked model overrides the auto-resolved default (provider + model +
             // env-var); absent → the modelTier hint auto-resolves from the connected key.

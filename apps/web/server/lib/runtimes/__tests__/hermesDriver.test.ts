@@ -164,7 +164,7 @@ describe('hermes driver (preserved runtime)', () => {
     expect(existsSync(mcpPath)).toBe(false)
   })
 
-  it('binds the run scope onto the shared Memory server URL only (per-run memory scope)', () => {
+  it('binds the run scope onto the shared Memory and Tasks server URLs (per-run scope)', () => {
     const json = JSON.parse(
       hermesMcpConfig('http://localhost:18790', { teamId: 'team-A', agentId: 'agent-1' }),
     ) as {
@@ -172,8 +172,12 @@ describe('hermes driver (preserved runtime)', () => {
     }
     expect(json.mcpServers['clawboo-memory']?.url).toContain('scopeTeamId=team-A')
     expect(json.mcpServers['clawboo-memory']?.url).toContain('scopeAgentId=agent-1')
-    // Tasks/Tools stay bare.
-    expect(json.mcpServers['clawboo-tasks']?.url).not.toContain('scopeTeamId')
+    // Tasks carries the same scope: board READS are forced to the run's team (a
+    // bare `list_tasks` must mean "my team's board"), and the agent binding is
+    // what enables the mid-run inbox piggyback.
+    expect(json.mcpServers['clawboo-tasks']?.url).toContain('scopeTeamId=team-A')
+    expect(json.mcpServers['clawboo-tasks']?.url).toContain('scopeAgentId=agent-1')
+    // Tools stays bare.
     expect(json.mcpServers['clawboo-tools']?.url).not.toContain('scopeTeamId')
     // TeamChat carries the room + AUTHOR binding (anti-spoof), not the scope params.
     expect(json.mcpServers['clawboo-teamchat']?.url).toContain('roomTeamId=team-A')

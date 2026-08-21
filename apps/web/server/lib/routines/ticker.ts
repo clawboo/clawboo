@@ -31,6 +31,7 @@ const MAX_ARM_DELAY_MS = 60_000
 
 interface TickerLog {
   info: (obj: object, msg: string) => void
+  warn: (obj: object, msg: string) => void
   error: (obj: object, msg: string) => void
 }
 
@@ -170,8 +171,35 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
         claimedRuns.push(claimed)
       }
       // Dispatch phase (concurrent — wall-clock is the slowest single fire, not
-      // the sum). allSettled so one failing fire never aborts the others.
-      await Promise.allSettled(claimedRuns.map((claimed) => dispatchAndRecord(claimed)))
+      // the sum). allSettled so one failing fire never aborts the others. The
+      // await is DEADLINE-BOUNDED: one wedged dispatch must not hold `ticking`
+      // hostage (it used to freeze EVERY routine for EVERY agent until restart).
+      // On expiry the tick moves on — a late dispatch still settles and records
+      // its own outcome, and its row stays `running` so no tick re-claims it.
+      const settledAll = Promise.allSettled(
+        claimedRuns.map((claimed) => dispatchAndRecord(claimed)),
+      )
+      if (claimedRuns.length > 0) {
+        const deadlineMs =
+          Number(process.env['CLAWBOO_ROUTINE_DISPATCH_DEADLINE_MS']) || 15 * 60_000
+        // The handle lives OUTSIDE the promise so the winner can clear it:
+        // unref() keeps the process exitable but does not release the timer, so
+        // every settled batch retained one for up to the full deadline.
+        let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+        const outcome = await Promise.race([
+          settledAll.then(() => 'settled' as const),
+          new Promise<'deadline'>((resolve) => {
+            deadlineTimer = setTimeout(() => resolve('deadline'), deadlineMs)
+            ;(deadlineTimer as { unref?: () => void }).unref?.()
+          }),
+        ])
+        clearTimeout(deadlineTimer)
+        if (outcome === 'deadline')
+          deps.log.warn(
+            { claimed: claimedRuns.length, deadlineMs },
+            'Routines: dispatch deadline exceeded — releasing the tick; late fires record their own outcomes',
+          )
+      }
       return { fired: claimedRuns.length }
     } finally {
       ticking = false

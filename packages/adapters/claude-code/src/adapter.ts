@@ -47,6 +47,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       // runtime headless, where the SDK run sets permissionMode: 'bypassPermissions'.
       // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
+      // The spawn driver's `writeContext` writes a file into the run's cwd. No
+      // model reads it back mid-run, so mid-run delivery here is a fiction and
+      // the durable mailbox is the real channel.
+      steerable: false,
       models: ['sonnet', 'opus', 'haiku'],
       // Claude (Sonnet/Opus) ships a 200k-token context window — drives the
       // proactive session-rotation watermark.

@@ -186,12 +186,15 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
         primaryModel: leaderModel,
         envVar,
         systemPrompt: LEADER_PROMPT,
-        // Trust-first: the engine OWNS the board, so the leader does NOT get the
-        // Tasks MCP (create_task etc.) — it would race the engine's claim (→409) or
-        // create an unrun orphan. The leader delegates via the `delegate` signal
-        // tool (added by the native driver for team runs) and sees results as the
-        // `[Task Update]` reflections the engine delivers. Memory + tools stay on.
-        tools: { memory: true, tools: true, tasks: false, teamchat: false },
+        // The engine OWNS board writes, so the leader gets the Tasks MCP
+        // READ-ONLY (list_tasks/get_task): full board visibility without racing
+        // the engine's claims (create_task/claim_task stay engine-only). It
+        // still delegates via the `delegate` signal tool and receives
+        // `[Task Update]` reflections. TeamChat is ON — it powers the
+        // conversation's automatic peer-inbox pull (pullPeerInbox), the team's
+        // only mid-run awareness channel; author identity is bound server-side
+        // (anti-spoof), so enabling it grants no impersonation surface.
+        tools: { memory: true, tools: true, tasks: 'read', teamchat: true },
         participantKind: 'agent',
         budgetUsd: null,
       },
@@ -206,7 +209,8 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
         primaryModel: specialistModel,
         envVar,
         systemPrompt: SPECIALIST_PROMPT,
-        tools: { memory: true, tools: true, tasks: false, teamchat: false },
+        // Same surface as the leader: board reads + team room (see above).
+        tools: { memory: true, tools: true, tasks: 'read', teamchat: true },
         participantKind: 'agent',
         budgetUsd: null,
       },

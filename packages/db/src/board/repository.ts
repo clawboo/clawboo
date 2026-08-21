@@ -16,9 +16,10 @@ import {
   DEFAULT_ROOT_CREATE_WINDOW_MS,
   isVerdictPromotable,
 } from '@clawboo/governance'
-import { and, count, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, inArray, isNull, like, lt, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
+import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
 import {
   executionProcesses,
   taskComments,
@@ -89,6 +90,13 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
 export function createTask(db: ClawbooDb, input: CreateTaskInput): DbTask {
   const row = buildTaskRow(input)
   withWriteRetry(() => db.insert(tasks).values(row).run())
+  emitBoardLifecycle({
+    kind: 'task_created',
+    taskId: row.id,
+    teamId: row.teamId ?? null,
+    status: row.status,
+    sourceDelegationId: row.sourceDelegationId ?? null,
+  })
   return row
 }
 
@@ -176,7 +184,11 @@ export function createCappedSubtask(
   const maxChildren = caps.maxChildren ?? DEFAULT_MAX_CHILDREN
   const maxDepth = caps.maxDepth ?? DEFAULT_MAX_DEPTH
 
-  return immediateWrite(db, (tx) => {
+  // The callback's return type is annotated because the result is now bound to a
+  // local (for the post-commit emit below) rather than returned directly, so it no
+  // longer inherits this function's return type as its contextual type — without
+  // the annotation `ok` widens to `boolean` and the discriminated union breaks.
+  const result = immediateWrite(db, (tx): GuardedCreateResult => {
     const parent = tx.select().from(tasks).where(eq(tasks.id, parentTaskId)).get() as
       DbTask | undefined
     // A missing parent would otherwise reach the insert and trip
@@ -230,6 +242,19 @@ export function createCappedSubtask(
     tx.insert(tasks).values(row).run()
     return { ok: true, task: row }
   })
+  // Post-commit, exactly as `createTask` does. The guarded creates insert INSIDE
+  // their own transaction rather than delegating to `createTask`, so they have to
+  // emit for themselves — without this a task created through the Tasks MCP is
+  // invisible to every lifecycle subscriber (the ready-pump wake among them).
+  if (result.ok)
+    emitBoardLifecycle({
+      kind: 'task_created',
+      taskId: result.task.id,
+      teamId: result.task.teamId ?? null,
+      status: result.task.status,
+      sourceDelegationId: result.task.sourceDelegationId ?? null,
+    })
+  return result
 }
 
 /**
@@ -257,7 +282,7 @@ export function createCappedRootTask(
   const windowMs = caps.windowMs ?? DEFAULT_ROOT_CREATE_WINDOW_MS
   const since = Date.now() - windowMs
 
-  return immediateWrite(db, (tx) => {
+  const result = immediateWrite(db, (tx): GuardedCreateResult => {
     // `idx_tasks_parent` covers the NULL-parent group (SQLite indexes NULLs), so
     // this is a scan of recent roots rather than the whole table.
     const row = tx
@@ -274,6 +299,16 @@ export function createCappedRootTask(
     tx.insert(tasks).values(created).run()
     return { ok: true, task: created }
   })
+  // Post-commit — see the note in `createCappedSubtask`.
+  if (result.ok)
+    emitBoardLifecycle({
+      kind: 'task_created',
+      taskId: result.task.id,
+      teamId: result.task.teamId ?? null,
+      status: result.task.status,
+      sourceDelegationId: result.task.sourceDelegationId ?? null,
+    })
+  return result
 }
 
 export function getTask(db: ClawbooDb, taskId: string): DbTask | null {
@@ -350,13 +385,150 @@ export function claimTask(
       const exists = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).get()
       return { ok: false, reason: exists ? 'conflict' : 'not_found' }
     }
+    emitBoardLifecycle({
+      kind: 'task_claimed',
+      taskId,
+      teamId: claimed[0]!.teamId ?? null,
+      assigneeAgentId,
+    })
     return { ok: true, task: claimed[0] }
   })
 }
 
+/** How often a drain loop beats a running task. A TIMER, not a throttle: the
+ *  beat must not ride observed events, or a run that is working silently stops
+ *  proving it is alive. The stale-sweep TTL must comfortably exceed this. */
+export const TASK_HEARTBEAT_MS = 30_000
+
+/** The scan-side mirror of the engine's `MAX_AUTO_FIRES` fire policy (the two
+ *  MUST agree — @clawboo/team-orchestration cannot import this package's value
+ *  because the engine package deliberately stays free of the db graph). */
+const AUTO_FIRE_LEDGER_CAP = 3
+
+/**
+ * Scan-side mirror of the engine's ready-pump fire policy over an execution
+ * ledger: fireable unless the last run was `cancelled` (user Stop — never
+ * auto-refire) or the TRAILING run of consecutive non-succeeded rows reached
+ * the cap (a permafailing task — stop feeding it; a success in between resets
+ * the streak, so a task that failed twice long ago is not penalized forever).
+ */
+export function isLedgerAutoFireable(execs: Array<{ status: string }>): boolean {
+  if (execs.length === 0) return true
+  if (execs[execs.length - 1]!.status === 'running') return false // someone owns it
+  if (execs[execs.length - 1]!.status === 'cancelled') return false
+  let trailingFailures = 0
+  for (let i = execs.length - 1; i >= 0; i--) {
+    const s = execs[i]!.status
+    if (s === 'succeeded' || s === 'cancelled') break
+    trailingFailures += 1
+  }
+  return trailingFailures < AUTO_FIRE_LEDGER_CAP
+}
+
+/**
+ * Teams that have at least one FIREABLE delegation: a READY (deps-satisfied,
+ * `todo`, non-dropped) task whose sourceDelegationId carries the `:agent:`
+ * target marker AND whose execution ledger permits an auto-fire. The server
+ * dispatch pump scans this to know WHICH team orchestrators to (re)build and
+ * pump. Precision matters twice over: without the ledger filter one
+ * permanently-parked task would rebuild its team's orchestrator every tick
+ * forever, and without the readiness filter a dep-blocked plan tail would do
+ * the same. The engine's own policy remains the final arbiter of what runs.
+ */
+export function listTeamsWithFireableDelegations(db: ClawbooDb): string[] {
+  const candidates = db
+    .selectDistinct({ teamId: tasks.teamId })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.status, 'todo'),
+        eq(tasks.dropped, 0),
+        like(tasks.sourceDelegationId, '%:agent:%'),
+      ),
+    )
+    .all() as Array<{ teamId: string | null }>
+  const teams = new Set<string>()
+  for (const c of candidates) {
+    if (!c.teamId || teams.has(c.teamId)) continue
+    // Readiness (deps satisfied) comes from the same query the engine's pump
+    // uses, so the two views can't drift.
+    const ready = getReadyTasks(db, { teamId: c.teamId }) as Array<{
+      id: string
+      sourceDelegationId?: string | null
+    }>
+    for (const t of ready) {
+      if (!/:agent:/.test(t.sourceDelegationId ?? '')) continue
+      if (!isLedgerAutoFireable(listExecutions(db, t.id))) continue
+      teams.add(c.teamId)
+      break
+    }
+  }
+  return [...teams]
+}
+
+/**
+ * Liveness heartbeat for a running task: bump `updatedAt` — the exact column
+ * `reconcileStaleInProgress` keys on — so an actively-driven run is never swept
+ * as stale, and the sweep TTL can be minutes instead of an hour. Guarded on
+ * `in_progress` (a beat racing a release/completion no-ops, never resurrecting
+ * freshness) and, when given, on the assignee — so a stale driver from a
+ * PREVIOUS claim can't keep beating a task that was released and re-claimed by
+ * someone else, masking the new run's death.
+ */
+export function heartbeatTask(
+  db: ClawbooDb,
+  taskId: string,
+  opts?: { assigneeAgentId?: string },
+): void {
+  withWriteRetry(() =>
+    db
+      .update(tasks)
+      .set({ updatedAt: Date.now() })
+      .where(
+        and(
+          eq(tasks.id, taskId),
+          eq(tasks.status, 'in_progress'),
+          ...(opts?.assigneeAgentId ? [eq(tasks.assigneeAgentId, opts.assigneeAgentId)] : []),
+        ),
+      )
+      .run(),
+  )
+}
+
+/**
+ * TIMER-DRIVEN beat for the whole ownership window of a run — claim to terminal.
+ * Returns a stop function; ALWAYS call it (a `finally`) or the interval leaks.
+ *
+ * Timer-driven, not event-driven, on purpose: liveness must mean "the owning
+ * process is alive", not "the runtime emitted something recently". An event-
+ * ridden beat dies during every legitimately-silent stretch — a 5-minute build
+ * inside one tool call, a 10-minute wait behind the home mutex, worktree
+ * provisioning — and the minutes-scale sweep would execute healthy work (the
+ * engine grants an open tool call 24 min and the drain idle guard grants 30 min;
+ * the sweep must never be stricter than either). If this process dies, the
+ * interval dies with it and the beats stop — exactly the signal the sweep reads.
+ */
+export function startTaskHeartbeat(
+  db: ClawbooDb,
+  taskId: string,
+  opts?: { assigneeAgentId?: string },
+): () => void {
+  const beat = (): void => {
+    try {
+      heartbeatTask(db, taskId, opts)
+    } catch {
+      /* a missed beat must never break the owner */
+    }
+  }
+  beat()
+  const timer = setInterval(beat, TASK_HEARTBEAT_MS)
+  ;(timer as { unref?: () => void }).unref?.()
+  return () => clearInterval(timer)
+}
+
 /** Release an `in_progress` task back to `todo` (clears the assignee). */
 export function releaseTask(db: ClawbooDb, taskId: string): void {
-  withWriteRetry(() =>
+  const released = withWriteRetry(() =>
     db
       .update(tasks)
       // Releasing for re-claim is a cross-runtime rebind boundary: clear the stale
@@ -371,8 +543,16 @@ export function releaseTask(db: ClawbooDb, taskId: string): void {
         updatedAt: Date.now(),
       })
       .where(and(eq(tasks.id, taskId), eq(tasks.status, 'in_progress')))
-      .run(),
-  )
+      .returning({ teamId: tasks.teamId })
+      .all(),
+  ) as Array<{ teamId: string | null }>
+  if (released.length > 0)
+    emitBoardLifecycle({
+      kind: 'task_released',
+      taskId,
+      teamId: released[0]!.teamId ?? null,
+      via: 'release',
+    })
 }
 
 // ─── Status transitions (state-machine enforced) ─────────────────────────────
@@ -428,7 +608,10 @@ export function updateStatus(
   to: TaskStatus,
   opts: UpdateStatusOptions = {},
 ): UpdateStatusResult {
-  return immediateWrite(db, (tx) => {
+  // Post-commit emission: the bus fires only after the BEGIN IMMEDIATE txn
+  // returned, so a subscriber can never observe (or act on) an uncommitted
+  // transition.
+  const result = immediateWrite(db, (tx): UpdateStatusResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
     const from = row.status as TaskStatus
@@ -458,6 +641,14 @@ export function updateStatus(
     const updated = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
     return { ok: true, task: updated }
   })
+  if (result.ok && result.task)
+    emitBoardLifecycle({
+      kind: 'status_changed',
+      taskId,
+      teamId: result.task.teamId ?? null,
+      status: to,
+    })
+  return result
 }
 
 /** Update non-status metadata (priority / title / description). Status changes
@@ -646,6 +837,15 @@ export function addComment(
     createdAt: now,
   }
   withWriteRetry(() => db.insert(taskComments).values(row).run())
+  const t = db.select({ teamId: tasks.teamId }).from(tasks).where(eq(tasks.id, taskId)).get() as
+    { teamId: string | null } | undefined
+  emitBoardLifecycle({
+    kind: 'comment_added',
+    taskId,
+    teamId: t?.teamId ?? null,
+    authorType,
+    authorAgentId: authorAgentId ?? null,
+  })
   return row
 }
 
@@ -809,7 +1009,7 @@ export function completeExecutionProcess(
   outcome: CompleteExecOutcome,
 ): DbExecutionProcess | null {
   const now = Date.now()
-  const row = withWriteRetry(() =>
+  const completedRows = withWriteRetry(() =>
     db
       .update(executionProcesses)
       .set({
@@ -824,11 +1024,33 @@ export function completeExecutionProcess(
         cacheWrite: outcome.cacheWrite ?? null,
         costUsd: outcome.costUsd ?? null,
       })
-      .where(eq(executionProcesses.id, execId))
+      // A terminal ledger row is IMMUTABLE: only a still-`running` exec can be
+      // completed. The ledger is the dispatch pump's fire-policy input, where
+      // `cancelled` means "user Stop" — a late abort terminal overwriting an
+      // already-swept (`timed_out`) row would reclassify infra death as user
+      // intent and permanently park refireable work. First terminal wins, and a
+      // loser closes nothing, so it returns null and its caller skips the
+      // duplicate `execution_completed` it would otherwise append.
+      .where(and(eq(executionProcesses.id, execId), eq(executionProcesses.status, 'running')))
       .returning()
-      .get(),
-  )
-  return (row as DbExecutionProcess | undefined) ?? null
+      .all(),
+  ) as DbExecutionProcess[]
+  const row = completedRows[0]
+  if (!row) return null
+  const t = db
+    .select({ teamId: tasks.teamId })
+    .from(tasks)
+    .where(eq(tasks.id, row.taskId))
+    .get() as { teamId: string | null } | undefined
+  emitBoardLifecycle({
+    kind: 'execution_completed',
+    taskId: row.taskId,
+    teamId: t?.teamId ?? null,
+    execId,
+    status: outcome.status,
+    executorType: row.executorType,
+  })
+  return row
 }
 
 /** List a task's execution-process rows (the run ledger), oldest first. */
@@ -848,20 +1070,36 @@ export interface ReconcileResult {
 }
 
 /**
- * On startup, any exec left `running` was orphaned when its process died with
- * the previous server. Mark each `failed` + set `recovery_tombstone=1` (so a
- * second pass is a no-op — no infinite auto-resume) and release its task back to
- * `todo`. Runs in one BEGIN IMMEDIATE txn.
+ * On startup, reap `running` execs whose driver is provably gone. LIVENESS-AWARE:
+ * a run is reaped only when its task's `updatedAt` has missed several heartbeats
+ * ({@link TASK_HEARTBEAT_MS} beats from the drain loops keep it fresh). A
+ * still-beating run belongs to a LIVE process — a second clawboo process on the
+ * same state dir, or the previous server's drains during a fast dev-loop restart
+ * — and blanket-failing it was exactly the split-brain that silently destroyed
+ * in-flight cascades. A run whose process truly died stops beating and is reaped
+ * here (when already stale at boot) or by the interval sweep within the TTL.
+ * Reaped execs get `failed` + `recovery_tombstone=1` (idempotent — no infinite
+ * auto-resume) and their task released to `todo`. One BEGIN IMMEDIATE txn.
  */
-export function reconcileOrphans(db: ClawbooDb): ReconcileResult {
-  return immediateWrite(db, (tx) => {
-    const orphans = tx
+export function reconcileOrphans(db: ClawbooDb, opts?: { staleAfterMs?: number }): ReconcileResult {
+  // Default: the same order of magnitude as the sweep TTL (6 missed beats).
+  const staleAfterMs = opts?.staleAfterMs ?? 6 * TASK_HEARTBEAT_MS
+  const releasedEvents: BoardLifecycleEvent[] = []
+  const result = immediateWrite(db, (tx) => {
+    const cutoff = Date.now() - staleAfterMs
+    const candidates = tx
       .select()
       .from(executionProcesses)
       .where(
         and(eq(executionProcesses.status, 'running'), eq(executionProcesses.recoveryTombstone, 0)),
       )
       .all() as DbExecutionProcess[]
+    const orphans = candidates.filter((ex) => {
+      const t = tx.select().from(tasks).where(eq(tasks.id, ex.taskId)).get() as DbTask | undefined
+      // No task row (integrity edge) ⇒ reap. Otherwise reap only when the beat
+      // clock is stale — a fresh row means SOMETHING is still driving this run.
+      return !t || t.updatedAt < cutoff
+    })
     const now = Date.now()
     for (const ex of orphans) {
       tx.update(executionProcesses)
@@ -873,7 +1111,8 @@ export function reconcileOrphans(db: ClawbooDb): ReconcileResult {
         })
         .where(eq(executionProcesses.id, ex.id))
         .run()
-      tx.update(tasks)
+      const released = tx
+        .update(tasks)
         .set({
           assigneeAgentId: null,
           assigneeRuntime: null,
@@ -882,25 +1121,41 @@ export function reconcileOrphans(db: ClawbooDb): ReconcileResult {
           updatedAt: now,
         })
         .where(and(eq(tasks.id, ex.taskId), inArray(tasks.status, ['in_progress', 'in_review'])))
-        .run()
+        .returning({ teamId: tasks.teamId })
+        .all() as Array<{ teamId: string | null }>
+      // Publish only when the row actually changed — the guard can no-op (the
+      // task already left in_progress/in_review) and a phantom release would
+      // wake pumps for nothing.
+      if (released.length > 0)
+        releasedEvents.push({
+          kind: 'task_released',
+          taskId: ex.taskId,
+          teamId: released[0]!.teamId ?? null,
+          via: 'orphan-reap',
+        })
     }
     return { reconciled: orphans.length }
   })
+  // Post-commit: subscribers must never see an uncommitted release.
+  for (const ev of releasedEvents) emitBoardLifecycle(ev)
+  return result
 }
 
 /**
- * Periodic backstop for an `in_progress` task whose driving client view closed
- * (the in-browser idle watchdog only runs while the team chat is mounted). Any
- * task `in_progress` whose `updatedAt` is older than `olderThanMs` AND whose
- * execution is still `running` is timed-out + released to `todo`, so a hung
- * delegate doesn't sit forever when nobody is watching. The TTL is deliberately
- * GENEROUS (much longer than the client's 8-min watchdog) because `tasks.updatedAt`
- * is only bumped on status/claim writes, not on every agent event — a long-but-
- * active run must not be falsely swept. Idempotent (a swept task is no longer
- * `in_progress`). Mirrors `reconcileOrphans` but on a TTL, not at boot.
+ * Periodic backstop that releases an `in_progress` task whose driving process
+ * died or wedged. Beat-governed: every claiming drain `heartbeatTask`s the row
+ * every {@link TASK_HEARTBEAT_MS} on a timer, so `updatedAt` older than the TTL
+ * means several consecutive missed beats — dead, not slow — and the TTL can be
+ * minutes. ONLY tasks with a `running` execution row are swept: the
+ * drains beat exactly the tasks they drive, so a task with no running execution
+ * has no beat producer and must not be subject to a beat deadline (a human
+ * dragging a card to `in_progress`, or a claimed-but-not-yet-dispatched task —
+ * the dispatch pump's concern, not this sweep's). Idempotent (a swept task is
+ * no longer `in_progress`). Mirrors `reconcileOrphans` but on a TTL, not at boot.
  */
 export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): ReconcileResult {
-  return immediateWrite(db, (tx) => {
+  const releasedEvents: BoardLifecycleEvent[] = []
+  const result = immediateWrite(db, (tx) => {
     const cutoff = Date.now() - olderThanMs
     const stale = tx
       .select()
@@ -912,11 +1167,17 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
     const now = Date.now()
     let reconciled = 0
     for (const t of stale) {
+      const running = tx
+        .select({ id: executionProcesses.id })
+        .from(executionProcesses)
+        .where(and(eq(executionProcesses.taskId, t.id), eq(executionProcesses.status, 'running')))
+        .all()
+      if (running.length === 0) continue // no beat producer ⇒ not beat-governed
       tx.update(executionProcesses)
         .set({
           status: 'timed_out',
           completedAt: now,
-          error: 'stale: no progress within the watchdog window',
+          error: 'stale: no heartbeat within the watchdog window',
         })
         .where(and(eq(executionProcesses.taskId, t.id), eq(executionProcesses.status, 'running')))
         .run()
@@ -930,8 +1191,17 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
         })
         .where(eq(tasks.id, t.id))
         .run()
+      releasedEvents.push({
+        kind: 'task_released',
+        taskId: t.id,
+        teamId: t.teamId ?? null,
+        via: 'sweep',
+      })
       reconciled += 1
     }
     return { reconciled }
   })
+  // Post-commit: subscribers must never see an uncommitted release.
+  for (const ev of releasedEvents) emitBoardLifecycle(ev)
+  return result
 }

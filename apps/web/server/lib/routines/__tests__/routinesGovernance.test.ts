@@ -136,7 +136,7 @@ describe('routines × governance (real ledger + real executor runner)', () => {
     const ticker = createRoutinesTicker({
       db,
       now: () => 2_000,
-      log: { info: () => {}, error: () => {} },
+      log: { info: () => {}, warn: () => {}, error: () => {} },
       // The REAL wake-bridge + the REAL runner; only the adapter is scripted.
       dispatch: (run) =>
         dispatchRoutine(run, {

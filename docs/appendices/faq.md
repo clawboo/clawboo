@@ -37,7 +37,7 @@ Clawboo verifies a provider key before it stores one — on onboarding's **Conti
 
 ## Where is my data stored?
 
-Everything Clawboo owns lives under `~/.clawboo/` (override with the `CLAWBOO_HOME` environment variable). That directory holds the SQLite database `clawboo.db` (the agent registry, board, memory, chat history, settings, governance ledger, and event log, 27 tables in one file), `settings.json`, the encrypted secrets vault, the proxy device identity, the API-port file, and task worktrees.
+Everything Clawboo owns lives under `~/.clawboo/` (override with the `CLAWBOO_HOME` environment variable). That directory holds the SQLite database `clawboo.db` (the agent registry, board, memory, chat history, settings, governance ledger, and event log, 28 tables in one file), `settings.json`, the encrypted secrets vault, the proxy device identity, the API-port file, and task worktrees.
 
 Clawboo only ever _reads_ OpenClaw's `~/.openclaw/` directory for interop; it never writes there. The full file/dir map, backup instructions, and the WAL-sidecar detail are in [data and state](/operating/data-and-state).
 

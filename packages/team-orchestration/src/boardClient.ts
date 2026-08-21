@@ -55,6 +55,17 @@ export interface ExecutionRef {
   id: string
 }
 
+/** One ledger row of a task's run history — the durable input to the ready-pump's
+ *  fire policy (a `cancelled` last run = user Stop = never auto-refire) and to
+ *  resume()'s ownership check (`executorType` tells the engine whether a running
+ *  exec is its OWN fire — watchdog-attachable — or an executor-runner run whose
+ *  events it will never see and must not falsely time out). */
+export interface ExecutionSummary {
+  id: string
+  status: string
+  executorType?: string
+}
+
 export interface CompleteExecutionOutcome {
   status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
   summary?: string
@@ -80,6 +91,15 @@ export interface BoardClient {
   linkDep(taskId: string, dependsOnTaskId: string): Promise<boolean>
   /** Team tasks that are `todo` with all dependencies satisfied (fire-ready). */
   getReadyTasks(teamId: string): Promise<BoardTask[]>
+  /**
+   * A task's execution ledger, oldest first. `null` means the ledger could not be
+   * READ, which is not the same as "this task has never run" and must never be
+   * collapsed into `[]`: an empty ledger is the strongest evidence a task is
+   * fireable, so a transient read failure would turn a user-Stopped delegation
+   * into an auto-fired one and quietly invert the durable-Stop guarantee.
+   * Callers treat `null` as "unknown, do nothing this pass".
+   */
+  listExecutions(taskId: string): Promise<ExecutionSummary[] | null>
   /** All non-dropped tasks for a team (the projection load). */
   listTasks(teamId: string): Promise<BoardTask[]>
   /**

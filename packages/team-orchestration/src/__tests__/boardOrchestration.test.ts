@@ -21,7 +21,7 @@ import type {
   ExecutionRef,
   TaskDetail,
 } from '../boardClient'
-import { runCascadeContract, type CascadeBoard } from '../contract'
+import { runCascadeContract, type CascadeBoard, type SeedExecState } from '../contract'
 
 // ─── FakeBoard — the in-memory reference implementation ───────────────────────
 
@@ -49,6 +49,8 @@ class FakeBoard implements CascadeBoard {
   statusUpdates: { taskId: string; status: string }[] = []
   claims: string[] = []
   execs = new Map<string, string>()
+  /** execId → executorType, when it is NOT the engine's own 'openclaw' fire. */
+  execTypes = new Map<string, string>()
   completed: { execId: string; outcome: CompleteExecutionOutcome }[] = []
   created: BoardTask[] = []
   forceClaimConflict = false
@@ -57,8 +59,15 @@ class FakeBoard implements CascadeBoard {
   private taskN = 0
   private execN = 0
 
+  /** Seeded rows are pre-existing state, not executions the ENGINE opened:
+   *  `RealCascadeBoard` increments only in createExecution, and the contract's
+   *  exec-count assertions mean "how many runs did the engine start". */
+  private seededExecs = new Set<string>()
+
   get execCount(): number {
-    return this.execs.size
+    let n = 0
+    for (const id of this.execs.keys()) if (!this.seededExecs.has(id)) n += 1
+    return n
   }
 
   private toBoardTask(t: FakeRow): BoardTask {
@@ -131,6 +140,25 @@ class FakeBoard implements CascadeBoard {
   async completeExecution(execId: string, outcome: CompleteExecutionOutcome): Promise<void> {
     this.completed.push({ execId, outcome })
   }
+  async listExecutions(
+    taskId: string,
+  ): Promise<Array<{ id: string; status: string; executorType?: string }>> {
+    // Derive the ledger from the recorded calls: every exec opened for the task,
+    // in id order; a completed one carries its outcome status, else 'running'.
+    // Engine-created execs are 'openclaw' (fireTask/spawn), matching the real
+    // board — resume()'s ownership gate keys on it.
+    const rows: Array<{ id: string; status: string; executorType?: string }> = []
+    for (const [id, tid] of this.execs) {
+      if (tid !== taskId) continue
+      const done = this.completed.find((c) => c.execId === id)
+      rows.push({
+        id,
+        status: done ? done.outcome.status : 'running',
+        executorType: this.execTypes.get(id) ?? 'openclaw',
+      })
+    }
+    return rows
+  }
   async linkDep(taskId: string, dependsOnTaskId: string): Promise<boolean> {
     const list = this.depMap.get(taskId) ?? []
     list.push(dependsOnTaskId)
@@ -191,6 +219,7 @@ class FakeBoard implements CascadeBoard {
     title: string
     sourceDelegationId: string | null
     assigneeAgentId: string
+    exec?: SeedExecState
   }): string {
     const id = `task-${++this.taskN}`
     this.tasks.set(id, {
@@ -202,6 +231,15 @@ class FakeBoard implements CascadeBoard {
       sourceDelegationId: input.sourceDelegationId,
       assigneeAgentId: input.assigneeAgentId,
     })
+    // A refresh scenario normally has a live ENGINE run behind the row; the
+    // other two shapes exist so the resume guards are actually exercised.
+    const exec = input.exec ?? 'running-openclaw'
+    if (exec !== 'none') {
+      const execId = `exec-${++this.execN}`
+      this.execs.set(execId, id)
+      this.seededExecs.add(execId)
+      if (exec === 'running-executor') this.execTypes.set(execId, 'codex')
+    }
     return id
   }
   dispose(): void {

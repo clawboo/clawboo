@@ -58,7 +58,7 @@ interface AgentConfig {
   tools: {
     memory: boolean // Memory MCP (shared facts)
     tools: boolean // Tools MCP / managed capability broker
-    tasks: boolean // Tasks MCP / the durable board
+    tasks: boolean | 'read' // Tasks MCP / the durable board; 'read' attaches only list_tasks + get_task
     teamchat: boolean // TeamChat MCP — post + listen as a named peer
     custom?: string[] // reserved
   }
@@ -71,7 +71,7 @@ interface AgentConfig {
 }
 ```
 
-When the assigned agent id has no stored config (for example a board task assigned to an arbitrary id), the run falls back to a default config: provider `anthropic`, model `claude-haiku-4-5`, all four shared MCP tools on, `maxTurns` 16. The provider key still resolves through the host's vault chain.
+When the assigned agent id has no stored config (for example a board task assigned to an arbitrary id), the run falls back to a default config: provider `anthropic`, model `claude-haiku-4-5`, `maxTurns` 16, and Memory, Tools and TeamChat on with Tasks attached read-only. Board writes are deliberate, never a fallback: a team agent silently defaulting to full board access would race the orchestrator's claims. The provider key still resolves through the host's vault chain.
 
 A native agent is created through the native AgentSource; there is no Gateway and no provider SDK call at creation. The id is minted as `native-<slug>-<6 chars>`, the `AgentConfig` rides the registry input's `execConfig` (with `SOUL.md` as the `systemPrompt` fallback), and if `budgetUsd` is set, an agent-scope hard-cap budget is created at the same time.
 
@@ -223,7 +223,7 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
 
 ### 3. Seed a default starter team (`seed-native-team`)
 
-`POST /api/onboarding/seed-native-team` with `{ provider?, model? }` mints a default native team in one call: a leader (capable model) and a specialist (cheap model). Both get the Memory and Tools MCP; the Tasks MCP and TeamChat are deliberately **off**, because the orchestration engine owns the board (a leader-created task would race the engine's claim or become an unrun orphan). The leader hands work over through the `delegate` signal tool the native driver adds for team runs, and sees results as `[Task Update]` reflections. First-run onboarding no longer calls this; it deploys a team you pick from the marketplace instead. The endpoint remains as a quick way to stand up a default two-agent native team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). Per-provider leader / specialist model defaults: `anthropic` → `claude-sonnet-5` / `claude-haiku-4-5`; `openai` → `gpt-5.4` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`. Each of the seven extra OpenAI-compatible providers carries its own pair in the same `MODEL_DEFAULTS` table, and all eleven ids are accepted (an unrecognized `provider` is a `400`).
+`POST /api/onboarding/seed-native-team` with `{ provider?, model? }` mints a default native team in one call: a leader (capable model) and a specialist (cheap model). Both get the Memory and Tools MCP, TeamChat, and the Tasks MCP in **read-only** mode (`list_tasks` / `get_task`). Board WRITES stay off, because the orchestration engine owns them: a leader-created task would race the engine's claim or become an unrun orphan. Reads were never the risk, and without them a leader could not see the board it presides over. The leader hands work over through the `delegate` signal tool the native driver adds for team runs, and sees results as `[Task Update]` reflections. First-run onboarding no longer calls this; it deploys a team you pick from the marketplace instead. The endpoint remains as a quick way to stand up a default two-agent native team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). Per-provider leader / specialist model defaults: `anthropic` → `claude-sonnet-5` / `claude-haiku-4-5`; `openai` → `gpt-5.4` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`. Each of the seven extra OpenAI-compatible providers carries its own pair in the same `MODEL_DEFAULTS` table, and all eleven ids are accepted (an unrecognized `provider` is a `400`).
 
 ```bash
 curl -X POST http://localhost:18790/api/onboarding/seed-native-team \

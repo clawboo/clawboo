@@ -278,22 +278,62 @@ export async function isDetached(worktreePath: string): Promise<boolean> {
   }
 }
 
+/** Thrown when a `KeyedMutex.run` caller's acquire wait exceeds its timeout —
+ *  the holder is wedged, and queueing forever would wedge this caller too. */
+export class MutexAcquireTimeoutError extends Error {
+  constructor(key: string, waitedMs: number) {
+    super(
+      `mutex acquire timed out after ${waitedMs}ms (key: ${key}) — the current holder is not releasing`,
+    )
+    this.name = 'MutexAcquireTimeoutError'
+  }
+}
+
 /**
  * Per-key async mutex: serializes operations that share a key (a worktree path)
  * so concurrent provision/remove calls can't race on the same checkout. A
  * failed op does NOT poison the chain — the next queued op still runs.
+ *
+ * `acquireTimeoutMs` bounds the WAIT, not the op: a caller stuck behind a
+ * wedged holder rejects with {@link MutexAcquireTimeoutError} instead of
+ * queueing forever (a hung run used to freeze an agent's identity key — chat,
+ * 1:1, and schedules — until restart). Serialization is preserved on timeout:
+ * the key stays held until the wedged holder actually settles.
  */
 export class KeyedMutex {
   private chains = new Map<string, Promise<unknown>>()
 
-  run<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  run<T>(key: string, fn: () => Promise<T>, opts?: { acquireTimeoutMs?: number }): Promise<T> {
     const prev = this.chains.get(key) ?? Promise.resolve()
-    // `prev.then(fn, fn)` runs `fn` whether the previous op resolved or rejected.
-    const result = prev.then(fn, fn) as Promise<T>
-    const tail = result.then(
-      () => undefined,
-      () => undefined,
+    const acquireMs = opts?.acquireTimeoutMs
+    const settled = prev.then(
+      () => 'acquired' as const,
+      () => 'acquired' as const,
     )
+    const gate =
+      acquireMs === undefined
+        ? settled
+        : (() => {
+            // Handle held outside so a won race clears it: unref() keeps the
+            // process exitable but retains the timer, and sustained dispatch
+            // accumulated one per successful bounded acquire.
+            let t: ReturnType<typeof setTimeout> | undefined
+            return Promise.race([
+              settled.finally(() => clearTimeout(t)),
+              new Promise<'timeout'>((resolve) => {
+                t = setTimeout(() => resolve('timeout'), acquireMs)
+                ;(t as { unref?: () => void }).unref?.()
+              }),
+            ])
+          })()
+    const result = gate.then((g) => {
+      if (g === 'timeout') throw new MutexAcquireTimeoutError(key, acquireMs!)
+      return fn()
+    })
+    // The key is free only when BOTH the previous holder and this op settled —
+    // a timed-out caller must not let the next caller run beside the wedged
+    // holder it just gave up on.
+    const tail = Promise.allSettled([prev, result]).then(() => undefined)
     this.chains.set(key, tail)
     void tail.then(() => {
       if (this.chains.get(key) === tail) this.chains.delete(key)

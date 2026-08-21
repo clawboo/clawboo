@@ -45,6 +45,8 @@ export class HermesAdapter implements RuntimeAdapter {
       // runtime headless, where the CLI run passes --yolo.
       // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
+      // See claude-code: the spawn driver writes a cwd file nothing reads back.
+      steerable: false,
       models: [], // provider-defined — Hermes resolves models via its own provider config
       // Native-preservation seam: a wrapped one-shot whose value COMPOUNDS in
       // its home — one stable home per identity; self-created skills, MEMORY.md

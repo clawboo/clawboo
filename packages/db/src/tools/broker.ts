@@ -92,12 +92,16 @@ export async function executeBrokeredCall(
 
   let effectiveArgs = validatedCall.args
   if (outcome.decision === 'require_approval') {
+    // Observations survive on THIS path too: an observed-then-approved call is
+    // exactly the false-positive datum the observe mode exists to count.
+    const approvalObs = outcome.observations ?? []
     writeAuditBefore(db, {
       toolName: call.name,
       agentId: ctx.agentId,
       decision: 'require_approval',
       args: outcome.args,
       tenantId: ctx.tenantId,
+      ...(approvalObs.length > 0 ? { note: `would-deny: ${approvalObs.join('; ')}` } : {}),
     })
     const approval = createApproval(db, {
       toolName: call.name,
@@ -121,12 +125,16 @@ export async function executeBrokeredCall(
     }
     effectiveArgs = outcome.args // allow_once / allow_always
   } else {
+    // An observed-but-allowed call is audited as `observe`, not `allow`: the whole
+    // point of not denying it is that someone can still count how often it happens.
+    const observations = outcome.observations ?? []
     writeAuditBefore(db, {
       toolName: call.name,
       agentId: ctx.agentId,
-      decision: 'allow',
+      decision: observations.length > 0 ? 'observe' : 'allow',
       args: effectiveArgs,
       tenantId: ctx.tenantId,
+      ...(observations.length > 0 ? { note: `would-deny: ${observations.join('; ')}` } : {}),
     })
   }
 

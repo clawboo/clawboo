@@ -15,52 +15,58 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, 
 
 ## At a glance
 
-| Variable                              | Area               | Default                          | Read by                                 |
-| ------------------------------------- | ------------------ | -------------------------------- | --------------------------------------- |
-| `CLAWBOO_HOME`                        | State & paths      | `~/.clawboo`                     | `resolveClawbooDir()`                   |
-| `OPENCLAW_STATE_DIR`                  | State & paths      | `~/.openclaw`                    | `resolveStateDir()`                     |
-| `MOLTBOT_STATE_DIR`                   | State & paths      | (none)                           | `resolveStateDir()` legacy fallback     |
-| `CLAWDBOT_STATE_DIR`                  | State & paths      | (none)                           | `resolveStateDir()` legacy fallback     |
-| `CLAWBOO_DB_PATH`                     | State & paths      | `~/.openclaw/clawboo/clawboo.db` | `defaultDbPath()` (MCP stdio bins)      |
-| `CLAWBOO_UI_DIR`                      | State & paths      | `<server>/ui`                    | server boot (production static serving) |
-| `CLAWBOO_SERVER_PATH`                 | State & paths      | (auto-discovered)                | CLI dev-fallback launch                 |
-| `CLAWBOO_MCP_BIN_DIR`                 | State & paths      | (set by CLI)                     | `GET /api/mcp/config` stdio snippet     |
-| `CLAWBOO_API_PORT`                    | Ports & binding    | `18790` (auto-scan)              | `resolveApiPort()`                      |
-| `CLAWBOO_API_PORT_START`              | Ports & binding    | `18790`                          | `resolveApiPort()` scan start           |
-| `CLAWBOO_AWAIT_PORT`                  | Ports & binding    | (none)                           | server boot (restart handoff)           |
-| `CLAWBOO_VERSION`                     | Version & updates  | (read from the shipped manifest) | `getCurrentVersion()`                   |
-| `PORT`                                | Ports & binding    | (none)                           | `resolveApiPort()` (production only)    |
-| `HOST`                                | Ports & binding    | `127.0.0.1`                      | `resolveHost()`                         |
-| `HOSTNAME`                            | Ports & binding    | (ignored)                        | ignored (no longer a bind signal)       |
-| `CLAWBOO_ALLOWED_ORIGINS`             | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
-| `CLAWBOO_ALLOWED_HOSTS`               | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
-| `STUDIO_ACCESS_TOKEN`                 | Secrets & auth     | (none)                           | access gate                             |
-| `CLAWBOO_ALLOW_INSECURE`              | Secrets & auth     | (unset)                          | boot guard (wide-bind opt-out)          |
-| `CLAWBOO_SECRETS_MASTER_KEY`          | Secrets & auth     | auto-generated key file          | secrets vault                           |
-| `ANTHROPIC_API_KEY`                   | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
-| `OPENAI_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
-| `OPENROUTER_API_KEY`                  | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
-| `GEMINI_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
-| `XAI_API_KEY`                         | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
-| `GROQ_API_KEY`                        | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
-| `MISTRAL_API_KEY`                     | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
-| `TOGETHER_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
-| `CEREBRAS_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
-| `MOONSHOT_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
-| `OLLAMA_BASE_URL`                     | Runtime keys       | `http://localhost:11434/v1`      | native OpenAI-compat provider           |
-| `CLAWBOO_REVIEWER_MODEL`              | Runtime tuning     | (the builder's model)            | executor verification critic            |
-| `LOG_LEVEL`                           | Logging            | `info`                           | `@clawboo/logger`                       |
-| `NODE_ENV`                            | Logging            | (none)                           | `@clawboo/logger` transport selection   |
-| `CLAWBOO_DB_WRITE_BUDGET_MS`          | Operational tuning | `1500` (1.5 s)                   | SQLite write-retry budget               |
-| `CLAWBOO_BOARD_STALE_TTL_MS`          | Operational tuning | `3600000` (60 min)               | board stale-task sweep                  |
-| `CLAWBOO_BOARD_STALE_SWEEP_MS`        | Operational tuning | `300000` (5 min)                 | board stale-task sweep                  |
-| `CLAWBOO_APPROVAL_TTL_MS`             | Operational tuning | `86400000` (24 h)                | approval reaper                         |
-| `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` | Operational tuning | `3600000` (1 h)                  | approval reaper                         |
-| `CLAWBOO_MCP_PROBE_MS`                | Operational tuning | `60000` (60 s)                   | MCP liveness supervisor                 |
-| `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS` | Operational tuning | `600000` (10 min)                | scheduled OpenClaw dispatch watchdog    |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`         | OpenTelemetry      | (none)                           | OTel bridge gate                        |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`  | OpenTelemetry      | (none)                           | OTel bridge gate                        |
-| `OTEL_SERVICE_NAME`                   | OpenTelemetry      | `clawboo`                        | OTel tracer resource                    |
+| Variable                               | Area               | Default                          | Read by                                 |
+| -------------------------------------- | ------------------ | -------------------------------- | --------------------------------------- |
+| `CLAWBOO_HOME`                         | State & paths      | `~/.clawboo`                     | `resolveClawbooDir()`                   |
+| `OPENCLAW_STATE_DIR`                   | State & paths      | `~/.openclaw`                    | `resolveStateDir()`                     |
+| `MOLTBOT_STATE_DIR`                    | State & paths      | (none)                           | `resolveStateDir()` legacy fallback     |
+| `CLAWDBOT_STATE_DIR`                   | State & paths      | (none)                           | `resolveStateDir()` legacy fallback     |
+| `CLAWBOO_DB_PATH`                      | State & paths      | `~/.openclaw/clawboo/clawboo.db` | `defaultDbPath()` (MCP stdio bins)      |
+| `CLAWBOO_UI_DIR`                       | State & paths      | `<server>/ui`                    | server boot (production static serving) |
+| `CLAWBOO_SERVER_PATH`                  | State & paths      | (auto-discovered)                | CLI dev-fallback launch                 |
+| `CLAWBOO_MCP_BIN_DIR`                  | State & paths      | (set by CLI)                     | `GET /api/mcp/config` stdio snippet     |
+| `CLAWBOO_API_PORT`                     | Ports & binding    | `18790` (auto-scan)              | `resolveApiPort()`                      |
+| `CLAWBOO_API_PORT_START`               | Ports & binding    | `18790`                          | `resolveApiPort()` scan start           |
+| `CLAWBOO_AWAIT_PORT`                   | Ports & binding    | (none)                           | server boot (restart handoff)           |
+| `CLAWBOO_VERSION`                      | Version & updates  | (read from the shipped manifest) | `getCurrentVersion()`                   |
+| `PORT`                                 | Ports & binding    | (none)                           | `resolveApiPort()` (production only)    |
+| `HOST`                                 | Ports & binding    | `127.0.0.1`                      | `resolveHost()`                         |
+| `HOSTNAME`                             | Ports & binding    | (ignored)                        | ignored (no longer a bind signal)       |
+| `CLAWBOO_ALLOWED_ORIGINS`              | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
+| `CLAWBOO_ALLOWED_HOSTS`                | Ports & binding    | (loopback only)                  | same-origin guard (widen)               |
+| `STUDIO_ACCESS_TOKEN`                  | Secrets & auth     | (none)                           | access gate                             |
+| `CLAWBOO_ALLOW_INSECURE`               | Secrets & auth     | (unset)                          | boot guard (wide-bind opt-out)          |
+| `CLAWBOO_SECRETS_MASTER_KEY`           | Secrets & auth     | auto-generated key file          | secrets vault                           |
+| `ANTHROPIC_API_KEY`                    | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
+| `OPENAI_API_KEY`                       | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
+| `OPENROUTER_API_KEY`                   | Runtime keys       | (none)                           | `resolveRuntimeKey()`                   |
+| `GEMINI_API_KEY`                       | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `XAI_API_KEY`                          | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `GROQ_API_KEY`                         | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `MISTRAL_API_KEY`                      | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `TOGETHER_API_KEY`                     | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `CEREBRAS_API_KEY`                     | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `MOONSHOT_API_KEY`                     | Runtime keys       | (none)                           | `resolveRuntimeKey()` (native compat)   |
+| `OLLAMA_BASE_URL`                      | Runtime keys       | `http://localhost:11434/v1`      | native OpenAI-compat provider           |
+| `CLAWBOO_REVIEWER_MODEL`               | Runtime tuning     | (the builder's model)            | executor verification critic            |
+| `LOG_LEVEL`                            | Logging            | `info`                           | `@clawboo/logger`                       |
+| `NODE_ENV`                             | Logging            | (none)                           | `@clawboo/logger` transport selection   |
+| `CLAWBOO_DB_WRITE_BUDGET_MS`           | Operational tuning | `1500` (1.5 s)                   | SQLite write-retry budget               |
+| `CLAWBOO_BOARD_STALE_TTL_MS`           | Operational tuning | `180000` (3 min)                 | board stale-task sweep                  |
+| `CLAWBOO_BOARD_STALE_SWEEP_MS`         | Operational tuning | `60000` (60 s)                   | board stale-task sweep                  |
+| `CLAWBOO_DISPATCH_PUMP_MS`             | Operational tuning | `60000` (60 s)                   | board dispatch pump                     |
+| `CLAWBOO_ENABLE_MOCK_RUNTIME`          | Testing            | (unset)                          | runtime registry (fault-injection)      |
+| `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | Operational tuning | `600000` (10 min)                | per-identity dispatch mutex             |
+| `CLAWBOO_MAX_FIX_CYCLES`               | Operational tuning | `1` (2 attempts)                 | `verifyMaxAttempts()`                   |
+| `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | Operational tuning | `1800000` (30 min)               | drain idle guard                        |
+| `CLAWBOO_ROUTINE_DISPATCH_DEADLINE_MS` | Operational tuning | `900000` (15 min)                | routine dispatch deadline               |
+| `CLAWBOO_APPROVAL_TTL_MS`              | Operational tuning | `86400000` (24 h)                | approval reaper                         |
+| `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS`  | Operational tuning | `3600000` (1 h)                  | approval reaper                         |
+| `CLAWBOO_MCP_PROBE_MS`                 | Operational tuning | `60000` (60 s)                   | MCP liveness supervisor                 |
+| `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`  | Operational tuning | `600000` (10 min)                | scheduled OpenClaw dispatch watchdog    |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`          | OpenTelemetry      | (none)                           | OTel bridge gate                        |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`   | OpenTelemetry      | (none)                           | OTel bridge gate                        |
+| `OTEL_SERVICE_NAME`                    | OpenTelemetry      | `clawboo`                        | OTel tracer resource                    |
 
 <Note>
 There are no feature-flag environment variables; every subsystem (board, executors, worktrees, MCP, verification, governance, observability) is always on. The OpenTelemetry export bridge is the only opt-in surface, gated by the presence of an OTLP endpoint variable.
@@ -297,19 +303,55 @@ These tune the always-on background services that run at server boot. Each is pa
 ### `CLAWBOO_BOARD_STALE_TTL_MS`
 
 - **Read by**: the board stale-task sweep in `apps/web/server/index.ts`.
-- **Purpose**: the TTL after which an `in_progress` board task whose `updatedAt` predates the window (and whose execution is still running) is timed out and released to `todo`. A generous restart/crash backstop; the server orchestrator's 8-minute idle watchdog is the primary mechanism, so keep this well beyond any real delegate turn (`tasks.updatedAt` is not a liveness signal).
-- **Default**: `3600000` (60 minutes).
+- **Purpose**: the TTL after which an `in_progress` board task whose `updatedAt` predates the window (and whose execution is still running) is timed out and released to `todo`. `updatedAt` is a real liveness signal: every claiming drain heartbeats the task row every 30 seconds while it owns it, so the default is six missed beats. Lowering it below a few beat intervals will sweep live work. Raising it has a ceiling: the sweep is what publishes `task_released`, and that release is what detaches a stale session from a resident team orchestrator, so keep this TTL plus `CLAWBOO_BOARD_STALE_SWEEP_MS` under the engine's 8-minute idle watchdog (`DELEGATION_IDLE_TIMEOUT_MS`, a compile-time constant with no environment override). Past that window the watchdog reaches a phantom engine-driven delegation first, fails its task to `blocked` and cancels its dependent plan steps, which is the permanent stall the detach exists to prevent.
+- **Default**: `180000` (3 minutes).
 
 ### `CLAWBOO_BOARD_STALE_SWEEP_MS`
 
 - **Read by**: the board stale-task sweep in `apps/web/server/index.ts`.
 - **Purpose**: the interval between stale-task sweeps. One pass also runs at boot. The timer is `.unref()`'d so it never holds the process open.
-- **Default**: `300000` (5 minutes).
+- **Default**: `60000` (60 seconds).
+
+### `CLAWBOO_ENABLE_MOCK_RUNTIME`
+
+- **Read by**: the runtime registry (`apps/web/server/lib/runtimes/descriptor.ts`).
+- **Purpose**: set to exactly `1` to expose `clawboo-mock`, a fault-injecting runtime used to reproduce coordination failures (silence, a crash, an unresolved tool call, a slow start) through the real drain and executor paths. It executes nothing: every event it emits is synthesized from directives in the task text. Any other value, including other truthy-looking ones, leaves it hidden, so a normal install never lists it in the UI or in `GET /api/runtimes`.
+- **Default**: unset (the runtime is absent).
+
+### `CLAWBOO_DISPATCH_PUMP_MS`
+
+- **Read by**: the board dispatch pump in `apps/web/server/index.ts`.
+- **Purpose**: how often the pump scans for teams holding fireable delegation work or undelivered mailbox rows and wakes their orchestrator. The board lifecycle bus already pushes on every relevant mutation, so this interval is the durable BACKSTOP and the boot-resume path, not the primary trigger. The timer is `.unref()`'d.
+- **Default**: `60000` (60 seconds).
+
+### `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`
+
+- **Read by**: `homeDispatchMutex` in `apps/web/server/lib/executorRunner.ts`.
+- **Purpose**: how long a run will WAIT for another run that shares its persistent identity home before giving up. It bounds the wait, never the run itself: a healthy queue always advances, so exceeding this means the current holder is wedged. Rejecting is what keeps one stuck run from freezing that agent's chat, 1:1 and schedules until restart.
+- **Default**: `600000` (10 minutes).
+
+### `CLAWBOO_MAX_FIX_CYCLES`
+
+- **Read by**: `verifyMaxAttempts()` in `apps/web/server/lib/verification/index.ts`, the single reader, shared by the executor's re-dispatch loop and the exhaustion terminal in `worktrees.ts`. It counts FIX cycles, so the attempt budget is one more than it.
+- **Purpose**: how many times a task whose verification FAILED is re-dispatched to the same runtime with the verdict attached before the fix loop is exhausted. Each cycle re-acquires the home mutex. Set to `0` to disable the fix loop (a single attempt). An exhausted loop routes the task to `blocked`, the needs-human terminal, and the delegator is told unconditionally.
+- **Default**: `1`.
+
+### `CLAWBOO_RUN_SILENT_TIMEOUT_MS`
+
+- **Read by**: the drain idle guard (`withIdleTimeout`) in the executor runner and in the team orchestrator's `serverDeliver`.
+- **Purpose**: how long a run may produce NO events before the drain stops waiting on it. This is a per-gap timeout, not a total run budget: a run that keeps emitting can work indefinitely. An open tool call extends the window, so a long-running tool is not mistaken for a dead stream.
+- **Default**: `1800000` (30 minutes).
+
+### `CLAWBOO_ROUTINE_DISPATCH_DEADLINE_MS`
+
+- **Read by**: the routines ticker (`apps/web/server/lib/routines/ticker.ts`).
+- **Purpose**: the ceiling on a single scheduled dispatch before the ticker stops awaiting it and moves on, so one wedged routine cannot stall the whole schedule.
+- **Default**: `900000` (15 minutes).
 
 ### `CLAWBOO_APPROVAL_TTL_MS`
 
 - **Read by**: the approval reaper (`approvalReaper.ts`).
-- **Purpose**: the staleness window after which a forgotten `pending` tool-call approval is auto-expired (and any linked blocked task unblocked). Idempotent across passes.
+- **Purpose**: the staleness window after which a forgotten `pending` tool-call approval is auto-expired (and any linked blocked task unblocked, unless a non-promotable verification verdict is what holds it `blocked`). Idempotent across passes.
 - **Default**: `86400000` (24 hours).
 
 ### `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS`

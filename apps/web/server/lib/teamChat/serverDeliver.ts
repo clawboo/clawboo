@@ -24,28 +24,44 @@ import {
   agents,
   getAncestors,
   getSetting,
+  listUndeliveredInbox,
+  markInboxDelivered,
   recordSpend,
+  INBOX_BUDGET_CHARS,
+  packInboxRows,
+  splitInboxByAddressing,
   setSetting,
+  startTaskHeartbeat,
   updateTaskFields,
   type ClawbooDb,
+  resolveRoomForTeam,
 } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
 import {
+  DEFAULT_RUN_SILENT_TIMEOUT_MS,
   resolveRuntimeIntegration,
+  withIdleTimeout,
   type RunHandle,
   type RuntimeAdapter,
   type RuntimeEvent,
 } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import { classifyError, isHarnessBug } from '@clawboo/obs'
-import { isTeamSessionKey, type NudgeQueue } from '@clawboo/team-orchestration'
+import {
+  buildTurnEnvelope,
+  classifyTurn,
+  isTeamSessionKey,
+  type NudgeQueue,
+  type TurnOrigin,
+} from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource/registry'
-import { homeDispatchMutex } from '../executorRunner'
+import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { emitEvent } from '../obs'
 import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDispatch'
 import { adapterFactoryFor } from '../runtimes'
-import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
+import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
@@ -53,6 +69,11 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
 import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
+import { getMcpAttachSecret } from '../mcpAttachSecret'
+import { buildPeerCatchup } from './peerCatchup'
+import { advanceChatLeaderSeq, loadChatLeaderState } from './leaderState'
+
+const log = createLogger('server-deliver')
 
 /** clawboo's own in-process runtime — the only one that uses the native leader
  *  session-resume pointer (mirrors driveAgentChat's native-only 1:1 continuity). */
@@ -78,6 +99,10 @@ export interface ServerDeliverDeps {
   onSessionClosed: (sessionKey: string) => Promise<void>
   /** The engine's `taskForSession` — used to attribute a delegated run's mission spend. */
   taskForSession: (sessionKey: string) => string | null
+  /** The team's reduce point. Read fresh (membership changes), and the ONLY thing
+   *  that decides whether a turn is framed as the lead's — being the leader is a
+   *  property of the agent, not of whether a task happens to still be tracked. */
+  leaderAgentId: () => string | null
   /** Persist a run's terminal turn text for chat-history observability (a seed for
    *  the unified writer). Optional — omitted in tests that only assert the wiring.
    *  May return whether the entry actually reached the transcript: an explicit
@@ -148,6 +173,7 @@ function missionRootId(db: ClawbooDb, taskId: string): string {
 /** Build the engine's `deliver(targetSessionKey, targetAgentId, message)`. */
 export function createServerDeliver(deps: ServerDeliverDeps) {
   const { db, teamId, mcpBaseUrl, nudge, abortMap, onEvent, onSessionClosed, taskForSession } = deps
+  const leaderAgentId = deps.leaderAgentId
   const persistTurn = deps.persistTurn
   const publishDelta = deps.publishDelta
   const publishStatus = deps.publishStatus
@@ -304,8 +330,25 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       if (!persistTurn) return false
       return persistTurn(sessionKey, text) !== false
     }
+    // Drain idle guard: a wedged adapter iterator must not hang this drain (and
+    // with it the agent's home mutex + the engine's view of the session) forever.
+    // Silence past the ceiling aborts the run; the abort surfaces `done:aborted`
+    // (→ the engine fails the delegation with a notice, since no user Stop is in
+    // effect), and a stream silent through the grace ends → `onSessionClosed`
+    // fails it with "ended before reporting". Either way, someone is told.
+    const silentMs =
+      Number(process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']) || DEFAULT_RUN_SILENT_TIMEOUT_MS
     try {
-      for await (const ev of adapter.events(run) as AsyncIterable<RuntimeEvent>) {
+      for await (const ev of withIdleTimeout(adapter.events(run) as AsyncIterable<RuntimeEvent>, {
+        idleMs: silentMs,
+        onIdle: async () => {
+          try {
+            await adapter.abort(run)
+          } catch {
+            /* the guard's grace window ends the stream regardless */
+          }
+        },
+      })) {
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
           // Tolerate BOTH delta conventions so the running text is never garbled:
           // native emits INCREMENTAL chunks, but the OpenClaw adapter emits CUMULATIVE
@@ -430,8 +473,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         } else nudge.markBusy(sessionKey)
         try {
           await onEvent(sessionKey, ev)
-        } catch {
-          // A single bad event must not kill the observer.
+        } catch (err) {
+          // A single bad event must not kill the observer — but it must not be
+          // invisible either: this is the engine refusing an event, which is how
+          // a cascade stops advancing for no apparent reason.
+          log.error({ err, sessionKey, kind: ev.kind }, 'engine rejected a run event')
         }
         if (terminal) {
           sawTerminal = true
@@ -456,8 +502,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       publishStatus?.(agentId, 'idle')
       try {
         await onSessionClosed(sessionKey)
-      } catch {
-        // best-effort
+      } catch (err) {
+        // Best-effort, but logged: this is the path that fails an in-flight
+        // delegation when its observer dies, so a throw here leaves the leader
+        // waiting on a delegate that will never report.
+        log.error({ err, sessionKey }, 'onSessionClosed failed after a dead stream')
       }
     }
   }
@@ -466,6 +515,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     targetSessionKey: string,
     targetAgentId: string,
     message: string,
+    origin: TurnOrigin,
   ): Promise<void> {
     // Live-roster context for a team run so the agent knows its teammates by name
     // (the `delegate` tool resolves the assignee against this same roster). Built
@@ -480,20 +530,87 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // resume (only the leader / user-facing turn resumes; a child keeps its own
     // executor-handoff continuity) AND the native-leader coordination block below.
     const isTaskRun = taskForSession(targetSessionKey) != null
+    // What this turn IS — three answers, from the caller's stated `origin` plus the
+    // two durable facts (who leads, does this session hold a task). It used to be
+    // `!isTaskRun` for all three, which is why a turn arriving after a worker's
+    // task was forgotten was framed as the team lead's.
+    const framing = classifyTurn({
+      origin,
+      targetAgentId,
+      leaderAgentId: leaderAgentId(),
+      hasBoardTask: isTaskRun,
+    })
     // Volatile-tier team context: rules + the user's self-intro + the live roster
     // (the single choke point covers the user's leader turn AND every delegated
-    // child turn). See `contextPreamble.ts`. A leader / user-facing turn (no board
-    // task) also gets the native-leader behavioral coordination block; a delegated
-    // child (isTaskRun) is a worker turn and does not.
-    const teamContext = isTeamSessionKey(targetSessionKey)
-      ? buildServerTeamContext(db, teamId, targetAgentId, !isTaskRun)
+    // child turn). See `contextPreamble.ts`.
+    const baseTeamContext = isTeamSessionKey(targetSessionKey)
+      ? buildServerTeamContext(db, teamId, targetAgentId, framing)
       : null
+    // WHAT IS WAITING is read when the run actually STARTS, never at `deliver`
+    // time. `nudge.deliver` FIFO-queues behind a busy session, so reading here in
+    // the outer scope meant two stacked deliveries both read the same undelivered
+    // rows and the same cursor — neither had begun — and both carried the same
+    // digest and the same peer posts. `markInboxDelivered` stops the double
+    // bookkeeping; it cannot un-bake duplicated context. It also meant anything
+    // arriving while the delivery sat in the queue was missed, which is the exact
+    // opposite of "currency is a property of the runner".
+    const renderWaiting = (): {
+      teamContext: string | null
+      digestIds: string[]
+      roomId: string | null
+      throughSeq: number | null
+    } => {
+      const inboxRows = isTeamSessionKey(targetSessionKey)
+        ? listUndeliveredInbox(db, targetAgentId, { teamId, limit: 20 })
+        : []
+      // Routed by `kind`, which the mailbox has carried since it shipped and
+      // nothing read: a `task_update` is a result to synthesize and an `alert` is
+      // a failure to act on. A `signal` is a peer speaking in passing.
+      const split = splitInboxByAddressing(inboxRows)
+      // ONE budget across both sections, spent on the addressed half first.
+      const packedAddressed = packInboxRows(split.addressed, INBOX_BUDGET_CHARS)
+      const packedAmbient = packInboxRows(
+        split.ambient,
+        INBOX_BUDGET_CHARS - packedAddressed.usedChars,
+      )
+      const roomId = isTeamSessionKey(targetSessionKey) ? resolveRoomForTeam(teamId) : null
+      const catchup = roomId
+        ? buildPeerCatchup(db, {
+            roomId,
+            agentId: targetAgentId,
+            sinceSeq: loadChatLeaderState(db, roomId, targetAgentId).lastSeenSeq,
+          })
+        : { text: null, throughSeq: null }
+      // Section membership comes from provenance (`kind`, and which reader produced
+      // the item), NEVER from the text.
+      const envelope = buildTurnEnvelope({
+        addressed: packedAddressed.bodies.length
+          ? [{ text: packedAddressed.bodies.join('\n') }]
+          : [],
+        ambient: [
+          ...(catchup.text ? [{ text: catchup.text }] : []),
+          ...(packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : []),
+        ],
+      })
+      return {
+        teamContext: [baseTeamContext, envelope].filter(Boolean).join('\n\n') || null,
+        // Only rows that actually FIT get marked — a row truncated out of the
+        // budget was not delivered and rides the next digest.
+        digestIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
+        roomId,
+        throughSeq: catchup.throughSeq,
+      }
+    }
+
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
     return nudge.deliver(
       targetSessionKey,
       () =>
         new Promise<void>((started, failStart) => {
+          // Rendered HERE: this runs when the queue releases the delivery, so the
+          // context reflects state at start time rather than at enqueue time.
+          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
           // Resolve the agent's registry row up front — the runtime tags obs, and (for
           // a connected substrate) the row's gateway id keys the cross-subsystem mutex.
           // NEVER read the task's `assigneeRuntime` (the engine hardcodes 'openclaw'
@@ -549,10 +666,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               : null
           } else {
             const runtime = resolvedRuntime
-            // native + the coding runtimes (claude-code / codex / hermes) via
-            // `isRuntimeId`, PLUS OpenClaw (the connected substrate, converged here).
-            // A truly-unknown runtime fails cleanly so the engine reflects it.
-            if (!runtime || (!isRuntimeId(runtime) && runtime !== 'openclaw')) {
+            // native + the coding runtimes (claude-code / codex / hermes), PLUS
+            // OpenClaw (the connected substrate, converged here) and the mock
+            // harness when its env flag is set. A truly-unknown runtime fails
+            // cleanly so the engine reflects it.
+            if (!runtime || (!isOrchestratableRuntimeId(runtime) && runtime !== 'openclaw')) {
               failStart(
                 new Error(`runtime '${runtime ?? 'unknown'}' is not server-orchestrated yet`),
               )
@@ -619,7 +737,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 // exposes the `team_delegate` signal tool (how a coding-runtime LEADER
                 // delegates; the engine's DELEGATE_TOOL_NAME_RE branch turns the call
                 // into a board task). executorRunner runs never set it.
-                memoryScope: { teamId, agentId: targetAgentId, delegate: true },
+                memoryScope: {
+                  teamId,
+                  agentId: targetAgentId,
+                  delegate: true,
+                  attachSecret: getMcpAttachSecret(db),
+                },
                 ...(homeDir ? { homeDir } : {}),
                 ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
               }
@@ -675,6 +798,30 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
+            // The run STARTED with the catch-up in its context, so the cursor may
+            // advance — and only now. Advancing at render time would let a failed
+            // start eat the posts, which is the same rule the digest follows one
+            // block below. Only through the last post that actually fit.
+            if (roomId && throughSeq !== null) {
+              try {
+                advanceChatLeaderSeq(db, roomId, targetAgentId, throughSeq)
+              } catch (err) {
+                log.error(
+                  { err, roomId, agentId: targetAgentId },
+                  'peer catch-up cursor advance failed',
+                )
+              }
+            }
+            // The run started with the digest in its context — mark the rows
+            // that were RENDERED delivered (first-winner guard handles a racing
+            // channel; truncated-out rows stay undelivered by design).
+            if (digestIds.length > 0) {
+              try {
+                markInboxDelivered(db, digestIds, 'digest')
+              } catch {
+                /* best-effort; undelivered rows simply ride the next digest */
+              }
+            }
             // Left-pane liveness: the run is in flight — flip the agent's badge to
             // Working the moment its run starts (the drain flips it back on the
             // terminal). Delegated children get this too, so a cascade shows every
@@ -700,15 +847,33 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // alone only knows THIS orchestrator's sessions. The two are mutually
           // exclusive (connected has no homeDir; persistent is not connected).
           const job = connectedKey
-            ? () => connectedAgentMutex.run(connectedKey, runJob)
+            ? () =>
+                connectedAgentMutex.run(connectedKey, runJob, {
+                  acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
+                })
             : capturedHomeDir
-              ? () => homeDispatchMutex.run(capturedHomeDir, runJob)
+              ? () =>
+                  homeDispatchMutex.run(capturedHomeDir, runJob, {
+                    acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
+                  })
               : runJob
-          void job().catch((e: unknown) => {
-            // runJob settles `started`/`failStart` itself; this catch only guards an
-            // unexpected throw before/around that so it isn't an unhandled rejection.
-            failStart(e instanceof Error ? e : new Error(String(e)))
-          })
+          // TIMER-DRIVEN liveness beat spanning the run's whole ownership window:
+          // the mutex WAIT (legitimately up to HOME_MUTEX_ACQUIRE_MS behind a
+          // sibling run), adapter start, and every silent stretch of the drain.
+          // Beat = this process owns the delivery; the interval dies with the
+          // process, which is exactly what the minutes-scale stale sweep reads.
+          // Delegated task runs only (a leader/user turn has no task row).
+          const beatTaskId = taskForSession(targetSessionKey)
+          const stopBeat = beatTaskId
+            ? startTaskHeartbeat(db, beatTaskId, { assigneeAgentId: targetAgentId })
+            : (): void => undefined
+          void job()
+            .catch((e: unknown) => {
+              // runJob settles `started`/`failStart` itself; this catch only guards an
+              // unexpected throw before/around that so it isn't an unhandled rejection.
+              failStart(e instanceof Error ? e : new Error(String(e)))
+            })
+            .finally(() => stopBeat())
         }),
     )
   }

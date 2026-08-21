@@ -10,6 +10,8 @@ import {
   DEFAULT_MAX_CHILDREN,
   DEFAULT_MAX_DEPTH,
   DEFAULT_MAX_ROOT_CREATES,
+  enqueueInbox,
+  listUndeliveredInbox,
   listPendingApprovals,
   listTasks,
   resolveApproval,
@@ -59,6 +61,119 @@ describe('Tasks MCP', () => {
 
     const list = await callText(client, 'list_tasks', { teamId: 't1' })
     expect((JSON.parse(list.text) as unknown[]).length).toBe(1)
+  })
+
+  it('readOnly mode serves only the board read surface', async () => {
+    const client = await connectInMemory(createTasksServer(db, { readOnly: true }))
+    const names = await listToolNames(client)
+    expect(names.sort()).toEqual(['get_task', 'list_tasks'])
+
+    // The read tools work against the shared substrate…
+    const writer = await connectInMemory(createTasksServer(db))
+    const created = JSON.parse(
+      (await callText(writer, 'create_task', { title: 'Visible', teamId: 't1' })).text,
+    ) as { id: string }
+    const list = await callText(client, 'list_tasks', { teamId: 't1' })
+    expect((JSON.parse(list.text) as unknown[]).length).toBe(1)
+    const got = await callText(client, 'get_task', { taskId: created.id })
+    expect(got.isError).toBe(false)
+  })
+
+  it('boundScope confines board READS to the run team', async () => {
+    // The agent is never told its own teamId, so a bare `list_tasks` must mean
+    // "my team's board" — unbound it would return every team's tasks, which is
+    // useless for the "don't duplicate a teammate's work" purpose it serves.
+    const writer = await connectInMemory(createTasksServer(db))
+    const mine = JSON.parse(
+      (await callText(writer, 'create_task', { title: 'Mine', teamId: 'A' })).text,
+    ) as { id: string }
+    const theirs = JSON.parse(
+      (await callText(writer, 'create_task', { title: 'Theirs', teamId: 'B' })).text,
+    ) as { id: string }
+
+    const bound = await connectInMemory(
+      createTasksServer(db, { readOnly: true, boundScope: { teamId: 'A' } }),
+    )
+    const listed = JSON.parse((await callText(bound, 'list_tasks', {})).text) as Array<{
+      id: string
+    }>
+    expect(listed.map((t) => t.id)).toEqual([mine.id])
+
+    // Passing someone else's teamId changes nothing — the binding wins outright
+    // (same anti-spoof semantic as TeamChat's bound identity).
+    const spoofed = JSON.parse(
+      (await callText(bound, 'list_tasks', { teamId: 'B' })).text,
+    ) as Array<{ id: string }>
+    expect(spoofed.map((t) => t.id)).toEqual([mine.id])
+
+    // …nor read another team's task by guessing its id.
+    expect((await callText(bound, 'get_task', { taskId: mine.id })).isError).toBe(false)
+    const crossTeam = await callText(bound, 'get_task', { taskId: theirs.id })
+    expect(crossTeam.isError).toBe(true)
+    expect(crossTeam.text).toMatch(/not found/)
+  })
+
+  it('an agent-bound server piggybacks undelivered inbox rows onto a tool response once', async () => {
+    enqueueInbox(db, { agentId: 'a1', teamId: 'A', kind: 'task_update', body: 'X finished' })
+    const bound = await connectInMemory(
+      createTasksServer(db, { readOnly: true, boundScope: { teamId: 'A', agentId: 'a1' } }),
+    )
+    // The piggyback rides as a SECOND content block — read all blocks.
+    const allBlocks = async (): Promise<string[]> => {
+      const res = await bound.callTool({ name: 'list_tasks', arguments: {} })
+      return ((res.content ?? []) as Array<{ type: string; text?: string }>)
+        .filter((c) => c.type === 'text')
+        .map((c) => c.text ?? '')
+    }
+    const first = await allBlocks()
+    expect(first.length).toBe(2) // the JSON result + the update block
+    expect(() => JSON.parse(first[0]!)).not.toThrow() // first block untouched
+    expect(first[1]).toContain('X finished') // delivered with this result…
+    const second = await allBlocks()
+    expect(second.join('')).not.toContain('X finished') // …exactly once
+  })
+
+  it('the piggyback is TEAM-SCOPED: another team’s row never rides this run', async () => {
+    // An agent can hold rows for more than one team. A team-bound session must
+    // deliver only its own team's, or a run scoped to A leaks B's coordination
+    // traffic into its context.
+    enqueueInbox(db, { agentId: 'a1', teamId: 'A', kind: 'task_update', body: 'ALPHA update' })
+    enqueueInbox(db, { agentId: 'a1', teamId: 'B', kind: 'task_update', body: 'BRAVO update' })
+    const boundToA = await connectInMemory(
+      createTasksServer(db, { readOnly: true, boundScope: { teamId: 'A', agentId: 'a1' } }),
+    )
+    const res = await boundToA.callTool({ name: 'list_tasks', arguments: {} })
+    const text = ((res.content ?? []) as Array<{ type: string; text?: string }>)
+      .map((c) => c.text ?? '')
+      .join('')
+    expect(text).toContain('ALPHA update')
+    expect(text).not.toContain('BRAVO update')
+    // B's row is untouched, so B's own session still delivers it.
+    expect(listUndeliveredInbox(db, 'a1', { teamId: 'B' }).map((r) => r.body)).toEqual([
+      'BRAVO update',
+    ])
+  })
+
+  it('a TEAMLESS row still rides a team-bound run (this is its only channel)', async () => {
+    // The digest is strictly team-scoped by design, so scoping the piggyback the
+    // same way would strand a teamless row forever. It widens to team-or-null.
+    enqueueInbox(db, { agentId: 'a1', kind: 'alert', body: 'NO TEAM alert' })
+    const boundToA = await connectInMemory(
+      createTasksServer(db, { readOnly: true, boundScope: { teamId: 'A', agentId: 'a1' } }),
+    )
+    const res = await boundToA.callTool({ name: 'list_tasks', arguments: {} })
+    const text = ((res.content ?? []) as Array<{ type: string; text?: string }>)
+      .map((c) => c.text ?? '')
+      .join('')
+    expect(text).toContain('NO TEAM alert')
+  })
+
+  it('stays board-wide when unbound (raw stdio / external attach)', async () => {
+    const writer = await connectInMemory(createTasksServer(db))
+    await callText(writer, 'create_task', { title: 'A', teamId: 'A' })
+    await callText(writer, 'create_task', { title: 'B', teamId: 'B' })
+    const listed = JSON.parse((await callText(writer, 'list_tasks', {})).text) as unknown[]
+    expect(listed).toHaveLength(2)
   })
 
   it('returns a tool error when a dependency link would create a cycle', async () => {

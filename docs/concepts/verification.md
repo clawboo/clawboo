@@ -1,6 +1,6 @@
 ---
 title: Verification
-description: 'Builder≠judge: a deterministic gate plus an independent read-only critic that make "done" mean verified, with completed_with_debt as a graceful exit.'
+description: 'Builder≠judge: a deterministic gate plus an independent read-only critic that make "done" mean verified, with an exhausted fix loop routed to blocked for a human.'
 ---
 
 Verification is the rule that makes `done` mean _verified_. A code task that mutated files can reach `done` only when two independent checks agree: a **deterministic gate** (the task's own build/test/lint command, judged by its exit code) passes, and, on a green gate, for a risky or large change, a read-only **critic** (an independent reviewer that cannot push) raises no blocking finding. The principle underneath is **builder≠judge**: the agent that did the work never certifies its own work. A generator self-grading is a known failure mode; Clawboo's only signals into `done` are a machine truth (an exit code) and a structurally-independent reviewer.
@@ -19,7 +19,7 @@ A few things verification is _not_:
 
 - **Not a quality opinion.** The deterministic gate is an exit code, not a judgement; the critic emits structured findings against a fixed severity taxonomy, not a free-form review.
 - **Not run on every change.** A read-only task, a research task, an empty diff, or a small low-risk diff is not sent to the critic; a model is spent only where it earns its keep (see [When the critic runs](#when-the-critic-runs)).
-- **Not a deadlock.** When the fix loop is exhausted, the task is marked `completed_with_debt` rather than stuck forever; but that exit is itself gated (see [The bounded fix loop](#the-bounded-fix-loop-and-completed_with_debt)).
+- **Not a deadlock for the task, and not a rescue for its chain.** When the attempt budget is spent, the verdict is recorded as `completed_with_debt` and the task lands `blocked` with its delegator notified, rather than sitting in a column that implies someone is still working on it. Its dependents keep waiting: the ready query requires every dependency to be `done`. The move buys visibility, not recovery (see [The bounded fix loop](#the-bounded-fix-loop-and-completed_with_debt)).
 - **Not applicable to non-worktree work.** A task with no isolated [worktree](/concepts/worktrees-and-handoff) (an OpenClaw-substrate run, a non-file-mutating native run) has no diff to verify, so it carries _no_ verdict; and a task with no verdict is unverified, not failing.
 
 The board owns _where_ the gate lives (the `→ done` transition and a single verification cell on the task row); the [worktree](/concepts/worktrees-and-handoff) subsystem owns the isolated checkout the gate runs in; the verification subsystem owns the gate-and-critic composition. Verification is downstream of [delegation](/concepts/delegation-and-orchestration): the orchestrator routes a structured failure verdict back to the team leader as a real, actionable fix request, not the string "FAIL".
@@ -42,12 +42,9 @@ flowchart TD
     critic -->|blocking finding| fail
     critic -->|"clean / non-blocking only"| pass
 
-    fail --> loop{"Fix budget left?<br/>(attempt &lt; maxCycles)"}
+    fail --> loop{"Attempts left?<br/>(attempt &lt; verifyMaxAttempts,<br/>default 2)"}
     loop -->|yes| retry["Status = in_progress<br/>(structured fix routed back)"]
-    loop -->|no| debt{"Latest deterministic<br/>gate green?"}
-
-    debt -->|yes| cwd["completed_with_debt → done"]
-    debt -->|no| blocked["blocked<br/>(routed to a human)"]
+    loop -->|no| blocked["completed_with_debt → blocked<br/>(verdict recorded,<br/>routed to a human)"]
 
     pass --> done["pass → done<br/>(intrinsic board gate allows)"]
 ```
@@ -116,14 +113,14 @@ A failing attempt does not return the string "FAIL". It carries a structured `{ 
 
 The independent evaluator is _permanent_; only the _retry budget_ is bounded. Each verify attempt is recorded in an `attempts[]` array on the task, that array **is** the loop history, which is why the `→ done` gate is a single-row read.
 
-After a failing attempt, the loop decides whether to retry or stop. If the attempt count (including the one just completed) is below `maxCycles` (default 3), the task goes back to `in_progress` with the structured fix note and the specialist tries again. Once the budget is exhausted, the task is marked **`completed_with_debt`**, never a deadlock, and the open issues are recorded as `debtNotes` (each a `{ criterion, severity, justification }`).
+After a failing attempt, the loop decides whether to retry or stop. One budget governs both halves of that decision, `verifyMaxAttempts()`, which reads `CLAWBOO_MAX_FIX_CYCLES` as a count of _fix cycles_ and returns the total _attempts_, one more. The default is **2 attempts**: the initial verify plus one fix cycle. While attempts remain, the task goes back to `in_progress` with the structured fix note and the specialist tries again. On the last attempt the verdict is marked **`completed_with_debt`** and the open issues are recorded as `debtNotes` (each a `{ criterion, severity, justification }`), and the task itself routes to `blocked` for a human.
 
 `completed_with_debt` is **not** an unconditional pass. Its promotability is the load-bearing rule:
 
-- `completed_with_debt` **over a green deterministic gate** (the gate passed; only non-blocking critic findings remain unresolved) → **promotable to `done`**. The debt covers reviewer findings the loop couldn't resolve in budget, not a broken build.
+- `completed_with_debt` **over a green deterministic gate** is still _promotable_ by the board's `→ done` gate, but the completion path no longer promotes it. A green gate with a failing verdict means the critic raised a **blocking** finding (security, crash, data loss, wrong algorithm, missing acceptance criteria), so the task routes to `blocked` for review rather than landing `done`.
 - `completed_with_debt` **over a red deterministic gate** (the build/test gate is still failing after the loop exhausts) → **not promotable**. A red gate is the canonical blocking case; it routes to `blocked` for a human rather than silently shipping.
 
-The completion path enforces exactly this: a `pass` verdict lands `done`; a debt-over-green verdict lands `done`; a debt-over-red verdict lands `blocked` with a system comment explaining why; any other `fail` reverts to `in_progress`.
+The completion path is stricter than the gate: only a clean `pass` lands `done`. A `completed_with_debt` verdict, and any `fail` that has spent the attempt budget, lands `blocked` with a system comment recording how many attempts failed and an inbox notice to the delegator, or to the team leader when the task has no delegator. A `fail` with attempts left reverts to `in_progress` so the next fix cycle can re-dispatch it.
 
 ## The intrinsic board gate
 
@@ -134,12 +131,12 @@ The rule above is enforced in the board state machine itself, so it cannot be sk
 - **anything else** (`fail`, or an unparseable verdict that _is_ present and non-promotable) → not promotable.
 - **no stored verdict** → the task is unverified, not failing, and lands `done` normally. The gate blocks _known-failing_ verdicts, not un-run verification. (An unparseable-but-present cell is treated leniently, if promotability can't be determined, the gate doesn't block.)
 
-When the verdict is non-promotable, the transition returns `verification_required`, which the [board REST](/reference/rest-api/board) layer maps to a `409`. The same `isVerdictPromotable` rule is used by both the state machine and the worktree completion path, so "done means verified" holds at every entry point.
+When the verdict is non-promotable, the transition returns `verification_required`, which the [board REST](/reference/rest-api/board) layer maps to a `409`. The state machine is the backstop for any caller that reaches `done` another way; the worktree completion path is stricter still and promotes only a clean `pass`, so "done means verified" holds at every entry point.
 
 The one escape is `humanOverride`, a human deciding to ship despite a non-promotable verdict. It is the _only_ way a task with a known-failing verdict can reach `done`, and the caller must audit it: the `PATCH /api/board/:taskId` handler writes a `verification` audit row (`{ override: true, route: 'board_patch', priorStatus, to: 'done' }`) whenever an override-to-`done` succeeds. The override is never silent.
 
 <Danger>
-Releasing a task back to `todo` (the `in_progress → todo` re-claim path) **clears the stored verification verdict**. This is intentional: a release is a cross-runtime rebind boundary, and a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The next runtime re-verifies from scratch.
+Moving a task back to `todo` **clears the stored verification verdict**, on the `in_progress → todo` re-claim path and on the `blocked → todo` re-queue a human uses after an exhausted fix loop. This is intentional: a release is a cross-runtime rebind boundary, and a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The next runtime re-verifies from scratch.
 </Danger>
 
 ## Design rationale and trade-offs
@@ -148,7 +145,7 @@ Verification exists because a self-grading generator is unreliable, and because 
 
 The two-layer split is deliberate. The deterministic gate is cheap, objective, and non-negotiable: a red gate is always a failure, with no model in the loop to be talked out of it. The critic adds judgement that an exit code can't capture (a security hole that still compiles, a wrong algorithm that still passes thin tests); but judgement is expensive and a same-model self-review is biased, so it is rationed to risky surfaces and made structurally independent (detached, push-less, no shared home).
 
-`completed_with_debt` is the honest middle. A purely binary gate either deadlocks on an un-fixable nit or ships broken work; bounding the _retry budget_ (not the evaluator) and recording debt lets a green-gate task with unresolved style findings ship with a paper trail, while keeping a red-gate task out of `done` and in front of a human. The trade-off is that some non-blocking findings ship as recorded debt rather than being fixed.
+`completed_with_debt` is the record, not a shortcut. Bounding the _retry budget_ (never the evaluator) keeps a task from churning forever, and the debt notes say what was still open when the budget ran out; but nothing ships on that record. Only a clean `pass` lands `done`, so a red gate and an unresolved blocking finding both end in front of a human. Non-blocking findings never reach this path at all: a green gate with only `style` / `perf` / `other` findings is a `pass`. The trade-off is that a task nobody revisits stays `blocked` indefinitely, and its dependents stay unready with it.
 
 Making the gate intrinsic to the state machine, rather than a step the orchestrator is trusted to call, is what makes the rule un-bypassable. The cost is a small inline read of the verification cell on every `→ done` transition; the benefit is that no caller (MCP tool, REST route, future orchestrator) can route around it without the audited override.
 

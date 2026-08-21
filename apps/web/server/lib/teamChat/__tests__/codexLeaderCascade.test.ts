@@ -55,6 +55,7 @@ import { getDb, resetDb } from '../../db'
 import { booZeroForTeam } from '../booZero'
 import { nativeTeamSessionSettingKey } from '../nativeTeamSession'
 import { createServerBoardClient } from '../serverBoardClient'
+import { HUMAN_TURN } from '@clawboo/team-orchestration'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 
 const TEAM = 'T'
@@ -246,6 +247,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       onEvent: (sk, ev) => engineRef.current!.onEvent(sk, ev),
       onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
+      leaderAgentId: () => LEAD,
       persistTurn: (sk, text) => {
         persisted.push({ sk, text })
       },
@@ -268,7 +270,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     engineRef.current = engine
 
     // The user's turn reaches the leader (what enqueueUserMessage does post-resolution).
-    await deliver(skFor(LEAD), LEAD, 'team: build a CSV parser')
+    await deliver(skFor(LEAD), LEAD, 'team: build a CSV parser', HUMAN_TURN)
 
     // Settle the whole cascade: leader drain → spawn → worker drain → report-up →
     // the 3s reflect batch → the leader's synthesis turn persisting to chat. The
@@ -339,6 +341,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       onEvent: (sk, ev) => engineRef.current!.onEvent(sk, ev),
       onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
+      leaderAgentId: () => LEAD,
       makeAdapterForAgent: (agentId) => adapters.get(agentId) ?? null,
     })
     engineRef.current = createBoardOrchestrator({
@@ -352,7 +355,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       stopGen: () => 0,
     })
 
-    await deliver(skFor(LEAD), LEAD, 'follow-up message')
+    await deliver(skFor(LEAD), LEAD, 'follow-up message', HUMAN_TURN)
     await settle(() => !getSetting(db, nativeTeamSessionSettingKey(LEAD, TEAM)))
 
     // The failed resumed turn CLEARED the pointer — the next turn starts fresh
