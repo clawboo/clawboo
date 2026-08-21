@@ -15,8 +15,14 @@ import { verifyMaxAttempts } from '../index'
 
 const KEY = 'CLAWBOO_MAX_FIX_CYCLES'
 
+// Restore whatever the worker inherited rather than blanket-deleting: a bare
+// delete changes process state for later suites in the same worker and can hide
+// a configuration-dependent failure.
+const prior = process.env[KEY]
+
 afterEach(() => {
-  delete process.env[KEY]
+  if (prior === undefined) delete process.env[KEY]
+  else process.env[KEY] = prior
 })
 
 describe('verifyMaxAttempts', () => {

@@ -59,8 +59,15 @@ class FakeBoard implements CascadeBoard {
   private taskN = 0
   private execN = 0
 
+  /** Seeded rows are pre-existing state, not executions the ENGINE opened:
+   *  `RealCascadeBoard` increments only in createExecution, and the contract's
+   *  exec-count assertions mean "how many runs did the engine start". */
+  private seededExecs = new Set<string>()
+
   get execCount(): number {
-    return this.execs.size
+    let n = 0
+    for (const id of this.execs.keys()) if (!this.seededExecs.has(id)) n += 1
+    return n
   }
 
   private toBoardTask(t: FakeRow): BoardTask {
@@ -230,6 +237,7 @@ class FakeBoard implements CascadeBoard {
     if (exec !== 'none') {
       const execId = `exec-${++this.execN}`
       this.execs.set(execId, id)
+      this.seededExecs.add(execId)
       if (exec === 'running-executor') this.execTypes.set(execId, 'codex')
     }
     return id

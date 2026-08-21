@@ -62,13 +62,18 @@ export function listUndeliveredInbox(
         : eq(agentInbox.teamId, opts.teamId),
     )
   }
-  return db
-    .select()
-    .from(agentInbox)
-    .where(and(...conds))
-    .orderBy(asc(agentInbox.createdAt))
-    .limit(opts?.limit ?? 50)
-    .all() as DbAgentInboxRow[]
+  return (
+    db
+      .select()
+      .from(agentInbox)
+      .where(and(...conds))
+      // rowid as the tiebreaker: same-millisecond enqueues (routine in a burst)
+      // have no defined order under createdAt alone, so FIFO within the burst
+      // depended on the engine's whim. rowid is insertion order.
+      .orderBy(asc(agentInbox.createdAt), sql`rowid`)
+      .limit(opts?.limit ?? 50)
+      .all() as DbAgentInboxRow[]
+  )
 }
 
 /**

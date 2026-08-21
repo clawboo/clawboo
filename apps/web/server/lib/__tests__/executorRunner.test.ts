@@ -312,8 +312,10 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(ctx.slice(addressedAt, ambientAt)).toContain('parser done')
     expect(ctx.slice(ambientAt)).toContain('touching the same file')
     // Both rendered → both marked, from the one union.
-    expect(listUndeliveredInbox(db, 'codex-1', { teamId: 'team-1' })).toEqual([])
-    expect([update.id, fyi.id]).toHaveLength(2)
+    // Per-id: each enqueued row must be gone, not merely "the list is empty".
+    const undelivered = listUndeliveredInbox(db, 'codex-1', { teamId: 'team-1' }).map((r) => r.id)
+    for (const id of [update.id, fyi.id]) expect(undelivered).not.toContain(id)
+    expect(undelivered).toEqual([])
   })
 
   it('a refused ledger close emits NO execution_completed, and names the real reason', async () => {

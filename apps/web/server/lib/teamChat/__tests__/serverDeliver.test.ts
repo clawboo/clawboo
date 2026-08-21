@@ -800,8 +800,13 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
 
     // Every row that was rendered is marked — across BOTH sections, from one
     // budget. Splitting the render must not lose half the delivery record.
-    expect(listUndeliveredInbox(db, 'a1', { teamId: 'T' })).toEqual([])
-    expect([update.id, alert.id, signal.id]).toHaveLength(3)
+    // Per-id, so a partial marking cannot hide behind an aggregate: each row we
+    // enqueued must be gone from the undelivered set. (The old trailing
+    // toHaveLength(3) asserted the length of an array this test built itself,
+    // which could never fail.)
+    const undelivered = listUndeliveredInbox(db, 'a1', { teamId: 'T' }).map((r) => r.id)
+    for (const id of [update.id, alert.id, signal.id]) expect(undelivered).not.toContain(id)
+    expect(undelivered).toEqual([])
   })
 
   it('spends ONE budget across both sections — a section is not a fresh 4000 chars', async () => {
