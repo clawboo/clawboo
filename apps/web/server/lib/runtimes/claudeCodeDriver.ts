@@ -254,6 +254,16 @@ export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext):
         for (const ev of translateClaudeMessage(msg)) push(ev)
       }
     } catch (err) {
+      // An abort WE asked for is not a failure. The SDK rejects its iterator when
+      // the signal fires, so without this check a deliberate stop (the user's Stop
+      // button, the budget cap, the drain's wedge guard) is reported as a crash:
+      // the badge reads error and the team chat posts a "The run failed" notice
+      // blaming the user for the thing they just did. The native, codex and hermes
+      // drivers all make this distinction already; this one is the odd one out.
+      if (abort.signal.aborted) {
+        push({ type: 'result', ok: true, aborted: true, summary: '' })
+        return
+      }
       push({
         type: 'result',
         ok: false,

@@ -145,7 +145,7 @@ Every team also has a durable **peer-chat room** underneath the group chat, wher
 </Warning>
 
 <Warning>
-**A response never streams back.** The stream is `GET /api/teams/:id/chat/stream` (SSE). If nothing appears after you send, confirm the runtime the target agent runs on is connected (a native team needs its provider key; an OpenClaw team needs its Gateway) and check the server logs. The message was accepted (202) as soon as you sent it; the work runs server-side regardless of the browser.
+**A response never streams back.** The stream is `GET /api/teams/:id/chat/stream` (SSE). A run that fails before producing any text now posts a system notice into the chat with the reason, so a missing provider key reads as a message rather than as silence. If even that does not appear, confirm the runtime the target agent runs on is connected (a native team needs its provider key; an OpenClaw team needs its Gateway) and check the server logs. The message was accepted (202) as soon as you sent it; the work runs server-side regardless of the browser.
 </Warning>
 
 <Warning>
