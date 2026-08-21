@@ -444,6 +444,42 @@ describe('CreateTeamModal deploy', () => {
     expect(exec.envVar).toBe('ANTHROPIC_API_KEY')
   })
 
+  it('native member: a LIVE-listed model keeps its provider instead of being dropped', async () => {
+    // The case the curated-id test above cannot see. Once a provider key is
+    // stored the picker lists that provider's OWN model ids, which the curated
+    // catalog does not contain. Deriving the provider from such an id yields
+    // nothing, the pick reads as "no selection", and the agent is quietly created
+    // on the tier default instead of the model the user clicked. The provider has
+    // to travel with the pick, from the group it was chosen from.
+    server.use(
+      http.get('/api/providers/anthropic/models', () =>
+        HttpResponse.json({
+          models: [{ id: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' }],
+        }),
+      ),
+      ...baseHandlers(),
+    )
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
+    await userEvent.click(await screen.findByTestId('model-provider-anthropic'))
+    await userEvent.click(await screen.findByRole('option', { name: /Claude Opus 4\.1/i }))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+
+    const memberCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
+    const exec = memberCall[3] as unknown as {
+      primaryModel?: string
+      primaryProvider?: string
+      envVar?: string
+    }
+    expect(exec.primaryModel).toBe('claude-opus-4-1-20250805')
+    expect(exec.primaryProvider).toBe('anthropic')
+    expect(exec.envVar).toBe('ANTHROPIC_API_KEY')
+  })
+
   it('hermes member: a picked model spreads into the createAgent execConfig as { provider, model }', async () => {
     // Hermes must be READY so its runtime option is selectable (default is not-installed).
     const runtimesReady = RUNTIMES.map((r) =>

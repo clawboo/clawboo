@@ -73,6 +73,32 @@ describe('ProvidersPanel', () => {
     expect(health).toEqual({ provider: 'anthropic', apiKey: 'sk-ant-good' })
   })
 
+  it('re-reads the agent registry after a key lands, so a stale "No provider key" badge clears', async () => {
+    // Agents carry a per-agent `providerReady` derived from the vault, and this
+    // hub is where the Runtimes panel sends users to ADD a key it has no row for.
+    // Without this refresh an agent badged "No provider key" keeps that badge
+    // after the user connects the very key the badge asked for: nothing else
+    // re-reads /api/agents in a native-only install (no Gateway heartbeat).
+    let agentReads = 0
+    server.use(
+      http.get('/api/providers', () => HttpResponse.json({ providers: [] })),
+      http.get('/api/agents', () => {
+        agentReads += 1
+        return HttpResponse.json({ defaultId: '', mainKey: 'main', agents: [], stale: false })
+      }),
+      http.post(HEALTHCHECK, () => HttpResponse.json({ ok: true })),
+      http.post('/api/providers/anthropic/connect', () => HttpResponse.json({ ok: true })),
+    )
+    render(<ProvidersPanel />)
+    const row = await rowFor('Anthropic')
+    await userEvent.click(within(row).getByRole('button', { name: 'Connect' }))
+    await userEvent.type(screen.getByPlaceholderText('sk-ant-…'), 'sk-ant-good')
+    expect(agentReads).toBe(0) // mounting the panel must NOT fetch the fleet
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(agentReads).toBe(1))
+  })
+
   it('a key that does not verify is not stored; "Save anyway" overrides it', async () => {
     const saved: unknown[] = []
     let healthchecks = 0

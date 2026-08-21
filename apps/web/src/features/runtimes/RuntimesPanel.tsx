@@ -5,6 +5,7 @@ import { Cpu, RefreshCw, ChevronDown } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { PanelHeader } from '@/features/shared/PanelHeader'
@@ -223,6 +224,15 @@ export function RuntimesPanel() {
 
   useVisiblePolling(() => void refresh(), 8000)
 
+  // A credential MUTATION (connect / disconnect / login), as opposed to the 8s
+  // poll above. Agents carry a per-agent `providerReady` derived from the vault,
+  // so re-read the registry too: without it an agent badged "No provider key"
+  // keeps that badge after the user connects the very key the badge sent them to
+  // add, since nothing else re-reads /api/agents in a native-only install.
+  const handleChanged = useCallback(async () => {
+    await Promise.all([refresh(), refreshFleetFromRegistry().catch(() => undefined)])
+  }, [refresh])
+
   const openclawCaps: Capabilities = {
     streaming: true,
     mcp: false,
@@ -335,7 +345,7 @@ export function RuntimesPanel() {
             statuses={statuses}
             loaded={loaded}
             variant="panel"
-            onChanged={refresh}
+            onChanged={handleChanged}
             onDiagnostics={(id) => setDiagId(id)}
             openclaw={{
               connected: openclawConnected,

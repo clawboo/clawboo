@@ -37,7 +37,7 @@ import {
   NATIVE_TEAM_TOOLS,
 } from './nativeTeamPrompts'
 import { RuntimeSelect } from './RuntimeSelect'
-import { nativeModelExec } from '@/lib/nativeModelCatalog'
+import { nativeExecForPick } from '@/lib/nativeModelCatalog'
 import { hermesModelExec } from '@/lib/hermesModelCatalog'
 import {
   useHermesModelGroups,
@@ -280,6 +280,11 @@ export function CreateTeamModal({
   // Per-agent MODEL override for native agents (catalog model id; absent = the tier
   // default auto-resolved from the connected key). Cleared in reset().
   const [agentModels, setAgentModels] = useState<Record<string, string>>({})
+  // The provider of the GROUP each model was picked from, kept beside the model
+  // rather than inferred from its id: once a provider key is stored the picker
+  // lists that provider's own model ids, which the curated catalog does not know,
+  // so an id lookup returns nothing and the pick is silently dropped.
+  const [agentModelProviders, setAgentModelProviders] = useState<Record<string, string>>({})
   // The CONNECTED LLM providers (Providers hub / OpenClaw .env) — the model picker
   // shows ONLY these. Slugs (providerSlug), so display names + ids compare cleanly.
   const [connectedProviderSlugs, setConnectedProviderSlugs] = useState<Set<string>>(new Set())
@@ -450,6 +455,7 @@ export function CreateTeamModal({
     setDetailTemplate(null)
     setAgentRuntimes({})
     setAgentModels({})
+    setAgentModelProviders({})
     // Fresh id for the next team so each one gets its own palette rotation.
     setPendingTeamId(crypto.randomUUID())
   }, [])
@@ -702,7 +708,14 @@ export function CreateTeamModal({
             // the connected key (via the modelTier hint).
             // A picked model overrides the auto-resolved default (provider + model +
             // env-var); absent → the modelTier hint auto-resolves from the connected key.
-            const modelExec = agentModels[agent.id] ? nativeModelExec(agentModels[agent.id]!) : null
+            // The provider comes from the GROUP the user clicked, falling back to an
+            // id lookup only for a model that arrived without one. Deriving it from
+            // the id alone used to drop the pick entirely for every live-listed
+            // model, silently handing the agent the provider's default instead.
+            const modelExec = nativeExecForPick(
+              agentModels[agent.id],
+              agentModelProviders[agent.id],
+            )
             agentId = await createAgent(finalAgentName, files, 'clawboo-native', {
               systemPrompt: `${soulWithPersonality}\n\n${isNativeLeader ? NATIVE_LEADER_PROMPT : NATIVE_SPECIALIST_PROMPT}`,
               tools: NATIVE_TEAM_TOOLS,
@@ -1182,12 +1195,18 @@ export function CreateTeamModal({
                                   // A model id is runtime-specific (native vs OpenClaw
                                   // catalogs differ), so clear any override when the
                                   // runtime changes — a stale cross-runtime id must not leak.
-                                  setAgentModels((prev) => {
+                                  // The picked provider is just as runtime-specific, so it
+                                  // goes with it: leaving it behind would pair one runtime's
+                                  // provider with another runtime's model the moment
+                                  // anything set a model without going through the picker.
+                                  const forget = (prev: Record<string, string>) => {
                                     if (!(agent.id in prev)) return prev
                                     const next = { ...prev }
                                     delete next[agent.id]
                                     return next
-                                  })
+                                  }
+                                  setAgentModels(forget)
+                                  setAgentModelProviders(forget)
                                 }}
                                 onDisabledClick={handleRuntimeConnectClick}
                               />
@@ -1198,9 +1217,13 @@ export function CreateTeamModal({
                                   data-testid="member-model-trigger"
                                   aria-label={`Model for ${agent.name}`}
                                   value={agentModels[agent.id] ?? ''}
-                                  onChange={(m) =>
+                                  onChange={(m, groupProvider) => {
                                     setAgentModels((prev) => ({ ...prev, [agent.id]: m }))
-                                  }
+                                    setAgentModelProviders((prev) => ({
+                                      ...prev,
+                                      [agent.id]: groupProvider ?? '',
+                                    }))
+                                  }}
                                   groups={groupsForRuntime(
                                     value,
                                     nativeModelGroups,

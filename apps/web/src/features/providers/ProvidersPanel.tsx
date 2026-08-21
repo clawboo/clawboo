@@ -26,6 +26,7 @@ import {
   type ProviderStatus,
 } from '@clawboo/control-client'
 
+import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { canHealthcheckProvider } from '@/lib/nativeProviders'
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from '@/lib/providerCatalog'
 import { ProviderIcon } from '@/features/onboarding/ProviderIcon'
@@ -327,6 +328,15 @@ export function ProvidersPanel() {
     setCodexReady(runtimes.some((r) => r.id === 'codex' && r.connectionState === 'ready'))
   }, [])
 
+  // Connecting or disconnecting here rewrites the same vault slot a native agent's
+  // `providerReady` is derived from, and this hub is where the Runtimes panel sends
+  // users to ADD a key it has no row for. Re-read the registry so an agent badged
+  // "No provider key" stops saying it once the key lands (and starts saying it when
+  // the key is pulled): nothing else re-reads /api/agents in a native-only install.
+  const handleChanged = useCallback(async () => {
+    await Promise.all([refresh(), refreshFleetFromRegistry().catch(() => undefined)])
+  }, [refresh])
+
   useEffect(() => {
     void refresh()
   }, [refresh])
@@ -358,7 +368,11 @@ export function ProvidersPanel() {
             <>
               {primary.map((entry) => (
                 <Fragment key={entry.id}>
-                  <ProviderRow entry={entry} status={statuses[entry.id]} onChanged={refresh} />
+                  <ProviderRow
+                    entry={entry}
+                    status={statuses[entry.id]}
+                    onChanged={handleChanged}
+                  />
                   {/* The subscription row sits beside its sibling: OpenAI the
                       key, ChatGPT the plan — two billing paths, one brand. */}
                   {entry.id === 'openai' && (
@@ -390,7 +404,7 @@ export function ProvidersPanel() {
                     key={entry.id}
                     entry={entry}
                     status={statuses[entry.id]}
-                    onChanged={refresh}
+                    onChanged={handleChanged}
                   />
                 ))}
             </>

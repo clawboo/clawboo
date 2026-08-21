@@ -13,22 +13,22 @@ Per-agent routes are multi-source: each operation routes to the source that OWNS
 
 ## Routes
 
-| Method | Path                               | Summary                                               | Stream? |
-| ------ | ---------------------------------- | ----------------------------------------------------- | ------- |
-| GET    | `/api/agents`                      | Aggregate every source's agent list from SQLite       | No      |
-| POST   | `/api/agents`                      | Create an agent through its source                    | No      |
-| POST   | `/api/agents/sync`                 | Manual / browser-fallback sync of the OpenClaw source | No      |
-| GET    | `/api/agents/registry/health`      | Server-side OpenClaw connection state (always 200)    | No      |
-| POST   | `/api/agents/cleanup-ghosts`       | Sweep stale local OpenClaw rows not in the live set   | No      |
-| GET    | `/api/agents/:agentId`             | One agent record from its source                      | No      |
-| DELETE | `/api/agents/:agentId`             | Archive upstream + clean local rows                   | No      |
-| GET    | `/api/agents/:agentId/files/:name` | Read one agent file                                   | No      |
-| PUT    | `/api/agents/:agentId/files/:name` | Write one agent file                                  | No      |
-| GET    | `/api/agents/:agentId/sessions`    | List the agent's live sessions                        | No      |
-| PATCH  | `/api/agents/:agentId/model`       | Change a native agent's model (native-only, 404 else) | No      |
-| POST   | `/api/agents/:agentId/chat`        | Drive one 1:1 turn on a native agent (detached, 202)  | No      |
-| POST   | `/api/agents/:agentId/chat/stop`   | Abort the agent's in-flight 1:1 turn                  | No      |
-| GET    | `/api/agents/:agentId/chat/stream` | SSE live-tail of the agent's 1:1 chat session         | SSE     |
+| Method | Path                               | Summary                                                    | Stream? |
+| ------ | ---------------------------------- | ---------------------------------------------------------- | ------- |
+| GET    | `/api/agents`                      | Aggregate every source's agent list from SQLite            | No      |
+| POST   | `/api/agents`                      | Create an agent through its source                         | No      |
+| POST   | `/api/agents/sync`                 | Manual / browser-fallback sync of the OpenClaw source      | No      |
+| GET    | `/api/agents/registry/health`      | Server-side OpenClaw connection state (always 200)         | No      |
+| POST   | `/api/agents/cleanup-ghosts`       | Sweep stale local OpenClaw rows not in the live set        | No      |
+| GET    | `/api/agents/:agentId`             | One agent record from its source                           | No      |
+| DELETE | `/api/agents/:agentId`             | Archive upstream + clean local rows                        | No      |
+| GET    | `/api/agents/:agentId/files/:name` | Read one agent file                                        | No      |
+| PUT    | `/api/agents/:agentId/files/:name` | Write one agent file                                       | No      |
+| GET    | `/api/agents/:agentId/sessions`    | List the agent's live sessions                             | No      |
+| PATCH  | `/api/agents/:agentId/model`       | Change a native/hermes agent's model + provider (404 else) | No      |
+| POST   | `/api/agents/:agentId/chat`        | Drive one 1:1 turn on a native agent (detached, 202)       | No      |
+| POST   | `/api/agents/:agentId/chat/stop`   | Abort the agent's in-flight 1:1 turn                       | No      |
+| GET    | `/api/agents/:agentId/chat/stream` | SSE live-tail of the agent's 1:1 chat session              | SSE     |
 
 The `AgentRecord` shape (returned by `GET /api/agents`, `GET /api/agents/:agentId`, and inside the create `201`):
 
@@ -51,6 +51,8 @@ interface AgentRecord {
   teamId: string | null
   personalityConfig: unknown | null
   execConfig: unknown | null
+  model?: string | null // native: the AgentConfig primaryModel; absent for sources whose model lives elsewhere
+  providerReady?: boolean | null // native: this agent has a runnable candidate (a key in its envVar slot, one of its fallbacks, or keyless Ollama); null/absent = not applicable
   // Classification (dormant seams)
   participantKind: 'agent' | 'human'
   runtime: 'openclaw' | 'claude-code' | 'codex' | 'hermes' | string
@@ -587,29 +589,29 @@ curl http://localhost:18790/api/agents/<agent-id>/sessions
 
 ## `PATCH /api/agents/:agentId/model`
 
-Changes a **native** agent's model. It rewrites the stored `AgentConfig.primaryModel` (the next run reads it), so it needs no Gateway. This route is native-only: an OpenClaw agent changes its model through the OpenClaw config path (`PATCH /api/system/openclaw-config` `{ agentModel }`), so this route returns **404** for a non-native agent.
+Changes a **native** or **hermes** agent's model, and optionally its provider. For a native agent it rewrites the stored `AgentConfig` (the next run reads it), so it needs no Gateway. With a `provider` in the body, `primaryProvider`, `primaryModel`, and `envVar` move **atomically**: the model picker offers every provider's models, and a cross-provider model left on the old provider would post to the wrong endpoint and fail auth. Without a `provider`, only `primaryModel` changes; that is the back-compat contract, and also how a custom model id for the agent's current provider is set. The server has no model-to-provider catalog (custom ids are supported), so it validates the provider name against the known set and trusts the model string; the dashboard sends the pair its catalog derived. A hermes agent routes every model through OpenRouter, so its execConfig is stored as `{ provider: 'openrouter', model }`; an explicit `provider` other than `openrouter` is a **400**. An OpenClaw agent changes its model through the OpenClaw config path (`PATCH /api/system/openclaw-config` `{ agentModel }`), so this route returns **404** for other runtimes.
 
 - **Path params**: `agentId`.
-- **Request body**: `{ model: string }` (a native-catalog model id, e.g. `claude-sonnet-4-6`).
+- **Request body**: `{ model: string, provider?: string }` (`model` is a native-catalog or custom model id, e.g. `claude-sonnet-4-6`; `provider` is one of the known native providers, e.g. `openrouter`).
 
 ### Responses
 
-**`200 OK`**: the model was saved:
+**`200 OK`**: the model (and, when supplied, the provider) was saved. The `provider` field is echoed back only when the request carried one:
 
 ```json
-{ "ok": true, "model": "claude-sonnet-4-6" }
+{ "ok": true, "model": "anthropic/claude-haiku-4.5", "provider": "openrouter" }
 ```
 
-**`400 Bad Request`**: missing `agentId` segment, or an empty `model`:
+**`400 Bad Request`**: missing `agentId` segment, an empty `model`, an unknown `provider`, or a non-`openrouter` provider on a hermes agent:
 
 ```json
-{ "error": "model (non-empty string) required" }
+{ "error": "unknown provider '<provider>'" }
 ```
 
-**`404 Not Found`**: unknown agent, or a non-native agent (model change via this route is native-only):
+**`404 Not Found`**: unknown agent, or an agent on a runtime this route does not edit:
 
 ```json
-{ "error": "model change via this route is native-only" }
+{ "error": "model change via this route is native/hermes-only" }
 ```
 
 **`500 Internal Server Error`**: any other failure:
@@ -623,7 +625,7 @@ Changes a **native** agent's model. It rewrites the stored `AgentConfig.primaryM
 ```bash
 curl -X PATCH http://localhost:18790/api/agents/<agent-id>/model \
   -H 'content-type: application/json' \
-  -d '{ "model": "claude-sonnet-4-6" }'
+  -d '{ "model": "anthropic/claude-haiku-4.5", "provider": "openrouter" }'
 ```
 
 ---

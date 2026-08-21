@@ -214,6 +214,61 @@ describe('booZero', () => {
     })
   })
 
+  it('ensureNativeBooZero: IGNORES a chosen leader model whose provider is no longer connected', async () => {
+    // The recorded pick is OpenRouter, but only Anthropic is connected now.
+    // Honoring it blindly would mint a universal leader that fails every run
+    // while the runtime reads healthy on the key that IS connected, so the
+    // auto-resolve path takes over instead.
+    seedNativeTeam()
+    process.env['ANTHROPIC_API_KEY'] = 'sk-test-key'
+    setSetting(
+      db,
+      SETTING_NATIVE_LEADER_MODEL,
+      JSON.stringify({ provider: 'openrouter', model: 'minimax/m2.5' }),
+    )
+    let captured: Record<string, unknown> | undefined
+    const capturingNative = {
+      createAgent: async (input: { name: string; teamId: string | null; execConfig?: unknown }) => {
+        captured = input.execConfig as Record<string, unknown>
+        const id = `native-boo-zero-${++created}`
+        agent(id, input.teamId, 'clawboo-native')
+        return { id }
+      },
+    }
+    expect(await ensureNativeBooZero(db, capturingNative)).not.toBeNull()
+    expect(captured?.['primaryProvider']).toBeUndefined()
+    expect(captured?.['primaryModel']).toBeUndefined()
+    expect(captured?.['modelTier']).toBe('leader')
+  })
+
+  it('ensureNativeBooZero: KEEPS a chosen OLLAMA leader model without OLLAMA_BASE_URL', async () => {
+    // Ollama is keyless and the router always builds a candidate for it, so a
+    // deliberate local pick stays put even with a cloud key present. Treating it
+    // as disconnected would silently move the user onto a billed provider.
+    seedNativeTeam()
+    process.env['ANTHROPIC_API_KEY'] = 'sk-test-key'
+    setSetting(
+      db,
+      SETTING_NATIVE_LEADER_MODEL,
+      JSON.stringify({ provider: 'ollama', model: 'llama3.2' }),
+    )
+    let captured: Record<string, unknown> | undefined
+    const capturingNative = {
+      createAgent: async (input: { name: string; teamId: string | null; execConfig?: unknown }) => {
+        captured = input.execConfig as Record<string, unknown>
+        const id = `native-boo-zero-${++created}`
+        agent(id, input.teamId, 'clawboo-native')
+        return { id }
+      },
+    }
+    expect(await ensureNativeBooZero(db, capturingNative)).not.toBeNull()
+    expect(captured).toMatchObject({
+      primaryProvider: 'ollama',
+      primaryModel: 'llama3.2',
+      envVar: 'OLLAMA_BASE_URL',
+    })
+  })
+
   it('ensureNativeBooZero: creates NOTHING when no native provider key is connected', async () => {
     seedNativeTeam()
     // No key set (cleared in beforeEach) → no runnable native agent → no Boo Zero.

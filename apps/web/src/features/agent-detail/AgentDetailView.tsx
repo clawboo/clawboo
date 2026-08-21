@@ -62,7 +62,13 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
   // provider keys, which showed a green "Connected" over an agent that could not
   // possibly respond. Fail-safe: null (unknown/probe failed) keeps the shell badge.
   const nativeState = useNativeRuntimeState(agent?.runtime === 'clawboo-native')
+  // Two ways a native run cannot succeed: the runtime has NO provider at all
+  // ('needs-auth'), or THIS agent's configured provider slot has no key while the
+  // runtime reads green on another provider (providerReady === false). Both badge
+  // the same way; see ChatPanel for why the per-agent one never gates sending.
   const nativeKeyless = nativeState === 'needs-auth'
+  const providerUnready = agent?.runtime === 'clawboo-native' && agent.providerReady === false
+  const showDisconnected = nativeKeyless || providerUnready
 
   if (!agent) {
     return (
@@ -92,11 +98,11 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
               No session
             </span>
           )}
-          {nativeKeyless ? (
+          {showDisconnected ? (
             <span className="ml-0.5 flex items-center gap-2">
               <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-amber/90">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber/80" />
-                Disconnected
+                {nativeKeyless ? 'Disconnected' : 'No provider key'}
               </span>
               <button
                 type="button"

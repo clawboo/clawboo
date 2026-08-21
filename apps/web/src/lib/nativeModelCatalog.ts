@@ -77,10 +77,50 @@ export function nativeModelGroupsFor(providerId: string): ModelGroup[] {
   return g ? [{ provider: g.label, models: g.models }] : NATIVE_MODEL_GROUPS
 }
 
+// Group DISPLAY name → native provider id. A picker knows which group the user
+// clicked, and that is the only reliable provider signal: the Anthropic/OpenAI/
+// OpenRouter groups swap in LIVE lists whose ids are the provider's verbatim
+// ones, so a reverse lookup by model id misses nearly all of them.
+const GROUP_LABEL_TO_PROVIDER: Record<string, string> = Object.fromEntries(
+  Object.entries(NATIVE_MODELS).map(([providerId, g]) => [g.label.toLowerCase(), providerId]),
+)
+
+/** The native provider id behind a model group's display name, or null when the
+ *  group is not a native one (e.g. a Hermes group). */
+export function nativeProviderIdForGroup(groupLabel: string): string | null {
+  return GROUP_LABEL_TO_PROVIDER[groupLabel.trim().toLowerCase()] ?? null
+}
+
 /** The recommended (leader-tier) model for a provider — index 0, the strongest curated
  *  pick. Empty string for an unknown provider (the caller falls back to a default). */
 export function nativeLeaderModelFor(providerId: string): string {
   return NATIVE_MODELS[providerId.toLowerCase()]?.models[0]?.id ?? ''
+}
+
+/**
+ * The native execConfig override for a model the user PICKED, or null to leave the
+ * agent on its `modelTier` auto-resolve.
+ *
+ * `groupProvider` is the display name of the group they clicked, and it wins over
+ * the model id. Once a provider key is stored the pickers list that provider's OWN
+ * model ids, which this curated catalog does not contain, so an id lookup returns
+ * null for nearly every real pick and the choice is silently dropped. The id
+ * lookup remains as the fallback for a pick that arrived without a group.
+ */
+export function nativeExecForPick(
+  modelId: string | undefined,
+  groupProvider: string | undefined,
+): { primaryProvider: string; primaryModel: string; envVar: string } | null {
+  if (!modelId) return null
+  const providerId = groupProvider ? nativeProviderIdForGroup(groupProvider) : null
+  if (providerId) {
+    return {
+      primaryProvider: providerId,
+      primaryModel: modelId,
+      envVar: envVarForNativeProvider(providerId),
+    }
+  }
+  return nativeModelExec(modelId)
 }
 
 /** The label for a native model id, or null when it's a custom / unlisted id. */
@@ -105,6 +145,13 @@ const PROVIDER_ENV_VAR: Record<string, string> = {
   openrouter: 'OPENROUTER_API_KEY',
   ollama: 'OLLAMA_BASE_URL',
   ...Object.fromEntries(NATIVE_MORE_PROVIDERS.map((p) => [p.id as string, p.envVar])),
+}
+
+/** The vault env-var holding a native provider's key. Ollama is keyless, and its
+ *  placeholder is also the fallback for an unknown provider, matching the server's
+ *  own `envVarForProvider(p) ?? 'OLLAMA_BASE_URL'`. */
+export function envVarForNativeProvider(providerId: string): string {
+  return PROVIDER_ENV_VAR[providerId] ?? 'OLLAMA_BASE_URL'
 }
 
 /** Turn a catalog model id into a full native execConfig override (provider + model +

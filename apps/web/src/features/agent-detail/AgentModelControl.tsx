@@ -27,7 +27,9 @@ interface AgentModelControlProps {
   runtime?: string | null
   currentModel: string | null
   defaultModel: string | null
-  onModelChange: (model: string | null) => void
+  /** `groupProvider` is the display name of the group the model was picked from,
+   *  omitted for the custom-id input. See `AgentModelSelector`. */
+  onModelChange: (model: string | null, groupProvider?: string) => void
   groups?: ModelGroup[]
   configuredProviders?: Set<string>
   hideDefault?: boolean

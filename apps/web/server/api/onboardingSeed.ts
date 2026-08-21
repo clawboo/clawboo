@@ -24,7 +24,11 @@ import { getDb } from '../lib/db'
 import { getTenantId } from '../lib/tenant'
 // Per-provider model picks live in the shared native-defaults helper (the native
 // AgentSource's provider auto-resolution uses the same map).
-import { MODEL_DEFAULTS } from '../lib/runtimes/native/nativeProviderDefaults'
+import {
+  canRunNativeProvider,
+  MODEL_DEFAULTS,
+  resolveConnectedNativeDefaults,
+} from '../lib/runtimes/native/nativeProviderDefaults'
 import { loadAgentConfig, saveAgentConfig } from '../lib/runtimes/native/agentConfigStore'
 import { SETTING_NATIVE_BOO_ZERO_ID, SETTING_NATIVE_LEADER_MODEL } from '../lib/teamChat/booZero'
 import { serverOrchestratedSettingKey } from '../lib/teamChat/resolveServerOrchestrated'
@@ -67,6 +71,28 @@ export const SPECIALIST_PROMPT =
 interface SeedBody {
   provider?: unknown
   model?: unknown
+}
+
+// The recorded leader-model pick (SETTING_NATIVE_LEADER_MODEL), or null when never
+// set, unparseable, or NOT USABLE. An unusable value has to read as absent rather
+// than as a pick that merely cannot run: the caller only records a freshly derived
+// pick when nothing was recorded, so a stored `{provider:'',model:''}` would both
+// fail to supply a provider and block the good one from ever being written.
+function readLeaderModelSetting(
+  db: ReturnType<typeof getDb>,
+): { provider: string; model: string } | null {
+  try {
+    const raw = getSetting(db, SETTING_NATIVE_LEADER_MODEL)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { provider?: unknown; model?: unknown }
+    if (typeof parsed.provider !== 'string' || typeof parsed.model !== 'string') return null
+    const provider = parsed.provider.trim()
+    const model = parsed.model.trim()
+    if (!model || !(KNOWN_PROVIDERS as readonly string[]).includes(provider)) return null
+    return { provider, model }
+  } catch {
+    return null
+  }
 }
 
 // POST /api/onboarding/native-leader-model — record the provider + model the user
@@ -135,25 +161,58 @@ export function onboardingNativeLeaderModelGET(_req: Request, res: Response): vo
 
 export async function onboardingSeedNativeTeamPOST(req: Request, res: Response): Promise<void> {
   const body = (req.body ?? {}) as SeedBody
-  const provider = typeof body.provider === 'string' ? body.provider.trim() : 'anthropic'
+  const requested = typeof body.provider === 'string' ? body.provider.trim() : ''
   const modelOverride =
     typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null
 
-  if (!(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
-    res.status(400).json({ error: `unknown provider '${provider}'` })
+  if (requested && !(KNOWN_PROVIDERS as readonly string[]).includes(requested)) {
+    res.status(400).json({ error: `unknown provider '${requested}'` })
     return
   }
 
-  // Ollama is keyless; AgentConfig.envVar is non-empty by schema, so the local
-  // path carries a harmless placeholder (the native router skips key resolution
-  // for ollama candidates entirely).
-  const envVar = envVarForProvider(provider) ?? 'OLLAMA_BASE_URL'
-  const models = MODEL_DEFAULTS[provider] ?? MODEL_DEFAULTS['anthropic']!
-  const leaderModel = modelOverride ?? models.leader
-  const specialistModel = models.specialist
-
   try {
     const db = getDb()
+
+    // Resolve the seeded team's provider. An explicit body.provider wins. Without
+    // one, seed the provider the user actually CONNECTED, not a hardcoded
+    // anthropic default: an anthropic-configured team for an OpenRouter-only user
+    // completes onboarding green and then every run fails ("no provider key
+    // available"). Ladder: the recorded leader-model pick while its key is still
+    // connected, else the first connected provider in priority order (which
+    // itself falls back to anthropic when nothing is connected at all).
+    let provider = requested
+    let recordedModel: string | null = null
+    // An explicit seed is a deliberate pick worth recording for the lazily-created
+    // Boo Zero. A derived pick must never stomp a recorded one, so the auto path
+    // writes the setting only when none existed.
+    let writeLeaderModelSetting = Boolean(requested)
+    if (!provider) {
+      const recorded = readLeaderModelSetting(db)
+      if (
+        recorded &&
+        (KNOWN_PROVIDERS as readonly string[]).includes(recorded.provider) &&
+        canRunNativeProvider(recorded.provider)
+      ) {
+        provider = recorded.provider
+        recordedModel = recorded.model
+      } else {
+        provider = resolveConnectedNativeDefaults('leader').primaryProvider
+        // Record a DERIVED pick only when it is real: with nothing connected the
+        // resolver returns the anthropic fallback, and persisting that would hand
+        // the lazily-created Boo Zero a provider the user never chose and cannot
+        // run (a later connect of some other key would not correct it).
+        writeLeaderModelSetting = recorded === null && canRunNativeProvider(provider)
+      }
+    }
+
+    // Ollama is keyless; AgentConfig.envVar is non-empty by schema, so the local
+    // path carries a harmless placeholder (the native router skips key resolution
+    // for ollama candidates entirely).
+    const envVar = envVarForProvider(provider) ?? 'OLLAMA_BASE_URL'
+    const models = MODEL_DEFAULTS[provider] ?? MODEL_DEFAULTS['anthropic']!
+    const leaderModel = modelOverride ?? recordedModel ?? models.leader
+    const specialistModel = models.specialist
+
     const now = Date.now()
     const teamId = crypto.randomUUID()
     const tenantId = getTenantId(req)
@@ -233,8 +292,11 @@ export async function onboardingSeedNativeTeamPOST(req: Request, res: Response):
     setSetting(db, serverOrchestratedSettingKey(teamId), 'true')
     // Remember the chosen leader model so the universal Boo Zero (created lazily by
     // ensureNativeBooZero, a DIFFERENT agent from this team's "Team Lead") runs on it
-    // instead of the auto-resolved per-provider default.
-    setSetting(db, SETTING_NATIVE_LEADER_MODEL, JSON.stringify({ provider, model: leaderModel }))
+    // instead of the auto-resolved per-provider default. Skipped when this seed
+    // itself derived the pick from an existing recorded setting.
+    if (writeLeaderModelSetting) {
+      setSetting(db, SETTING_NATIVE_LEADER_MODEL, JSON.stringify({ provider, model: leaderModel }))
+    }
 
     res.status(201).json({ teamId, leaderAgentId: leader.id, specialistAgentId: specialist.id })
   } catch (err) {

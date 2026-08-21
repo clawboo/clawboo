@@ -11,9 +11,12 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 
+import { NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
 import { agents, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
 
 import { getDb, resetDb } from '../../db'
+import { adapterFactoryFor } from '../../runtimes'
+import type { RuntimeRunContext } from '../../runtimes/types'
 import {
   loadAgentConfig,
   nativeConfigKey,
@@ -24,16 +27,24 @@ import { ClawbooNativeAgentSource } from '../clawbooNativeAgentSource'
 
 describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', () => {
   let home: string
+  let stateDir: string
   let prevHome: string | undefined
+  let prevState: string | undefined
   let source: ClawbooNativeAgentSource
   let db: ClawbooDb
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-source-'))
     await mkdir(path.join(home, '.clawboo'), { recursive: true })
+    // OPENCLAW_STATE_DIR short-circuits the state-dir resolution BEFORE the
+    // sandboxed HOME, so an exported one would let the developer's real
+    // ~/.openclaw/.env satisfy a provider-key lookup that must find nothing here.
+    stateDir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-source-st-'))
     prevHome = process.env['HOME']
+    prevState = process.env['OPENCLAW_STATE_DIR']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    process.env['OPENCLAW_STATE_DIR'] = stateDir
     source = new ClawbooNativeAgentSource({ getDb })
     db = getDb()
   })
@@ -47,8 +58,11 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevState === undefined) delete process.env['OPENCLAW_STATE_DIR']
+    else process.env['OPENCLAW_STATE_DIR'] = prevState
     delete process.env['CLAWBOO_HOME']
     await rm(home, { recursive: true, force: true }).catch(() => {})
+    await rm(stateDir, { recursive: true, force: true }).catch(() => {})
   })
 
   it('round-trips create → get → update → archive (the contract spine)', async () => {
@@ -286,5 +300,96 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     expect(row?.tenantId).toBeNull()
     expect(loadAgentConfig(db, a.id)?.tenantId).toBeNull()
     expect(getBudget(db, 'agent', a.id)?.tenantId).toBeNull()
+  })
+})
+
+describe('providerReady: per-agent key readiness (vs the permissive runtime health)', () => {
+  let home: string
+  let stateDir: string
+  let prevHome: string | undefined
+  let prevState: string | undefined
+  const savedKeys: Record<string, string | undefined> = {}
+  let source: ClawbooNativeAgentSource
+
+  beforeEach(async () => {
+    home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-ready-'))
+    await mkdir(path.join(home, '.clawboo'), { recursive: true })
+    stateDir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-ready-st-'))
+    prevHome = process.env['HOME']
+    prevState = process.env['OPENCLAW_STATE_DIR']
+    process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    process.env['OPENCLAW_STATE_DIR'] = stateDir
+    // Empty vault + no OpenClaw .env (sandboxed above) + a cleared process env:
+    // "connected" is exactly what THIS test sets, never a developer's ambient key.
+    for (const k of ['OLLAMA_BASE_URL', ...NATIVE_PROVIDER_ENV_VARS]) {
+      savedKeys[k] = process.env[k]
+      delete process.env[k]
+    }
+    source = new ClawbooNativeAgentSource({ getDb })
+  })
+  afterEach(async () => {
+    resetDb()
+    for (const [k, v] of Object.entries(savedKeys)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+    if (prevHome === undefined) delete process.env['HOME']
+    else process.env['HOME'] = prevHome
+    if (prevState === undefined) delete process.env['OPENCLAW_STATE_DIR']
+    else process.env['OPENCLAW_STATE_DIR'] = prevState
+    delete process.env['CLAWBOO_HOME']
+    await rm(home, { recursive: true, force: true }).catch(() => {})
+    await rm(stateDir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  it('is false with no key, true once the key appears, and always true for ollama', async () => {
+    const created = await source.createAgent({
+      name: 'Anthropic Agent',
+      teamId: null,
+      execConfig: {
+        primaryProvider: 'anthropic',
+        primaryModel: 'claude-haiku-4-5',
+        envVar: 'ANTHROPIC_API_KEY',
+      },
+    })
+    expect(created.providerReady).toBe(false)
+
+    process.env['ANTHROPIC_API_KEY'] = 'sk-test'
+    const listed = await source.listAgents()
+    expect(listed.find((a) => a.id === created.id)?.providerReady).toBe(true)
+
+    const local = await source.createAgent({
+      name: 'Local Agent',
+      teamId: null,
+      execConfig: {
+        primaryProvider: 'ollama',
+        primaryModel: 'llama3.2',
+        envVar: 'OLLAMA_BASE_URL',
+      },
+    })
+    expect(local.providerReady).toBe(true)
+  })
+
+  it('REGRESSION: an agent parked on a disconnected provider reads not-ready while runtime health stays green', async () => {
+    // The audited failure shape: OpenRouter is the only connected provider, the
+    // agent is configured for Anthropic. Runtime health passes on ANY key
+    // (deliberate, pinned in nativeHealth.test.ts), so before providerReady the
+    // dashboard showed green everywhere while every run failed with
+    // "no provider key available".
+    process.env['OPENROUTER_API_KEY'] = 'or-test-key'
+    const agent = await source.createAgent({
+      name: 'Parked Agent',
+      teamId: null,
+      execConfig: {
+        primaryProvider: 'anthropic',
+        primaryModel: 'claude-haiku-4-5',
+        envVar: 'ANTHROPIC_API_KEY',
+      },
+    })
+
+    const health = await adapterFactoryFor('clawboo-native')({} as RuntimeRunContext).health()
+    expect(health.ok).toBe(true)
+    expect(agent.providerReady).toBe(false)
   })
 })

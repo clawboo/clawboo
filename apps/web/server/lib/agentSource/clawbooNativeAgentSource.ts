@@ -44,7 +44,10 @@ import {
   saveAgentConfig,
   writeNativeAgentFile,
 } from '../runtimes/native/agentConfigStore'
-import { resolveConnectedNativeDefaults } from '../runtimes/native/nativeProviderDefaults'
+import {
+  nativeAgentProviderReady,
+  resolveConnectedNativeDefaults,
+} from '../runtimes/native/nativeProviderDefaults'
 import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
 
 const SOURCE_ID = 'clawboo-native'
@@ -90,6 +93,7 @@ export class ClawbooNativeAgentSource implements AgentSource {
   }
 
   private mapRow(row: DbAgent, db: ClawbooDb): AgentRecord {
+    const cfg = loadAgentConfig(db, row.id)
     return {
       id: row.id,
       sourceId: row.sourceId,
@@ -106,7 +110,11 @@ export class ClawbooNativeAgentSource implements AgentSource {
       execConfig: parseJson(row.execConfig),
       // Surface the AgentConfig's model so the client's model selector shows the
       // native agent's real model (the config is the source of truth for native).
-      model: loadAgentConfig(db, row.id)?.primaryModel ?? null,
+      model: cfg?.primaryModel ?? null,
+      // Per-agent key readiness: runtime health is green with ANY provider
+      // connected, but the router keys off THIS agent's envVar slot, so only
+      // this flag reveals an agent parked on a disconnected provider.
+      providerReady: cfg ? nativeAgentProviderReady(cfg) : null,
       participantKind: (row.participantKind as AgentRecord['participantKind']) ?? 'agent',
       runtime: row.runtime,
       capabilities: parseJson(row.capabilities),

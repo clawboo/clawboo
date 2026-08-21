@@ -114,14 +114,24 @@ export async function writeAgentFile(
   await jsonOrThrow<{ name: string; content: string }>(res, `Write ${name}`)
 }
 
-/** Change an agent's model via the model route. Native persists to its AgentConfig
- *  `primaryModel`; Hermes persists to its execConfig `{ provider, model }` (routed via
- *  OpenRouter). Other runtimes (Codex / Claude Code / OpenClaw) 404 here. */
-export async function setAgentModel(agentId: string, model: string): Promise<void> {
+/** Change an agent's model via the model route. Native persists to its AgentConfig:
+ *  pass `provider` (the provider the model belongs to) so a cross-provider pick moves
+ *  `primaryProvider` + `envVar` atomically with the model; omit it to change only
+ *  `primaryModel` (a custom id for the agent's current provider). Hermes persists to
+ *  its execConfig `{ provider, model }` (routed via OpenRouter; any other explicit
+ *  provider is a 400). Other runtimes (Codex / Claude Code / OpenClaw) 404 here. */
+export async function setAgentModel(
+  agentId: string,
+  model: string,
+  provider?: string,
+): Promise<void> {
   const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/model`, {
     method: 'PATCH',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ model }),
+    // Sent whenever the caller supplied one, INCLUDING an empty string: dropping a
+    // malformed value here would hide it from the endpoint's own validation and
+    // silently downgrade the call to a model-only update.
+    body: JSON.stringify({ model, ...(provider !== undefined ? { provider } : {}) }),
   })
   await jsonOrThrow<{ ok: boolean; model: string }>(res, 'Set model')
 }

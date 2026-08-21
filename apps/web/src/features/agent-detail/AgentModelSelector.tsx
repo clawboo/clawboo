@@ -16,7 +16,12 @@ import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 interface AgentModelSelectorProps {
   currentModel: string | null // null = "Use default"
   defaultModel: string | null // global default for display
-  onModelChange: (model: string | null) => void // null = revert to default
+  /** `model` null = revert to default. `groupProvider` is the DISPLAY name of the
+   *  group the model was picked from, omitted for the custom-id input and the
+   *  default row. It is the only reliable provider signal: the Anthropic / OpenAI /
+   *  OpenRouter groups swap in live lists whose ids are the provider's verbatim
+   *  ones, so the caller cannot recover the provider from the id alone. */
+  onModelChange: (model: string | null, groupProvider?: string) => void
   /** Override the model catalog. Native agents pass NATIVE_MODEL_GROUPS (native-format
    *  IDs); omitted → the OpenClaw catalog (`useModelCatalog`). */
   groups?: ModelGroup[]
@@ -79,8 +84,8 @@ export function AgentModelSelector({
   }, [onModelChange])
 
   const handleSelectModel = useCallback(
-    (modelId: string) => {
-      onModelChange(modelId)
+    (modelId: string, groupProvider?: string) => {
+      onModelChange(modelId, groupProvider)
       setOpen(false)
     },
     [onModelChange],
@@ -89,6 +94,9 @@ export function AgentModelSelector({
   const handleCustomSubmit = useCallback(() => {
     const trimmed = customInput.trim()
     if (trimmed && trimmed.includes('/')) {
+      // No group, so no provider signal: a custom id is typed FOR the agent's
+      // current provider (every native provider that takes `vendor/model` ids
+      // would otherwise be re-pointed at OpenRouter by a shape guess).
       onModelChange(trimmed)
       setOpen(false)
     }
@@ -453,7 +461,9 @@ export function AgentModelSelector({
                         key={model.id}
                         type="button"
                         onClick={
-                          activeGroupConfigured ? () => handleSelectModel(model.id) : undefined
+                          activeGroupConfigured
+                            ? () => handleSelectModel(model.id, activeGroup.provider)
+                            : undefined
                         }
                         className={[
                           'flex w-full items-center gap-2 px-3.5 py-1.5 text-left text-[12px] transition-colors',
