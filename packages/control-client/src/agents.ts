@@ -128,7 +128,10 @@ export async function setAgentModel(
   const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/model`, {
     method: 'PATCH',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ model, ...(provider ? { provider } : {}) }),
+    // Sent whenever the caller supplied one, INCLUDING an empty string: dropping a
+    // malformed value here would hide it from the endpoint's own validation and
+    // silently downgrade the call to a model-only update.
+    body: JSON.stringify({ model, ...(provider !== undefined ? { provider } : {}) }),
   })
   await jsonOrThrow<{ ok: boolean; model: string }>(res, 'Set model')
 }

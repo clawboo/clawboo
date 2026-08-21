@@ -73,8 +73,11 @@ interface SeedBody {
   model?: unknown
 }
 
-// The recorded leader-model pick (SETTING_NATIVE_LEADER_MODEL), or null when
-// never set or unparseable.
+// The recorded leader-model pick (SETTING_NATIVE_LEADER_MODEL), or null when never
+// set, unparseable, or NOT USABLE. An unusable value has to read as absent rather
+// than as a pick that merely cannot run: the caller only records a freshly derived
+// pick when nothing was recorded, so a stored `{provider:'',model:''}` would both
+// fail to supply a provider and block the good one from ever being written.
 function readLeaderModelSetting(
   db: ReturnType<typeof getDb>,
 ): { provider: string; model: string } | null {
@@ -83,7 +86,10 @@ function readLeaderModelSetting(
     if (!raw) return null
     const parsed = JSON.parse(raw) as { provider?: unknown; model?: unknown }
     if (typeof parsed.provider !== 'string' || typeof parsed.model !== 'string') return null
-    return { provider: parsed.provider, model: parsed.model }
+    const provider = parsed.provider.trim()
+    const model = parsed.model.trim()
+    if (!model || !(KNOWN_PROVIDERS as readonly string[]).includes(provider)) return null
+    return { provider, model }
   } catch {
     return null
   }

@@ -306,6 +306,32 @@ describe('onboarding seed-native-team REST', () => {
     })
   })
 
+  it('treats an UNUSABLE recorded pick as absent, and records the derived one', async () => {
+    // A stored `{provider:'',model:''}` (or an unknown provider) is not a pick that
+    // merely cannot run: it is no pick at all. Reading it as present would both fail
+    // to supply a provider AND block the usable derived one from ever being written,
+    // leaving the lazily-created Boo Zero with nothing corrected.
+    process.env['OPENROUTER_API_KEY'] = 'or-test-key'
+    const db = getDb()
+    for (const junk of [
+      { provider: '', model: '' },
+      { provider: 'not-a-provider', model: 'x' },
+      { provider: 'openrouter', model: '   ' },
+    ]) {
+      setSetting(db, SETTING_NATIVE_LEADER_MODEL, JSON.stringify(junk))
+      const m = mockRes()
+      await onboardingSeedNativeTeamPOST(req({}), m.res)
+      expect(m.statusCode(), JSON.stringify(junk)).toBe(201)
+      const out = m.body() as { leaderAgentId: string }
+      expect(loadAgentConfig(db, out.leaderAgentId)?.primaryProvider).toBe('openrouter')
+      // The derived pick REPLACES the unusable one rather than being suppressed by it.
+      expect(JSON.parse(getSetting(db, SETTING_NATIVE_LEADER_MODEL) ?? '{}')).toEqual({
+        provider: 'openrouter',
+        model: 'anthropic/claude-haiku-4.5',
+      })
+    }
+  })
+
   it('rejects an unknown provider with 400', async () => {
     const m = mockRes()
     await onboardingSeedNativeTeamPOST(req({ provider: 'not-a-provider' }), m.res)

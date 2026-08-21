@@ -297,6 +297,21 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     )
     expect(bad.status()).toBe(400)
     expect(loadAgentConfig(db, id)?.primaryModel).toBe('llama3.2')
+
+    // A provider that is PRESENT but malformed is also a 400. Treating it as
+    // absent would silently downgrade the call to a model-only update, leaving
+    // the model on the OLD provider: the accept-and-drop bug this route fixes.
+    for (const junk of ['', '   ', 123, null, {}]) {
+      const malformed = mockRes()
+      await agentModelPATCH(
+        req({ params: { agentId: id }, body: { model: 'gpt-4o', provider: junk } }),
+        malformed.res,
+      )
+      expect(malformed.status(), `provider: ${JSON.stringify(junk)}`).toBe(400)
+    }
+    // ...and none of them changed anything.
+    expect(loadAgentConfig(db, id)?.primaryModel).toBe('llama3.2')
+    expect(loadAgentConfig(db, id)?.primaryProvider).toBe('ollama')
   })
 
   it('PATCH /api/agents/:id/model on hermes accepts only openrouter (or no) provider', async () => {

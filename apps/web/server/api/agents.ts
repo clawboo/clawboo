@@ -209,13 +209,17 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
   }
   const body = req.body as { model?: unknown; provider?: unknown } | undefined
   const model = typeof body?.model === 'string' ? body.model.trim() : ''
+  // PRESENT-but-malformed is rejected, not quietly treated as absent: dropping it
+  // would do a model-only update, leaving the model on the OLD provider, which is
+  // the accept-and-drop behaviour this route exists to stop.
+  const providerSupplied = body != null && 'provider' in body && body.provider !== undefined
   const provider = typeof body?.provider === 'string' ? body.provider.trim() : ''
   if (!model) {
     res.status(400).json({ error: 'model (non-empty string) required' })
     return
   }
-  if (provider && !(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
-    res.status(400).json({ error: `unknown provider '${provider}'` })
+  if (providerSupplied && !(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
+    res.status(400).json({ error: `unknown provider '${String(body?.provider)}'` })
     return
   }
   try {

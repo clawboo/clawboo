@@ -27,10 +27,12 @@ export interface AgentState {
   runtime?: string | null
   /** Per-agent execution permission config (null = use Gateway default) */
   execConfig: { execAsk: string } | null
-  /** Native only: whether a key resolves in THIS agent's configured provider
-   *  slot (or the provider is keyless Ollama). Runtime health is green with ANY
-   *  provider connected, so this is what flags an agent whose own provider is
-   *  disconnected. null/undefined = not applicable (non-native) or unknown. */
+  /** Native only: whether this agent has a runnable routing candidate, mirroring
+   *  the runtime router: a key in its own `envVar`, or in one of its configured
+   *  fallbacks, or a keyless Ollama provider. NOT proof that the PRIMARY key
+   *  exists. Runtime health is green with ANY provider connected, so this is what
+   *  flags an agent whose own routing is dead. null/undefined = not applicable
+   *  (non-native) or unknown. */
   providerReady?: boolean | null
 }
 
