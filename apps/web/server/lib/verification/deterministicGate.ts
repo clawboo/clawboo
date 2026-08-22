@@ -39,26 +39,6 @@ export interface DeterministicGateInput {
   env?: NodeJS.ProcessEnv
 }
 
-/**
- * The worktree location, confirmed to sit inside clawboo's own state directory.
- *
- * Every task and review checkout clawboo provisions lives there. The verify
- * command is worktree-authored and runs through a shell, so the directory it
- * runs in, reads its command from, and appends evidence to is pinned before any
- * of that happens: a path resolving anywhere else is a broken record, not a
- * place to run commands. The root is compared WITH a trailing separator, so a
- * sibling that merely shares its spelling is not mistaken for something inside.
- */
-function insideClawbooDir(candidate: string): string {
-  const root = path.resolve(resolveClawbooDir())
-  const resolved = path.resolve(candidate)
-  const prefix = root.endsWith(path.sep) ? root : root + path.sep
-  if (resolved !== root && !resolved.startsWith(prefix)) {
-    throw new Error(`worktree path is outside the clawboo state directory: ${resolved}`)
-  }
-  return resolved
-}
-
 async function resolveVerifyCommand(
   worktreePath: string,
   override?: string | null,
@@ -117,7 +97,25 @@ async function appendEvidence(
 export async function runDeterministicGate(
   input: DeterministicGateInput,
 ): Promise<DeterministicResult> {
-  const worktreePath = insideClawbooDir(input.worktreePath)
+  // Every task and review checkout clawboo provisions lives inside its own state
+  // directory. The verify command is worktree-authored and runs through a shell,
+  // so the directory it runs in, reads its command from, and appends evidence to
+  // is confirmed to be in there first: a path that resolves anywhere else is a
+  // broken record, not a place to run commands.
+  //
+  // The check is written out here rather than shared from a helper on purpose.
+  // A helper that validates and then RETURNS the path hands the caller a value
+  // that reads as unchecked, both to a reviewer skimming the call site and to
+  // static analysis; keeping the test and the use in one place means the thing
+  // being spawned into is visibly the thing that was just tested. The root is
+  // compared WITH a trailing separator, so a sibling directory that merely
+  // shares its spelling is not mistaken for something inside it.
+  const stateRoot = path.resolve(resolveClawbooDir())
+  const stateRootPrefix = stateRoot.endsWith(path.sep) ? stateRoot : stateRoot + path.sep
+  const worktreePath = path.resolve(input.worktreePath)
+  if (worktreePath !== stateRoot && !worktreePath.startsWith(stateRootPrefix)) {
+    throw new Error(`worktree path is outside the clawboo state directory: ${worktreePath}`)
+  }
   const command = await resolveVerifyCommand(worktreePath, input.verifyCommand)
   if (!command) {
     return deterministicResultSchema.parse({
