@@ -213,6 +213,12 @@ location /clawboo/ {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
 }
+
+# `location /clawboo/` matches only the trailing-slash form, so without this the
+# bare `/clawboo` never reaches Clawboo and cannot be redirected by it.
+location = /clawboo {
+    return 308 /clawboo/;
+}
 ```
 
 The SPA, every `/api` route, the SSE streams, and the Gateway WebSocket all live under the prefix, and the prebuilt bundle needs no rebuild: the server templates the mount point into the shell it serves. The access cookie is scoped to the prefix (`Path=/clawboo`), so a sibling app on the same origin never receives it, which also means a browser hitting the unprefixed `/api` on a token-gated install gets a 401. That root `/api` surface stays served for the loopback control plane (the CLI probe, the MCP callback URLs, the self-update check) and stays exactly as gated as before.

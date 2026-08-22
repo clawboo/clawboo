@@ -57,7 +57,12 @@ export function normalizeBasePath(raw: string | undefined | null): BasePathResul
   }
 
   const withLeading = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
-  const withoutTrailing = withLeading.replace(/\/+$/, '')
+  // Trailing slashes are trimmed by scanning, not by `/\/+$/`: that pattern
+  // backtracks polynomially on a long run of slashes, and this helper is exported,
+  // so it should not depend on its input staying operator-controlled.
+  let end = withLeading.length
+  while (end > 0 && withLeading[end - 1] === '/') end -= 1
+  const withoutTrailing = withLeading.slice(0, end)
   // A value that was only slashes ('//' or '///') collapses to empty here, which
   // is an empty segment rather than the root.
   if (!withoutTrailing) return { ok: false, reason: 'contains only slashes' }

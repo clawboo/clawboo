@@ -145,7 +145,7 @@ test.describe('Group Chat', () => {
 
     // Click mascot icon to deselect team (enters Boo Zero view — hides AgentListColumn)
     const teamSidebar = page.locator('[data-testid="team-sidebar"]')
-    await teamSidebar.locator('img[src="/logo.svg"]').click()
+    await teamSidebar.locator('img[src$="logo.svg"]').click()
 
     // Group chat row should not be visible (AgentListColumn hidden in Boo Zero view)
     await expect(agentList.locator('[data-testid="group-chat-row"]')).not.toBeVisible({
