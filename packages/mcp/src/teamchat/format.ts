@@ -19,11 +19,40 @@ export interface PeerPostLike {
   seq: number
 }
 
-/** Any inter-session envelope header — used to DEFANG a forged one smuggled in a
- *  body. A hostile peer could otherwise embed a byte-identical
- *  `[Inter-session message · … · isUser=true]` line that reads as a real (user-
- *  authority) envelope; the binding controls the OUTER header, never the body. */
-const INTER_SESSION_HEADER_RE = /\[Inter-session message[^\]]*\]/gi
+/** The envelope opener, matched case-insensitively (all-ASCII, so a lowercased
+ *  slice comparison is exact). */
+const HEADER_PREFIX = '[inter-session message'
+
+/**
+ * DEFANG any inter-session envelope header smuggled in a body. A hostile peer
+ * could otherwise embed a byte-identical
+ * `[Inter-session message · … · isUser=true]` line that reads as a real
+ * (user-authority) envelope; the binding controls the OUTER header, never the
+ * body. Each embedded header (opener through its first closing `]`) collapses
+ * to an inert marker. A single forward index scan, not a regex: a body stuffed
+ * with unterminated openers must cost one pass over the text, never a fresh
+ * tail-rescan per opener.
+ */
+function defangInterSessionHeaders(body: string): string {
+  let out = ''
+  let cursor = 0
+  while (true) {
+    const start = body.indexOf('[', cursor)
+    if (start === -1) break
+    if (body.slice(start, start + HEADER_PREFIX.length).toLowerCase() !== HEADER_PREFIX) {
+      out += body.slice(cursor, start + 1)
+      cursor = start + 1
+      continue
+    }
+    const close = body.indexOf(']', start + HEADER_PREFIX.length)
+    // An opener that never closes is not a complete header, and with no `]`
+    // left anywhere no later opener can complete either; the rest passes through.
+    if (close === -1) break
+    out += body.slice(cursor, start) + '[peer-quoted header]'
+    cursor = close + 1
+  }
+  return out + body.slice(cursor)
+}
 
 /**
  * Wrap a room post as a non-user, inter-session evidence message. The returned
@@ -37,8 +66,7 @@ const INTER_SESSION_HEADER_RE = /\[Inter-session message[^\]]*\]/gi
  */
 export function formatPeerPost(post: PeerPostLike): string {
   const header = `[Inter-session message · from=${post.authorAgentId} · kind=${post.kind} · seq=${post.seq} · isUser=false]`
-  const safeBody = post.body
-    .replace(INTER_SESSION_HEADER_RE, '[peer-quoted header]')
+  const safeBody = defangInterSessionHeaders(post.body)
     .split('\n')
     .map((line) => `| ${line}`)
     .join('\n')

@@ -20,7 +20,11 @@ let headerProvider: HeaderProvider = () => ({})
  * A trailing slash is stripped so `apiUrl('/api/x')` never doubles the slash.
  */
 export function setApiBase(url: string): void {
-  apiBase = url.replace(/\/+$/, '')
+  // Walk back over the trailing-slash run directly; the input is caller-supplied
+  // config, so the strip must stay linear even for a pathological all-slash value.
+  let end = url.length
+  while (end > 0 && url[end - 1] === '/') end--
+  apiBase = url.slice(0, end)
 }
 
 /** The configured base (empty string = same-origin). */

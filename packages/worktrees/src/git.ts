@@ -79,14 +79,52 @@ export async function branchExists(repoPath: string, branch: string): Promise<bo
   }
 }
 
+// A task id becomes a directory name under the worktree root and part of a git
+// branch name, so it has to be one plain path segment. Real ids are uuid-shaped
+// and test ids are short slugs, both well inside this shape. An id that does not
+// fit is REJECTED rather than scrubbed into shape: a rewritten id would no
+// longer name the directory the board recorded, so the mismatch would surface
+// later as a worktree that cannot be resumed instead of here as a clear error.
+const SAFE_TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+/** Return `taskId` unchanged, or throw if it is not usable as a path segment. */
+export function assertSafeTaskId(taskId: string): string {
+  if (!SAFE_TASK_ID_RE.test(taskId)) {
+    throw new Error(`unsafe task id (must be a single path segment): ${JSON.stringify(taskId)}`)
+  }
+  return taskId
+}
+
+/**
+ * Resolve `candidate` and throw unless it is `root` itself or sits inside it.
+ * Guards every filesystem op that takes a caller-supplied worktree location, so
+ * a doctored path cannot walk the recursive remove out of the worktree root.
+ */
+export function assertWithin(root: string, candidate: string): string {
+  const resolvedRoot = path.resolve(root)
+  const resolved = path.resolve(candidate)
+  const rel = path.relative(resolvedRoot, resolved)
+  if (rel && (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))) {
+    throw new Error(`path escapes ${resolvedRoot}: ${resolved}`)
+  }
+  return resolved
+}
+
 /** The default branch name for a task's worktree. */
 export function branchNameForTask(taskId: string): string {
-  return `clawboo/task-${taskId}`
+  return `clawboo/task-${assertSafeTaskId(taskId)}`
 }
 
 /** Where a repo's clawboo worktrees live (overridable). */
 export function worktreeRootFor(repoPath: string, rootDir?: string): string {
   return rootDir ?? path.join(repoPath, '.clawboo', 'worktrees')
+}
+
+/** The absolute directory a task's worktree occupies: one validated segment
+ *  directly under the (resolved) worktree root. */
+export function worktreePathFor(repoPath: string, taskId: string, rootDir?: string): string {
+  const root = path.resolve(worktreeRootFor(repoPath, rootDir))
+  return assertWithin(root, path.join(root, assertSafeTaskId(taskId)))
 }
 
 /**

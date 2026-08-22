@@ -11,8 +11,9 @@
 // anywhere in this path. No user input reaches an argument: binary paths come
 // from `resolveRuntimeBin` (filesystem resolution), every other token is a
 // compile-time constant. The one composed string is util-linux `script -c`'s
-// OWN contract (it takes a single command string); the interpolated binary
-// path is quote-validated and the rest is constants.
+// OWN contract (it takes a single command string); the interpolated binary path
+// is validated by `resolveVerifiedBin` (its file name must be the tool asked
+// for, and shell-significant characters are rejected) and the rest is constants.
 //
 // Per-tool ground truth (pinned from the INSTALLED CLIs' source — see CLAUDE.md
 // "UI-driven ChatGPT sign-in"):
@@ -75,6 +76,37 @@ export const CLI_LOGIN_COMMANDS: Record<CliLoginTool, string> = {
   openclaw: 'openclaw models auth login --provider openai-codex',
 }
 
+// Characters that are never part of a real program path but ARE meaningful to
+// the two wrappers a plan can end up inside: util-linux `script -c`'s command
+// string on Linux, and the `cmd.exe /c` wrapper a Windows `.cmd` shim needs.
+// Spaces and backslashes stay legal, since a spaced Windows user directory is
+// ordinary and the wrappers already quote for it.
+const UNSAFE_BIN_CHARS = /["'`$;&|<>^%*?\r\n]/
+
+/**
+ * Resolve a tool's binary and confirm it really is that tool.
+ *
+ * `resolveBin` walks PATH and the per-runtime install directories, so its answer
+ * is only as trustworthy as those directories are. Requiring the resolved FILE
+ * NAME to be the tool that was asked for stops a lookalike sitting earlier on
+ * PATH from being launched under that tool's identity, and the character check
+ * keeps a path that could change the meaning of a wrapper's command line from
+ * reaching one. Either failure reports "not installed", which lands the UI on
+ * its copy-the-command fallback.
+ */
+function resolveVerifiedBin(
+  tool: CliLoginTool,
+  resolveBin: (name: string) => string | null,
+): string | null {
+  const bin = resolveBin(tool)
+  if (!bin || UNSAFE_BIN_CHARS.test(bin)) return null
+  const stem = path
+    .basename(bin)
+    .toLowerCase()
+    .replace(/\.(exe|cmd|bat|ps1)$/, '')
+  return stem === tool ? bin : null
+}
+
 /**
  * Build the spawn plan for a tool's login. Pure given (tool, platform, resolver)
  * — unit-testable without spawning anything. `resolveBin` defaults to the real
@@ -86,7 +118,7 @@ export function buildCliLoginPlan(
   resolveBin: (name: string) => string | null = resolveRuntimeBin,
 ): CliLoginPlanResult {
   if (tool === 'codex') {
-    const bin = resolveBin('codex')
+    const bin = resolveVerifiedBin('codex', resolveBin)
     if (!bin) return notInstalled('codex')
     return {
       ok: true,
@@ -100,7 +132,7 @@ export function buildCliLoginPlan(
   }
 
   if (tool === 'hermes') {
-    const bin = resolveBin('hermes')
+    const bin = resolveVerifiedBin('hermes', resolveBin)
     if (!bin) return notInstalled('hermes')
     const binDir = path.dirname(bin)
     return {
@@ -129,7 +161,7 @@ export function buildCliLoginPlan(
         'The OpenClaw sign-in needs a terminal on Windows. Run the command below in your own terminal, then re-check.',
     }
   }
-  const bin = resolveBin('openclaw')
+  const bin = resolveVerifiedBin('openclaw', resolveBin)
   if (!bin) return notInstalled('openclaw')
   // NO --device-code: the default `oauth` method is the ungated browser-PKCE
   // flow (see the header ground truth).
@@ -153,8 +185,8 @@ export function buildCliLoginPlan(
   }
   // util-linux script takes ONE command string (`-c`) by contract. The only
   // interpolation is the RESOLVED binary path (never user input), single-quoted;
-  // a path containing a quote is rejected outright rather than escaped.
-  if (bin.includes("'")) return notInstalled('openclaw')
+  // `resolveVerifiedBin` has already rejected every character that could end
+  // that quoting or add a second command.
   return {
     ok: true,
     plan: {

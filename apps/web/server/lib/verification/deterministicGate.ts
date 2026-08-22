@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { appendFile, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { resolveClawbooDir } from '@clawboo/config'
 import { scrubResultSummary } from '@clawboo/db'
 import {
   deterministicResultSchema,
@@ -15,7 +16,7 @@ import {
   parseVerifyCommandFromVerificationMd,
   type DeterministicResult,
 } from '@clawboo/governance'
-import { SOR_FILES } from '@clawboo/worktrees'
+import { SOR_FILES, assertWithin } from '@clawboo/worktrees'
 
 import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
@@ -96,7 +97,13 @@ async function appendEvidence(
 export async function runDeterministicGate(
   input: DeterministicGateInput,
 ): Promise<DeterministicResult> {
-  const command = await resolveVerifyCommand(input.worktreePath, input.verifyCommand)
+  // Every task and review checkout clawboo provisions lives under its own state
+  // directory. The verify command is model-authored and runs through a shell, so
+  // the directory it runs in is pinned to that tree first: a worktree path that
+  // resolves anywhere else is a broken record, not a place to run commands or to
+  // append evidence to.
+  const worktreePath = assertWithin(resolveClawbooDir(), input.worktreePath)
+  const command = await resolveVerifyCommand(worktreePath, input.verifyCommand)
   if (!command) {
     return deterministicResultSchema.parse({
       command: '(none configured)',
@@ -122,7 +129,7 @@ export async function runDeterministicGate(
     let stderr = ''
     let timedOut = false
     const child = spawn(command, [], {
-      cwd: input.worktreePath,
+      cwd: worktreePath,
       env: input.env ?? buildChildEnv(),
       shell: true,
       windowsHide: isWindows,
@@ -161,6 +168,6 @@ export async function runDeterministicGate(
     durationMs: Date.now() - startedAt,
     timedOut: run.timedOut,
   })
-  await appendEvidence(input.worktreePath, det, startedAt)
+  await appendEvidence(worktreePath, det, startedAt)
   return det
 }

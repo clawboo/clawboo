@@ -200,7 +200,12 @@ function shellQuote(s: string): string {
  * artifact, created by `writeHandoff` when a runtime first hands off.
  */
 export async function writeScaffold(worktreePath: string, input: TaskScaffoldInput): Promise<void> {
-  const at = (leaf: string) => path.join(worktreePath, leaf)
+  // Resolve the root once so every write lands in the same place. A relative
+  // root would otherwise be read against the server's working directory rather
+  // than the task's checkout. Callers reach here through `provisionWorktree`,
+  // which builds the path from a validated task id.
+  const root = path.resolve(worktreePath)
+  const at = (leaf: string) => path.join(root, leaf)
   await writeFile(at(SOR_FILES.task), renderTaskMd(input), 'utf8')
   await writeFile(at(SOR_FILES.progress), renderProgressMd(input), 'utf8')
   await writeFile(at(SOR_FILES.decisions), renderDecisionsJson(), 'utf8')

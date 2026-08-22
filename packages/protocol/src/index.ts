@@ -5,18 +5,26 @@ const TOOL_RESULT_PREFIX = '[[tool-result]]'
 const META_PREFIX = '[[meta]]'
 const TRACE_MARKDOWN_PREFIX = '[[trace]]'
 
-const THINKING_BLOCK_RE = /<\s*(think(?:ing)?|analysis)\s*>([\s\S]*?)<\s*\/\s*\1\s*>/gi
-const THINKING_STREAM_TAG_RE = /<\s*(\/?)\s*(?:think(?:ing)?|analysis|thought|antthinking)\s*>/gi
+// Model output is the input to all of these, and a model can emit an arbitrary
+// run of `<think>` openers that never close. The slash in a closing tag carries
+// its own following whitespace (`(?:\/\s*)?`) so two `\s*` runs never sit side
+// by side competing for the same spaces.
+const THINKING_STREAM_TAG_RE =
+  /<\s*(?:(\/)\s*)?(?:think(?:ing)?|analysis|thought|antthinking)\s*>/gi
 const THINKING_OPEN_RE = /<\s*(think(?:ing)?|analysis)\s*>/i
 const THINKING_CLOSE_RE = /<\s*\/\s*(think(?:ing)?|analysis)\s*>/i
-const THINKING_TAG_RE = /<\s*\/?\s*(think(?:ing)?|analysis)\s*>/gi
+const THINKING_TAG_RE = /<\s*(?:\/\s*)?(think(?:ing)?|analysis)\s*>/gi
 
 const ASSISTANT_PREFIX_RE = /^(?:\[\[reply_to_current\]\]|\[reply_to_current\])\s*(?:\|\s*)?/i
 
 const HEARTBEAT_PROMPT_RE = /^Read HEARTBEAT\.md if it exists\b/i
 const HEARTBEAT_PATH_RE = /Heartbeat file path:/i
 
-const MESSAGE_ID_RE = /\s*\[message_id:[^\]]+\]\s*/gi
+// The surrounding whitespace runs and the id itself are length-capped so an
+// unterminated `[message_id:` in model output cannot make each candidate start
+// re-measure the rest of the text. Ids are short (uuid-shaped) and the marker
+// sits on its own line, so the caps never bite in practice.
+const MESSAGE_ID_RE = /\s{0,32}\[message_id:[^\]]{1,128}\]\s{0,32}/gi
 const PROJECT_PROMPT_BLOCK_RE = /^(?:Project|Workspace) path:[\s\S]*?\n\s*\n/i
 const PROJECT_PROMPT_INLINE_RE = /^(?:Project|Workspace) path:[\s\S]*?memory_search\.\s*/i
 const RESET_PROMPT_RE = /^A new session was started via \/new or \/reset[\s\S]*?reasoning\.\s*/i
@@ -148,6 +156,31 @@ const extractRawText = (message: unknown): string | null => {
 const stripAssistantPrefix = (text: string): string => {
   if (!text) return text
   return ASSISTANT_PREFIX_RE.test(text) ? text.replace(ASSISTANT_PREFIX_RE, '').trimStart() : text
+}
+
+/**
+ * The body of every `<think>…</think>` block, in order.
+ *
+ * One pass over the tag positions, pairing each opener with the next closer,
+ * rather than a search for a partner tag per opener. A model that emits a burst
+ * of openers and never closes them would otherwise have every one of them scan
+ * the rest of the text looking for a close tag that is not there. A second
+ * opener inside an open block is part of that block's body, which is what the
+ * `openEnd < 0` guard preserves.
+ */
+function thinkingBlockBodies(text: string): string[] {
+  const bodies: string[] = []
+  let openEnd = -1
+  for (const match of text.matchAll(THINKING_TAG_RE)) {
+    const idx = match.index ?? 0
+    if (match[0].includes('/')) {
+      if (openEnd >= 0) bodies.push(text.slice(openEnd, idx))
+      openEnd = -1
+    } else if (openEnd < 0) {
+      openEnd = idx + match[0].length
+    }
+  }
+  return bodies
 }
 
 const stripThinkingTags = (value: string): string => {
@@ -333,8 +366,9 @@ export const extractThinking = (message: unknown): string | null => {
   const rawText = extractRawText(message)
   if (!rawText) return null
 
-  const matches = [...rawText.matchAll(THINKING_BLOCK_RE)]
-  const extracted = matches.map((match) => (match[2] ?? '').trim()).filter(Boolean)
+  const extracted = thinkingBlockBodies(rawText)
+    .map((body) => body.trim())
+    .filter(Boolean)
   if (extracted.length > 0) return extracted.join('\n')
 
   const tagged = extractThinkingFromTaggedStream(rawText)

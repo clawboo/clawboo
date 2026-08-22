@@ -47,12 +47,45 @@ const SAFE_COUNT_KEYS = new Set([
   'authors',
 ])
 
+// A PEM private key block is masked by its own scan (below) rather than by a
+// pattern in the list, so the multi-line block still wins before any of the
+// single-line shapes get a look at it.
+const PEM_BEGIN_RE = /-----BEGIN[A-Z ]{0,32}PRIVATE KEY-----/g
+const PEM_END_RE = /-----END[A-Z ]{0,32}PRIVATE KEY-----/g
+
+/**
+ * Mask every `-----BEGIN … PRIVATE KEY-----` block through its closing header.
+ *
+ * Each opener is paired with the next unused closer in one forward pass. A
+ * single regex spanning the pair has to skip the body with a lazy `[\s\S]*?`,
+ * so a blob carrying many BEGIN headers and no closing END re-scans everything
+ * behind each one. The label runs are length-capped because they share their
+ * alphabet with the `PRIVATE KEY` literal that follows them.
+ */
+function maskPemBlocks(s: string, mask: string): string {
+  const ends = [...s.matchAll(PEM_END_RE)]
+  if (ends.length === 0) return s
+  let out = ''
+  let cursor = 0
+  let next = 0
+  for (const begin of s.matchAll(PEM_BEGIN_RE)) {
+    const at = begin.index ?? 0
+    if (at < cursor) continue
+    const bodyStart = at + begin[0].length
+    while (next < ends.length && (ends[next]?.index ?? 0) < bodyStart) next++
+    const end = ends[next]
+    if (!end) break
+    out += s.slice(cursor, at) + mask
+    cursor = (end.index ?? 0) + end[0].length
+  }
+  return out + s.slice(cursor)
+}
+
 // Value patterns that look like a credential regardless of the key they sit
 // under. This is an intentional ALLOW-LIST (not universal SHAPE coverage) so
 // telemetry / hashes survive — EXTEND it for a new vendor, don't assume every
-// secret shape is caught. PEM is first so its multi-line match wins.
+// secret shape is caught.
 const SENSITIVE_VALUE_RES: RegExp[] = [
-  /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g, // PEM private key block
   /\bsk-[A-Za-z0-9_-]{12,}\b/g, // OpenAI-style API key
   /\bsk-ant-[A-Za-z0-9_-]{12,}\b/g, // Anthropic-style API key
   /\bsk-or-[A-Za-z0-9_-]{12,}\b/g, // OpenRouter-style API key
@@ -68,7 +101,9 @@ const SENSITIVE_VALUE_RES: RegExp[] = [
   // stderr): `OPENROUTER_API_KEY=sk-or-…` / `DB_PASSWORD: …`. Quote-aware so a
   // quoted multi-word secret is fully masked; secret-shaped (UPPER_SNAKE key
   // ending KEY/TOKEN/SECRET/PASSWORD), so it never fires on prose or telemetry.
-  /\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/g,
+  // The name run is length-capped for the same reason as the PEM label: it can
+  // otherwise also spell the trailing keyword it is meant to stop in front of.
+  /\b[A-Z][A-Z0-9_]{0,64}(?:KEY|TOKEN|SECRET|PASSWORD)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/g,
 ]
 
 /** Whole-string JWT shape (a bare token value, not embedded in prose). */
@@ -76,7 +111,7 @@ const JWT_RE = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}$/
 
 function maskString(s: string): string {
   if (JWT_RE.test(s.trim())) return REDACTION_MASK
-  let out = s
+  let out = maskPemBlocks(s, REDACTION_MASK)
   for (const re of SENSITIVE_VALUE_RES) out = out.replace(re, REDACTION_MASK)
   return out
 }

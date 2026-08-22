@@ -65,29 +65,53 @@ export function compactToolOutput(
   return { text: compacted, stats: { rule: ruleId, originalBytes, compactedBytes, applied: true } }
 }
 
-// Matches a `[[tool-result]] <name> (<id>)` header through its fenced
-// ```text … ``` body (the `formatToolResultMarkdown` shape). Non-greedy so
-// each block is captured independently; prose between blocks is untouched.
-const TOOL_RESULT_BLOCK =
-  /(\[\[tool-result\]\]\s*([^\n(]+?)(?:\s*\([^)]*\))?[^\n]*\n[\s\S]*?```text\n)([\s\S]*?)(\n```)/g
+// The `[[tool-result]] <name> (<id>)` header line (the `formatToolResultMarkdown`
+// shape). The name runs to the first `(` or end of line and is trimmed by the
+// caller, so no separate whitespace group competes with it for the same spaces.
+const TOOL_RESULT_HEADER = /\[\[tool-result\]\]([^\n(]*)(?:\([^)\n]*\))?[^\n]*\n/g
+const FENCE_OPEN = '```text\n'
+const FENCE_CLOSE = '\n```'
 
 /**
  * Compact the verbose body of every embedded `[[tool-result]]` block in a text
  * blob (e.g. a relayed agent response), leaving prose untouched. Returns the
  * rewritten text + per-block stats.
+ *
+ * Each block is located in two steps: a regex for the header line, then plain
+ * index scans for the fences that open and close the body. A single regex
+ * spanning header-to-fence would have to skip arbitrary text with `[\s\S]*?`,
+ * so every header that turned out to have no fenced body behind it would
+ * re-scan the whole remaining blob. Index scans cost one pass per block no
+ * matter how many bare `[[tool-result]]` markers the text carries.
  */
 export function compactToolResultMarkdown(
   text: string,
   opts: CompactOptions = {},
 ): { text: string; stats: CompactionStats[] } {
   const stats: CompactionStats[] = []
-  const out = text.replace(
-    TOOL_RESULT_BLOCK,
-    (match: string, prefix: string, name: string, body: string, fence: string) => {
-      const r = compactToolOutput(name.trim() || 'tool', body, opts)
-      stats.push(r.stats)
-      return r.stats.applied ? `${prefix}${r.text}${fence}` : match
-    },
-  )
-  return { text: out, stats }
+  let out = ''
+  let cursor = 0
+
+  for (const m of text.matchAll(TOOL_RESULT_HEADER)) {
+    // A header buried inside a body already consumed belongs to that body.
+    if (m.index < cursor) continue
+    const fenceStart = text.indexOf(FENCE_OPEN, m.index + m[0].length)
+    // No opening fence left after this header means no later header can have
+    // one either, so everything from here on is prose.
+    if (fenceStart === -1) break
+    const bodyStart = fenceStart + FENCE_OPEN.length
+    const bodyEnd = text.indexOf(FENCE_CLOSE, bodyStart)
+    if (bodyEnd === -1) break
+    const blockEnd = bodyEnd + FENCE_CLOSE.length
+
+    const r = compactToolOutput((m[1] ?? '').trim() || 'tool', text.slice(bodyStart, bodyEnd), opts)
+    stats.push(r.stats)
+    out += text.slice(cursor, m.index)
+    out += r.stats.applied
+      ? `${text.slice(m.index, bodyStart)}${r.text}${FENCE_CLOSE}`
+      : text.slice(m.index, blockEnd)
+    cursor = blockEnd
+  }
+
+  return { text: out + text.slice(cursor), stats }
 }

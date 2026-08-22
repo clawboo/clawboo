@@ -1,10 +1,11 @@
 // Live model lists for the native providers that need an API key to enumerate
 // their models — Anthropic + OpenAI. Mirrors `openrouterModels.ts` (module cache
 // + TTL + AbortController timeout + last-good-on-failure, never throws), but keyed
-// by a hash of the API key so a changed key refetches. The key is used ONLY for
-// the outbound fetch — never logged, persisted, or returned (secretsVault invariant).
+// by a salted derivation of the API key so a changed key refetches. The key is used
+// ONLY for the outbound fetch, never logged, persisted, or returned (the
+// secretsVault invariant).
 
-import { createHash } from 'node:crypto'
+import { randomBytes, scryptSync } from 'node:crypto'
 
 import { NATIVE_COMPAT_PROVIDERS } from './runtimes/native/nativeProviders'
 
@@ -23,8 +24,19 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>()
 
+// Salt for the cache discriminator below. Random per process and never written
+// anywhere, so the derived values mean nothing outside this one running server
+// and are worthless if a heap dump or a log ever surfaces them.
+const KEY_SALT = randomBytes(16)
+
+// Derive the "is this still the same key?" discriminator. A plain fast digest of
+// a credential is effectively a reversible lookup, because provider keys have a
+// short fixed prefix and a bounded alphabet, so candidates can be enumerated
+// against a leaked digest. scrypt's work factor takes that off the table. It costs tens of
+// milliseconds, which is paid only on an operator-triggered model-list fetch that
+// is already waiting on a network round trip.
 function keyHash(key: string): string {
-  return createHash('sha256').update(key).digest('hex').slice(0, 16)
+  return scryptSync(key, KEY_SALT, 16).toString('hex')
 }
 
 async function timedFetch(url: string, headers: Record<string, string>): Promise<Response | null> {

@@ -20,7 +20,7 @@ export function failureLines(text: string): string[] {
 export function compactGitStatus(output: string): string {
   const kept: string[] = []
   for (const raw of output.split('\n')) {
-    const line = raw.replace(/\s+$/, '')
+    const line = raw.trimEnd()
     if (!line.trim()) continue
     if (/^\s*\(use /.test(line)) continue // drop the "(use ...)" hint lines
     if (/^On branch /.test(line)) kept.push(line)
@@ -45,7 +45,7 @@ export function compactGitStatus(output: string): string {
 export function compactTestOutput(output: string): string {
   const kept: string[] = []
   for (const raw of output.split('\n')) {
-    const line = raw.replace(/\s+$/, '')
+    const line = raw.trimEnd()
     if (!line.trim()) continue
     if (FAILURE_RE.test(line))
       kept.push(line) // keep every failure line
@@ -61,22 +61,43 @@ export function compactTestOutput(output: string): string {
 // ─── HTML → text (linear, no parser/heavy dep) ───────────────────────────────
 
 export function htmlToText(output: string): string {
-  return output
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<\/(p|div|li|tr|h[1-6]|section|article)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  // Tag stripping repeats until the text stops changing. Removing one tag can
+  // splice its neighbours into a brand-new one: `<scr<b>ipt>` becomes
+  // `<script>` the moment the inner `<b>` goes, so a single pass can hand back
+  // the very markup it was asked to strip. Every pass only ever shortens the
+  // text, so the loop always settles.
+  //
+  // The end-tag patterns accept trailing junk (`</script >`, `</style foo>`)
+  // because a browser closes on those too; matching only the bare `</script>`
+  // would leave the script body in the "text" as readable content.
+  let text = output
+  let prev: string
+  do {
+    prev = text
+    text = text
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<\/(p|div|li|tr|h[1-6]|section|article)\s*>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+  } while (text !== prev)
+
+  return (
+    text
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      // `&amp;` decodes last. Going first would turn `&amp;lt;` into `&lt;` and
+      // then into `<`, decoding a sequence the author wrote to be READ as the
+      // four characters `&lt;`.
+      .replace(/&amp;/g, '&')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  )
 }
 
 // ─── long-URL shortening ─────────────────────────────────────────────────────

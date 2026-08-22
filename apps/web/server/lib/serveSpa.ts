@@ -3,6 +3,8 @@ import path from 'node:path'
 
 import express, { type Express, type Response } from 'express'
 
+import { staticLimiter } from './rateLimit'
+
 /** Escape a value for use inside a double-quoted HTML attribute. */
 function attr(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
@@ -106,6 +108,12 @@ function injectBase(html: string, basePath: string): string {
  */
 export function mountSpa(app: Express, uiDir: string, basePath = ''): void {
   const root = path.resolve(uiDir)
+
+  // Ahead of all three handlers below, each of which reaches the filesystem: the
+  // shell interceptor canonicalizes the request path, `express.static` stats and
+  // streams, and the catch-all reads the shell. The ceiling is high enough that
+  // a real page load, which pulls the shell plus every asset, never notices it.
+  app.use(staticLimiter)
 
   /**
    * Send the templated shell with the caching headers `express.static` used to

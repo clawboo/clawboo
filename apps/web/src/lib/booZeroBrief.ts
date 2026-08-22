@@ -64,15 +64,23 @@ const DEFAULT_ANTI_PATTERNS: readonly string[] = [
   'Only delegate via `<delegate to="@AgentName">` blocks; bare @-mentions in prose are best-effort fallbacks.',
 ]
 
+/** Escape a value so it reads as one markdown table cell. Backslashes go first:
+ *  escaping only the pipe turns a member-supplied `\|` into `\\|`, which renders
+ *  as a literal backslash followed by a LIVE column separator, splitting the row
+ *  the escaping was there to hold together. */
+function escapeCell(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
+}
+
 function renderMembersTable(members: readonly TeamBriefMember[]): string {
   if (members.length === 0) {
     return '_No members yet. Boo Zero will respond solo until the team is populated._'
   }
   const header = '| Name | Role | Strengths | Tools |\n|---|---|---|---|'
   const rows = members.map((m) => {
-    const strengths = (m.strengths ?? '').replace(/\|/g, '\\|')
-    const tools = (m.tools ?? []).join(', ').replace(/\|/g, '\\|')
-    return `| ${m.name} | ${m.role} | ${strengths} | ${tools} |`
+    const strengths = escapeCell(m.strengths ?? '')
+    const tools = escapeCell((m.tools ?? []).join(', '))
+    return `| ${escapeCell(m.name)} | ${escapeCell(m.role)} | ${strengths} | ${tools} |`
   })
   return [header, ...rows].join('\n')
 }
