@@ -152,6 +152,33 @@ describe('the honesty invariants', () => {
     }
   })
 
+  it('never declares auth inputs on a REMOTE entry', () => {
+    // `connectorSnippet` emits `{ type, url }` for JSON and a bare `url = …` for
+    // Codex. Neither has anywhere to reference a variable, so a remote entry that
+    // declared inputs would print "you will also need X" beside a block that
+    // reads nothing. Mirrored in scripts/verify-connectors.ts, which is the
+    // release gate; this is the one that fails in the dev loop.
+    for (const c of CONNECTOR_DEFINITIONS) {
+      if (c.launch.transport !== 'streamable-http') continue
+      expect(c.auth.inputs, c.slug).toHaveLength(0)
+    }
+  })
+
+  it('passes an allowed directory to the filesystem server', () => {
+    // Started with neither a directory argument nor a non-empty Roots set from
+    // the client, this server throws during initialization. Every dialect renders
+    // `args` verbatim, so carrying the placeholder here is what makes all three
+    // snippets startable.
+    const fs = connectorBySlug('filesystem')
+    expect(fs).toBeDefined()
+    const launch = fs!.launch
+    expect(launch.transport).toBe('stdio')
+    if (launch.transport !== 'stdio') return
+    const trailing = launch.args[launch.args.length - 1]
+    expect(trailing.startsWith('/'), 'last arg should be a directory path').toBe(true)
+    expect(trailing).not.toContain('@')
+  })
+
   it('declares egress on anything that can reach the network', () => {
     for (const c of CONNECTOR_DEFINITIONS) {
       if (!c.trifecta.canEgress) continue

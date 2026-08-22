@@ -182,13 +182,19 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   {
     slug: 'filesystem',
     displayName: 'Filesystem',
-    description: 'Read and write files under directories you explicitly allow.',
+    description:
+      'Read and write files under directories you explicitly allow. Replace the path in the config with the directory you want to expose.',
     category: 'dev',
     provenance: 'curated',
     launch: {
       transport: 'stdio',
       command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem@2026.7.10'],
+      // The trailing path is REQUIRED, not decoration. This server accepts its
+      // allowed directories either as argv or as MCP Roots, and its own docs are
+      // explicit: started with neither, it throws during initialization. A
+      // snippet a user pastes and cannot start is worse than no snippet, so the
+      // block ships with a placeholder they are told to edit.
+      args: ['-y', '@modelcontextprotocol/server-filesystem@2026.7.10', '/path/to/allowed/dir'],
       pinnedVersion: '2026.7.10',
     },
     auth: { kind: 'none', inputs: [] },

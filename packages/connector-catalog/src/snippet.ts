@@ -113,6 +113,22 @@ export function connectorSnippet(def: ConnectorDefinition, dialect: SnippetDiale
   }
 }
 
+/**
+ * Values that look like a real credential rather than a `${VAR}` reference.
+ *
+ * Exported so the vitest suite and the offline release gate share ONE pattern.
+ * They previously carried private copies of `(sk|xoxb|ghp|pat)[-_][A-Za-z0-9]{8,}`,
+ * which misses every Stripe key: `sk_test_…` and `sk_live_…` put a word and a
+ * second underscore where that pattern demanded eight straight alphanumerics, so
+ * a literal Stripe secret would have passed both checks.
+ *
+ * A deny-list of prefixes can only ever be a backstop. The real guarantee is that
+ * `envBlock` emits `${VAR}` and never a value; this catches a hand-written entry
+ * that forgot.
+ */
+export const SECRET_LOOKING_VALUE =
+  /sk_(?:test|live)_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{8,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|pat_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}/
+
 export const SNIPPET_DIALECTS: readonly { id: SnippetDialect; label: string }[] = Object.freeze([
   { id: 'claude-code', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },

@@ -28,6 +28,7 @@ import {
   CURATED_CONNECTORS,
   COMMUNITY_CONNECTORS,
   connectorSnippet,
+  SECRET_LOOKING_VALUE,
   SNIPPET_DIALECTS,
   type ConnectorDefinition,
 } from '../packages/connector-catalog/src/index.js'
@@ -74,6 +75,18 @@ function checkOffline(): void {
       fail(def.slug, 'api-key auth declares no inputs')
     if (def.auth.kind === 'none' && def.auth.inputs.length > 0)
       fail(def.slug, 'auth kind "none" but inputs are declared')
+    // A remote entry cannot carry env inputs: `connectorSnippet` emits
+    // `{ type, url }` for JSON and a bare `url = …` for Codex, with no place to
+    // reference a variable. Declaring one anyway would make `requiredEnv` tell
+    // the user to set something the pasted block never reads. Every remote entry
+    // is OAuth today; this is what keeps the next one from quietly shipping an
+    // unauthenticatable snippet.
+    if (def.launch.transport === 'streamable-http' && def.auth.inputs.length > 0)
+      fail(
+        def.slug,
+        'remote (streamable-http) entries cannot declare auth inputs: the snippet has no header ' +
+          'or env block to reference them. Teach connectorSnippet to emit headers first.',
+      )
 
     if (def.trifecta.canEgress && def.egressAllow.length === 0)
       fail(def.slug, 'can egress but declares no allowed hosts')
@@ -84,7 +97,7 @@ function checkOffline(): void {
     for (const { id } of SNIPPET_DIALECTS) {
       const snippet = connectorSnippet(def, id)
       if (snippet.body.trim() === '') fail(def.slug, `empty ${id} snippet`)
-      if (/(sk|xoxb|ghp|pat)[-_][A-Za-z0-9]{8,}/.test(snippet.body))
+      if (SECRET_LOOKING_VALUE.test(snippet.body))
         fail(def.slug, `${id} snippet contains something that looks like a real credential`)
       if (snippet.language === 'json') {
         try {
@@ -111,10 +124,19 @@ async function checkNpm(def: ConnectorDefinition & { launch: { transport: 'stdio
   const version = arg.slice(at + 1)
   const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/${version}`, {
     headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
   })
   if (res.status === 404) fail(def.slug, `npm has no ${name}@${version} (yanked or renamed?)`)
   else if (!res.ok) fail(def.slug, `npm returned ${res.status} for ${name}@${version}`)
-  else console.log(`  ✓ ${def.slug} → ${name}@${version}`)
+  else {
+    // A deprecated version still resolves, so the 404 check above sails straight
+    // past it. Curated means we vouch for it, and we cannot vouch for a package
+    // whose own publisher says it is no longer supported.
+    const meta = (await res.json()) as { deprecated?: string }
+    if (typeof meta.deprecated === 'string')
+      fail(def.slug, `npm marks ${name}@${version} deprecated: ${meta.deprecated}`)
+    else console.log(`  ✓ ${def.slug} → ${name}@${version}`)
+  }
 }
 
 async function checkEndpoint(

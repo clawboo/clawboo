@@ -43,41 +43,6 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
     homepage: 'https://github.com/makenotion/notion-mcp-server',
   },
   {
-    slug: 'slack',
-    displayName: 'Slack',
-    description: 'Read channel history and post messages to Slack.',
-    category: 'chat',
-    provenance: 'curated',
-    launch: {
-      transport: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-slack@2025.4.25'],
-      pinnedVersion: '2025.4.25',
-    },
-    auth: {
-      kind: 'api-key',
-      inputs: [
-        {
-          key: 'SLACK_BOT_TOKEN',
-          description: 'A Slack bot token (starts with xoxb-).',
-          docsUrl: 'https://api.slack.com/apps',
-          required: true,
-          secret: true,
-        },
-        {
-          key: 'SLACK_TEAM_ID',
-          description: 'Your Slack workspace ID (starts with T).',
-          required: true,
-          secret: false,
-        },
-      ],
-    },
-    egressAllow: ['slack.com'],
-    trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: true },
-    tags: ['chat', 'messaging', 'notifications'],
-    homepage: 'https://github.com/modelcontextprotocol/servers',
-  },
-  {
     slug: 'figma',
     displayName: 'Figma',
     description: 'Read Figma files, frames, and design tokens for implementation.',

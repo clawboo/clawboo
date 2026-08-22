@@ -4,6 +4,7 @@ import {
   CONNECTOR_DEFINITIONS,
   connectorBySlug,
   connectorSnippet,
+  SECRET_LOOKING_VALUE,
   SNIPPET_DIALECTS,
   type ConnectorDefinition,
 } from '../index'
@@ -99,8 +100,33 @@ describe('every catalog entry × every dialect', () => {
       for (const { id } of SNIPPET_DIALECTS) {
         const body = connectorSnippet(def, id).body
         // Anything that looks like a real token rather than a ${VAR} reference.
-        expect(body, `${def.slug}/${id}`).not.toMatch(/(sk|xoxb|ghp|pat)[-_][A-Za-z0-9]{8,}/)
+        expect(body, `${def.slug}/${id}`).not.toMatch(SECRET_LOOKING_VALUE)
       }
+    }
+  })
+
+  it('the secret pattern catches the prefixes it is meant to', () => {
+    // Guarding the guard. The previous pattern demanded eight straight
+    // alphanumerics after `sk_`, so every Stripe key walked through it.
+    for (const sample of [
+      'sk_test_51H8xYzAbCdEfGhIj',
+      'sk_live_51H8xYzAbCdEfGhIj',
+      'sk-proj-AbCdEfGhIjKlMnOpQrSt',
+      'xoxb-1234567890-abcdefghij',
+      'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+      'github_pat_11ABCDEFG0abcdefghij',
+      'AKIAIOSFODNN7EXAMPLE',
+    ]) {
+      expect(sample).toMatch(SECRET_LOOKING_VALUE)
+    }
+    // ...and does not fire on the things a real snippet is made of.
+    for (const sample of [
+      '${STRIPE_SECRET_KEY}',
+      '@modelcontextprotocol/server-filesystem@2026.7.10',
+      'https://mcp.stripe.com',
+      '/path/to/allowed/dir',
+    ]) {
+      expect(sample).not.toMatch(SECRET_LOOKING_VALUE)
     }
   })
 })
