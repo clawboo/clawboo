@@ -21,6 +21,8 @@ export type {
   CapabilityScope,
   CapabilitySourceId,
   CapabilityStatus,
+  CapabilityHealth,
+  CapabilityTrifecta,
 } from './records'
 
 export type {

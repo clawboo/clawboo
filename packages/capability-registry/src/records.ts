@@ -53,6 +53,33 @@ export type CapabilityOrigin =
 export type CapabilityStatus = 'ready' | 'disabled' | 'manageable-but-pending-auth' | 'unavailable'
 
 /**
+ * Live health — a first-class concept `CapabilityRecord` has never carried.
+ *
+ * Distinct from `status` (lifecycle: has a human turned it off?) and from
+ * `available` (is its declared requirement met?). This is the operational
+ * question: is the thing behind it actually answering right now.
+ *
+ * `drift` is the highest-signal value in the set. It means the server's tool
+ * list no longer hashes to what a human approved — a rug-pull — and it must
+ * never be collapsed into `error`, because the remediation is completely
+ * different: `error` says retry, `drift` says re-read what changed before you
+ * trust it again.
+ */
+export type CapabilityHealth = 'unknown' | 'ok' | 'needs-auth' | 'degraded' | 'error' | 'drift'
+
+/**
+ * The three legs of the "lethal trifecta", as a capability can contribute them.
+ * Structural mirror of `@clawboo/governance`'s `TrifectaTags`, declared locally
+ * so this package stays dependency-free — the same discipline `CapabilityAvailability`
+ * already follows for `@clawboo/db`'s `AvailabilityRequirement`.
+ */
+export interface CapabilityTrifecta {
+  readsPrivateData: boolean
+  ingestsUntrustedContent: boolean
+  canEgress: boolean
+}
+
+/**
  * Declarative availability — a capability is unavailable (greyed) until its
  * requirement is satisfied. Structural mirror of @clawboo/db's
  * `AvailabilityRequirement`, declared locally so this package stays
@@ -131,4 +158,43 @@ export interface CapabilityRecord {
   tenantId: string | null
   /** ISO timestamp — when this record was last read(). */
   syncedAt: string
+
+  // ─── Connector-era fields ─────────────────────────────────────────────────
+  // All OPTIONAL, so every existing producer and consumer compiles unchanged.
+  // A source that knows nothing about connectors simply omits them.
+
+  /**
+   * The grant authorizing this capability for its subject, when one exists.
+   *
+   * A grant is user INTENT and lives in its own table; this row is a cache that a
+   * source-scoped reconcile rewrites on every read. The id is carried here only
+   * so a renderer can join the two without a second fetch — never as the place
+   * the grant is stored.
+   */
+  grantId?: string | null
+
+  /** The connector instance this capability came from, for attribution. */
+  connectorId?: string | null
+
+  /**
+   * Live health, which is strictly richer than the boolean `available`.
+   *
+   * `available` answers "is its declared requirement satisfied". `health`
+   * answers "what is actually wrong", and that distinction is what lets a
+   * renderer show a pulsing key for `needs-auth` instead of the same flat grey
+   * it shows for a missing plugin.
+   */
+  health?: CapabilityHealth
+
+  /** One scrubbed line explaining a non-ok `health`. Never a secret, never a stack. */
+  healthDetail?: string | null
+
+  /** ISO timestamp of the last successful use. Drives graph desaturation. */
+  lastUsedAt?: string | null
+
+  /** How many subjects hold a grant on this. `>= 2` renders the shared "xN" chip. */
+  grantCount?: number
+
+  /** Which exfiltration-risk legs this capability can contribute. */
+  trifecta?: CapabilityTrifecta
 }
