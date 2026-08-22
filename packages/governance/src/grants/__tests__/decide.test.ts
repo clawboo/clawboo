@@ -264,6 +264,46 @@ describe('standing rules', () => {
     if (d.kind === 'allow') expect(d.ruleId).toBe('exact')
   })
 
+  // Deny must not depend on row order. A user can mint a deny while an older
+  // allow for the same tool is still on file, and the array's order is an
+  // insertion detail, not a policy.
+  it('prefers a DENY over an allow at the same specificity, whatever the order', () => {
+    const allowFirst = decide({
+      standingRules: [rule({ id: 'allow' }), rule({ id: 'deny', decision: 'deny' })],
+    })
+    expect(allowFirst.kind).toBe('deny')
+
+    const denyFirst = decide({
+      standingRules: [rule({ id: 'deny', decision: 'deny' }), rule({ id: 'allow' })],
+    })
+    expect(denyFirst.kind).toBe('deny')
+  })
+
+  it('prefers a DENY over an allow for the same exact args shape', () => {
+    const d = decide({
+      argsShape: 'shape_a',
+      standingRules: [
+        rule({ id: 'allow', argsShape: 'shape_a' }),
+        rule({ id: 'deny', argsShape: 'shape_a', decision: 'deny' }),
+      ],
+    })
+    expect(d.kind).toBe('deny')
+  })
+
+  it('still lets an exact ALLOW beat an any-args deny (specificity outranks deny)', () => {
+    // Deny wins WITHIN a level, not across them: a broad "deny everything" plus a
+    // narrow "allow this one shape" is a user deliberately carving an exception.
+    const d = decide({
+      argsShape: 'shape_a',
+      standingRules: [
+        rule({ id: 'anyDeny', decision: 'deny' }),
+        rule({ id: 'exactAllow', argsShape: 'shape_a' }),
+      ],
+    })
+    expect(d.kind).toBe('allow')
+    if (d.kind === 'allow') expect(d.ruleId).toBe('exactAllow')
+  })
+
   it('never honours a rule for a never-remembered tool', () => {
     const d = decide({ tool: tool({ neverRemember: true }), standingRules: [rule()] })
     expect(d.kind).toBe('require_approval')

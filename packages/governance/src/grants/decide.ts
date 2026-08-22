@@ -73,16 +73,33 @@ function findStandingRule(
   now: number,
 ): StandingRule | null {
   if (!rules) return null
+  let exactMatch: StandingRule | null = null
   let anyArgsMatch: StandingRule | null = null
   for (const r of rules) {
     if (r.grantId !== grantId || r.toolName !== toolName) continue
     if (r.expiresAt !== null && r.expiresAt <= now) continue
     // An exact args-shape match is strictly more specific than a rule that
     // covers any arguments, so it wins outright.
-    if (r.argsShape !== null && r.argsShape === argsShape) return r
-    if (r.argsShape === null) anyArgsMatch = r
+    //
+    // WITHIN one specificity level, deny beats allow regardless of row order.
+    // Conflicting rows are reachable: a user mints a deny while an older allow
+    // for the same shape is still on file. Returning whichever the array happened
+    // to list first would let a superseded allow resurrect a call the user has
+    // since forbidden. `isToolInScope` already evaluates deny after
+    // allow for exactly this reason; standing rules must not be the one place
+    // where precedence is an accident of insertion order.
+    if (r.argsShape !== null && r.argsShape === argsShape) {
+      if (r.decision === 'deny') return r
+      exactMatch ??= r
+    } else if (r.argsShape === null) {
+      // Take `r` when nothing is held yet, or when `r` upgrades an allow to a deny.
+      // Written without a self-reference on the right-hand side: TS cannot narrow
+      // `anyArgsMatch` through a circular assignment and collapses it to `never`.
+      const upgradesToDeny = r.decision === 'deny' && anyArgsMatch?.decision !== 'deny'
+      if (anyArgsMatch === null || upgradesToDeny) anyArgsMatch = r
+    }
   }
-  return anyArgsMatch
+  return exactMatch ?? anyArgsMatch
 }
 
 /**
