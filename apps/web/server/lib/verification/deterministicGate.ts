@@ -107,13 +107,20 @@ export async function runDeterministicGate(
   // A helper that validates and then RETURNS the path hands the caller a value
   // that reads as unchecked, both to a reviewer skimming the call site and to
   // static analysis; keeping the test and the use in one place means the thing
-  // being spawned into is visibly the thing that was just tested. The root is
-  // compared WITH a trailing separator, so a sibling directory that merely
-  // shares its spelling is not mistaken for something inside it.
+  // being spawned into is visibly the thing that was just tested.
+  //
+  // Containment is ONE test: the resolved path has to start with the state root
+  // plus a trailing separator. The separator is what stops a sibling that merely
+  // shares the root's spelling (`~/.clawboo-old` against `~/.clawboo`) from
+  // reading as something inside it. The state root itself does not pass either,
+  // which is right: every checkout clawboo provisions lands several segments
+  // down (`worktrees/<repo-hash>/<task-id>`), so a path arriving equal to the
+  // root is the same broken record as one pointing outside, and earns the same
+  // answer.
   const stateRoot = path.resolve(resolveClawbooDir())
   const stateRootPrefix = stateRoot.endsWith(path.sep) ? stateRoot : stateRoot + path.sep
   const worktreePath = path.resolve(input.worktreePath)
-  if (worktreePath !== stateRoot && !worktreePath.startsWith(stateRootPrefix)) {
+  if (!worktreePath.startsWith(stateRootPrefix)) {
     throw new Error(`worktree path is outside the clawboo state directory: ${worktreePath}`)
   }
   const command = await resolveVerifyCommand(worktreePath, input.verifyCommand)
