@@ -33,6 +33,20 @@ export class ReservedMcpServerNameError extends Error {
   }
 }
 
+/** A spec that cannot produce a usable server block: HTTP without a url, or
+ *  stdio without a command. Both fields are optional on `CanonicalMcpServer`
+ *  because one transport's required field is the other's dead weight, so the
+ *  pairing has to be enforced here. Emitting `url = ""` instead would write a
+ *  config the runtime accepts and can never connect with, which is the worst of
+ *  the three outcomes: no error at write time, no error at parse time, and a
+ *  connector that silently never works. */
+export class IncompleteMcpSpecError extends Error {
+  constructor(public readonly detail: string) {
+    super(`incomplete MCP server spec: ${detail}`)
+    this.name = 'IncompleteMcpSpecError'
+  }
+}
+
 /** An existing config file that is not parseable JSON. Never overwrite one. */
 export class UnparseableMcpConfigError extends Error {
   constructor(public readonly detail: string) {
@@ -58,6 +72,11 @@ function assertSafeServer(spec: CanonicalMcpServer): void {
     throw new ReservedMcpServerNameError(spec.name)
   for (const k of Object.keys(spec.env ?? {})) {
     if (!VALID_ENV_KEY.test(k)) throw new InvalidMcpIdentError(k)
+  }
+  if (spec.transport === 'stdio') {
+    if (!spec.command) throw new IncompleteMcpSpecError(`stdio server ${spec.name} has no command`)
+  } else if (!spec.url) {
+    throw new IncompleteMcpSpecError(`${spec.transport} server ${spec.name} has no url`)
   }
 }
 

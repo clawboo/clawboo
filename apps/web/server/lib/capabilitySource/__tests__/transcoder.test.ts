@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  IncompleteMcpSpecError,
   InvalidMcpIdentError,
   ReservedMcpServerNameError,
   UnparseableMcpConfigError,
@@ -67,6 +68,30 @@ describe('transcoder — dialects', () => {
     expect(transcodeServer('hermes', { name: 'x', transport: 'http', url: 'u' }).format).toBe(
       'json',
     )
+  })
+})
+
+describe('transcoder — incomplete specs', () => {
+  // `command` and `url` are both optional on CanonicalMcpServer because each is
+  // dead weight for the other transport. Nothing else enforces the pairing, so a
+  // spec missing its own transport's field used to transcode into `url = ""` or
+  // `command: ''`: a block the runtime happily writes and can never connect with.
+  it('rejects an http spec with no url, in every dialect', () => {
+    const spec = { name: 'x', transport: 'http' } as const
+    expect(() => toJsonEntry(spec)).toThrow(IncompleteMcpSpecError)
+    expect(() => toCodexTomlBlock(spec)).toThrow(IncompleteMcpSpecError)
+  })
+
+  it('rejects an http spec with an EMPTY url', () => {
+    expect(() => toJsonEntry({ name: 'x', transport: 'http', url: '' })).toThrow(
+      IncompleteMcpSpecError,
+    )
+  })
+
+  it('rejects a stdio spec with no command', () => {
+    const spec = { name: 'x', transport: 'stdio' } as const
+    expect(() => toJsonEntry(spec)).toThrow(IncompleteMcpSpecError)
+    expect(() => toCodexTomlBlock(spec)).toThrow(IncompleteMcpSpecError)
   })
 })
 
