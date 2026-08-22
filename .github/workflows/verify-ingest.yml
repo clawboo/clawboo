@@ -36,6 +36,8 @@ on:
       - 'scripts/ingest-manifest.json'
       - 'apps/web/src/features/marketplace/agents/**'
       - 'apps/web/src/features/marketplace/teams/**'
+      - 'scripts/verify-connectors.ts'
+      - 'packages/connector-catalog/**'
       - '.github/workflows/verify-ingest.yml'
   workflow_dispatch: {}
 
@@ -81,6 +83,14 @@ jobs:
       - run: pnpm verify:ingest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The connector catalog's LIVE leg: re-resolve every pinned npm version and
+      # dial every remote endpoint. It rides here rather than in `ci.yml` for the
+      # same reason the marketplace live check does — a yanked package or a
+      # vendor's outage is real news, but it must not be able to redden a PR or
+      # hold up a release. Needs no token: npm and the MCP endpoints are public,
+      # and a 401 from an OAuth-protected server is the expected answer.
+      - run: pnpm verify:connectors --live
 
   report:
     name: File a drift issue

@@ -211,6 +211,29 @@ jobs:
       # `verify-ingest.yml` (weekly + on PRs that touch the ingest scripts).
       - run: pnpm verify:catalog
 
+  verify-connectors:
+    name: Verify connector catalog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # OFFLINE, and a SEPARATE job from verify-catalog on purpose: this one must
+      # run in a context with no token and no upstream dependency, so a yanked npm
+      # version or a connector vendor's outage can never redden a PR that did not
+      # touch the catalog. The LIVE half — re-resolving every pinned package and
+      # dialing every remote endpoint — runs in `verify-ingest.yml` (weekly + on
+      # PRs that touch the catalog).
+      - run: pnpm verify:connectors
+
   smoke-test-bundle:
     name: Smoke test bundled CLI (clean install simulation)
     strategy:
