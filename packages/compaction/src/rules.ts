@@ -92,8 +92,17 @@ function endOfElement(s: string, from: number, name: string): number {
     at = s.indexOf('</', at)
     if (at === -1) return -1
     const nameAt = at + 2
-    if (s.slice(nameAt, nameAt + name.length).toLowerCase() === name) {
-      const gt = s.indexOf('>', nameAt + name.length)
+    const nameEnd = nameAt + name.length
+    // The name has to END here, not merely start here: `</scripture>` closes no
+    // `<script>`. What may follow is the `>` itself, or whitespace before any
+    // trailing junk a browser would ignore (`</script >`, `</style foo>`).
+    const after = s[nameEnd]
+    if (
+      s.slice(nameAt, nameEnd).toLowerCase() === name &&
+      after !== undefined &&
+      (after === '>' || /\s/.test(after))
+    ) {
+      const gt = s.indexOf('>', nameEnd)
       return gt === -1 ? -1 : gt + 1
     }
     at = nameAt

@@ -95,6 +95,13 @@ describe('builtin rules (pure transforms)', () => {
     expect(performance.now() - started).toBeLessThan(1000)
   })
 
+  it('html-to-text does not close a script on a longer tag name', () => {
+    // `</scripture>` is not a `</script>`, so the element stays unclosed and its
+    // body falls through as text rather than being swallowed to that tag.
+    expect(htmlToText('<script>secret</scripture>')).toContain('secret')
+    expect(htmlToText('<script>gone</script >tail')).toBe('tail')
+  })
+
   it('html-to-text keeps a bare angle bracket that opens nothing', () => {
     expect(htmlToText('<p>2 < 3')).toBe('2 < 3')
   })
