@@ -38,6 +38,13 @@ export const ORCHESTRATION_EVENT_KINDS = [
   'team_chat_post',
   'speaker_selected',
   'turn_bound_hit',
+  // ─── Connector / grant plane ──────────────────────────────────────────────
+  // A grant DECISION is its own kind rather than a field on `tool_call`, because
+  // the interesting ones are the calls that never happened: a denial produces no
+  // tool_call at all, so folding it in would make the deny path invisible in the
+  // very stream you would use to audit it.
+  'grant_decision',
+  'connector_health',
 ] as const
 
 export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number]
@@ -116,6 +123,37 @@ export interface ToolCallData {
   toolCallId: string
   name: string
   input?: unknown
+  /**
+   * Attribution. Optional so every existing producer compiles unchanged.
+   *
+   * Without these the only join key is the tool NAME, which is unprefixed and
+   * collides across servers by design — so a UI could not tell which connector
+   * a call belonged to, and "which grants fired overnight" had no answer.
+   */
+  grantId?: string | null
+  connectorId?: string | null
+}
+
+export interface GrantDecisionData {
+  /** `allow` | `require_approval` | `deny` — the verdict `decideGrant` returned. */
+  decision: string
+  /** The typed reason, e.g. `tool-not-in-scope`, `lethal-trifecta`. */
+  reason?: string | null
+  grantId?: string | null
+  connectorId?: string | null
+  toolName: string
+  /** Set when a standing rule short-circuited the decision. */
+  ruleId?: string | null
+}
+
+export interface ConnectorHealthData {
+  connectorId: string
+  /** Mirrors `CapabilityHealth`: unknown | ok | needs-auth | degraded | error | drift. */
+  health: string
+  /** One scrubbed line. Never a secret, never a stack. */
+  detail?: string | null
+  /** Consecutive failures behind a degraded/error transition. */
+  failures?: number
 }
 export interface ToolResultData {
   toolCallId: string
@@ -249,6 +287,8 @@ export interface KindToData {
   team_chat_post: TeamChatPostData
   speaker_selected: SpeakerSelectedData
   turn_bound_hit: TurnBoundHitData
+  grant_decision: GrantDecisionData
+  connector_health: ConnectorHealthData
 }
 
 /** A producer-side typed event: the envelope minus the server-assigned bits, plus

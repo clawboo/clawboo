@@ -123,7 +123,20 @@ function readRecentEvents(req: Request): OrchestrationEvent[] {
 // observes — board lifecycle events are already emitted server-side by the board
 // REST handlers, never accepted here. Best-effort per event (one bad row never
 // fails the batch).
-const INGEST_KINDS = new Set<OrchestrationEventKind>(['tool_call', 'tool_result', 'error'])
+// Kinds a RUNTIME MIRROR is allowed to push. Deliberately a hard allowlist, not
+// the full kind union: an external process must not be able to forge a
+// `status_changed` or an `approval_resolved`.
+//
+// `grant_decision` and `connector_health` are included because a brokered call
+// can originate in any of the five runtimes, and a decision the mirror cannot
+// report is a decision the audit stream silently loses.
+const INGEST_KINDS = new Set<OrchestrationEventKind>([
+  'tool_call',
+  'tool_result',
+  'error',
+  'grant_decision',
+  'connector_health',
+])
 const MAX_INGEST_BATCH = 200
 /** Tolerated clock skew ahead of the server for a mirrored event. */
 const INGEST_MAX_AHEAD_MS = 60_000
