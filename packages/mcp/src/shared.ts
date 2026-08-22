@@ -94,7 +94,31 @@ export function zodObjectToJsonSchema(obj: z.ZodObject<z.ZodRawShape>): {
  * the matching handler (validating args with the tool's zod schema first).
  */
 export function buildServer(name: string, tools: ToolDef[]): Server {
-  const server = new Server({ name, version: MCP_SERVER_VERSION }, { capabilities: { tools: {} } })
+  // `listChanged: true` is a CAPABILITY DECLARATION, not a promise that we push
+  // on every change — a client that does not see it will never listen, so it must
+  // be declared before any notification can matter. Without it, a connector
+  // granted mid-session stays invisible to an attached runtime until it
+  // reconnects, and a revoked one keeps being called until the model gives up.
+  const server = new Server(
+    { name, version: MCP_SERVER_VERSION },
+    { capabilities: { tools: { listChanged: true } } },
+  )
+
+  // Dispatch below is `tools.find(...)` — FIRST match wins, silently. That is
+  // fine while every ToolDef is ours, and becomes a shadowing bug the moment a
+  // third-party tool set is composed in: the duplicate would render in tools/list
+  // and never be the one that runs. Assert uniqueness here, at the seam where a
+  // duplicate can first be introduced, rather than discovering it at call time.
+  const seen = new Set<string>()
+  for (const t of tools) {
+    if (seen.has(t.name)) {
+      throw new Error(
+        `duplicate MCP tool name "${t.name}" in server "${name}" — ` +
+          'namespace one of them before composing the tool set.',
+      )
+    }
+    seen.add(t.name)
+  }
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: tools.map((t) => ({

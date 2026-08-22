@@ -13,14 +13,6 @@ import type { CanonicalMcpServer } from '@clawboo/capability-registry'
 
 export type McpDialect = 'claude-code' | 'codex' | 'hermes'
 
-/** A non-stdio server handed to a stdio-only dialect (Codex). */
-export class NonStdioUnsupportedError extends Error {
-  constructor(public readonly dialect: McpDialect) {
-    super(`dialect '${dialect}' supports stdio MCP servers only`)
-    this.name = 'NonStdioUnsupportedError'
-  }
-}
-
 /** A server name / env key that is not a safe identifier — interpolating it raw
  *  would let it break out of the TOML header (`[mcp_servers.<name>]`) or JSON key
  *  and inject an attacker-controlled server block. */
@@ -41,7 +33,20 @@ export class ReservedMcpServerNameError extends Error {
   }
 }
 
-const VALID_MCP_NAME = /^[A-Za-z0-9_.-]{1,64}$/
+/** An existing config file that is not parseable JSON. Never overwrite one. */
+export class UnparseableMcpConfigError extends Error {
+  constructor(public readonly detail: string) {
+    super(`existing MCP config is not valid JSON: ${detail}`)
+    this.name = 'UnparseableMcpConfigError'
+  }
+}
+
+// NOTE: `.` is deliberately EXCLUDED. It is legal in a JSON key, but the same
+// name is interpolated into a TOML table header, where `[mcp_servers.a.b]`
+// declares a table `b` nested under `a` — so Codex would register a server named
+// `b` and `mergeTomlMcpServer` could never find it again. One shared charset
+// keeps a name meaning the same thing in every dialect.
+const VALID_MCP_NAME = /^[A-Za-z0-9_-]{1,64}$/
 const VALID_ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /** Make header/key interpolation structurally safe regardless of dialect: a name
@@ -80,10 +85,19 @@ export function toJsonEntry(spec: CanonicalMcpServer): Record<string, unknown> {
   }
 }
 
-/** Codex TOML block — stdio only (rejects http). */
+/**
+ * Codex TOML block.
+ *
+ * HTTP is supported via `url = …`, NOT refused. This previously threw
+ * `NonStdioUnsupportedError` for any non-stdio spec while the repo's own
+ * `codexDriver.ts` writes exactly that block in production — the driver is the
+ * one that ships, so the transcoder was simply wrong.
+ */
 export function toCodexTomlBlock(spec: CanonicalMcpServer): string {
-  if (spec.transport !== 'stdio') throw new NonStdioUnsupportedError('codex')
   assertSafeServer(spec)
+  if (spec.transport !== 'stdio') {
+    return [`[mcp_servers.${spec.name}]`, `url = ${tomlString(spec.url ?? '')}`].join('\n')
+  }
   const lines = [`[mcp_servers.${spec.name}]`, `command = ${tomlString(spec.command ?? '')}`]
   lines.push(`args = [${(spec.args ?? []).map(tomlString).join(', ')}]`)
   if (spec.env && Object.keys(spec.env).length > 0) {
@@ -110,8 +124,14 @@ export function mergeJsonMcpServers(
   if (existing && existing.trim()) {
     try {
       parsed = JSON.parse(existing) as { mcpServers?: Record<string, unknown> }
-    } catch {
-      parsed = {}
+    } catch (err) {
+      // THROW, do not reset. The previous `parsed = {}` looked like a tolerant
+      // fallback and was silent data loss: the returned string contained only the
+      // new server, so writing it back over the user's config deleted every other
+      // MCP server and every other top-level key in the file. A config we cannot
+      // parse is a config we must not rewrite — the caller has to decide whether
+      // to back it up, ask, or abort, and it can only do that if it is told.
+      throw new UnparseableMcpConfigError(err instanceof Error ? err.message : String(err))
     }
   }
   const servers = { ...(parsed.mcpServers ?? {}) }
@@ -158,8 +178,27 @@ export interface TranscodeResult {
   block?: string
 }
 
-/** Dialect the canonical spec for a runtime; the caller merges into the file. */
+/**
+ * Dialect the canonical spec for a runtime; the caller merges into the file.
+ *
+ * Switches EXHAUSTIVELY rather than falling through to JSON. The fall-through
+ * silently aliased `'hermes'` to the Claude Code dialect, which is a guess — and
+ * a guess that produces a plausible-looking file is worse than an error, because
+ * nothing downstream can tell it was one. Adding a dialect now fails to compile
+ * until it is handled.
+ */
 export function transcodeServer(dialect: McpDialect, spec: CanonicalMcpServer): TranscodeResult {
-  if (dialect === 'codex') return { format: 'toml', block: toCodexTomlBlock(spec) }
-  return { format: 'json', entry: toJsonEntry(spec) }
+  switch (dialect) {
+    case 'codex':
+      return { format: 'toml', block: toCodexTomlBlock(spec) }
+    case 'claude-code':
+    case 'hermes':
+      // Same shape today (`{ mcpServers: { name: entry } }`), but reached
+      // deliberately rather than by default.
+      return { format: 'json', entry: toJsonEntry(spec) }
+    default: {
+      const exhaustive: never = dialect
+      throw new Error(`unsupported MCP dialect: ${String(exhaustive)}`)
+    }
+  }
 }

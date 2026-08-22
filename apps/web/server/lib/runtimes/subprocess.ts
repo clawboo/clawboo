@@ -44,7 +44,12 @@ let shuttingDown = false
  * it runs inside a signal handler, just before `process.exit`.
  */
 export function killLiveSubprocesses(): number {
-  shuttingDown = false
+  // `true`, not `false`. The flag exists so a run that spawns AFTER shutdown
+  // begins is killed the moment it registers (see the registration guard). This
+  // function runs from the synchronous 'exit' hook, i.e. AFTER the async
+  // graceful path — clearing the flag here re-opened the exact window the flag
+  // was added to close, letting a late child outlive the server.
+  shuttingDown = true
   const count = liveChildren.size
   for (const child of liveChildren) {
     try {

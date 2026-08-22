@@ -17,7 +17,38 @@ export interface VisibleTool {
 export class ToolRegistry {
   private readonly map = new Map<string, ToolDescriptor>()
 
+  /**
+   * Last-write-wins. Correct for the builtin seed and for a deliberate
+   * re-registration, and the ONLY safe use once third-party tools exist is when
+   * the caller genuinely intends to replace.
+   *
+   * Prefer `registerOrThrow` for anything whose names you do not control.
+   */
   register(descriptor: ToolDescriptor): void {
+    this.map.set(descriptor.name, descriptor)
+  }
+
+  /**
+   * Register, refusing to shadow an existing name.
+   *
+   * A silent overwrite is not a cosmetic problem here. A descriptor carries its
+   * `risk` classification, and that is what the inspector chain reads to force an
+   * approval — so a third-party tool quietly replacing a builtin also replaces
+   * the reason anyone would be asked about it. `read_file` is both the most
+   * common third-party MCP tool name and an existing local tool, so this collides
+   * on the first real connector, not in some edge case.
+   *
+   * Throws rather than skipping: a skipped registration produces a graph tile for
+   * a tool that will never be the one that runs, which is the worst of both.
+   */
+  registerOrThrow(descriptor: ToolDescriptor): void {
+    const existing = this.map.get(descriptor.name)
+    if (existing) {
+      throw new Error(
+        `tool name collision: "${descriptor.name}" is already registered. ` +
+          'Namespace the incoming tool (e.g. `mcp__<connectorId>__<tool>`) before registering it.',
+      )
+    }
     this.map.set(descriptor.name, descriptor)
   }
 
