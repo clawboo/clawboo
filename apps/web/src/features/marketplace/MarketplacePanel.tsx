@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Blocks, Bot, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
+import { Blocks, Bot, Plug, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { Select } from '@/features/shared/Select'
 import { Button } from '@/features/shared/Button'
@@ -41,6 +41,8 @@ import { TeamTemplateDetail } from './TeamTemplateDetail'
 import { AgentCard } from './AgentCard'
 import { AgentTemplateDetail } from './AgentTemplateDetail'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { ConnectorsBrowser } from './ConnectorsBrowser'
+import { CURATED_CONNECTORS } from '@clawboo/connector-catalog'
 
 // ─── Skill category colours ─────────────────────────────────────────────────
 // Token-driven palette shared with SkillNode.tsx via `--category-*`.
@@ -367,6 +369,7 @@ export function MarketplacePanel() {
   const isAgentsTab = marketplaceTab === 'agents'
   const isTeamsTab = marketplaceTab === 'teams'
   const isSkillsTab = marketplaceTab === 'skills'
+  const isConnectorsTab = marketplaceTab === 'connectors'
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -410,124 +413,135 @@ export function MarketplacePanel() {
             { id: 'teams', label: 'Teams', icon: Users, count: TEAM_CATALOG.length },
             { id: 'agents', label: 'Agents', icon: Bot, count: AGENT_CATALOG.length },
             { id: 'skills', label: 'Skills', icon: Wrench, count: SKILL_CATALOG.length },
+            {
+              id: 'connectors',
+              label: 'Connectors',
+              icon: Plug,
+              count: CURATED_CONNECTORS.length,
+            },
           ]}
         />
       </div>
 
+      {/* Connectors owns its own filter bar + body, so the shared one is skipped. */}
+      {isConnectorsTab && <ConnectorsBrowser />}
+
       {/* Filter bar */}
-      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
-        {isTeamsTab && (
-          <>
-            {/* Team search */}
-            <SearchInput
-              size="sm"
-              placeholder="Search teams…"
-              value={teamSearchQuery}
-              onChange={setTeamSearchQuery}
-            />
+      {!isConnectorsTab && (
+        <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
+          {isTeamsTab && (
+            <>
+              {/* Team search */}
+              <SearchInput
+                size="sm"
+                placeholder="Search teams…"
+                value={teamSearchQuery}
+                onChange={setTeamSearchQuery}
+              />
 
-            {/* Team category pills — popular inline, the rest under "+N more" */}
-            <CollapsiblePillRow
-              aria-label="Filter teams by category"
-              options={teamCategoryOpts}
-              activeKey={teamCategoryFilter}
-              onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
-            />
+              {/* Team category pills — popular inline, the rest under "+N more" */}
+              <CollapsiblePillRow
+                aria-label="Filter teams by category"
+                options={teamCategoryOpts}
+                activeKey={teamCategoryFilter}
+                onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
+              />
 
-            {/* Team source pills */}
-            <div className="flex flex-wrap gap-1.5">
-              {TEAM_SOURCE_ENTRIES.map((src) => (
-                <Chip
-                  key={src.key}
-                  size="sm"
-                  active={teamSourceFilter === src.key}
-                  accent={src.key === 'all' ? undefined : src.color}
-                  onClick={() => setTeamSourceFilter(src.key)}
-                >
-                  {src.key !== 'all' && (
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{ background: src.color }}
-                    />
-                  )}
-                  {src.label}
-                </Chip>
-              ))}
-            </div>
-          </>
-        )}
-
-        {isAgentsTab && (
-          <>
-            {/* Agent search */}
-            <SearchInput
-              size="sm"
-              placeholder="Search agents…"
-              value={agentSearchQuery}
-              onChange={setAgentSearchQuery}
-            />
-
-            {/* Agent domain pills — popular inline, the rest under "+N more" */}
-            <CollapsiblePillRow
-              aria-label="Filter agents by domain"
-              options={domainOptions}
-              activeKey={agentDomainFilter}
-              onSelect={(k) => setAgentDomainFilter(k as AgentDomain | 'all')}
-            />
-
-            {/* Agent source pills */}
-            <div className="flex flex-wrap gap-1.5">
-              {TEAM_SOURCE_ENTRIES.map((src) => (
-                <Chip
-                  key={src.key}
-                  size="sm"
-                  active={agentSourceFilter === src.key}
-                  accent={src.key === 'all' ? undefined : src.color}
-                  onClick={() => setAgentSourceFilter(src.key)}
-                >
-                  {src.key !== 'all' && (
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{ background: src.color }}
-                    />
-                  )}
-                  {src.label}
-                </Chip>
-              ))}
-            </div>
-          </>
-        )}
-
-        {isSkillsTab && (
-          <>
-            {/* Skill search */}
-            <SearchInput
-              size="sm"
-              placeholder="Search skills…"
-              value={searchQuery}
-              onChange={setSearchQuery}
-            />
-
-            {/* Skill category pills */}
-            <div className="flex flex-wrap gap-1.5">
-              {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
-                const { color, label } = CATEGORY_META[key]
-                return (
+              {/* Team source pills */}
+              <div className="flex flex-wrap gap-1.5">
+                {TEAM_SOURCE_ENTRIES.map((src) => (
                   <Chip
-                    key={key}
+                    key={src.key}
                     size="sm"
-                    active={categoryFilter === key}
-                    accent={key === 'all' ? undefined : color}
-                    onClick={() => setCategoryFilter(key)}
+                    active={teamSourceFilter === src.key}
+                    accent={src.key === 'all' ? undefined : src.color}
+                    onClick={() => setTeamSourceFilter(src.key)}
                   >
-                    {label}
+                    {src.key !== 'all' && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ background: src.color }}
+                      />
+                    )}
+                    {src.label}
                   </Chip>
-                )
-              })}
-            </div>
-          </>
-        )}
-      </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {isAgentsTab && (
+            <>
+              {/* Agent search */}
+              <SearchInput
+                size="sm"
+                placeholder="Search agents…"
+                value={agentSearchQuery}
+                onChange={setAgentSearchQuery}
+              />
+
+              {/* Agent domain pills — popular inline, the rest under "+N more" */}
+              <CollapsiblePillRow
+                aria-label="Filter agents by domain"
+                options={domainOptions}
+                activeKey={agentDomainFilter}
+                onSelect={(k) => setAgentDomainFilter(k as AgentDomain | 'all')}
+              />
+
+              {/* Agent source pills */}
+              <div className="flex flex-wrap gap-1.5">
+                {TEAM_SOURCE_ENTRIES.map((src) => (
+                  <Chip
+                    key={src.key}
+                    size="sm"
+                    active={agentSourceFilter === src.key}
+                    accent={src.key === 'all' ? undefined : src.color}
+                    onClick={() => setAgentSourceFilter(src.key)}
+                  >
+                    {src.key !== 'all' && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ background: src.color }}
+                      />
+                    )}
+                    {src.label}
+                  </Chip>
+                ))}
+              </div>
+            </>
+          )}
+
+          {isSkillsTab && (
+            <>
+              {/* Skill search */}
+              <SearchInput
+                size="sm"
+                placeholder="Search skills…"
+                value={searchQuery}
+                onChange={setSearchQuery}
+              />
+
+              {/* Skill category pills */}
+              <div className="flex flex-wrap gap-1.5">
+                {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
+                  const { color, label } = CATEGORY_META[key]
+                  return (
+                    <Chip
+                      key={key}
+                      size="sm"
+                      active={categoryFilter === key}
+                      accent={key === 'all' ? undefined : color}
+                      onClick={() => setCategoryFilter(key)}
+                    >
+                      {label}
+                    </Chip>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Grid */}
       <div className="flex-1 overflow-y-auto p-6">

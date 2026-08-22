@@ -19,7 +19,7 @@ export interface InstalledSkillRecord {
 
 // ─── Store ──────────────────────────────────────────────────────────────────────
 
-export type MarketplaceTab = 'skills' | 'agents' | 'teams'
+export type MarketplaceTab = 'skills' | 'agents' | 'teams' | 'connectors'
 
 export type SortBy = 'name' | 'category'
 
@@ -66,6 +66,14 @@ interface MarketplaceStore {
   /** Category filter for agent catalog (reserved — not wired to UI yet) */
   agentCategoryFilter: TemplateCategory | 'all'
 
+  /** Search query for the connector directory */
+  connectorSearchQuery: string
+
+  /** Category filter for the connector directory. Typed as a plain string so the
+   *  store does not take a dependency on @clawboo/connector-catalog — the browser
+   *  narrows it at the call site. */
+  connectorCategoryFilter: string
+
   // ─── Actions ────────────────────────────────────────────────────────────────
 
   /** Replace full installed skills list and rebuild the per-agent Map. */
@@ -89,6 +97,8 @@ interface MarketplaceStore {
   setAgentDomainFilter: (d: AgentDomain | 'all') => void
   setAgentSourceFilter: (s: TemplateSource | 'all') => void
   setAgentCategoryFilter: (c: TemplateCategory | 'all') => void
+  setConnectorSearchQuery: (q: string) => void
+  setConnectorCategoryFilter: (c: string) => void
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -127,6 +137,8 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   agentDomainFilter: 'all',
   agentSourceFilter: 'all',
   agentCategoryFilter: 'all',
+  connectorSearchQuery: '',
+  connectorCategoryFilter: 'all',
 
   hydrateInstalled: (records) =>
     set({ installedSkills: records, installedByAgent: buildByAgentIndex(records) }),
@@ -184,4 +196,6 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   setAgentDomainFilter: (agentDomainFilter) => set({ agentDomainFilter }),
   setAgentSourceFilter: (agentSourceFilter) => set({ agentSourceFilter }),
   setAgentCategoryFilter: (agentCategoryFilter) => set({ agentCategoryFilter }),
+  setConnectorSearchQuery: (connectorSearchQuery) => set({ connectorSearchQuery }),
+  setConnectorCategoryFilter: (connectorCategoryFilter) => set({ connectorCategoryFilter }),
 }))
