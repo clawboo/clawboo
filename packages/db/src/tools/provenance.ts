@@ -18,11 +18,13 @@ function b64urlToBytes(s: string): Uint8Array {
 }
 
 function bytesToB64url(bytes: Uint8Array): string {
-  return Buffer.from(bytes)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
+  const b64 = Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_')
+  // Walk back over the padding run rather than matching a trailing `=+`: a
+  // trailing-run pattern re-measures the whole run from every position the run
+  // could have started at.
+  let end = b64.length
+  while (end > 0 && b64[end - 1] === '=') end--
+  return b64.slice(0, end)
 }
 
 /** The canonical bytes a provenance signature covers: name + description. */

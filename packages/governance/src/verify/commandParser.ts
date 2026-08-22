@@ -27,7 +27,11 @@ function rejectPlaceholder(cmd: string): string | null {
 
 /** Parse `VERIFY_CMD='…'` out of an init.sh body. Returns null if absent or the placeholder. */
 export function parseVerifyCommand(initShText: string): string | null {
-  const m = initShText.match(/^\s*(?:export\s+)?VERIFY_CMD=(.+?)\s*$/m)
+  // Whitespace classes are horizontal-only ([^\S\n]) so no quantifier can span a
+  // line break, and the value capture is greedy to end-of-line: matching stays
+  // linear on hostile bodies (e.g. a value padded with an enormous run of
+  // spaces). Trailing whitespace in the capture is trimmed by unquoteSingle.
+  const m = initShText.match(/^[^\S\n]*(?:export[^\S\n]+)?VERIFY_CMD=(.+)$/m)
   if (!m) return null
   return rejectPlaceholder(unquoteSingle(m[1] ?? ''))
 }

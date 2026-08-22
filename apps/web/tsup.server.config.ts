@@ -19,6 +19,11 @@ export default defineConfig({
   noExternal: [
     /^@clawboo\//,
     'express',
+    // Express middleware has to ship wherever express does. Left external it
+    // would be a bare require against a node_modules a clean `npx clawboo`
+    // install does not have, and the server would die on boot rather than
+    // degrade.
+    'express-rate-limit',
     'cors',
     'drizzle-orm',
     '@noble/ed25519',

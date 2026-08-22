@@ -6,12 +6,25 @@ import { getDb } from '../lib/db'
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { nativeTeamSessionSettingKey } from '../lib/teamChat/nativeTeamSession'
 
+/**
+ * One query parameter as a string, or '' for anything else.
+ *
+ * The TYPE of a query value is the caller's choice, not ours: a repeated key
+ * (`?k=a&k=b`) arrives as an array and a bracketed one (`?k[x]=y`) as an object.
+ * A cast says otherwise but checks nothing, so an array would reach the string
+ * methods below and the database comparison as an array. Narrowing here means
+ * every reader downstream really is handling a string.
+ */
+function queryString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 // ─── GET /api/chat-history?sessionKey=<key>&limit=<n> ─────────────────────────
 // Returns the last N transcript entries for a session, ordered by timestamp ASC.
 
 export async function chatHistoryGET(req: Request, res: Response): Promise<void> {
-  const sessionKey = (req.query['sessionKey'] as string | undefined) ?? ''
-  const limitParam = req.query['limit'] as string | undefined
+  const sessionKey = queryString(req.query['sessionKey'])
+  const limitParam = queryString(req.query['limit'])
   const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 200, 1000) : 200
 
   if (!sessionKey) {
@@ -91,11 +104,36 @@ export async function chatHistoryPOST(req: Request, res: Response): Promise<void
   }
 }
 
+// ─── Session-key parsing ──────────────────────────────────────────────────────
+
+/** Parse a team session key (`agent:<agentId>:team:<teamId>`) into its ids, or
+ *  null when the key isn't team-shaped. The key arrives verbatim from the query
+ *  string, so the parse is plain single-pass string scanning: cost stays linear
+ *  no matter how many `:team:` fragments a hostile key packs in. Ids are
+ *  colon-free in practice (native agent ids are slugs, team ids are UUIDs); if a
+ *  key does embed extra `:team:` fragments, the rightmost one with a non-empty
+ *  id on each side is the separator. */
+export function parseTeamSessionKey(
+  sessionKey: string,
+): { agentId: string; teamId: string } | null {
+  const prefix = 'agent:'
+  const sep = ':team:'
+  // Ids never contain line breaks; a key smuggling one is malformed input.
+  if (!sessionKey.startsWith(prefix) || /[\r\n\u2028\u2029]/.test(sessionKey)) return null
+  const rest = sessionKey.slice(prefix.length)
+  let at = rest.lastIndexOf(sep)
+  // A key ending exactly in `:team:` has an empty team id at that occurrence;
+  // fall back to the previous one (which always has a non-empty tail).
+  if (at !== -1 && at + sep.length === rest.length) at = rest.lastIndexOf(sep, at - 1)
+  if (at <= 0) return null
+  return { agentId: rest.slice(0, at), teamId: rest.slice(at + sep.length) }
+}
+
 // ─── DELETE /api/chat-history?sessionKey=<key> ────────────────────────────────
 // Clears all messages for a session (used when agent is deleted).
 
 export async function chatHistoryDELETE(req: Request, res: Response): Promise<void> {
-  const sessionKey = (req.query['sessionKey'] as string | undefined) ?? ''
+  const sessionKey = queryString(req.query['sessionKey'])
   if (!sessionKey) {
     res.status(400).json({ error: 'sessionKey required' })
     return
@@ -113,8 +151,8 @@ export async function chatHistoryDELETE(req: Request, res: Response): Promise<vo
     // continuity for the leader/user-facing turn. Clearing its history = a fresh
     // conversation, so drop the per-(agent, team) resume pointer too (else the leader
     // would still "remember" the wiped turns).
-    const teamMatch = sessionKey.match(/^agent:(.+):team:(.+)$/)
-    if (teamMatch) setSetting(db, nativeTeamSessionSettingKey(teamMatch[1]!, teamMatch[2]!), '')
+    const teamKey = parseTeamSessionKey(sessionKey)
+    if (teamKey) setSetting(db, nativeTeamSessionSettingKey(teamKey.agentId, teamKey.teamId), '')
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

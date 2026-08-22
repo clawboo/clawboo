@@ -316,12 +316,12 @@ export async function actOnTaskWorkspace(
   const worktree = await loadWorktree({ repoPath: ws.repoPath, taskId, rootDir })
 
   if (action === 'pause') {
-    const pause = await pauseWorktree(ws.repoPath, worktree)
+    const pause = await pauseWorktree(ws.repoPath, worktree, rootDir)
     updateWorkspaceStatus(db, ws.id, 'active', { lastUsedAt: Date.now() })
     return { ok: true, action: 'pause', pause }
   }
 
-  const complete = await completeWorktree(ws.repoPath, worktree)
+  const complete = await completeWorktree(ws.repoPath, worktree, rootDir)
 
   // Empty diff → land the task without a verification gate. An empty diff has no
   // deliverable to verify, so this is an INTENTIONAL override of the intrinsic

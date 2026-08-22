@@ -64,6 +64,30 @@ describe('redactValue — credential value shapes', () => {
     expect(redactValue(pem)).toBe('x •••• y')
   })
 
+  it('masks unlabelled, multiple, and dash-bearing PEM blocks', () => {
+    expect(redactValue('-----BEGIN PRIVATE KEY-----\nk\n-----END PRIVATE KEY-----')).toBe('••••')
+    const two =
+      'a -----BEGIN EC PRIVATE KEY-----\nk1\n-----END EC PRIVATE KEY----- b ' +
+      '-----BEGIN PRIVATE KEY-----\nk2\n-----END PRIVATE KEY----- c'
+    expect(redactValue(two)).toBe('a •••• b •••• c')
+    // An encrypted key carries `-` inside the body; the block must still go.
+    const encrypted =
+      '-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,X\n\nk\n-----END RSA PRIVATE KEY-----'
+    expect(redactValue(encrypted)).toBe('••••')
+  })
+
+  it('leaves a PEM header with no closing header untouched', () => {
+    const open = 'note -----BEGIN RSA PRIVATE KEY-----\nMIIabc'
+    expect(redactValue(open)).toBe(open)
+  })
+
+  it('stays linear on a blob of unclosed PEM headers', () => {
+    const blob = '-----BEGIN PRIVATE KEY-----\n'.repeat(20000)
+    const started = performance.now()
+    expect(redactValue(blob)).toBe(blob)
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
   it('masks a JWT through BOTH paths (whole-string and embedded)', () => {
     const jwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefg'
     // Whole-string: JWT_RE in maskString short-circuits to the bare mask.

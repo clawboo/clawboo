@@ -436,3 +436,30 @@ describe('parseToolMarkdown', () => {
     expect(result.label).toBe('readFile')
   })
 })
+
+describe('thinking-tag and message-id patterns', () => {
+  it('handles spacing and slash variants of the tags', () => {
+    expect(extractThinking({ content: '< thinking >spaced</ thinking >visible' })).toBe('spaced')
+    expect(extractThinking({ content: '<analysis>a</analysis>rest' })).toBe('a')
+    expect(extractText({ role: 'assistant', content: '< think >x</ think >kept' })).toBe('kept')
+  })
+
+  it('keeps the inner tag when a block nests the same tag name', () => {
+    expect(extractThinking({ content: '<think>a<think>b</think>c</think>' })).toBe('a<think>b')
+  })
+
+  it('strips every message-id marker, including adjacent ones', () => {
+    expect(stripUiMetadata('body [message_id:abc] [message_id:def]')).toBe('body')
+    expect(stripUiMetadata('body\n\n[message_id:abc]')).toBe('body')
+  })
+
+  it('stays linear on unterminated thinking tags and message-id markers', () => {
+    const openers = '<think>a'.repeat(20000)
+    const markers = '[message_id:'.repeat(20000)
+    const started = performance.now()
+    extractThinking({ content: openers })
+    extractText({ role: 'assistant', content: openers })
+    stripUiMetadata(markers)
+    expect(performance.now() - started).toBeLessThan(2000)
+  })
+})

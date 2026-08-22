@@ -371,3 +371,62 @@ describe('resolveSessionsSendTarget', () => {
     expect(resolveSessionsSendTarget({ label: 'Nobody', message: 'x' }, roster)).toBeNull()
   })
 })
+
+describe('tag scanning holds up on hostile and mangled input', () => {
+  it('still recovers each documented opener drift', () => {
+    const variants = [
+      '<delegate to="@Bug Fixer Boo">fix it</delegate>',
+      'delegate to="@Bug Fixer Boo">fix it</delegate>',
+      'to="@Bug Fixer Boo">fix it</delegate>',
+      '< delegate  to="@Bug Fixer Boo">fix it</delegate>',
+      "<delegate to='@Bug Fixer Boo'>fix it</delegate>",
+      '<delegate to=“@Bug Fixer Boo”>fix it</delegate>',
+    ]
+    for (const text of variants) {
+      const blocks = findDelegationBlocks(text)
+      expect(blocks, text).toHaveLength(1)
+      expect(blocks[0]!.task, text).toBe('fix it')
+      expect(stripDelegationBlocks(text), text).toBe('')
+    }
+  })
+
+  it('keeps prose around a block and reports usable offsets', () => {
+    const text = 'before <delegate to="@Doc Writer Boo">write</delegate> after'
+    const [block] = findDelegationBlocks(text)
+    expect(text.slice(block!.blockStart, block!.blockEnd)).toBe(
+      '<delegate to="@Doc Writer Boo">write</delegate>',
+    )
+    expect(stripDelegationBlocks(text)).toBe('before  after')
+  })
+
+  it('pairs each opener with its own closer across several blocks', () => {
+    const text =
+      '<delegate to="@Bug Fixer Boo">one</delegate> mid <delegate to="@Doc Writer Boo">two</delegate>'
+    const blocks = findDelegationBlocks(text)
+    expect(blocks.map((b) => b.task)).toEqual(['one', 'two'])
+    expect(stripDelegationBlocks(text)).toBe('mid')
+  })
+
+  it('ignores an opener that never closes', () => {
+    expect(findDelegationBlocks('<delegate to="@Bug Fixer Boo">dangling')).toHaveLength(0)
+    expect(findPlanBlocks('<plan><step to="@Bug Fixer Boo">s</step>')).toHaveLength(0)
+  })
+
+  it('keeps plan step offsets pointing at the step source', () => {
+    const text = 'x <plan>\n<step to="@Bug Fixer Boo">alpha</step>\n</plan>'
+    const [plan] = findPlanBlocks(text)
+    const step = plan!.steps[0]!
+    expect(text.slice(step.stepStart, step.stepEnd)).toBe('<step to="@Bug Fixer Boo">alpha</step>')
+    expect(text.slice(plan!.blockStart, plan!.blockEnd).startsWith('<plan>')).toBe(true)
+  })
+
+  it('stays linear on a burst of unclosed openers', () => {
+    const delegates = '<delegate to="@Bug Fixer Boo">a'.repeat(20000)
+    const plans = '<plan>a'.repeat(20000)
+    const started = performance.now()
+    expect(findDelegationBlocks(delegates)).toHaveLength(0)
+    expect(stripDelegationBlocks(delegates)).toBe(delegates.trim())
+    expect(findPlanBlocks(plans)).toHaveLength(0)
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+})

@@ -20,7 +20,7 @@ export function failureLines(text: string): string[] {
 export function compactGitStatus(output: string): string {
   const kept: string[] = []
   for (const raw of output.split('\n')) {
-    const line = raw.replace(/\s+$/, '')
+    const line = raw.trimEnd()
     if (!line.trim()) continue
     if (/^\s*\(use /.test(line)) continue // drop the "(use ...)" hint lines
     if (/^On branch /.test(line)) kept.push(line)
@@ -45,7 +45,7 @@ export function compactGitStatus(output: string): string {
 export function compactTestOutput(output: string): string {
   const kept: string[] = []
   for (const raw of output.split('\n')) {
-    const line = raw.replace(/\s+$/, '')
+    const line = raw.trimEnd()
     if (!line.trim()) continue
     if (FAILURE_RE.test(line))
       kept.push(line) // keep every failure line
@@ -60,23 +60,122 @@ export function compactTestOutput(output: string): string {
 
 // ─── HTML → text (linear, no parser/heavy dep) ───────────────────────────────
 
+/** Closing tags that end a visual block, so the text gets a line break there. */
+const BLOCK_CLOSE_TAGS = new Set([
+  'p',
+  'div',
+  'li',
+  'tr',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'section',
+  'article',
+])
+
+/** Elements whose CONTENT is not prose, and goes with the tag. */
+const OPAQUE_ELEMENTS = ['script', 'style']
+
+const TAG_NAME_RE = /^<\s*(\/?)\s*([a-z][a-z0-9]*)/i
+
+/**
+ * Index just past `</name …>`, or -1 when the element never closes. Only ever
+ * compares a fixed number of characters per candidate, so a document full of
+ * unrelated closing tags costs one walk rather than a rescan.
+ */
+function endOfElement(s: string, from: number, name: string): number {
+  let at = from
+  for (;;) {
+    at = s.indexOf('</', at)
+    if (at === -1) return -1
+    const nameAt = at + 2
+    const nameEnd = nameAt + name.length
+    // The name has to END here, not merely start here: `</scripture>` closes no
+    // `<script>`. What may follow is the `>` itself, or whitespace before any
+    // trailing junk a browser would ignore (`</script >`, `</style foo>`).
+    const after = s[nameEnd]
+    if (
+      s.slice(nameAt, nameEnd).toLowerCase() === name &&
+      after !== undefined &&
+      (after === '>' || /\s/.test(after))
+    ) {
+      const gt = s.indexOf('>', nameEnd)
+      return gt === -1 ? -1 : gt + 1
+    }
+    at = nameAt
+  }
+}
+
 export function htmlToText(output: string): string {
-  return output
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<\/(p|div|li|tr|h[1-6]|section|article)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  // One forward pass that COPIES OUT the text between tags, rather than passes
+  // that delete tags from the string. Deleting splices whatever surrounded a tag
+  // back together, so `<scr<b>ipt>` becomes a working `<script>` the moment the
+  // inner tag goes, and further passes are then needed to catch what the last
+  // one built. Nothing is spliced here, so nothing can be reassembled: a `<`
+  // that opens a tag leaves with it, and a `<` that opens nothing is text.
+  const parts: string[] = []
+  // An opaque element whose closing tag is missing exhausts that name: no later
+  // opener can have one either, so the tail is walked once, not once per opener.
+  const exhausted = new Set<string>()
+  let i = 0
+
+  while (i < output.length) {
+    if (output[i] !== '<') {
+      const next = output.indexOf('<', i)
+      parts.push(output.slice(i, next === -1 ? output.length : next))
+      if (next === -1) break
+      i = next
+      continue
+    }
+
+    if (output.startsWith('<!--', i)) {
+      const end = output.indexOf('-->', i + 4)
+      // An unterminated comment swallows the rest, as a browser treats it.
+      i = end === -1 ? output.length : end + 3
+      continue
+    }
+
+    const gt = output.indexOf('>', i + 1)
+    // A `<` with no `>` anywhere after it is text, not a tag.
+    if (gt === -1) {
+      parts.push(output.slice(i))
+      break
+    }
+
+    const parsed = output.slice(i, gt + 1).match(TAG_NAME_RE)
+    const isClose = parsed?.[1] === '/'
+    const name = parsed?.[2]?.toLowerCase() ?? ''
+
+    if (!isClose && OPAQUE_ELEMENTS.includes(name) && !exhausted.has(name)) {
+      const end = endOfElement(output, gt + 1, name)
+      if (end === -1) exhausted.add(name)
+      i = end === -1 ? gt + 1 : end
+      continue
+    }
+
+    if (name === 'br' || (isClose && BLOCK_CLOSE_TAGS.has(name))) parts.push('\n')
+    i = gt + 1
+  }
+
+  return (
+    parts
+      .join('')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      // `&amp;` decodes last. Going first would turn `&amp;lt;` into `&lt;` and
+      // then into `<`, decoding a sequence the author wrote to be READ as the
+      // four characters `&lt;`.
+      .replace(/&amp;/g, '&')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  )
 }
 
 // ─── long-URL shortening ─────────────────────────────────────────────────────

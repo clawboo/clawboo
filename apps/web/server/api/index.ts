@@ -1,5 +1,7 @@
 import { Router, type Router as RouterType } from 'express'
 
+import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
+
 import { settingsGET, settingsPOST } from './settings'
 import { approvalsGET, approvalsPOST } from './approvals'
 import { chatHistoryGET, chatHistoryPOST, chatHistoryDELETE } from './chatHistory'
@@ -141,6 +143,11 @@ import {
 
 const router: RouterType = Router()
 
+// Rate ceilings first, so every route below inherits the general one. See
+// ../lib/rateLimit for why the numbers are where they are; the strict tier is
+// attached per-route to the handful of routes that spawn work.
+router.use(generalLimiter)
+
 // Settings
 router.get('/api/settings', settingsGET)
 router.post('/api/settings', settingsPOST)
@@ -179,19 +186,19 @@ router.delete('/api/skills', skillsDELETE)
 
 // System management
 router.get('/api/system/status', systemStatusGET)
-router.post('/api/system/install-openclaw', installOpenclawPOST)
-router.post('/api/system/configure-openclaw', configureOpenclawPOST)
-router.post('/api/system/auto-configure-openclaw', autoConfigureOpenclawPOST)
-router.post('/api/system/gateway', gatewayControlPOST)
+router.post('/api/system/install-openclaw', sensitiveLimiter, installOpenclawPOST)
+router.post('/api/system/configure-openclaw', sensitiveLimiter, configureOpenclawPOST)
+router.post('/api/system/auto-configure-openclaw', sensitiveLimiter, autoConfigureOpenclawPOST)
+router.post('/api/system/gateway', sensitiveLimiter, gatewayControlPOST)
 router.get('/api/system/openclaw-config', openclawConfigGET)
-router.patch('/api/system/openclaw-config', openclawConfigPATCH)
+router.patch('/api/system/openclaw-config', sensitiveLimiter, openclawConfigPATCH)
 router.get('/api/system/models', systemModelsGET)
-router.post('/api/system/approve-device', approveDevicePOST)
+router.post('/api/system/approve-device', sensitiveLimiter, approveDevicePOST)
 // Self-update ("update available" chip): version check + SSE apply. The check
 // probes the npm registry server-side (cached, fail-silent); the apply installs
 // clawboo@latest and restarts into it (global installs only).
 router.get('/api/system/self-version', selfVersionGET)
-router.post('/api/system/self-update', selfUpdatePOST)
+router.post('/api/system/self-update', sensitiveLimiter, selfUpdatePOST)
 
 // Teams
 router.get('/api/teams', teamsGET)
@@ -331,11 +338,11 @@ router.post('/api/providers/:id/disconnect', providerDisconnectPOST)
 // disconnect. Distinct two-segment suffixes — no collision with `:id/run`.
 // UI-driven "Sign in with ChatGPT": spawn the official CLI's login locally and
 // relay its device-code/URL output (SSE, killable — Cancel aborts the child tree).
-router.post('/api/auth/cli-login/:tool', cliLoginPOST)
-router.post('/api/runtimes/:id/install', runtimesInstallPOST)
-router.post('/api/runtimes/:id/connect', runtimesConnectPOST)
-router.post('/api/runtimes/:id/disconnect', runtimesDisconnectPOST)
-router.post('/api/runtimes/:id/logout', runtimesLogoutPOST)
+router.post('/api/auth/cli-login/:tool', sensitiveLimiter, cliLoginPOST)
+router.post('/api/runtimes/:id/install', sensitiveLimiter, runtimesInstallPOST)
+router.post('/api/runtimes/:id/connect', sensitiveLimiter, runtimesConnectPOST)
+router.post('/api/runtimes/:id/disconnect', sensitiveLimiter, runtimesDisconnectPOST)
+router.post('/api/runtimes/:id/logout', sensitiveLimiter, runtimesLogoutPOST)
 // Verify a pasted provider key (native, multi-provider) BEFORE seeding. Distinct
 // two-segment suffix — no collision with `:id/run`.
 router.post('/api/runtimes/:id/healthcheck', runtimesHealthcheckPOST)

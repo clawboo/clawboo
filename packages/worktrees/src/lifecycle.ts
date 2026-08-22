@@ -24,10 +24,30 @@ import {
   removeWorktree,
   resolveBaseSha,
   revParse,
+  worktreePathFor,
   worktreeRootFor,
 } from './git'
 import { SOR_FILES, writeScaffold } from './scaffold'
 import type { DiffStat, TaskScaffoldInput, Worktree } from './types'
+
+/**
+ * The directory a worktree record owns, or a thrown error.
+ *
+ * `pauseWorktree` / `completeWorktree` recursively remove a directory named by a
+ * stored record, so the location they act on is REBUILT here from the worktree
+ * root and the task's validated id rather than taken from the record verbatim.
+ * The record is still compared against the rebuilt path, so a record pointing
+ * somewhere else fails loudly instead of quietly retargeting the remove.
+ */
+function ownedWorktreeDir(worktree: Worktree, repoPath: string, rootDir?: string): string {
+  const expected = worktreePathFor(repoPath, worktree.taskId, rootDir)
+  if (path.resolve(worktree.worktreePath) !== expected) {
+    throw new Error(
+      `worktree path does not belong to task ${worktree.taskId}: ${worktree.worktreePath}`,
+    )
+  }
+  return expected
+}
 
 // The system-of-record bookkeeping files — excluded from the "did the agent do
 // work?" diff so a worktree that only carries its own scaffold/handoff is empty.
@@ -71,8 +91,8 @@ export interface ProvisionOptions {
  * is initialization, not work).
  */
 export async function provisionWorktree(opts: ProvisionOptions): Promise<Worktree> {
-  const root = worktreeRootFor(opts.repoPath, opts.rootDir)
-  const worktreePath = path.join(root, opts.taskId)
+  const root = path.resolve(worktreeRootFor(opts.repoPath, opts.rootDir))
+  const worktreePath = worktreePathFor(opts.repoPath, opts.taskId, opts.rootDir)
   const branch = branchNameForTask(opts.taskId)
 
   return mutex.run(worktreePath, async () => {
@@ -136,7 +156,7 @@ export interface LoadOptions {
  * that only persisted the path/branch (e.g. the board) can pause/complete it.
  */
 export async function loadWorktree(opts: LoadOptions): Promise<Worktree> {
-  const worktreePath = path.join(worktreeRootFor(opts.repoPath, opts.rootDir), opts.taskId)
+  const worktreePath = worktreePathFor(opts.repoPath, opts.taskId, opts.rootDir)
   const branch = branchNameForTask(opts.taskId)
   const baseCommit = await findScaffoldCommit(opts.repoPath, branch, opts.taskId)
   return { taskId: opts.taskId, worktreePath, branch, baseCommit, detached: false }
@@ -155,8 +175,7 @@ export interface ResumeOptions {
  * later `completeWorktree` diffs against the right baseline.
  */
 export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
-  const root = worktreeRootFor(opts.repoPath, opts.rootDir)
-  const worktreePath = path.join(root, opts.taskId)
+  const worktreePath = worktreePathFor(opts.repoPath, opts.taskId, opts.rootDir)
   const branch = branchNameForTask(opts.taskId)
 
   return mutex.run(worktreePath, async () => {
@@ -182,21 +201,26 @@ export interface PauseResult {
  * worktree to free disk + process slots, and KEEP the branch. Resume re-creates
  * the worktree from the preserved branch.
  */
-export async function pauseWorktree(repoPath: string, worktree: Worktree): Promise<PauseResult> {
-  return mutex.run(worktree.worktreePath, async () => {
+export async function pauseWorktree(
+  repoPath: string,
+  worktree: Worktree,
+  rootDir?: string,
+): Promise<PauseResult> {
+  const worktreePath = ownedWorktreeDir(worktree, repoPath, rootDir)
+  return mutex.run(worktreePath, async () => {
     let committed = false
     if (
-      (await isWorktreeRegistered(repoPath, worktree.worktreePath)) &&
-      (await hasUncommittedChanges(worktree.worktreePath))
+      (await isWorktreeRegistered(repoPath, worktreePath)) &&
+      (await hasUncommittedChanges(worktreePath))
     ) {
-      await commitAll(worktree.worktreePath, `clawboo: pause task ${worktree.taskId}`)
+      await commitAll(worktreePath, `clawboo: pause task ${worktree.taskId}`)
       committed = true
     }
     const head = committed
-      ? await revParse(worktree.worktreePath, 'HEAD')
+      ? await revParse(worktreePath, 'HEAD')
       : await revParse(repoPath, worktree.branch)
-    await removeWorktree(repoPath, worktree.worktreePath) // keep the branch
-    await rm(worktree.worktreePath, { recursive: true, force: true })
+    await removeWorktree(repoPath, worktreePath) // keep the branch
+    await rm(worktreePath, { recursive: true, force: true })
     return { committed, head }
   })
 }
@@ -252,14 +276,16 @@ export interface CompleteResult {
 export async function completeWorktree(
   repoPath: string,
   worktree: Worktree,
+  rootDir?: string,
 ): Promise<CompleteResult> {
-  return mutex.run(worktree.worktreePath, async () => {
-    const ds = await diffStat(worktree.worktreePath, worktree.baseCommit, {
+  const worktreePath = ownedWorktreeDir(worktree, repoPath, rootDir)
+  return mutex.run(worktreePath, async () => {
+    const ds = await diffStat(worktreePath, worktree.baseCommit, {
       excludePaths: SOR_FILE_LIST,
     })
     if (!ds.dirty) {
-      await removeWorktree(repoPath, worktree.worktreePath)
-      await rm(worktree.worktreePath, { recursive: true, force: true })
+      await removeWorktree(repoPath, worktreePath)
+      await rm(worktreePath, { recursive: true, force: true })
       await deleteBranch(repoPath, worktree.branch)
       return { dirty: false, diffStat: ds, cleaned: true }
     }

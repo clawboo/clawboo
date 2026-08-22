@@ -98,6 +98,36 @@ describe('buildTeamBrief', () => {
     expect(out).toContain('| Markdown Boo | Tester | Handles pipes \\| in strings \\| gracefully |')
   })
 
+  it('keeps a backslash-escaped pipe from splitting the row', () => {
+    // Escaping only the pipe would emit `\\|`: a literal backslash followed by a
+    // live separator, so the cell would break out into new columns.
+    const out = buildTeamBrief({
+      team: baseTeam,
+      members: [
+        { name: 'Markdown Boo', role: 'Tester', strengths: 'ends with \\| here', tools: [] },
+      ],
+    })
+    expect(out).toContain('| Markdown Boo | Tester | ends with \\\\\\| here |')
+    const row = out.split('\n').find((l) => l.includes('Markdown Boo'))!
+    expect(row.split(/(?<!\\)\|/)).toHaveLength(6) // 4 cells + the empty edges
+  })
+
+  it('keeps a line break inside a cell from ending the row', () => {
+    const out = buildTeamBrief({
+      team: baseTeam,
+      members: [
+        {
+          name: 'Multi\nLine Boo',
+          role: 'Tester\r\nInjected',
+          strengths: 'a\rb',
+          tools: ['x\ny'],
+        },
+      ],
+    })
+    const row = out.split('\n').find((l) => l.includes('Multi'))!
+    expect(row).toBe('| Multi Line Boo | Tester Injected | a b | x y |')
+  })
+
   it('deduplicates and sorts aggregated tools', () => {
     const out = buildTeamBrief({ team: baseTeam, members })
     // github appears in all three, code-search in two, test-runner once, computer once

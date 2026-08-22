@@ -73,6 +73,45 @@ describe('builtin rules (pure transforms)', () => {
     expect(out).not.toContain('color:red')
   })
 
+  it('html-to-text strips tags that only reassemble after a first pass', () => {
+    // Deleting the inner tag splices `<scr` onto `ipt>`; one pass would emit the
+    // reassembled tag as if it were text.
+    expect(htmlToText('<scr<b>ipt>alert(1)</scr<b>ipt>')).not.toContain('<script>')
+    expect(htmlToText('<<b>!-- x --<b>>')).not.toContain('<!--')
+  })
+
+  it('html-to-text closes script and style tags written with trailing junk', () => {
+    expect(htmlToText('<p>keep</p><script>evil()</script >')).not.toContain('evil()')
+    expect(htmlToText('<p>keep</p><style>.x{color:red}</style foo>')).not.toContain('color:red')
+  })
+
+  it('html-to-text drops the tag of an unclosed script and stays linear', () => {
+    // The body of an unclosed script survives as text, which is what the
+    // pattern-based version did too; what must not survive is the tag itself.
+    expect(htmlToText('<p>keep</p><script>secret()')).toBe('keep\nsecret()')
+    const blob = '<script>x'.repeat(20000)
+    const started = performance.now()
+    expect(htmlToText(blob)).not.toContain('<script')
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
+  it('html-to-text does not close a script on a longer tag name', () => {
+    // `</scripture>` is not a `</script>`, so the element stays unclosed and its
+    // body falls through as text rather than being swallowed to that tag.
+    expect(htmlToText('<script>secret</scripture>')).toContain('secret')
+    expect(htmlToText('<script>gone</script >tail')).toBe('tail')
+  })
+
+  it('html-to-text keeps a bare angle bracket that opens nothing', () => {
+    expect(htmlToText('<p>2 < 3')).toBe('2 < 3')
+  })
+
+  it('html-to-text does not decode an entity twice', () => {
+    // `&amp;lt;` is how a page writes the literal text `&lt;`.
+    expect(htmlToText('<p>&amp;lt;</p>')).toBe('&lt;')
+    expect(htmlToText('<p>&amp;amp;</p>')).toBe('&amp;')
+  })
+
   it('shortenUrls collapses only over-long URLs', () => {
     const short = 'see https://ex.co/a'
     expect(shortenUrls(short)).toBe(short)
@@ -158,5 +197,50 @@ describe('compactToolResultMarkdown (embedded [[tool-result]] blocks)', () => {
     const { text: out, stats } = compactToolResultMarkdown(text)
     expect(out).toBe(text)
     expect(stats[0].applied).toBe(false)
+  })
+
+  it('compacts several blocks and keeps the prose between them', () => {
+    const noisy = Array.from({ length: 200 }, () => 'tick').join('\n')
+    const block = (id: string): string =>
+      `[[tool-result]] bash (${id})\n\`\`\`text\n${noisy}\n\`\`\``
+    const text = `intro\n\n${block('c1')}\n\nmiddle prose\n\n${block('c2')}\n\nend`
+    const { text: out, stats } = compactToolResultMarkdown(text)
+    expect(stats).toHaveLength(2)
+    expect(stats.every((s) => s.applied)).toBe(true)
+    expect(out).toContain('intro')
+    expect(out).toContain('middle prose')
+    expect(out).toContain('end')
+    expect(out).not.toContain(noisy)
+  })
+
+  it('does not let an unfenced header adopt a later block', () => {
+    const noisy = Array.from({ length: 200 }, () => 'tick').join('\n')
+    const text = `[[tool-result]] bad (c0)\nno fence here\n\n[[tool-result]] bash (c1)\n\`\`\`text\n${noisy}\n\`\`\``
+    const { stats } = compactToolResultMarkdown(text)
+    // One block, and it is attributed to the header that actually opened it.
+    expect(stats).toHaveLength(1)
+    expect(stats[0]!.rule).not.toBe('bad')
+  })
+
+  it('leaves headers with no fenced body alone', () => {
+    const text = '[[tool-result]] bash (c1)\nno fence here\n\n[[tool-result]] read (c2)\nnor here'
+    const { text: out, stats } = compactToolResultMarkdown(text)
+    expect(out).toBe(text)
+    expect(stats).toHaveLength(0)
+  })
+
+  it('treats a header quoted inside a body as body text, not a new block', () => {
+    const inner = Array.from({ length: 200 }, () => '[[tool-result]] fake (x)').join('\n')
+    const text = `[[tool-result]] bash (c1)\n\`\`\`text\n${inner}\n\`\`\``
+    const { stats } = compactToolResultMarkdown(text)
+    expect(stats).toHaveLength(1)
+  })
+
+  it('stays linear on a blob of bare headers with no fence', () => {
+    const text = Array.from({ length: 20000 }, () => '[[tool-result]] bash (c)').join('\n')
+    const started = performance.now()
+    const { stats } = compactToolResultMarkdown(text)
+    expect(stats).toHaveLength(0)
+    expect(performance.now() - started).toBeLessThan(1000)
   })
 })

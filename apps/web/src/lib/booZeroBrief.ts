@@ -64,15 +64,32 @@ const DEFAULT_ANTI_PATTERNS: readonly string[] = [
   'Only delegate via `<delegate to="@AgentName">` blocks; bare @-mentions in prose are best-effort fallbacks.',
 ]
 
+/** Escape a value so it reads as one markdown table cell.
+ *
+ *  Line breaks collapse to spaces first: a row is one line by definition, so a
+ *  name or strength carrying a newline would end the row early and let the rest
+ *  of the value start fresh markdown structure below the table.
+ *
+ *  Backslashes are escaped before pipes: escaping only the pipe turns a
+ *  member-supplied `\|` into `\\|`, which renders as a literal backslash
+ *  followed by a LIVE column separator, splitting the row the escaping was
+ *  there to hold together. */
+function escapeCell(value: string): string {
+  return value
+    .replace(/\r\n?|\n/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+}
+
 function renderMembersTable(members: readonly TeamBriefMember[]): string {
   if (members.length === 0) {
     return '_No members yet. Boo Zero will respond solo until the team is populated._'
   }
   const header = '| Name | Role | Strengths | Tools |\n|---|---|---|---|'
   const rows = members.map((m) => {
-    const strengths = (m.strengths ?? '').replace(/\|/g, '\\|')
-    const tools = (m.tools ?? []).join(', ').replace(/\|/g, '\\|')
-    return `| ${m.name} | ${m.role} | ${strengths} | ${tools} |`
+    const strengths = escapeCell(m.strengths ?? '')
+    const tools = escapeCell((m.tools ?? []).join(', '))
+    return `| ${escapeCell(m.name)} | ${escapeCell(m.role)} | ${strengths} | ${tools} |`
   })
   return [header, ...rows].join('\n')
 }

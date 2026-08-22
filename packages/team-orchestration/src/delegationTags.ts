@@ -35,9 +35,64 @@ export interface DelegationBlock {
   blockEnd: number
 }
 
+/** One `<open …>body</close>` pair located in a text. */
+interface TagBlock {
+  /** The opening tag's match, for its capture groups. */
+  open: RegExpMatchArray
+  /** Offset of the first character of the opening tag. */
+  start: number
+  /** Offset immediately AFTER the closing tag. */
+  end: number
+  /** Text between the opening and closing tags. */
+  body: string
+  /** Offset of the first character of `body`. */
+  bodyStart: number
+}
+
+/**
+ * Pair every opening tag with the next unused closing tag, in one forward pass.
+ *
+ * The alternative, one regex holding opener, `[\s\S]*?` body and closer, makes
+ * every opener that has no closer behind it re-scan the whole remaining text,
+ * and a mangled tag stream from a weak model is exactly the input that produces
+ * a pile of unclosed openers. Collecting the closers once and walking a pointer
+ * through them costs a single pass however lopsided the tags are.
+ */
+function findTagBlocks(text: string, openRe: RegExp, closeRe: RegExp): TagBlock[] {
+  const closes = [...text.matchAll(closeRe)]
+  if (closes.length === 0) return []
+  const blocks: TagBlock[] = []
+  let cursor = 0
+  let next = 0
+  for (const open of text.matchAll(openRe)) {
+    const at = open.index ?? 0
+    if (at < cursor) continue
+    const bodyStart = at + open[0].length
+    while (next < closes.length && (closes[next]?.index ?? 0) < bodyStart) next++
+    const close = closes[next]
+    if (!close) break
+    const end = (close.index ?? 0) + close[0].length
+    blocks.push({ open, start: at, end, body: text.slice(bodyStart, close.index ?? 0), bodyStart })
+    cursor = end
+  }
+  return blocks
+}
+
+/** Remove `blocks` from `text`, keeping the prose around them. */
+function stripTagBlocks(text: string, blocks: TagBlock[]): string {
+  if (blocks.length === 0) return text.trim()
+  let out = ''
+  let cursor = 0
+  for (const block of blocks) {
+    out += text.slice(cursor, block.start)
+    cursor = block.end
+  }
+  return (out + text.slice(cursor)).trim()
+}
+
 // Match `<delegate to="…">…</delegate>`, case-insensitive, multi-line body.
 // `[^"]+` for the `to` attribute keeps it simple — agent names don't contain
-// double-quotes. The non-greedy `[\s\S]*?` body handles multi-line tasks.
+// double-quotes. The body may span lines and is bounded by the closing tag.
 //
 // The ENTIRE opening `<delegate ` is optional (`(?:<?\s*delegate\s+)?`). The
 // reliable anchor is the closing `</delegate>` plus the `to="…">` attribute
@@ -53,8 +108,11 @@ export interface DelegationBlock {
 // no opening-tag fragment leaks into the rendered prose.
 // Tolerate straight, single, and curly/smart quotes around the `to=` value —
 // weaker models (and copy-paste from rich editors) emit `to='@X'` / `to=“@X”`.
-const DELEGATE_TAG_RE =
-  /(?:<?\s*delegate\s+)?to=["'“”‘’]([^"'“”‘’]+)["'“”‘’]>([\s\S]*?)<\/delegate>/gi
+// The whitespace runs inside the opener are length-capped: a real tag carries a
+// space or two, and leaving them open-ended lets a long run of blanks be
+// re-measured from every offset inside it.
+const DELEGATE_OPEN_RE = /(?:<?\s{0,8}delegate\s{1,8})?to=["'“”‘’]([^"'“”‘’]+)["'“”‘’]>/gi
+const DELEGATE_CLOSE_RE = /<\/delegate>/gi
 
 /**
  * Loose detector for a delegation/plan ATTEMPT — a `<delegate>`/`<plan>`/`<step>`
@@ -77,21 +135,14 @@ export function detectDelegationIntent(text: string): boolean {
  * extractor.
  */
 export function findDelegationBlocks(text: string): DelegationBlock[] {
-  const blocks: DelegationBlock[] = []
-  // matchAll operates on a clone, so the shared module-level regex's lastIndex
+  // matchAll operates on a clone, so the shared module-level regexes' lastIndex
   // is never mutated across calls.
-  for (const m of text.matchAll(DELEGATE_TAG_RE)) {
-    const targetName = (m[1] ?? '').trim()
-    const task = (m[2] ?? '').trim()
-    const blockStart = m.index ?? 0
-    blocks.push({
-      targetName,
-      task,
-      blockStart,
-      blockEnd: blockStart + m[0].length,
-    })
-  }
-  return blocks
+  return findTagBlocks(text, DELEGATE_OPEN_RE, DELEGATE_CLOSE_RE).map((block) => ({
+    targetName: (block.open[1] ?? '').trim(),
+    task: block.body.trim(),
+    blockStart: block.start,
+    blockEnd: block.end,
+  }))
 }
 
 /**
@@ -158,7 +209,7 @@ export function parseStructuredDelegations(
  * durable board tasks instead).
  */
 export function stripDelegationBlocks(text: string): string {
-  return text.replace(DELEGATE_TAG_RE, '').trim()
+  return stripTagBlocks(text, findTagBlocks(text, DELEGATE_OPEN_RE, DELEGATE_CLOSE_RE))
 }
 
 // ─── Plan tags ───────────────────────────────────────────────────────────────
@@ -192,14 +243,16 @@ export interface PlanBlock {
 // `</plan>` but sometimes drop the leading `<` of the opener (e.g. `plan>…</plan>`).
 // The `</plan>` close + the literal `plan` keyword anchor it, so prose never
 // false-matches.
-const PLAN_TAG_RE = /<?\s*plan(?:\s[^>]*)?>([\s\S]*?)<\/plan>/gi
+const PLAN_OPEN_RE = /<?\s{0,8}plan(?:\s[^>]*)?>/gi
+const PLAN_CLOSE_RE = /<\/plan>/gi
 
 // Match `<step to="…">…</step>` inside a plan body. Mirrors the `<delegate>`
 // drift tolerance exactly (same `to="…">…<close>` shape): the ENTIRE opening
 // `<step ` is optional, anchored on the closing `</step>` + the `to="…">`
 // attribute shape — recovers both `step to="@X">…</step>` (dropped `<`) and
 // `to="@X">…</step>` (dropped the whole `<step`).
-const STEP_TAG_RE = /(?:<?\s*step\s+)?to=["'“”‘’]([^"'“”‘’]+)["'“”‘’]>([\s\S]*?)<\/step>/gi
+const STEP_OPEN_RE = /(?:<?\s{0,8}step\s{1,8})?to=["'“”‘’]([^"'“”‘’]+)["'“”‘’]>/gi
+const STEP_CLOSE_RE = /<\/step>/gi
 
 /**
  * Find every `<plan>` block in the text and parse its `<step>` children.
@@ -208,27 +261,22 @@ const STEP_TAG_RE = /(?:<?\s*step\s+)?to=["'“”‘’]([^"'“”‘’]+)["'
  */
 export function findPlanBlocks(text: string): PlanBlock[] {
   const blocks: PlanBlock[] = []
-  for (const planMatch of text.matchAll(PLAN_TAG_RE)) {
-    const matchIndex = planMatch.index ?? 0
-    const matchText = planMatch[0]
-    const blockStart = matchIndex
-    const blockEnd = matchIndex + matchText.length
-    const planInnerStart = matchIndex + matchText.indexOf('>') + 1
-    const planBody = planMatch[1] ?? ''
-
+  for (const plan of findTagBlocks(text, PLAN_OPEN_RE, PLAN_CLOSE_RE)) {
     const steps: PlanStep[] = []
-    for (const stepMatch of planBody.matchAll(STEP_TAG_RE)) {
-      const targetName = (stepMatch[1] ?? '').trim()
-      const task = (stepMatch[2] ?? '').trim()
+    for (const step of findTagBlocks(plan.body, STEP_OPEN_RE, STEP_CLOSE_RE)) {
+      const targetName = (step.open[1] ?? '').trim()
+      const task = step.body.trim()
       if (!targetName || !task) continue
-      // Translate the step's offset within `planBody` back to an absolute
+      // Translate the step's offset within the plan body back to an absolute
       // offset in the original text so downstream consumers can splice.
-      const stepStart = planInnerStart + (stepMatch.index ?? 0)
-      const stepEnd = stepStart + stepMatch[0].length
-      steps.push({ targetName, task, stepStart, stepEnd })
+      steps.push({
+        targetName,
+        task,
+        stepStart: plan.bodyStart + step.start,
+        stepEnd: plan.bodyStart + step.end,
+      })
     }
-
-    blocks.push({ blockStart, blockEnd, steps })
+    blocks.push({ blockStart: plan.start, blockEnd: plan.end, steps })
   }
   return blocks
 }
@@ -239,7 +287,7 @@ export function findPlanBlocks(text: string): PlanBlock[] {
  * `stripDelegationBlocks`).
  */
 export function stripPlanBlocks(text: string): string {
-  return text.replace(PLAN_TAG_RE, '').trim()
+  return stripTagBlocks(text, findTagBlocks(text, PLAN_OPEN_RE, PLAN_CLOSE_RE))
 }
 
 // ─── sessions_send target resolution ─────────────────────────────────────────

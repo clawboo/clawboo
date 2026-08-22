@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { appendFile, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { resolveClawbooDir } from '@clawboo/config'
 import { scrubResultSummary } from '@clawboo/db'
 import {
   deterministicResultSchema,
@@ -96,7 +97,33 @@ async function appendEvidence(
 export async function runDeterministicGate(
   input: DeterministicGateInput,
 ): Promise<DeterministicResult> {
-  const command = await resolveVerifyCommand(input.worktreePath, input.verifyCommand)
+  // Every task and review checkout clawboo provisions lives inside its own state
+  // directory. The verify command is worktree-authored and runs through a shell,
+  // so the directory it runs in, reads its command from, and appends evidence to
+  // is confirmed to be in there first: a path that resolves anywhere else is a
+  // broken record, not a place to run commands.
+  //
+  // The check is written out here rather than shared from a helper on purpose.
+  // A helper that validates and then RETURNS the path hands the caller a value
+  // that reads as unchecked, both to a reviewer skimming the call site and to
+  // static analysis; keeping the test and the use in one place means the thing
+  // being spawned into is visibly the thing that was just tested.
+  //
+  // Containment is ONE test: the resolved path has to start with the state root
+  // plus a trailing separator. The separator is what stops a sibling that merely
+  // shares the root's spelling (`~/.clawboo-old` against `~/.clawboo`) from
+  // reading as something inside it. The state root itself does not pass either,
+  // which is right: every checkout clawboo provisions lands several segments
+  // down (`worktrees/<repo-hash>/<task-id>`), so a path arriving equal to the
+  // root is the same broken record as one pointing outside, and earns the same
+  // answer.
+  const stateRoot = path.resolve(resolveClawbooDir())
+  const stateRootPrefix = stateRoot.endsWith(path.sep) ? stateRoot : stateRoot + path.sep
+  const worktreePath = path.resolve(input.worktreePath)
+  if (!worktreePath.startsWith(stateRootPrefix)) {
+    throw new Error(`worktree path is outside the clawboo state directory: ${worktreePath}`)
+  }
+  const command = await resolveVerifyCommand(worktreePath, input.verifyCommand)
   if (!command) {
     return deterministicResultSchema.parse({
       command: '(none configured)',
@@ -122,7 +149,7 @@ export async function runDeterministicGate(
     let stderr = ''
     let timedOut = false
     const child = spawn(command, [], {
-      cwd: input.worktreePath,
+      cwd: worktreePath,
       env: input.env ?? buildChildEnv(),
       shell: true,
       windowsHide: isWindows,
@@ -161,6 +188,6 @@ export async function runDeterministicGate(
     durationMs: Date.now() - startedAt,
     timedOut: run.timedOut,
   })
-  await appendEvidence(input.worktreePath, det, startedAt)
+  await appendEvidence(worktreePath, det, startedAt)
   return det
 }
