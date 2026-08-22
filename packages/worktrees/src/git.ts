@@ -103,8 +103,11 @@ export function assertSafeTaskId(taskId: string): string {
 export function assertWithin(root: string, candidate: string): string {
   const resolvedRoot = path.resolve(root)
   const resolved = path.resolve(candidate)
-  const rel = path.relative(resolvedRoot, resolved)
-  if (rel && (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))) {
+  // Compare against the root WITH a trailing separator, so a sibling directory
+  // that merely shares the root's spelling (`/data/worktrees-old` against
+  // `/data/worktrees`) is not mistaken for something inside it.
+  const prefix = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep
+  if (resolved !== resolvedRoot && !resolved.startsWith(prefix)) {
     throw new Error(`path escapes ${resolvedRoot}: ${resolved}`)
   }
   return resolved

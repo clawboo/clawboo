@@ -68,7 +68,11 @@ export function compactToolOutput(
 // The `[[tool-result]] <name> (<id>)` header line (the `formatToolResultMarkdown`
 // shape). The name runs to the first `(` or end of line and is trimmed by the
 // caller, so no separate whitespace group competes with it for the same spaces.
-const TOOL_RESULT_HEADER = /\[\[tool-result\]\]([^\n(]*)(?:\([^)\n]*\))?[^\n]*\n/g
+// Whatever follows the name is swallowed by one run that has to begin at that
+// `(`, rather than by an optional id group next to a second run-to-end-of-line:
+// two such groups can both claim the same characters, which is what makes a
+// header line cost more than one pass to reject.
+const TOOL_RESULT_HEADER = /\[\[tool-result\]\]([^\n(]*)(?:\([^\n]*)?\n/g
 const FENCE_OPEN = '```text\n'
 const FENCE_CLOSE = '\n```'
 

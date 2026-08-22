@@ -6,12 +6,25 @@ import { getDb } from '../lib/db'
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { nativeTeamSessionSettingKey } from '../lib/teamChat/nativeTeamSession'
 
+/**
+ * One query parameter as a string, or '' for anything else.
+ *
+ * The TYPE of a query value is the caller's choice, not ours: a repeated key
+ * (`?k=a&k=b`) arrives as an array and a bracketed one (`?k[x]=y`) as an object.
+ * A cast says otherwise but checks nothing, so an array would reach the string
+ * methods below and the database comparison as an array. Narrowing here means
+ * every reader downstream really is handling a string.
+ */
+function queryString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 // ─── GET /api/chat-history?sessionKey=<key>&limit=<n> ─────────────────────────
 // Returns the last N transcript entries for a session, ordered by timestamp ASC.
 
 export async function chatHistoryGET(req: Request, res: Response): Promise<void> {
-  const sessionKey = (req.query['sessionKey'] as string | undefined) ?? ''
-  const limitParam = req.query['limit'] as string | undefined
+  const sessionKey = queryString(req.query['sessionKey'])
+  const limitParam = queryString(req.query['limit'])
   const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 200, 1000) : 200
 
   if (!sessionKey) {
@@ -120,7 +133,7 @@ export function parseTeamSessionKey(
 // Clears all messages for a session (used when agent is deleted).
 
 export async function chatHistoryDELETE(req: Request, res: Response): Promise<void> {
-  const sessionKey = (req.query['sessionKey'] as string | undefined) ?? ''
+  const sessionKey = queryString(req.query['sessionKey'])
   if (!sessionKey) {
     res.status(400).json({ error: 'sessionKey required' })
     return

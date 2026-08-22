@@ -70,17 +70,18 @@ export function htmlToText(output: string): string {
   // The end-tag patterns accept trailing junk (`</script >`, `</style foo>`)
   // because a browser closes on those too; matching only the bare `</script>`
   // would leave the script body in the "text" as readable content.
+  // Each pass assigns straight back into `text` rather than chaining, so every
+  // one of them is measured against the same fixpoint the loop is testing.
   let text = output
   let prev: string
   do {
     prev = text
-    text = text
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, '')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, '')
-      .replace(/<!--[\s\S]*?-->/g, '')
-      .replace(/<\/(p|div|li|tr|h[1-6]|section|article)\s*>/gi, '\n')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
+    text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, '')
+    text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, '')
+    text = text.replace(/<!--[\s\S]*?-->/g, '')
+    text = text.replace(/<\/(p|div|li|tr|h[1-6]|section|article)\s*>/gi, '\n')
+    text = text.replace(/<br\s*\/?>/gi, '\n')
+    text = text.replace(/<[^>]+>/g, '')
   } while (text !== prev)
 
   return (

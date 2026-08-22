@@ -11,7 +11,6 @@ import path from 'node:path'
 import {
   KeyedMutex,
   addWorktree,
-  assertSafeTaskId,
   branchExists,
   branchNameForTask,
   commitAll,
@@ -34,21 +33,20 @@ import type { DiffStat, TaskScaffoldInput, Worktree } from './types'
 /**
  * The directory a worktree record owns, or a thrown error.
  *
- * `pauseWorktree` / `completeWorktree` take a stored record and recursively
- * remove the directory it names, and they are not told which root it was
- * provisioned under, so containment against the default root would break a
- * caller that passed `rootDir`. Instead we re-derive the invariant that
- * provisioning established: the directory is named for the task it belongs to.
- * That is enough to keep a doctored record from pointing the remove at a
- * parent directory or at an unrelated tree.
+ * `pauseWorktree` / `completeWorktree` recursively remove a directory named by a
+ * stored record, so the location they act on is REBUILT here from the worktree
+ * root and the task's validated id rather than taken from the record verbatim.
+ * The record is still compared against the rebuilt path, so a record pointing
+ * somewhere else fails loudly instead of quietly retargeting the remove.
  */
-function ownedWorktreeDir(worktree: Worktree): string {
-  const resolved = path.resolve(worktree.worktreePath)
-  const expected = assertSafeTaskId(worktree.taskId)
-  if (path.basename(resolved) !== expected) {
-    throw new Error(`worktree path does not belong to task ${expected}: ${worktree.worktreePath}`)
+function ownedWorktreeDir(worktree: Worktree, repoPath: string, rootDir?: string): string {
+  const expected = worktreePathFor(repoPath, worktree.taskId, rootDir)
+  if (path.resolve(worktree.worktreePath) !== expected) {
+    throw new Error(
+      `worktree path does not belong to task ${worktree.taskId}: ${worktree.worktreePath}`,
+    )
   }
-  return resolved
+  return expected
 }
 
 // The system-of-record bookkeeping files — excluded from the "did the agent do
@@ -203,8 +201,12 @@ export interface PauseResult {
  * worktree to free disk + process slots, and KEEP the branch. Resume re-creates
  * the worktree from the preserved branch.
  */
-export async function pauseWorktree(repoPath: string, worktree: Worktree): Promise<PauseResult> {
-  const worktreePath = ownedWorktreeDir(worktree)
+export async function pauseWorktree(
+  repoPath: string,
+  worktree: Worktree,
+  rootDir?: string,
+): Promise<PauseResult> {
+  const worktreePath = ownedWorktreeDir(worktree, repoPath, rootDir)
   return mutex.run(worktreePath, async () => {
     let committed = false
     if (
@@ -274,8 +276,9 @@ export interface CompleteResult {
 export async function completeWorktree(
   repoPath: string,
   worktree: Worktree,
+  rootDir?: string,
 ): Promise<CompleteResult> {
-  const worktreePath = ownedWorktreeDir(worktree)
+  const worktreePath = ownedWorktreeDir(worktree, repoPath, rootDir)
   return mutex.run(worktreePath, async () => {
     const ds = await diffStat(worktreePath, worktree.baseCommit, {
       excludePaths: SOR_FILE_LIST,
