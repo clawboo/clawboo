@@ -214,8 +214,13 @@ jobs:
   verify-connectors:
     name: Verify connector catalog
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # This job never pushes, so the job token has no business living on in
+          # .git/config for the rest of the run.
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6
 

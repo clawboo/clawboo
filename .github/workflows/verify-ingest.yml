@@ -91,6 +91,10 @@ jobs:
       # hold up a release. Needs no token: npm and the MCP endpoints are public,
       # and a 401 from an OAuth-protected server is the expected answer.
       - run: pnpm verify:connectors --live
+        # Advisory on PRs, blocking on the weekly cron. The paths filter admits any
+        # PR that touches the catalog, so without this a yanked upstream package
+        # would redden a PR that only reworded a description.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
 
   report:
     name: File a drift issue
