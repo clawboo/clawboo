@@ -85,6 +85,20 @@ describe('builtin rules (pure transforms)', () => {
     expect(htmlToText('<p>keep</p><style>.x{color:red}</style foo>')).not.toContain('color:red')
   })
 
+  it('html-to-text drops the tag of an unclosed script and stays linear', () => {
+    // The body of an unclosed script survives as text, which is what the
+    // pattern-based version did too; what must not survive is the tag itself.
+    expect(htmlToText('<p>keep</p><script>secret()')).toBe('keep\nsecret()')
+    const blob = '<script>x'.repeat(20000)
+    const started = performance.now()
+    expect(htmlToText(blob)).not.toContain('<script')
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
+  it('html-to-text keeps a bare angle bracket that opens nothing', () => {
+    expect(htmlToText('<p>2 < 3')).toBe('2 < 3')
+  })
+
   it('html-to-text does not decode an entity twice', () => {
     // `&amp;lt;` is how a page writes the literal text `&lt;`.
     expect(htmlToText('<p>&amp;lt;</p>')).toBe('&lt;')
@@ -190,6 +204,15 @@ describe('compactToolResultMarkdown (embedded [[tool-result]] blocks)', () => {
     expect(out).toContain('middle prose')
     expect(out).toContain('end')
     expect(out).not.toContain(noisy)
+  })
+
+  it('does not let an unfenced header adopt a later block', () => {
+    const noisy = Array.from({ length: 200 }, () => 'tick').join('\n')
+    const text = `[[tool-result]] bad (c0)\nno fence here\n\n[[tool-result]] bash (c1)\n\`\`\`text\n${noisy}\n\`\`\``
+    const { stats } = compactToolResultMarkdown(text)
+    // One block, and it is attributed to the header that actually opened it.
+    expect(stats).toHaveLength(1)
+    expect(stats[0]!.rule).not.toBe('bad')
   })
 
   it('leaves headers with no fenced body alone', () => {

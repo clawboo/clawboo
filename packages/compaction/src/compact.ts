@@ -72,7 +72,11 @@ export function compactToolOutput(
 // `(`, rather than by an optional id group next to a second run-to-end-of-line:
 // two such groups can both claim the same characters, which is what makes a
 // header line cost more than one pass to reject.
-const TOOL_RESULT_HEADER = /\[\[tool-result\]\]([^\n(]*)(?:\([^\n]*)?\n/g
+//
+// Anchored per line, because a header only ever starts one. Unanchored, a blob
+// of `[[tool-result]](` with no line break anywhere would run the scan to the
+// end of the input once per marker.
+const TOOL_RESULT_HEADER = /^\[\[tool-result\]\]([^\n(]*)(?:\([^\n]*)?\n/gm
 const FENCE_OPEN = '```text\n'
 const FENCE_CLOSE = '\n```'
 
@@ -96,13 +100,19 @@ export function compactToolResultMarkdown(
   let out = ''
   let cursor = 0
 
-  for (const m of text.matchAll(TOOL_RESULT_HEADER)) {
+  const headers = [...text.matchAll(TOOL_RESULT_HEADER)]
+  for (let h = 0; h < headers.length; h++) {
+    const m = headers[h]!
     // A header buried inside a body already consumed belongs to that body.
     if (m.index < cursor) continue
     const fenceStart = text.indexOf(FENCE_OPEN, m.index + m[0].length)
     // No opening fence left after this header means no later header can have
     // one either, so everything from here on is prose.
     if (fenceStart === -1) break
+    // A fence that only turns up past the NEXT header belongs to that header.
+    // Without this, an unfenced header would adopt a later block and label that
+    // block's output with its own tool name, picking the wrong compaction rule.
+    if (fenceStart >= (headers[h + 1]?.index ?? text.length)) continue
     const bodyStart = fenceStart + FENCE_OPEN.length
     const bodyEnd = text.indexOf(FENCE_CLOSE, bodyStart)
     if (bodyEnd === -1) break

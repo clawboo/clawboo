@@ -64,12 +64,21 @@ const DEFAULT_ANTI_PATTERNS: readonly string[] = [
   'Only delegate via `<delegate to="@AgentName">` blocks; bare @-mentions in prose are best-effort fallbacks.',
 ]
 
-/** Escape a value so it reads as one markdown table cell. Backslashes go first:
- *  escaping only the pipe turns a member-supplied `\|` into `\\|`, which renders
- *  as a literal backslash followed by a LIVE column separator, splitting the row
- *  the escaping was there to hold together. */
+/** Escape a value so it reads as one markdown table cell.
+ *
+ *  Line breaks collapse to spaces first: a row is one line by definition, so a
+ *  name or strength carrying a newline would end the row early and let the rest
+ *  of the value start fresh markdown structure below the table.
+ *
+ *  Backslashes are escaped before pipes: escaping only the pipe turns a
+ *  member-supplied `\|` into `\\|`, which renders as a literal backslash
+ *  followed by a LIVE column separator, splitting the row the escaping was
+ *  there to hold together. */
 function escapeCell(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
+  return value
+    .replace(/\r\n?|\n/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
 }
 
 function renderMembersTable(members: readonly TeamBriefMember[]): string {

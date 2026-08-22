@@ -16,7 +16,7 @@ import {
   parseVerifyCommandFromVerificationMd,
   type DeterministicResult,
 } from '@clawboo/governance'
-import { SOR_FILES, assertWithin } from '@clawboo/worktrees'
+import { SOR_FILES } from '@clawboo/worktrees'
 
 import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
@@ -37,6 +37,26 @@ export interface DeterministicGateInput {
    * same secret-scrub every other runtime child gets — never the raw process.env.
    */
   env?: NodeJS.ProcessEnv
+}
+
+/**
+ * The worktree location, confirmed to sit inside clawboo's own state directory.
+ *
+ * Every task and review checkout clawboo provisions lives there. The verify
+ * command is worktree-authored and runs through a shell, so the directory it
+ * runs in, reads its command from, and appends evidence to is pinned before any
+ * of that happens: a path resolving anywhere else is a broken record, not a
+ * place to run commands. The root is compared WITH a trailing separator, so a
+ * sibling that merely shares its spelling is not mistaken for something inside.
+ */
+function insideClawbooDir(candidate: string): string {
+  const root = path.resolve(resolveClawbooDir())
+  const resolved = path.resolve(candidate)
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  if (resolved !== root && !resolved.startsWith(prefix)) {
+    throw new Error(`worktree path is outside the clawboo state directory: ${resolved}`)
+  }
+  return resolved
 }
 
 async function resolveVerifyCommand(
@@ -97,12 +117,7 @@ async function appendEvidence(
 export async function runDeterministicGate(
   input: DeterministicGateInput,
 ): Promise<DeterministicResult> {
-  // Every task and review checkout clawboo provisions lives under its own state
-  // directory. The verify command is model-authored and runs through a shell, so
-  // the directory it runs in is pinned to that tree first: a worktree path that
-  // resolves anywhere else is a broken record, not a place to run commands or to
-  // append evidence to.
-  const worktreePath = assertWithin(resolveClawbooDir(), input.worktreePath)
+  const worktreePath = insideClawbooDir(input.worktreePath)
   const command = await resolveVerifyCommand(worktreePath, input.verifyCommand)
   if (!command) {
     return deterministicResultSchema.parse({

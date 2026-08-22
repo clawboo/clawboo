@@ -60,32 +60,100 @@ export function compactTestOutput(output: string): string {
 
 // ─── HTML → text (linear, no parser/heavy dep) ───────────────────────────────
 
+/** Closing tags that end a visual block, so the text gets a line break there. */
+const BLOCK_CLOSE_TAGS = new Set([
+  'p',
+  'div',
+  'li',
+  'tr',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'section',
+  'article',
+])
+
+/** Elements whose CONTENT is not prose, and goes with the tag. */
+const OPAQUE_ELEMENTS = ['script', 'style']
+
+const TAG_NAME_RE = /^<\s*(\/?)\s*([a-z][a-z0-9]*)/i
+
+/**
+ * Index just past `</name …>`, or -1 when the element never closes. Only ever
+ * compares a fixed number of characters per candidate, so a document full of
+ * unrelated closing tags costs one walk rather than a rescan.
+ */
+function endOfElement(s: string, from: number, name: string): number {
+  let at = from
+  for (;;) {
+    at = s.indexOf('</', at)
+    if (at === -1) return -1
+    const nameAt = at + 2
+    if (s.slice(nameAt, nameAt + name.length).toLowerCase() === name) {
+      const gt = s.indexOf('>', nameAt + name.length)
+      return gt === -1 ? -1 : gt + 1
+    }
+    at = nameAt
+  }
+}
+
 export function htmlToText(output: string): string {
-  // Tag stripping repeats until the text stops changing. Removing one tag can
-  // splice its neighbours into a brand-new one: `<scr<b>ipt>` becomes
-  // `<script>` the moment the inner `<b>` goes, so a single pass can hand back
-  // the very markup it was asked to strip. Every pass only ever shortens the
-  // text, so the loop always settles.
-  //
-  // The end-tag patterns accept trailing junk (`</script >`, `</style foo>`)
-  // because a browser closes on those too; matching only the bare `</script>`
-  // would leave the script body in the "text" as readable content.
-  // Each pass assigns straight back into `text` rather than chaining, so every
-  // one of them is measured against the same fixpoint the loop is testing.
-  let text = output
-  let prev: string
-  do {
-    prev = text
-    text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, '')
-    text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, '')
-    text = text.replace(/<!--[\s\S]*?-->/g, '')
-    text = text.replace(/<\/(p|div|li|tr|h[1-6]|section|article)\s*>/gi, '\n')
-    text = text.replace(/<br\s*\/?>/gi, '\n')
-    text = text.replace(/<[^>]+>/g, '')
-  } while (text !== prev)
+  // One forward pass that COPIES OUT the text between tags, rather than passes
+  // that delete tags from the string. Deleting splices whatever surrounded a tag
+  // back together, so `<scr<b>ipt>` becomes a working `<script>` the moment the
+  // inner tag goes, and further passes are then needed to catch what the last
+  // one built. Nothing is spliced here, so nothing can be reassembled: a `<`
+  // that opens a tag leaves with it, and a `<` that opens nothing is text.
+  const parts: string[] = []
+  // An opaque element whose closing tag is missing exhausts that name: no later
+  // opener can have one either, so the tail is walked once, not once per opener.
+  const exhausted = new Set<string>()
+  let i = 0
+
+  while (i < output.length) {
+    if (output[i] !== '<') {
+      const next = output.indexOf('<', i)
+      parts.push(output.slice(i, next === -1 ? output.length : next))
+      if (next === -1) break
+      i = next
+      continue
+    }
+
+    if (output.startsWith('<!--', i)) {
+      const end = output.indexOf('-->', i + 4)
+      // An unterminated comment swallows the rest, as a browser treats it.
+      i = end === -1 ? output.length : end + 3
+      continue
+    }
+
+    const gt = output.indexOf('>', i + 1)
+    // A `<` with no `>` anywhere after it is text, not a tag.
+    if (gt === -1) {
+      parts.push(output.slice(i))
+      break
+    }
+
+    const parsed = output.slice(i, gt + 1).match(TAG_NAME_RE)
+    const isClose = parsed?.[1] === '/'
+    const name = parsed?.[2]?.toLowerCase() ?? ''
+
+    if (!isClose && OPAQUE_ELEMENTS.includes(name) && !exhausted.has(name)) {
+      const end = endOfElement(output, gt + 1, name)
+      if (end === -1) exhausted.add(name)
+      i = end === -1 ? gt + 1 : end
+      continue
+    }
+
+    if (name === 'br' || (isClose && BLOCK_CLOSE_TAGS.has(name))) parts.push('\n')
+    i = gt + 1
+  }
 
   return (
-    text
+    parts
+      .join('')
       .replace(/&nbsp;/g, ' ')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
