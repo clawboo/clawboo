@@ -11,7 +11,7 @@
 
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Check, Copy, KeyRound, Plug, SearchX, ShieldAlert, Terminal } from 'lucide-react'
+import { Check, Copy, Globe, KeyRound, Plug, SearchX, ShieldAlert, Terminal } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import {
   connectorCounts,
@@ -100,8 +100,8 @@ function ConnectorCard({
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-foreground">{def.displayName}</div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            {remote ? <span>Remote</span> : <Terminal size={11} aria-hidden />}
-            {!remote && <span>Local process</span>}
+            {remote ? <Globe size={11} aria-hidden /> : <Terminal size={11} aria-hidden />}
+            <span>{remote ? 'Remote' : 'Local process'}</span>
             <span aria-hidden>·</span>
             <span>{CATEGORY_LABELS[def.category]}</span>
           </div>
@@ -223,13 +223,16 @@ function ConnectorDetail({ def, onClose }: { def: ConnectorDefinition; onClose: 
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Add it to your runtime
           </h3>
-          <div className="flex gap-1" role="tablist" aria-label="Config dialect">
+          {/* A pressed-state group, NOT role="tablist". The ARIA tab pattern
+              obliges arrow-key roving, a roving tabindex and an aria-controls
+              tabpanel; announcing a widget that does not behave the way it was
+              announced is worse for a screen reader than plain buttons. */}
+          <div className="flex gap-1" role="group" aria-label="Config dialect">
             {SNIPPET_DIALECTS.map((d) => (
               <button
                 key={d.id}
                 type="button"
-                role="tab"
-                aria-selected={dialect === d.id}
+                aria-pressed={dialect === d.id}
                 onClick={() => setDialect(d.id)}
                 className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
                   dialect === d.id

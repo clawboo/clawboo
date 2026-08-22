@@ -42,7 +42,7 @@ import { AgentCard } from './AgentCard'
 import { AgentTemplateDetail } from './AgentTemplateDetail'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { ConnectorsBrowser } from './ConnectorsBrowser'
-import { CURATED_CONNECTORS } from '@clawboo/connector-catalog'
+import { CONNECTOR_DEFINITIONS } from '@clawboo/connector-catalog'
 
 // ─── Skill category colours ─────────────────────────────────────────────────
 // Token-driven palette shared with SkillNode.tsx via `--category-*`.
@@ -417,14 +417,26 @@ export function MarketplacePanel() {
               id: 'connectors',
               label: 'Connectors',
               icon: Plug,
-              count: CURATED_CONNECTORS.length,
+              // The merged count, because ConnectorsBrowser lists the merged
+              // catalog. The curated/community SPLIT is the browser's own header
+              // line; a tab badge that silently omitted community entries would
+              // disagree with the list one click away.
+              count: CONNECTOR_DEFINITIONS.length,
             },
           ]}
         />
       </div>
 
-      {/* Connectors owns its own filter bar + body, so the shared one is skipped. */}
-      {isConnectorsTab && <ConnectorsBrowser />}
+      {/* Connectors owns its own filter bar + body, so the shared one is skipped.
+          `min-h-0 flex-1` is load-bearing: the browser is a flex COLUMN child, so
+          without the flex slot its `h-full` resolves against a container that has
+          already given the remaining height to the grid below, and its internal
+          scroll region never gets a box to scroll inside. */}
+      {isConnectorsTab && (
+        <div className="min-h-0 flex-1">
+          <ConnectorsBrowser />
+        </div>
+      )}
 
       {/* Filter bar */}
       {!isConnectorsTab && (
@@ -543,8 +555,12 @@ export function MarketplacePanel() {
         </div>
       )}
 
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto p-6">
+      {/* Grid. Every child is gated on teams/agents/skills, so on the connectors
+          tab this container is empty, but `flex-1` would still make it eat the
+          remaining height and starve the browser above it. Dropped OUT of the
+          flex layout rather than unmounted, to keep the ~100 lines below at their
+          current indentation. */}
+      <div className={isConnectorsTab ? 'hidden' : 'flex-1 overflow-y-auto p-6'}>
         {isTeamsTab && (
           <TeamShowcaseGrid
             teams={filteredTeams}

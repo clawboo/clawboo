@@ -157,6 +157,20 @@ export const ResourceNode = memo(function ResourceNode({
         />
         <Handle type="target" position={Position.Left} style={centerHandleStyle} />
         <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
+        {/* The grant SOURCE handle survives fleet zoom too. Dropping it here
+            would make drag-to-grant depend on how far the user happens to be
+            zoomed out, and a gesture that silently stops existing is worse than
+            one that never existed. Invisible at this scale (the tile is a dot) but
+            still hit-testable, and deliberately NOT centerHandleStyle, which
+            centers the handle and disables pointer events. */}
+        {(grantIds?.length ?? 0) > 0 && (
+          <Handle
+            id="grant"
+            type="source"
+            position={Position.Right}
+            style={{ opacity: 0, pointerEvents: 'auto' }}
+          />
+        )}
       </div>
     )
   }

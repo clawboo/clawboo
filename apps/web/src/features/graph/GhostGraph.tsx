@@ -1527,6 +1527,15 @@ const EDGE_META = {
     desc: 'This agent has this MCP server attached.',
     file: 'Capabilities',
   },
+  // A grant edge is a resource edge with a permission behind it. Without its own
+  // entry the panel falls through to `skill` and tells the user they are looking
+  // at a tool grant, which is the one thing an explain panel must never get wrong.
+  grant: {
+    label: 'Connector Grant',
+    color: 'var(--violet)',
+    desc: 'This agent holds a grant for this MCP connector.',
+    file: 'Grants',
+  },
 } as const
 
 function EdgeExplainPanel({
