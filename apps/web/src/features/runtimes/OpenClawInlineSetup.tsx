@@ -15,7 +15,7 @@ import { ArrowRight, Check, Eye, EyeOff, Loader2, Terminal } from 'lucide-react'
 
 import type { GatewayClient } from '@clawboo/gateway-client'
 import { GatewayResponseError } from '@clawboo/gateway-client'
-import { connectProvider, consumeApiSSE } from '@clawboo/control-client'
+import { apiFetch, connectProvider, consumeApiSSE } from '@clawboo/control-client'
 
 import { connectGatewayFromSettings } from '@/lib/gatewayConnect'
 import { enterGatewayMode } from '@/features/connection/GatewayBootstrap'
@@ -122,7 +122,7 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
       setPhase('preparing')
       // Reuse an already-connected credential — a provider key, or an existing
       // OpenClaw ChatGPT-subscription (openai-codex) auth profile.
-      const auto = (await fetch('/api/system/auto-configure-openclaw', { method: 'POST' })
+      const auto = (await apiFetch('/api/system/auto-configure-openclaw', { method: 'POST' })
         .then((r) => r.json())
         .catch(() => ({ ok: false, needsKey: true }))) as {
         ok?: boolean
@@ -138,7 +138,7 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
           if (typeof auto.loginCommand === 'string' && auto.loginCommand) {
             setCodexLoginCommand(auto.loginCommand)
           }
-          const st = (await fetch('/api/system/status')
+          const st = (await apiFetch('/api/system/status')
             .then((r) => r.json())
             .catch(() => null)) as { openclaw?: { installed?: boolean } } | null
           if (!st?.openclaw?.installed) {
@@ -152,7 +152,7 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
         setPhase('needs-key')
         return
       }
-      const status = (await fetch('/api/system/status')
+      const status = (await apiFetch('/api/system/status')
         .then((r) => r.json())
         .catch(() => null)) as { openclaw?: { installed?: boolean } } | null
       if (!status?.openclaw?.installed) {

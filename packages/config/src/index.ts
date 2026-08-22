@@ -2,6 +2,17 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+// The URL path prefix the whole app is served under. Re-exported by name (a
+// `export *` of a workspace dep breaks downstream bundling in this repo).
+export {
+  normalizeBasePath,
+  resolveBasePath,
+  resolveBasePathOrRoot,
+  type BasePathError,
+  type BasePathOk,
+  type BasePathResult,
+} from './basePath'
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const NEW_STATE_DIRNAME = '.openclaw'

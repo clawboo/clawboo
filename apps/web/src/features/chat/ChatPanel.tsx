@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { apiFetch } from '@clawboo/control-client'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
@@ -68,7 +69,7 @@ export function ChatPanel({
     const existing = useChatStore.getState().transcripts.get(sessionKey)
     if (existing && existing.length > 0) return
 
-    fetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`)
+    apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`)
       .then((r) => r.json())
       .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
         if (historical && historical.length > 0) {
@@ -190,7 +191,7 @@ export function ChatPanel({
       const trimmed = message.trim()
       if (isNativeChat && (trimmed === '/reset' || trimmed === '/new')) {
         useChatStore.getState().clearTranscript(sessionKey)
-        void fetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`, {
+        void apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`, {
           method: 'DELETE',
         }).catch(() => {})
         return
@@ -245,7 +246,7 @@ export function ChatPanel({
           // Best-effort: a miss injects nothing.
           let activityBlock: string | null = null
           try {
-            const res = await fetch(
+            const res = await apiFetch(
               `/api/teams/${encodeURIComponent(mention.targetId)}/activity-summary`,
             )
             if (res.ok) {

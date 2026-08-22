@@ -23,6 +23,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { apiFetch } from '@clawboo/control-client'
 import { TeamOnboardingGate } from './TeamOnboardingGate'
 import { GroupChatViewHeader } from './GroupChatViewHeader'
 import { useTeamOnboarding } from './useTeamOnboarding'
@@ -74,7 +75,7 @@ export function GroupChatView({ teamId }: { teamId: string }) {
       const teamSk = buildTeamSessionKey(agent.id, teamId)
       const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
-      fetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
+      apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
         .then((r) => r.json())
         .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
           if (historical && historical.length > 0) {

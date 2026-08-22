@@ -17,6 +17,7 @@ import { Button } from '@/features/shared/Button'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { syncBooZeroSoulIdentity } from '@/lib/booZeroIdentitySync'
+import { apiFetch } from '@clawboo/control-client'
 
 export function DisplayNameEditor({
   agentId,
@@ -34,7 +35,7 @@ export function DisplayNameEditor({
     const trimmed = value.trim() || 'Boo Zero'
     setSaving(true)
     try {
-      const res = await fetch(`/api/boo-zero/display-name/${encodeURIComponent(agentId)}`, {
+      const res = await apiFetch(`/api/boo-zero/display-name/${encodeURIComponent(agentId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed }),

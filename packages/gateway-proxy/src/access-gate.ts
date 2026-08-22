@@ -11,6 +11,16 @@ export interface AccessGateOptions {
   cookieName?: string
   /** URL query param that carries the one-time token. Defaults to 'access_token'. */
   queryParam?: string
+  /**
+   * The URL prefix the app is mounted under ('' = origin root), already normalized.
+   *
+   * The gate runs BEHIND the base-path strip, so the pathnames it tests are always
+   * root-form and its `/api/` checks need no change. This is used only where a
+   * path leaves the gate: the cookie's `Path` (so a mount does not hand its
+   * operator cookie to a sibling app on the same origin) and the post-exchange
+   * redirect (which must land back under the mount, not at the origin root).
+   */
+  basePath?: string
 }
 
 export interface AccessGate {
@@ -91,6 +101,9 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
   let token = String(options.token ?? '').trim()
   const cookieName = String(options.cookieName ?? 'clawboo_access').trim() || 'clawboo_access'
   const queryParam = String(options.queryParam ?? 'access_token').trim() || 'access_token'
+  // '' at the origin root, else '/mount'. The cookie needs a non-empty Path.
+  const basePath = String(options.basePath ?? '').trim()
+  const cookiePath = basePath || '/'
   // The gate is the ONLY auth for a non-loopback bind, and the token is written raw
   // into the Set-Cookie value + compared raw against the cookie but percent-decoded in
   // the query path. A token with a cookie-delimiter / non-token char would corrupt the
@@ -135,8 +148,13 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
       url.searchParams.delete(queryParam)
       const secure = requestIsHttps(req) ? '; Secure' : ''
       res.statusCode = 302
-      res.setHeader('Set-Cookie', `${cookieName}=${token}; HttpOnly; Path=/; SameSite=Lax${secure}`)
-      res.setHeader('Location', buildRedirectUrl(req, url.pathname + url.search))
+      res.setHeader(
+        'Set-Cookie',
+        `${cookieName}=${token}; HttpOnly; Path=${cookiePath}; SameSite=Lax${secure}`,
+      )
+      // The pathname here is post-strip, so re-attach the mount prefix or the
+      // operator is redirected to the origin root and out of the app.
+      res.setHeader('Location', buildRedirectUrl(req, basePath + url.pathname + url.search))
       res.end()
       return true
     }

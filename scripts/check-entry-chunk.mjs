@@ -84,8 +84,10 @@ if (preloadTags.length === 0) {
   )
 }
 
+// The build uses a RELATIVE base (`./assets/…`) so one bundle serves from any
+// mount point; accept the absolute spelling too in case that changes back.
 const preloadedAll = preloadTags
-  .map((tag) => /href="\/assets\/([^"]+)"/.exec(tag)?.[1] ?? tag)
+  .map((tag) => /href="(?:\.\/|\/)assets\/([^"]+)"/.exec(tag)?.[1] ?? tag)
   .map((href) => href.replace(/-[\w-]{8}\.js$/, '.js'))
 const preloaded = preloadTags.filter((tag) => tag.includes(CHUNK))
 if (preloaded.length > 0) {
@@ -103,7 +105,7 @@ const kb = (f) => Math.round(statSync(path.join(ASSETS_DIR, f)).size / 1024)
 
 // Read the entry from the script tag rather than matching `index-*.js`: several app
 // modules are named index.ts and emit chunks matching that pattern too.
-const entry = /<script[^>]+type="module"[^>]*\ssrc="\/assets\/([^"]+)"/.exec(html)?.[1]
+const entry = /<script[^>]+type="module"[^>]*\ssrc="(?:\.\/|\/)assets\/([^"]+)"/.exec(html)?.[1]
 
 console.log('\n✅ Marketplace catalog is a deferred chunk, not preloaded by the entry.')
 for (const f of chunks) console.log(`   ${f} — ${kb(f)} KB (fetched on demand)`)

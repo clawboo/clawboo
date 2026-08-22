@@ -3,6 +3,7 @@
 // normal chat composer behind the "Know Your Team" + user introduction flow.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiFetch } from '@clawboo/control-client'
 
 export interface TeamOnboardingState {
   agentsIntroduced: boolean
@@ -42,7 +43,7 @@ export function useTeamOnboarding(teamId: string | null): UseTeamOnboardingResul
     setIsLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/teams/${encodeURIComponent(id)}/onboarding`)
+      const res = await apiFetch(`/api/teams/${encodeURIComponent(id)}/onboarding`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as TeamOnboardingState
       if (mountedRef.current) {
@@ -76,7 +77,7 @@ export function useTeamOnboarding(teamId: string | null): UseTeamOnboardingResul
     async (body: Partial<TeamOnboardingState>): Promise<void> => {
       if (!teamId) return
       try {
-        const res = await fetch(`/api/teams/${encodeURIComponent(teamId)}/onboarding`, {
+        const res = await apiFetch(`/api/teams/${encodeURIComponent(teamId)}/onboarding`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),

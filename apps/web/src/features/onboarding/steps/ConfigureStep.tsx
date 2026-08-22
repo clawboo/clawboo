@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { MODEL_GROUPS } from '@/lib/modelCatalog'
 import { NATIVE_STEPS } from '../StepIndicator'
 import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
@@ -207,7 +208,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
   const refreshCodexAuth = useCallback(async () => {
     setCodexChecking(true)
     try {
-      const res = await fetch('/api/system/openclaw-config')
+      const res = await apiFetch('/api/system/openclaw-config')
       // A transient failure must NOT drop a known-good confirmation (the toggle
       // re-probes on every re-entry). Keep the last state; Re-check re-probes.
       // A never-succeeded probe stays null, so Continue stays gated as before.
@@ -261,7 +262,7 @@ export function ConfigureStep({ onConfigured, onBack }: ConfigureStepProps) {
     setError(null)
 
     try {
-      const res = await fetch('/api/system/configure-openclaw', {
+      const res = await apiFetch('/api/system/configure-openclaw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

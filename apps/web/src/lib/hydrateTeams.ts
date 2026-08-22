@@ -1,3 +1,4 @@
+import { apiFetch } from '@clawboo/control-client'
 import { useTeamStore } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import type { CollectionId } from '@/lib/teamPalettes'
@@ -9,7 +10,7 @@ import { normalizeTeamColor } from '@/lib/normalizeTeamColor'
  */
 export async function hydrateTeams(): Promise<void> {
   try {
-    const r = await fetch('/api/teams?includeArchived=true')
+    const r = await apiFetch('/api/teams?includeArchived=true')
     const data = (await r.json()) as {
       teams?: {
         id: string
@@ -50,7 +51,7 @@ export async function hydrateTeams(): Promise<void> {
       for (const t of data.teams) {
         const normalized = normalizeTeamColor(t.color)
         if (normalized !== t.color) {
-          void fetch(`/api/teams/${t.id}`, {
+          void apiFetch(`/api/teams/${t.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ color: normalized }),

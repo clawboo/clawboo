@@ -18,6 +18,7 @@ import { PanelHeader } from '@/features/shared/PanelHeader'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Skeleton } from '@/features/shared/Skeleton'
+import { apiFetch } from '@clawboo/control-client'
 
 // ─── API response types ─────────────────────────────────────────────────────
 
@@ -295,7 +296,7 @@ export function CostDashboard() {
     setLoading(true)
     setError(null)
 
-    fetch('/api/cost-records/summary')
+    apiFetch('/api/cost-records/summary')
       .then((res) => res.json() as Promise<TokenSummaryResponse>)
       .then((json) => {
         if (!cancelled) {

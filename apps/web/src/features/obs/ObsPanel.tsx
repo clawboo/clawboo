@@ -27,6 +27,7 @@ import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 import { EvalScorecard } from './EvalScorecard'
+import { apiFetch } from '@clawboo/control-client'
 
 interface ObsEvent {
   seq: number
@@ -99,7 +100,7 @@ const KICKER_COLOR = 'rgb(var(--foreground-rgb) / 0.4)'
 
 async function getJson<T>(url: string): Promise<T | null> {
   try {
-    const r = await fetch(url)
+    const r = await apiFetch(url)
     if (!r.ok) return null
     return (await r.json()) as T
   } catch {

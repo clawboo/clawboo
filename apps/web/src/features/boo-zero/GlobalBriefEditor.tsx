@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshCw, Save } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
 import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
@@ -23,13 +24,13 @@ interface BriefResponse {
 }
 
 async function fetchGlobalBrief(): Promise<BriefResponse> {
-  const res = await fetch('/api/boo-zero/global-brief')
+  const res = await apiFetch('/api/boo-zero/global-brief')
   if (!res.ok) throw new Error('Failed to load global brief')
   return (await res.json()) as BriefResponse
 }
 
 async function putGlobalBrief(content: string): Promise<void> {
-  const res = await fetch('/api/boo-zero/global-brief', {
+  const res = await apiFetch('/api/boo-zero/global-brief', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),

@@ -5,6 +5,7 @@
 // memoryClient. CapabilityRecord types come straight from the browser-safe
 // @clawboo/capability-registry package.
 
+import { apiFetch } from '@clawboo/control-client'
 import type {
   CapabilityInstallSpec,
   CapabilityRecord,
@@ -37,7 +38,7 @@ export async function fetchCapabilities(filter: CapabilityFilter = {}): Promise<
   if (filter.agentId) qs.set('agentId', filter.agentId)
   const url = qs.toString() ? `/api/capabilities?${qs}` : '/api/capabilities'
   try {
-    const res = await fetch(url)
+    const res = await apiFetch(url)
     if (!res.ok) return { records: [], sources: [], ok: false }
     const body = (await res.json()) as Partial<CapabilitiesView>
     return { records: body.records ?? [], sources: body.sources ?? [], ok: true }
@@ -55,7 +56,7 @@ export interface CapabilityActionResult {
 
 async function postAction(action: string, body: unknown): Promise<CapabilityActionResult> {
   try {
-    const res = await fetch(`/api/capabilities/${action}`, {
+    const res = await apiFetch(`/api/capabilities/${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

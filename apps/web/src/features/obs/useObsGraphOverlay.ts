@@ -6,6 +6,7 @@
 // untouched — this only augments.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiFetch } from '@clawboo/control-client'
 
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
@@ -33,8 +34,8 @@ export function useObsGraphOverlay(teamId: string | null): ObsOverlay {
     try {
       const q = teamId ? `?teamId=${encodeURIComponent(teamId)}` : ''
       const [hRes, gRes] = await Promise.all([
-        fetch(`/api/obs/health${q}`),
-        fetch(`/api/obs/graph${q}`),
+        apiFetch(`/api/obs/health${q}`),
+        apiFetch(`/api/obs/graph${q}`),
       ])
       if (generationRef.current !== generation || !hRes.ok || !gRes.ok) return
       const h = (await hRes.json()) as {

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -98,7 +99,7 @@ function MascotIcon({
             : 'border-2 border-transparent bg-foreground/[0.04] hover:bg-foreground/[0.07]',
         ].join(' ')}
       >
-        <img src="/logo.svg" width={26} height={24} alt="Boo Zero" />
+        <img src="logo.svg" width={26} height={24} alt="Boo Zero" />
       </button>
     </RailTip>
   )
@@ -175,7 +176,7 @@ export function TeamSidebar() {
     setContextMenu(null)
 
     try {
-      await fetch(`/api/teams/${team.id}`, {
+      await apiFetch(`/api/teams/${team.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isArchived: wasArchived ? 0 : 1 }),
@@ -218,7 +219,7 @@ export function TeamSidebar() {
     }
 
     try {
-      await fetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      await apiFetch(`/api/teams/${team.id}`, { method: 'DELETE' })
       useTeamStore.getState().removeTeam(team.id)
 
       useFleetStore.setState((s) => ({
@@ -275,7 +276,7 @@ export function TeamSidebar() {
         }
       }
 
-      await fetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      await apiFetch(`/api/teams/${team.id}`, { method: 'DELETE' })
       useTeamStore.getState().removeTeam(team.id)
 
       if (useTeamStore.getState().selectedTeamId === null) {

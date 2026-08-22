@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { CheckCircle2, ShieldCheck } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,7 +37,7 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
     setPhase('approving')
     setErrorMessage(null)
     try {
-      const res = await fetch('/api/system/approve-device', { method: 'POST' })
+      const res = await apiFetch('/api/system/approve-device', { method: 'POST' })
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean
         error?: string

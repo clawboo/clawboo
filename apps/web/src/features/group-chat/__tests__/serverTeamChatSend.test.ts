@@ -92,6 +92,13 @@ describe('stopServerTeam', () => {
     expect(useChatStore.getState().streamingText.get(sk1)).toBeUndefined()
     expect(useChatStore.getState().streamingText.get(sk2)).toBeUndefined()
     expect(useChatStore.getState().streamStartedAt.get(sk1)).toBeUndefined()
-    expect(fetchMock).toHaveBeenCalledWith('/api/teams/t1/chat/stop', { method: 'POST' })
+    // `headers: {}` is the control-client seam's injected-header slot (empty by
+    // default, populated by a remote/authenticated client). The URL stays
+    // root-relative because the base is empty unless the server mounts the app
+    // under a path prefix.
+    expect(fetchMock).toHaveBeenCalledWith('/api/teams/t1/chat/stop', {
+      method: 'POST',
+      headers: {},
+    })
   })
 })

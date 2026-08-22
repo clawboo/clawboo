@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Rocket, X } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 
 import { useViewStore } from '@/stores/view'
 import { useTourStore } from '@/stores/tour'
@@ -16,7 +17,7 @@ const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
 async function countCompletedTasks(): Promise<number> {
   try {
-    const res = await fetch('/api/board?status=done')
+    const res = await apiFetch('/api/board?status=done')
     if (!res.ok) return 0
     const body = (await res.json()) as { tasks?: unknown[] }
     return Array.isArray(body.tasks) ? body.tasks.length : 0
@@ -27,7 +28,7 @@ async function countCompletedTasks(): Promise<number> {
 
 async function persistDismiss(): Promise<void> {
   try {
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ firstRunDismissedAt: Date.now() }),
@@ -53,7 +54,7 @@ export function FirstRunNudge() {
     let alive = true
     void (async () => {
       try {
-        const settings = (await (await fetch('/api/settings')).json()) as {
+        const settings = (await (await apiFetch('/api/settings')).json()) as {
           firstRunDismissedAt?: number | null
         }
         if (settings.firstRunDismissedAt != null) return

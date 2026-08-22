@@ -23,7 +23,7 @@ import { exec } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 
-import { resolveClawbooDir } from '@clawboo/config'
+import { resolveBasePathOrRoot, resolveClawbooDir } from '@clawboo/config'
 
 import { VERSION } from './version'
 import { nodeVersionError } from './node-version'
@@ -75,6 +75,15 @@ function fail(err: unknown): never {
 }
 
 // ─── Server start / stop reporting ────────────────────────────────────────────
+
+// The URL prefix the server is mounted under, for the links we PRINT. Display
+// only: a malformed value falls back to the root here and the server refuses to
+// start with a precise message, so the CLI never dies on a bad setting. The
+// trailing slash matters under a mount, since the shell's assets are relative.
+const uiPath = (): string => {
+  const base = resolveBasePathOrRoot(process.env)
+  return base ? `${base}/` : ''
+}
 
 /**
  * Start a dashboard and narrate it. Returns the port, or null when the user is
@@ -166,7 +175,7 @@ function printGatedNotice(port: number): void {
   )
   p.log.info(
     chalk.gray('Open ') +
-      chalk.cyan.underline(`http://localhost:${port}/?access_token=<token>`) +
+      chalk.cyan.underline(`http://localhost:${port}${uiPath()}?access_token=<token>`) +
       chalk.gray(' once to set it in your browser, or unset the variable and restart the server.'),
   )
 }
@@ -336,7 +345,7 @@ async function run(opts: LaunchOptions): Promise<void> {
     if (dashboardPort === null) process.exit(1)
   }
 
-  const dashboardUrl = `http://localhost:${dashboardPort}`
+  const dashboardUrl = `http://localhost:${dashboardPort}${uiPath()}`
 
   // ── 4. Open browser ────────────────────────────────────────────────────────
 
@@ -469,7 +478,7 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
     process.exit(1)
   }
 
-  const url = `http://localhost:${started}`
+  const url = `http://localhost:${started}${uiPath()}`
   if (opts.open) {
     const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
     await openBrowser(url)

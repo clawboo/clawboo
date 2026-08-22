@@ -6,7 +6,7 @@ import { useFleetStore } from '@/stores/fleet'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
-import { listAgentSessions } from '@clawboo/control-client'
+import { apiFetch, listAgentSessions } from '@clawboo/control-client'
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
@@ -187,7 +187,7 @@ export function useApprovalActions() {
 
         if (agentId) {
           try {
-            const res = await fetch('/api/approvals', {
+            const res = await apiFetch('/api/approvals', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

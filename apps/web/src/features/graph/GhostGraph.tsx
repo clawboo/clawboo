@@ -1,4 +1,4 @@
-import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
+import { apiFetch, readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import '@xyflow/react/dist/style.css'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -876,7 +876,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         })
 
         // Ensure agent-to-agent coordination is enabled in Gateway config (idempotent)
-        fetch('/api/system/openclaw-config', {
+        apiFetch('/api/system/openclaw-config', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentToAgent: { enabled: true } }),

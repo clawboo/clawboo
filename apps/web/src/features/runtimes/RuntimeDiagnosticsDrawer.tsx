@@ -31,7 +31,7 @@ import { fetchCapabilities } from '@/lib/capabilitiesClient'
 import { formatRelative } from '@/lib/formatRelative'
 import { ENTER_SPRING } from '@/lib/motion'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
-import { type ConnectionState, type RuntimeClass } from '@clawboo/control-client'
+import { apiFetch, type ConnectionState, type RuntimeClass } from '@clawboo/control-client'
 import { useCapabilityFilterStore } from '@/stores/capabilityFilter'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 
@@ -146,7 +146,7 @@ export function RuntimeDiagnosticsDrawer({
     let alive = true
     void (async () => {
       try {
-        const res = await fetch('/api/obs/errors')
+        const res = await apiFetch('/api/obs/errors')
         if (!res.ok) return
         const body = (await res.json()) as { errors?: RuntimeErrorRow[] }
         if (alive) setErrors((body.errors ?? []).filter((e) => e.runtime === target.id).slice(0, 5))

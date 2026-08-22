@@ -4,7 +4,7 @@ import type { AgentStatusPatch, ChatCost } from '@clawboo/events'
 import { createEventHandler, createPatchQueue, processEvent } from '@clawboo/events'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { isTeamSessionKey } from '@clawboo/team-orchestration'
-import { listAgentSessions } from '@clawboo/control-client'
+import { apiFetch, listAgentSessions } from '@clawboo/control-client'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
@@ -59,7 +59,7 @@ export function recordChatCost(agentId: string, runId: string | null, cost: Chat
     useChatStore.getState().setLastTokenUsage(runId, inputTokens, cost.outputTokens)
   }
 
-  void fetch('/api/cost-records', {
+  void apiFetch('/api/cost-records', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -281,7 +281,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
 
         // Best-effort persistence — never throw in an event handler
         const gwUrl = useConnectionStore.getState().gatewayUrl ?? ''
-        void fetch('/api/chat-history', {
+        void apiFetch('/api/chat-history', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionKey, gatewayUrl: gwUrl, entries }),

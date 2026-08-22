@@ -116,14 +116,37 @@ export const authRetryAfterMs = (err: unknown): number | null => {
 
 // ─── URL helpers ──────────────────────────────────────────────────────────────
 
-export const resolveProxyGatewayUrl = (): string => {
+/** Normalize a URL prefix to '' or '/segment', whatever shape it arrives in.
+ *  Applied to the EXPLICIT argument as well as the injected global: a caller
+ *  passing '/clawboo/' or '/' would otherwise build '/clawboo//api/gateway/ws'
+ *  or '//api/gateway/ws', and the second is protocol-relative once it lands in a
+ *  URL. Trailing slashes are trimmed by scanning rather than with `/\/+$/`,
+ *  which backtracks polynomially on a long run of slashes. */
+const normalizeBase = (raw: unknown): string => {
+  if (typeof raw !== 'string') return ''
+  const trimmed = raw.trim()
+  if (!trimmed || trimmed === '/') return ''
+  const withLeading = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  let end = withLeading.length
+  while (end > 0 && withLeading[end - 1] === '/') end -= 1
+  return withLeading.slice(0, end)
+}
+
+export const resolveProxyGatewayUrl = (basePath?: string): string => {
+  // The proxy route lives UNDER the app's path prefix, so a subpath mount has to
+  // carry it here too. `window.location.pathname` is not a substitute: it is the
+  // current route, not the mount point. Read defensively so this helper stays
+  // usable outside the SPA bundle.
+  const base = normalizeBase(
+    basePath ?? (globalThis as { __CLAWBOO_BASE__?: unknown }).__CLAWBOO_BASE__,
+  )
   // Browser path: same-origin, so we never hardcode a port. The string below
   // is only used in SSR / Node test contexts where `window` is undefined —
   // 18790 mirrors the default in `apps/web/server/lib/portUtils.ts`.
-  if (typeof window === 'undefined') return 'ws://localhost:18790/api/gateway/ws'
+  if (typeof window === 'undefined') return `ws://localhost:18790${base}/api/gateway/ws`
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const host = window.location.host
-  return `${protocol}://${host}/api/gateway/ws`
+  return `${protocol}://${host}${base}/api/gateway/ws`
 }
 
 export const isLocalGatewayUrl = (url: string): boolean => {

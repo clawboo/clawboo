@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { apiFetch } from '@clawboo/control-client'
 import { MODEL_GROUPS, type ModelGroup } from './modelCatalog'
 import { useOpenClawModelGroups } from './useOpenRouterModels'
 
@@ -13,7 +14,7 @@ let fetchPromise: Promise<void> | null = null
 
 async function fetchDynamic(): Promise<void> {
   try {
-    const res = await fetch('/api/system/models')
+    const res = await apiFetch('/api/system/models')
     const data = (await res.json()) as {
       groups: ModelGroup[] | null
       configuredProviders?: string[]

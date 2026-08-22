@@ -22,13 +22,14 @@
  * propagates so callers can branch on it). Callers `catch` and fall back.
  */
 
+import { apiFetch } from '@clawboo/control-client'
 import { GatewayClient, resolveProxyGatewayUrl } from '@clawboo/gateway-client'
 
 export async function connectGatewayFromSettings(): Promise<{
   client: GatewayClient
   gatewayUrl: string
 }> {
-  const resp = await fetch('/api/settings')
+  const resp = await apiFetch('/api/settings')
   if (!resp.ok) {
     throw new Error('Could not read saved Gateway settings')
   }

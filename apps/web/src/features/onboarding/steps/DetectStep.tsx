@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, Check, ExternalLink, Loader2, X } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { useSystemStore } from '@/stores/system'
 import type { SystemInfo } from '@/stores/system'
 import { NATIVE_STEPS } from '../StepIndicator'
@@ -79,7 +80,7 @@ export function DetectStep({
 
     void (async () => {
       try {
-        const res = await fetch('/api/system/status')
+        const res = await apiFetch('/api/system/status')
         const data = (await res.json()) as SystemInfo
         setInfo(data)
       } catch {

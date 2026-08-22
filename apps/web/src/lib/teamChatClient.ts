@@ -7,6 +7,8 @@
 // NOTE: the polished room panel (interleaving these named-peer rows into the team
 // view) is a future UX coherence lap; this is the data layer it builds on.
 
+import { apiFetch } from '@clawboo/control-client'
+
 export interface TeamChatPost {
   id: string
   roomId: string
@@ -29,7 +31,7 @@ export interface TeamChatRoom {
 export async function fetchTeamChat(teamId: string, sinceSeq = 0): Promise<TeamChatRoom> {
   const empty: TeamChatRoom = { roomId: `team:${teamId}`, posts: [], nextSeq: sinceSeq }
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/team-chat?teamId=${encodeURIComponent(teamId)}&sinceSeq=${sinceSeq}`,
     )
     if (!res.ok) return empty

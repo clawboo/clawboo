@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useRefreshOnVisible } from '@/lib/useVisiblePolling'
+import { apiFetch } from '@clawboo/control-client'
 
 // useUpdateCheck — polls the server's self-version endpoint and decides whether
 // to surface the "update available" chip. Mirrors GitHubStarButton's
@@ -95,7 +96,7 @@ export function useUpdateCheck(): UseUpdateCheck {
     if (!force && readCache()) return
     inflight.current = true
     try {
-      const res = await fetch(ENDPOINT, { cache: 'no-store' })
+      const res = await apiFetch(ENDPOINT, { cache: 'no-store' })
       if (!res.ok) return
       const data = (await res.json()) as SelfVersionInfo
       if (typeof data.current !== 'string') return

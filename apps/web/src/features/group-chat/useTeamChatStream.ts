@@ -30,6 +30,7 @@ import type { BoardChange } from '@/features/group-chat/boardOrchestration'
 import { useBoardStore } from '@/stores/board'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
+import { apiUrl } from '@clawboo/control-client'
 
 export interface TeamChatDelta {
   sessionKey: string
@@ -158,7 +159,7 @@ export function useTeamChatStream({
       (typeof EventSource !== 'undefined' ? (url: string) => new EventSource(url) : null)
     if (!factory) return
 
-    const es = factory(`/api/teams/${encodeURIComponent(teamId)}/chat/stream`)
+    const es = factory(apiUrl(`/api/teams/${encodeURIComponent(teamId)}/chat/stream`))
 
     const onCommitted = (e: MessageEvent): void => {
       applyCommittedFrame(e.data as string)

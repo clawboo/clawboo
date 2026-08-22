@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Blocks, Bot, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import { Select } from '@/features/shared/Select'
 import { Button } from '@/features/shared/Button'
 import { Chip } from '@/features/shared/Chip'
@@ -66,7 +67,7 @@ async function installSkillFromMarketplace(
     // reads it (injection-scanned + audited server-side), so the skill appears on
     // the Ghost Graph + the Capabilities dashboard. (Supersedes the legacy
     // per-agent markdown skill-file write.)
-    const res = await fetch('/api/skills', {
+    const res = await apiFetch('/api/skills', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

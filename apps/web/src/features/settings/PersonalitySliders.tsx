@@ -1,4 +1,4 @@
-import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
+import { apiFetch, readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Check, FileText, PenLine, SlidersHorizontal } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
@@ -74,7 +74,9 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
     baseSoulRef.current = ''
 
     // Fetch both SQLite personality values and existing SOUL.md in parallel
-    const sqlitePromise = fetch(`/api/personality?agentId=${encodeURIComponent(selectedAgentId)}`)
+    const sqlitePromise = apiFetch(
+      `/api/personality?agentId=${encodeURIComponent(selectedAgentId)}`,
+    )
       .then((res) => res.json())
       .then((data: { values: PersonalityValues | null; customText?: string | null }) => {
         if (data.values && isPersonalityValues(data.values)) {
@@ -107,7 +109,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       if (dirty && client) {
         dirtyRef.current = null
         // Best-effort save to both SQLite and SOUL.md on agent switch
-        void fetch('/api/personality', {
+        void apiFetch('/api/personality', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentId: selectedAgentId, values: dirty }),
@@ -145,7 +147,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       setError(null)
 
       // 1. Save to SQLite — persistent source of truth for slider values
-      const sqliteSave = fetch('/api/personality', {
+      const sqliteSave = apiFetch('/api/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId: selectedAgentId, values: next, customText: null }),
@@ -199,7 +201,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       setError(null)
 
       // 1. Save to SQLite with custom text
-      const sqliteSave = fetch('/api/personality', {
+      const sqliteSave = apiFetch('/api/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId: selectedAgentId, values, customText: text }),
@@ -247,7 +249,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       customTextDirtyRef.current = false
 
       // Save cleared custom text + restore slider personality to SOUL.md
-      void fetch('/api/personality', {
+      void apiFetch('/api/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId: selectedAgentId, values, customText: null }),

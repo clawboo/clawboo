@@ -5,6 +5,7 @@
 // replaces `client.chat.send` (which only knows OpenClaw agents).
 
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { apiFetch } from '@clawboo/control-client'
 
 import { nextSeq } from '@/lib/sequenceKey'
 import { useChatStore } from '@/stores/chat'
@@ -54,7 +55,7 @@ export async function sendNativeAgentMessage({
     .appendTranscript(sessionKey, [makeUserEntry(sessionKey, shownText, entryId)])
 
   try {
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/chat`, {
+    const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: trimmed, displayText: shownText, entryId }),
@@ -76,7 +77,7 @@ export async function sendNativeAgentMessage({
 /** Abort the in-flight conversational turn (the composer's Stop button). */
 export async function stopNativeAgentChat(agentId: string): Promise<void> {
   try {
-    await fetch(`/api/agents/${encodeURIComponent(agentId)}/chat/stop`, { method: 'POST' })
+    await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/chat/stop`, { method: 'POST' })
   } catch {
     // best-effort
   }

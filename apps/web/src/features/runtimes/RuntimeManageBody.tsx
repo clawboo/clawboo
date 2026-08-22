@@ -13,7 +13,12 @@
 import { useState, type ReactNode } from 'react'
 import { ArrowRight, LogOut, RotateCcw } from 'lucide-react'
 
-import { disconnectRuntime, signOutRuntime, type RuntimeId } from '@clawboo/control-client'
+import {
+  apiFetch,
+  disconnectRuntime,
+  signOutRuntime,
+  type RuntimeId,
+} from '@clawboo/control-client'
 
 import { Button } from '@/features/shared/Button'
 import { confirm } from '@/stores/confirm'
@@ -105,7 +110,7 @@ export function RuntimeManageBody({
     setBusy(true)
     let result: { ok: boolean; error?: string }
     if (runtimeId === 'openclaw') {
-      result = await fetch('/api/system/gateway', {
+      result = await apiFetch('/api/system/gateway', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'stop' }),

@@ -15,6 +15,8 @@
 //   2. The team chat composer slash command `/rule <text>` — appends a
 //      line to the team's rules in one click.
 
+import { apiFetch } from '@clawboo/control-client'
+
 const CACHE_TTL_MS = 5_000
 
 interface CacheEntry {
@@ -67,7 +69,7 @@ export async function fetchTeamRules(teamId: string): Promise<string> {
     return cached.content
   }
   try {
-    const res = await fetch(`/api/team-rules/${encodeURIComponent(teamId)}`)
+    const res = await apiFetch(`/api/team-rules/${encodeURIComponent(teamId)}`)
     if (!res.ok) return ''
     const body = (await res.json()) as { content?: string | null }
     const content = typeof body.content === 'string' ? body.content : ''
@@ -81,7 +83,7 @@ export async function fetchTeamRules(teamId: string): Promise<string> {
 /** PUT new rules content for a team. Invalidates the local cache. */
 export async function saveTeamRules(teamId: string, content: string): Promise<boolean> {
   try {
-    const res = await fetch(`/api/team-rules/${encodeURIComponent(teamId)}`, {
+    const res = await apiFetch(`/api/team-rules/${encodeURIComponent(teamId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),

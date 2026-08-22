@@ -8,6 +8,7 @@
 
 import { useCallback, useId, useState } from 'react'
 import { X } from 'lucide-react'
+import { apiFetch } from '@clawboo/control-client'
 import type { Team } from '@/stores/team'
 import { useTeamStore } from '@/stores/team'
 import { IconButton } from '@/features/shared/Button'
@@ -37,7 +38,7 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
   const persist = useCallback(
     (patch: { colorCollectionId?: CollectionId; color?: string; icon?: string }) => {
       useTeamStore.getState().updateTeam(team.id, patch)
-      void fetch(`/api/teams/${team.id}`, {
+      void apiFetch(`/api/teams/${team.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),

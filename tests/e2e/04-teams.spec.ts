@@ -13,7 +13,7 @@ test.describe('Teams', () => {
     await expect(teamSidebar).toBeVisible({ timeout: 5_000 })
 
     // Mascot logo should be in the team sidebar
-    const mascot = teamSidebar.locator('img[src="/logo.svg"]')
+    const mascot = teamSidebar.locator('img[src$="logo.svg"]')
     await expect(mascot).toBeVisible({ timeout: 5_000 })
 
     // Agents should appear in the agent list column (Col 2).

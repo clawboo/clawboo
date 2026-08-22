@@ -188,6 +188,45 @@ location / {
 
 Bind Clawboo to loopback and let the proxy be the only network-facing surface, **or** bind it wide and protect it with `STUDIO_ACCESS_TOKEN`, full details in [Security](/operating/security).
 
+### Serving under a path prefix
+
+When Clawboo shares a hostname with other apps, mount it under a prefix with `CLAWBOO_BASE_PATH` instead of giving it the whole origin:
+
+```bash
+CLAWBOO_BASE_PATH=/clawboo \
+CLAWBOO_ALLOWED_ORIGINS=https://apps.example.com \
+CLAWBOO_ALLOWED_HOSTS=apps.example.com \
+  npx clawboo
+```
+
+```nginx
+# The prefix is passed THROUGH to Clawboo, so proxy_pass carries no URI part
+# (no trailing slash after the port). With a trailing slash nginx strips the
+# location prefix before forwarding, and Clawboo, seeing requests arrive at the
+# root, redirects them back to the prefix: the browser then loops between the
+# two until it gives up.
+location /clawboo/ {
+    proxy_pass http://127.0.0.1:18790;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+
+# `location /clawboo/` matches only the trailing-slash form, so without this the
+# bare `/clawboo` never reaches Clawboo and cannot be redirected by it.
+location = /clawboo {
+    return 308 /clawboo/;
+}
+```
+
+The SPA, every `/api` route, the SSE streams, and the Gateway WebSocket all live under the prefix, and the prebuilt bundle needs no rebuild: the server templates the mount point into the shell it serves. The access cookie is scoped to the prefix (`Path=/clawboo`), so a sibling app on the same origin never receives it, which also means a browser hitting the unprefixed `/api` on a token-gated install gets a 401. That root `/api` surface stays served for the loopback control plane (the CLI probe, the MCP callback URLs, the self-update check) and stays exactly as gated as before.
+
+<Note>
+An invalid `CLAWBOO_BASE_PATH` makes the server refuse to start rather than silently serving at the root, so a typo surfaces at boot instead of looking like a broken proxy. In `pnpm dev` the Vite dev server still serves the SPA at the root and proxies `/api` to the API server, so the prefix shapes only what that API server accepts; develop at the root and set the prefix on the built server.
+</Note>
+
 ## Verify it worked
 
 - Hit `GET /api/settings`; a 200 with `{ gatewayUrl, hasToken }` confirms the server is up and Clawboo-shaped.

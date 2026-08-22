@@ -16,6 +16,7 @@ import { useSettingsModalStore } from '@/stores/settingsModal'
 import { createAgent } from '@/lib/createAgent'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import {
+  apiFetch,
   fetchBooZeroOverride,
   fetchNativeLeaderModel,
   fetchProviders,
@@ -537,7 +538,7 @@ export function CreateTeamModal({
       const finalTeamName = dedupPlan.teamName
 
       // Create the team via API
-      const res = await fetch('/api/teams', {
+      const res = await apiFetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -588,7 +589,7 @@ export function CreateTeamModal({
       // The PATCH merges partials, so omitting the field leaves it false.
       if (presatisfyOnboardingGate) {
         try {
-          await fetch(`/api/teams/${team.id}/onboarding`, {
+          await apiFetch(`/api/teams/${team.id}/onboarding`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentsIntroduced: true }),
@@ -753,7 +754,7 @@ export function CreateTeamModal({
         // model-inert as members, so this only applies to an OpenClaw pick. Best-effort.
         if (sourceId === 'openclaw' && agentModels[agent.id]) {
           try {
-            await fetch('/api/system/openclaw-config', {
+            await apiFetch('/api/system/openclaw-config', {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ agentModel: { agentId, model: agentModels[agent.id] } }),
@@ -764,7 +765,7 @@ export function CreateTeamModal({
         }
 
         // Persist default personality to SQLite so sliders load correctly
-        void fetch('/api/personality', {
+        void apiFetch('/api/personality', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentId, values: defaultPersonality }),
@@ -778,7 +779,7 @@ export function CreateTeamModal({
 
         // Assign the successfully-created agent to the team (best-effort).
         try {
-          await fetch(`/api/teams/${team.id}/agents`, {
+          await apiFetch(`/api/teams/${team.id}/agents`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId }),
@@ -818,7 +819,7 @@ export function CreateTeamModal({
       // PATCH always runs (incl. writing null) so the column stays accurate on re-deploys.
       if (team.id) {
         try {
-          await fetch(`/api/teams/${team.id}`, {
+          await apiFetch(`/api/teams/${team.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ leaderAgentId }),
@@ -891,7 +892,7 @@ export function CreateTeamModal({
             : null,
       })
       try {
-        await fetch(`/api/boo-zero/team-briefs/${encodeURIComponent(team.id)}`, {
+        await apiFetch(`/api/boo-zero/team-briefs/${encodeURIComponent(team.id)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content: briefMarkdown }),
@@ -910,7 +911,7 @@ export function CreateTeamModal({
       const hasRouting = resolved.some((a) => a.agentsTemplate && /@[\w"']/.test(a.agentsTemplate))
       if (hasRouting) {
         try {
-          await fetch('/api/system/openclaw-config', {
+          await apiFetch('/api/system/openclaw-config', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentToAgent: { enabled: true } }),

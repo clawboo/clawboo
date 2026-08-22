@@ -4,6 +4,8 @@
 // never throwing to the caller. The SPA never imports server packages, so the
 // shapes are mirrored locally here.
 
+import { apiFetch } from '@clawboo/control-client'
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const
 
 export type SearchMode = 'fts' | 'vector' | 'hybrid'
@@ -58,7 +60,7 @@ export async function searchMemory(
     if (opts.limit) p.set('limit', String(opts.limit))
     if (opts.teamId) p.set('teamId', opts.teamId)
     if (opts.agentId) p.set('agentId', opts.agentId)
-    const r = await fetch(`/api/memory?${p.toString()}`)
+    const r = await apiFetch(`/api/memory?${p.toString()}`)
     if (!r.ok) return []
     const body = (await r.json()) as { results?: MemorySearchResult[] }
     return body.results ?? []
@@ -76,7 +78,7 @@ export interface SaveFactInput {
 /** POST /api/memory — save a declarative fact. Returns the saved fact or null. */
 export async function saveFact(input: SaveFactInput): Promise<MemoryFact | null> {
   try {
-    const r = await fetch('/api/memory', {
+    const r = await apiFetch('/api/memory', {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({ kind: 'fact', ...input }),
@@ -105,7 +107,7 @@ export async function browseMemory(opts: SearchOpts = {}): Promise<BrowseResult>
     if (opts.teamId) p.set('teamId', opts.teamId)
     if (opts.agentId) p.set('agentId', opts.agentId)
     const qs = p.toString()
-    const r = await fetch(`/api/memory/browse${qs ? `?${qs}` : ''}`)
+    const r = await apiFetch(`/api/memory/browse${qs ? `?${qs}` : ''}`)
     if (!r.ok) return { facts: [], procedures: [], ok: false }
     const body = (await r.json()) as { facts?: MemoryFact[]; procedures?: MemoryProcedure[] }
     return { facts: body.facts ?? [], procedures: body.procedures ?? [], ok: true }
@@ -117,7 +119,7 @@ export async function browseMemory(opts: SearchOpts = {}): Promise<BrowseResult>
 /** GET /api/memory/provider — the active embedding provider (null = FTS-only). */
 export async function getProvider(): Promise<EmbeddingProviderInfo | null> {
   try {
-    const r = await fetch('/api/memory/provider')
+    const r = await apiFetch('/api/memory/provider')
     if (!r.ok) return null
     const body = (await r.json()) as { provider?: EmbeddingProviderInfo | null }
     return body.provider ?? null

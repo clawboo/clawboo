@@ -3,6 +3,8 @@
 // safe value on failure, never throwing. The SPA never imports server packages,
 // so the row shapes are mirrored locally here.
 
+import { apiFetch } from '@clawboo/control-client'
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const
 
 export type BudgetScope = 'agent' | 'mission' | 'team' | 'tenant'
@@ -47,7 +49,7 @@ export interface BudgetsResult {
 /** GET /api/governance/budgets */
 export async function listBudgets(): Promise<BudgetsResult> {
   try {
-    const r = await fetch('/api/governance/budgets')
+    const r = await apiFetch('/api/governance/budgets')
     if (!r.ok) return { budgets: [], ok: false }
     const body = (await r.json()) as { budgets?: Budget[] }
     return { budgets: body.budgets ?? [], ok: true }
@@ -68,7 +70,7 @@ export interface SetBudgetInput {
 /** POST /api/governance/budgets — set/raise a cap (raising above spend un-pauses). */
 export async function setBudget(input: SetBudgetInput): Promise<Budget | null> {
   try {
-    const r = await fetch('/api/governance/budgets', {
+    const r = await apiFetch('/api/governance/budgets', {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify(input),
@@ -96,7 +98,7 @@ export async function resumeBudget(
   graceUsdCents?: number,
 ): Promise<ResumeBudgetResult> {
   try {
-    const r = await fetch(
+    const r = await apiFetch(
       `/api/governance/budgets/${encodeURIComponent(scope)}/${encodeURIComponent(scopeId)}/resume`,
       {
         method: 'POST',
@@ -128,7 +130,7 @@ export async function listAudit(filter: AuditFilter = {}): Promise<AuditRow[]> {
     if (filter.since) p.set('since', String(filter.since))
     if (filter.limit) p.set('limit', String(filter.limit))
     const qs = p.toString()
-    const r = await fetch(`/api/governance/audit${qs ? `?${qs}` : ''}`)
+    const r = await apiFetch(`/api/governance/audit${qs ? `?${qs}` : ''}`)
     if (!r.ok) return []
     const body = (await r.json()) as { audit?: AuditRow[] }
     return body.audit ?? []
