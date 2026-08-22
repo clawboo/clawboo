@@ -6,7 +6,22 @@ import type { GraphNode, GraphEdge, LayoutData } from './types'
 
 // ─── Store shape ──────────────────────────────────────────────────────────────
 
+/** Payload for the share-to-a-second-agent dialog (J4). Set by the graph's
+ *  `onConnect` resource→boo branch; cleared on close/confirm. */
+export interface GrantComposerState {
+  connectorName: string
+  capabilityId: string | null
+  connectorId: string | null
+  sourceAgentName: string
+  targetAgentId: string
+  targetAgentName: string
+}
+
 interface GraphStore {
+  /** Open GrantComposer, or null. */
+  grantComposer: GrantComposerState | null
+  setGrantComposer: (s: GrantComposerState | null) => void
+
   // Per-agent graph inputs: the agent-scoped capability records (the unified
   // inventory — supersedes the legacy per-agent markdown skill-file path) +
   // AGENTS.md routing (still drives dependency edges).
@@ -110,6 +125,8 @@ interface GraphStore {
 // ─── Store instance ───────────────────────────────────────────────────────────
 
 export const useGraphStore = create<GraphStore>((set) => ({
+  grantComposer: null,
+  setGrantComposer: (grantComposer) => set({ grantComposer }),
   agentFiles: new Map(),
   isLoadingFiles: false,
   filesError: null,

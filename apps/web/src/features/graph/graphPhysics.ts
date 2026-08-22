@@ -419,7 +419,10 @@ function initialize(nodes: GraphNode[], edges: GraphEdge[]): void {
   // Build parent map: childNodeId → parentBooId
   const parentMap = new Map<string, string>()
   for (const edge of edges) {
-    if (edge.type === 'skill' || edge.type === 'resource') {
+    // `grant` is an orbital edge like skill/resource — it wraps OrbitalEdge and
+    // ties a tile to its Boo. Omitting it here would leave a grant-backed tile
+    // with no parent, so it would carry no spring and drift free of its agent.
+    if (edge.type === 'skill' || edge.type === 'resource' || edge.type === 'grant') {
       parentMap.set(edge.target, edge.source)
     }
   }

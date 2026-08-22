@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
   Cable,
@@ -8,12 +8,17 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
-import { Handle, Position } from '@xyflow/react'
+import { Handle, NodeToolbar, Position, useStore } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { useGraphStore } from '../store'
+import { useViewStore } from '@/stores/view'
+import { useToastStore } from '@/stores/toast'
+import { disableCapability, enableCapability } from '@/lib/capabilitiesClient'
+import { detachGrant } from '../operations/revokeGrant'
 import { useFloatingMotion } from '../useFloatingMotion'
 import { usePeacockTransition } from '../usePeacockTransition'
 import type { ResourceNodeData, ConnectorServiceKind } from '../types'
+import { capabilityBadge, capabilityReason } from './capabilityBadge'
 
 // ─── ResourceNode — the MCP-connector tile ────────────────────────────────────
 //
@@ -26,6 +31,9 @@ import type { ResourceNodeData, ConnectorServiceKind } from '../types'
 
 const VIOLET = 'var(--violet)'
 const CIRCLE = 46 // matches the regular SkillNode tile
+/** Below this zoom, orbital tiles collapse to flat dots (see the LOD note). */
+const LOD_ZOOM = 0.4
+const LOD_DOT = 10
 
 // Each clawboo MCP server gets a MEANINGFUL glyph (lucide, never emoji):
 // memory → Database, tasks → Kanban, tools → Wrench, team chat → Messages.
@@ -69,16 +77,35 @@ export const ResourceNode = memo(function ResourceNode({
   dragging,
   positionAbsoluteX,
   positionAbsoluteY,
+  selected,
 }: NodeProps<Node<ResourceNodeData, 'resource'>>) {
   const { name, fullName, serviceKind, isVisible, available, enabled, agentIds } = data
-  const { orbitIndex, orbitCount } = data
-  // Unavailable OR policy-disabled → greyed (matches SkillNode + the dashboard).
-  const greyed = available === false || enabled === false
+  const { orbitIndex, orbitCount, health, healthDetail, diagnostics, hint, grantIds } = data
+  const { grantCount, grantState } = data
+  // ONE badge, strict precedence — see ./capabilityBadge. The tile previously
+  // collapsed the whole lifecycle into `status !== 'disabled'`, so a connector
+  // waiting on auth rendered as fully normal while the dashboard got it right.
+  const badge = capabilityBadge({ health, available, enabled, grantIds, grantState })
+  const reason = capabilityReason({ badge, diagnostics, healthDetail, hint })
+  // Two dialects, deliberately distinct (the 04 §5 rule): DIMMED means a human
+  // turned it off — a choice — and keeps its color; GREYED + grayscale means it
+  // cannot run — a condition. Collapsing them is what made a pending-auth
+  // connector read the same as a deliberately disabled one.
+  const unavailable = available === false || health === 'error' || health === 'degraded'
+  const off = enabled === false
+  const greyed = unavailable || off
   const Icon = SERVICE_ICON[serviceKind ?? 'generic'] ?? Cable
   // Float with the SKILL motion profile: connector tiles are visual peers of
   // skill tiles in the same orbital fan, so a static tile next to gently
   // bobbing siblings would read as frozen/broken, not calm.
-  const floatRef = useFloatingMotion(nodeId, 'skill', dragging)
+  // ── LOD ───────────────────────────────────────────────────────────────────
+  // Below this zoom a 46px tile is ~18px on screen: the label is unreadable, the
+  // badge is a smudge, and the per-frame floating rAF write buys nothing. The
+  // selector returns a BOOLEAN, not the zoom, so this subscription re-renders
+  // only when the threshold is crossed — subscribing to the raw zoom would
+  // re-render every tile on every wheel tick, which is the opposite of the point.
+  const farZoom = useStore((st) => st.transform[2] < LOD_ZOOM)
+  const floatRef = useFloatingMotion(nodeId, 'skill', dragging, farZoom)
   // See SkillNode: decorative hover/tap spring, dropped under reduced motion.
   const reduceMotion = useReducedMotion()
 
@@ -102,10 +129,49 @@ export const ResourceNode = memo(function ResourceNode({
   })
 
   const tooltipBase = fullName && fullName !== name ? `${name} — ${fullName}` : name
+
+  // At fleet zoom the tile is a dot. Deliberately still MOUNTED and still
+  // carrying its handles: unmounting would break every edge anchored to it, and
+  // the whole point is that zooming out stays cheap, not that it changes the
+  // graph's topology. The accessible name survives because the wrapper keeps it.
+  if (farZoom && isVisible !== false) {
+    return (
+      <div
+        style={{ width: CIRCLE, height: CIRCLE, position: 'relative' }}
+        title={reason ? `${tooltipBase} — ${reason}` : tooltipBase}
+      >
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: (CIRCLE - LOD_DOT) / 2,
+            left: (CIRCLE - LOD_DOT) / 2,
+            width: LOD_DOT,
+            height: LOD_DOT,
+            borderRadius: '50%',
+            // Badge color wins at this zoom: at fleet scale the only thing worth
+            // a pixel is "something here needs you".
+            background: badge ? badge.color : VIOLET,
+            opacity: greyed ? 0.4 : 0.9,
+          }}
+        />
+        <Handle type="target" position={Position.Left} style={centerHandleStyle} />
+        <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
+      </div>
+    )
+  }
+
   return (
     // Static root: the center Handle lives here, OUTSIDE the animated /
     // floating wrappers, so edges anchor to the stable geometric center.
     <div style={{ width: CIRCLE, height: CIRCLE, position: 'relative' }}>
+      {/* Selection toolbar — portal-rendered by React Flow, so it is never
+          clipped by the orbital ring. Every button is gated on the RECORD:
+          an action that cannot complete does not render (the CapabilitiesPanel
+          actionsFor rule, applied to the canvas). Ordered frequency-then-danger. */}
+      <NodeToolbar isVisible={selected && isVisible !== false} position={Position.Top} offset={34}>
+        <ResourceToolbar data={data} />
+      </NodeToolbar>
       <motion.div
         initial={peacock.initial}
         animate={peacock.animate}
@@ -120,17 +186,20 @@ export const ResourceNode = memo(function ResourceNode({
         <div ref={floatRef}>
           <div
             title={
-              greyed
-                ? `${tooltipBase} — ${enabled === false ? 'disabled' : 'unavailable'}`
-                : `${tooltipBase} · attached MCP server`
+              reason
+                ? `${tooltipBase} — ${reason}`
+                : `${tooltipBase} · attached MCP server${
+                    (grantCount ?? 0) >= 2 ? ` · shared by ${grantCount} agents` : ''
+                  }`
             }
+            data-off={off || undefined}
             style={{
               width: CIRCLE,
               height: CIRCLE,
               position: 'relative',
               overflow: 'visible',
               opacity: greyed ? (isHighlighted ? 0.5 : 0.16) : isHighlighted ? 1 : 0.22,
-              filter: greyed ? 'grayscale(1)' : undefined,
+              filter: unavailable ? 'grayscale(1)' : undefined,
               transition: 'opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1), filter 0.3s ease',
             }}
           >
@@ -155,6 +224,52 @@ export const ResourceNode = memo(function ResourceNode({
             >
               <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
             </motion.div>
+
+            {/* ONE badge, top-right of the disc. Suppressed while collapsed: a
+              collapsed ring of fifteen warnings is unactionable noise, and the
+              parent Boo carries the roll-up instead. */}
+            {badge && isVisible !== false && (
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  top: -1,
+                  right: -1,
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  background: badge.color,
+                  border: '2px solid var(--surface)',
+                  animation: badge.pulse
+                    ? 'clawboo-badge-pulse 1.8s ease-in-out infinite'
+                    : undefined,
+                }}
+              />
+            )}
+
+            {/* Shared by N agents. Hovering the tile highlights its siblings via
+              the existing hover cascade, so the chip only has to say "there are
+              others" — it does not need to name them. */}
+            {(grantCount ?? 0) >= 2 && isVisible !== false && (
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  bottom: -1,
+                  right: -3,
+                  padding: '0 4px',
+                  borderRadius: 999,
+                  fontSize: 9,
+                  fontWeight: 600,
+                  lineHeight: '13px',
+                  color: 'var(--foreground)',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                x{grantCount}
+              </span>
+            )}
 
             {/* Name below the disc — theme foreground (the accent lives on the tile). */}
             <div
@@ -196,8 +311,131 @@ export const ResourceNode = memo(function ResourceNode({
         }}
       />
 
+      {/* Right handle — SOURCE, so a connector tile can be dragged onto a second
+          Boo to grant it there. Both handles were `type="target"` until now,
+          which made the whole drag-to-grant gesture impossible by construction,
+          not by policy.
+
+          Rendered ONLY on a grant-backed tile — the same discipline SkillNode
+          applies with `showInstall`: an affordance whose action cannot complete
+          is not an affordance, it is a small lie. Legacy clawboo MCP tiles
+          (memory/tasks/tools) carry no grant and get no handle. */}
+      {(grantIds?.length ?? 0) > 0 && (
+        <Handle
+          id="grant"
+          type="source"
+          position={Position.Right}
+          style={{
+            ...handleStyle,
+            opacity: isVisible === false ? 0 : 1,
+            pointerEvents: isVisible === false ? 'none' : undefined,
+            transition: 'opacity 0.2s ease',
+          }}
+        />
+      )}
+
       {/* Center handle — invisible, edge routing only. */}
       <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
     </div>
   )
 })
+
+// ─── ResourceToolbar ─────────────────────────────────────────────────────────
+//
+// Pure function of the record. Buttons render only when their action is real:
+//   Configure       always (opens the Capabilities panel — the detail surface)
+//   Disable/Enable  writable rows only (the existing REST write)
+//   Sign in         health 'needs-auth' only — the hint IS the action today
+//   Retry           health 'error' | 'degraded' only (re-reads the inventory)
+//   Detach          grant-backed rows only (revoke + the undo toast)
+
+const TOOLBAR_BTN =
+  'rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-medium ' +
+  'text-foreground transition-colors hover:border-border-strong hover:bg-surface-raised'
+
+function ResourceToolbar({ data }: { data: ResourceNodeData }) {
+  const { capabilityId, writable, enabled, health, hint, grantIds, name } = data
+  // A real ref, not a per-render object: the guard must survive re-renders or a
+  // double-click races two toggle writes.
+  const busyRef = useRef(false)
+
+  const toggleEnabled = async () => {
+    if (!capabilityId || busyRef.current) return
+    busyRef.current = true
+    const result =
+      enabled === false
+        ? await enableCapability(capabilityId)
+        : await disableCapability(capabilityId)
+    busyRef.current = false
+    if (!result.ok) {
+      useToastStore.getState().addToast({
+        message:
+          enabled === false
+            ? `Could not enable ${name}. It is still off.`
+            : `Could not disable ${name}. It is still on.`,
+        type: 'error',
+      })
+      return
+    }
+    // No success toast: the state changes under the cursor and the button's
+    // accessible name flips, which announces it.
+    useGraphStore.getState().triggerRefresh()
+  }
+
+  return (
+    <div className="flex items-center gap-1.5" role="toolbar" aria-label={`${name} actions`}>
+      <button
+        type="button"
+        className={TOOLBAR_BTN}
+        onClick={() => useViewStore.getState().navigateTo('capabilities')}
+      >
+        Configure
+      </button>
+      {writable === true && capabilityId && (
+        <button type="button" className={TOOLBAR_BTN} onClick={() => void toggleEnabled()}>
+          {enabled === false ? 'Enable' : 'Disable'}
+        </button>
+      )}
+      {health === 'needs-auth' && (
+        <button
+          type="button"
+          className={TOOLBAR_BTN}
+          title={hint}
+          onClick={() =>
+            useToastStore.getState().addToast({
+              // The source-supplied hint verbatim — the graph never paraphrases
+              // a per-runtime remedy into a string of its own.
+              message: hint ?? `${name} needs sign-in.`,
+              type: 'info',
+              ttlMs: 8000,
+            })
+          }
+        >
+          Sign in
+        </button>
+      )}
+      {(health === 'error' || health === 'degraded') && (
+        <button
+          type="button"
+          className={TOOLBAR_BTN}
+          onClick={() => useGraphStore.getState().triggerRefresh()}
+        >
+          Retry
+        </button>
+      )}
+      {(grantIds?.length ?? 0) > 0 && (
+        <button
+          type="button"
+          className={TOOLBAR_BTN}
+          onClick={() =>
+            // agentIds carries IDs, not display names — the toast copy adapts
+            // rather than printing an id at the user.
+            void detachGrant({ grantId: grantIds![0]!, connectorName: name })
+          }
+        >
+          Detach
+        </button>
+      )}
+    </div>
+  )
+}

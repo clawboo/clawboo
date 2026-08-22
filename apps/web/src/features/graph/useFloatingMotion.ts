@@ -110,6 +110,13 @@ export function useFloatingMotion(
   nodeId: string,
   type: FloatingNodeType,
   isDragging?: boolean,
+  /**
+   * Skip the RAF subscription entirely. Same treatment as reduced motion — the
+   * float is decorative, so anything that makes it pointless should also make it
+   * free. Used by the LOD path, where the node is a 10px dot and a sub-pixel
+   * orbit is invisible but still costs a per-frame style write per tile.
+   */
+  disabled?: boolean,
 ): React.RefCallback<HTMLDivElement> {
   const paramsRef = useRef<MotionParams>(deriveParams(nodeId, type))
   const elementRef = useRef<HTMLDivElement | null>(null)
@@ -135,8 +142,9 @@ export function useFloatingMotion(
   }, [])
 
   // Subscribe to the singleton RAF loop
+  const off = reduced || disabled === true
   useEffect(() => {
-    if (reduced) {
+    if (off) {
       // Clear anything written before the preference flipped, so the node lands
       // back on its exact layout position instead of freezing mid-orbit.
       const el = elementRef.current
@@ -157,7 +165,7 @@ export function useFloatingMotion(
       const y = Math.cos(time * speedY + phase * 0.7) * amplitudeY
       el.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`
     })
-  }, [reduced])
+  }, [off])
 
   return useCallback((el: HTMLDivElement | null) => {
     elementRef.current = el

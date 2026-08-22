@@ -7,6 +7,8 @@ import type { ConnectionLineComponentProps } from '@xyflow/react'
 const NODE_TYPE_COLOR: Record<string, string> = {
   boo: 'var(--primary)',
   skill: 'var(--mint)',
+  // Grant-share drags start on a connector tile; the thread matches its violet.
+  resource: 'var(--violet)',
 }
 
 export function ConnectionLine({

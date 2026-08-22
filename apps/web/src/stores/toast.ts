@@ -6,6 +6,18 @@ export interface Toast {
   id: string
   message: string
   type: ToastType
+  /**
+   * One optional action rendered as a ghost button on the card (the undo toast).
+   * The handler runs once; activating it dismisses the toast. NOT part of the
+   * live-region announcement — the announcement stays a single readable
+   * sentence, and the action is discoverable on the card itself.
+   */
+  action?: { label: string; onAction: () => void }
+  /**
+   * Per-toast lifetime override. Actionable toasts should pass 8000: regret
+   * needs reading time, and the 3s default is tuned for pure confirmations.
+   */
+  ttlMs?: number
 }
 
 /**
@@ -58,7 +70,7 @@ export const useToastStore = create<ToastStore>((set) => ({
         // stale text out of the AT tree for someone browsing with a virtual cursor.
         announcement: s.announcement?.id === id ? null : s.announcement,
       }))
-    }, TOAST_TTL_MS)
+    }, t.ttlMs ?? TOAST_TTL_MS)
   },
   removeToast: (id) =>
     set((s) => ({

@@ -702,7 +702,12 @@ export function buildGraphElements(
         // render greyed so they never read as "the agent has this".
         const enabled = cap.status !== 'disabled'
         if (cap.kind === 'connector') {
-          const nodeId = `resource-${agent.id}-${slug}`
+          // Node identity: the connector INSTANCE id when the record carries one,
+          // else the display slug. An instance-keyed tile survives a rename with
+          // its hand-placed position intact; slug keying (the only option for
+          // legacy rows) mints a new node id on rename and orphans the position.
+          const instanceKey = cap.connectorId ?? slug
+          const nodeId = `resource-${agent.id}-${instanceKey}`
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
           const meta = connectorMeta(cap.name)
@@ -717,18 +722,51 @@ export function buildGraphElements(
               agentIds: [agent.id],
               available: cap.available,
               enabled,
+              // Connector-era threading. All optional on CapabilityRecord — a
+              // server that has never heard of grants leaves them undefined and
+              // this renders byte-identically to the pre-grant graph.
+              capabilityId: cap.id,
+              connectorId: cap.connectorId ?? null,
+              grantIds: cap.grantId ? [cap.grantId] : undefined,
+              health: cap.health,
+              healthDetail: cap.healthDetail ?? null,
+              diagnostics: cap.diagnostics.length > 0 ? cap.diagnostics : undefined,
+              hint: cap.hint,
+              grantCount: cap.grantCount,
+              lastUsedAt: cap.lastUsedAt ? Date.parse(cap.lastUsedAt) : undefined,
+              writable: cap.writable,
             } satisfies ResourceNodeData,
             position: { x: 0, y: 0 },
           })
-          resourceEdges.push({
-            id: `resourceedge-${agent.id}-${slug}`,
-            type: 'resource',
-            source: `boo-${agent.id}`,
-            sourceHandle: 'center',
-            target: nodeId,
-            targetHandle: 'center',
-            data: {},
-          })
+          if (cap.grantId) {
+            // Grant-backed: the edge IS the authorization, so it renders as one.
+            resourceEdges.push({
+              id: `grantedge-${agent.id}-${instanceKey}`,
+              type: 'grant',
+              source: `boo-${agent.id}`,
+              sourceHandle: 'center',
+              target: nodeId,
+              targetHandle: 'center',
+              data: {
+                grantId: cap.grantId,
+                // Until the record carries richer grant fields, state/mode are the
+                // conservative floor: an emitted grantId on a live row means the
+                // grant is active, and read is the least-privilege rendering.
+                state: 'active',
+                mode: 'read',
+              },
+            })
+          } else {
+            resourceEdges.push({
+              id: `resourceedge-${agent.id}-${instanceKey}`,
+              type: 'resource',
+              source: `boo-${agent.id}`,
+              sourceHandle: 'center',
+              target: nodeId,
+              targetHandle: 'center',
+              data: {},
+            })
+          }
         } else {
           const nodeId = `skill-${agent.id}-${slug}`
           if (seen.has(nodeId)) continue
