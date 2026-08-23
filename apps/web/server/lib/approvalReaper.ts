@@ -11,6 +11,7 @@
 import {
   appendAudit,
   expireStaleApprovals,
+  sweepExpiredGrants,
   getTask,
   getTaskVerification,
   unblockTask,
@@ -38,12 +39,26 @@ function envMs(name: string, fallback: number): number {
 export interface ReapResult {
   expired: string[]
   unblocked: string[]
+  /** Grants moved to `expired`, and standing rules dropped, by this pass. */
+  grantsExpired: number
+  rulesExpired: number
 }
 
 /** One reaper pass: expire stale pending approvals, unblock any linked blocked
  *  task, audit + emit obs per row. Returns only the rows expired by THIS pass. */
 export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {}): ReapResult {
   const ttlMs = opts.ttlMs ?? envMs('CLAWBOO_APPROVAL_TTL_MS', DEFAULT_TTL_MS)
+
+  // Grants ride the SAME tick rather than getting their own timer. The gate
+  // already denies a past-expiry grant from its timestamp alone, so this sweep
+  // is cosmetic for enforcement and load-bearing for everything that reads
+  // `state` without running a decision: a list, a count, an audit query.
+  //
+  // Deliberately inside `reapStaleApprovals` rather than in the interval body:
+  // that body is guarded by a module-level `started` flag, so a test could never
+  // run one pass over it.
+  const swept = sweepExpiredGrants(db)
+
   const expiredRows = expireStaleApprovals(db, { olderThanMs: ttlMs })
   const unblocked: string[] = []
   for (const row of expiredRows) {
@@ -75,7 +90,12 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
       }
     }
   }
-  return { expired: expiredRows.map((r) => r.id), unblocked }
+  return {
+    expired: expiredRows.map((r) => r.id),
+    unblocked,
+    grantsExpired: swept.grants,
+    rulesExpired: swept.rules,
+  }
 }
 
 let started = false
