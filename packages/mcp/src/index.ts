@@ -42,6 +42,7 @@ export { MCP_SERVER_VERSION } from './shared'
 // alone; pnpm's strict layout puts it out of reach of apps/web.
 export {
   connectStdioConnector,
+  ConnectorHandshakeError,
   flattenContent,
   DEFAULT_CALL_TIMEOUT_MS,
   DEFAULT_HANDSHAKE_TIMEOUT_MS,

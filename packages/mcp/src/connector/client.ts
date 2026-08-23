@@ -30,6 +30,12 @@ export const DEFAULT_CALL_TIMEOUT_MS = 45_000
 /** Stop paging here. A server advertising more tools than this is misbehaving,
  *  and an unbounded cursor loop is a hang with extra steps. */
 const MAX_LIST_PAGES = 20
+/** Total wall clock for discovery, across every page. The per-page timeout alone
+ *  lets 20 slow pages hold a connect request for the sum of all of them. */
+const DEFAULT_DISCOVERY_BUDGET_MS = 90_000
+/** Enough of a failing server's last words to diagnose it, bounded so a chatty
+ *  one cannot grow this without limit. */
+const STDERR_TAIL_BYTES = 4_000
 /** Hard cap on tools accepted from one server, for the same reason. */
 export const MAX_CONNECTOR_TOOLS = 500
 
@@ -61,7 +67,23 @@ export interface ConnectorSession {
    */
   readonly pid: number | null
   listTools(): Promise<DiscoveredTool[]>
+  /**
+   * Whether the last `listTools` hit a cap and returned a PARTIAL inventory.
+   *
+   * Load-bearing rather than informational: a digest computed over a truncated
+   * list does not describe the server, so it would read as drift against the
+   * real one from then on.
+   */
+  wasTruncated(): boolean
   callTool(name: string, args: Record<string, unknown>): Promise<ConnectorCallResult>
+  /**
+   * Fires when the child exits, for ANY reason, including one we did not cause.
+   *
+   * Without it a crashed connector stays "live" in every consumer: its tools go
+   * on being served, the graph goes on reporting it ready, and a pid the OS may
+   * have recycled stays in the shutdown registry.
+   */
+  onClose(handler: () => void): void
   close(): Promise<void>
 }
 
@@ -79,6 +101,8 @@ export interface StdioConnectorSpec {
   handshakeTimeoutMs?: number
   listTimeoutMs?: number
   callTimeoutMs?: number
+  /** Total wall clock for discovery across every page. */
+  discoveryBudgetMs?: number
 }
 
 /**
@@ -132,6 +156,23 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/**
+ * A handshake that failed AFTER a process was spawned.
+ *
+ * Carries the pid because `transport.close()` signals only the direct child, and
+ * a catalog launch is an `npx` wrapper: without the pid the caller cannot reap
+ * the tree, and a failed connect silently leaks the real server.
+ */
+export class ConnectorHandshakeError extends Error {
+  constructor(
+    message: string,
+    public readonly pid: number | null,
+  ) {
+    super(message)
+    this.name = 'ConnectorHandshakeError'
+  }
+}
+
 /** Connect to a stdio MCP server, completing the handshake before returning. */
 export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<ConnectorSession> {
   const transport = new StdioClientTransport({
@@ -140,7 +181,10 @@ export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<C
     env: spec.env,
     ...(spec.cwd ? { cwd: spec.cwd } : {}),
     // Never 'inherit': a connector writing to our stderr would interleave with
-    // clawboo's own structured logs and could forge log lines.
+    // clawboo's own structured logs and could forge log lines. But 'pipe' alone
+    // is a hang: the stream is a PassThrough, and a chatty connector BLOCKS on
+    // its own writes once the buffer fills. It is drained below into a bounded
+    // tail, which also gives a failed handshake something to say.
     stderr: 'pipe',
   })
 
@@ -155,26 +199,75 @@ export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<C
   const listTimeout = spec.listTimeoutMs ?? DEFAULT_LIST_TIMEOUT_MS
   const callTimeout = spec.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS
 
+  // Drained continuously and kept to a bounded tail: unread it would backpressure
+  // the child, and unbounded it would be a memory leak driven by a remote server.
+  let stderrTail = ''
+  transport.stderr?.on('data', (chunk: Buffer) => {
+    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_BYTES)
+  })
+  transport.stderr?.on('error', () => {
+    /* a broken stderr pipe must never take down the connection */
+  })
+
   try {
     await client.connect(transport, {
       timeout: spec.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS,
     })
   } catch (err) {
     // The transport may already hold a spawned child; closing is what stops a
-    // failed connect from leaking a process.
+    // failed connect from leaking a process. `close()` reaps only the direct
+    // child, so the caller is also handed the pid to kill the tree.
+    const leakedPid = transport.pid
     await transport.close().catch(() => {})
-    throw new Error(`connector handshake failed: ${errorText(err)}`)
+    const tail = stderrTail.trim()
+    throw new ConnectorHandshakeError(
+      // The child's own last words, when it had any. A bare "timeout" for a
+      // server that printed a clear error is a diagnostic thrown away.
+      tail
+        ? `connector handshake failed: ${errorText(err)} — ${tail}`
+        : `connector handshake failed: ${errorText(err)}`,
+      leakedPid,
+    )
   }
+
+  let lastListTruncated = false
+  const closeHandlers: (() => void)[] = []
+  let closed = false
+  const fireClosed = (): void => {
+    // Once only: the SDK can surface both a transport close and a client close
+    // for the same exit, and a consumer that tears down twice would race itself.
+    if (closed) return
+    closed = true
+    for (const h of closeHandlers) {
+      try {
+        h()
+      } catch {
+        /* one bad handler must not stop the others */
+      }
+    }
+  }
+  transport.onclose = fireClosed
 
   return {
     get pid() {
       return transport.pid
     },
 
+    onClose(handler) {
+      if (closed) handler()
+      else closeHandlers.push(handler)
+    },
+
     async listTools(): Promise<DiscoveredTool[]> {
       const out: DiscoveredTool[] = []
+      const seen = new Set<string>()
+      let truncated = false
+      const deadline = Date.now() + (spec.discoveryBudgetMs ?? DEFAULT_DISCOVERY_BUDGET_MS)
       let cursor: string | undefined
       for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
+        // The per-page timeout is not a total: twenty slow-but-legal pages would
+        // hold a connect request for their sum.
+        if (Date.now() > deadline) break
         // Paged on purpose: a single listTools() call returns only the first
         // page, and an incomplete inventory produces a WRONG tools digest,
         // which then reads as drift on the very next comparison.
@@ -186,12 +279,29 @@ export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<C
             inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
             ...(t.annotations ? { annotations: t.annotations as Record<string, unknown> } : {}),
           })
-          if (out.length >= MAX_CONNECTOR_TOOLS) return out
+          // Stop the PAGE, not the function: falling out of the loop keeps the
+          // truncation visible to the caller through `truncated`, where an early
+          // return would have handed back a partial list indistinguishable from
+          // a complete one -- and the tools digest computed over it would read
+          // as drift against the real inventory forever after.
+          if (out.length >= MAX_CONNECTOR_TOOLS) {
+            truncated = true
+            break
+          }
         }
+        if (truncated) break
         cursor = res.nextCursor
-        if (!cursor) break
+        // A server that repeats its cursor would otherwise re-serve the same page
+        // until MAX_LIST_PAGES, manufacturing duplicate tools from a plain bug.
+        if (!cursor || seen.has(cursor)) break
+        seen.add(cursor)
       }
+      lastListTruncated = truncated || out.length >= MAX_CONNECTOR_TOOLS
       return out
+    },
+
+    wasTruncated() {
+      return lastListTruncated
     },
 
     async callTool(name, args): Promise<ConnectorCallResult> {

@@ -45,6 +45,16 @@ describe('connectorChildEnv', () => {
     }
   })
 
+  it('enumerates every name the SDK itself adds underneath', async () => {
+    // The transport merges getDefaultEnvironment() UNDER whatever we pass, so a
+    // list that omitted those names would document a subset of what the child
+    // actually receives.
+    const { DEFAULT_INHERITED_ENV_VARS } = await import('@modelcontextprotocol/sdk/client/stdio.js')
+    for (const name of DEFAULT_INHERITED_ENV_VARS) {
+      expect(CONNECTOR_ENV_ALLOWLIST.has(name), name).toBe(true)
+    }
+  })
+
   it('is an ALLOWLIST: every key it emits is one we enumerated', () => {
     // The property that makes this different from the runtime denylist. A
     // variable nobody thought of cannot arrive here by default; it can only

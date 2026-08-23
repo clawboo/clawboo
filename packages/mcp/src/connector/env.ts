@@ -12,6 +12,15 @@
 // So this starts from {} and adds back only what a child process needs in order
 // to START. Everything else is a deliberate decision, made once, here.
 //
+// ONE CAVEAT, because the guarantee is narrower than it first reads: the SDK's
+// stdio transport merges `getDefaultEnvironment()` UNDERNEATH whatever env it is
+// given. On POSIX that adds HOME, LOGNAME, PATH, SHELL, TERM and USER; on Windows
+// APPDATA, HOMEDRIVE, HOMEPATH, LOCALAPPDATA, PATH, PROCESSOR_ARCHITECTURE,
+// SYSTEMDRIVE, SYSTEMROOT, TEMP, USERNAME, USERPROFILE and PROGRAMFILES. That set
+// is fixed and contains no credential, so the security property holds; the exact
+// key set the child sees is simply the union, not this list alone. Those names
+// are enumerated below so the documented set matches the real one.
+//
 // WHAT THIS IS NOT. It is not a sandbox. The child still runs as the user and
 // can read ~/.ssh, ~/.aws, the clawboo database and the vault files on disk. It
 // closes the env vector only. Saying otherwise would be the kind of claim this
@@ -25,7 +34,21 @@
  * a connector's OUTPUT rather than its ability to start, and a date formatted in
  * an unexpected locale is a bug nobody will trace back to this file.
  */
-const POSIX_PASSTHROUGH = ['PATH', 'HOME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TMPDIR']
+const POSIX_PASSTHROUGH = [
+  'PATH',
+  'HOME',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'TMPDIR',
+  // The SDK adds these regardless. Listed so CONNECTOR_ENV_ALLOWLIST is the
+  // truth about what the child receives rather than a subset of it.
+  'LOGNAME',
+  'TERM',
+  'USER',
+]
 
 /**
  * Windows equivalents. SystemRoot is not optional: omit it and process creation
@@ -46,6 +69,11 @@ const WINDOWS_PASSTHROUGH = [
   'windir',
   'NUMBER_OF_PROCESSORS',
   'PROCESSOR_ARCHITECTURE',
+  // Also added by the SDK on Windows.
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'USERNAME',
+  'PROGRAMFILES',
 ]
 
 /**
