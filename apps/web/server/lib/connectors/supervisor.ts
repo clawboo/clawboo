@@ -21,6 +21,7 @@ import {
   getConnector,
   namespacedToolName,
   persistDescriptorMetadata,
+  repinOwnerGrant,
   specDigest,
   toolsDigest,
   upsertConnector,
@@ -44,9 +45,16 @@ export interface ConnectableDefinition {
   launch:
     | { transport: 'stdio'; command: string; args: string[]; pinnedVersion: string }
     | { transport: 'streamable-http'; url: string }
-  /** A bearer token for a remote connector. Resolved from the vault by the
-   *  caller, so this module never touches the OAuth flow. */
-  accessToken?: string
+  /**
+   * A bearer token for a remote connector, or a callback that produces one.
+   *
+   * The CALLBACK form is what survives expiry: it is consulted before every
+   * request, so a refresh reaches the next tool call. A plain string is frozen
+   * for the life of the session and is kept only for callers that genuinely
+   * have a static token. Resolved by the caller either way, so this module
+   * never touches the OAuth flow itself.
+   */
+  accessToken?: string | (() => string | null | Promise<string | null>)
   egressAllow: readonly string[]
   trifecta: { readsPrivateData: boolean; ingestsUntrustedContent: boolean; canEgress: boolean }
   /** Credentials the connector declared. Resolved from the vault, never ambient. */
@@ -171,6 +179,18 @@ async function performConnect(
         : await connectStdioConnector({
             command: plan.command,
             args: plan.args,
+            // Recorded the moment the child exists, not once the handshake
+            // succeeds. A cold `npx` install can hold the handshake open for
+            // the better part of a minute, and a hard stop inside that window
+            // used to leave an orphan the boot reap could not see.
+            onSpawn: (spawned) => {
+              recordConnectorPid({
+                pid: spawned,
+                slug: def.slug,
+                startedAt: Date.now(),
+                command: plan.command,
+              })
+            },
             // The allowlist, never process.env. `declared` is the ONLY way a
             // credential reaches the child, and it comes from the vault rather
             // than the ambient environment.
@@ -184,6 +204,10 @@ async function performConnect(
     // survives a connect that reported failure.
     if (err instanceof ConnectorHandshakeError && typeof err.pid === 'number') {
       killProcessTreeByPid(err.pid)
+      // The durable record was written as soon as the child spawned, so it has
+      // to be dropped here or the boot reap would chase a pid this connect
+      // already killed.
+      forgetConnectorPid(err.pid)
     }
     throw err
   }
@@ -191,15 +215,17 @@ async function performConnect(
   // process, and the transport's own close() reaps only the direct child.
   const pid = session.pid
   registerConnectorPid(pid)
-  // ...and durably, so a CRASH does not orphan it. The in-memory registry only
-  // survives a graceful shutdown; nothing runs a hook when the process is killed.
+  // The durable record is already written by `onSpawn` above, which fires
+  // before the handshake rather than after it. Re-recorded here only for a
+  // transport that never called it, so the record cannot depend on the poll
+  // having caught a very short-lived spawn.
   if (typeof pid === 'number') {
     recordConnectorPid({
       pid,
       slug: def.slug,
       startedAt: Date.now(),
-      // The resolved binary, so the boot reap can corroborate that the pid still
-      // belongs to this connector before signalling its tree.
+      // The resolved binary, for the log. Identity is decided by boot and start
+      // time rather than by this.
       command: plan.command,
     })
   }
@@ -249,10 +275,18 @@ async function performConnect(
 
   // What the operator consented to, and therefore what drift is measured
   // against. A URL for a remote connector; a command and argv for a local one.
+  //
+  // THE CATALOG'S COMMAND, not the resolved absolute path. The resolved path is
+  // a property of this machine at this moment: switching Node versions, or
+  // installing a package manager somewhere else, moves it without anything
+  // about the connector changing. Pinning it made an nvm switch look identical
+  // to a rug-pull and denied every call afterwards with no way back. The argv IS
+  // resolved, because the operator's launch argument is the one part of it they
+  // chose and a change there is a real change of scope.
   const spec =
     launch.transport === 'streamable-http'
       ? { transport: launch.transport, url: launch.url }
-      : { transport: launch.transport, command: plan.command, args: plan.args }
+      : { transport: launch.transport, command: launch.command, args: plan.args }
   const specHash = specDigest(spec)
   // Over the DISCOVERED list, including descriptions: a rug-pull that rewrites a
   // description to smuggle instructions changes nothing else.
@@ -308,15 +342,30 @@ async function performConnect(
   // connector the user had just connected -- a race whose symptom looks exactly
   // like a governance bug.
   try {
-    ensureOwnerGrant(db, {
+    const identity = {
       subjectKind: 'global',
       subjectId: null,
       capabilityKind: 'connector',
       connectorId,
       capabilityId: null,
-      specHashPin: specHash,
-      toolsHashPin: toolsHash,
-    })
+    } as const
+    if (!ensureOwnerGrant(db, { ...identity, specHashPin: specHash, toolsHashPin: toolsHash })) {
+      // The grant already existed, and its pins describe a previous connect.
+      //
+      // THE SPEC PIN IS RE-PINNED, THE TOOLS PIN IS NOT, and the asymmetry is
+      // the whole point. The spec is what the operator is looking at when they
+      // press Connect: the command, the URL, the launch argument they just
+      // typed. Consenting to it again is exactly what the click means, and
+      // without this a changed argument denies every call as spec-drift forever,
+      // because the automatic path is insert-only.
+      //
+      // The tool inventory is not on screen and was not consented to. A server
+      // that rewrites a tool description to smuggle instructions changes nothing
+      // else, so re-pinning it on a reconnect would erase the one signal that
+      // catches a rug-pull. That drift stays, and clearing it takes a human
+      // revoking the grant and granting it again.
+      repinOwnerGrant(db, { ...identity, specHashPin: specHash })
+    }
   } catch {
     // A grant write must not fail a connection that otherwise succeeded; the
     // projection will mint it on the next inventory read.

@@ -180,7 +180,7 @@ export function lastUsedByGrant(db: ClawbooDb, grantIds: readonly string[]): Map
   return out
 }
 
-/** Pending approvals per grant — the count the graph renders as a marching edge. */
+/** Pending approvals per grant: the count the graph renders as a marching edge. */
 export function pendingApprovalsByGrant(
   db: ClawbooDb,
   grantIds: readonly string[],
@@ -354,6 +354,50 @@ export function ensureOwnerGrant(db: ClawbooDb, input: UpsertGrantInput): GrantR
     } satisfies DbCapabilityGrant
     tx.insert(capabilityGrants).values(row).run()
     return rowToGrantRow(row)
+  })
+}
+
+/**
+ * Re-pin an ACTIVE owner grant's hashes, on an explicit operator action.
+ *
+ * The counterpart to `ensureOwnerGrant` being insert-only. The pins record what
+ * the operator consented to; when they reconnect with a different launch
+ * argument, or the catalog ships a new pinned version, the live hashes stop
+ * matching and the gate denies `spec-drift` on every call. There is no way back
+ * from that on the automatic path, because ensure returns null for an existing
+ * grant and nothing else writes the pins.
+ *
+ * OWNER ORIGIN AND ACTIVE STATE ONLY, which is what keeps this from being a
+ * drift bypass. An operator grant is a deliberate human share: its pins are the
+ * snapshot a person approved, and a reconnect must not silently re-approve a
+ * changed server on their behalf. A suspended grant is off for a reason this
+ * reconnect has not addressed. Both are left exactly as they are.
+ *
+ * Each pin is written only when the caller PASSES it, which is what lets a
+ * reconnect re-pin the spec the operator just looked at while leaving the tool
+ * inventory pinned to the snapshot nobody has reviewed.
+ */
+export function repinOwnerGrant(db: ClawbooDb, input: UpsertGrantInput): GrantRow | null {
+  const identity = normalizeGrantIdentity(input)
+  const key = grantKey(identity)
+  const now = Date.now()
+
+  return immediateWrite(db, (tx) => {
+    const existing = tx
+      .select()
+      .from(capabilityGrants)
+      .where(eq(capabilityGrants.grantKey, key))
+      .get() as DbCapabilityGrant | undefined
+    if (!existing) return null
+    if (existing.origin !== 'owner' || existing.state !== 'active') return rowToGrantRow(existing)
+
+    const update: Partial<DbCapabilityGrant> = {
+      updatedAt: now,
+      ...(input.specHashPin !== undefined ? { specHashPin: input.specHashPin } : {}),
+      ...(input.toolsHashPin !== undefined ? { toolsHashPin: input.toolsHashPin } : {}),
+    }
+    tx.update(capabilityGrants).set(update).where(eq(capabilityGrants.id, existing.id)).run()
+    return rowToGrantRow({ ...existing, ...update } as DbCapabilityGrant)
   })
 }
 
