@@ -31,7 +31,7 @@ import {
 } from '@clawboo/mcp'
 import type { Request, Response } from 'express'
 
-import { connectorToolsForServer } from '../lib/connectors/supervisor'
+import { connectorToolsForServer, onConnectorsChanged } from '../lib/connectors/supervisor'
 import { getDb, getDbPath } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getMcpAttachSecret } from '../lib/mcpAttachSecret'
@@ -163,12 +163,11 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
       return createToolsServer(getDb(), {
         ...(scope?.agentId ? { agentId: scope.agentId } : {}),
         ...(scope?.teamId ? { teamId: scope.teamId } : {}),
-        // Read at SESSION construction, which is also the granularity at which a
-        // newly connected connector becomes visible: this factory runs per
-        // initialize, so an existing session keeps the tool list it was built
-        // with. Pushing a mid-session change needs `tools/listChanged`, which
-        // nothing in the repo sends yet.
-        connectorTools: connectorToolsForServer(),
+        // A LIVE source plus a subscription, so a connector connected mid-session
+        // becomes visible to a session that started before it existed. Passing
+        // the array would have frozen the list at initialize.
+        connectorTools: connectorToolsForServer,
+        onConnectorsChanged,
       })
     }),
     teamchat: createStreamableHttpHandlers((req) => {

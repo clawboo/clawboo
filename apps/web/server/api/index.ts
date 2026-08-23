@@ -82,7 +82,19 @@ import {
 } from './board'
 import { memorySearchGET, memorySavePOST, memoryBrowseGET, memoryProviderGET } from './memory'
 import { capabilitiesListGET, capabilitiesActionPOST } from './capabilities'
-import { connectorsConnectPOST, connectorsDisconnectPOST, connectorsListGET } from './connectors'
+import {
+  connectorAuthorizeAwaitPOST,
+  connectorAuthorizeDELETE,
+  connectorAuthorizePOST,
+  connectorConfigGET,
+  connectorConfigPUT,
+  connectorsCustomDELETE,
+  connectorsCustomGET,
+  connectorsCustomPOST,
+  connectorsConnectPOST,
+  connectorsDisconnectPOST,
+  connectorsListGET,
+} from './connectors'
 import { grantsCreatePOST, grantsListGET, grantsResumePOST, grantsRevokePOST } from './grants'
 import { toolsListGET, toolsApprovalsGET, toolsApprovalResolvePOST, toolsAuditGET } from './tools'
 import {
@@ -318,7 +330,23 @@ router.get('/api/tools/audit', toolsAuditGET)
 // child process, so the scope gate lives in the handler rather than the client.
 router.get('/api/connectors', connectorsListGET)
 router.post('/api/connectors/connect', connectorsConnectPOST)
+// Custom connectors: the operator points clawboo at a server of their own.
+// Registered BEFORE the :slug routes so `custom` is never read as a slug.
+router.get('/api/connectors/custom', connectorsCustomGET)
+router.post('/api/connectors/custom', connectorsCustomPOST)
+router.delete('/api/connectors/custom/:slug', connectorsCustomDELETE)
 router.post('/api/connectors/:slug/disconnect', connectorsDisconnectPOST)
+// Config: what an operator must supply before a connector can run. A credential
+// goes IN and comes back only as a boolean; a launch argument comes back in full,
+// because checking which folder a connector was handed is the point of asking.
+// OAuth sign-in for a remote connector. The callback does NOT land here: it
+// goes to an ephemeral loopback listener, because the redirect back is a
+// cross-site navigation and the origin guard refuses exactly that.
+router.post('/api/connectors/:slug/authorize', connectorAuthorizePOST)
+router.post('/api/connectors/:slug/authorize/await', connectorAuthorizeAwaitPOST)
+router.delete('/api/connectors/:slug/authorize', connectorAuthorizeDELETE)
+router.get('/api/connectors/:slug/config', connectorConfigGET)
+router.put('/api/connectors/:slug/config', connectorConfigPUT)
 router.get('/api/grants', grantsListGET)
 router.post('/api/grants', grantsCreatePOST)
 router.post('/api/grants/:id/revoke', grantsRevokePOST)

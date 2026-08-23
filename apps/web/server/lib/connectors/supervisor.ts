@@ -7,6 +7,7 @@
 // together or not at all.
 
 import {
+  connectHttpConnector,
   connectorChildEnv,
   ConnectorHandshakeError,
   connectStdioConnector,
@@ -30,16 +31,26 @@ import {
 import { connectorInstanceIdForSlug } from '../capabilitySource/connectorIdentity'
 import { killProcessTreeByPid } from '../runtimes/killTree'
 import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
+import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
+import { forgetConnectorPid, recordConnectorPid } from './pidFile'
 import { planConnectorSpawn } from './spawnPlan'
 
 /** What the catalog gives us, narrowed to what a connection needs. */
 export interface ConnectableDefinition {
   slug: string
   displayName: string
-  provenance: 'curated' | 'community'
-  launch: { transport: 'stdio'; command: string; args: string[]; pinnedVersion: string }
+  /** Only a CURATED entry earns belief in its own tool annotations. */
+  provenance: 'curated' | 'community' | 'custom'
+  launch:
+    | { transport: 'stdio'; command: string; args: string[]; pinnedVersion: string }
+    | { transport: 'streamable-http'; url: string }
+  /** A bearer token for a remote connector. Resolved from the vault by the
+   *  caller, so this module never touches the OAuth flow. */
+  accessToken?: string
   egressAllow: readonly string[]
   trifecta: { readsPrivateData: boolean; ingestsUntrustedContent: boolean; canEgress: boolean }
+  /** Credentials the connector declared. Resolved from the vault, never ambient. */
+  authInputs?: readonly DeclaredInput[]
 }
 
 export interface LiveConnector {
@@ -135,23 +146,42 @@ async function performConnect(
   def: ConnectableDefinition,
   connectorId: string,
 ): Promise<ConnectResult> {
-  const plan = planConnectorSpawn(def.launch)
+  // Branched on the DISCRIMINANT rather than a boolean, so each side is narrowed
+  // and neither can read a field the other shape does not have.
+  const launch = def.launch
+
+  // A remote connector spawns nothing: no command to resolve, no process to
+  // reap. `display` is the URL, which is still the thing consent is asked for.
+  const plan =
+    launch.transport === 'streamable-http'
+      ? { command: launch.url, args: [] as string[], display: launch.url, unresolved: false }
+      : planConnectorSpawn(launch)
   if (plan.unresolved) {
-    throw new Error(`cannot find ${def.launch.command} on PATH. Is Node installed?`)
+    throw new Error(`cannot find ${plan.command} on PATH. Is Node installed?`)
   }
 
   let session: ConnectorSession
   try {
-    session = await connectStdioConnector({
-      command: plan.command,
-      args: plan.args,
-      // The allowlist, never process.env.
-      env: connectorChildEnv(),
-    })
+    session =
+      launch.transport === 'streamable-http'
+        ? await connectHttpConnector({
+            url: launch.url,
+            ...(def.accessToken ? { accessToken: def.accessToken } : {}),
+          })
+        : await connectStdioConnector({
+            command: plan.command,
+            args: plan.args,
+            // The allowlist, never process.env. `declared` is the ONLY way a
+            // credential reaches the child, and it comes from the vault rather
+            // than the ambient environment.
+            env: connectorChildEnv({
+              declared: resolveConnectorCredentials(def.slug, def.authInputs ?? []),
+            }),
+          })
   } catch (err) {
-    // A handshake failure still SPAWNED something. The transport's own close
-    // reaps only the direct child, so without this the real server survives a
-    // connect that reported failure.
+    // A handshake failure still SPAWNED something, for stdio. The transport's
+    // own close reaps only the direct child, so without this the real server
+    // survives a connect that reported failure.
     if (err instanceof ConnectorHandshakeError && typeof err.pid === 'number') {
       killProcessTreeByPid(err.pid)
     }
@@ -161,13 +191,28 @@ async function performConnect(
   // process, and the transport's own close() reaps only the direct child.
   const pid = session.pid
   registerConnectorPid(pid)
+  // ...and durably, so a CRASH does not orphan it. The in-memory registry only
+  // survives a graceful shutdown; nothing runs a hook when the process is killed.
+  if (typeof pid === 'number') {
+    recordConnectorPid({
+      pid,
+      slug: def.slug,
+      startedAt: Date.now(),
+      // The resolved binary, so the boot reap can corroborate that the pid still
+      // belongs to this connector before signalling its tree.
+      command: plan.command,
+    })
+  }
 
   let discovered: DiscoveredTool[]
   try {
     discovered = await session.listTools()
   } catch (err) {
     await session.close()
-    if (typeof pid === 'number') killProcessTreeByPid(pid)
+    if (typeof pid === 'number') {
+      killProcessTreeByPid(pid)
+      forgetConnectorPid(pid)
+    }
     unregisterConnectorPid(pid)
     throw new Error(`connected but could not list tools: ${(err as Error).message}`)
   }
@@ -202,11 +247,12 @@ async function performConnect(
     skipped.push({ name: '(inventory)', reason: 'tool-list-truncated' })
   }
 
-  const spec = {
-    transport: def.launch.transport,
-    command: def.launch.command,
-    args: def.launch.args,
-  }
+  // What the operator consented to, and therefore what drift is measured
+  // against. A URL for a remote connector; a command and argv for a local one.
+  const spec =
+    launch.transport === 'streamable-http'
+      ? { transport: launch.transport, url: launch.url }
+      : { transport: launch.transport, command: plan.command, args: plan.args }
   const specHash = specDigest(spec)
   // Over the DISCOVERED list, including descriptions: a rug-pull that rewrites a
   // description to smuggle instructions changes nothing else.
@@ -277,6 +323,7 @@ async function performConnect(
   }
 
   live.set(connectorId, connector)
+  announceChange()
 
   // A child can die on its own: a crash, an OOM kill, a user running `pkill`.
   // Without this the entry stays in `live` forever, the capability source keeps
@@ -286,7 +333,9 @@ async function performConnect(
     if (live.get(connectorId) !== connector) return
     live.delete(connectorId)
     unregisterConnectorPid(pid)
+    if (typeof pid === 'number') forgetConnectorPid(pid)
     markConnectorDown(db, connectorId, 'the connector process exited')
+    announceChange()
   })
 
   return { connector, display: plan.display }
@@ -332,9 +381,39 @@ export async function disconnectConnector(connectorId: string): Promise<boolean>
   // close() signals only the DIRECT child, which for an `npx -y <pkg>` launch is
   // the wrapper. Without this the real server keeps running, and unregistering
   // the pid below would remove the last thing that could ever reap it.
-  if (typeof pid === 'number') killProcessTreeByPid(pid)
+  if (typeof pid === 'number') {
+    killProcessTreeByPid(pid)
+    forgetConnectorPid(pid)
+  }
   unregisterConnectorPid(pid)
+  announceChange()
   return true
+}
+
+/**
+ * Anyone who wants to know when the connected set changes.
+ *
+ * The tools server subscribes so it can send `tools/listChanged`. Without this
+ * the capability is declared and never exercised: a connector added mid-session
+ * stays invisible until the client reconnects, and a disconnected one keeps
+ * being offered until the model gives up calling it.
+ */
+const changeListeners = new Set<() => void>()
+
+export function onConnectorsChanged(listener: () => void): () => void {
+  changeListeners.add(listener)
+  return () => changeListeners.delete(listener)
+}
+
+function announceChange(): void {
+  for (const listener of changeListeners) {
+    try {
+      listener()
+    } catch {
+      // One bad listener must not stop the others, and must never propagate
+      // into a connect or a process-exit callback.
+    }
+  }
 }
 
 /** Everything currently connected, for the tools-server injection point. */
