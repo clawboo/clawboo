@@ -72,6 +72,31 @@ export function presentEvent(e: ObsLogEvent): ActivityRow | null {
     }
     case 'error':
       return { tone: 'error', badge: 'error', body: asStr(d['message']) || '(no message)' }
+    case 'grant_decision': {
+      // GrantDecisionData carries neither `message` nor `detail`, so without this
+      // case the default branch renders a bare badge with an empty body: a denial
+      // that is invisible in the one surface built to show it.
+      const decision = asStr(d['decision'])
+      const reason = asStr(d['reason'])
+      return {
+        tone: decision === 'deny' ? 'error' : decision === 'require_approval' ? 'idle' : 'success',
+        badge: 'grant',
+        label: asStr(d['toolName']),
+        // The reason is the whole point of the row: "denied" alone tells an
+        // operator nothing they can act on.
+        body: reason ? `${decision}: ${reason}` : decision,
+      }
+    }
+    case 'connector_health': {
+      const health = asStr(d['health'])
+      const detail = asStr(d['detail'])
+      return {
+        tone: health === 'ok' ? 'success' : health === 'unknown' ? 'idle' : 'error',
+        badge: 'connector',
+        label: asStr(d['connectorId']),
+        body: detail ? `${health}: ${detail}` : health,
+      }
+    }
     case 'execution_started':
       return { tone: 'working', badge: 'run', body: 'started' }
     case 'execution_completed': {
