@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
-import { buildAuthorizeUrl, createPkce, resourceMetadataUrl } from '../oauth'
+import {
+  buildAuthorizeUrl,
+  createPkce,
+  discoverResourceMetadata,
+  resourceMetadataUrl,
+} from '../oauth'
 
 describe('resourceMetadataUrl', () => {
   it('parses the quoted form GitHub sends', () => {
@@ -85,5 +90,167 @@ describe('buildAuthorizeUrl', () => {
     )
     expect(url.searchParams.get('tenant')).toBe('x')
     expect(url.searchParams.get('client_id')).toBe('abc')
+  })
+})
+
+describe('buildAuthorizeUrl scheme check', () => {
+  it('REFUSES a javascript: authorization endpoint', () => {
+    // This string is handed to a browsing context's `location`. A hostile
+    // authorization-server metadata document naming a `javascript:` endpoint
+    // would otherwise be script execution on the page that opened the tab.
+    expect(() =>
+      buildAuthorizeUrl({
+        metadata: {
+          authorization_endpoint: 'javascript:alert(1)',
+          token_endpoint: 'https://example.com/token',
+        },
+        clientId: 'abc',
+        redirectUri: 'http://127.0.0.1:1/callback',
+        resource: 'https://r',
+        pkce: createPkce(),
+        state: 's',
+      }),
+    ).toThrow(/must be https/)
+  })
+
+  it('refuses a plain-http endpoint that is not loopback', () => {
+    expect(() =>
+      buildAuthorizeUrl({
+        metadata: {
+          authorization_endpoint: 'http://evil.example/authorize',
+          token_endpoint: 'https://example.com/token',
+        },
+        clientId: 'abc',
+        redirectUri: 'http://127.0.0.1:1/callback',
+        resource: 'https://r',
+        pkce: createPkce(),
+        state: 's',
+      }),
+    ).toThrow(/must be https/)
+  })
+})
+
+describe('discoverResourceMetadata', () => {
+  // THE SUBSTITUTION ATTACK these checks exist for: every value in the discovery
+  // chain is chosen by the server that will receive the token. A compromised
+  // host that can name somebody else's authorization server, and somebody else's
+  // resource identifier, sends the operator to a GENUINE consent screen for that
+  // other provider and receives a token minted for them. The RFC 8707 `resource`
+  // binding cannot prevent it, because the attacker picked the bound value.
+  const original = globalThis.fetch
+
+  function stub(handler: (url: string) => Response): void {
+    globalThis.fetch = ((input: string | URL) =>
+      Promise.resolve(handler(String(input)))) as typeof fetch
+  }
+  function json(body: unknown, url: string): Response {
+    const res = new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+    // `res.url` is what the same-origin redirect check reads, and it is
+    // read-only on a constructed Response.
+    Object.defineProperty(res, 'url', { value: url })
+    return res
+  }
+  function challenge(metadataUrl: string): Response {
+    return new Response('{}', {
+      status: 401,
+      headers: { 'www-authenticate': `Bearer resource_metadata="${metadataUrl}"` },
+    })
+  }
+
+  afterEach(() => {
+    globalThis.fetch = original
+  })
+
+  it('accepts metadata served by the server itself', async () => {
+    stub((url) =>
+      url === 'https://mcp.example.com/mcp'
+        ? challenge('https://mcp.example.com/.well-known/oauth-protected-resource')
+        : json(
+            {
+              resource: 'https://mcp.example.com/mcp',
+              authorization_servers: ['https://auth.example.com'],
+            },
+            url,
+          ),
+    )
+    const metadata = await discoverResourceMetadata('https://mcp.example.com/mcp')
+    expect(metadata.authorization_servers).toEqual(['https://auth.example.com'])
+  })
+
+  it('accepts a resource that covers the path as a PREFIX', async () => {
+    // Providers differ about the trailing slash and about how much of the path
+    // the resource identifier names. Stripe declares a bare origin for a server
+    // reached at that origin.
+    stub((url) =>
+      url === 'https://mcp.stripe.com'
+        ? challenge('https://mcp.stripe.com/.well-known/oauth-protected-resource')
+        : json(
+            { resource: 'https://mcp.stripe.com/', authorization_servers: ['https://auth.stripe'] },
+            url,
+          ),
+    )
+    await expect(discoverResourceMetadata('https://mcp.stripe.com')).resolves.toBeTruthy()
+  })
+
+  it('REFUSES metadata hosted on another origin', async () => {
+    stub((url) =>
+      url === 'https://evil.example/mcp'
+        ? challenge('https://mcp.linear.app/.well-known/oauth-protected-resource')
+        : json(
+            {
+              resource: 'https://mcp.linear.app/mcp',
+              authorization_servers: ['https://linear.app'],
+            },
+            url,
+          ),
+    )
+    await expect(discoverResourceMetadata('https://evil.example/mcp')).rejects.toThrow(
+      /not its own origin/,
+    )
+  })
+
+  it('REFUSES a resource identifier naming a different server', async () => {
+    // Same-origin metadata, but it claims to be Linear. The token would be
+    // minted for Linear and sent to this host.
+    stub((url) =>
+      url === 'https://evil.example/mcp'
+        ? challenge('https://evil.example/.well-known/oauth-protected-resource')
+        : json(
+            {
+              resource: 'https://mcp.linear.app/mcp',
+              authorization_servers: ['https://linear.app'],
+            },
+            url,
+          ),
+    )
+    await expect(discoverResourceMetadata('https://evil.example/mcp')).rejects.toThrow(
+      /different server/,
+    )
+  })
+
+  it('REFUSES a non-https authorization server', async () => {
+    stub((url) =>
+      url === 'https://mcp.example.com/mcp'
+        ? challenge('https://mcp.example.com/.well-known/oauth-protected-resource')
+        : json(
+            {
+              resource: 'https://mcp.example.com/mcp',
+              authorization_servers: ['http://auth.example.com'],
+            },
+            url,
+          ),
+    )
+    await expect(discoverResourceMetadata('https://mcp.example.com/mcp')).rejects.toThrow(
+      /non-https authorization server/,
+    )
+  })
+
+  it('refuses to probe a non-https server at all', async () => {
+    await expect(discoverResourceMetadata('http://mcp.example.com/mcp')).rejects.toThrow(
+      /not https/,
+    )
   })
 })
