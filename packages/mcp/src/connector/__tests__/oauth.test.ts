@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildAuthorizeUrl,
   createPkce,
+  discoverAuthServer,
   discoverResourceMetadata,
+  isLoopbackUrl,
   resourceMetadataUrl,
 } from '../oauth'
 
@@ -248,9 +250,77 @@ describe('discoverResourceMetadata', () => {
     )
   })
 
+  it('normalises a pathological run of slashes in LINEAR time', async () => {
+    // The regression: trailing slashes were stripped with `/\/+$/`, which
+    // backtracks quadratically, and the string comes from a remote server's
+    // JSON. 200k slashes took long enough to be a denial of service somebody
+    // else could trigger; the budget here is far above the linear cost and far
+    // below the quadratic one.
+    const pathological = `https://mcp.example.com/${'/'.repeat(200_000)}x`
+    stub((url) =>
+      url === 'https://mcp.example.com/mcp'
+        ? challenge('https://mcp.example.com/.well-known/oauth-protected-resource')
+        : json(
+            { resource: pathological, authorization_servers: ['https://auth.example.com'] },
+            url,
+          ),
+    )
+    const started = Date.now()
+    await expect(discoverResourceMetadata('https://mcp.example.com/mcp')).rejects.toThrow(
+      /different server/,
+    )
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
   it('refuses to probe a non-https server at all', async () => {
     await expect(discoverResourceMetadata('http://mcp.example.com/mcp')).rejects.toThrow(
       /not https/,
     )
+  })
+})
+
+describe('discoverAuthServer private-network guard', () => {
+  const original = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = original
+  })
+
+  it('REFUSES an authorization server that resolves inside the network', async () => {
+    // The issuer is chosen by the remote MCP server. Without this it could aim
+    // clawboo's own process at a router, an internal service, or the cloud
+    // metadata endpoint, and the status comes back to the operator as an error
+    // naming the URL.
+    globalThis.fetch = (() => {
+      throw new Error('must not be fetched')
+    }) as typeof fetch
+    // Literal addresses, so this needs no DNS and cannot flake on a runner
+    // without a resolver. `dns.lookup` returns an IP literal unchanged.
+    await expect(discoverAuthServer('https://192.168.1.1')).rejects.toThrow(/private address/)
+    // The cloud metadata endpoint, which is the one everybody actually goes for.
+    await expect(discoverAuthServer('https://169.254.169.254')).rejects.toThrow(/private address/)
+    await expect(discoverAuthServer('https://10.0.0.5')).rejects.toThrow(/private address/)
+  })
+
+  it('allows one when the connector itself is on this machine', async () => {
+    // A self-hosted authorization server is the operator's own choice, not a
+    // remote server reaching somewhere it otherwise could not.
+    expect(isLoopbackUrl('http://127.0.0.1:9000/mcp')).toBe(true)
+    expect(isLoopbackUrl('https://mcp.linear.app/mcp')).toBe(false)
+    const doc = JSON.stringify({
+      issuer: 'https://192.168.1.1',
+      authorization_endpoint: 'https://192.168.1.1/authorize',
+      token_endpoint: 'https://192.168.1.1/token',
+    })
+    globalThis.fetch = (async (input: string | URL) => {
+      const res = new Response(doc, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+      Object.defineProperty(res, 'url', { value: String(input) })
+      return res
+    }) as unknown as typeof fetch
+    await expect(
+      discoverAuthServer('https://192.168.1.1', { allowPrivate: true }),
+    ).resolves.toBeTruthy()
   })
 })

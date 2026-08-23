@@ -71,6 +71,7 @@ export {
   discoverAuthServer,
   discoverResourceMetadata,
   exchangeCode,
+  isLoopbackUrl,
   refreshToken,
   registerClient,
   resourceMetadataUrl,

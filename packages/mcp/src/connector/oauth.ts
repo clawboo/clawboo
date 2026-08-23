@@ -18,6 +18,7 @@
 // the caller, which is what keeps this testable against a stub server.
 
 import { createHash, randomBytes } from 'node:crypto'
+import { lookup } from 'node:dns/promises'
 
 /** RFC 9728 protected-resource metadata, narrowed to what the flow reads. */
 export interface ProtectedResourceMetadata {
@@ -66,6 +67,69 @@ function assertSafeUrl(value: string, what: string): URL {
     throw new Error(`${what} must be https, got ${url.protocol}//${url.host}`)
   }
   return url
+}
+
+/**
+ * Reject a host that resolves inside the machine or the private network.
+ *
+ * The authorization server, and every endpoint it names, are chosen by the
+ * remote MCP server. Without this, a connector could point clawboo's own process
+ * at `http://169.254.169.254/`, a router's admin page, or an internal service,
+ * and the status line comes back to the operator as an error naming the URL. On
+ * a local-first tool that is a scanner running inside the user's network.
+ *
+ * WHAT THIS DOES NOT STOP: a name that resolves public here and private on the
+ * fetch a moment later. Closing that needs the socket itself pinned to the
+ * address we checked, which the platform fetch does not expose. This raises the
+ * cost from trivial to a rebinding attack, and the same-origin rule on the
+ * resource metadata is what keeps that surface to the issuer alone.
+ */
+async function assertPublicHost(url: URL, what: string): Promise<void> {
+  let addresses: { address: string }[]
+  try {
+    addresses = await lookup(url.hostname, { all: true })
+  } catch {
+    // A name that does not resolve fails at the fetch anyway, with a better
+    // message than anything invented here.
+    return
+  }
+  for (const { address } of addresses) {
+    if (isPrivateAddress(address)) {
+      throw new Error(`${what} resolves to a private address (${address}), which is not allowed`)
+    }
+  }
+}
+
+function isPrivateAddress(address: string): boolean {
+  if (address.includes(':')) {
+    const v6 = address.toLowerCase()
+    // Loopback, unique-local (fc00::/7) and link-local (fe80::/10).
+    if (v6 === '::1' || v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe8')) {
+      return true
+    }
+    // An IPv4-mapped address carries the v4 rules, not the v6 ones.
+    const mapped = v6.startsWith('::ffff:') ? v6.slice(7) : null
+    return mapped !== null ? isPrivateAddress(mapped) : false
+  }
+  const parts = address.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n))) return false
+  const [a = 0, b = 0] = parts
+  if (a === 0 || a === 10 || a === 127) return true
+  if (a === 169 && b === 254) return true // link-local, including the metadata endpoint
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
+  return false
+}
+
+/** Whether a URL points at this machine. Exported so the flow can decide whether
+ *  a self-hosted authorization server was the operator's own choice. */
+export function isLoopbackUrl(value: string): boolean {
+  try {
+    return isLoopback(new URL(value))
+  } catch {
+    return false
+  }
 }
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -193,8 +257,22 @@ function resourceMatches(resource: unknown, server: URL): boolean {
   if (typeof resource !== 'string') return false
   const declared = safeUrl(resource)
   if (!declared || declared.origin !== server.origin) return false
-  const norm = (p: string): string => p.replace(/\/+$/, '')
-  return norm(server.pathname).startsWith(norm(declared.pathname))
+  return stripTrailingSlashes(server.pathname).startsWith(stripTrailingSlashes(declared.pathname))
+}
+
+/**
+ * Drop trailing slashes in LINEAR time.
+ *
+ * Hand-written rather than `/\/+$/`, and the reason is not style. A greedy `+`
+ * anchored at the end backtracks quadratically: the engine retries from every
+ * start position, so a value of many thousand slashes costs O(n squared). Every
+ * string this is applied to arrives in JSON from a remote server, which makes
+ * that a denial of service somebody else gets to trigger.
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1
+  return value.slice(0, end)
 }
 
 /**
@@ -206,8 +284,15 @@ function resourceMatches(resource: unknown, server: URL): boolean {
  * and appending instead returns a 404 that looks like "this provider does not
  * support discovery".
  */
-export async function discoverAuthServer(issuer: string): Promise<AuthServerMetadata> {
+export async function discoverAuthServer(
+  issuer: string,
+  /** Set only when the connector's OWN server is on this machine, which makes a
+   *  private authorization server the operator's deliberate choice rather than
+   *  a remote server pointing us at the network it cannot otherwise reach. */
+  opts: { allowPrivate?: boolean } = {},
+): Promise<AuthServerMetadata> {
   const url = assertSafeUrl(issuer, 'authorization server')
+  if (!opts.allowPrivate) await assertPublicHost(url, `authorization server ${issuer}`)
   const path = url.pathname.replace(/\/$/, '')
   const candidates = [
     `${url.origin}/.well-known/oauth-authorization-server${path}`,
@@ -219,10 +304,19 @@ export async function discoverAuthServer(issuer: string): Promise<AuthServerMeta
     try {
       const metadata = await getJson<AuthServerMetadata>(candidate)
       assertIssuerMatches(metadata, issuer)
-      assertSafeUrl(metadata.authorization_endpoint, 'authorization_endpoint')
-      assertSafeUrl(metadata.token_endpoint, 'token_endpoint')
-      if (metadata.registration_endpoint) {
-        assertSafeUrl(metadata.registration_endpoint, 'registration_endpoint')
+      // Each endpoint is checked in its own right: the metadata document may
+      // name a different host from the issuer, and those are the URLs that
+      // actually receive the code verifier and the client identity.
+      const endpoints = [
+        ['authorization_endpoint', metadata.authorization_endpoint],
+        ['token_endpoint', metadata.token_endpoint],
+        ...(metadata.registration_endpoint
+          ? [['registration_endpoint', metadata.registration_endpoint] as const]
+          : []),
+      ] as const
+      for (const [what, value] of endpoints) {
+        const parsed = assertSafeUrl(value, what)
+        if (!opts.allowPrivate) await assertPublicHost(parsed, what)
       }
       return metadata
     } catch (err) {
@@ -244,8 +338,7 @@ export async function discoverAuthServer(issuer: string): Promise<AuthServerMeta
  */
 function assertIssuerMatches(metadata: AuthServerMetadata, issuer: string): void {
   if (metadata.issuer === undefined) return
-  const strip = (v: string): string => v.replace(/\/+$/, '')
-  if (strip(metadata.issuer) !== strip(issuer)) {
+  if (stripTrailingSlashes(metadata.issuer) !== stripTrailingSlashes(issuer)) {
     throw new Error(`metadata for ${issuer} claims to be issued by ${metadata.issuer}`)
   }
 }
