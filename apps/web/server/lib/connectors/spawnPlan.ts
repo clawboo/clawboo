@@ -13,6 +13,9 @@
 // `resolveWindowsSpawn`, which escapes each token individually and sets
 // windowsVerbatimArguments. That is a different thing from a shell.
 
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+
 import { findExecutable, isWindows } from '../platform'
 import { resolveWindowsSpawn } from '../runtimes/winSpawn'
 
@@ -49,7 +52,13 @@ export function planConnectorSpawn(launch: {
   command: string
   args: readonly string[]
 }): ConnectorSpawnPlan {
-  const resolved = findExecutable(launch.command)
+  // An ABSOLUTE command needs no lookup, and looking it up anyway is wrong on
+  // Windows: `where` searches PATH for a NAME and fails outright on a full path,
+  // so an absolute command would report itself as missing. POSIX `which` happens
+  // to accept one, which is exactly why this only ever broke on Windows.
+  const preResolved =
+    path.isAbsolute(launch.command) && existsSync(launch.command) ? launch.command : null
+  const resolved = preResolved ?? findExecutable(launch.command)
   const command = resolved ?? launch.command
   const args = [...launch.args]
 

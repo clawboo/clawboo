@@ -64,6 +64,9 @@ s.connect(new StdioServerTransport())
       expect(connectorIdForRecord(records[0]!)).toBe(connectorInstanceId('memory'))
 
       await resetConnectorsForTests()
+      // Windows will not unlink a file with an open handle, so the database has
+      // to be closed before the directory goes.
+      db.$client.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

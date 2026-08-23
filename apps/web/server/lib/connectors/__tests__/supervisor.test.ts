@@ -70,6 +70,10 @@ describe('connector supervisor', () => {
 
   afterAll(async () => {
     await resetConnectorsForTests()
+    // Close the database BEFORE removing the directory: Windows refuses to
+    // unlink a file that still has an open handle, so the teardown fails with
+    // EBUSY and takes the whole suite red on that platform only.
+    db.$client.close()
     rmSync(dir, { recursive: true, force: true })
   })
 

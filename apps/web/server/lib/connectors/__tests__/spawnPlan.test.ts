@@ -20,6 +20,17 @@ describe('planConnectorSpawn', () => {
     expect(plan.unresolved).toBe(false)
   })
 
+  it('uses an ABSOLUTE command as-is, without a PATH lookup', () => {
+    // Windows `where` searches PATH for a NAME and fails on a full path, so
+    // looking one up would report an existing binary as missing. POSIX `which`
+    // tolerates it, which is why this only ever broke on Windows.
+    mockFind.mockClear()
+    const plan = planConnectorSpawn({ command: process.execPath, args: ['-e', ''] })
+    expect(plan.command).toBe(process.execPath)
+    expect(plan.unresolved).toBe(false)
+    expect(mockFind).not.toHaveBeenCalled()
+  })
+
   it('reports an unresolved binary rather than throwing', () => {
     // A missing Node is an ordinary user-fixable condition, and the caller can
     // render it far better than an exception can.
