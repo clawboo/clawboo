@@ -14,6 +14,7 @@ import { listCapabilities, upsertCapabilities } from '@clawboo/db'
 
 import { getDb } from '../db'
 import { recordToInsert, rowToRecord } from './mapper'
+import { projectGrants } from './grantProjection'
 import { getCapabilityMultiplexer } from './registry'
 
 export interface CapabilityFilter {
@@ -69,5 +70,7 @@ export async function loadCapabilities(filter: CapabilityFilter = {}): Promise<C
     seen.add(r.id)
     if (matches(r, filter)) merged.push(r)
   }
-  return { records: merged, sources }
+  // Grants LAST, and after the filter, so a synthetic twin the projection adds
+  // is not filtered out by a scope predicate evaluated before it existed.
+  return { records: projectGrants(db, merged), sources }
 }

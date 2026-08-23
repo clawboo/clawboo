@@ -195,6 +195,34 @@ export interface CapabilityRecord {
   /** How many subjects hold a grant on this. `>= 2` renders the shared "xN" chip. */
   grantCount?: number
 
+  /**
+   * Tool calls under this grant waiting on a human right now.
+   *
+   * CAUSED BY a `require_approval` verdict but not itself one, which is why it
+   * is a plain count rather than part of the decision projection: it is the
+   * marching-edge signal, not an authorization.
+   */
+  pendingApprovals?: number
+
   /** Which exfiltration-risk legs this capability can contribute. */
   trifecta?: CapabilityTrifecta
+
+  /**
+   * The grant's lifecycle AS THE GATE SEES IT, which is not always what the row
+   * says: an expired-but-unswept grant projects `expired` because that is what
+   * the runtime would do with it. Renderers show this, never `row.state`.
+   */
+  grantState?: 'proposed' | 'active' | 'suspended' | 'revoked' | 'expired'
+
+  /**
+   * True for a record the server SYNTHESISED rather than read from a runtime.
+   *
+   * A grantee's twin tile is the only producer: agent B holds a grant on a
+   * connector its own runtime never reported. Consumers that assume every record
+   * id resolves through `getCapability` must skip these, and the client's
+   * inherit-if-empty grouping must not count them as "this agent has its own
+   * capabilities" -- doing so switches inheritance off and hides the agent's
+   * entire real fan.
+   */
+  synthetic?: boolean
 }
