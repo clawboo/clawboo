@@ -358,6 +358,55 @@ export function ensureOwnerGrant(db: ClawbooDb, input: UpsertGrantInput): GrantR
 }
 
 /**
+ * Reinstate a revoked or expired OWNER grant, on an explicit operator action.
+ *
+ * Deliberately separate from `ensureOwnerGrant`, and the split is the whole
+ * point. `ensureOwnerGrant` runs on every inventory read and must never
+ * resurrect what a human revoked. But insert-only with no counterpart means a
+ * revoked owner grant is PERMANENT: the key carries no state component, so the
+ * next ensure returns null, `selectGrant` keeps choosing the revoked row, and
+ * every call denies `grant-revoked` with no way back short of editing the
+ * database. `resumeGrant` does not cover it either -- that window is 15 seconds
+ * and exists for an accidental Detach, not for a deliberate reconnect.
+ *
+ * So: the automatic path never reinstates, and this explicit one does.
+ */
+export function reinstateOwnerGrant(db: ClawbooDb, input: UpsertGrantInput): GrantRow | null {
+  const identity = normalizeGrantIdentity(input)
+  const key = grantKey(identity)
+  const now = Date.now()
+
+  return immediateWrite(db, (tx) => {
+    const existing = tx
+      .select()
+      .from(capabilityGrants)
+      .where(eq(capabilityGrants.grantKey, key))
+      .get() as DbCapabilityGrant | undefined
+    if (!existing) return null
+    // An ACTIVE grant is already what the caller wants; a suspended one is off
+    // for a reason the caller has not addressed (drift, a failed re-auth, the
+    // freeze), and quietly clearing that would be the resurrection this split
+    // exists to prevent.
+    if (existing.state !== 'revoked' && existing.state !== 'expired') return rowToGrantRow(existing)
+
+    const update: Partial<DbCapabilityGrant> = {
+      state: 'active',
+      revokedAt: null,
+      revokedReason: null,
+      grantedAt: now,
+      updatedAt: now,
+      // A reconnect re-pins: the hashes are what the operator is consenting to
+      // NOW, and carrying the old pin forward would report drift against a
+      // snapshot nobody has seen since.
+      ...(input.specHashPin !== undefined ? { specHashPin: input.specHashPin } : {}),
+      ...(input.toolsHashPin !== undefined ? { toolsHashPin: input.toolsHashPin } : {}),
+    }
+    tx.update(capabilityGrants).set(update).where(eq(capabilityGrants.id, existing.id)).run()
+    return rowToGrantRow({ ...existing, ...update } as DbCapabilityGrant)
+  })
+}
+
+/**
  * Revoke a grant and CASCADE-DELETE its standing rules.
  *
  * The cascade is the point: a remembered "Always" outliving the grant it was

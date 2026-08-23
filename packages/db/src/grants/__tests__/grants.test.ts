@@ -19,6 +19,7 @@ import {
   lastUsedByGrant,
   listCandidateGrants,
   mintStandingRule,
+  reinstateOwnerGrant,
   resumeGrant,
   revokeGrant,
   RESUME_WINDOW_MS,
@@ -228,6 +229,52 @@ describe('grant repository', () => {
     expect(second.id).toBe(first.id)
     expect(second.decision).toBe('deny')
     expect(listStandingRules(db, g.id)).toHaveLength(1)
+  })
+
+  it('an explicit reinstate recovers a revoked owner grant; the automatic path never does', () => {
+    // Insert-only with no counterpart makes a revoked owner grant PERMANENT: the
+    // key has no state component, so every later ensure returns null while the
+    // gate keeps denying grant-revoked. The two paths have to differ.
+    const owner = ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+    })!
+    revokeGrant(db, owner.id, 'disconnected')
+
+    const identity = {
+      subjectKind: 'agent' as const,
+      subjectId: 'a1',
+      capabilityKind: 'connector' as const,
+      connectorId: CONNECTOR,
+      capabilityId: null,
+    }
+    // The projection runs on every read and must NOT bring it back.
+    expect(ensureOwnerGrant(db, identity)).toBeNull()
+    expect(getGrant(db, owner.id)?.state).toBe('revoked')
+
+    // An explicit reconnect must, and re-pins while it is at it.
+    const back = reinstateOwnerGrant(db, { ...identity, toolsHashPin: 'newhash' })
+    expect(back?.state).toBe('active')
+    expect(back?.id).toBe(owner.id)
+    expect(getGrant(db, owner.id)?.toolsHashPin).toBe('newhash')
+  })
+
+  it('reinstate leaves a SUSPENDED grant alone', () => {
+    // Suspended is off for a reason the caller has not addressed. Clearing it
+    // silently would be exactly the resurrection the split prevents.
+    const g = agentGrant(db, 'a1')
+    db.$client.prepare("UPDATE capability_grants SET state = 'suspended' WHERE id = ?").run(g.id)
+    const out = reinstateOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+    })
+    expect(out?.state).toBe('suspended')
   })
 
   it('cascade-deletes standing rules on revoke', () => {
