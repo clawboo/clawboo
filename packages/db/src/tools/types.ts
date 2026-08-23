@@ -5,6 +5,7 @@
 // are audited. The descriptor's `inputSchema` is a zod schema (validated at the
 // boundary; the MCP server also exposes it as the tool's JSON schema).
 
+import type { TrifectaTags } from '@clawboo/governance'
 import type { ZodTypeAny } from 'zod'
 
 export type ToolOwner = 'core' | 'plugin' | 'channel' | 'mcp'
@@ -49,6 +50,28 @@ export interface ToolCallContext {
   availability: AvailabilityContext
   /** Tools a child run must never call (e.g. delegation primitives). */
   toolBlocklist?: string[]
+  /** The agent's team, so a team-scoped grant can authorize the call. */
+  teamId?: string | null
+  /**
+   * The connector this call is being brokered on behalf of.
+   *
+   * REQUIRED for a grant to be found, and deliberately caller-supplied rather
+   * than derived from the tool name: the identity is `conn:<source>:<runtime>:
+   * <key>`, which contains `:` and cannot survive an MCP tool name. Absent on
+   * every core builtin, which is why they are not grant-governed.
+   */
+  connectorId?: string | null
+  /**
+   * Trifecta legs the RUN has already accumulated, and whether it has ingested
+   * attacker-authorable content. Both are CALLER-OWNED: `decideGrant` unions the
+   * tool's own legs with these and cannot compute them itself. Nothing sets them
+   * yet, so the lethal-trifecta gate currently fires only when a SINGLE tool
+   * declares all three legs, and `tainted-run` never fires at all. Closing that
+   * needs a run-scoped accumulator, which needs a run identity the broker does
+   * not currently see.
+   */
+  runTrifecta?: TrifectaTags
+  tainted?: boolean
 }
 
 export interface ToolDescriptor {
@@ -57,7 +80,27 @@ export interface ToolDescriptor {
   inputSchema: ZodTypeAny
   availability?: AvailabilityRequirement
   owner?: ToolOwner
+  /** PAIRED with `ToolRisk` in @clawboo/governance grants/types.ts. The two are
+   *  structurally identical and the grant gate relies on that. Widen both or
+   *  neither: a class one knows and the other does not would coerce to `safe`. */
   risk?: ToolRisk
+  /**
+   * MCP ToolAnnotations, mirrored so the grant gate can classify a tool without
+   * a second vocabulary. NOTHING POPULATES THESE YET — an outbound MCP client
+   * reading `tools/list` is what fills them.
+   *
+   * CONSEQUENCE WORTH KNOWING: `requiredMode` treats anything not declaring
+   * `readOnly: true` as a write, so a `mode: 'read'` grant denies every
+   * unannotated tool. That is why an owner grant is minted at `admin`.
+   */
+  readOnly?: boolean
+  destructive?: boolean
+  idempotent?: boolean
+  openWorld?: boolean
+  trifecta?: TrifectaTags
+  /** Approvals that may never be remembered: money movement, external send,
+   *  credential grant. Forces the UI not to offer "Always". */
+  neverRemember?: boolean
   executor: (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<string> | string
   provenance?: ToolProvenance
 }

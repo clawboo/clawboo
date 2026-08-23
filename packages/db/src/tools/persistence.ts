@@ -45,6 +45,11 @@ export interface AuditBeforeInput {
   /** What the gate would have refused, for an `observe` row. Lands in
    *  `resultSummary`, which is otherwise null on a `before` row. */
   note?: string | null
+  /** Grant attribution. Null for a core builtin, which no grant governs. */
+  grantId?: string | null
+  connectorId?: string | null
+  /** The standing rule that short-circuited the decision, when one did. */
+  ruleId?: string | null
 }
 
 export function writeAuditBefore(db: ClawbooDb, input: AuditBeforeInput): string {
@@ -62,6 +67,9 @@ export function writeAuditBefore(db: ClawbooDb, input: AuditBeforeInput): string
         resultSummary: input.note ?? null,
         isError: 0,
         tenantId: input.tenantId ?? null,
+        grantId: input.grantId ?? null,
+        connectorId: input.connectorId ?? null,
+        ruleId: input.ruleId ?? null,
         createdAt: Date.now(),
       })
       .run(),
@@ -75,6 +83,10 @@ export interface AuditAfterInput {
   result: string
   isError: boolean
   tenantId?: string | null
+  /** Grant attribution. This is the row `lastUsedByGrant` reads, so omitting it
+   *  here is what would make a grant's "last used" permanently null. */
+  grantId?: string | null
+  connectorId?: string | null
 }
 
 export function writeAuditAfter(db: ClawbooDb, input: AuditAfterInput): string {
@@ -92,6 +104,9 @@ export function writeAuditAfter(db: ClawbooDb, input: AuditAfterInput): string {
         resultSummary: scrubResultSummary(input.result),
         isError: input.isError ? 1 : 0,
         tenantId: input.tenantId ?? null,
+        grantId: input.grantId ?? null,
+        connectorId: input.connectorId ?? null,
+        ruleId: null,
         createdAt: Date.now(),
       })
       .run(),
@@ -127,6 +142,14 @@ export interface CreateApprovalInput {
   tenantId?: string | null
   /** The board task this approval gates (so the TTL reaper can unblock it). */
   taskId?: string | null
+  grantId?: string | null
+  connectorId?: string | null
+  /** True when the tool has no scopable argument shape. PERSISTED rather than
+   *  recomputed at resolve time, so the resolve path can never mint a durable
+   *  rule the prompt did not offer. */
+  neverRemember?: boolean
+  /** The GrantApprovalReason behind the prompt, e.g. `lethal-trifecta`. */
+  ruleReason?: string | null
 }
 
 export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToolCallApproval {
@@ -140,6 +163,10 @@ export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToo
     status: 'pending',
     taskId: input.taskId ?? null,
     tenantId: input.tenantId ?? null,
+    grantId: input.grantId ?? null,
+    connectorId: input.connectorId ?? null,
+    neverRemember: input.neverRemember ? 1 : 0,
+    ruleReason: input.ruleReason ?? null,
     createdAt: now,
     expiresAt: now + (input.ttlMs ?? DEFAULT_TTL_MS),
     resolvedAt: null,
