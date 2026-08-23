@@ -756,7 +756,7 @@ export function buildGraphElements(
                 // remain the least-privilege floor for a server that predates
                 // the projection.
                 state: cap.grantState ?? 'active',
-                mode: 'read',
+                mode: cap.grantMode ?? 'read',
                 ...(cap.pendingApprovals ? { pendingApprovals: cap.pendingApprovals } : {}),
               },
             })

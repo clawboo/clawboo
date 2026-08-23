@@ -164,7 +164,7 @@ export const ResourceNode = memo(function ResourceNode({
             one that never existed. Invisible at this scale (the tile is a dot) but
             still hit-testable, and deliberately NOT centerHandleStyle, which
             centers the handle and disables pointer events. */}
-        {connectorId !== null && (
+        {connectorId != null && (
           <Handle
             id="grant"
             type="source"
@@ -338,7 +338,7 @@ export const ResourceNode = memo(function ResourceNode({
           itself is the proof the agent has it. Detach, further down, stays gated
           on an actual grant, because that one really does need something to
           revoke. */}
-      {connectorId !== null && (
+      {connectorId != null && (
         <Handle
           id="grant"
           type="source"
