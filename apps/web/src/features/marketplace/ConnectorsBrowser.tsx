@@ -22,6 +22,7 @@ import {
   Info,
   KeyRound,
   Plug,
+  Plus,
   SearchX,
   ShieldAlert,
   Terminal,
@@ -30,6 +31,10 @@ import type { LucideIcon } from 'lucide-react'
 import {
   CONNECT_REFUSAL_COPY,
   connectorCounts,
+  isReachable,
+  needsArgumentOnly,
+  needsCredentialOnly,
+  needsSignInOnly,
   connectorSnippet,
   connectRefusal,
   isConnectable,
@@ -46,7 +51,18 @@ import { SearchInput } from '@/features/shared/SearchInput'
 import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
-import { connectConnector, disconnectConnector, listLiveConnectors } from './connectConnector'
+import {
+  connectConnector,
+  createCustomConnector,
+  disconnectConnector,
+  fetchConnectorConfig,
+  listCustomConnectors,
+  listLiveConnectors,
+  saveConnectorConfig,
+  signInConnector,
+  type ConnectorConfigState,
+  type CredentialStatus,
+} from './connectConnector'
 
 // ─── Category pills ─────────────────────────────────────────────────────────
 
@@ -83,6 +99,10 @@ function authLabel(
       : { label: 'Not connected', active: false }
   }
   if (def.auth.kind === 'oauth') return { label: 'Sign in', icon: KeyRound, active: false }
+  // "Add …" rather than "Needs …": both are now something the user can do here,
+  // not a statement about why they cannot.
+  if (needsArgumentOnly(def)) return { label: 'Add a path', icon: KeyRound, active: false }
+  if (needsCredentialOnly(def)) return { label: 'Add a key', icon: KeyRound, active: false }
   if (def.auth.kind === 'none') return { label: 'Copy config', active: false }
   return { label: 'Needs a key', icon: KeyRound, active: false }
 }
@@ -167,6 +187,322 @@ function ConnectorCard({
  * the REST handler enforces. A tile therefore cannot offer a button the server
  * would refuse, and cannot withhold one the server would accept.
  */
+/**
+ * Enter the credentials a connector declared.
+ *
+ * The values are write-only from the browser's point of view: the server stores
+ * them in the vault and every response reports presence alone, so a stored
+ * credential can never be read back out through this form. An already-stored
+ * value therefore renders as a placeholder rather than a value, and leaving the
+ * field untouched leaves the stored one alone.
+ */
+function ConfigForm({
+  def,
+  state,
+  onSaved,
+  collapsedByDefault = false,
+}: {
+  def: ConnectorDefinition
+  state: ConnectorConfigState
+  onSaved: (next: ConnectorConfigState) => void
+  /** Collapsed once everything is supplied: present but out of the way. */
+  collapsedByDefault?: boolean
+}) {
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [argument, setArgument] = useState(state.argument ?? '')
+  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(!collapsedByDefault)
+
+  if (!open) {
+    return (
+      <section className="rounded-xl border border-border bg-surface-subtle px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 text-xs text-muted-foreground">
+            {/* The stored ARGUMENT is shown in full, which is the entire reason
+                for asking which folder a connector gets. Credentials are counted,
+                never shown. */}
+            {state.argument ? (
+              <>
+                Configured: <code className="text-foreground">{state.argument}</code>
+              </>
+            ) : (
+              `${state.credentials.filter((c) => c.present).length} credential${
+                state.credentials.filter((c) => c.present).length === 1 ? '' : 's'
+              } saved`
+            )}
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+            Change
+          </Button>
+        </div>
+      </section>
+    )
+  }
+
+  const argumentChanged = argument.trim() !== (state.argument ?? '')
+  const hasCredentialInput = Object.values(draft).some((v) => v.length > 0)
+
+  async function save() {
+    setBusy(true)
+    try {
+      // Only fields the user actually typed into. Sending the untouched ones as
+      // empty strings would CLEAR credentials they never meant to remove.
+      const values = Object.fromEntries(Object.entries(draft).filter(([, v]) => v.length > 0))
+      const next = await saveConnectorConfig(def.slug, def.displayName, {
+        ...(Object.keys(values).length > 0 ? { values } : {}),
+        ...(argumentChanged ? { argument: argument.trim() } : {}),
+      })
+      if (next) {
+        setDraft({})
+        onSaved(next)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-border bg-surface-subtle p-4">
+      <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+        <KeyRound size={13} aria-hidden />
+        Before it can run
+      </div>
+      {state.credentials.length > 0 && (
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+          Credentials are stored encrypted on this machine and passed only to this connector&rsquo;s
+          process. clawboo never sends them anywhere else, and never shows them again once saved.
+        </p>
+      )}
+
+      {state.argumentSpec && (
+        <label className="mt-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-foreground">
+            {state.argumentSpec.label}
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            {state.argumentSpec.description}
+          </span>
+          <input
+            type="text"
+            spellCheck={false}
+            value={argument}
+            onChange={(e) => setArgument(e.target.value)}
+            placeholder={state.argumentSpec.example}
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          />
+        </label>
+      )}
+
+      <div className="mt-3 flex flex-col gap-3">
+        {state.credentials.map((cred: CredentialStatus) => (
+          <label key={cred.key} className="flex flex-col gap-1">
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+              <code>{cred.key}</code>
+              {cred.required ? null : <span className="text-muted-foreground">(optional)</span>}
+              {cred.present && (
+                <span className="text-[10px] text-mint" aria-label="already stored">
+                  saved
+                </span>
+              )}
+            </span>
+            <span className="text-[11px] text-muted-foreground">{cred.description}</span>
+            <input
+              type={cred.secret ? 'password' : 'text'}
+              autoComplete="off"
+              spellCheck={false}
+              value={draft[cred.key] ?? ''}
+              onChange={(e) => setDraft((d) => ({ ...d, [cred.key]: e.target.value }))}
+              placeholder={cred.present ? 'saved, type to replace' : 'not set'}
+              className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+            />
+            {cred.docsUrl && (
+              <a
+                href={cred.docsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-accent underline"
+              >
+                Where to get this
+              </a>
+            )}
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={busy || (!hasCredentialInput && !argumentChanged)}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Point clawboo at a server of your own.
+ *
+ * The honest framing, and the copy says it: this is the same thing as writing a
+ * server into a runtime's own config file, which is what the snippet below every
+ * catalog entry already asks you to do. clawboo vouches for nothing here, which
+ * is why the form asks for a command rather than offering a list.
+ */
+function AddCustomConnector({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [displayName, setDisplayName] = useState('')
+  const [command, setCommand] = useState('')
+  const [argsText, setArgsText] = useState('')
+
+  // Derived rather than a fourth field: a slug is an implementation detail (it
+  // becomes a tool-name segment and a grant identity), and asking for one would
+  // be asking the operator to care about that.
+  const slug = displayName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+
+  const valid = slug.length > 0 && command.trim().length > 0
+
+  async function submit() {
+    setBusy(true)
+    try {
+      const ok = await createCustomConnector({
+        slug,
+        displayName: displayName.trim(),
+        command: command.trim(),
+        // Split on whitespace, which is the shape a user copies from a README.
+        // Never joined back into a string: argv stays an array all the way to
+        // the spawn, so a value containing a shell metacharacter is inert.
+        args: argsText.trim().length > 0 ? argsText.trim().split(/\s+/) : [],
+      })
+      if (ok) {
+        setDisplayName('')
+        setCommand('')
+        setArgsText('')
+        setOpen(false)
+        onAdded()
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="mt-3 flex justify-center">
+        <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+          <Plus size={13} aria-hidden />
+          Add your own MCP server
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <section className="mt-3 rounded-2xl border border-border bg-surface-subtle p-4">
+      <h3 className="text-xs font-semibold text-foreground">Add your own MCP server</h3>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        Anything that speaks MCP over stdio. clawboo runs it as a local process under your account
+        and does not vouch for it, so add servers you would be willing to put in a runtime&rsquo;s
+        config file yourself.
+      </p>
+
+      <div className="mt-3 flex flex-col gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-foreground">Name</span>
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="My Notes Server"
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-foreground">Command</span>
+          <span className="text-[11px] text-muted-foreground">
+            The program to run. An absolute path is used as-is; a bare name is looked up on PATH.
+          </span>
+          <input
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            spellCheck={false}
+            placeholder="npx"
+            className="rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-foreground">Arguments</span>
+          <span className="text-[11px] text-muted-foreground">
+            Separated by spaces. Passed to the program directly, never through a shell.
+          </span>
+          <input
+            value={argsText}
+            onChange={(e) => setArgsText(e.target.value)}
+            spellCheck={false}
+            placeholder="-y @scope/my-mcp-server@1.0.0"
+            className="rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <Button size="sm" variant="secondary" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={submit} disabled={busy || !valid}>
+          {busy ? 'Adding…' : 'Add'}
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Sign in to a remote provider.
+ *
+ * The copy names what actually happens, because it is a browser tab going to
+ * somebody else's site: clawboo registers itself with that provider for this
+ * install and stores the resulting token locally.
+ */
+function SignInPanel({ def, onChanged }: { def: ConnectorDefinition; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <section className="rounded-xl border border-border bg-surface-subtle p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+            <KeyRound size={13} aria-hidden />
+            Sign in to {def.displayName}
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Opens {def.displayName} in a new tab. clawboo registers itself with them for this
+            install and keeps the resulting token on this machine, encrypted.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              if (await signInConnector(def.slug, def.displayName)) onChanged()
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? 'Waiting…' : 'Sign in'}
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 function ConnectAction({
   def,
   connected,
@@ -177,7 +513,46 @@ function ConnectAction({
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState(false)
-  const refusal = connectRefusal(def)
+  const [config, setConfig] = useState<ConnectorConfigState | null>(null)
+
+  // Fetched for ANY connector with something to configure, not only an
+  // unsatisfied one. A credential or folder that can never be seen or changed
+  // again is worse than one that was never asked for: checking which folder a
+  // connector was handed is the entire reason for asking.
+  const hasConfig =
+    def.auth.inputs.length > 0 || def.userArgument !== undefined || needsSignInOnly(def)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    if (!hasConfig) return
+    void fetchConnectorConfig(def.slug).then((next) => {
+      if (next) setConfig(next)
+      else setFailed(true)
+    })
+  }, [hasConfig, def.slug])
+
+  const configGated = needsCredentialOnly(def) || needsArgumentOnly(def) || needsSignInOnly(def)
+  const satisfied = config?.satisfied ?? false
+  const refusal = connectRefusal(def, satisfied, satisfied)
+
+  if (configGated && !satisfied) {
+    if (config && needsSignInOnly(def) && !config.authorized) {
+      return (
+        <SignInPanel
+          def={def}
+          onChanged={() => void fetchConnectorConfig(def.slug).then(setConfig)}
+        />
+      )
+    }
+    if (config) return <ConfigForm def={def} state={config} onSaved={setConfig} />
+    // A failed fetch must not leave the tile spinning forever with no way out.
+    return (
+      <section className="rounded-xl border border-border bg-surface-subtle p-4 text-xs text-muted-foreground">
+        {failed
+          ? 'Could not read this connector’s settings. Check that the clawboo server is running, then reopen this connector.'
+          : 'Checking what this connector needs…'}
+      </section>
+    )
+  }
 
   if (refusal) {
     return (
@@ -209,30 +584,38 @@ function ConnectAction({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-surface-subtle p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-foreground">
-            {connected ? 'Connected' : 'Run this connector'}
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {connected
-              ? 'Its tools are available to agents attached over HTTP. Agents running in-process cannot reach them yet. Disconnecting stops the process.'
-              : /* Named plainly: this starts a process on your machine, and the
+    <>
+      {/* Still editable after it is satisfied. A credential can expire and a
+          folder can be the wrong one, and neither is fixable from a panel that
+          disappeared the moment it was filled in. */}
+      {config && hasConfig && (
+        <ConfigForm def={def} state={config} onSaved={setConfig} collapsedByDefault />
+      )}
+      <section className="rounded-xl border border-border bg-surface-subtle p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-foreground">
+              {connected ? 'Connected' : 'Run this connector'}
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {connected
+                ? 'Its tools are available to your agents. Disconnecting stops the process.'
+                : /* Named plainly: this starts a process on your machine, and the
                    first run downloads the pinned package. */
-                'clawboo starts this server as a local process and lists its tools. The first run downloads the pinned package.'}
-          </p>
+                  'clawboo starts this server as a local process and lists its tools. The first run downloads the pinned package.'}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant={connected ? 'secondary' : 'primary'}
+            onClick={run}
+            disabled={busy}
+          >
+            {busy ? 'Working…' : connected ? 'Disconnect' : 'Connect'}
+          </Button>
         </div>
-        <Button
-          size="sm"
-          variant={connected ? 'secondary' : 'primary'}
-          onClick={run}
-          disabled={busy}
-        >
-          {busy ? 'Working…' : connected ? 'Disconnect' : 'Connect'}
-        </Button>
-      </div>
-    </section>
+      </section>
+    </>
   )
 }
 
@@ -415,12 +798,33 @@ export function ConnectorsBrowser() {
   // Stated rather than implied. The header used to read "a directory, not an
   // installer", which was true when nothing here could run and is now false for
   // exactly the connectable set.
-  const connectableCount = useMemo(() => searchConnectors('').filter(isConnectable).length, [])
+  // Everything an operator could get running once they have filled in whatever
+  // it asks for. `isReachable` exists precisely so this is one predicate rather
+  // than a hand-assembled union that forgets a case -- which it did, by two.
+  const connectableCount = useMemo(() => searchConnectors('').filter(isReachable).length, [])
+
+  // The operator's own entries, merged with the committed catalog. Fetched
+  // rather than bundled: they live in the database, so the browser cannot know
+  // them statically the way it knows the catalog.
+  const [custom, setCustom] = useState<ConnectorDefinition[]>([])
+  const refreshCustom = useCallback(() => {
+    void listCustomConnectors().then(setCustom)
+  }, [])
+  useEffect(refreshCustom, [refreshCustom])
 
   const results = useMemo(() => {
-    const matched = searchConnectors(searchQuery)
+    const q = searchQuery.trim().toLowerCase()
+    const mine = q
+      ? custom.filter(
+          (c) =>
+            c.displayName.toLowerCase().includes(q) ||
+            c.slug.includes(q) ||
+            c.description.toLowerCase().includes(q),
+        )
+      : custom
+    const matched = [...mine, ...searchConnectors(searchQuery)]
     return categoryFilter === 'all' ? matched : matched.filter((c) => c.category === categoryFilter)
-  }, [searchQuery, categoryFilter])
+  }, [searchQuery, categoryFilter, custom])
 
   const categoryOptions: PillOption[] = useMemo(() => {
     const present = new Set(searchConnectors('').map((c) => c.category))
@@ -496,6 +900,7 @@ export function ConnectorsBrowser() {
             ))}
           </div>
         )}
+        <AddCustomConnector onAdded={refreshCustom} />
       </div>
     </div>
   )
