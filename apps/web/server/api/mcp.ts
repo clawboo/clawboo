@@ -150,7 +150,20 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     memory: createStreamableHttpHandlers((req) =>
       createMemoryServer(getDb(), cachedEmbed, { boundScope: parseBoundScope(req) }),
     ),
-    tools: createStreamableHttpHandlers(() => createToolsServer(getDb())),
+    // `req` was previously dropped here, alone among the four handlers, so the
+    // HMAC-verified scope params the attach URL carries were parsed by nobody.
+    // Over HTTP that left ctx.agentId undefined, which makes an agent-scoped
+    // grant unfindable and a team-scoped one likewise -- the call then resolves
+    // against whatever GLOBAL grant happens to exist, or none. Failing open on
+    // identity is worse than failing closed, so the scope is threaded here for
+    // the same reason tasks and memory thread it.
+    tools: createStreamableHttpHandlers((req) => {
+      const scope = parseBoundScope(req)
+      return createToolsServer(getDb(), {
+        ...(scope?.agentId ? { agentId: scope.agentId } : {}),
+        ...(scope?.teamId ? { teamId: scope.teamId } : {}),
+      })
+    }),
     teamchat: createStreamableHttpHandlers((req) => {
       const db = getDb()
       return createTeamChatServer(db, {
