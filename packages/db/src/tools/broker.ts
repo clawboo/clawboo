@@ -18,7 +18,13 @@ import {
   writeAuditAfter,
   writeAuditBefore,
 } from './persistence'
-import { evaluateGrant, releaseGrantCharge, ruleIdOf, type GrantGateResult } from './grantGate'
+import {
+  chargeGrantCall,
+  evaluateGrant,
+  releaseGrantCharge,
+  ruleIdOf,
+  type GrantGateResult,
+} from './grantGate'
 import { verifyProvenance, type ProvenanceVerifyOpts } from './provenance'
 import type { ToolRegistry } from './registry'
 import type { Inspector, ToolCall, ToolCallContext } from './types'
@@ -214,6 +220,9 @@ export async function executeBrokeredCall(
         denied: `approval:${resolution}`,
       }
     }
+    // The human said yes, so the call is about to run and must count against the
+    // grant's ceiling exactly as an immediately-allowed one would.
+    chargeGrantCall(gate)
     if (outcome.decision === 'require_approval') effectiveArgs = outcome.args // allow_once / allow_always
   } else {
     // An observed-but-allowed call is audited as `observe`, not `allow`: the whole

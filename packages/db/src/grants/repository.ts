@@ -288,9 +288,15 @@ export function upsertGrant(db: ClawbooDb, input: UpsertGrantInput): GrantRow {
     if (input.toolsHashPin !== undefined) update.toolsHashPin = input.toolsHashPin
     if (input.callCeilingPerHour !== undefined) update.callCeilingPerHour = input.callCeilingPerHour
     if (input.grantedBy !== undefined) update.grantedBy = input.grantedBy
-    // `origin` is NOT updated: an owner grant a human later shares deliberately
-    // stays owner-origin for the audit, and an operator grant never silently
-    // becomes an implicit one.
+    // ONE-WAY promotion. An owner grant that a human then deliberately shares
+    // becomes operator-origin, because only an operator grant is drawn as an
+    // edge and carries a Detach control: without this, sharing a connector the
+    // grantee's own runtime already attaches would reactivate the owner row,
+    // report success, and leave the operator unable to see or revoke what they
+    // just created. The reverse never happens: a deliberate share does not decay
+    // back into an implicit one.
+
+    if (input.origin === 'operator' && existing.origin !== 'operator') update.origin = 'operator'
 
     tx.update(capabilityGrants).set(update).where(eq(capabilityGrants.id, existing.id)).run()
     return rowToGrantRow({ ...existing, ...update } as DbCapabilityGrant)
@@ -446,20 +452,25 @@ export function mintStandingRule(db: ClawbooDb, input: MintStandingRuleInput): D
     createdAt: now,
   } satisfies DbApprovalRule
 
-  withWriteRetry(() =>
-    db
-      .insert(approvalRules)
-      .values(row)
-      .onConflictDoUpdate({
-        target: approvalRules.ruleKey,
-        set: {
-          decision: row.decision,
-          expiresAt: row.expiresAt,
-          createdFromApprovalId: row.createdFromApprovalId,
-          createdAt: now,
-        },
-      })
-      .run(),
+  // `.returning().get()` rather than the local `row`: on conflict the UNIQUE
+  // index preserves the EXISTING id, so returning the id we just generated would
+  // hand the caller a key no row has, and any audit attribution written from it
+  // would dangle.
+  return withWriteRetry(
+    () =>
+      db
+        .insert(approvalRules)
+        .values(row)
+        .onConflictDoUpdate({
+          target: approvalRules.ruleKey,
+          set: {
+            decision: row.decision,
+            expiresAt: row.expiresAt,
+            createdFromApprovalId: row.createdFromApprovalId,
+            createdAt: now,
+          },
+        })
+        .returning()
+        .get() as DbApprovalRule,
   )
-  return row
 }

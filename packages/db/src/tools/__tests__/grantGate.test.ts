@@ -10,9 +10,10 @@ import { z } from 'zod'
 
 import { createDb, type ClawbooDb } from '../../db'
 import { upsertGrant, revokeGrant } from '../../grants/repository'
-import { resetRateWindows } from '../../grants/rateWindow'
+import { callsInWindow, chargeCall, resetRateWindows } from '../../grants/rateWindow'
 import { defaultAvailabilityContext } from '../availability'
 import { executeBrokeredCall } from '../broker'
+import { chargeGrantCall, releaseGrantCharge } from '../grantGate'
 import { ToolRegistry } from '../registry'
 import { createBuiltinRegistry } from '../registry'
 import type { ToolCallContext, ToolDescriptor } from '../types'
@@ -162,6 +163,30 @@ describe('the grant gate', () => {
       { registry },
     )
     expect(res.denied).toBe('grant:mode-insufficient')
+  })
+
+  it('charges the rate window for an approved call, exactly once', () => {
+    // Charging only an immediate `allow` lets a grant that combines an approval
+    // policy with a ceiling exceed that ceiling forever: every call prompts,
+    // every prompt is approved, and nothing is ever counted.
+    const gate = { decision: { kind: 'allow', grantId: 'g1' }, connectorId: 'c1', charged: false }
+    chargeGrantCall(gate as never)
+    expect(callsInWindow('g1')).toBe(1)
+
+    // Idempotent: a result already charged at decision time is left alone.
+    chargeGrantCall(gate as never)
+    expect(callsInWindow('g1')).toBe(1)
+
+    releaseGrantCharge(gate as never)
+    expect(callsInWindow('g1')).toBe(0)
+  })
+
+  it('releases a charge only once, so a double release cannot go negative', () => {
+    chargeCall('g2')
+    const gate = { decision: { kind: 'allow', grantId: 'g2' }, connectorId: 'c1', charged: true }
+    releaseGrantCharge(gate as never)
+    releaseGrantCharge(gate as never)
+    expect(callsInWindow('g2')).toBe(0)
   })
 
   it('emits a grant_decision event for every gated call', async () => {

@@ -175,6 +175,61 @@ describe('grant repository', () => {
     expect(getGrant(db, first!.id)?.state).toBe('revoked')
   })
 
+  it('promotes an owner grant to operator when a human deliberately shares it', () => {
+    // Sharing a connector the grantee's runtime ALREADY attaches lands on that
+    // agent's existing owner row. Without the promotion the row reactivates,
+    // the POST reports success, and the operator can neither see the edge nor
+    // detach it, because only an operator grant is drawn.
+    const owner = ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+    })
+    expect(owner?.origin).toBe('owner')
+
+    const shared = agentGrant(db, 'a1', { origin: 'operator', mode: 'write' })
+    expect(shared.id).toBe(owner!.id)
+    expect(shared.origin).toBe('operator')
+  })
+
+  it('never demotes an operator grant back to owner', () => {
+    const op = agentGrant(db, 'a1', { origin: 'operator' })
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+    })
+    expect(getGrant(db, op.id)?.origin).toBe('operator')
+  })
+
+  it('returns the PERSISTED standing rule on conflict, not a fresh id', () => {
+    const g = agentGrant(db, 'a1')
+    const first = mintStandingRule(db, {
+      grantId: g.id,
+      toolName: 'read_file',
+      argsShape: null,
+      decision: 'allow',
+      expiresAt: Date.now() + 60_000,
+    })
+    const second = mintStandingRule(db, {
+      grantId: g.id,
+      toolName: 'read_file',
+      argsShape: null,
+      decision: 'deny',
+      expiresAt: Date.now() + 60_000,
+    })
+    // The UNIQUE index keeps the existing row, so returning the id we just
+    // generated would hand the caller a key no row has and any audit
+    // attribution written from it would dangle.
+    expect(second.id).toBe(first.id)
+    expect(second.decision).toBe('deny')
+    expect(listStandingRules(db, g.id)).toHaveLength(1)
+  })
+
   it('cascade-deletes standing rules on revoke', () => {
     const g = agentGrant(db, 'a1')
     mintStandingRule(db, {

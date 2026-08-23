@@ -28,7 +28,9 @@ import type { ToolCallContext, ToolDescriptor } from './types'
 export interface GrantGateResult {
   decision: GrantDecision
   connectorId: string
-  /** Charge taken against the rate window, to be released if the call never runs. */
+  /** Whether a charge is currently held against the rate window for this call.
+   *  Mutable: the approval path charges after the human answers, and every path
+   *  releases if the call ends up not running. */
   charged: boolean
 }
 
@@ -103,17 +105,34 @@ export function evaluateGrant(
     now,
   })
 
-  // Charge here, still synchronously, and only for a verdict that leads to a
-  // call actually running.
+  // Charge here, still synchronously, for a verdict that leads straight to a
+  // call. An approval-gated call is charged LATER, once a human says yes, by
+  // `chargeGrantCall` -- charging on the prompt would bill a call that may never
+  // run, and not charging at all would let a grant that combines an approval
+  // policy with a ceiling exceed that ceiling indefinitely.
   const charged = decision.kind === 'allow'
   if (charged) chargeCall(chosen.grantId, now)
 
   return { decision, connectorId, charged }
 }
 
+/**
+ * Charge a call that proceeded after a human approved it.
+ *
+ * Idempotent through `charged`: a result already charged at decision time is
+ * left alone, so no call is ever counted twice.
+ */
+export function chargeGrantCall(result: GrantGateResult | null, now = Date.now()): void {
+  if (!result || result.charged || !result.decision.grantId) return
+  chargeCall(result.decision.grantId, now)
+  result.charged = true
+}
+
 /** Give back a charge when the call it was taken for never ran. */
 export function releaseGrantCharge(result: GrantGateResult | null, now = Date.now()): void {
-  if (result?.charged && result.decision.grantId) releaseCall(result.decision.grantId, now)
+  if (!result?.charged || !result.decision.grantId) return
+  releaseCall(result.decision.grantId, now)
+  result.charged = false
 }
 
 /** The standing rule id a decision short-circuited on, for the audit row. */
