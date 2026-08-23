@@ -261,7 +261,12 @@ export function expireStaleApprovals(
 
 // ─── Registry metadata (light) ────────────────────────────────────────────────
 
-export function persistDescriptorMetadata(db: ClawbooDb, descriptor: ToolDescriptor): void {
+export function persistDescriptorMetadata(
+  db: ClawbooDb,
+  descriptor: ToolDescriptor,
+  /** The connector this tool came from. Omitted for a builtin. */
+  connectorId?: string | null,
+): void {
   const now = Date.now()
   withWriteRetry(() =>
     db
@@ -276,6 +281,7 @@ export function persistDescriptorMetadata(db: ClawbooDb, descriptor: ToolDescrip
         provenanceSignature: descriptor.provenance?.signature ?? null,
         provenanceSignedAt: descriptor.provenance?.signedAt ?? null,
         enabled: 1,
+        connectorId: connectorId ?? null,
         createdAt: now,
         updatedAt: now,
       })
@@ -288,6 +294,7 @@ export function persistDescriptorMetadata(db: ClawbooDb, descriptor: ToolDescrip
           provenanceSignerId: descriptor.provenance?.signerId ?? null,
           provenanceSignature: descriptor.provenance?.signature ?? null,
           provenanceSignedAt: descriptor.provenance?.signedAt ?? null,
+          connectorId: connectorId ?? null,
           updatedAt: now,
         },
       })

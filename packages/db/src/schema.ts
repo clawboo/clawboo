@@ -520,10 +520,15 @@ export const toolRegistry = sqliteTable(
     provenanceSignature: text('provenance_signature'),
     provenanceSignedAt: integer('provenance_signed_at'),
     enabled: integer('enabled').notNull().default(1),
+    /** The connector this tool was discovered from. Null for a builtin. */
+    connectorId: text('connector_id'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [index('idx_tool_registry_owner').on(t.owner)],
+  (t) => [
+    index('idx_tool_registry_owner').on(t.owner),
+    index('idx_tool_registry_connector').on(t.connectorId),
+  ],
 )
 
 export type DbToolRegistry = typeof toolRegistry.$inferSelect

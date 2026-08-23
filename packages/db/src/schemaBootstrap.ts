@@ -360,10 +360,18 @@ const SCHEMA_DDL = `
       provenance_signature  TEXT,
       provenance_signed_at  INTEGER,
       enabled               INTEGER NOT NULL DEFAULT 1,
+      -- The connector this tool was discovered from. Null for a builtin, which
+      -- is every row today. Namespacing already keeps two connectors exposing
+      -- the same remote name from colliding on the PRIMARY KEY, so this column
+      -- is not what makes them storable: it is what makes them QUERYABLE, so
+      -- revoking a connector can find its tools instead of pattern-matching
+      -- their names.
+      connector_id          TEXT,
       created_at            INTEGER NOT NULL,
       updated_at            INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_tool_registry_owner ON tool_registry (owner);
+    CREATE INDEX IF NOT EXISTS idx_tool_registry_connector ON tool_registry (connector_id);
 
     CREATE TABLE IF NOT EXISTS tool_call_audit (
       id             TEXT    PRIMARY KEY,
