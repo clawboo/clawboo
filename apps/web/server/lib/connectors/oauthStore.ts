@@ -14,6 +14,16 @@ import { deleteRuntimeSecret, getRuntimeSecret, setRuntimeSecret } from '../secr
 export interface StoredClient {
   client_id: string
   client_secret?: string
+  /**
+   * The redirect this registration was made with.
+   *
+   * Load-bearing rather than bookkeeping. Dynamic registration PINS a
+   * redirect_uri, and ours carries an ephemeral port, so a later sign-in that
+   * reuses this registration from a different port is refused by the provider
+   * for redirect_uri mismatch. Recording it is what lets the flow notice and
+   * re-register instead of failing on every retry.
+   */
+  redirect_uri?: string
 }
 
 export interface StoredTokens {
@@ -60,9 +70,24 @@ export function saveStoredTokens(slug: string, tokens: StoredTokens): void {
   setRuntimeSecret(tokenSlot(slug), JSON.stringify(tokens))
 }
 
-/** Whether this connector has been authorized. Never returns the token itself. */
+/**
+ * Whether this connector holds an authorization that could still be used.
+ *
+ * "Could still be used" rather than "exists", because the connect route decides
+ * the same question by actually resolving a token, and the two answers have to
+ * agree. A stored token that has expired with NO refresh token is dead: reporting
+ * it as authorized left the panel showing a Connect button that the server then
+ * refused, with no sign-in offered and no way back.
+ *
+ * What this cannot see is a refresh token the provider has revoked on their
+ * side. That takes a network round-trip, which this read must not make, so the
+ * connect route reports `remote-needs-oauth` and the panel offers sign-in again.
+ */
 export function isAuthorized(slug: string): boolean {
-  return getStoredTokens(slug)?.access_token !== undefined
+  const tokens = getStoredTokens(slug)
+  if (!tokens?.access_token) return false
+  if (tokens.expires_at === undefined) return true
+  return tokens.expires_at > Date.now() || tokens.refresh_token !== undefined
 }
 
 /** Forget everything for one connector. Used by an explicit sign-out. */

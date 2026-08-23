@@ -18,7 +18,7 @@
 // provider without dynamic registration needs a fixed, pre-registered callback,
 // and the registration step refuses those up front rather than failing here.
 
-import { createServer, type Server } from 'node:http'
+import { createServer, type Server, type ServerResponse } from 'node:http'
 import { AddressInfo } from 'node:net'
 
 export interface CallbackResult {
@@ -29,9 +29,39 @@ export interface CallbackResult {
 export interface Listener {
   /** The exact redirect_uri to register and to send in the authorize request. */
   redirectUri: string
+  /** The port actually bound, so a later attempt can ask for it again. */
+  port: number
   /** Resolves with the callback params, or rejects on timeout or an error param. */
   waitForCallback(): Promise<CallbackResult>
+  /**
+   * Report the outcome of the token exchange, which is what the operator's tab
+   * finally renders. Until this is called the tab is still loading, because
+   * "Connected" is not true until a token has actually been obtained.
+   */
+  settle(outcome: { ok: boolean; detail: string }): void
   close(): void
+}
+
+export interface ListenerOptions {
+  timeoutMs?: number
+  /**
+   * The `state` this listener will accept, and ONLY this one.
+   *
+   * The port is reachable by anything else running on the machine, including a
+   * page the operator happens to have open, and a request to it used to abort
+   * whatever sign-in was in flight. Matching state first makes an unauthenticated
+   * request a 404 that changes nothing, and it is the same value that stops an
+   * attacker-supplied authorization code being redeemed into the operator's
+   * connector.
+   */
+  expectedState?: string
+  /**
+   * A port to try first. Dynamic registration PINS the redirect, so reusing the
+   * previous port is what lets a second sign-in reuse the previous registration
+   * instead of leaving a new dead client on the provider's side every time.
+   * Falls back to an ephemeral port when it is taken.
+   */
+  preferredPort?: number
 }
 
 /** A page the user sees in the tab the provider redirected. Plain, self-closing. */
@@ -45,9 +75,28 @@ function resultPage(title: string, detail: string): string {
 /** How long the user has to finish signing in before the listener gives up. */
 const DEFAULT_TIMEOUT_MS = 5 * 60_000
 
-export async function startOAuthListener(opts: { timeoutMs?: number } = {}): Promise<Listener> {
+/** How long the tab waits for the token exchange before it stops holding. */
+const SETTLE_TIMEOUT_MS = 30_000
+
+export async function startOAuthListener(opts: ListenerOptions = {}): Promise<Listener> {
   let resolveCb: ((r: CallbackResult) => void) | null = null
   let rejectCb: ((e: Error) => void) | null = null
+
+  // The callback response is held open until the caller reports the outcome, so
+  // the operator's tab shows what actually happened rather than an optimistic
+  // "Connected" written before the code had been exchanged for anything.
+  let held: ServerResponse | null = null
+  let settled: { ok: boolean; detail: string } | null = null
+
+  function write(res: ServerResponse, outcome: { ok: boolean; detail: string }): void {
+    res.writeHead(outcome.ok ? 200 : 400, { 'content-type': 'text/html; charset=utf-8' })
+    res.end(
+      resultPage(
+        outcome.ok ? 'Connected' : 'Sign-in was not completed',
+        escapeHtml(outcome.detail),
+      ),
+    )
+  }
 
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -59,45 +108,81 @@ export async function startOAuthListener(opts: { timeoutMs?: number } = {}): Pro
     const code = url.searchParams.get('code')
     const state = url.searchParams.get('state')
 
+    // STATE FIRST, before anything else can be acted on. Any other local process
+    // can reach this port; without this check a single unauthenticated request
+    // aborted whatever sign-in was in flight.
+    if (opts.expectedState !== undefined && state !== opts.expectedState) {
+      res.writeHead(404).end()
+      return
+    }
+
     if (error) {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      res.end(
-        resultPage(
-          'Sign-in was not completed',
-          // The provider's own description, escaped. It is the only thing that
-          // explains WHY, and paraphrasing it would lose that.
-          escapeHtml(url.searchParams.get('error_description') ?? error),
-        ),
-      )
+      write(res, {
+        ok: false,
+        // The provider's own description. It is the only thing that explains
+        // WHY, and paraphrasing it would lose that.
+        detail: url.searchParams.get('error_description') ?? error,
+      })
       rejectCb?.(new Error(`authorization failed: ${error}`))
       return
     }
     if (!code || !state) {
-      res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' })
-      res.end(
-        resultPage('Something went wrong', 'The provider did not send an authorization code.'),
-      )
+      write(res, { ok: false, detail: 'The provider did not send an authorization code.' })
       rejectCb?.(new Error('callback missing code or state'))
       return
     }
 
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    res.end(resultPage('Connected', 'clawboo has the credentials it needs.'))
+    // The exchange has not happened yet, so nothing is claimed yet.
+    if (settled) {
+      write(res, settled)
+    } else {
+      held = res
+      const stopHolding = setTimeout(() => {
+        if (held === res) {
+          held = null
+          write(res, {
+            ok: false,
+            detail: 'clawboo is still finishing. Check the connectors panel.',
+          })
+        }
+      }, SETTLE_TIMEOUT_MS)
+      stopHolding.unref()
+    }
     resolveCb?.({ code, state })
   })
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    // Port 0 asks the OS for a free one, which is what makes this safe to run
-    // alongside anything else the user has bound.
-    server.listen(0, '127.0.0.1', resolve)
-  })
+  const bind = (port: number): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const onError = (err: Error): void => reject(err)
+      server.once('error', onError)
+      // Port 0 asks the OS for a free one, which is what makes this safe to run
+      // alongside anything else the user has bound.
+      server.listen(port, '127.0.0.1', () => {
+        server.removeListener('error', onError)
+        resolve()
+      })
+    })
+
+  if (opts.preferredPort) {
+    // Preferred, not required. Something else may hold it, including a previous
+    // attempt that has not finished releasing it, and a sign-in that fails
+    // because a port was busy would be a worse outcome than one more dynamic
+    // registration.
+    try {
+      await bind(opts.preferredPort)
+    } catch {
+      await bind(0)
+    }
+  } else {
+    await bind(0)
+  }
 
   const address = server.address() as AddressInfo
   const redirectUri = `http://127.0.0.1:${address.port}/callback`
 
   return {
     redirectUri,
+    port: address.port,
     waitForCallback() {
       return new Promise<CallbackResult>((resolve, reject) => {
         resolveCb = resolve
@@ -109,10 +194,17 @@ export async function startOAuthListener(opts: { timeoutMs?: number } = {}): Pro
         timer.unref()
       })
     },
+    settle(outcome) {
+      settled = outcome
+      if (held) {
+        const res = held
+        held = null
+        write(res, outcome)
+      }
+    },
     close() {
       server.close()
-      // Any keep-alive socket would otherwise hold the port, and the next
-      // attempt asks for a fresh one anyway.
+      // Any keep-alive socket would otherwise hold the port open.
       server.closeAllConnections?.()
     },
   }

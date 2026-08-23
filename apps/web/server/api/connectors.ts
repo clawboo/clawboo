@@ -127,7 +127,7 @@ export async function connectorAuthorizePOST(req: Request, res: Response): Promi
       res.status(400).json({ error: 'only remote connectors sign in' })
       return
     }
-    const { authorizeUrl } = await beginAuthorization(def.slug, def.launch.url)
+    const { authorizeUrl } = await beginAuthorization(def.slug, def.launch.url, def.auth?.scopes)
     res.json({ ok: true, authorizeUrl })
   } catch (err) {
     // 502: the failure is almost always the provider's discovery or registration
@@ -284,7 +284,7 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
   }
 }
 
-// GET /api/connectors — what is live right now.
+// GET /api/connectors: what is live right now.
 export function connectorsListGET(_req: Request, res: Response): void {
   try {
     res.json({
@@ -344,7 +344,13 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     const db: ClawbooDb = getDb()
     const { connector, display } = await connectConnector(db, {
       ...toConnectable(def, resolveLaunchArgs(def, argument ?? undefined)),
-      ...(accessToken ? { accessToken } : {}),
+      // The CALLBACK, not the string resolved above. `getAccessToken` refreshes
+      // an expired token, so consulting it per request is what keeps a
+      // long-lived connection working instead of turning every call into an
+      // opaque 401 once the first token expires.
+      ...(remote && accessToken
+        ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
+        : {}),
     })
     res.json({
       ok: true,
