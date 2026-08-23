@@ -19,6 +19,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 /** Generous: a cold `npx` install happens inside this window, not before it. */
 export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 60_000
@@ -173,6 +174,43 @@ export class ConnectorHandshakeError extends Error {
   }
 }
 
+export interface HttpConnectorSpec {
+  url: string
+  /** Sent as `Authorization: Bearer`. Omit for a server that needs no auth. */
+  accessToken?: string
+  handshakeTimeoutMs?: number
+  listTimeoutMs?: number
+  callTimeoutMs?: number
+  discoveryBudgetMs?: number
+}
+
+/**
+ * Connect to a REMOTE MCP server over streamable HTTP.
+ *
+ * Shares every timeout, paging rule and result-flattening decision with the
+ * stdio path by construction: the session object below is built by the same
+ * factory, so a fix to one is a fix to both rather than a thing someone has to
+ * remember to port.
+ *
+ * There is no child process here, so `pid` is null and nothing needs reaping.
+ * The corresponding hazard is different: a token, which lives in the vault and
+ * never in this module beyond the request header it is written into.
+ */
+export async function connectHttpConnector(spec: HttpConnectorSpec): Promise<ConnectorSession> {
+  const transport = new StreamableHTTPClientTransport(new URL(spec.url), {
+    ...(spec.accessToken
+      ? { requestInit: { headers: { Authorization: `Bearer ${spec.accessToken}` } } }
+      : {}),
+  })
+  return finishConnect(transport, spec, {
+    // No child process, so nothing to reap and nothing to report.
+    pid: () => null,
+    // A remote server's failure explanation arrives in the HTTP response the SDK
+    // already surfaces, so there is no side channel to drain here.
+    diagnostic: () => '',
+  })
+}
+
 /** Connect to a stdio MCP server, completing the handshake before returning. */
 export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<ConnectorSession> {
   const transport = new StdioClientTransport({
@@ -188,6 +226,50 @@ export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<C
     stderr: 'pipe',
   })
 
+  // Drained continuously and kept to a bounded tail: unread it would
+  // backpressure the child, and unbounded it would be a memory leak driven by a
+  // remote server.
+  let stderrTail = ''
+  transport.stderr?.on('data', (chunk: Buffer) => {
+    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_BYTES)
+  })
+  transport.stderr?.on('error', () => {
+    /* a broken stderr pipe must never take down the connection */
+  })
+
+  return finishConnect(transport, spec, {
+    pid: () => transport.pid,
+    diagnostic: () => stderrTail.trim(),
+  })
+}
+
+/** What a transport can tell us beyond the protocol, so the shared factory does
+ *  not have to know which kind it is holding. */
+interface TransportFacts {
+  /** The child's pid for a stdio transport; null for a remote one. */
+  pid: () => number | null
+  /** The server's own last words on a failed handshake, when there are any. */
+  diagnostic: () => string
+}
+
+/**
+ * Everything both transports share: handshake, paging, call, close.
+ *
+ * ONE implementation rather than two similar ones. Every decision in here was
+ * made because a real server misbehaved -- the paging, the throw-to-isError
+ * mapping, the content flattening, the truncation flag -- and a second copy is a
+ * second place for those to silently diverge.
+ */
+async function finishConnect(
+  transport: { close(): Promise<void>; onclose?: () => void },
+  spec: {
+    handshakeTimeoutMs?: number
+    listTimeoutMs?: number
+    callTimeoutMs?: number
+    discoveryBudgetMs?: number
+  },
+  facts: TransportFacts,
+): Promise<ConnectorSession> {
   const client = new Client(
     { name: 'clawboo', version: '0.0.0' },
     // We advertise no client capabilities: clawboo does not implement sampling
@@ -199,27 +281,17 @@ export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<C
   const listTimeout = spec.listTimeoutMs ?? DEFAULT_LIST_TIMEOUT_MS
   const callTimeout = spec.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS
 
-  // Drained continuously and kept to a bounded tail: unread it would backpressure
-  // the child, and unbounded it would be a memory leak driven by a remote server.
-  let stderrTail = ''
-  transport.stderr?.on('data', (chunk: Buffer) => {
-    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_BYTES)
-  })
-  transport.stderr?.on('error', () => {
-    /* a broken stderr pipe must never take down the connection */
-  })
-
   try {
-    await client.connect(transport, {
+    await client.connect(transport as Parameters<Client['connect']>[0], {
       timeout: spec.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS,
     })
   } catch (err) {
     // The transport may already hold a spawned child; closing is what stops a
     // failed connect from leaking a process. `close()` reaps only the direct
     // child, so the caller is also handed the pid to kill the tree.
-    const leakedPid = transport.pid
+    const leakedPid = facts.pid()
     await transport.close().catch(() => {})
-    const tail = stderrTail.trim()
+    const tail = facts.diagnostic()
     throw new ConnectorHandshakeError(
       // The child's own last words, when it had any. A bare "timeout" for a
       // server that printed a clear error is a diagnostic thrown away.
@@ -250,7 +322,7 @@ export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<C
 
   return {
     get pid() {
-      return transport.pid
+      return facts.pid()
     },
 
     onClose(handler) {

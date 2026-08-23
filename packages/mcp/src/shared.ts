@@ -111,7 +111,18 @@ export function zodObjectToJsonSchema(obj: z.ZodObject<z.ZodRawShape>): {
  * Build a low-level MCP Server that lists `tools` and dispatches tools/call to
  * the matching handler (validating args with the tool's zod schema first).
  */
-export function buildServer(name: string, tools: ToolDef[]): Server {
+/**
+ * A live tool list, or a fixed one.
+ *
+ * A function is what makes `listChanged` mean anything: the list has to be
+ * recomputed when a client re-lists, or the notification tells it to go and
+ * fetch the same stale array again.
+ */
+export type ToolSource = ToolDef[] | (() => ToolDef[])
+
+export function buildServer(name: string, toolsOrSource: ToolSource): Server {
+  const readTools = (): ToolDef[] =>
+    typeof toolsOrSource === 'function' ? toolsOrSource() : toolsOrSource
   // `listChanged: true` is a CAPABILITY DECLARATION, not a promise that we push
   // on every change — a client that does not see it will never listen, so it must
   // be declared before any notification can matter. Without it, a connector
@@ -127,8 +138,11 @@ export function buildServer(name: string, tools: ToolDef[]): Server {
   // third-party tool set is composed in: the duplicate would render in tools/list
   // and never be the one that runs. Assert uniqueness here, at the seam where a
   // duplicate can first be introduced, rather than discovering it at call time.
+  // Checked against the list AS IT IS AT BUILD TIME. A live source can change
+  // afterwards, and the composer that feeds it is responsible for not producing
+  // duplicates -- this catches the static mistake, which is the common one.
   const seen = new Set<string>()
-  for (const t of tools) {
+  for (const t of readTools()) {
     if (seen.has(t.name)) {
       throw new Error(
         `duplicate MCP tool name "${t.name}" in server "${name}" — ` +
@@ -139,7 +153,7 @@ export function buildServer(name: string, tools: ToolDef[]): Server {
   }
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: tools.map((t) => ({
+    tools: readTools().map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.jsonSchema ?? zodObjectToJsonSchema(t.inputSchema),
@@ -147,7 +161,11 @@ export function buildServer(name: string, tools: ToolDef[]): Server {
   }))
 
   server.setRequestHandler(CallToolRequestSchema, async (req): Promise<CallToolResult> => {
-    const tool = tools.find((t) => t.name === req.params.name)
+    // Resolved at CALL time, not at build time. A tool that appeared after this
+    // session started has to be callable, and one that disappeared has to stop
+    // being callable, or `listChanged` would advertise a list the dispatcher
+    // could not honour.
+    const tool = readTools().find((t) => t.name === req.params.name)
     if (!tool) return textResult(`unknown tool: ${req.params.name}`, true) as CallToolResult
     const parsed = tool.inputSchema.safeParse(req.params.arguments ?? {})
     if (!parsed.success)

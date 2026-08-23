@@ -41,6 +41,7 @@ export { MCP_SERVER_VERSION } from './shared'
 // Lives here because @modelcontextprotocol/sdk is a dependency of this package
 // alone; pnpm's strict layout puts it out of reach of apps/web.
 export {
+  connectHttpConnector,
   connectStdioConnector,
   ConnectorHandshakeError,
   flattenContent,
@@ -51,6 +52,7 @@ export {
   type ConnectorCallResult,
   type ConnectorSession,
   type DiscoveredTool,
+  type HttpConnectorSpec,
   type StdioConnectorSpec,
 } from './connector/client'
 export {
@@ -58,3 +60,23 @@ export {
   CONNECTOR_ENV_ALLOWLIST,
   type ConnectorEnvOptions,
 } from './connector/env'
+
+// ── OAuth 2.1 for remote MCP servers ──
+// Discovery-first (RFC 9728 -> RFC 8414), PKCE S256 only, and dynamic client
+// registration because clawboo has no registered app and a desktop tool cannot
+// keep a secret.
+export {
+  buildAuthorizeUrl,
+  createPkce,
+  discoverAuthServer,
+  discoverResourceMetadata,
+  exchangeCode,
+  refreshToken,
+  registerClient,
+  resourceMetadataUrl,
+  type AuthServerMetadata,
+  type Pkce,
+  type ProtectedResourceMetadata,
+  type RegisteredClient,
+  type TokenSet,
+} from './connector/oauth'
