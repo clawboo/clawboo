@@ -18,6 +18,56 @@ import { isWindows } from '../platform'
 
 const DEFAULT_GRACE_MS = 3_000
 
+/**
+ * Kill a process tree given only its PID.
+ *
+ * The pid-only variant exists for children this process did not spawn a handle
+ * for. An outbound MCP connector is exactly that case: the SDK's transport owns
+ * the ChildProcess and exposes only `.pid`, while the thing that actually needs
+ * killing is the whole tree, because a catalog launch is an `npx` wrapper whose
+ * real server is a grandchild.
+ *
+ * Without a `close` event to clear it, the SIGKILL escalation here relies purely
+ * on its liveness probe, which is why that probe is not optional.
+ */
+export function killProcessTreeByPid(pid: number, opts: { graceMs?: number } = {}): void {
+  if (!pid) return
+
+  if (isWindows) {
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    } catch {
+      /* best-effort — already gone */
+    }
+    return
+  }
+
+  try {
+    process.kill(-pid, 'SIGTERM')
+  } catch {
+    // ESRCH — the group is gone, or the child was not spawned detached. Try the
+    // pid directly; never widen to another group.
+    try {
+      process.kill(pid, 'SIGTERM')
+    } catch {
+      /* gone */
+    }
+    return
+  }
+
+  const timer = setTimeout(() => {
+    try {
+      // The same liveness probe as the handle-based path: a freed leader pid can
+      // be recycled, and escalating blind would kill an unrelated group.
+      process.kill(-pid, 0)
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      /* already exited */
+    }
+  }, opts.graceMs ?? DEFAULT_GRACE_MS)
+  timer.unref()
+}
+
 export function killProcessTree(child: ChildProcess | null, opts: { graceMs?: number } = {}): void {
   const pid = child?.pid
   if (!pid) return

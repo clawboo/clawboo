@@ -49,6 +49,11 @@ export {
 export { scrubArgsSummary, scrubResultSummary, scrubSecrets } from './scrub'
 
 export {
+  buildConnectorDescriptor,
+  type ConnectorDescriptorOptions,
+  type RemoteToolFacts,
+} from './connectorDescriptor'
+export {
   CONNECTOR_TOOL_PREFIX,
   isConnectorToolName,
   namespacedToolName,
