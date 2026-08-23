@@ -363,10 +363,17 @@ function AddCustomConnector({ onAdded }: { onAdded: () => void }) {
   // Derived rather than a fourth field: a slug is an implementation detail (it
   // becomes a tool-name segment and a grant identity), and asking for one would
   // be asking the operator to care about that.
+  // Split-and-join rather than replace-then-trim. The trim was `/^-+|-+$/g`,
+  // whose second alternative is a greedy `+` with no start anchor, so a global
+  // replace retries it from every position and costs O(n squared) on a long run
+  // of separators. Same output, and the shape a scanner flags is simply not
+  // there. (The same pattern predates this work in six other files, on inputs
+  // that are not typed into a form; those are left alone.)
   const slug = displayName
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join('-')
     .slice(0, 48)
 
   const valid = slug.length > 0 && command.trim().length > 0
