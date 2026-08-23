@@ -1,14 +1,14 @@
-// The connector CATALOG entry — a definition, not an instance.
+// The connector CATALOG entry: a definition, not an instance.
 //
 // Three nouns, kept apart on purpose, because collapsing them is exactly why the
 // reference implementations cannot ship revoke, scopes or expiry:
-//   TYPE     this file — what a connector IS. No user state.
-//   INSTANCE the `connectors` row — a configured, possibly-authenticated install.
-//   TOOL     a `capabilities` row — one callable verb the instance exposes.
+//   TYPE     this file: what a connector IS. No user state.
+//   INSTANCE the `connectors` row: a configured, possibly-authenticated install.
+//   TOOL     a `capabilities` row: one callable verb the instance exposes.
 //
 // Committed as TypeScript rather than fetched at runtime. A connector browser in
 // an offline `npx clawboo` must not have a loading state, and the official MCP
-// registry is a preview API that ships data-reset warnings — so the snapshot IS
+// registry is a preview API that ships data-reset warnings, so the snapshot IS
 // the content address, and CI verifies it with the network switched off.
 
 /** Coarse grouping for the directory's category pills. */
@@ -46,7 +46,7 @@ export type ConnectorProvenance = 'curated' | 'community' | 'custom'
 /** How the connector authenticates. `none` renders as "Active", not "Connect". */
 export type ConnectorAuthKind = 'none' | 'api-key' | 'bearer' | 'oauth'
 
-/** One credential the connector needs. Names only — a value never appears here. */
+/** One credential the connector needs. Names only: a value never appears here. */
 export interface ConnectorInput {
   /** The env var or header name, e.g. `GITHUB_TOKEN`. */
   key: string
@@ -81,6 +81,19 @@ export interface ConnectorAuthSpec {
   scopes?: string[]
   /** One sentence the consent dialog shows verbatim: why these scopes. */
   scopesRationale?: string
+  /**
+   * This provider requires a PRE-REGISTERED OAuth app, so clawboo cannot sign in.
+   *
+   * Declared rather than discovered, because the discovery that would reveal it
+   * happens three requests into a flow the operator has already started. clawboo
+   * registers itself per install through dynamic client registration (RFC 7591)
+   * and ships no client secret; an authorization server without a registration
+   * endpoint cannot be used by that path at all. GitHub is the live case.
+   *
+   * Marking it here is what keeps the tile from offering a Sign in button that
+   * can only ever fail, and keeps the entry out of the connectable count.
+   */
+  needsPreregisteredApp?: boolean
   setupGuide?: ConnectorSetupGuide
 }
 
@@ -93,7 +106,7 @@ export interface ConnectorStdioLaunch {
    * The exact version this entry was verified against, already baked into `args`.
    *
    * A bare `npx -y <pkg>` resolves to `@latest` on EVERY spawn, so the code that
-   * actually executes changes with no consent event — silently defeating the
+   * actually executes changes with no consent event, silently defeating the
    * spec pin, because drift detection only fires AFTER the new version has
    * already run and already read the child environment. Pin, or do not ship.
    */
@@ -109,7 +122,7 @@ export type ConnectorLaunch = ConnectorStdioLaunch | ConnectorHttpLaunch
 
 /**
  * The trifecta legs this connector CAN contribute, at its most permissive.
- * A conservative upper bound, not a measurement — the runtime union across a run
+ * A conservative upper bound, not a measurement: the runtime union across a run
  * is what `decideGrant` actually gates on.
  */
 export interface ConnectorTrifectaHint {

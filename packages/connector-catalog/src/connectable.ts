@@ -23,6 +23,7 @@ export const PLACEHOLDER_ARG = /(^|\/)path\/to\/|^<.+>$/
 /** Why an entry cannot be connected, or null when it can. */
 export type ConnectRefusal =
   | 'community-unsandboxed'
+  | 'remote-needs-registered-app'
   | 'remote-needs-oauth'
   | 'needs-credential'
   | 'needs-user-supplied-argument'
@@ -30,7 +31,14 @@ export type ConnectRefusal =
 /** Human copy for each refusal. Names the ACTUAL obstacle, never a status code. */
 export const CONNECT_REFUSAL_COPY: Readonly<Record<ConnectRefusal, string>> = Object.freeze({
   'community-unsandboxed':
-    'Only curated connectors can be connected. A community server runs as you, unsandboxed.',
+    // Names what is actually refused. "Only curated connectors can be connected"
+    // was untrue the moment custom entries became connectable, and it read as a
+    // guarantee about custom ones that clawboo does not make.
+    'A community server runs as you, unsandboxed, and nobody has read this one. ' +
+    'Add it as a custom connector if you trust it.',
+  'remote-needs-registered-app':
+    'This provider requires a pre-registered OAuth app, so clawboo cannot sign itself in. ' +
+    'Use the config below in a runtime that already has credentials for it.',
   'remote-needs-oauth': 'Sign in to this provider to connect it.',
   // These two are SOLVABLE, so their copy asks rather than refuses. The UI
   // renders a form for both; this text is the fallback for a surface that has
@@ -65,6 +73,13 @@ export function connectRefusal(
   // `community` is blocked, because that is a one-click install of somebody
   // else's package.
   if (def.provenance === 'community') return 'community-unsandboxed'
+  // TERMINAL, and checked before the solvable sign-in below. A provider without
+  // dynamic client registration cannot be signed into by a tool that ships no
+  // registered app, so offering the sign-in would be an affordance that fails
+  // three requests in, every time, for everyone.
+  if (def.launch.transport !== 'stdio' && def.auth.needsPreregisteredApp) {
+    return 'remote-needs-registered-app'
+  }
   // Remote connectors are solvable too, once the operator has signed in. Only
   // the server can know whether they have, which is why this is a parameter
   // rather than something read here.

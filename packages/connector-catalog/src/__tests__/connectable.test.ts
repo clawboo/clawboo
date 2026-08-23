@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CONNECTOR_DEFINITIONS, connectorBySlug } from '../index'
-import { connectRefusal, isConnectable } from '../connectable'
+import { connectRefusal, isConnectable, isReachable, needsSignInOnly } from '../connectable'
 
 describe('connectRefusal', () => {
   it('allows exactly the entries this release can actually run', () => {
@@ -21,9 +21,22 @@ describe('connectRefusal', () => {
   })
 
   it('refuses a REMOTE connector, naming the actual obstacle', () => {
-    const github = connectorBySlug('github')
-    expect(github?.launch.transport).toBe('streamable-http')
-    expect(connectRefusal(github!)).toBe('remote-needs-oauth')
+    const linear = connectorBySlug('linear')
+    expect(linear?.launch.transport).toBe('streamable-http')
+    expect(connectRefusal(linear!)).toBe('remote-needs-oauth')
+  })
+
+  it('refuses GITHUB permanently, because clawboo cannot register itself there', () => {
+    // Verified against the live provider: its authorization server publishes no
+    // registration endpoint. clawboo ships no OAuth app and no client secret, so
+    // a Sign in button for it would fail three requests into the flow every
+    // time. The refusal has to be terminal rather than "sign in first".
+    const github = connectorBySlug('github')!
+    expect(github.auth.needsPreregisteredApp).toBe(true)
+    expect(connectRefusal(github, true, true, false)).toBe('remote-needs-registered-app')
+    // Even a stored token does not clear it: there is no way to have obtained one.
+    expect(connectRefusal(github, true, true, true)).toBe('remote-needs-registered-app')
+    expect(isReachable(github)).toBe(false)
   })
 
   it('refuses a connector that needs a credential', () => {
@@ -51,15 +64,18 @@ describe('connectRefusal', () => {
     // The placeholder backstop reads `launch.args`, which only a stdio launch
     // has. It used to be unreachable for a remote because the sign-in check
     // returned first; making that solvable made this reachable.
-    const github = connectorBySlug('github')!
-    expect(() => connectRefusal(github, true, true, true)).not.toThrow()
-    expect(connectRefusal(github, true, true, true)).toBeNull()
+    const linear = connectorBySlug('linear')!
+    expect(() => connectRefusal(linear, true, true, true)).not.toThrow()
+    expect(connectRefusal(linear, true, true, true)).toBeNull()
   })
 
   it('treats a remote connector as connectable ONCE signed in', () => {
-    const github = connectorBySlug('github')!
-    expect(connectRefusal(github, true, true, false)).toBe('remote-needs-oauth')
-    expect(connectRefusal(github, true, true, true)).toBeNull()
+    const linear = connectorBySlug('linear')!
+    expect(connectRefusal(linear, true, true, false)).toBe('remote-needs-oauth')
+    expect(connectRefusal(linear, true, true, true)).toBeNull()
+    expect(needsSignInOnly(linear)).toBe(true)
+    // And the one that cannot be signed into is not offered the affordance.
+    expect(needsSignInOnly(connectorBySlug('github')!)).toBe(false)
   })
 
   it('allows the memory connector, which is the one with nothing to fill in', () => {

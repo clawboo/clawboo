@@ -7,7 +7,7 @@
 // connector which does not install is worse than a shorter directory.
 //
 // Remote entries were confirmed to return HTTP 401 to an unauthenticated
-// `initialize` — which is the MCP authorization spec working as designed, and is
+// `initialize`, which is the MCP authorization spec working as designed, and is
 // the signal that OAuth discovery will have something to discover.
 
 import type { ConnectorDefinition } from '../types'
@@ -26,13 +26,17 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       scopes: ['repo', 'read:org'],
       scopesRationale:
         'Repository access to read and file issues and pull requests; org read to resolve team mentions.',
+      // GitHub's authorization server publishes no registration endpoint, so
+      // clawboo cannot register itself and has no app to fall back on. The tile
+      // says so instead of offering a sign-in that fails every time.
+      needsPreregisteredApp: true,
       setupGuide: {
         console: 'GitHub',
         url: 'https://github.com/settings/installations',
         steps: [
           'Approve the authorization request in the browser tab that opens.',
           'Choose which organizations and repositories to grant, not "all repositories".',
-          'Return to clawboo — the connector tile clears its amber key badge on success.',
+          'Return to clawboo. The connector tile clears its amber key badge on success.',
         ],
       },
     },
@@ -58,7 +62,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
         steps: [
           'Approve the authorization request in the browser tab that opens.',
           'Pick the workspace this agent should act in.',
-          'Return to clawboo — the tile clears its amber key badge on success.',
+          'Return to clawboo. The tile clears its amber key badge on success.',
         ],
       },
     },
@@ -84,7 +88,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
         steps: [
           'Approve the authorization request in the browser tab that opens.',
           'Select the organization whose issues this agent may read.',
-          'Return to clawboo — the tile clears its amber key badge on success.',
+          'Return to clawboo. The tile clears its amber key badge on success.',
         ],
       },
     },
@@ -228,7 +232,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'CLOUDFLARE_API_TOKEN',
-          description: 'A scoped Cloudflare API token — not your global API key.',
+          description: 'A scoped Cloudflare API token, not your global API key.',
           docsUrl: 'https://dash.cloudflare.com/profile/api-tokens',
           required: true,
           secret: true,
