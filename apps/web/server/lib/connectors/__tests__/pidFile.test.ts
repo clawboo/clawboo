@@ -128,6 +128,36 @@ describe('connector pid file', () => {
     expect(report.expired).toBe(1)
   })
 
+  it('refuses to signal when it cannot establish WHEN the process started', () => {
+    // The reason this platform check is a test and not a comment: the identity
+    // probe used to exist only for POSIX, so on Windows every recorded pid was
+    // signalled with nothing corroborating that it was still ours, and the
+    // signal is a whole-tree SIGKILL. Failing closed is what makes the guarantee
+    // the same everywhere.
+    //
+    // Asserted through the observable contract rather than by stubbing the
+    // probe: a pid that is live but whose start time cannot possibly match is
+    // the same decision path.
+    const killed: number[] = []
+    writeFileSync(
+      connectorPidFilePath(),
+      JSON.stringify([
+        {
+          pid: process.pid,
+          slug: 'memory',
+          // Same boot, inside the age window, but claiming to predate this
+          // process. Whatever the host reports, the answer must not be "kill".
+          startedAt: Date.now() - 6 * 60 * 60_000,
+          bootAt: Math.round((Date.now() - os.uptime() * 1000) / 10_000) * 10_000,
+        },
+      ]),
+      'utf8',
+    )
+    const report = reapOrphanedConnectors((pid) => killed.push(pid))
+    expect(killed).toEqual([])
+    expect(report.expired).toBe(1)
+  })
+
   it('treats a corrupt file as empty rather than throwing', () => {
     // A read-only state directory or a truncated write must degrade to "we
     // cannot reap old children", never to "the server will not start".

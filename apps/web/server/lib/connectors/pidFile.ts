@@ -65,18 +65,43 @@ function currentBootAt(): number {
  *
  * The dispositive identity check. Comparing the COMMAND does not work: `ps`
  * reports `node`, not the absolute path we spawned, and an `npx` launch re-execs
- * into something else entirely. A start time cannot be confused that way -- a
+ * into something else entirely. A start time cannot be confused that way: a
  * recycled pid necessarily started AFTER we recorded the original.
  *
- * `lstart` rather than `etimes`: the latter is Linux-only and macOS rejects it.
+ * BOTH PLATFORMS IMPLEMENTED, because a missing answer here is not a missing
+ * nicety. The caller signals a whole process TREE with SIGKILL, so a platform
+ * with no start time was a platform where the reaper killed whatever now held a
+ * recycled number, with nothing to say otherwise.
+ *
+ * On POSIX, `lstart` rather than `etimes`: the latter is Linux-only and macOS
+ * rejects it. On Windows there is no `ps`, so PowerShell reports the same fact;
+ * it is emitted as a round-trip ISO string so parsing does not depend on the
+ * machine's locale.
  */
 function processStartedAt(pid: number): number | null {
+  // The pid reaches a command line below, and the only validation the record
+  // itself carries is `typeof pid === 'number'`. A float or a value large enough
+  // to format as `1e+21` would reach PowerShell as a malformed argument, so the
+  // shape is settled here rather than left to the shell to reject.
+  if (!Number.isInteger(pid) || pid <= 0) return null
   try {
-    const raw = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      encoding: 'utf8',
-      timeout: 5_000,
-      windowsHide: true,
-    }).trim()
+    const raw =
+      process.platform === 'win32'
+        ? execFileSync(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
+            ],
+            { encoding: 'utf8', timeout: 15_000, windowsHide: true },
+          ).trim()
+        : execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+            encoding: 'utf8',
+            timeout: 5_000,
+            windowsHide: true,
+          }).trim()
     const parsed = Date.parse(raw)
     return Number.isFinite(parsed) ? parsed : null
   } catch {
@@ -138,8 +163,9 @@ export function forgetConnectorPid(pid: number): void {
 export interface ReapReport {
   killed: number
   /** Entries dropped UNSIGNALLED because they could not be trusted to still be
-   *  ours: recorded under a different boot, too old, or now running something
-   *  else. Reported separately so a surprising count is visible in the log. */
+   *  ours: recorded under a different boot, too old, now running something else,
+   *  or on a host that could not report a start time at all. Reported separately
+   *  so a surprising count is visible in the log. */
   expired: number
 }
 
@@ -179,8 +205,13 @@ export function reapOrphanedConnectors(kill: (pid: number) => void): ReapReport 
     // Within one boot a pid can still be recycled, so corroborate WHEN the
     // process holding it started. A recycled pid started after we recorded the
     // original; ours started just before.
+    //
+    // FAILS CLOSED. An unanswerable start time is not permission to proceed: the
+    // next line SIGKILLs a whole process tree, and this is the only check that
+    // separates our child from whatever else the kernel handed that number to.
+    // Leaving one connector running is the cheaper mistake, every time.
     const startedAt = processStartedAt(entry.pid)
-    if (startedAt !== null && startedAt > entry.startedAt + START_TIME_SLACK_MS) {
+    if (startedAt === null || startedAt > entry.startedAt + START_TIME_SLACK_MS) {
       expired += 1
       continue
     }
