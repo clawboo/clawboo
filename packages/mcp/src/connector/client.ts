@@ -11,7 +11,7 @@
 //
 // THREE SEPARATE BUDGETS, and they are separate for a reason. The SDK applies
 // one 60s default to every request, and `StdioClientTransport.start()` resolves
-// on the child's `spawn` event rather than on a handshake — so a process that
+// on the child's `spawn` event rather than on a handshake, so a process that
 // launches and never speaks MCP wedges a request for a full minute with nothing
 // to show for it. Worse, a cold `npx -y pkg@ver` performs a real network install
 // AFTER spawn, so the install lands inside the HANDSHAKE window, not the spawn
@@ -36,6 +36,9 @@ const MAX_LIST_PAGES = 20
 const DEFAULT_DISCOVERY_BUDGET_MS = 90_000
 /** Enough of a failing server's last words to diagnose it, bounded so a chatty
  *  one cannot grow this without limit. */
+/** How often to look for a spawned child while the handshake is still running. */
+const SPAWN_POLL_MS = 25
+
 const STDERR_TAIL_BYTES = 4_000
 /** Hard cap on tools accepted from one server, for the same reason. */
 export const MAX_CONNECTOR_TOOLS = 500
@@ -63,7 +66,7 @@ export interface ConnectorSession {
    *
    * Exposed because `close()` is NOT sufficient to reap the process tree: the
    * transport kills only the process it spawned, and a catalog launch is
-   * `npx -y <pkg>` — a wrapper whose real server is a grandchild. A supervisor
+   * `npx -y <pkg>`: a wrapper whose real server is a grandchild. A supervisor
    * must register this pid and kill the tree.
    */
   readonly pid: number | null
@@ -93,7 +96,20 @@ export interface ConnectorCallResult {
   isError: boolean
 }
 
-export interface StdioConnectorSpec {
+export interface ConnectorSpawnHook {
+  /**
+   * Called with the child's pid as soon as it EXISTS, which is before the
+   * handshake finishes rather than after.
+   *
+   * The window matters: a cold `npx` install can hold a handshake open for the
+   * better part of a minute, and a hard stop inside it used to leave a child
+   * nothing could see afterwards. Reporting the pid early is what lets the
+   * caller record it durably before it can be orphaned.
+   */
+  onSpawn?: (pid: number) => void
+}
+
+export interface StdioConnectorSpec extends ConnectorSpawnHook {
   command: string
   args: string[]
   /** The child's environment. Pass `connectorChildEnv()`; never `process.env`. */
@@ -111,7 +127,7 @@ export interface StdioConnectorSpec {
  *
  * Non-text blocks are DESCRIBED, never dropped. The previous in-memory adapter
  * mapped anything without a `text` field to `''`, so a screenshot tool returned
- * an empty string and looked like a success with no output — the model then
+ * an empty string and looked like a success with no output: the model then
  * retried, or worse, proceeded as if the call had produced nothing of interest.
  * A visible placeholder is a far better failure.
  */
@@ -176,8 +192,17 @@ export class ConnectorHandshakeError extends Error {
 
 export interface HttpConnectorSpec {
   url: string
-  /** Sent as `Authorization: Bearer`. Omit for a server that needs no auth. */
-  accessToken?: string
+  /**
+   * Sent as `Authorization: Bearer`. Omit for a server that needs no auth.
+   *
+   * A FUNCTION rather than a string is the form to prefer, and the reason is
+   * expiry. A token resolved once at connect is frozen for the life of the
+   * session, so when it expires every tool call starts failing while the
+   * connector still reports itself connected, and nothing short of a manual
+   * disconnect and reconnect recovers. Resolved per request, the same callback
+   * that refreshes the token is consulted before each call.
+   */
+  accessToken?: string | (() => string | null | Promise<string | null>)
   handshakeTimeoutMs?: number
   listTimeoutMs?: number
   callTimeoutMs?: number
@@ -197,9 +222,22 @@ export interface HttpConnectorSpec {
  * never in this module beyond the request header it is written into.
  */
 export async function connectHttpConnector(spec: HttpConnectorSpec): Promise<ConnectorSession> {
+  const token = spec.accessToken
+  const resolveToken = typeof token === 'function' ? token : token ? (): string => token : null
+
   const transport = new StreamableHTTPClientTransport(new URL(spec.url), {
-    ...(spec.accessToken
-      ? { requestInit: { headers: { Authorization: `Bearer ${spec.accessToken}` } } }
+    // The header is attached HERE, per request, rather than in a `requestInit`
+    // the transport reuses for the whole session, so a refreshed token takes
+    // effect on the next call instead of the next reconnect.
+    ...(resolveToken
+      ? {
+          fetch: async (url: string | URL, init?: RequestInit): Promise<Response> => {
+            const bearer = await resolveToken()
+            const headers = new Headers(init?.headers)
+            if (bearer) headers.set('Authorization', `Bearer ${bearer}`)
+            return fetch(url, { ...init, headers })
+          },
+        }
       : {}),
   })
   return finishConnect(transport, spec, {
@@ -267,6 +305,7 @@ async function finishConnect(
     listTimeoutMs?: number
     callTimeoutMs?: number
     discoveryBudgetMs?: number
+    onSpawn?: (pid: number) => void
   },
   facts: TransportFacts,
 ): Promise<ConnectorSession> {
@@ -280,6 +319,25 @@ async function finishConnect(
 
   const listTimeout = spec.listTimeoutMs ?? DEFAULT_LIST_TIMEOUT_MS
   const callTimeout = spec.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS
+
+  // Watched rather than read once, because the pid appears part-way through
+  // `connect()`: the transport spawns first and the handshake follows. There is
+  // no event for that moment, and the SDK refuses a pre-started transport, so a
+  // short poll is the only way to see it while the handshake is still running.
+  let announcedPid = false
+  const watchSpawn = setInterval(() => {
+    if (announcedPid) return
+    const spawned = facts.pid()
+    if (spawned !== null) {
+      announcedPid = true
+      try {
+        spec.onSpawn?.(spawned)
+      } catch {
+        /* bookkeeping must never fail a connection */
+      }
+    }
+  }, SPAWN_POLL_MS)
+  watchSpawn.unref?.()
 
   try {
     await client.connect(transport as Parameters<Client['connect']>[0], {
@@ -296,10 +354,12 @@ async function finishConnect(
       // The child's own last words, when it had any. A bare "timeout" for a
       // server that printed a clear error is a diagnostic thrown away.
       tail
-        ? `connector handshake failed: ${errorText(err)} — ${tail}`
+        ? `connector handshake failed: ${errorText(err)}. ${tail}`
         : `connector handshake failed: ${errorText(err)}`,
       leakedPid,
     )
+  } finally {
+    clearInterval(watchSpawn)
   }
 
   let lastListTruncated = false
@@ -318,7 +378,15 @@ async function finishConnect(
       }
     }
   }
-  transport.onclose = fireClosed
+  // CHAINED, not replaced. The SDK installs its own `onclose` during connect,
+  // and that wrapper is what rejects in-flight requests when a connector drops.
+  // Overwriting it left every pending call waiting out its full timeout instead
+  // of failing immediately.
+  const sdkOnClose = transport.onclose
+  transport.onclose = (): void => {
+    sdkOnClose?.()
+    fireClosed()
+  }
 
   return {
     get pid() {

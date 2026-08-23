@@ -135,29 +135,35 @@ export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}):
   // Turn the declared `listChanged` capability into a real one. Best-effort: a
   // notification that fails must never take down the session it was announcing
   // a change to.
+  let released = false
+  const release = (): void => {
+    if (released) return
+    released = true
+    unsubscribe?.()
+  }
+
   const unsubscribe = opts.onConnectorsChanged?.(() => {
-    void server.sendToolListChanged?.().catch(() => {})
+    void server.sendToolListChanged?.().catch(() => {
+      // `onclose` is not guaranteed: a session the client abandons without
+      // closing would otherwise leave this listener in a module-level Set
+      // forever, keeping a whole server object alive and taking a notification
+      // on every connector change. A send that fails with NO TRANSPORT LEFT is
+      // that case, and releasing here bounds the leak to one dead listener
+      // until the next connector change.
+      //
+      // Deliberately NOT `onerror`. The SDK fires that for ordinary non-fatal
+      // protocol errors, so releasing there meant one stray notification
+      // permanently unsubscribed a LIVE session from connector changes, which
+      // silently disables the `tools/listChanged` capability this same code
+      // advertises.
+      if (!server.transport) release()
+    })
   })
   if (unsubscribe) {
-    let released = false
-    const release = (): void => {
-      if (released) return
-      released = true
-      unsubscribe()
-    }
     const previousClose = server.onclose
     server.onclose = () => {
       release()
       previousClose?.()
-    }
-    // `onclose` is not guaranteed: a transport that errors, or a session the
-    // client abandons without closing, leaves the listener in a module-level Set
-    // forever. Every abandoned session would then keep a whole server object
-    // alive and take a notification on every connector change.
-    const previousError = server.onerror
-    server.onerror = (err: Error) => {
-      release()
-      previousError?.(err)
     }
   }
 
