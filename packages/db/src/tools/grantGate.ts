@@ -1,11 +1,11 @@
 // The grant gate: where a `capability_grants` row stops being decorative.
 //
-// WHAT IS GOVERNED, and why the answer is narrow today. A call is grant-governed
-// only when its descriptor is NOT owner:'core' AND the caller supplied a
-// `connectorId`. Every tool reachable today is a core builtin, so this gate is
-// inert in this release BY CONSTRUCTION rather than by accident: it cannot
-// change the behaviour of a single call that works right now, and it is already
-// the real enforcement path the moment a connector's own tools are registered.
+// WHAT IS GOVERNED, and why the line falls where it does. A call is
+// grant-governed only when its descriptor is NOT owner:'core' AND the caller
+// supplied a `connectorId`. That is exactly the pair a connected connector
+// produces, so from the moment one is connected this gate decides every call to
+// its tools. Core builtins stay ungoverned: they are clawboo's own verbs, and a
+// grant that could revoke them would be a switch for turning the product off.
 //
 // The alternative -- gating everything and back-filling permissive grants -- was
 // rejected. A permissive back-fill that authorizes everything is indistinguishable

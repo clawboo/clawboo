@@ -553,9 +553,9 @@ const SCHEMA_DDL = `
     -- No secret material ever lands here: spec carries only secret:NAME
     -- references, which is also why it is safe to hash and to log.
     --
-    -- NOTHING IN THIS RELEASE WRITES A ROW. The table ships so the grant path can
-    -- read trifecta, health and hashes the moment an outbound MCP client starts
-    -- producing them. Until then getConnector() returns null and drift is inert.
+    -- ONE ROW PER CONNECTED CONNECTOR, written by the supervisor once discovery
+    -- has succeeded, and never before: a row for a server that never answered
+    -- would make the directory claim a connection that does not exist.
     CREATE TABLE IF NOT EXISTS connectors (
       id            TEXT    PRIMARY KEY,
       slug          TEXT    NOT NULL,

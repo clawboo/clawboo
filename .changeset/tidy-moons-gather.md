@@ -14,6 +14,7 @@ graph and the broker call the same `decideGrant`, over the same candidate rows, 
 An expired grant whose row has not been swept yet renders as expired, because that is what the
 runtime would do with it.
 
-Nothing callable today changes behaviour. Every brokered tool that ships is owned by core, and the
-gate applies only to a tool a connector supplied, so it is inert by construction rather than by
-accident.
+What the gate governs is narrow and deliberate. Core builtins are clawboo's own verbs and stay
+ungoverned; a grant that could revoke them would be a switch for turning the product off. Every
+tool a connector supplies goes through the gate from the moment that connector is connected, so
+connecting one is also the act that puts it under governance.

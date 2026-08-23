@@ -147,8 +147,8 @@ export async function executeBrokeredCall(
   // ── The grant gate ────────────────────────────────────────────────────────
   // Placed after validation so a denial audits the args the caller actually
   // sent, and before the inspector chain so a call nothing authorizes never
-  // reaches it. Returns null for a core builtin, which no grant governs: that
-  // is why nothing callable today changes behaviour.
+  // reaches it. Returns null for a core builtin, which no grant governs; every
+  // connector-supplied tool goes through it.
   const gate = evaluateGrant(db, descriptor, ctx)
   let attribution = attributionOf(gate)
   if (gate) {
