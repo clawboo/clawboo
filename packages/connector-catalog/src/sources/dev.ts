@@ -197,6 +197,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       args: ['-y', '@modelcontextprotocol/server-filesystem@2026.7.10', '/path/to/allowed/dir'],
       pinnedVersion: '2026.7.10',
     },
+    requiresUserArgument: true,
     auth: { kind: 'none', inputs: [] },
     egressAllow: [],
     trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: false },

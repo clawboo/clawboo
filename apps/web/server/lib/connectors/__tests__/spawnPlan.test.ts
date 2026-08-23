@@ -38,6 +38,18 @@ describe('planConnectorSpawn', () => {
     expect(plan.args).toEqual(nasty)
   })
 
+  it('never rewrites the spawn command, so cross-spawn can do its own routing', () => {
+    // The MCP SDK spawns through cross-spawn, which handles .cmd itself and sets
+    // windowsVerbatimArguments -- the half that makes its escaping correct.
+    // Pre-routing to cmd.exe here would make cross-spawn skip that, and Node
+    // would re-quote an already-escaped line.
+    mockFind.mockReturnValueOnce('C:\\Program Files\\nodejs\\npx.cmd')
+    const plan = planConnectorSpawn({ command: 'npx', args: ['-y', 'pkg@1.0.0'] })
+    expect(plan.command).toBe('C:\\Program Files\\nodejs\\npx.cmd')
+    expect(plan.args).toEqual(['-y', 'pkg@1.0.0'])
+    expect(plan.command.toLowerCase()).not.toContain('cmd.exe')
+  })
+
   it('quotes a dangerous arg for DISPLAY without changing what is spawned', () => {
     mockFind.mockReturnValueOnce('/usr/local/bin/npx')
     const plan = planConnectorSpawn({ command: 'npx', args: ['& calc.exe'] })

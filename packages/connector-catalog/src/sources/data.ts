@@ -17,6 +17,10 @@ export const DATA_CONNECTORS: ConnectorDefinition[] = [
       args: ['-y', 'mcp-server-sqlite-npx@0.8.0'],
       pinnedVersion: '0.8.0',
     },
+    // Verified by running it: exits 1 with
+    // `Usage: mcp-server-sqlite-npx <database-path>`. Nothing in the args looks
+    // wrong, which is exactly why this has to be declared rather than detected.
+    requiresUserArgument: true,
     auth: { kind: 'none', inputs: [] },
     egressAllow: [],
     trifecta: { readsPrivateData: true, ingestsUntrustedContent: false, canEgress: false },

@@ -10,7 +10,16 @@
 // the SPA imports these types to type the REST response.
 
 /** The five read()-adapters / multiplexer keys (the `id` namespace prefix). */
-export type CapabilitySourceId = 'native' | 'hermes' | 'claude-code' | 'codex' | 'openclaw'
+/**
+ * The adapter that OWNS a capability row.
+ *
+ * `connector` is clawboo's own outbound MCP connections -- servers clawboo spawns
+ * and holds itself, rather than ones a runtime happens to have attached. It is a
+ * source rather than a flag on `native` because its rows have a different owner,
+ * a different lifecycle, and a different manageability tier.
+ */
+export type CapabilitySourceId =
+  'native' | 'hermes' | 'claude-code' | 'codex' | 'openclaw' | 'connector'
 
 /**
  * Runtime that OWNS the capability. Open set (mirrors the executor RuntimeId).

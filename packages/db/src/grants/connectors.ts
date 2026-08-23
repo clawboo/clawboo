@@ -1,13 +1,15 @@
 // The `connectors` table — configured connector INSTANCES.
 //
-// NOTHING IN THIS RELEASE WRITES A ROW. `getConnector` returns null everywhere,
-// so drift detection is INERT: both the gate and the graph pass the stored hash,
-// but there is no stored hash to pass. That is stated rather than hidden because
-// a drift badge nobody can trigger is worse than an absent one.
+// THE CONNECTOR SUPERVISOR NOW WRITES ROWS HERE, on connect and on a child's
+// exit, so `getConnector` returns real hashes and health.
 //
-// The table, this repository and the digest helper ship now so the seam exists
-// and is tested against seeded rows, and so an outbound MCP client is the only
-// thing left to add.
+// DRIFT IS STILL NOT LIVE, and the distinction matters. `decideGrant` compares a
+// grant's `tools_hash_pin` against the connector's current `tools_hash`, and
+// nothing writes that PIN: no code path sets `specHashPin` or `toolsHashPin` on
+// a grant. So the comparison is always against null and the `spec-drift` branch
+// cannot fire. Arming it needs two things this module does not have: a consent
+// step that pins the hash a human actually saw, and a reconnect that rewrites
+// the row's hash while leaving that pin alone.
 
 import { eq } from 'drizzle-orm'
 

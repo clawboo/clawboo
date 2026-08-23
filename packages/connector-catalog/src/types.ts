@@ -123,6 +123,16 @@ export interface ConnectorDefinition {
   /** Hosts this connector legitimately talks to. Seeds the instance egress allowlist. */
   egressAllow: string[]
   trifecta: ConnectorTrifectaHint
+  /**
+   * The server refuses to start without an argument only a human can supply.
+   *
+   * DECLARED rather than inferred. A placeholder-shaped arg is detectable by
+   * pattern, but the harder case is a server that takes a REQUIRED argument the
+   * catalog simply does not pass -- `mcp-server-sqlite-npx` exits 1 with
+   * `Usage: mcp-server-sqlite-npx <database-path>`, and its args look perfectly
+   * ordinary. Verified by running it; do not remove without doing the same.
+   */
+  requiresUserArgument?: boolean
   tags: string[]
   homepage?: string
   /** Registry id when the entry came from a snapshot, e.g. `io.github.org/server`. */

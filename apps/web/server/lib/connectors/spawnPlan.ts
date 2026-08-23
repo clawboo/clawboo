@@ -20,8 +20,6 @@ export interface ConnectorSpawnPlan {
   /** What is actually handed to the process spawner. */
   command: string
   args: string[]
-  /** Windows cmd.exe routing needs the raw command line preserved. */
-  windowsVerbatimArguments?: boolean
   /**
    * What the operator is shown, and it is the RESOLVED form.
    *
@@ -55,19 +53,25 @@ export function planConnectorSpawn(launch: {
   const command = resolved ?? launch.command
   const args = [...launch.args]
 
-  // On a non-Windows host, or for a non-batch target, this returns the plan
-  // unchanged -- so the common case carries no Windows machinery at all.
-  const spawn = resolveWindowsSpawn({ command, args })
-
-  const display = isWindows
-    ? [spawn.command, ...spawn.args].map(displayToken).join(' ')
-    : [command, ...args].map(displayToken).join(' ')
+  // WE DO NOT PRE-ROUTE ON WINDOWS, and that is a correction rather than an
+  // omission. The MCP SDK spawns through cross-spawn, which performs the whole
+  // cmd.exe routing itself -- escaping each token and setting
+  // windowsVerbatimArguments, which is the half that makes the escaping correct.
+  // Rewriting the command to cmd.exe here would DEFEAT that: cross-spawn skips
+  // its routing when the command is already an .exe, so nothing would set
+  // verbatim and Node would re-quote an already-caret-escaped line. The
+  // connector then fails to start. Handing cross-spawn the plain `npx.cmd` is
+  // what makes it work.
+  //
+  // `resolveWindowsSpawn` is still used, for DISPLAY only: it produces the
+  // cmd.exe line the operator will actually get, which is the thing consent is
+  // being asked for.
+  const shown = isWindows ? resolveWindowsSpawn({ command, args }) : { command, args }
 
   return {
-    command: spawn.command,
-    args: spawn.args,
-    ...(spawn.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-    display,
+    command,
+    args,
+    display: [shown.command, ...shown.args].map(displayToken).join(' '),
     unresolved: resolved === null,
   }
 }

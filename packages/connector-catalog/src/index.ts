@@ -9,3 +9,4 @@
 export * from './types'
 export * from './catalog'
 export * from './snippet'
+export * from './connectable'

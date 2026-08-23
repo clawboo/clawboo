@@ -8,13 +8,18 @@
 
 import {
   connectorChildEnv,
+  ConnectorHandshakeError,
   connectStdioConnector,
   type ConnectorSession,
   type DiscoveredTool,
 } from '@clawboo/mcp'
 import {
+  appendEvent,
   buildConnectorDescriptor,
+  ensureOwnerGrant,
+  getConnector,
   namespacedToolName,
+  persistDescriptorMetadata,
   specDigest,
   toolsDigest,
   upsertConnector,
@@ -22,6 +27,8 @@ import {
   type ToolDescriptor,
 } from '@clawboo/db'
 
+import { connectorInstanceIdForSlug } from '../capabilitySource/connectorIdentity'
+import { killProcessTreeByPid } from '../runtimes/killTree'
 import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
 import { planConnectorSpawn } from './spawnPlan'
 
@@ -44,20 +51,28 @@ export interface LiveConnector {
   skipped: { name: string; reason: string }[]
   specHash: string
   toolsHash: string
+  /** The resolved command this connector was started with, for the operator record. */
+  display: string
 }
 
 /**
  * The identity a grant is keyed on for a clawboo-owned connector instance.
  *
- * Derived from the slug rather than from a runtime record, because this
- * connector belongs to clawboo itself rather than to any one agent's runtime
- * config. Stable across reconnects, which is what lets a grant survive one.
+ * Delegated to `connectorIdentity`, which is also what the capability projection
+ * derives from the connector source's record. Two independent spellings of this
+ * string would mean the supervisor mints a grant under one id while the broker
+ * looks one up under another, and the only symptom would be `no-grant` denials
+ * for a connector the graph shows as perfectly healthy.
  */
 export function connectorInstanceId(slug: string): string {
-  return `conn:connector:clawboo:${slug}`
+  return connectorInstanceIdForSlug(slug)
 }
 
 const live = new Map<string, LiveConnector>()
+
+/** Connects that have started but not finished, so a second caller joins rather
+ *  than starting a second child. Cleared in a `finally`, success or failure. */
+const inFlight = new Map<string, Promise<ConnectResult>>()
 
 /** Bind a discovered tool to the live session that serves it. */
 function toDescriptor(
@@ -100,34 +115,66 @@ export async function connectConnector(
 ): Promise<ConnectResult> {
   const connectorId = connectorInstanceId(def.slug)
   const existing = live.get(connectorId)
-  if (existing) return { connector: existing, display: '' }
+  if (existing) return { connector: existing, display: existing.display }
 
+  // Share one in-flight connect per connector. The `live` check above cannot do
+  // this on its own: a cold start spends up to a minute inside the handshake
+  // while `npx` installs, and two clicks in that window would both pass the
+  // check, both spawn a child, and leave the loser tracked only by the shutdown
+  // registry -- a process no Disconnect could ever reach.
+  const pending = inFlight.get(connectorId)
+  if (pending) return pending
+
+  const attempt = performConnect(db, def, connectorId).finally(() => inFlight.delete(connectorId))
+  inFlight.set(connectorId, attempt)
+  return attempt
+}
+
+async function performConnect(
+  db: ClawbooDb,
+  def: ConnectableDefinition,
+  connectorId: string,
+): Promise<ConnectResult> {
   const plan = planConnectorSpawn(def.launch)
   if (plan.unresolved) {
-    throw new Error(`cannot find ${def.launch.command} on PATH — is Node installed?`)
+    throw new Error(`cannot find ${def.launch.command} on PATH. Is Node installed?`)
   }
 
-  const session = await connectStdioConnector({
-    command: plan.command,
-    args: plan.args,
-    // The allowlist, never process.env.
-    env: connectorChildEnv(),
-  })
+  let session: ConnectorSession
+  try {
+    session = await connectStdioConnector({
+      command: plan.command,
+      args: plan.args,
+      // The allowlist, never process.env.
+      env: connectorChildEnv(),
+    })
+  } catch (err) {
+    // A handshake failure still SPAWNED something. The transport's own close
+    // reaps only the direct child, so without this the real server survives a
+    // connect that reported failure.
+    if (err instanceof ConnectorHandshakeError && typeof err.pid === 'number') {
+      killProcessTreeByPid(err.pid)
+    }
+    throw err
+  }
   // Register BEFORE anything can fail: from here on, a throw must not leak a
   // process, and the transport's own close() reaps only the direct child.
-  registerConnectorPid(session.pid)
+  const pid = session.pid
+  registerConnectorPid(pid)
 
   let discovered: DiscoveredTool[]
   try {
     discovered = await session.listTools()
   } catch (err) {
     await session.close()
-    unregisterConnectorPid(session.pid)
+    if (typeof pid === 'number') killProcessTreeByPid(pid)
+    unregisterConnectorPid(pid)
     throw new Error(`connected but could not list tools: ${(err as Error).message}`)
   }
 
   const descriptors: ToolDescriptor[] = []
   const skipped: { name: string; reason: string }[] = []
+  const claimed = new Set<string>()
   for (const tool of discovered) {
     const named = namespacedToolName(def.slug, tool.name)
     if (!named.ok) {
@@ -136,7 +183,23 @@ export async function connectConnector(
       skipped.push({ name: tool.name, reason: named.reason })
       continue
     }
+    // A server can repeat a name, and an unstable cursor makes the paging loop
+    // manufacture repeats on its own. Two identical names reach
+    // `registerOrThrow`, which throws INSIDE the per-session tools-server
+    // factory -- taking down every builtin tool for every HTTP-attached agent,
+    // not just this connector, until someone disconnects it.
+    if (claimed.has(named.name)) {
+      skipped.push({ name: tool.name, reason: 'duplicate-name' })
+      continue
+    }
+    claimed.add(named.name)
     descriptors.push(toDescriptor(def, tool, named.name))
+  }
+  if (session.wasTruncated()) {
+    // Recorded like any other dropped tool, because an inventory that silently
+    // stops at a cap is the one case where the digest below stops describing
+    // the server it was taken from.
+    skipped.push({ name: '(inventory)', reason: 'tool-list-truncated' })
   }
 
   const spec = {
@@ -179,9 +242,83 @@ export async function connectConnector(
     skipped,
     specHash,
     toolsHash,
+    display: plan.display,
   }
+  // Persist a registry row per tool, attributed to its connector. Without one
+  // `setToolEnabled` updates zero rows and `isToolEnabled` falls back to
+  // enabled, so the per-tool kill switch silently does nothing for exactly the
+  // tools most likely to need it.
+  for (const descriptor of descriptors) {
+    try {
+      persistDescriptorMetadata(db, descriptor, connectorId)
+    } catch {
+      // A metadata write must not fail a connection that otherwise succeeded.
+    }
+  }
+
+  // Mint the owner grant HERE rather than leaving it to the capability
+  // projection. That projection runs on `GET /api/capabilities`, so a tool call
+  // landing before any inventory read would deny `grant:no-grant` for a
+  // connector the user had just connected -- a race whose symptom looks exactly
+  // like a governance bug.
+  try {
+    ensureOwnerGrant(db, {
+      subjectKind: 'global',
+      subjectId: null,
+      capabilityKind: 'connector',
+      connectorId,
+      capabilityId: null,
+      specHashPin: specHash,
+      toolsHashPin: toolsHash,
+    })
+  } catch {
+    // A grant write must not fail a connection that otherwise succeeded; the
+    // projection will mint it on the next inventory read.
+  }
+
   live.set(connectorId, connector)
+
+  // A child can die on its own: a crash, an OOM kill, a user running `pkill`.
+  // Without this the entry stays in `live` forever, the capability source keeps
+  // reporting it ready, its tools keep being served into every new session, and
+  // a possibly-recycled pid stays in the shutdown registry.
+  session.onClose(() => {
+    if (live.get(connectorId) !== connector) return
+    live.delete(connectorId)
+    unregisterConnectorPid(pid)
+    markConnectorDown(db, connectorId, 'the connector process exited')
+  })
+
   return { connector, display: plan.display }
+}
+
+/**
+ * Record that a connector is no longer running.
+ *
+ * `connectors.health` previously had exactly one writer -- the literal `'ok'` on
+ * connect -- so a crashed connector's row claimed health forever. This is the
+ * other end of that, and it also emits the `connector_health` event whose schema,
+ * ingest allowlist and two UI renderers all already exist and had no producer.
+ */
+function markConnectorDown(db: ClawbooDb, connectorId: string, detail: string): void {
+  try {
+    const row = getConnector(db, connectorId)
+    if (row) {
+      upsertConnector(db, {
+        ...row,
+        health: 'error',
+        healthDetail: detail,
+        failures: row.failures + 1,
+      })
+    }
+    appendEvent(db, {
+      kind: 'connector_health',
+      data: { connectorId, health: 'error', detail },
+    })
+  } catch {
+    // Best effort: an observability write must never throw on a process-exit
+    // callback, where there is nobody to catch it.
+  }
 }
 
 /** Close a connector and stop tracking its process. */
@@ -190,7 +327,12 @@ export async function disconnectConnector(connectorId: string): Promise<boolean>
   if (!connector) return false
   live.delete(connectorId)
   const pid = connector.session.pid
+
   await connector.session.close()
+  // close() signals only the DIRECT child, which for an `npx -y <pkg>` launch is
+  // the wrapper. Without this the real server keeps running, and unregistering
+  // the pid below would remove the last thing that could ever reap it.
+  if (typeof pid === 'number') killProcessTreeByPid(pid)
   unregisterConnectorPid(pid)
   return true
 }

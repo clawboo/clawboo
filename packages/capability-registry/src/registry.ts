@@ -12,6 +12,7 @@ const SOURCE_IDS: readonly CapabilitySourceId[] = [
   'hermes',
   'claude-code',
   'codex',
+  'connector',
   'openclaw',
 ]
 
