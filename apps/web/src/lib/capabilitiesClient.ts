@@ -120,12 +120,19 @@ export function groupAgentCapabilities(
   }
   const out = new Map<string, CapabilityRecord[]>()
   for (const [agentId, runtime] of agentRuntimes) {
-    const own = agentScoped.get(agentId)
-    if (own && own.length > 0) {
+    const own = agentScoped.get(agentId) ?? []
+    // SYNTHETIC records are excluded from the "does this agent have its own
+    // capabilities" test. A grantee's twin tile is agent-scoped, so counting it
+    // would flip inheritance off wholesale and the agent would lose every skill
+    // and connector it was showing a second earlier. The twin is still
+    // rendered — it is just not evidence of a real per-agent inventory.
+    const ownReal = own.filter((r) => !r.synthetic)
+    if (ownReal.length > 0) {
       out.set(agentId, own)
     } else {
-      const inherited = runtime ? globalByRuntime.get(runtime) : undefined
-      if (inherited && inherited.length > 0) out.set(agentId, inherited)
+      const inherited = (runtime ? globalByRuntime.get(runtime) : undefined) ?? []
+      const merged = [...inherited, ...own]
+      if (merged.length > 0) out.set(agentId, merged)
     }
   }
   return out

@@ -80,7 +80,8 @@ export const ResourceNode = memo(function ResourceNode({
   selected,
 }: NodeProps<Node<ResourceNodeData, 'resource'>>) {
   const { name, fullName, serviceKind, isVisible, available, enabled, agentIds } = data
-  const { orbitIndex, orbitCount, health, healthDetail, diagnostics, hint, grantIds } = data
+  const { orbitIndex, orbitCount, health, healthDetail, diagnostics, hint, grantIds, connectorId } =
+    data
   const { grantCount, grantState } = data
   // ONE badge, strict precedence — see ./capabilityBadge. The tile previously
   // collapsed the whole lifecycle into `status !== 'disabled'`, so a connector
@@ -163,7 +164,7 @@ export const ResourceNode = memo(function ResourceNode({
             one that never existed. Invisible at this scale (the tile is a dot) but
             still hit-testable, and deliberately NOT centerHandleStyle, which
             centers the handle and disables pointer events. */}
-        {(grantIds?.length ?? 0) > 0 && (
+        {connectorId !== null && (
           <Handle
             id="grant"
             type="source"
@@ -330,11 +331,14 @@ export const ResourceNode = memo(function ResourceNode({
           which made the whole drag-to-grant gesture impossible by construction,
           not by policy.
 
-          Rendered ONLY on a grant-backed tile — the same discipline SkillNode
-          applies with `showInstall`: an affordance whose action cannot complete
-          is not an affordance, it is a small lie. Legacy clawboo MCP tiles
-          (memory/tasks/tools) carry no grant and get no handle. */}
-      {(grantIds?.length ?? 0) > 0 && (
+          Rendered on EVERY connector tile, not only an already-shared one.
+          Gating it on `grantIds` was a deadlock: the composer this handle opens
+          is the only thing that mints a grant, so a tile with no grant could
+          never get one. Sharing is an affordance of BEING a connector; the tile
+          itself is the proof the agent has it. Detach, further down, stays gated
+          on an actual grant, because that one really does need something to
+          revoke. */}
+      {connectorId !== null && (
         <Handle
           id="grant"
           type="source"

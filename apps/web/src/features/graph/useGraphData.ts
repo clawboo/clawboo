@@ -733,6 +733,7 @@ export function buildGraphElements(
               diagnostics: cap.diagnostics.length > 0 ? cap.diagnostics : undefined,
               hint: cap.hint,
               grantCount: cap.grantCount,
+              grantState: cap.grantState,
               lastUsedAt: cap.lastUsedAt ? Date.parse(cap.lastUsedAt) : undefined,
               writable: cap.writable,
             } satisfies ResourceNodeData,
@@ -749,11 +750,14 @@ export function buildGraphElements(
               targetHandle: 'center',
               data: {
                 grantId: cap.grantId,
-                // Until the record carries richer grant fields, state/mode are the
-                // conservative floor: an emitted grantId on a live row means the
-                // grant is active, and read is the least-privilege rendering.
-                state: 'active',
+                // The server projects these from `decideGrant`, so an
+                // expired-but-unswept grant renders `expired` because that is
+                // what the runtime would actually do with it. `active`/`read`
+                // remain the least-privilege floor for a server that predates
+                // the projection.
+                state: cap.grantState ?? 'active',
                 mode: 'read',
+                ...(cap.pendingApprovals ? { pendingApprovals: cap.pendingApprovals } : {}),
               },
             })
           } else {
