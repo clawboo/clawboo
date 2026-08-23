@@ -541,11 +541,17 @@ export const toolCallAudit = sqliteTable(
     resultSummary: text('result_summary'), // scrubbed + compacted (after)
     isError: integer('is_error').notNull().default(0),
     tenantId: text('tenant_id'),
+    // Grant attribution. Null for a core builtin, which no grant governs.
+    grantId: text('grant_id'),
+    connectorId: text('connector_id'),
+    ruleId: text('rule_id'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [
     index('idx_tool_audit_tool').on(t.toolName),
     index('idx_tool_audit_created').on(t.createdAt),
+    // Backs lastUsedByGrant, which is why capability_grants has no last_used_at.
+    index('idx_tool_audit_grant').on(t.grantId, t.createdAt),
   ],
 )
 
@@ -566,6 +572,14 @@ export const toolCallApprovals = sqliteTable(
     // unblock it on expiry). Nullable — tool-call approvals carry no task.
     taskId: text('task_id'),
     tenantId: text('tenant_id'),
+    grantId: text('grant_id'),
+    connectorId: text('connector_id'),
+    // 1 when the tool has no scopable argument shape, which is what makes
+    // "Always" unofferable. Persisted so the resolve path cannot mint a durable
+    // rule the prompt never offered.
+    neverRemember: integer('never_remember').notNull().default(0),
+    // The GrantApprovalReason behind the prompt, e.g. lethal-trifecta.
+    ruleReason: text('rule_reason'),
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     resolvedAt: integer('resolved_at'),
@@ -573,6 +587,7 @@ export const toolCallApprovals = sqliteTable(
   (t) => [
     index('idx_tool_approvals_status').on(t.status),
     index('idx_tool_approvals_created').on(t.createdAt),
+    index('idx_tool_approvals_grant').on(t.grantId, t.status),
   ],
 )
 
@@ -727,6 +742,129 @@ export const capabilities = sqliteTable(
 
 export type DbCapability = typeof capabilities.$inferSelect
 export type DbCapabilityInsert = typeof capabilities.$inferInsert
+
+// ─── The grant spine ──────────────────────────────────────────────────────────
+// Three nouns kept apart: the catalog TYPE is committed TypeScript in
+// @clawboo/connector-catalog, a `connectors` row is a configured INSTANCE, and a
+// `capabilities` row is one callable TOOL.
+//
+// `capability_grants` is the load-bearing one: a row is BOTH the permission
+// `executeBrokeredCall` enforces AND the Ghost Graph edge an operator reads. The
+// renderer and the gate call the same `decideGrant`, so a badge can never assert
+// a denial the runtime would not make.
+
+export const connectors = sqliteTable(
+  'connectors',
+  {
+    id: text('id').primaryKey(),
+    slug: text('slug').notNull(),
+    catalogId: text('catalog_id'),
+    displayName: text('display_name').notNull(),
+    transport: text('transport').notNull(), // stdio | streamable-http
+    // JSON CanonicalizableSpec. Carries `${secret:NAME}` references, never values.
+    spec: text('spec').notNull().default('{}'),
+    specHash: text('spec_hash').notNull(),
+    toolsHash: text('tools_hash'),
+    egressAllow: text('egress_allow').notNull().default('[]'), // JSON string[]
+    trifecta: text('trifecta')
+      .notNull()
+      .default('{"readsPrivateData":false,"ingestsUntrustedContent":false,"canEgress":false}'),
+    // A LIVENESS measurement, never an authorization. Nothing writes it in this
+    // release; an outbound MCP client is what produces it.
+    health: text('health').notNull().default('unknown'),
+    healthDetail: text('health_detail'),
+    failures: integer('failures').notNull().default(0),
+    tenantId: text('tenant_id'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('uniq_connectors_slug').on(t.slug),
+    index('idx_connectors_health').on(t.health),
+    index('idx_connectors_catalog').on(t.catalogId),
+  ],
+)
+
+export type DbConnector = typeof connectors.$inferSelect
+export type DbConnectorInsert = typeof connectors.$inferInsert
+
+export const capabilityGrants = sqliteTable(
+  'capability_grants',
+  {
+    id: text('id').primaryKey(),
+    // The canonicalised (subject, capability) composite. Uniqueness can only live
+    // here: SQLite treats NULLs as distinct, so a UNIQUE over the five nullable
+    // identity columns would happily insert the same global grant twice.
+    grantKey: text('grant_key').notNull(),
+    subjectKind: text('subject_kind').notNull(), // agent | team | global
+    subjectId: text('subject_id'),
+    capabilityKind: text('capability_kind').notNull(),
+    // Agent-INDEPENDENT identity. When set, capabilityId is stored null: a
+    // capabilities.id folds the agent id into its key, so a grant keyed on one
+    // would be unfindable by the grantee's broker.
+    connectorId: text('connector_id'),
+    capabilityId: text('capability_id'),
+    toolAllow: text('tool_allow').notNull().default('["*"]'), // JSON glob[]
+    toolDeny: text('tool_deny').notNull().default('[]'),
+    mode: text('mode').notNull().default('read'), // read | write | admin
+    approvalPolicy: text('approval_policy').notNull().default('risk'),
+    state: text('state').notNull().default('active'),
+    // owner    = the runtime config already attaches this connector to this
+    //            subject, so the row records what is already true. Never drawn as
+    //            an edge: the tile itself is that statement.
+    // operator = a human deliberately shared it. This is what draws an edge.
+    origin: text('origin').notNull().default('operator'),
+    expiresAt: integer('expires_at'),
+    specHashPin: text('spec_hash_pin'),
+    toolsHashPin: text('tools_hash_pin'),
+    callCeilingPerHour: integer('call_ceiling_per_hour'),
+    grantedBy: text('granted_by'),
+    grantedAt: integer('granted_at').notNull(),
+    revokedAt: integer('revoked_at'),
+    revokedReason: text('revoked_reason'),
+    tenantId: text('tenant_id'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('uniq_capability_grants_key').on(t.grantKey),
+    index('idx_grants_subject').on(t.subjectKind, t.subjectId),
+    index('idx_grants_connector').on(t.connectorId),
+    index('idx_grants_capability').on(t.capabilityId),
+    index('idx_grants_state').on(t.state),
+    index('idx_grants_expires').on(t.expiresAt),
+  ],
+)
+
+export type DbCapabilityGrant = typeof capabilityGrants.$inferSelect
+export type DbCapabilityGrantInsert = typeof capabilityGrants.$inferInsert
+
+export const approvalRules = sqliteTable(
+  'approval_rules',
+  {
+    id: text('id').primaryKey(),
+    ruleKey: text('rule_key').notNull(),
+    grantId: text('grant_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    argsShape: text('args_shape'),
+    decision: text('decision').notNull(), // allow | deny
+    createdFromApprovalId: text('created_from_approval_id'),
+    // NOT NULL on purpose: the rule matcher treats a null expiry as immortal, so
+    // "every remembered approval expires" is a policy this column enforces or
+    // nothing does.
+    expiresAt: integer('expires_at').notNull(),
+    tenantId: text('tenant_id'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('uniq_approval_rules_key').on(t.ruleKey),
+    index('idx_approval_rules_grant').on(t.grantId),
+    index('idx_approval_rules_expires').on(t.expiresAt),
+  ],
+)
+
+export type DbApprovalRule = typeof approvalRules.$inferSelect
+export type DbApprovalRuleInsert = typeof approvalRules.$inferInsert
 
 // ─── team_chat ────────────────────────────────────────────────────────────────
 // The durable group-chat room substrate (mixed-runtime peer chat): every team

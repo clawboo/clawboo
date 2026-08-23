@@ -2,10 +2,13 @@
 export {
   agents,
   approvalHistory,
+  approvalRules,
   booZeroTeamBriefs,
   budgets,
   capabilities,
+  capabilityGrants,
   chatMessages,
+  connectors,
   costRecords,
   executionProcesses,
   governanceAudit,
@@ -34,14 +37,20 @@ export type {
   DbAgentInsert,
   DbApprovalHistory,
   DbApprovalHistoryInsert,
+  DbApprovalRule,
+  DbApprovalRuleInsert,
   DbBooZeroTeamBrief,
   DbBooZeroTeamBriefInsert,
   DbBudget,
   DbBudgetInsert,
   DbCapability,
   DbCapabilityInsert,
+  DbCapabilityGrant,
+  DbCapabilityGrantInsert,
   DbChatMessage,
   DbChatMessageInsert,
+  DbConnector,
+  DbConnectorInsert,
   DbCostRecord,
   DbCostRecordInsert,
   DbExecutionProcess,
@@ -115,6 +124,9 @@ export * from './inbox'
 
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'
+
+// ── The grant spine — capability_grants IS the Ghost Graph edge ──
+export * from './grants'
 
 // ── Database connection + helpers ──────────────────────────────────────────
 export {
