@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { killProcessTreeByPid } from '../../runtimes/killTree'
+
 /**
  * A FRESH module per test.
  *
@@ -50,13 +52,10 @@ function alive(pid: number): boolean {
 }
 
 afterEach(() => {
-  for (const pid of spawned.splice(0)) {
-    try {
-      process.kill(-pid, 'SIGKILL')
-    } catch {
-      /* already gone */
-    }
-  }
+  // The SAME killer the product uses, not a hand-rolled negative-pid signal.
+  // A process GROUP is a POSIX concept: on Windows `process.kill(-pid)` throws,
+  // so every sleeper this file spawned outlived the run on that job.
+  for (const pid of spawned.splice(0)) killProcessTreeByPid(pid)
 })
 
 describe('connector process reaping', () => {

@@ -270,6 +270,22 @@ describe('connector supervisor', () => {
     expect(after.toolsHashPin).not.toBe(again.connector.toolsHash)
   }, 45_000)
 
+  it('a disconnect during a connect WAITS for it rather than reporting not-connected', async () => {
+    // The window is real: a cold `npx` spends up to a minute inside the
+    // handshake, and `live` is empty for all of it. Disconnect, Remove and Sign
+    // out all used to answer "was not connected" for a connector whose child was
+    // being spawned at that moment, and the connection then published itself
+    // seconds after the operator was told it did not exist.
+    await resetConnectorsForTests()
+    const connecting = connectConnector(db, definition(process.execPath, [file]))
+    // Not awaited: the point is to disconnect while the attempt is still in the
+    // air. The disconnect must observe the in-flight attempt and settle after it.
+    const disconnecting = disconnectConnector(connectorInstanceId('fixture'))
+    const [, stopped] = await Promise.all([connecting, disconnecting])
+    expect(stopped).toBe(true)
+    expect(connectorToolsForServer()).toHaveLength(0)
+  }, 45_000)
+
   it('disconnects and stops serving its tools', async () => {
     await connectConnector(db, definition(process.execPath, [file]))
     expect(await disconnectConnector(connectorInstanceId('fixture'))).toBe(true)

@@ -230,164 +230,181 @@ async function performConnect(
     })
   }
 
-  let discovered: DiscoveredTool[]
-  try {
-    discovered = await session.listTools()
-  } catch (err) {
-    await session.close()
+  // EVERY EXIT PATH FROM HERE TO `live.set` HAS TO TEAR THE CHILD DOWN. In that
+  // window the process is running and nothing can reach it: it is not in `live`,
+  // so no Disconnect finds it, and the caller sees only a rejected promise.
+  // Discovery was already guarded; the namespacing, the digests and three
+  // database writes that follow were not, and any of them can throw.
+  const abandon = async (): Promise<void> => {
+    await session.close().catch(() => {})
     if (typeof pid === 'number') {
       killProcessTreeByPid(pid)
       forgetConnectorPid(pid)
     }
     unregisterConnectorPid(pid)
+  }
+
+  let discovered: DiscoveredTool[]
+  try {
+    discovered = await session.listTools()
+  } catch (err) {
+    await abandon()
     throw new Error(`connected but could not list tools: ${(err as Error).message}`)
   }
 
-  const descriptors: ToolDescriptor[] = []
-  const skipped: { name: string; reason: string }[] = []
-  const claimed = new Set<string>()
-  for (const tool of discovered) {
-    const named = namespacedToolName(def.slug, tool.name)
-    if (!named.ok) {
-      // One unusable tool must not cost the whole connector. Recorded so the
-      // operator can see what was dropped instead of wondering.
-      skipped.push({ name: tool.name, reason: named.reason })
-      continue
-    }
-    // A server can repeat a name, and an unstable cursor makes the paging loop
-    // manufacture repeats on its own. Two identical names reach
-    // `registerOrThrow`, which throws INSIDE the per-session tools-server
-    // factory -- taking down every builtin tool for every HTTP-attached agent,
-    // not just this connector, until someone disconnects it.
-    if (claimed.has(named.name)) {
-      skipped.push({ name: tool.name, reason: 'duplicate-name' })
-      continue
-    }
-    claimed.add(named.name)
-    descriptors.push(toDescriptor(def, tool, named.name))
-  }
-  if (session.wasTruncated()) {
-    // Recorded like any other dropped tool, because an inventory that silently
-    // stops at a cap is the one case where the digest below stops describing
-    // the server it was taken from.
-    skipped.push({ name: '(inventory)', reason: 'tool-list-truncated' })
-  }
-
-  // What the operator consented to, and therefore what drift is measured
-  // against. A URL for a remote connector; a command and argv for a local one.
-  //
-  // THE CATALOG'S COMMAND, not the resolved absolute path. The resolved path is
-  // a property of this machine at this moment: switching Node versions, or
-  // installing a package manager somewhere else, moves it without anything
-  // about the connector changing. Pinning it made an nvm switch look identical
-  // to a rug-pull and denied every call afterwards with no way back. The argv IS
-  // resolved, because the operator's launch argument is the one part of it they
-  // chose and a change there is a real change of scope.
-  const spec =
-    launch.transport === 'streamable-http'
-      ? { transport: launch.transport, url: launch.url }
-      : { transport: launch.transport, command: launch.command, args: plan.args }
-  const specHash = specDigest(spec)
-  // Over the DISCOVERED list, including descriptions: a rug-pull that rewrites a
-  // description to smuggle instructions changes nothing else.
-  const toolsHash = toolsDigest(
-    discovered.map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-    })),
-  )
-
-  upsertConnector(db, {
-    id: connectorId,
-    slug: def.slug,
-    catalogId: def.slug,
-    displayName: def.displayName,
-    transport: def.launch.transport,
-    spec: JSON.stringify(spec),
-    specHash,
-    toolsHash,
-    egressAllow: JSON.stringify(def.egressAllow),
-    trifecta: JSON.stringify(def.trifecta),
-    health: 'ok',
-    healthDetail: null,
-    failures: 0,
-  })
-
-  const connector: LiveConnector = {
-    connectorId,
-    slug: def.slug,
-    session,
-    descriptors,
-    skipped,
-    specHash,
-    toolsHash,
-    display: plan.display,
-  }
-  // Persist a registry row per tool, attributed to its connector. Without one
-  // `setToolEnabled` updates zero rows and `isToolEnabled` falls back to
-  // enabled, so the per-tool kill switch silently does nothing for exactly the
-  // tools most likely to need it.
-  for (const descriptor of descriptors) {
-    try {
-      persistDescriptorMetadata(db, descriptor, connectorId)
-    } catch {
-      // A metadata write must not fail a connection that otherwise succeeded.
-    }
-  }
-
-  // Mint the owner grant HERE rather than leaving it to the capability
-  // projection. That projection runs on `GET /api/capabilities`, so a tool call
-  // landing before any inventory read would deny `grant:no-grant` for a
-  // connector the user had just connected -- a race whose symptom looks exactly
-  // like a governance bug.
   try {
-    const identity = {
-      subjectKind: 'global',
-      subjectId: null,
-      capabilityKind: 'connector',
-      connectorId,
-      capabilityId: null,
-    } as const
-    if (!ensureOwnerGrant(db, { ...identity, specHashPin: specHash, toolsHashPin: toolsHash })) {
-      // The grant already existed, and its pins describe a previous connect.
-      //
-      // THE SPEC PIN IS RE-PINNED, THE TOOLS PIN IS NOT, and the asymmetry is
-      // the whole point. The spec is what the operator is looking at when they
-      // press Connect: the command, the URL, the launch argument they just
-      // typed. Consenting to it again is exactly what the click means, and
-      // without this a changed argument denies every call as spec-drift forever,
-      // because the automatic path is insert-only.
-      //
-      // The tool inventory is not on screen and was not consented to. A server
-      // that rewrites a tool description to smuggle instructions changes nothing
-      // else, so re-pinning it on a reconnect would erase the one signal that
-      // catches a rug-pull. That drift stays, and clearing it takes a human
-      // revoking the grant and granting it again.
-      repinOwnerGrant(db, { ...identity, specHashPin: specHash })
+    const descriptors: ToolDescriptor[] = []
+    const skipped: { name: string; reason: string }[] = []
+    const claimed = new Set<string>()
+    for (const tool of discovered) {
+      const named = namespacedToolName(def.slug, tool.name)
+      if (!named.ok) {
+        // One unusable tool must not cost the whole connector. Recorded so the
+        // operator can see what was dropped instead of wondering.
+        skipped.push({ name: tool.name, reason: named.reason })
+        continue
+      }
+      // A server can repeat a name, and an unstable cursor makes the paging loop
+      // manufacture repeats on its own. Two identical names reach
+      // `registerOrThrow`, which throws INSIDE the per-session tools-server
+      // factory -- taking down every builtin tool for every HTTP-attached agent,
+      // not just this connector, until someone disconnects it.
+      if (claimed.has(named.name)) {
+        skipped.push({ name: tool.name, reason: 'duplicate-name' })
+        continue
+      }
+      claimed.add(named.name)
+      descriptors.push(toDescriptor(def, tool, named.name))
     }
-  } catch {
-    // A grant write must not fail a connection that otherwise succeeded; the
-    // projection will mint it on the next inventory read.
-  }
+    if (session.wasTruncated()) {
+      // Recorded like any other dropped tool, because an inventory that silently
+      // stops at a cap is the one case where the digest below stops describing
+      // the server it was taken from.
+      skipped.push({ name: '(inventory)', reason: 'tool-list-truncated' })
+    }
 
-  live.set(connectorId, connector)
-  announceChange()
+    // What the operator consented to, and therefore what drift is measured
+    // against. A URL for a remote connector; a command and argv for a local one.
+    //
+    // THE CATALOG'S COMMAND, not the resolved absolute path. The resolved path is
+    // a property of this machine at this moment: switching Node versions, or
+    // installing a package manager somewhere else, moves it without anything
+    // about the connector changing. Pinning it made an nvm switch look identical
+    // to a rug-pull and denied every call afterwards with no way back. The argv IS
+    // resolved, because the operator's launch argument is the one part of it they
+    // chose and a change there is a real change of scope.
+    const spec =
+      launch.transport === 'streamable-http'
+        ? { transport: launch.transport, url: launch.url }
+        : { transport: launch.transport, command: launch.command, args: plan.args }
+    const specHash = specDigest(spec)
+    // Over the DISCOVERED list, including descriptions: a rug-pull that rewrites a
+    // description to smuggle instructions changes nothing else.
+    const toolsHash = toolsDigest(
+      discovered.map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      })),
+    )
 
-  // A child can die on its own: a crash, an OOM kill, a user running `pkill`.
-  // Without this the entry stays in `live` forever, the capability source keeps
-  // reporting it ready, its tools keep being served into every new session, and
-  // a possibly-recycled pid stays in the shutdown registry.
-  session.onClose(() => {
-    if (live.get(connectorId) !== connector) return
-    live.delete(connectorId)
-    unregisterConnectorPid(pid)
-    if (typeof pid === 'number') forgetConnectorPid(pid)
-    markConnectorDown(db, connectorId, 'the connector process exited')
+    upsertConnector(db, {
+      id: connectorId,
+      slug: def.slug,
+      catalogId: def.slug,
+      displayName: def.displayName,
+      transport: def.launch.transport,
+      spec: JSON.stringify(spec),
+      specHash,
+      toolsHash,
+      egressAllow: JSON.stringify(def.egressAllow),
+      trifecta: JSON.stringify(def.trifecta),
+      health: 'ok',
+      healthDetail: null,
+      failures: 0,
+    })
+
+    const connector: LiveConnector = {
+      connectorId,
+      slug: def.slug,
+      session,
+      descriptors,
+      skipped,
+      specHash,
+      toolsHash,
+      display: plan.display,
+    }
+    // Persist a registry row per tool, attributed to its connector. Without one
+    // `setToolEnabled` updates zero rows and `isToolEnabled` falls back to
+    // enabled, so the per-tool kill switch silently does nothing for exactly the
+    // tools most likely to need it.
+    for (const descriptor of descriptors) {
+      try {
+        persistDescriptorMetadata(db, descriptor, connectorId)
+      } catch {
+        // A metadata write must not fail a connection that otherwise succeeded.
+      }
+    }
+
+    // Mint the owner grant HERE rather than leaving it to the capability
+    // projection. That projection runs on `GET /api/capabilities`, so a tool call
+    // landing before any inventory read would deny `grant:no-grant` for a
+    // connector the user had just connected -- a race whose symptom looks exactly
+    // like a governance bug.
+    try {
+      const identity = {
+        subjectKind: 'global',
+        subjectId: null,
+        capabilityKind: 'connector',
+        connectorId,
+        capabilityId: null,
+      } as const
+      if (!ensureOwnerGrant(db, { ...identity, specHashPin: specHash, toolsHashPin: toolsHash })) {
+        // The grant already existed, and its pins describe a previous connect.
+        //
+        // THE SPEC PIN IS RE-PINNED, THE TOOLS PIN IS NOT, and the asymmetry is
+        // the whole point. The spec is what the operator is looking at when they
+        // press Connect: the command, the URL, the launch argument they just
+        // typed. Consenting to it again is exactly what the click means, and
+        // without this a changed argument denies every call as spec-drift forever,
+        // because the automatic path is insert-only.
+        //
+        // The tool inventory is not on screen and was not consented to. A server
+        // that rewrites a tool description to smuggle instructions changes nothing
+        // else, so re-pinning it on a reconnect would erase the one signal that
+        // catches a rug-pull. That drift stays, and clearing it takes a human
+        // revoking the grant and granting it again.
+        repinOwnerGrant(db, { ...identity, specHashPin: specHash })
+      }
+    } catch {
+      // A grant write must not fail a connection that otherwise succeeded; the
+      // projection will mint it on the next inventory read.
+    }
+
+    live.set(connectorId, connector)
     announceChange()
-  })
 
-  return { connector, display: plan.display }
+    // A child can die on its own: a crash, an OOM kill, a user running `pkill`.
+    // Without this the entry stays in `live` forever, the capability source keeps
+    // reporting it ready, its tools keep being served into every new session, and
+    // a possibly-recycled pid stays in the shutdown registry.
+    //
+    // Registered AFTER `live.set`, so the guard below can compare against the
+    // entry that was actually published.
+    session.onClose(() => {
+      if (live.get(connectorId) !== connector) return
+      live.delete(connectorId)
+      unregisterConnectorPid(pid)
+      if (typeof pid === 'number') forgetConnectorPid(pid)
+      markConnectorDown(db, connectorId, 'the connector process exited')
+      announceChange()
+    })
+
+    return { connector, display: plan.display }
+  } catch (err) {
+    await abandon()
+    throw err
+  }
 }
 
 /**
@@ -421,6 +438,17 @@ function markConnectorDown(db: ClawbooDb, connectorId: string, detail: string): 
 
 /** Close a connector and stop tracking its process. */
 export async function disconnectConnector(connectorId: string): Promise<boolean> {
+  // A CONNECT MAY BE IN FLIGHT, and it can be for the better part of a minute
+  // while `npx` installs. `live` is empty during that whole window, so this used
+  // to answer `false` for a connector whose child was actively being spawned;
+  // the operator's Disconnect, Remove or Sign out reported "not connected" and
+  // the connection then published itself seconds later. Waiting for the attempt
+  // to settle first is the only answer that is true either way: if it succeeds
+  // the connector is in `live` and gets torn down below, and if it fails it
+  // already tore itself down.
+  const attempt = inFlight.get(connectorId)
+  if (attempt) await attempt.catch(() => {})
+
   const connector = live.get(connectorId)
   if (!connector) return false
   live.delete(connectorId)
