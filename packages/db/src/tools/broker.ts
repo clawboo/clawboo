@@ -150,7 +150,7 @@ export async function executeBrokeredCall(
   // reaches it. Returns null for a core builtin, which no grant governs: that
   // is why nothing callable today changes behaviour.
   const gate = evaluateGrant(db, descriptor, ctx)
-  const attribution = attributionOf(gate)
+  let attribution = attributionOf(gate)
   if (gate) {
     emitGrantDecision(db, validatedCall, ctx, gate)
     if (gate.decision.kind === 'deny') {
@@ -220,9 +220,25 @@ export async function executeBrokeredCall(
         denied: `approval:${resolution}`,
       }
     }
-    // The human said yes, so the call is about to run and must count against the
-    // grant's ceiling exactly as an immediately-allowed one would.
-    chargeGrantCall(gate)
+    // REVALIDATE before charging or executing. The verdict above was reached
+    // BEFORE the wait, and that wait is minutes by default: inside it the grant
+    // can be revoked, pass its expiry, drift, or have its ceiling exhausted by a
+    // concurrent call. Executing on the pre-wait verdict lets a human's "yes"
+    // outlive the authorization it was given under, which is the one thing an
+    // approval must never do.
+    if (gate) {
+      const fresh = evaluateGrant(db, descriptor, ctx)
+      if (fresh) {
+        attribution = attributionOf(fresh)
+        if (fresh.decision.kind === 'deny') {
+          return deny(db, validatedCall, ctx, `grant:${fresh.decision.reason}`, attribution)
+        }
+        // Idempotent: `evaluateGrant` already charged if it returned `allow`.
+        // This covers the still-require_approval case, where the human has now
+        // answered and the call is about to run.
+        chargeGrantCall(fresh)
+      }
+    }
     if (outcome.decision === 'require_approval') effectiveArgs = outcome.args // allow_once / allow_always
   } else {
     // An observed-but-allowed call is audited as `observe`, not `allow`: the whole

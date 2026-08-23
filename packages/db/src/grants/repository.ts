@@ -383,6 +383,12 @@ export function reinstateOwnerGrant(db: ClawbooDb, input: UpsertGrantInput): Gra
       .where(eq(capabilityGrants.grantKey, key))
       .get() as DbCapabilityGrant | undefined
     if (!existing) return null
+    // OWNER ORIGIN ONLY, and the check is the whole safety of this function. An
+    // operator grant is a deliberate human share; revoking one is a deliberate
+    // human decision. Reinstating it because someone reconnected the underlying
+    // connector would silently undo that decision, which is precisely the
+    // bypass this path must not become.
+    if (existing.origin !== 'owner') return rowToGrantRow(existing)
     // An ACTIVE grant is already what the caller wants; a suspended one is off
     // for a reason the caller has not addressed (drift, a failed re-auth, the
     // freeze), and quietly clearing that would be the resurrection this split

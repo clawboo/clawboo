@@ -262,6 +262,24 @@ describe('grant repository', () => {
     expect(getGrant(db, owner.id)?.toolsHashPin).toBe('newhash')
   })
 
+  it('reinstate REFUSES a revoked operator grant', () => {
+    // Revoking a deliberate share is a deliberate decision. Reinstating it
+    // because someone reconnected the underlying connector would silently undo
+    // that decision, which is the bypass this check exists to prevent.
+    const op = agentGrant(db, 'a1', { origin: 'operator' })
+    revokeGrant(db, op.id, 'detached')
+
+    const out = reinstateOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+    })
+    expect(out?.state).toBe('revoked')
+    expect(getGrant(db, op.id)?.state).toBe('revoked')
+  })
+
   it('reinstate leaves a SUSPENDED grant alone', () => {
     // Suspended is off for a reason the caller has not addressed. Clearing it
     // silently would be exactly the resurrection the split prevents.

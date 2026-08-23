@@ -10,6 +10,7 @@ import { z } from 'zod'
 
 import { createDb, type ClawbooDb } from '../../db'
 import { upsertGrant, revokeGrant } from '../../grants/repository'
+import { listPendingApprovals, resolveApproval } from '../persistence'
 import { callsInWindow, chargeCall, resetRateWindows } from '../../grants/rateWindow'
 import { defaultAvailabilityContext } from '../availability'
 import { executeBrokeredCall } from '../broker'
@@ -187,6 +188,44 @@ describe('the grant gate', () => {
     releaseGrantCharge(gate as never)
     releaseGrantCharge(gate as never)
     expect(callsInWindow('g2')).toBe(0)
+  })
+
+  it('DENIES a call whose grant was revoked while the human was deciding', async () => {
+    // The verdict is reached BEFORE waitForApproval, and that wait is minutes by
+    // default. Executing on the pre-wait verdict lets a human's "yes" outlive the
+    // authorization it was given under.
+    const grant = upsertGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+      mode: 'admin',
+      approvalPolicy: 'always', // every call prompts
+    })
+    const registry = new ToolRegistry()
+    registry.register(connectorTool())
+
+    const inflight = executeBrokeredCall(
+      db,
+      { name: 'gh_read', args: {} },
+      ctx({ agentId: 'a1', connectorId: CONNECTOR }),
+      { registry, approvalPollMs: 5, approvalTimeoutMs: 5_000 },
+    )
+
+    // Wait for the prompt to exist, then revoke and approve. The approval says
+    // yes; the grant behind it no longer does.
+    for (let i = 0; i < 200 && listPendingApprovals(db).length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const pending = listPendingApprovals(db)
+    expect(pending).toHaveLength(1)
+    revokeGrant(db, grant.id, 'revoked mid-approval')
+    resolveApproval(db, pending[0]!.id, 'allow_once')
+
+    const res = await inflight
+    expect(res.ok).toBe(false)
+    expect(res.denied).toBe('grant:grant-revoked')
   })
 
   it('emits a grant_decision event for every gated call', async () => {
