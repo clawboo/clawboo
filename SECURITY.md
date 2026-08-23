@@ -94,8 +94,36 @@ not "no shell involved".
 That is the environment vector, and it is the only one a local-first tool can close. **A connector
 child is still a process running as you.** It can read your home directory, your SSH keys, your
 `~/.aws` credentials, the clawboo database, and the vault files on disk. No local key scheme changes
-that. This is why only **curated** connectors can be connected today, and why community entries stay
-blocked until a sandbox exists.
+that. This is why **community** entries stay blocked until a sandbox exists: installing one is a
+one-click install of somebody else's package, chosen from a list rather than by you.
+
+**Curated** entries are ones we have read and pinned to an exact version. **Custom** entries are ones
+you add yourself, by typing the command or the URL. Both can be connected, and a custom entry gets no
+less access than a curated one: clawboo assumes it reads private data, ingests untrusted content and
+can reach the network, because it cannot know otherwise. Adding a custom connector is the same act of
+trust as writing that command into any other MCP client's config, and it carries the same weight.
+
+### Signing in to a remote connector
+
+A remote connector authenticates with OAuth. clawboo has no registered OAuth app and ships no client
+secret, so it registers itself with the provider per install (RFC 7591) and listens on an ephemeral
+loopback port for the redirect. A provider that requires a pre-registered app therefore cannot be
+signed into from clawboo at all, and its tile says so rather than offering the attempt.
+
+The tokens, and the client registration itself, are stored in the same encrypted vault as connector
+credentials, namespaced per connector, and are never returned by any API. **Sign out** deletes both
+and stops the connection.
+
+Two checks are what make this safe against a hostile server, and both are worth naming because
+neither is obvious. Discovery must stay on the server's own origin, and the resource identifier the
+server declares must be the server clawboo is talking to. Without them a compromised host could name
+somebody else's authorization server, send you to a genuine consent screen for that other provider,
+and receive a token minted for them. The `resource` binding alone does not prevent this, because the
+value being bound is chosen by the server that receives the token.
+
+What clawboo cannot check is what the provider does with the authorization once granted. Scopes are
+requested as pinned in the catalog, or left to the provider's default where it does not accept them,
+and the consent screen you approve is the provider's own.
 
 The same reasoning applies to the governance controls. On a loopback bind with no access token, every
 `/api/*` route is reachable by any process on the machine, including a connector child. Such a
