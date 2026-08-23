@@ -27,6 +27,7 @@ import {
   type McpToolInfo,
 } from '@clawboo/mcp'
 
+import { connectorToolsForServer, onConnectorsChanged } from '../../connectors/supervisor'
 import type { NativeToolOutcome } from './fileTools'
 
 export interface McpBridgeOptions {
@@ -117,7 +118,23 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
   if (enable.tools) {
     clients.push(
       await connectInMemoryClient(
-        createToolsServer(db, { agentId: opts.agentId }),
+        createToolsServer(db, {
+          agentId: opts.agentId,
+          // The team the run belongs to, so a TEAM-scoped grant is findable. A
+          // null teamId makes every one of them invisible to the gate, and the
+          // call is then denied `no-grant` with nothing explaining why.
+          ...(opts.memoryScope?.teamId ? { teamId: opts.memoryScope.teamId } : {}),
+          // Connector tools, so a NATIVE run can call them too. This server is
+          // built in-memory rather than over HTTP, so it does not pick them up
+          // from the HTTP mount: without this line connectors work for every
+          // attached runtime and silently do nothing for clawboo's own.
+          //
+          // The FUNCTION, not its result: a run outlives a connect, so freezing
+          // the list here would make a connector added mid-run invisible for the
+          // rest of it.
+          connectorTools: connectorToolsForServer,
+          onConnectorsChanged,
+        }),
         'clawboo-native',
       ),
     )
@@ -141,21 +158,35 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
   // bridge, so the conversation runs with its built-in tools only.
   if (clients.length === 0) return null
 
-  /** name → owning client; first registration wins (collision skipped). */
+  /**
+   * name → owning client; first registration wins (collision skipped).
+   *
+   * REFRESHED rather than snapshotted. The tools server's list is live now, so a
+   * connector connected after this bridge was built has to become visible
+   * without the run reconnecting; a snapshot taken here would put the staleness
+   * back one layer down where it is harder to see.
+   */
   const routes = new Map<string, InMemoryMcpClient>()
-  const defs: McpToolInfo[] = []
-  for (const client of clients) {
-    for (const tool of await client.listTools()) {
-      if (routes.has(tool.name)) continue
-      routes.set(tool.name, client)
-      defs.push(tool)
+
+  const refresh = async (): Promise<McpToolInfo[]> => {
+    routes.clear()
+    const next: McpToolInfo[] = []
+    for (const client of clients) {
+      for (const tool of await client.listTools()) {
+        if (routes.has(tool.name)) continue
+        routes.set(tool.name, client)
+        next.push(tool)
+      }
     }
+    next.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    return next
   }
-  defs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  // Once up front, so `owns()` is answerable before anyone lists.
+  await refresh()
 
   return {
     async listTools(): Promise<McpToolInfo[]> {
-      return defs
+      return refresh()
     },
     owns(name: string): boolean {
       return routes.has(name)

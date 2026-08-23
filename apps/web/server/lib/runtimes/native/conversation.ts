@@ -153,7 +153,7 @@ export class Conversation {
     }
 
     const system = `${config.systemPrompt}\n\nToday: ${dateStamp(new Date())}`
-    const { tools, dispatch } = await this.buildToolUniverse()
+    let { tools, dispatch } = await this.buildToolUniverse()
 
     const turn1 = [opts.context, opts.message].filter(Boolean).join('\n\n')
     if (turn1) this.messages.push({ role: 'user', content: [{ type: 'text', text: turn1 }] })
@@ -175,6 +175,21 @@ export class Conversation {
       if (this.nextModel) {
         client.setModel(this.nextModel)
         this.nextModel = null
+      }
+
+      // RE-DERIVE at the turn boundary. A run outlives a connector connect or
+      // disconnect, and the universe above is built once before turn 1: without
+      // this, a connector added mid-run stays invisible for the rest of it and a
+      // revoked one keeps being offered until the model gives up calling it.
+      // The boundary is the right granularity -- the tool list the model sees
+      // must not change underneath a turn it is already mid-way through.
+      if (turn > 1) {
+        try {
+          ;({ tools, dispatch } = await this.buildToolUniverse())
+        } catch {
+          // Keep the previous universe rather than failing the run: a transient
+          // listTools failure must not end a conversation that is working.
+        }
       }
 
       let turnText = ''
