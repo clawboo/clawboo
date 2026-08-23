@@ -228,6 +228,49 @@ describe('the grant gate', () => {
     expect(res.denied).toBe('grant:grant-revoked')
   })
 
+  it('an inspector-forced approval does not make a ceiling deny its own call', async () => {
+    // The gate allows and CHARGES; an inspector then demands approval. If the
+    // revalidation runs over that still-held charge, a ceiling of 1 denies the
+    // very call the human just approved, and the charge is stranded for an hour.
+    const grant = upsertGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+      mode: 'admin',
+      approvalPolicy: 'never', // the GRANT allows outright...
+      callCeilingPerHour: 1,
+    })
+    const registry = new ToolRegistry()
+    registry.register(connectorTool())
+
+    const inflight = executeBrokeredCall(
+      db,
+      { name: 'gh_read', args: {} },
+      ctx({ agentId: 'a1', connectorId: CONNECTOR }),
+      {
+        registry,
+        // ...and an INSPECTOR overrides that with a prompt.
+        inspectors: [() => ({ kind: 'require_approval' as const, message: 'inspector says so' })],
+        approvalPollMs: 5,
+        approvalTimeoutMs: 5_000,
+      },
+    )
+
+    for (let i = 0; i < 200 && listPendingApprovals(db).length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const pending = listPendingApprovals(db)
+    expect(pending).toHaveLength(1)
+    resolveApproval(db, pending[0]!.id, 'allow_once')
+
+    const res = await inflight
+    expect(res.denied).toBeUndefined()
+    expect(res.ok).toBe(true)
+    expect(grant.callCeilingPerHour).toBe(1)
+  })
+
   it('emits a grant_decision event for every gated call', async () => {
     const registry = new ToolRegistry()
     registry.register(connectorTool())

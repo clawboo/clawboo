@@ -227,6 +227,12 @@ export async function executeBrokeredCall(
     // outlive the authorization it was given under, which is the one thing an
     // approval must never do.
     if (gate) {
+      // Release BEFORE re-evaluating. The gate may already have charged: an
+      // inspector can demand approval on a call the grant allowed outright, and
+      // that charge is still in the window. Re-evaluating over it makes a grant
+      // with a ceiling of N deny its own approved call at N, and a denial here
+      // would leave the charge stranded for the rest of the hour.
+      releaseGrantCharge(gate)
       const fresh = evaluateGrant(db, descriptor, ctx)
       if (fresh) {
         attribution = attributionOf(fresh)
