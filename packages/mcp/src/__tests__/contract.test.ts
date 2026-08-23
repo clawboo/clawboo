@@ -376,6 +376,45 @@ describe('Tools MCP', () => {
     expect(names).toContain('echo')
   })
 
+  it("advertises a connector tool's OWN schema, not one re-derived from zod", async () => {
+    // The local zod->JSON converter understands six leaf kinds and falls back to
+    // {} for the rest, so round-tripping a remote schema would hand the model a
+    // contract looser than the server actually enforces.
+    const remoteSchema = {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['fast', 'thorough'] },
+        depth: { type: 'integer', minimum: 1, maximum: 9 },
+      },
+      required: ['mode'],
+      additionalProperties: false,
+    }
+    const client = await connectInMemory(
+      createToolsServer(db, {
+        availability: defaultAvailabilityContext({ env: {} }),
+        connectorTools: [
+          {
+            descriptor: {
+              name: 'mcp__memory__search',
+              description: 'remote search',
+              // Permissive locally: the remote server is the authority on its
+              // own arguments.
+              inputSchema: z.object({}).passthrough(),
+              jsonSchema: remoteSchema,
+              owner: 'mcp',
+              readOnly: true,
+              executor: () => 'ok',
+            },
+            connectorId: 'conn:connector:clawboo:memory',
+          },
+        ],
+      }),
+    )
+    const listed = await client.listTools()
+    const tool = listed.tools.find((x) => x.name === 'mcp__memory__search')
+    expect(tool?.inputSchema).toEqual(remoteSchema)
+  })
+
   it('REFUSES a connector tool that would shadow a builtin', () => {
     // Silent last-wins would let a connector tool named `echo` replace the
     // builtin and inherit its risk classification, and therefore its approval

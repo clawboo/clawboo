@@ -44,6 +44,24 @@ export interface ToolDef {
   description: string
   /** A ZodObject describing the tool's params. Used for validation + JSON Schema. */
   inputSchema: z.ZodObject<z.ZodRawShape>
+  /**
+   * A pre-built JSON Schema to ADVERTISE instead of deriving one from
+   * `inputSchema`.
+   *
+   * A tool discovered from a remote MCP server arrives as JSON Schema and never
+   * as zod, and the derivation below understands six leaf kinds and falls back
+   * to `{}` for everything else. Round-tripping such a schema through zod would
+   * therefore silently widen it: an enum becomes a string, a constrained object
+   * becomes unconstrained, and the model is handed a contract looser than the
+   * one the server will actually enforce.
+   *
+   * `inputSchema` is still REQUIRED when this is set, because it is what
+   * validates arguments locally. A connector tool supplies a permissive
+   * passthrough there: the remote server is the authority on its own arguments,
+   * and re-deriving a stricter local guess would reject calls the server would
+   * have accepted.
+   */
+  jsonSchema?: Record<string, unknown>
   handler: (args: Record<string, unknown>) => Promise<McpToolResult> | McpToolResult
 }
 
@@ -124,7 +142,7 @@ export function buildServer(name: string, tools: ToolDef[]): Server {
     tools: tools.map((t) => ({
       name: t.name,
       description: t.description,
-      inputSchema: zodObjectToJsonSchema(t.inputSchema),
+      inputSchema: t.jsonSchema ?? zodObjectToJsonSchema(t.inputSchema),
     })),
   }))
 

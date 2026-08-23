@@ -101,6 +101,15 @@ export interface ToolDescriptor {
   /** Approvals that may never be remembered: money movement, external send,
    *  credential grant. Forces the UI not to offer "Always". */
   neverRemember?: boolean
+  /**
+   * The tool's own JSON Schema, when it came from a remote MCP server.
+   *
+   * Advertised VERBATIM rather than re-derived from `inputSchema`: a remote
+   * schema has no zod original, and round-tripping it through the local
+   * converter would widen it into a contract looser than the server enforces.
+   * `inputSchema` remains the local validator.
+   */
+  jsonSchema?: Record<string, unknown>
   executor: (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<string> | string
   provenance?: ToolProvenance
 }

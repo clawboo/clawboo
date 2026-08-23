@@ -69,6 +69,7 @@ export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}):
       name: descriptor.name,
       description: descriptor.description,
       inputSchema: descriptor.inputSchema as z.ZodObject<z.ZodRawShape>,
+      ...(descriptor.jsonSchema ? { jsonSchema: descriptor.jsonSchema } : {}),
       handler: async (args: Record<string, unknown>) => {
         const connectorId = connectorOf.get(descriptor.name)
         const result = await executeBrokeredCall(
