@@ -199,6 +199,19 @@ export interface GrantDecisionInput {
   runTrifecta?: TrifectaTags
   /** True once the run has ingested attacker-authorable content. */
   tainted?: boolean
+  /**
+   * Decide only the GRANT-level question: is this grant live right now.
+   *
+   * For the Ghost Graph, which has no call in hand. It skips the two checks that
+   * are properties of a specific tool rather than of the grant (scope and mode),
+   * because the alternative is a probe standing in for "any tool", and any name
+   * chosen for that either collides with the glob alphabet or fails scope
+   * against a narrowed `toolAllow`. Both make a live grant look broken.
+   *
+   * Everything else still runs, over the same rows and the same code, so a badge
+   * and the gate cannot disagree about revocation, expiry, drift or a ceiling.
+   */
+  grantLevelOnly?: boolean
   /** Epoch ms. Injected rather than read from the clock so the function is pure. */
   now: number
 }

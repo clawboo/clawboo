@@ -9,14 +9,31 @@
 // re-consent dialog, which is precisely the signal drift detection exists to
 // preserve.
 
+/**
+ * How deep a structure may nest before it is treated as bad data.
+ *
+ * The input reaching this function includes a connector's `inputSchema`, which a
+ * REMOTE SERVER writes. Unbounded recursion over an attacker-chosen shape is a
+ * stack overflow, and a RangeError thrown out of a hash is not something any
+ * caller here handles: it would take down a connect, or a projection the graph
+ * runs on every read. 64 is far past any real JSON Schema and far short of the
+ * default stack.
+ */
+const MAX_DEPTH = 64
+
 /** Stable stringify: object keys sorted, arrays left in order (order is meaningful in argv). */
-function canonicalJson(value: unknown): string {
+function canonicalJson(value: unknown, depth = 0): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  // Truncated rather than thrown. A hash is a fingerprint, and a distinct
+  // sentinel keeps it one: two schemas that differ only past this depth hash the
+  // same, which is a far better failure than refusing to hash at all. Anything
+  // this deep is not a schema a human is reading.
+  if (depth >= MAX_DEPTH) return '"[too-deep]"'
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v, depth + 1)).join(',')}]`
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([, v]) => v !== undefined)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v, depth + 1)}`).join(',')}}`
 }
 
 /**

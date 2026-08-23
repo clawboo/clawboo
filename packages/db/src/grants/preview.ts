@@ -19,13 +19,19 @@ import { decideGrant, type Grant, type GrantDenyReason, type GrantState } from '
 import { callsInWindow } from './rateWindow'
 
 /**
- * A read-only, unclassified, trifecta-free probe.
+ * A read-only, unclassified, trifecta-free stand-in.
  *
  * `readOnly: true` matters: `requiredMode` treats anything else as a write, so a
- * write-probe would report `mode-insufficient` on every read-mode grant and the
- * whole graph would render as broken.
+ * write-probe would report `mode-insufficient` on every read-mode grant.
+ *
+ * The NAME is never matched against anything, because every call below passes
+ * `grantLevelOnly`, which skips scope and mode. It used to be `'*'` matched as a
+ * literal tool name: `matchesGlob` treats `*` as special only on the PATTERN
+ * side, so any grant narrower than `toolAllow: ['*']` denied the probe
+ * `tool-not-in-scope`, a verdict `DENY_TO_STATE` has no entry for, and the
+ * grantee's tile disappeared from the graph.
  */
-const PROBE = { name: '*', readOnly: true } as const
+const PROBE = { name: '(preview)', readOnly: true } as const
 
 export interface GrantPreview {
   grantId: string
@@ -39,7 +45,7 @@ export interface GrantPreview {
 }
 
 /** Map a grant-level deny back to the lifecycle the operator recognises. */
-const DENY_TO_STATE: Partial<Record<GrantDenyReason, GrantState>> = {
+const DENY_TO_STATE: Record<GrantDenyReason, GrantState> = {
   'grant-proposed': 'proposed',
   'grant-suspended': 'suspended',
   'grant-revoked': 'revoked',
@@ -48,6 +54,15 @@ const DENY_TO_STATE: Partial<Record<GrantDenyReason, GrantState>> = {
   // active, it just is not authorizing anything at this instant.
   'spec-drift': 'active',
   'rate-limited': 'active',
+  // TOTAL rather than Partial, and the two below are why. They are tool-level
+  // verdicts that `grantLevelOnly` now prevents, but a `Partial` map let any
+  // unmapped reason fall silently through to the row's own state, which reads as
+  // a healthy grant while `denyReason` is set and the renderer drops the edge.
+  // Making the map total means adding a deny reason forces a decision here.
+  'tool-not-in-scope': 'active',
+  'mode-insufficient': 'active',
+  'no-grant': 'revoked',
+  'standing-deny': 'active',
 }
 
 export interface PreviewInput {
@@ -66,12 +81,18 @@ export function previewGrant(input: PreviewInput): GrantPreview | null {
   // Two passes, and only because `decideGrant` picks the grant internally: the
   // first learns WHICH grant it chose so the rate window can be read for that
   // grant, the second decides with the count in hand.
-  const first = decideGrant({ grants: input.grants, tool: PROBE, now: input.now })
+  const first = decideGrant({
+    grants: input.grants,
+    tool: PROBE,
+    grantLevelOnly: true,
+    now: input.now,
+  })
   if (first.grantId === null) return null
 
   const decision = decideGrant({
     grants: input.grants,
     tool: PROBE,
+    grantLevelOnly: true,
     currentSpecHash: input.currentSpecHash ?? null,
     currentToolsHash: input.currentToolsHash ?? null,
     callsInWindow: callsInWindow(first.grantId, input.now),
@@ -84,7 +105,7 @@ export function previewGrant(input: PreviewInput): GrantPreview | null {
   const denyReason = decision.kind === 'deny' ? decision.reason : null
   return {
     grantId: decision.grantId,
-    state: denyReason ? (DENY_TO_STATE[denyReason] ?? chosen.state) : 'active',
+    state: denyReason ? DENY_TO_STATE[denyReason] : 'active',
     mode: chosen.mode,
     denyReason,
   }

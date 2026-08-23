@@ -152,11 +152,18 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
     return { kind: 'deny', grantId: grant.id, reason: 'spec-drift' }
 
   // ── scope ────────────────────────────────────────────────────────────────
-  if (!isToolInScope({ allow: grant.toolAllow, deny: grant.toolDeny, name: tool.name }))
+  // Both of the next two checks are properties of the TOOL being called, not of
+  // the grant, so a caller with no call in hand skips them. See
+  // `grantLevelOnly`: without it the graph had to invent a tool to ask about,
+  // and every name it could invent was wrong for some grant.
+  if (
+    input.grantLevelOnly !== true &&
+    !isToolInScope({ allow: grant.toolAllow, deny: grant.toolDeny, name: tool.name })
+  )
     return { kind: 'deny', grantId: grant.id, reason: 'tool-not-in-scope' }
 
   // ── mode ─────────────────────────────────────────────────────────────────
-  if (MODE_RANK[requiredMode(tool)] > MODE_RANK[grant.mode])
+  if (input.grantLevelOnly !== true && MODE_RANK[requiredMode(tool)] > MODE_RANK[grant.mode])
     return { kind: 'deny', grantId: grant.id, reason: 'mode-insufficient' }
 
   // ── rate ─────────────────────────────────────────────────────────────────
