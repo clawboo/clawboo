@@ -215,6 +215,15 @@ export interface CapabilityRecord {
   grantState?: 'proposed' | 'active' | 'suspended' | 'revoked' | 'expired'
 
   /**
+   * The projected grant's privilege ceiling.
+   *
+   * Threaded rather than assumed: a renderer that defaults to `read` on an
+   * `admin` grant UNDER-REPORTS what the agent can actually do, which is the
+   * one direction a governance surface must never be wrong in.
+   */
+  grantMode?: 'read' | 'write' | 'admin'
+
+  /**
    * True for a record the server SYNTHESISED rather than read from a runtime.
    *
    * A grantee's twin tile is the only producer: agent B holds a grant on a

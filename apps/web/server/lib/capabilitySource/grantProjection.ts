@@ -47,6 +47,8 @@ function syntheticTwin(source: CapabilityRecord, grant: GrantRow): CapabilityRec
     synthetic: true,
     connectorId: grant.connectorId,
     grantId: grant.id,
+    grantState: 'active',
+    grantMode: grant.mode,
   }
 }
 
@@ -120,6 +122,7 @@ export function projectGrants(db: ClawbooDb, records: CapabilityRecord[]): Capab
         ? {
             grantId: preview.grantId,
             grantState: preview.state,
+            grantMode: preview.mode,
             lastUsedAt: lastUsed.has(preview.grantId)
               ? new Date(lastUsed.get(preview.grantId)!).toISOString()
               : null,
@@ -141,11 +144,24 @@ export function projectGrants(db: ClawbooDb, records: CapabilityRecord[]): Capab
     if (!source) continue
     for (const g of holders) {
       if (g.origin !== 'operator' || g.subjectKind !== 'agent' || !g.subjectId) continue
-      if (g.state !== 'active') continue
       const alreadyReal = out.some(
         (r) => r.agentId === g.subjectId && connectorIdForRecord(r) === connectorId,
       )
       if (alreadyReal) continue
+
+      // Gate on what the GATE would decide for the recipient, not on `g.state`.
+      // A row can sit stored as `active` while `decideGrant` refuses it -- past
+      // its expiry, out-scoped by a deny, or drifted -- and a tile for a
+      // connector the broker will refuse is exactly the lie this design exists
+      // to prevent.
+      const recipientConnector = getConnector(db, connectorId)
+      const effective = previewGrant({
+        grants: listCandidateGrants(db, { agentId: g.subjectId, connectorId }),
+        currentSpecHash: recipientConnector?.specHash ?? null,
+        currentToolsHash: recipientConnector?.toolsHash ?? null,
+        now,
+      })
+      if (!effective || effective.grantId !== g.id || effective.denyReason !== null) continue
       out.push(syntheticTwin(source, g))
     }
   }
