@@ -82,6 +82,7 @@ import {
 } from './board'
 import { memorySearchGET, memorySavePOST, memoryBrowseGET, memoryProviderGET } from './memory'
 import { capabilitiesListGET, capabilitiesActionPOST } from './capabilities'
+import { connectorsConnectPOST, connectorsDisconnectPOST, connectorsListGET } from './connectors'
 import { grantsCreatePOST, grantsListGET, grantsResumePOST, grantsRevokePOST } from './grants'
 import { toolsListGET, toolsApprovalsGET, toolsApprovalResolvePOST, toolsAuditGET } from './tools'
 import {
@@ -313,6 +314,11 @@ router.post('/api/tools/approvals/:id/resolve', toolsApprovalResolvePOST)
 router.get('/api/tools/audit', toolsAuditGET)
 // Grants — the server half of the Ghost Graph's connector gestures. `:id/resume`
 // is the 8-second Undo behind the Detach toast, and is bounded server-side.
+// Connectors — the lifecycle of an outbound MCP connection. `connect` spawns a
+// child process, so the scope gate lives in the handler rather than the client.
+router.get('/api/connectors', connectorsListGET)
+router.post('/api/connectors/connect', connectorsConnectPOST)
+router.post('/api/connectors/:slug/disconnect', connectorsDisconnectPOST)
 router.get('/api/grants', grantsListGET)
 router.post('/api/grants', grantsCreatePOST)
 router.post('/api/grants/:id/revoke', grantsRevokePOST)
