@@ -18,6 +18,7 @@ import {
   type DbToolCallAudit,
   type DbToolRegistry,
 } from '../schema'
+import { mintStandingRule } from '../grants/repository'
 import { createBuiltinRegistry } from './registry'
 import { scrubArgsSummary, scrubResultSummary } from './scrub'
 import type { ToolDescriptor } from './types'
@@ -193,6 +194,17 @@ export function listPendingApprovals(db: ClawbooDb): DbToolCallApproval[] {
     .all() as DbToolCallApproval[]
 }
 
+/**
+ * How long a remembered "Always" lasts.
+ *
+ * A rule MUST expire: the matcher treats a null expiry as immortal, and an
+ * immortal allow minted from one click is a permission nobody revisits. Thirty
+ * days is long enough that the operator is not re-prompted through a piece of
+ * work, and short enough that a connector they stopped using stops being
+ * pre-authorized.
+ */
+const STANDING_RULE_TTL_MS = 30 * 24 * 60 * 60_000
+
 /** Resolve a still-pending approval. The `status='pending'` guard makes a second
  *  resolve a no-op (idempotent). */
 export function resolveApproval(
@@ -200,14 +212,45 @@ export function resolveApproval(
   id: string,
   decision: ApprovalDecision,
 ): DbToolCallApproval | null {
-  withWriteRetry(() =>
-    db
-      .update(toolCallApprovals)
-      .set({ status: decision, resolvedAt: Date.now() })
-      .where(and(eq(toolCallApprovals.id, id), eq(toolCallApprovals.status, 'pending')))
-      .run(),
+  const changed = withWriteRetry(
+    () =>
+      db
+        .update(toolCallApprovals)
+        .set({ status: decision, resolvedAt: Date.now() })
+        .where(and(eq(toolCallApprovals.id, id), eq(toolCallApprovals.status, 'pending')))
+        .run().changes,
   )
-  return getApproval(db, id)
+  const row = getApproval(db, id)
+
+  // "ALWAYS" HAS TO MINT SOMETHING, or it is a relabelled "Allow once". Nothing
+  // else writes `approval_rules`, so without this the whole standing-rule path
+  // was unreachable: `listStandingRules` always returned empty, `decideGrant`
+  // never took its allow short-circuit, and the operator was re-prompted for the
+  // same call forever while the button promised otherwise.
+  //
+  // Guarded three ways. `changed` means THIS call did the resolving, so a second
+  // resolve of the same approval cannot re-mint. `grantId` must exist because a
+  // rule is bound to a grant and cascade-deleted with it. And `neverRemember` is
+  // the class the prompt already declared unrememberable (a lethal trifecta, a
+  // tainted run); honouring an "Always" for one of those would make that class a
+  // lie, which is why the flag is persisted at prompt time rather than recomputed
+  // here.
+  if (changed > 0 && row && decision === 'allow_always' && row.grantId && !row.neverRemember) {
+    mintStandingRule(db, {
+      grantId: row.grantId,
+      toolName: row.toolName,
+      // ANY arguments. The operator was shown one call and asked whether to stop
+      // being asked about this tool, so the rule is the broader of the two tiers
+      // `findStandingRule` supports. A shape-scoped rule would re-prompt on the
+      // next call with a different argument, which is the behaviour they just
+      // asked to end.
+      argsShape: null,
+      decision: 'allow',
+      expiresAt: Date.now() + STANDING_RULE_TTL_MS,
+      createdFromApprovalId: row.id,
+    })
+  }
+  return row
 }
 
 /**

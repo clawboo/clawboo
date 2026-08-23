@@ -18,6 +18,18 @@ export interface ToolApproval {
   reason: string | null
   createdAt: number
   expiresAt: number
+  /**
+   * This class of call may never be remembered, so the card must not offer
+   * "Always".
+   *
+   * Persisted at PROMPT time and carried through, rather than recomputed here.
+   * A lethal trifecta or a tainted run is a property of the run that produced
+   * this prompt, and the resolve path refuses to mint a rule for one, so an
+   * "Always" button on it is a control that quietly does nothing.
+   *
+   * SQLite has no boolean: the API sends the integer column through as-is.
+   */
+  neverRemember?: number | boolean | null
 }
 
 export type ToolDecision = 'allow_once' | 'allow_always' | 'deny'

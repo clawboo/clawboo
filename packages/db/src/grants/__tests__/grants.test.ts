@@ -10,6 +10,7 @@ import { decideGrant } from '@clawboo/governance'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
+import { createApproval, resolveApproval } from '../../tools/persistence'
 import { grantKey, normalizeGrantIdentity, ruleKey } from '../key'
 import { previewGrant } from '../preview'
 import { callsInWindow, chargeCall, releaseCall, resetRateWindows } from '../rateWindow'
@@ -443,5 +444,98 @@ describe('preview and gate agree', () => {
 
   it('returns null when nothing could authorize the call', () => {
     expect(previewGrant({ grants: [], now: Date.now() })).toBeNull()
+  })
+})
+
+describe('an "Always" approval mints a standing rule', () => {
+  // Nothing else writes `approval_rules`. Without this the button was a
+  // relabelled "Allow once": `listStandingRules` always came back empty, so
+  // `decideGrant` never took its allow short-circuit and the operator was
+  // re-prompted for the same call forever.
+  let dir: string
+  let db: ClawbooDb
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-rules-'))
+    db = createDb(path.join(dir, 'test.db'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('mints an any-args allow bound to the approval', () => {
+    const grant = agentGrant(db, 'a1')
+    const approval = createApproval(db, {
+      toolName: 'mcp__github__search',
+      agentId: 'a1',
+      args: { q: 'x' },
+      grantId: grant.id,
+    })
+    expect(listStandingRules(db, grant.id)).toHaveLength(0)
+
+    resolveApproval(db, approval.id, 'allow_always')
+
+    const rules = listStandingRules(db, grant.id)
+    expect(rules).toHaveLength(1)
+    expect(rules[0]!.toolName).toBe('mcp__github__search')
+    expect(rules[0]!.decision).toBe('allow')
+    // Any arguments: they asked to stop being asked about this tool, not about
+    // this exact call.
+    expect(rules[0]!.argsShape).toBeNull()
+    // A rule with no expiry is immortal to the matcher, which one click must
+    // never buy.
+    expect(rules[0]!.expiresAt).toBeGreaterThan(Date.now())
+  })
+
+  it('mints nothing for a plain allow, a deny, or a second resolve', () => {
+    const grant = agentGrant(db, 'a2')
+    const once = createApproval(db, {
+      toolName: 'mcp__github__search',
+      args: {},
+      grantId: grant.id,
+    })
+    resolveApproval(db, once.id, 'allow_once')
+    expect(listStandingRules(db, grant.id)).toHaveLength(0)
+
+    const denied = createApproval(db, {
+      toolName: 'mcp__github__write',
+      args: {},
+      grantId: grant.id,
+    })
+    resolveApproval(db, denied.id, 'deny')
+    expect(listStandingRules(db, grant.id)).toHaveLength(0)
+
+    // Idempotent: the status guard means the second resolve changes nothing, so
+    // it must not mint either.
+    const always = createApproval(db, {
+      toolName: 'mcp__github__read',
+      args: {},
+      grantId: grant.id,
+    })
+    resolveApproval(db, always.id, 'allow_always')
+    resolveApproval(db, always.id, 'allow_always')
+    expect(
+      listStandingRules(db, grant.id).filter((r) => r.toolName === 'mcp__github__read'),
+    ).toHaveLength(1)
+  })
+
+  it('REFUSES to remember a class the prompt declared unrememberable', () => {
+    // `neverRemember` is persisted at prompt time precisely so the resolve path
+    // cannot mint a durable rule the prompt never offered: a lethal trifecta is
+    // a property of one run, and a standing allow would authorize a future run
+    // that looks nothing like it.
+    const grant = agentGrant(db, 'a3')
+    const approval = createApproval(db, {
+      toolName: 'mcp__github__exfil',
+      args: {},
+      grantId: grant.id,
+      neverRemember: true,
+      ruleReason: 'lethal-trifecta',
+    })
+    resolveApproval(db, approval.id, 'allow_always')
+    expect(listStandingRules(db, grant.id)).toHaveLength(0)
+  })
+
+  it('mints nothing when the approval is not bound to a grant', () => {
+    const approval = createApproval(db, { toolName: 'core__thing', args: {} })
+    expect(() => resolveApproval(db, approval.id, 'allow_always')).not.toThrow()
   })
 })
