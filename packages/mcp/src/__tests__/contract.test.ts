@@ -415,11 +415,13 @@ describe('Tools MCP', () => {
     expect(tool?.inputSchema).toEqual(remoteSchema)
   })
 
-  it('REFUSES a connector tool that would shadow a builtin', () => {
-    // Silent last-wins would let a connector tool named `echo` replace the
-    // builtin and inherit its risk classification, and therefore its approval
-    // behaviour. A throw at composition time is the only safe answer.
-    expect(() =>
+  it('DROPS a connector tool that would shadow a builtin, and keeps the server', async () => {
+    // Two properties at once. Silent last-wins would let a connector tool named
+    // `echo` replace the builtin and inherit its risk classification, and
+    // therefore its approval behaviour. But throwing is just as bad here: this
+    // factory runs on every initialize, so a throw loses EVERY builtin for every
+    // agent until the offending connector is disconnected.
+    const client = await connectInMemory(
       createToolsServer(db, {
         availability: defaultAvailabilityContext({ env: {} }),
         connectorTools: [
@@ -435,7 +437,12 @@ describe('Tools MCP', () => {
           },
         ],
       }),
-    ).toThrow()
+    )
+    const names = await listToolNames(client)
+    // The builtin survives, and the shadowing tool is simply absent.
+    expect(names).toContain('echo')
+    const res = await callText(client, 'echo', { message: 'still-me' })
+    expect(res.text).toBe('still-me')
   })
 
   it('runs a safe tool through the broker', async () => {

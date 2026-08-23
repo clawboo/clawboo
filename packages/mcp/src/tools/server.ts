@@ -58,8 +58,20 @@ export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}):
   // its risk classification and therefore its approval behaviour.
   const connectorOf = new Map<string, string>()
   for (const entry of opts.connectorTools ?? []) {
-    registry.registerOrThrow(entry.descriptor)
-    connectorOf.set(entry.descriptor.name, entry.connectorId)
+    try {
+      registry.registerOrThrow(entry.descriptor)
+      connectorOf.set(entry.descriptor.name, entry.connectorId)
+    } catch {
+      // DROP the offending tool, never the server. This factory runs on every
+      // `initialize`, so a throw here does not fail one tool or even one
+      // connector: it fails construction, which loses every builtin for every
+      // agent until someone disconnects the connector that caused it. No remote
+      // server gets to decide whether the local tools server can be built.
+      //
+      // The caller is expected to have de-duplicated already; this is the
+      // backstop for a collision it did not anticipate, including one against a
+      // builtin name.
+    }
   }
 
   const tools: ToolDef[] = registry
