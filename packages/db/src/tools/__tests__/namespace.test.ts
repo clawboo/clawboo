@@ -51,6 +51,17 @@ describe('connector tool namespacing', () => {
     expect(out).toEqual({ ok: false, reason: 'name-too-long' })
   })
 
+  it('parses EXACTLY what it can construct, and nothing else', () => {
+    // A looser parser classifies a name the constructor refuses to emit as a
+    // valid connector tool, so a name from a persisted row or a hand-written
+    // config would be routed on the strength of its prefix alone.
+    for (const remote of ['a.b', 'has space', 'x'.repeat(200)]) {
+      expect(namespacedToolName('github', remote).ok).toBe(false)
+      expect(parseNamespacedToolName(`mcp__github__${remote}`)).toBeNull()
+      expect(isConnectorToolName(`mcp__github__${remote}`)).toBe(false)
+    }
+  })
+
   it('does not mistake a builtin for a connector tool', () => {
     expect(isConnectorToolName('echo')).toBe(false)
     expect(isConnectorToolName('mcp__github__x')).toBe(true)

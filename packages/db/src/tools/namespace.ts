@@ -64,7 +64,13 @@ export function parseNamespacedToolName(name: string): { slug: string; remoteNam
   if (at <= 0) return null
   const slug = rest.slice(0, at)
   const remoteName = rest.slice(at + SEP.length)
-  if (!SAFE_SLUG.test(slug) || remoteName.length === 0) return null
+  // The parser must accept EXACTLY what the constructor can emit. A looser
+  // parser would classify `mcp__github__a.b` as a connector tool even though
+  // `namespacedToolName` refuses to produce it, so a name arriving from a
+  // persisted row or a hand-written config would be routed to a connector on
+  // the strength of its prefix alone.
+  if (!SAFE_SLUG.test(slug) || !SAFE_NAME.test(remoteName)) return null
+  if (name.length > MAX_TOOL_NAME) return null
   return { slug, remoteName }
 }
 
