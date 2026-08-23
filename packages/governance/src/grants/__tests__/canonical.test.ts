@@ -9,7 +9,7 @@ describe('canonicalizeSpec', () => {
     expect(a).toBe(b)
   })
 
-  it('preserves argv ORDER — arrays are not sorted', () => {
+  it('preserves argv ORDER: arrays are not sorted', () => {
     const a = canonicalizeSpec({ command: 'npx', args: ['-y', 'pkg'] })
     const b = canonicalizeSpec({ command: 'npx', args: ['pkg', '-y'] })
     expect(a).not.toBe(b)

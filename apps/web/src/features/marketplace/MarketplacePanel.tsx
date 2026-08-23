@@ -451,7 +451,7 @@ export function MarketplacePanel() {
                 onChange={setTeamSearchQuery}
               />
 
-              {/* Team category pills — popular inline, the rest under "+N more" */}
+              {/* Team category pills: popular inline, the rest under "+N more" */}
               <CollapsiblePillRow
                 aria-label="Filter teams by category"
                 options={teamCategoryOpts}
@@ -492,7 +492,7 @@ export function MarketplacePanel() {
                 onChange={setAgentSearchQuery}
               />
 
-              {/* Agent domain pills — popular inline, the rest under "+N more" */}
+              {/* Agent domain pills: popular inline, the rest under "+N more" */}
               <CollapsiblePillRow
                 aria-label="Filter agents by domain"
                 options={domainOptions}

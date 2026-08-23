@@ -1,9 +1,9 @@
-// Detach — revoke ONE grant (J5). No dialog: the 8-second undo window is the
+// Detach: revoke ONE grant (J5). No dialog: the 8-second undo window is the
 // safety, which is honest because detach never touches tokens (the drawer's
 // uninstall is the only verb that does, and it gets the typed confirmation).
 //
 // Reachable only from a grant-backed tile's toolbar, which renders only when the
-// record carries a grantId — so this can target the grants API for the
+// record carries a grantId, so this can target the grants API for the
 // same reason `grantConnector.ts` can: by the time any user can click it, the
 // endpoint exists.
 
@@ -25,7 +25,7 @@ async function post(path: string): Promise<boolean> {
 export async function detachGrant(display: {
   grantId: string
   connectorName: string
-  /** Display name. Omit when the caller only has an id — the copy adapts. */
+  /** Display name. Omit when the caller only has an id: the copy adapts. */
   agentName?: string
 }): Promise<void> {
   const ok = await post(`/api/grants/${encodeURIComponent(display.grantId)}/revoke`)

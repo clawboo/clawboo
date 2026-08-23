@@ -815,7 +815,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
 
       // Connector-to-Boo: share a grant-backed connector with a second agent.
       // Validation already passed (the source handle only exists on grant-backed
-      // tiles), so this opens the composer rather than acting — the grant's mode
+      // tiles), so this opens the composer rather than acting: the grant's mode
       // is a decision, not a default. This branch used to fall through to the
       // early return below: the drag validated, then silently did nothing.
       if (sourceNode.type === 'resource' && targetNode.type === 'boo') {
@@ -952,7 +952,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     (connection) => {
       // `getNode` instead of scanning `nodes`: this callback is a <ReactFlow>
       // prop, so closing over the array re-creates it on EVERY position tick
-      // during a drag — React Flow's own perf guide names that the primary
+      // during a drag: React Flow's own perf guide names that the primary
       // anti-pattern. `getNode` is referentially stable.
       const source = connection.source ? getNode(connection.source) : undefined
       const target = connection.target ? getNode(connection.target) : undefined
@@ -963,7 +963,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
 
   // A refused drop must be SAID, not just felt as a thread snapping back. React
   // Flow gives the attempted pair in connectionState; the reason comes from the
-  // same connectionRefusal the validity check uses — one function, one dialect.
+  // same connectionRefusal the validity check uses: one function, one dialect.
   const onConnectEnd = useCallback(
     (
       _event: MouseEvent | TouchEvent,
@@ -1064,7 +1064,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       }
       // `grant` belongs here too: it is an orbital edge like the others (it wraps
       // OrbitalEdge), so without it a grant edge stays drawn while its tile is
-      // collapsed — a line to nothing.
+      // collapsed: a line to nothing.
       if (e.type !== 'skill' && e.type !== 'resource' && e.type !== 'grant') return e
       // Skill / resource / grant edges always have the parent Boo as `source`.
       // Visibility is animated INSIDE the edge component (OrbitalEdge draws
@@ -1444,7 +1444,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         )}
       </ReactFlow>
 
-      {/* J4 share dialog — mounted here (not inside ReactFlow) so it overlays
+      {/* J4 share dialog: mounted here (not inside ReactFlow) so it overlays
           the canvas on the dialog layer; state lives in the graph store, set by
           the onConnect resource→boo branch. */}
       <GrantComposer />

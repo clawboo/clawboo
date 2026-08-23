@@ -1,4 +1,4 @@
-// Curated: the SaaS canon — docs, chat, design, payments.
+// Curated: the SaaS canon of docs, chat, design and payments.
 // Same verification rule as ./dev.ts.
 
 import type { ConnectorDefinition } from '../types'
@@ -33,7 +33,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
         steps: [
           'Create a new internal integration and copy its token.',
           'Open the pages or databases this agent should reach.',
-          'Use the page menu to connect the integration — Notion grants nothing by default.',
+          'Use the page menu to connect the integration. Notion grants nothing by default.',
         ],
       },
     },
@@ -87,8 +87,8 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
         url: 'https://dashboard.stripe.com/',
         steps: [
           'Approve the authorization request in the browser tab that opens.',
-          'Start in TEST mode — a live-mode grant lets an agent move real money.',
-          'Return to clawboo — the tile clears its amber key badge on success.',
+          'Start in TEST mode. A live-mode grant lets an agent move real money.',
+          'Return to clawboo. The tile clears its amber key badge on success.',
         ],
       },
     },

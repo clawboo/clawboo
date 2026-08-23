@@ -37,7 +37,7 @@ export {
 
 export { MCP_SERVER_VERSION } from './shared'
 
-// ── Outbound MCP client — clawboo connecting OUT to somebody else's server ──
+// ── Outbound MCP client: clawboo connecting OUT to somebody else's server ──
 // Lives here because @modelcontextprotocol/sdk is a dependency of this package
 // alone; pnpm's strict layout puts it out of reach of apps/web.
 export {

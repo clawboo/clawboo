@@ -83,14 +83,14 @@ export const ResourceNode = memo(function ResourceNode({
   const { orbitIndex, orbitCount, health, healthDetail, diagnostics, hint, grantIds, connectorId } =
     data
   const { grantCount, grantState } = data
-  // ONE badge, strict precedence — see ./capabilityBadge. The tile previously
+  // ONE badge, strict precedence. See ./capabilityBadge. The tile previously
   // collapsed the whole lifecycle into `status !== 'disabled'`, so a connector
   // waiting on auth rendered as fully normal while the dashboard got it right.
   const badge = capabilityBadge({ health, available, enabled, grantIds, grantState })
   const reason = capabilityReason({ badge, diagnostics, healthDetail, hint })
   // Two dialects, deliberately distinct (the 04 §5 rule): DIMMED means a human
-  // turned it off — a choice — and keeps its color; GREYED + grayscale means it
-  // cannot run — a condition. Collapsing them is what made a pending-auth
+  // turned it off (a choice) and keeps its color; GREYED + grayscale means it
+  // cannot run (a condition). Collapsing them is what made a pending-auth
   // connector read the same as a deliberately disabled one.
   const unavailable = available === false || health === 'error' || health === 'degraded'
   const off = enabled === false
@@ -103,7 +103,7 @@ export const ResourceNode = memo(function ResourceNode({
   // Below this zoom a 46px tile is ~18px on screen: the label is unreadable, the
   // badge is a smudge, and the per-frame floating rAF write buys nothing. The
   // selector returns a BOOLEAN, not the zoom, so this subscription re-renders
-  // only when the threshold is crossed — subscribing to the raw zoom would
+  // only when the threshold is crossed: subscribing to the raw zoom would
   // re-render every tile on every wheel tick, which is the opposite of the point.
   const farZoom = useStore((st) => st.transform[2] < LOD_ZOOM)
   const floatRef = useFloatingMotion(nodeId, 'skill', dragging, farZoom)
@@ -139,7 +139,7 @@ export const ResourceNode = memo(function ResourceNode({
     return (
       <div
         style={{ width: CIRCLE, height: CIRCLE, position: 'relative' }}
-        title={reason ? `${tooltipBase} — ${reason}` : tooltipBase}
+        title={reason ? `${tooltipBase}: ${reason}` : tooltipBase}
       >
         <div
           aria-hidden
@@ -180,7 +180,7 @@ export const ResourceNode = memo(function ResourceNode({
     // Static root: the center Handle lives here, OUTSIDE the animated /
     // floating wrappers, so edges anchor to the stable geometric center.
     <div style={{ width: CIRCLE, height: CIRCLE, position: 'relative' }}>
-      {/* Selection toolbar — portal-rendered by React Flow, so it is never
+      {/* Selection toolbar: portal-rendered by React Flow, so it is never
           clipped by the orbital ring. Every button is gated on the RECORD:
           an action that cannot complete does not render (the CapabilitiesPanel
           actionsFor rule, applied to the canvas). Ordered frequency-then-danger. */}
@@ -202,7 +202,7 @@ export const ResourceNode = memo(function ResourceNode({
           <div
             title={
               reason
-                ? `${tooltipBase} — ${reason}`
+                ? `${tooltipBase}: ${reason}`
                 : `${tooltipBase} · attached MCP server${
                     (grantCount ?? 0) >= 2 ? ` · shared by ${grantCount} agents` : ''
                   }`
@@ -264,7 +264,7 @@ export const ResourceNode = memo(function ResourceNode({
 
             {/* Shared by N agents. Hovering the tile highlights its siblings via
               the existing hover cascade, so the chip only has to say "there are
-              others" — it does not need to name them. */}
+              others", not to name them. */}
             {(grantCount ?? 0) >= 2 && isVisible !== false && (
               <span
                 aria-hidden
@@ -326,7 +326,7 @@ export const ResourceNode = memo(function ResourceNode({
         }}
       />
 
-      {/* Right handle — SOURCE, so a connector tile can be dragged onto a second
+      {/* Right handle: SOURCE, so a connector tile can be dragged onto a second
           Boo to grant it there. Both handles were `type="target"` until now,
           which made the whole drag-to-grant gesture impossible by construction,
           not by policy.
@@ -361,9 +361,9 @@ export const ResourceNode = memo(function ResourceNode({
 // ─── ResourceToolbar ─────────────────────────────────────────────────────────
 //
 // Pure function of the record. Buttons render only when their action is real:
-//   Configure       always (opens the Capabilities panel — the detail surface)
+//   Configure       always (opens the Capabilities panel, the detail surface)
 //   Disable/Enable  writable rows only (the existing REST write)
-//   Sign in         health 'needs-auth' only — the hint IS the action today
+//   Sign in         health 'needs-auth' only: the hint IS the action today
 //   Retry           health 'error' | 'degraded' only (re-reads the inventory)
 //   Detach          grant-backed rows only (revoke + the undo toast)
 
@@ -421,7 +421,7 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
           title={hint}
           onClick={() =>
             useToastStore.getState().addToast({
-              // The source-supplied hint verbatim — the graph never paraphrases
+              // The source-supplied hint verbatim: the graph never paraphrases
               // a per-runtime remedy into a string of its own.
               message: hint ?? `${name} needs sign-in.`,
               type: 'info',
@@ -446,7 +446,7 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
           type="button"
           className={TOOLBAR_BTN}
           onClick={() =>
-            // agentIds carries IDs, not display names — the toast copy adapts
+            // agentIds carries IDs, not display names, so the toast copy adapts
             // rather than printing an id at the user.
             void detachGrant({ grantId: grantIds![0]!, connectorName: name })
           }

@@ -105,7 +105,7 @@ describe('the honesty invariants', () => {
   it('pins a concrete version on every stdio launch', () => {
     // A bare `npx -y <pkg>` resolves to @latest on every spawn, so the executing
     // code changes with no consent event. The pin must also actually appear in
-    // argv — recording it in a field the spawner never reads would be theatre.
+    // argv: recording it in a field the spawner never reads would be theatre.
     for (const c of CONNECTOR_DEFINITIONS) {
       // Bound to a local so the discriminated-union narrowing survives into the
       // `.some()` callback, where TS would otherwise widen it back.
@@ -217,7 +217,7 @@ describe('searchConnectors', () => {
     expect(searchConnectors('  ')).toHaveLength(CONNECTOR_DEFINITIONS.length)
   })
 
-  it('matches on a one- or two-character query — there is no silent minimum', () => {
+  it('matches on a one- or two-character query: there is no silent minimum', () => {
     // A silent below-N no-op reads as a broken box, so there is no minimum.
     expect(searchConnectors('gi').length).toBeGreaterThan(0)
   })

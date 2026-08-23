@@ -543,7 +543,7 @@ const SCHEMA_DDL = `
     );
     CREATE INDEX IF NOT EXISTS idx_agent_inbox_pending ON agent_inbox (agent_id, delivered_at);
 
-    -- ── Connector INSTANCES — see src/grants/ ────────────────────────────────
+    -- ── Connector INSTANCES: see src/grants/ ────────────────────────────────
     -- Three nouns kept apart on purpose. The catalog TYPE is committed TypeScript
     -- in @clawboo/connector-catalog, this row is a configured INSTANCE, and a
     -- capabilities row is one callable TOOL. spec_hash / tools_hash are
@@ -578,7 +578,7 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS        idx_connectors_health  ON connectors (health);
     CREATE INDEX IF NOT EXISTS        idx_connectors_catalog ON connectors (catalog_id);
 
-    -- ── The grant spine — capability_grants IS the edge ──────────────────────
+    -- ── The grant spine: capability_grants IS the edge ──────────────────────
     -- One row is BOTH the permission executeBrokeredCall enforces AND the Ghost
     -- Graph edge an operator reads. The renderer calls the same decideGrant the
     -- gate calls: a badge computed by a second code path is governance theatre,
@@ -637,7 +637,7 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_grants_state      ON capability_grants (state);
     CREATE INDEX IF NOT EXISTS idx_grants_expires    ON capability_grants (expires_at);
 
-    -- ── approval_rules — durable allow_always, BOUND to a grant ──────────────
+    -- ── approval_rules: durable allow_always, BOUND to a grant ──────────────
     -- priorAllowAlways (src/governance/approvalScope.ts) already ships a durable
     -- remembered-approval reader, so this table has to justify itself by what it
     -- ADDS: an args-shape binding, a cascade-revoke with its grant, and an expiry.

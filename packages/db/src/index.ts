@@ -125,7 +125,7 @@ export * from './inbox'
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'
 
-// ── The grant spine — capability_grants IS the Ghost Graph edge ──
+// ── The grant spine: capability_grants IS the Ghost Graph edge ──
 export * from './grants'
 
 // ── Database connection + helpers ──────────────────────────────────────────

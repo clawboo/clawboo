@@ -86,7 +86,7 @@ export interface ToolDescriptor {
   risk?: ToolRisk
   /**
    * MCP ToolAnnotations, mirrored so the grant gate can classify a tool without
-   * a second vocabulary. NOTHING POPULATES THESE YET — an outbound MCP client
+   * a second vocabulary. NOTHING POPULATES THESE YET: an outbound MCP client
    * reading `tools/list` is what fills them.
    *
    * CONSEQUENCE WORTH KNOWING: `requiredMode` treats anything not declaring

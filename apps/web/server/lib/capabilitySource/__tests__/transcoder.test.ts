@@ -55,7 +55,7 @@ describe('transcoder — dialects', () => {
   })
 
   it('rejects a dotted name, which TOML would silently nest', () => {
-    // `[mcp_servers.a.b]` declares table `b` under `a` — Codex would register a
+    // `[mcp_servers.a.b]` declares table `b` under `a`, so Codex would register a
     // server called `b`, and the merge could never find it again.
     expect(() => toCodexTomlBlock({ name: 'a.b', transport: 'stdio', command: 'c' })).toThrow(
       InvalidMcpIdentError,
@@ -71,7 +71,7 @@ describe('transcoder — dialects', () => {
   })
 })
 
-describe('transcoder — incomplete specs', () => {
+describe('transcoder: incomplete specs', () => {
   // `command` and `url` are both optional on CanonicalMcpServer because each is
   // dead weight for the other transport. Nothing else enforces the pairing, so a
   // spec missing its own transport's field used to transcode into `url = ""` or

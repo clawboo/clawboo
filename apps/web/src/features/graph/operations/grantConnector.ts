@@ -1,7 +1,7 @@
 // Grant an already-connected connector to a second agent (J4, "the twin").
 //
 // Reachable ONLY through a grant-backed tile's source handle, which renders only
-// when the record carries a grantId — i.e. only once the server actually serves
+// when the record carries a grantId, i.e. only once the server actually serves
 // grants. So this op can honestly target the grants API: by the time any
 // user can fire it, the endpoint exists. Shipping the button and the endpoint in
 // the same release is the rule; this is the gesture-side half.

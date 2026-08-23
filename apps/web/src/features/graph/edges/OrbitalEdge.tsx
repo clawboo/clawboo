@@ -43,7 +43,7 @@ interface OrbitalEdgeProps {
    */
   dash?: string
   width?: number
-  /** Marching dashes — reserved for "a human owes this edge a decision". */
+  /** Marching dashes: reserved for "a human owes this edge a decision". */
   march?: boolean
 }
 
@@ -188,7 +188,7 @@ export function OrbitalEdge({ edge, accent, dash, width, march }: OrbitalEdgePro
           pathLength: isVisible ? 1 : 0,
           opacity: isVisible ? 1 : 0,
           // The march runs only when there is something to decide, and only when
-          // motion is allowed — under reduced motion the dash pattern alone still
+          // motion is allowed. Under reduced motion the dash pattern alone still
           // distinguishes the state.
           ...(march && dash && !reduceMotion ? { strokeDashoffset: [0, -16] } : {}),
         }}

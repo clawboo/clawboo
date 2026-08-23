@@ -3,18 +3,18 @@ import type { EdgeProps } from '@xyflow/react'
 import { OrbitalEdge } from './OrbitalEdge'
 import { isGrantEdgeData, type GrantEdgeMode, type GrantEdgeState } from '../types'
 
-// ─── GrantEdge — the authorization edge: agent → capability ──────────────────
+// ─── GrantEdge, the authorization edge: agent → capability ──────────────────
 //
 // Two orthogonal channels, so both can be read at once:
 //
-//   GEOMETRY = PRIVILEGE. Static, and static on purpose — it must survive
+//   GEOMETRY = PRIVILEGE. Static, and static on purpose: it must survive
 //   zoom-out, screenshots, and reduced motion, none of which an animation does.
 //     1px dotted  read    · 2px solid  write   · 3px  admin
 //
 //   ANIMATION = STATE. Transient, and only for states a human can act on:
 //     marching amber dashes  a decision is pending
 //     flat grey              suspended (including the global freeze)
-//     faded                  revoked — revocation must be SEEN, not just applied
+//     faded                  revoked: revocation must be SEEN, not just applied
 //
 // A thin wrapper over `OrbitalEdge` rather than a new edge component: the
 // gradient stroke, the peacock draw-in, the hover cascade and the MiniGraph

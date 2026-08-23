@@ -24,7 +24,7 @@ export function makeCapabilityId(sourceId: CapabilitySourceId, rawKey: string): 
 /**
  * Split a capability id back into its owning source + raw key.
  *
- * PREFIX-MATCHES the closed `SOURCE_IDS` list — it does NOT split on the first
+ * PREFIX-MATCHES the closed `SOURCE_IDS` list: it does NOT split on the first
  * `:`, and the difference matters: `claude-code:x` contains no colon before the
  * source name ends, but a naive first-colon split would still be wrong the moment
  * a source id itself contains one. Prefix-matching also means an id whose source

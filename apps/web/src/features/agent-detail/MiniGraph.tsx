@@ -48,7 +48,7 @@ const NATIVE_EMPTY_PROVIDERS = new Set<string>()
 // Offset from each Boo's React Flow `node.position` (top-left of the
 // envelope) to its visual center. The Boo renders centered inside its
 // envelope (`BOO_FOOTPRINT = 280` in `nodes/BooNode.tsx`), so the center is at
-// half the envelope size — the same anchor used by `computeOrbitalPositions`,
+// half the envelope size: the same anchor used by `computeOrbitalPositions`,
 // the global `graphPhysics` singleton, and `TeamHaloLayer`, all of which use
 // 140. This file previously used 170 against a comment citing a 340 footprint
 // that does not exist, so the mini graph's physics anchor sat 30px below and

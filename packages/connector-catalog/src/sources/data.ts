@@ -1,5 +1,5 @@
 // Curated: data, search, and infrastructure connectors.
-// Same verification rule as ./dev.ts — every package below resolved on npm and
+// Same verification rule as ./dev.ts: every package below resolved on npm and
 // is pinned to the version that answered.
 
 import type { ConnectorDefinition } from '../types'

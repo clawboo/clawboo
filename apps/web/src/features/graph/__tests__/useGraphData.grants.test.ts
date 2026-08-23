@@ -1,7 +1,7 @@
 // The connector-era threading: buildGraphElements carries the optional grant /
 // health fields from a CapabilityRecord onto the resource node, keys the node on
 // the connector INSTANCE id when one exists, and renders a grant-backed record's
-// edge as a `grant` edge — while a record that has never heard of grants renders
+// edge as a `grant` edge, while a record that has never heard of grants renders
 // byte-identically to the pre-grant graph. That backward-compat half is the
 // load-bearing assertion: prod servers emit none of these fields today, so any
 // visual change without them is a regression.
@@ -71,7 +71,7 @@ function build(caps: CapabilityRecord[]) {
   return buildGraphElements([agent], files, [makeTeam({ id: 't1' })])
 }
 
-describe('buildGraphElements — grant-era threading', () => {
+describe('buildGraphElements: grant-era threading', () => {
   it('renders a LEGACY record (no grant fields) byte-identically to the pre-grant graph', () => {
     const { rawNodes, rawEdges } = build([
       makeConnectorCap({ sourceKey: 'mcp:memory', name: 'clawboo-memory' }),
@@ -85,7 +85,7 @@ describe('buildGraphElements — grant-era threading', () => {
     expect(data.connectorId).toBeNull()
     expect(data.grantIds).toBeUndefined()
 
-    // The edge stays a plain resource edge — no grant, no grant rendering.
+    // The edge stays a plain resource edge: no grant, no grant rendering.
     const edge = rawEdges.find((e) => e.target === node!.id)
     expect(edge?.type).toBe('resource')
   })
@@ -99,7 +99,7 @@ describe('buildGraphElements — grant-era threading', () => {
       }),
     ])
     const node = rawNodes.find((n) => n.type === 'resource')
-    // A rename changes the slug but not the instance id — the node id (and with
+    // A rename changes the slug but not the instance id: the node id (and with
     // it the user's hand-placed position) survives.
     expect(node!.id).toBe('resource-a1-conn_abc123')
     expect((node!.data as ResourceNodeData).connectorId).toBe('conn_abc123')

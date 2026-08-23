@@ -1,4 +1,4 @@
-// The grant gate — where a `capability_grants` row stops being decorative.
+// The grant gate: where a `capability_grants` row stops being decorative.
 //
 // WHAT IS GOVERNED, and why the answer is narrow today. A call is grant-governed
 // only when its descriptor is NOT owner:'core' AND the caller supplied a

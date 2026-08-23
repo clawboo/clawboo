@@ -1,7 +1,7 @@
 // The "lethal trifecta": reads private data + ingests untrusted content + can
 // send bytes out. Any one leg is ordinary. All three armed inside one run is the
 // shape of an exfiltration chain, and no amount of tool-description sanitising
-// prevents it — the model is supposed to read those descriptions.
+// prevents it: the model is supposed to read those descriptions.
 //
 // Tracked as a UNION across the run rather than per call, because the attack is
 // a chain: one tool reads the repo, another fetches an attacker-authored page,

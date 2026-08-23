@@ -89,7 +89,7 @@ export function killLiveSubprocesses(): number {
   // `true`, not `false`. The flag exists so a run that spawns AFTER shutdown
   // begins is killed the moment it registers (see the registration guard). This
   // function runs from the synchronous 'exit' hook, i.e. AFTER the async
-  // graceful path — clearing the flag here re-opened the exact window the flag
+  // graceful path: clearing the flag here re-opened the exact window the flag
   // was added to close, letting a late child outlive the server.
   shuttingDown = true
   const count = liveChildren.size + liveConnectorPids.size

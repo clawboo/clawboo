@@ -127,7 +127,7 @@ export interface ToolCallData {
    * Attribution. Optional so every existing producer compiles unchanged.
    *
    * Without these the only join key is the tool NAME, which is unprefixed and
-   * collides across servers by design — so a UI could not tell which connector
+   * collides across servers by design, so a UI could not tell which connector
    * a call belonged to, and "which grants fired overnight" had no answer.
    */
   grantId?: string | null
@@ -135,7 +135,7 @@ export interface ToolCallData {
 }
 
 export interface GrantDecisionData {
-  /** `allow` | `require_approval` | `deny` — the verdict `decideGrant` returned. */
+  /** `allow` | `require_approval` | `deny`: the verdict `decideGrant` returned. */
   decision: string
   /** The typed reason, e.g. `tool-not-in-scope`, `lethal-trifecta`. */
   reason?: string | null

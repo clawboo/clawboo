@@ -778,7 +778,7 @@ export function buildGraphElements(
               agentIds: [agent.id],
               available: cap.available,
               enabled,
-              // Connector-era threading. All optional on CapabilityRecord — a
+              // Connector-era threading. All optional on CapabilityRecord: a
               // server that has never heard of grants leaves them undefined and
               // this renders byte-identically to the pre-grant graph.
               capabilityId: cap.id,

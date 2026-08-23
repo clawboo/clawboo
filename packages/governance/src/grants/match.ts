@@ -4,7 +4,7 @@
 // (catastrophic backtracking on a name the tool itself supplies).
 //
 // Only `*` is special, and it matches any run of characters including none.
-// Everything else is literal — `.` and `-` are ordinary characters here, which
+// Everything else is literal: `.` and `-` are ordinary characters here, which
 // matters because MCP tool names are full of both.
 
 /** True when `name` matches a single `*`-glob pattern, anchored at both ends. */
@@ -52,7 +52,7 @@ export function matchesAny(patterns: readonly string[], name: string): boolean {
  * except the two dangerous ones" without enumerating the rest.
  *
  * `allow: []` means NO tools, not all of them. That is the whole reason
- * `Grant.toolAllow` is a required field — an optional one would let a dropped
+ * `Grant.toolAllow` is a required field: an optional one would let a dropped
  * key read as "unrestricted", which is the failure mode this three-state design
  * exists to prevent.
  */

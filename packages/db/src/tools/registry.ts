@@ -33,7 +33,7 @@ export class ToolRegistry {
    *
    * A silent overwrite is not a cosmetic problem here. A descriptor carries its
    * `risk` classification, and that is what the inspector chain reads to force an
-   * approval — so a third-party tool quietly replacing a builtin also replaces
+   * approval, so a third-party tool quietly replacing a builtin also replaces
    * the reason anyone would be asked about it. `read_file` is both the most
    * common third-party MCP tool name and an existing local tool, so this collides
    * on the first real connector, not in some edge case.

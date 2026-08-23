@@ -9,7 +9,7 @@ export interface Toast {
   /**
    * One optional action rendered as a ghost button on the card (the undo toast).
    * The handler runs once; activating it dismisses the toast. NOT part of the
-   * live-region announcement — the announcement stays a single readable
+   * live-region announcement: the announcement stays a single readable
    * sentence, and the action is discoverable on the card itself.
    */
   action?: { label: string; onAction: () => void }

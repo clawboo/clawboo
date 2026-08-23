@@ -1,4 +1,4 @@
-// The connector CapabilitySource — clawboo's OWN outbound MCP connections.
+// The connector CapabilitySource: clawboo's OWN outbound MCP connections.
 //
 // A sixth source rather than a flag on `native`, because these rows have a
 // different owner (clawboo spawned the process), a different lifecycle (they

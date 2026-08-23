@@ -184,13 +184,13 @@ export interface ResourceNodeData extends Record<string, unknown> {
   connectorId?: string | null
   /** Grants authorizing this tile for its Boo. Empty ⇒ observed but not granted. */
   grantIds?: string[]
-  /** Live health — richer than `available`, and what the badge ladder reads. */
+  /** Live health: richer than `available`, and what the badge ladder reads. */
   health?: CapabilityHealth
   /** One scrubbed line explaining a non-ok health, shown in the tooltip. */
   healthDetail?: string | null
   /** Server-computed reasons a capability is unavailable (`auth-missing:openai`). */
   diagnostics?: string[]
-  /** Source-supplied affordance hint, rendered verbatim — never a hardcoded string. */
+  /** Source-supplied affordance hint, rendered verbatim, never a hardcoded string. */
   hint?: string
   /** `>= 2` renders the shared "xN" chip. */
   grantCount?: number
@@ -198,7 +198,7 @@ export interface ResourceNodeData extends Record<string, unknown> {
    *  badge ladder, where revoked/suspended outrank every health state. */
   grantState?: 'proposed' | 'active' | 'suspended' | 'revoked' | 'expired'
   /** Whether the owning source can act on this record (mirrors
-   *  `CapabilityRecord.writable`). Gates the toolbar's Enable/Disable — the
+   *  `CapabilityRecord.writable`). Gates the toolbar's Enable/Disable: the
    *  action set stays a pure function of the record, never a per-tile literal. */
   writable?: boolean
 }
@@ -246,7 +246,7 @@ export type GraphEdge = Edge<Record<string, unknown>>
 // ─── Grant edge ───────────────────────────────────────────────────────────────
 //
 // The authorization edge: agent → capability. It is BOTH the permission record
-// and the thing you see, which is the point — a badge computed by a second code
+// and the thing you see, which is the point: a badge computed by a second code
 // path drifts from the gate that actually decides, and an operator trusts the
 // badge.
 //
@@ -264,7 +264,7 @@ export interface GrantEdgeData extends Record<string, unknown> {
   mode: GrantEdgeMode
   /** `> 0` ⇒ the amber dashed march. */
   pendingApprovals?: number
-  /** Epoch ms. Desaturates as it ages — the prune signal. */
+  /** Epoch ms. Desaturates as it ages: the prune signal. */
   lastUsedAt?: number | null
   expiresAt?: number | null
 }

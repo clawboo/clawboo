@@ -91,7 +91,7 @@ export function killProcessTreeByPid(pid: number, opts: { graceMs?: number } = {
     try {
       spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
     } catch {
-      /* best-effort — already gone */
+      /* best-effort: already gone */
     }
     return
   }
@@ -124,7 +124,7 @@ export function killProcessTree(child: ChildProcess | null, opts: { graceMs?: nu
     try {
       spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
     } catch {
-      /* best-effort — already gone */
+      /* best-effort: already gone */
     }
     return
   }

@@ -57,7 +57,7 @@ export class UnparseableMcpConfigError extends Error {
 
 // NOTE: `.` is deliberately EXCLUDED. It is legal in a JSON key, but the same
 // name is interpolated into a TOML table header, where `[mcp_servers.a.b]`
-// declares a table `b` nested under `a` — so Codex would register a server named
+// declares a table `b` nested under `a`, so Codex would register a server named
 // `b` and `mergeTomlMcpServer` could never find it again. One shared charset
 // keeps a name meaning the same thing in every dialect.
 const VALID_MCP_NAME = /^[A-Za-z0-9_-]{1,64}$/
@@ -109,7 +109,7 @@ export function toJsonEntry(spec: CanonicalMcpServer): Record<string, unknown> {
  *
  * HTTP is supported via `url = …`, NOT refused. This previously threw
  * `NonStdioUnsupportedError` for any non-stdio spec while the repo's own
- * `codexDriver.ts` writes exactly that block in production — the driver is the
+ * `codexDriver.ts` writes exactly that block in production: the driver is the
  * one that ships, so the transcoder was simply wrong.
  */
 export function toCodexTomlBlock(spec: CanonicalMcpServer): string {
@@ -148,7 +148,7 @@ export function mergeJsonMcpServers(
       // fallback and was silent data loss: the returned string contained only the
       // new server, so writing it back over the user's config deleted every other
       // MCP server and every other top-level key in the file. A config we cannot
-      // parse is a config we must not rewrite — the caller has to decide whether
+      // parse is a config we must not rewrite: the caller has to decide whether
       // to back it up, ask, or abort, and it can only do that if it is told.
       throw new UnparseableMcpConfigError(err instanceof Error ? err.message : String(err))
     }
@@ -201,7 +201,7 @@ export interface TranscodeResult {
  * Dialect the canonical spec for a runtime; the caller merges into the file.
  *
  * Switches EXHAUSTIVELY rather than falling through to JSON. The fall-through
- * silently aliased `'hermes'` to the Claude Code dialect, which is a guess — and
+ * silently aliased `'hermes'` to the Claude Code dialect, which is a guess, and
  * a guess that produces a plausible-looking file is worse than an error, because
  * nothing downstream can tell it was one. Adding a dialect now fails to compile
  * until it is handled.

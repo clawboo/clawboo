@@ -98,7 +98,7 @@ export function grantsRevokePOST(req: Request, res: Response): void {
   }
 }
 
-// POST /api/grants/:id/resume — the Undo behind the Detach toast.
+// POST /api/grants/:id/resume: the Undo behind the Detach toast.
 export function grantsResumePOST(req: Request, res: Response): void {
   try {
     const id = (req.params['id'] as string | undefined) ?? ''

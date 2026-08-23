@@ -125,7 +125,7 @@ export function groupAgentCapabilities(
     // capabilities" test. A grantee's twin tile is agent-scoped, so counting it
     // would flip inheritance off wholesale and the agent would lose every skill
     // and connector it was showing a second earlier. The twin is still
-    // rendered — it is just not evidence of a real per-agent inventory.
+    // rendered. It is just not evidence of a real per-agent inventory.
     const ownReal = own.filter((r) => !r.synthetic)
     if (ownReal.length > 0) {
       out.set(agentId, own)

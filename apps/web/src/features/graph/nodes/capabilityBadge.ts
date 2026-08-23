@@ -1,7 +1,7 @@
 // The single-slot badge ladder for a capability tile.
 //
 // A 46px disc has room for exactly ONE badge, so precedence is a decision, not
-// an accident — the same discipline n8n's canvas status icons use (one strict
+// an accident: the same discipline n8n's canvas status icons use (one strict
 // if/else chain, never a row of stacked indicators).
 //
 // The ladder is ordered by what a human must act on FIRST, not by severity in
@@ -9,13 +9,13 @@
 //
 //   1. revoked        the grant is gone; the tile is about to disappear
 //   2. suspended      temporarily off, including the global freeze
-//   3. drift          the highest-signal state — the tool list no longer hashes
+//   3. drift          the highest-signal state: the tool list no longer hashes
 //                     to what was approved. A rug-pull. It outranks needs-auth
 //                     because re-authing a drifted server is the wrong move.
 //   4. needs-auth     real and manageable, just not signed in
 //   5. rate-limited   self-clearing; informational
 //   6. unavailable    a declared requirement is unmet (auth-missing, env-missing)
-//   7. disabled       a human turned it off — a CHOICE, not a fault
+//   7. disabled       a human turned it off (a CHOICE, not a fault)
 //   8. ok             NOTHING. Never-ran is not broken, and a badge on every
 //                     healthy tile is a badge nobody reads.
 //
@@ -45,7 +45,7 @@ export interface CapabilityBadge {
   label: string
   /** CSS custom property for the badge tint. */
   color: string
-  /** Whether the badge should pulse — reserved for states awaiting a human. */
+  /** Whether the badge should pulse: reserved for states awaiting a human. */
   pulse: boolean
 }
 
@@ -82,7 +82,7 @@ export function capabilityBadge(input: CapabilityBadgeInput): CapabilityBadge | 
  *
  * Assembled from data the server already computes and the graph currently throws
  * away: `diagnostics` (`auth-missing:openai`) and `hint` (the source-supplied
- * remedy). This is the whole "why can't this teammate do X" affordance — a greyed
+ * remedy). This is the whole "why can't this teammate do X" affordance: a greyed
  * tile with no reason is strictly worse than a 400, because a 400 at least says
  * something.
  *

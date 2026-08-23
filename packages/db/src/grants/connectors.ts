@@ -1,4 +1,4 @@
-// The `connectors` table — configured connector INSTANCES.
+// The `connectors` table: configured connector INSTANCES.
 //
 // THE CONNECTOR SUPERVISOR NOW WRITES ROWS HERE, on connect and on a child's
 // exit, so `getConnector` returns real hashes and health.

@@ -2,7 +2,7 @@
 //
 // SCOPE, and it is narrow on purpose: these strings are for a HUMAN to paste into
 // their own config file. Nothing here writes, merges, or parses an existing file.
-// That distinction matters — the in-repo `capabilitySource/transcoder.ts` does
+// That distinction matters: the in-repo `capabilitySource/transcoder.ts` does
 // attempt a merge, and its JSON path resets to `{}` on a parse failure, which
 // would delete every other server in the file. A generator that only ever
 // produces a fresh block cannot have that bug.
@@ -19,13 +19,13 @@ export interface SnippetResult {
   dialect: SnippetDialect
   /** Where the user pastes it. */
   file: string
-  /** `json` | `toml` — drives syntax highlighting. */
+  /** `json` | `toml`: drives syntax highlighting. */
   language: 'json' | 'toml'
   body: string
   /**
    * Env vars the user must set themselves. Present so the UI can say "you will
    * also need GITHUB_TOKEN" instead of the user discovering it from a crash.
-   * NAMES only — a value never enters a snippet.
+   * NAMES only: a value never enters a snippet.
    */
   requiredEnv: string[]
 }
@@ -37,7 +37,7 @@ function tomlString(s: string): string {
 
 /**
  * A safe TOML table key. `[mcp_servers.a.b]` declares a table `b` NESTED under
- * `a`, so a dotted slug would silently register a server under the wrong name —
+ * `a`, so a dotted slug would silently register a server under the wrong name;
  * quoting is what keeps it one key.
  */
 function tomlKey(slug: string): string {
@@ -56,7 +56,7 @@ function requiredEnv(def: ConnectorDefinition): string[] {
   return def.auth.inputs.filter((i) => i.required).map((i) => i.key)
 }
 
-/** Claude Code / VS Code JSON entry — the value under `mcpServers[slug]`. */
+/** Claude Code / VS Code JSON entry: the value under `mcpServers[slug]`. */
 function jsonEntry(def: ConnectorDefinition): Record<string, unknown> {
   if (def.launch.transport === 'streamable-http') {
     // Claude Code aliases `streamable-http` to `http`; `http` is the portable spelling.
@@ -76,7 +76,7 @@ function jsonEntry(def: ConnectorDefinition): Record<string, unknown> {
  *
  * Codex over HTTP is emitted as `url = …`, NOT refused. `transcoder.ts:85` throws
  * `NonStdioUnsupportedError` for exactly this case while the repo's own
- * `codexDriver.ts` writes that block in production — the driver is right and the
+ * `codexDriver.ts` writes that block in production: the driver is right and the
  * transcoder is wrong, so this follows the driver.
  */
 export function connectorSnippet(def: ConnectorDefinition, dialect: SnippetDialect): SnippetResult {

@@ -338,7 +338,7 @@ describe('the happy path', () => {
     expect(decide().kind).toBe('allow')
   })
 
-  it('is total — never throws on a sparse input', () => {
+  it('is total: never throws on a sparse input', () => {
     expect(() => decideGrant({ grants: [], tool: { name: 'x' }, now: NOW })).not.toThrow()
   })
 })

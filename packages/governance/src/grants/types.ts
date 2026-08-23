@@ -1,4 +1,4 @@
-// The grant vocabulary — the typed nouns behind "this agent may use this
+// The grant vocabulary: the typed nouns behind "this agent may use this
 // capability, in this mode, under this approval policy".
 //
 // A grant is BOTH the permission record the broker reads AND the edge the Ghost
@@ -6,13 +6,13 @@
 // code path is governance theatre, so the renderer must call the same
 // `decideGrant` the gate calls, with the same inputs, and render its verdict.
 //
-// Pure, browser-safe, zero runtime deps — the SPA imports these types to type an
+// Pure, browser-safe, zero runtime deps: the SPA imports these types to type an
 // edge, `@clawboo/db` imports them to gate a call.
 
 /**
  * Lifecycle of a grant. Only `active` authorizes anything.
  * - `proposed`  created but not yet accepted (an agent asked; a human has not answered).
- * - `suspended` temporarily off — drift, a failed re-auth, or the global freeze.
+ * - `suspended` temporarily off: drift, a failed re-auth, or the global freeze.
  *   Distinct from `revoked` because it is expected to come back.
  * - `revoked`   deliberately ended by a human. Terminal.
  * - `expired`   passed `expiresAt`. Terminal until re-granted.
@@ -20,7 +20,7 @@
 export type GrantState = 'proposed' | 'active' | 'suspended' | 'revoked' | 'expired'
 
 /**
- * The privilege ceiling. Ordered — comparison IS the enforcement primitive, so
+ * The privilege ceiling. Ordered: comparison IS the enforcement primitive, so
  * these are ranked numerically by `MODE_RANK` rather than compared as strings.
  */
 export type GrantMode = 'read' | 'write' | 'admin'
@@ -85,7 +85,7 @@ export interface GrantToolFacts {
   risk?: ToolRisk
   trifecta?: TrifectaTags
   /**
-   * Tools whose approval may never be remembered — money movement, external
+   * Tools whose approval may never be remembered: money movement, external
    * send, credential grant. Forces `neverRemember` on the verdict so the UI does
    * not offer "Always".
    */
@@ -107,7 +107,7 @@ export interface Grant {
    * Tool-name globs this grant covers. THREE-STATE, and the distinction is
    * load-bearing:
    *   `['*']`      every tool (the column default)
-   *   `[]`         NO tools — an explicit, meaningful "nothing"
+   *   `[]`         NO tools: an explicit, meaningful "nothing"
    *   `['a','b*']` exactly this subset
    * Required rather than optional so a caller cannot accidentally collapse
    * "nothing" into "everything" by omitting it.
@@ -132,7 +132,7 @@ export interface StandingRule {
   grantId: string
   toolName: string
   /**
-   * Hash of the argument SHAPE this rule was approved for — key set plus a
+   * Hash of the argument SHAPE this rule was approved for: key set plus a
    * value-scoping predicate for path/URL/host-shaped arguments, never the raw
    * values. `null` means "any arguments", which callers should only ever mint for
    * tools that have no scopable argument.
@@ -177,7 +177,7 @@ export type GrantDecision =
 
 export interface GrantDecisionInput {
   /**
-   * Every grant that could authorize this call — typically the agent-scoped one
+   * Every grant that could authorize this call: typically the agent-scoped one
    * plus any team/global ones. `decideGrant` picks the most specific.
    * Empty ⇒ `deny: no-grant`.
    */
@@ -194,7 +194,7 @@ export interface GrantDecisionInput {
   argsShape?: string | null
   /**
    * Trifecta legs the RUN has already accumulated before this call. Unioned with
-   * the tool's own legs — the chain is what matters, not one call.
+   * the tool's own legs: the chain is what matters, not one call.
    */
   runTrifecta?: TrifectaTags
   /** True once the run has ingested attacker-authorable content. */

@@ -13,7 +13,7 @@ const filesystem = connectorBySlug('filesystem') as ConnectorDefinition
 const github = connectorBySlug('github') as ConnectorDefinition
 const notion = connectorBySlug('notion') as ConnectorDefinition
 
-describe('connectorSnippet — stdio', () => {
+describe('connectorSnippet: stdio', () => {
   it('emits a Claude Code mcpServers block', () => {
     const s = connectorSnippet(filesystem, 'claude-code')
     expect(s.file).toBe('.mcp.json')
@@ -41,7 +41,7 @@ describe('connectorSnippet — stdio', () => {
   })
 })
 
-describe('connectorSnippet — remote', () => {
+describe('connectorSnippet: remote', () => {
   it('emits type:http with the url for Claude Code', () => {
     const parsed = JSON.parse(connectorSnippet(github, 'claude-code').body) as {
       mcpServers: Record<string, { type: string; url: string }>

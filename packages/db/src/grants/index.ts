@@ -1,4 +1,4 @@
-// @clawboo/db grants — the durable half of the grant spine.
+// @clawboo/db grants: the durable half of the grant spine.
 //
 // The pure decision layer is @clawboo/governance (`decideGrant` and friends).
 // This module is everything that decision needs from a database: the rows, the

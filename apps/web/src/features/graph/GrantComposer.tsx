@@ -1,4 +1,4 @@
-// GrantComposer — the J4 "share with a second agent" dialog.
+// GrantComposer: the J4 "share with a second agent" dialog.
 //
 // Opens from the graph's `onConnect` when a grant-backed connector tile is
 // dragged onto another Boo. Least-privilege defaults on purpose: `read` and

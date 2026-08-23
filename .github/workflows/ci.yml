@@ -234,8 +234,8 @@ jobs:
       # OFFLINE, and a SEPARATE job from verify-catalog on purpose: this one must
       # run in a context with no token and no upstream dependency, so a yanked npm
       # version or a connector vendor's outage can never redden a PR that did not
-      # touch the catalog. The LIVE half — re-resolving every pinned package and
-      # dialing every remote endpoint — runs in `verify-ingest.yml` (weekly + on
+      # touch the catalog. The LIVE half (re-resolving every pinned package and
+      # dialing every remote endpoint) runs in `verify-ingest.yml` (weekly + on
       # PRs that touch the catalog).
       - run: pnpm verify:connectors
 

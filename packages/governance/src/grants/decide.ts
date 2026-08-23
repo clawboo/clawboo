@@ -1,4 +1,4 @@
-// `decideGrant` — the ONE function that decides whether a capability call may
+// `decideGrant`: the ONE function that decides whether a capability call may
 // proceed. The broker's inspector calls it to gate; the Ghost Graph calls it to
 // render an edge's badge. One function, two consumers, on purpose: a badge
 // computed by a parallel code path drifts from the gate, and a permission-shaped
@@ -30,7 +30,7 @@ const SUBJECT_SPECIFICITY: Readonly<Record<Grant['subjectKind'], number>> = Obje
  *
  * `readOnly` wins over a contradictory `destructive`. Per the MCP spec,
  * destructive/idempotent are meaningful only when `readOnly` is false, so a
- * manifest declaring both is malformed — and resolving a malformed manifest
+ * manifest declaring both is malformed, and resolving a malformed manifest
  * toward the SAFER reading would be wrong here: it would let a tool claim
  * read-only and still be treated as destructive-and-therefore-gated. We treat it
  * as read-only for the MODE gate (what it says it does) and leave the risk gate
@@ -137,7 +137,7 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
   if (grant.state === 'expired' || (grant.expiresAt !== null && grant.expiresAt <= now))
     return { kind: 'deny', grantId: grant.id, reason: 'grant-expired' }
 
-  // ── drift (before scope — see the header) ────────────────────────────────
+  // ── drift (before scope, see the header) ────────────────────────────────
   if (
     grant.specHashPin !== null &&
     input.currentSpecHash != null &&
@@ -163,7 +163,7 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
   if (grant.callCeilingPerHour !== null && (input.callsInWindow ?? 0) >= grant.callCeilingPerHour)
     return { kind: 'deny', grantId: grant.id, reason: 'rate-limited' }
 
-  // ── trifecta / taint (before policy — see the header) ────────────────────
+  // ── trifecta / taint (before policy, see the header) ────────────────────
   const chain = unionTrifecta(input.runTrifecta, tool.trifecta)
   const neverRemember = tool.neverRemember === true
   if (isLethalTrifecta(chain))
@@ -191,7 +191,7 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
   if (rule?.decision === 'allow' && !neverRemember)
     return { kind: 'allow', grantId: grant.id, ruleId: rule.id }
 
-  // A never-remembered tool always prompts, even with a rule on file — the rule
+  // A never-remembered tool always prompts, even with a rule on file: the rule
   // should never have been minted, and honouring it would make the class a lie.
   if (neverRemember)
     return {
@@ -218,7 +218,7 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
     }
   // A read-only tool does NOT trip `risk-external`. Connectors carry an
   // `external` risk FLOOR, so without this carve-out every `list_files` on every
-  // filesystem connector would prompt — and an approval dialog a user sees
+  // filesystem connector would prompt, and an approval dialog a user sees
   // hundreds of times a night is one they stop reading, which is how the whole
   // governance layer becomes decorative. Read-only exfiltration is not left
   // unguarded: it is exactly what the trifecta gate above catches, and that gate

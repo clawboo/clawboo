@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { capabilityBadge, capabilityReason, humanizeDiagnostic } from '../capabilityBadge'
 
-describe('capabilityBadge — the ladder', () => {
+describe('capabilityBadge: the ladder', () => {
   it('shows NOTHING for a healthy tile', () => {
     // Never-ran is not broken. A badge on every healthy tile is a badge nobody reads.
     expect(capabilityBadge({})).toBeNull()
@@ -77,7 +77,7 @@ describe('humanizeDiagnostic', () => {
   })
 
   it('degrades to the raw code rather than dropping an unknown one', () => {
-    // The diagnostic vocabulary is open — each source mints its own — so a
+    // The diagnostic vocabulary is open (each source mints its own), so a
     // lookup table would silently swallow anything it had not been taught.
     expect(humanizeDiagnostic('something-new')).toBe('something new')
   })
@@ -103,8 +103,8 @@ describe('capabilityReason', () => {
     // The hint comes from the owning runtime, so the graph must never paraphrase
     // it into a per-runtime string of its own.
     const badge = capabilityBadge({ health: 'needs-auth' })
-    const reason = capabilityReason({ badge, hint: 'pending auth — run `codex login`' })
-    expect(reason?.endsWith('pending auth — run `codex login`')).toBe(true)
+    const reason = capabilityReason({ badge, hint: 'pending auth: run `codex login`' })
+    expect(reason?.endsWith('pending auth: run `codex login`')).toBe(true)
   })
 
   it('includes healthDetail between the badge and the diagnostics', () => {

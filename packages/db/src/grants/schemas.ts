@@ -37,7 +37,7 @@ export const createGrantBody = z
   })
 export type CreateGrantBody = z.infer<typeof createGrantBody>
 
-/** POST /api/grants/:id/revoke — body is optional and usually absent. */
+/** POST /api/grants/:id/revoke: body is optional and usually absent. */
 export const revokeGrantBody = z.object({
   reason: z.string().max(200).nullable().optional(),
 })

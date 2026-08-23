@@ -6,7 +6,7 @@
  *
  *   pnpm verify:connectors          OFFLINE. No network. Gates PRs and the
  *                                   release path. Asserts the shipping
- *                                   invariants — version pins that actually
+ *                                   invariants: version pins that actually
  *                                   appear in argv, https-only endpoints, no
  *                                   secret values, declared egress.
  *
@@ -17,7 +17,7 @@
  *                                   hold up a release.
  *
  * The offline half deliberately overlaps the package's own vitest suite. That is
- * the point of a release gate — it must not depend on the test runner having been
+ * the point of a release gate: it must not depend on the test runner having been
  * run, and it must fail loudly on the publish path.
  *
  * Exits 0 when everything passes; 1 otherwise.
@@ -111,7 +111,7 @@ function checkOffline(): void {
 
   const serialized = JSON.stringify(CONNECTOR_DEFINITIONS)
   if (/"icon(Url)?"\s*:\s*"https?:/i.test(serialized))
-    failures.push('  ❌ catalog carries a remote icon URL — inline it or drop it')
+    failures.push('  ❌ catalog carries a remote icon URL. Inline it or drop it')
 }
 
 // ─── Live: does any of this still exist? ─────────────────────────────────────
@@ -153,7 +153,7 @@ async function checkEndpoint(
       signal: AbortSignal.timeout(10_000),
     })
     // 401 is the CORRECT answer from an OAuth-protected MCP server to an
-    // unauthenticated initialize — it is what makes discovery possible. A 404 or
+    // unauthenticated initialize: it is what makes discovery possible. A 404 or
     // a connection failure is the real problem.
     if (res.status === 404) fail(def.slug, `endpoint ${def.launch.url} returned 404`)
     else console.log(`  ✓ ${def.slug} → ${def.launch.url} (HTTP ${res.status})`)
@@ -174,7 +174,7 @@ async function checkLive(): Promise<void> {
 
 async function main(): Promise<void> {
   console.log(
-    `\n🔌 Clawboo connector catalog verify (${LIVE ? 'LIVE — network' : 'offline — no network'})`,
+    `\n🔌 Clawboo connector catalog verify (${LIVE ? 'LIVE, network' : 'offline, no network'})`,
   )
   console.log(
     `   ${CURATED_CONNECTORS.length} curated · ${COMMUNITY_CONNECTORS.length} community\n`,

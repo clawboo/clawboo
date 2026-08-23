@@ -2,7 +2,7 @@
 //
 // Curated entries are hand-written and verified. Community entries (ingested
 // from a committed registry snapshot) will land in `./generated/` and merge here
-// — kept in a separate array so the UI can render the hard visual split the
+// and are kept in a separate array so the UI can render the hard visual split the
 // honesty posture requires, and so the counts are always reportable as
 // "N curated · M community" rather than one impressive-looking total.
 
@@ -20,7 +20,7 @@ export const CURATED_CONNECTORS: readonly ConnectorDefinition[] = Object.freeze(
 
 /**
  * Ingested from the committed registry snapshot. Empty until the ingest script
- * lands — deliberately a real, empty array rather than a TODO, so every consumer
+ * lands: deliberately a real, empty array rather than a TODO, so every consumer
  * is already written against the two-array shape and nothing has to change when
  * it fills.
  */
@@ -35,7 +35,7 @@ const BY_SLUG: ReadonlyMap<string, ConnectorDefinition> = new Map(
   CONNECTOR_DEFINITIONS.map((c) => [c.slug, c]),
 )
 
-/** Exact-slug lookup. Undefined for an unknown slug — never throws. */
+/** Exact-slug lookup. Undefined for an unknown slug, never throws. */
 export function connectorBySlug(slug: string): ConnectorDefinition | undefined {
   return BY_SLUG.get(slug)
 }
@@ -51,7 +51,7 @@ export function connectorsByCategory(
  * description, tags.
  *
  * No minimum query length. A search box that silently returns the unfiltered list
- * below N characters reads as broken rather than as a constraint — if a minimum
+ * below N characters reads as broken rather than as a constraint. If a minimum
  * is ever needed it belongs in the field's placeholder, not in a condition that
  * quietly no-ops.
  */
@@ -66,7 +66,7 @@ export function searchConnectors(query: string): ConnectorDefinition[] {
   })
 }
 
-/** `{ curated, community }` — the only counts the UI should ever render. */
+/** `{ curated, community }`: the only counts the UI should ever render. */
 export function connectorCounts(): { curated: number; community: number } {
   return { curated: CURATED_CONNECTORS.length, community: COMMUNITY_CONNECTORS.length }
 }

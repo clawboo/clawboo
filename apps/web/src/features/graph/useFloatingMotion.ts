@@ -111,7 +111,7 @@ export function useFloatingMotion(
   type: FloatingNodeType,
   isDragging?: boolean,
   /**
-   * Skip the RAF subscription entirely. Same treatment as reduced motion — the
+   * Skip the RAF subscription entirely. Same treatment as reduced motion: the
    * float is decorative, so anything that makes it pointless should also make it
    * free. Used by the LOD path, where the node is a 10px dot and a sub-pixel
    * orbit is invisible but still costs a per-frame style write per tile.

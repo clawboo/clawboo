@@ -70,7 +70,7 @@ interface MarketplaceStore {
   connectorSearchQuery: string
 
   /** Category filter for the connector directory. Typed as a plain string so the
-   *  store does not take a dependency on @clawboo/connector-catalog — the browser
+   *  store does not take a dependency on @clawboo/connector-catalog: the browser
    *  narrows it at the call site. */
   connectorCategoryFilter: string
 
