@@ -16,6 +16,7 @@ import {
   discoverAuthServer,
   discoverResourceMetadata,
   exchangeCode,
+  isLoopbackUrl,
   refreshToken as refreshOAuthToken,
   registerClient,
   type AuthServerMetadata,
@@ -50,6 +51,10 @@ interface PendingAuth {
 
 const pending = new Map<string, PendingAuth>()
 
+/** Monotonic per-slug counter, so a slower attempt cannot publish over a newer
+ *  one that claimed the same connector while it was still discovering. */
+const generations = new Map<string, number>()
+
 export interface AuthorizeStart {
   /** The URL the operator must open. Returned rather than opened for them: the
    *  server may not be on the machine with the browser. */
@@ -71,21 +76,31 @@ export async function beginAuthorization(
    */
   scopes?: readonly string[],
 ): Promise<AuthorizeStart> {
-  const resource = await discoverResourceMetadata(serverUrl)
-  const issuer = resource.authorization_servers?.[0]
-  if (!issuer) {
-    throw new Error(`${serverUrl} did not name an authorization server`)
-  }
-  const metadata = await discoverAuthServer(issuer)
-
-  // An earlier sign-in the operator abandoned still holds a bound port and a
-  // promise nobody will resolve. Cancel it before starting another, or the tab
-  // they open now would resolve the OLD attempt while this one waits forever.
+  // CLAIMED BEFORE THE FIRST AWAIT. An earlier sign-in the operator abandoned
+  // still holds a bound port and a promise nobody will resolve, so it is
+  // cancelled here rather than after discovery: two overlapping requests both
+  // used to observe an empty map, neither cancelled the other, and the loser's
+  // listener stayed bound with nobody holding it while `awaitAuthorization`
+  // reported on whichever entry happened to be published last.
+  //
+  // The generation number is the other half. Discovery and registration are four
+  // network round-trips during which another attempt can claim the slug, and the
+  // one that finishes second must not overwrite it.
   const previous = pending.get(slug)
   if (previous) {
     previous.cancel()
     pending.delete(slug)
   }
+  const generation = (generations.get(slug) ?? 0) + 1
+  generations.set(slug, generation)
+  const isCurrent = (): boolean => generations.get(slug) === generation
+
+  const resource = await discoverResourceMetadata(serverUrl)
+  const issuer = resource.authorization_servers?.[0]
+  if (!issuer) {
+    throw new Error(`${serverUrl} did not name an authorization server`)
+  }
+  const metadata = await discoverAuthServer(issuer, { allowPrivate: isLoopbackUrl(serverUrl) })
 
   const pkce = createPkce()
   const state = randomBytes(16).toString('base64url')
@@ -178,6 +193,13 @@ export async function beginAuthorization(
     state,
     completion,
   }
+  // A newer attempt claimed this connector while we were discovering and
+  // registering. It owns the slug; this one closes its own listener and reports
+  // rather than publishing over the newer entry.
+  if (!isCurrent()) {
+    listener.close()
+    throw new Error('another sign-in for this connector started first')
+  }
   pending.set(slug, entry)
 
   return {
@@ -254,6 +276,33 @@ export async function getAccessToken(slug: string, serverUrl: string): Promise<s
   if (fresh) return stored.access_token
   if (!stored.refresh_token) return null
 
+  // ONE REDEMPTION AT A TIME, per connector. This function is the transport's
+  // per-request token callback, so every concurrent tool call reaches it, and
+  // they all arrive at the same moment: the instant the stored token goes stale.
+  // Most providers ROTATE the refresh token and invalidate the presented one, so
+  // N concurrent calls would redeem the same refresh token N times, the first
+  // response would be overwritten by a later one, and the connector would end up
+  // holding a token the provider had already retired. Sharing the in-flight
+  // promise makes the extra callers wait for the same answer instead.
+  const existing = refreshing.get(slug)
+  if (existing) return existing
+
+  const attempt = refreshAccessToken(slug, serverUrl, stored).finally(() => {
+    refreshing.delete(slug)
+  })
+  refreshing.set(slug, attempt)
+  return attempt
+}
+
+/** In-flight refreshes, keyed by connector slug. See `getAccessToken`. */
+const refreshing = new Map<string, Promise<string | null>>()
+
+async function refreshAccessToken(
+  slug: string,
+  serverUrl: string,
+  stored: StoredTokens,
+): Promise<string | null> {
+  if (!stored.refresh_token) return null
   const client = getStoredClient(slug)
   if (!client) return null
 
@@ -261,7 +310,7 @@ export async function getAccessToken(slug: string, serverUrl: string): Promise<s
     const resource = await discoverResourceMetadata(serverUrl)
     const issuer = resource.authorization_servers?.[0]
     if (!issuer) return null
-    const metadata = await discoverAuthServer(issuer)
+    const metadata = await discoverAuthServer(issuer, { allowPrivate: isLoopbackUrl(serverUrl) })
     const next = await refreshOAuthToken({
       metadata,
       clientId: client.client_id,
