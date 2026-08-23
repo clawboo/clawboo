@@ -5,6 +5,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+/** What `/config` reports. Mutable, so a test can put a connector in the state
+ *  that follows a successful sign-in. */
+const config = vi.hoisted(() => ({ authorized: false, satisfied: false }))
+
 vi.mock('@clawboo/control-client', () => ({
   apiFetch: vi.fn(async (path: string) => {
     if (path === '/api/connectors') {
@@ -14,20 +18,19 @@ vi.mock('@clawboo/control-client', () => ({
       return { ok: true, json: async () => ({ ok: true, connectors: [] }) } as Response
     }
     if (path.endsWith('/config')) {
-      // Nothing supplied yet, which is the state the form exists for.
       return {
         ok: true,
         json: async () => ({
           ok: true,
           credentials: [],
-          authorized: false,
+          authorized: config.authorized,
           argument: null,
           argumentSpec: {
             label: 'Folder this connector may read and write',
             description: 'Only this folder and everything inside it.',
             example: '/Users/you/projects/notes',
           },
-          satisfied: false,
+          satisfied: config.satisfied,
         }),
       } as Response
     }
@@ -40,6 +43,8 @@ import { useMarketplaceStore } from '@/stores/marketplace'
 
 afterEach(() => {
   cleanup()
+  config.authorized = false
+  config.satisfied = false
   useMarketplaceStore.setState({ connectorSearchQuery: '', connectorCategoryFilter: 'all' })
 })
 
@@ -64,14 +69,43 @@ describe('ConnectorsBrowser connect affordance', () => {
   it('offers SIGN IN for a remote connector, not Connect', async () => {
     // Connect would promise a session the provider has not authorized. Sign in
     // is the step that actually exists, so that is what the tile offers.
-    useMarketplaceStore.setState({ connectorSearchQuery: 'GitHub' })
-    await openDetail('GitHub')
+    useMarketplaceStore.setState({ connectorSearchQuery: 'Linear' })
+    await openDetail('Linear')
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^sign in$/i })).toBeTruthy()
     })
     expect(screen.queryByRole('button', { name: /^connect$/i })).toBeNull()
     // Names what actually happens: a tab to somebody else's site.
-    expect(screen.getByText(/opens github in a new tab/i)).toBeTruthy()
+    expect(screen.getByText(/opens linear in a new tab/i)).toBeTruthy()
+  })
+
+  it('offers CONNECT once a remote connector has been signed in', async () => {
+    // The regression this exists for: the panel dropped the `authorized`
+    // argument, so every remote connector read as never-signed-in and stayed on
+    // "Not connectable yet" forever. Sign-in worked and led nowhere.
+    config.authorized = true
+    config.satisfied = true
+    useMarketplaceStore.setState({ connectorSearchQuery: 'Linear' })
+    await openDetail('Linear')
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^connect$/i })).toBeTruthy()
+    })
+    expect(screen.queryByText(/not connectable yet/i)).toBeNull()
+    // ...and the way back out is offered, which is the only thing that can
+    // clear a token the provider has revoked.
+    expect(screen.getByRole('button', { name: /^sign out$/i })).toBeTruthy()
+  })
+
+  it('does NOT offer sign-in for a provider clawboo cannot register with', async () => {
+    // GitHub publishes no dynamic registration endpoint, and clawboo ships no
+    // OAuth app. The button would fail three requests into the flow every time.
+    useMarketplaceStore.setState({ connectorSearchQuery: 'GitHub' })
+    await openDetail('GitHub')
+    await waitFor(() => {
+      expect(screen.getByText(/pre-registered OAuth app/i)).toBeTruthy()
+    })
+    expect(screen.queryByRole('button', { name: /^sign in$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^connect$/i })).toBeNull()
   })
 
   it('ASKS for the folder Filesystem needs, instead of refusing outright', async () => {

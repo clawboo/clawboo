@@ -54,12 +54,14 @@ import { useMarketplaceStore } from '@/stores/marketplace'
 import {
   connectConnector,
   createCustomConnector,
+  deleteCustomConnector,
   disconnectConnector,
   fetchConnectorConfig,
   listCustomConnectors,
   listLiveConnectors,
   saveConnectorConfig,
   signInConnector,
+  signOutConnector,
   type ConnectorConfigState,
   type CredentialStatus,
 } from './connectConnector'
@@ -93,11 +95,12 @@ function authLabel(
   def: ConnectorDefinition,
   connected: boolean,
 ): { label: string; icon?: LucideIcon; active: boolean } {
-  if (isConnectable(def)) {
-    return connected
-      ? { label: 'Connected', icon: Plug, active: true }
-      : { label: 'Not connected', active: false }
-  }
+  // `connected` is the live truth from the server, so it is checked FIRST and
+  // for every entry. Gating it on `isConnectable(def)` meant a connector that
+  // needed a key, a path or a sign-in never showed "Connected" even while its
+  // process was running, which is 14 of the 19.
+  if (connected) return { label: 'Connected', icon: Plug, active: true }
+  if (isConnectable(def)) return { label: 'Not connected', active: false }
   if (def.auth.kind === 'oauth') return { label: 'Sign in', icon: KeyRound, active: false }
   // "Add …" rather than "Needs …": both are now something the user can do here,
   // not a statement about why they cannot.
@@ -139,7 +142,7 @@ function ConnectorCard({
       transition={{ duration: 0.18, delay: Math.min(index * 0.02, 0.4) }}
       className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 text-left transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       style={{ boxShadow: 'var(--shadow-raised)' }}
-      aria-label={`${def.displayName} connector — ${auth.label}, ${legs} of 3 risk signals`}
+      aria-label={`${def.displayName} connector: ${auth.label}, ${legs} of 3 risk signals`}
     >
       <div className="flex items-center gap-3">
         <div
@@ -532,7 +535,10 @@ function ConnectAction({
 
   const configGated = needsCredentialOnly(def) || needsArgumentOnly(def) || needsSignInOnly(def)
   const satisfied = config?.satisfied ?? false
-  const refusal = connectRefusal(def, satisfied, satisfied)
+  // The FOURTH argument is not optional in practice: without it every remote
+  // connector reads as never-signed-in, so the panel refuses an action the
+  // server would have accepted and Connect is unreachable forever.
+  const refusal = connectRefusal(def, satisfied, satisfied, config?.authorized ?? false)
 
   if (configGated && !satisfied) {
     if (config && needsSignInOnly(def) && !config.authorized) {
@@ -576,12 +582,23 @@ function ConnectAction({
     setBusy(true)
     try {
       if (connected) await disconnectConnector(def.slug, def.displayName)
-      else await connectConnector(def.slug, def.displayName)
+      else {
+        // The callback matters for a token the provider has revoked: the local
+        // record still reads as authorized, so without re-reading the config the
+        // panel would keep offering a Connect button that always fails.
+        await connectConnector(def.slug, def.displayName, () => {
+          void fetchConnectorConfig(def.slug).then((next) => {
+            if (next) setConfig(next)
+          })
+        })
+      }
       onChanged()
     } finally {
       setBusy(false)
     }
   }
+
+  const remote = def.launch.transport !== 'stdio'
 
   return (
     <>
@@ -615,7 +632,102 @@ function ConnectAction({
           </Button>
         </div>
       </section>
+      {/* The way OUT, which nothing else offers. A stored token cannot be
+          inspected, so the only thing an operator can do with one is replace it
+          or forget it; without this the tokens are unreachable from the product
+          and a provider-side revocation has no local counterpart. */}
+      {remote && config?.authorized && (
+        <RevokeRow
+          title={`Signed in to ${def.displayName}`}
+          detail="Signing out deletes the stored tokens and stops the connection."
+          action="Sign out"
+          busyLabel="Signing out…"
+          onConfirm={async () => {
+            if (await signOutConnector(def.slug, def.displayName)) {
+              const next = await fetchConnectorConfig(def.slug)
+              if (next) setConfig(next)
+              onChanged()
+            }
+          }}
+        />
+      )}
+      {/* Only a custom entry can be removed: a curated one is part of the
+          catalog, and deleting it would be deleting a row of the product. */}
+      {def.provenance === 'custom' && (
+        <RevokeRow
+          title="Remove this connector"
+          detail="Deletes the definition you added. Its process is stopped first."
+          action="Remove"
+          busyLabel="Removing…"
+          onConfirm={async () => {
+            if (await deleteCustomConnector(def.slug, def.displayName)) onChanged()
+          }}
+        />
+      )}
     </>
+  )
+}
+
+/**
+ * A destructive control that asks first.
+ *
+ * Two clicks rather than a confirm dialog: both actions here delete something
+ * that cannot be recovered from the product, and both sit next to a button the
+ * operator uses routinely.
+ */
+function RevokeRow({
+  title,
+  detail,
+  action,
+  busyLabel,
+  onConfirm,
+}: {
+  title: string
+  detail: string
+  action: string
+  busyLabel: string
+  onConfirm: () => Promise<void>
+}) {
+  const [armed, setArmed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  return (
+    <section className="rounded-xl border border-border bg-surface-subtle p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-foreground">{title}</div>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {armed ? `${detail} This cannot be undone.` : detail}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {armed && (
+            <Button size="sm" variant="secondary" onClick={() => setArmed(false)} disabled={busy}>
+              Cancel
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={async () => {
+              if (!armed) {
+                setArmed(true)
+                return
+              }
+              setBusy(true)
+              try {
+                await onConfirm()
+              } finally {
+                setBusy(false)
+                setArmed(false)
+              }
+            }}
+          >
+            {busy ? busyLabel : armed ? `Yes, ${action.toLowerCase()}` : action}
+          </Button>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -645,7 +757,7 @@ function ConnectorDetail({
       // rather than leaving the button looking like it worked.
       addToast({
         type: 'error',
-        message: 'Could not copy — select the block and copy manually.',
+        message: 'Could not copy. Select the block and copy manually.',
       })
     }
   }
@@ -683,7 +795,7 @@ function ConnectorDetail({
           <li>
             Network:{' '}
             {def.egressAllow.length === 0
-              ? 'none — local only'
+              ? 'none, local only'
               : def.egressAllow.includes('*')
                 ? 'any host (a browser can go anywhere)'
                 : def.egressAllow.join(', ')}
@@ -703,7 +815,7 @@ function ConnectorDetail({
       {def.auth.setupGuide && (
         <section className="rounded-xl border border-border p-4">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Setup — {def.auth.setupGuide.console}
+            Setup: {def.auth.setupGuide.console}
           </h3>
           <ol className="mt-2 list-inside list-decimal space-y-1 text-xs text-foreground">
             {def.auth.setupGuide.steps.map((step) => (
@@ -722,7 +834,7 @@ function ConnectorDetail({
       )}
 
       {/* The snippet. Framed as "paste this into your own runtime" because that is
-          literally what it does — clawboo writes nothing. */}
+          literally what it does: clawboo writes nothing. */}
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

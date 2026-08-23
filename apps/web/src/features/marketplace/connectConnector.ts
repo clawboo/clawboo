@@ -19,16 +19,27 @@ export interface ConnectSuccess {
 }
 
 async function readError(res: Response): Promise<string> {
+  return (await readRefusal(res)).message
+}
+
+/** A refusal, with the machine-readable reason the server sent alongside it. */
+async function readRefusal(res: Response): Promise<{ message: string; reason?: string }> {
   return res
     .json()
-    .then((b: { error?: string }) => b.error ?? `HTTP ${res.status}`)
-    .catch(() => `HTTP ${res.status}`)
+    .then((b: { error?: string; reason?: string }) => ({
+      message: b.error ?? `HTTP ${res.status}`,
+      ...(b.reason ? { reason: b.reason } : {}),
+    }))
+    .catch(() => ({ message: `HTTP ${res.status}` }))
 }
 
 /** Connect a catalog connector. Returns null when the server refused. */
 export async function connectConnector(
   slug: string,
   displayName: string,
+  /** Called when the server refuses because the stored authorization is no
+   *  longer usable, so the caller can offer sign-in again. */
+  onNeedsSignIn?: () => void,
 ): Promise<ConnectSuccess | null> {
   let res: Response
   try {
@@ -48,19 +59,25 @@ export async function connectConnector(
   if (!res.ok) {
     // The server's refusal copy names the actual obstacle, so it is shown
     // verbatim rather than replaced with a generic failure line.
-    useToastStore.getState().addToast({ message: await readError(res), type: 'error' })
+    const body = await readRefusal(res)
+    useToastStore.getState().addToast({ message: body.message, type: 'error' })
+    // A stored token the provider has since revoked reads as authorized locally
+    // and is refused here. Reporting the reason is what lets the panel offer
+    // sign-in again instead of leaving the operator with a button that always
+    // fails and no way back.
+    if (body.reason === 'remote-needs-oauth') onNeedsSignIn?.()
     return null
   }
 
   const body = (await res.json()) as ConnectSuccess
   const skipped = body.skipped?.length ?? 0
   useToastStore.getState().addToast({
-    // "to agents attached over HTTP" is not padding. The in-process tools server
-    // a native run uses is constructed without these, so a bare "N tools
-    // available" would promise something a native agent cannot reach.
+    // No longer qualified by transport. The in-process tools server a native run
+    // builds now takes the same connector tools an HTTP-attached agent sees, so
+    // naming one of the two would be the inaccurate half.
     message: skipped
-      ? `${displayName} connected. ${body.tools.length} tools available to agents attached over HTTP, ${skipped} skipped.`
-      : `${displayName} connected. ${body.tools.length} tools available to agents attached over HTTP.`,
+      ? `${displayName} connected. ${body.tools.length} tools available to your agents, ${skipped} skipped.`
+      : `${displayName} connected. ${body.tools.length} tools available to your agents.`,
     type: 'success',
   })
   return body
@@ -265,7 +282,12 @@ export async function deleteCustomConnector(slug: string, displayName: string): 
  * caught by the popup blocker on a sign-in the user explicitly asked for.
  */
 export async function signInConnector(slug: string, displayName: string): Promise<boolean> {
-  const tab = window.open('', '_blank', 'noopener,noreferrer')
+  // Opened WITHOUT `noopener`, because that feature makes window.open return
+  // null by specification -- which made the whole pre-open dead code and left
+  // the real open happening after the await, exactly where a popup blocker
+  // catches it. The handle is needed to navigate the tab once the URL arrives.
+  // `opener` is neutralised below instead.
+  const tab = window.open('about:blank', '_blank')
   let res: Response
   try {
     res = await apiFetch(`/api/connectors/${encodeURIComponent(slug)}/authorize`, {
@@ -283,8 +305,23 @@ export async function signInConnector(slug: string, displayName: string): Promis
   }
 
   const { authorizeUrl } = (await res.json()) as { authorizeUrl: string }
-  if (tab) tab.location.href = authorizeUrl
-  else window.open(authorizeUrl, '_blank', 'noopener,noreferrer')
+  if (tab) {
+    // Sever the back-reference before navigating: the provider's page must not
+    // be able to reach back into this one.
+    tab.opener = null
+    tab.location.href = authorizeUrl
+  } else {
+    // The pre-open was blocked anyway. This one usually is too, so the URL is
+    // surfaced rather than silently lost.
+    const opened = window.open(authorizeUrl, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      useToastStore.getState().addToast({
+        message: `Your browser blocked the sign-in window. Allow pop-ups for clawboo and try again.`,
+        type: 'error',
+      })
+      return false
+    }
+  }
 
   // Block until the loopback listener sees the redirect. The server owns the
   // timeout, so a user who abandons the tab gets a clear failure rather than a
