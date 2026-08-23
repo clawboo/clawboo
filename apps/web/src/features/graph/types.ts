@@ -56,6 +56,15 @@ export interface BooNodeData extends Record<string, unknown> {
 export type ConnectorServiceKind = 'memory' | 'tasks' | 'tools' | 'teamchat' | 'generic'
 
 export interface SkillNodeData extends Record<string, unknown> {
+  /**
+   * Set on the "+N more" tile, and only there.
+   *
+   * The orbital ring holds a fixed number of tiles, so a Boo with more
+   * capabilities than slots loses some. This carries the count that was cut, so
+   * the ring always accounts for everything the agent has rather than quietly
+   * showing a subset as if it were the whole set.
+   */
+  overflowCount?: number
   skillId: string
   name: string
   category: SkillCategory
