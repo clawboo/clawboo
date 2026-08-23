@@ -16,7 +16,8 @@
 //   operator a human dragged a tile onto another Boo. THIS is what draws an edge
 //            and what Detach revokes.
 
-import type { CapabilityRecord } from '@clawboo/capability-registry'
+import type { CapabilityHealth, CapabilityRecord } from '@clawboo/capability-registry'
+import type { GrantDenyReason } from '@clawboo/governance'
 import {
   ensureOwnerGrant,
   getConnector,
@@ -115,6 +116,18 @@ export function projectGrants(db: ClawbooDb, records: CapabilityRecord[]): Capab
     out.push({
       ...record,
       connectorId,
+      // HEALTH, projected from the two places that actually know it.
+      //
+      // Without this the whole upper half of the badge ladder was unreachable:
+      // `drift` in particular, which is the highest-signal state there is. A
+      // rug-pulled connector rendered as a healthy active grant while the broker
+      // denied every call under it, which is precisely the disagreement between
+      // the picture and the enforcement that this projection exists to prevent.
+      //
+      // Drift wins over the stored row: the connector is answering fine, and
+      // that is the point. The remediation is to re-read what changed, not to
+      // retry.
+      ...connectorHealth(preview?.denyReason ?? null, connector),
       // Only an OPERATOR grant surfaces as `grantId`, because that field is what
       // makes the tile render an edge and a Detach button. An owner grant is
       // real, gates real calls, and stays invisible.
@@ -167,4 +180,32 @@ export function projectGrants(db: ClawbooDb, records: CapabilityRecord[]): Capab
   }
 
   return out
+}
+
+/**
+ * The live health of one connector tile.
+ *
+ * Two inputs, in priority order. A DRIFT verdict comes from the gate itself, so
+ * it is the same fact the broker would act on. Otherwise the `connectors` row
+ * carries whatever the supervisor last recorded, which is `ok` while it is
+ * running and an error once something noticed it was not.
+ */
+function connectorHealth(
+  denyReason: GrantDenyReason | null,
+  connector: { health?: string | null; healthDetail?: string | null } | null,
+): { health: CapabilityHealth; healthDetail?: string | null } {
+  if (denyReason === 'spec-drift') {
+    return {
+      health: 'drift',
+      healthDetail: 'this connector no longer matches what was approved for it',
+    }
+  }
+  const stored = connector?.health
+  if (stored === 'error' || stored === 'degraded' || stored === 'needs-auth') {
+    return {
+      health: stored,
+      ...(connector?.healthDetail ? { healthDetail: connector.healthDetail } : {}),
+    }
+  }
+  return { health: connector ? 'ok' : 'unknown' }
 }

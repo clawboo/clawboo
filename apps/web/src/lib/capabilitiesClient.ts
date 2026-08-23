@@ -6,6 +6,7 @@
 // @clawboo/capability-registry package.
 
 import { apiFetch } from '@clawboo/control-client'
+import { parseCapabilityId } from '@clawboo/capability-registry'
 import type {
   CapabilityInstallSpec,
   CapabilityRecord,
@@ -101,6 +102,18 @@ export function disableCapability(id: string): Promise<CapabilityActionResult> {
  * `agentRuntimes` maps each agent id → its runtime, so an empty agent knows which
  * runtime's global caps to inherit. Agents absent from the map are ignored.
  */
+/**
+ * Whether this record came from clawboo's OWN outbound connector source.
+ *
+ * Read off the id rather than off `source`: several runtimes stamp
+ * `origin: 'mcp-connector'` on rows describing servers THEY attach, and those
+ * are runtime-scoped facts that must keep obeying ordinary inheritance. Only the
+ * `connector` source id means clawboo is holding the connection itself.
+ */
+function isConnectorSourced(record: CapabilityRecord): boolean {
+  return parseCapabilityId(record.id)?.sourceId === 'connector'
+}
+
 export function groupAgentCapabilities(
   records: CapabilityRecord[],
   agentRuntimes: Map<string, string | null>,
@@ -127,10 +140,20 @@ export function groupAgentCapabilities(
     // and connector it was showing a second earlier. The twin is still
     // rendered. It is just not evidence of a real per-agent inventory.
     const ownReal = own.filter((r) => !r.synthetic)
+    const inherited = (runtime ? globalByRuntime.get(runtime) : undefined) ?? []
     if (ownReal.length > 0) {
-      out.set(agentId, own)
+      // CONNECTORS ARE INHERITED EVEN THEN, and they are the one source that is.
+      // clawboo owns the process and every agent reaches it through the same
+      // broker, so a connector record is global by construction and there is no
+      // agent-scoped version of it to find. Excluding it with the rest of the
+      // globals meant a connected connector never appeared on the ring of any
+      // agent that had a skill of its own, which is most of them: the headline
+      // feature was invisible in the graph for exactly the fleets most likely to
+      // use it.
+      const connectors = inherited.filter((r) => isConnectorSourced(r))
+      const seen = new Set(own.map((r) => r.id))
+      out.set(agentId, [...own, ...connectors.filter((r) => !seen.has(r.id))])
     } else {
-      const inherited = (runtime ? globalByRuntime.get(runtime) : undefined) ?? []
       const merged = [...inherited, ...own]
       if (merged.length > 0) out.set(agentId, merged)
     }
