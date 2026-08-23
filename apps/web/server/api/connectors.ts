@@ -14,7 +14,12 @@
 // nothing here may treat "the request arrived" as operator intent.
 
 import { connectConnectorBody, type ClawbooDb } from '@clawboo/db'
-import { connectorBySlug, type ConnectorDefinition } from '@clawboo/connector-catalog'
+import {
+  CONNECT_REFUSAL_COPY,
+  connectRefusal,
+  connectorBySlug,
+  type ConnectorDefinition,
+} from '@clawboo/connector-catalog'
 import type { Request, Response } from 'express'
 
 import {
@@ -26,34 +31,6 @@ import {
 } from '../lib/connectors/supervisor'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
-
-/** A placeholder the catalog tells the user to edit, which we cannot edit for them. */
-const PLACEHOLDER_ARG = /(^|\/)path\/to\/|^<.+>$/
-
-/**
- * Why a catalog entry cannot be connected by this release, or null if it can.
- *
- * Each refusal names the ACTUAL obstacle. A connector the UI offered and the
- * server then rejected with a bare status is the affordance-shaped lie the
- * connectors browser exists to refuse.
- */
-export function connectRefusal(def: ConnectorDefinition): string | null {
-  if (def.provenance !== 'curated') {
-    return 'Only curated connectors can be connected. A community server runs as you, unsandboxed.'
-  }
-  if (def.launch.transport !== 'stdio') {
-    return 'Remote connectors need an OAuth sign-in, which is not implemented yet.'
-  }
-  if (def.auth.kind !== 'none') {
-    return 'This connector needs a credential, and there is no way to supply one yet.'
-  }
-  if (def.launch.args.some((a) => PLACEHOLDER_ARG.test(a))) {
-    // Filesystem is the live example: its args end in /path/to/allowed/dir and
-    // the server refuses to start without a real one.
-    return 'This connector needs a path you have to fill in, and per-connector settings are not implemented yet.'
-  }
-  return null
-}
 
 function toConnectable(def: ConnectorDefinition): ConnectableDefinition {
   if (def.launch.transport !== 'stdio') throw new Error('not a stdio connector')
@@ -107,9 +84,11 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
       res.status(404).json({ error: `no catalog connector named ${parsed.data.slug}` })
       return
     }
+    // The SAME predicate the browser renders. A client-side copy would drift,
+    // and the first symptom would be a tile offering a button the server refuses.
     const refusal = connectRefusal(def)
     if (refusal) {
-      res.status(422).json({ error: refusal })
+      res.status(422).json({ error: CONNECT_REFUSAL_COPY[refusal], reason: refusal })
       return
     }
 

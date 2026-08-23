@@ -1,21 +1,38 @@
 // The connectors tab body, kept out of MarketplacePanel because that file is
 // already 695 lines across three tabs.
 //
-// This is a DIRECTORY, not an installer, and the copy says so. Clawboo is not an
-// MCP client yet, so the honest deliverable today is: browse, read what a
-// connector would be allowed to do, and copy a config block into your own
-// runtime. Rendering an "Install" button that writes nothing would be the exact
-// kind of affordance-shaped lie the plan is trying to avoid.
+// PART directory, PART installer, and the copy now says exactly which is which.
+// clawboo can run a curated, credential-free stdio server itself; everything
+// else it can only describe, so those tiles offer a config block to paste into a
+// runtime you already use and say plainly why they cannot be connected here.
+//
+// Which half a tile falls into is decided by `connectRefusal` in
+// @clawboo/connector-catalog -- the SAME predicate the REST handler enforces.
+// A tile therefore cannot offer a button the server would refuse, which is the
+// affordance-shaped lie this file exists to avoid.
 //
 // No fetch, no loading state: the catalog is committed data.
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Check, Copy, Globe, KeyRound, Plug, SearchX, ShieldAlert, Terminal } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  Globe,
+  Info,
+  KeyRound,
+  Plug,
+  SearchX,
+  ShieldAlert,
+  Terminal,
+} from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import {
+  CONNECT_REFUSAL_COPY,
   connectorCounts,
   connectorSnippet,
+  connectRefusal,
+  isConnectable,
   searchConnectors,
   SNIPPET_DIALECTS,
   type ConnectorCategory,
@@ -29,6 +46,7 @@ import { SearchInput } from '@/features/shared/SearchInput'
 import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
+import { connectConnector, disconnectConnector, listLiveConnectors } from './connectConnector'
 
 // ─── Category pills ─────────────────────────────────────────────────────────
 
@@ -45,16 +63,27 @@ const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   finance: 'Finance',
 }
 
-/** Auth kind → the status word a user reads. */
-function authLabel(def: ConnectorDefinition): {
-  label: string
-  icon?: LucideIcon
-  active: boolean
-} {
-  // A no-auth server is ready the moment it is attached, so "Active" is the
-  // honest word — "Connect" would imply a step that does not exist.
-  if (def.auth.kind === 'none') return { label: 'Active', active: true }
+/**
+ * The status word a user reads.
+ *
+ * A CONNECTABLE entry now reports its connection STATE. It used to say "Active"
+ * on the grounds that a no-auth server is ready the moment it is attached, and
+ * that was true while this tab was a directory and nothing more. It is exactly
+ * the set that now offers a Connect button, so leaving it would put "Active"
+ * next to "Connect" on the same tile and claim a state the backend does not
+ * have.
+ */
+function authLabel(
+  def: ConnectorDefinition,
+  connected: boolean,
+): { label: string; icon?: LucideIcon; active: boolean } {
+  if (isConnectable(def)) {
+    return connected
+      ? { label: 'Connected', icon: Plug, active: true }
+      : { label: 'Not connected', active: false }
+  }
   if (def.auth.kind === 'oauth') return { label: 'Sign in', icon: KeyRound, active: false }
+  if (def.auth.kind === 'none') return { label: 'Copy config', active: false }
   return { label: 'Needs a key', icon: KeyRound, active: false }
 }
 
@@ -69,13 +98,15 @@ function legCount(def: ConnectorDefinition): number {
 function ConnectorCard({
   def,
   index,
+  connected,
   onOpen,
 }: {
   def: ConnectorDefinition
   index: number
+  connected: boolean
   onOpen: (def: ConnectorDefinition) => void
 }) {
-  const auth = authLabel(def)
+  const auth = authLabel(def, connected)
   const legs = legCount(def)
   const remote = def.launch.transport === 'streamable-http'
 
@@ -129,7 +160,93 @@ function ConnectorCard({
 
 // ─── Detail: the copy-paste snippet ─────────────────────────────────────────
 
-function ConnectorDetail({ def, onClose }: { def: ConnectorDefinition; onClose: () => void }) {
+/**
+ * Connect / Disconnect, or an honest statement of why neither is offered.
+ *
+ * The refusal copy comes from the catalog package, which is the same predicate
+ * the REST handler enforces. A tile therefore cannot offer a button the server
+ * would refuse, and cannot withhold one the server would accept.
+ */
+function ConnectAction({
+  def,
+  connected,
+  onChanged,
+}: {
+  def: ConnectorDefinition
+  connected: boolean
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const refusal = connectRefusal(def)
+
+  if (refusal) {
+    return (
+      <section className="rounded-xl border border-border bg-surface-subtle p-4">
+        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+          <Info size={13} aria-hidden />
+          Not connectable yet
+        </div>
+        {/* Verbatim from the shared predicate: the actual obstacle, not a status. */}
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+          {CONNECT_REFUSAL_COPY[refusal]}
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+          You can still copy the config below into a runtime you already use.
+        </p>
+      </section>
+    )
+  }
+
+  async function run() {
+    setBusy(true)
+    try {
+      if (connected) await disconnectConnector(def.slug, def.displayName)
+      else await connectConnector(def.slug, def.displayName)
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-border bg-surface-subtle p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-foreground">
+            {connected ? 'Connected' : 'Run this connector'}
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {connected
+              ? 'Its tools are available to agents attached over HTTP. Agents running in-process cannot reach them yet. Disconnecting stops the process.'
+              : /* Named plainly: this starts a process on your machine, and the
+                   first run downloads the pinned package. */
+                'clawboo starts this server as a local process and lists its tools. The first run downloads the pinned package.'}
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant={connected ? 'secondary' : 'primary'}
+          onClick={run}
+          disabled={busy}
+        >
+          {busy ? 'Working…' : connected ? 'Disconnect' : 'Connect'}
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+function ConnectorDetail({
+  def,
+  connected,
+  onConnected,
+  onClose,
+}: {
+  def: ConnectorDefinition
+  connected: boolean
+  onConnected: () => void
+  onClose: () => void
+}) {
   const [dialect, setDialect] = useState<SnippetDialect>('claude-code')
   const [copied, setCopied] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
@@ -161,6 +278,11 @@ function ConnectorDetail({ def, onClose }: { def: ConnectorDefinition; onClose: 
           Back
         </Button>
       </div>
+
+      {/* The connect action, or the reason there isn't one. Above the snippet
+          because running it here is now the primary verb; pasting a config into
+          your own runtime is the fallback for everything clawboo cannot run. */}
+      <ConnectAction def={def} connected={connected} onChanged={onConnected} />
 
       {/* What it is allowed to reach. Shown before the snippet on purpose: the
           decision a user is making is "should this run at all", not "where do I
@@ -290,6 +412,10 @@ export function ConnectorsBrowser() {
   const [selected, setSelected] = useState<ConnectorDefinition | null>(null)
 
   const counts = connectorCounts()
+  // Stated rather than implied. The header used to read "a directory, not an
+  // installer", which was true when nothing here could run and is now false for
+  // exactly the connectable set.
+  const connectableCount = useMemo(() => searchConnectors('').filter(isConnectable).length, [])
 
   const results = useMemo(() => {
     const matched = searchConnectors(searchQuery)
@@ -304,7 +430,25 @@ export function ConnectorsBrowser() {
     ]
   }, [])
 
-  if (selected) return <ConnectorDetail def={selected} onClose={() => setSelected(null)} />
+  // Which connectors are live, by slug. Fetched rather than assumed: a connector
+  // survives a page reload because the PROCESS is owned by the server, so a
+  // client-side guess would be wrong on every refresh.
+  const [liveSlugs, setLiveSlugs] = useState<ReadonlySet<string>>(new Set())
+  const refreshLive = useCallback(() => {
+    void listLiveConnectors().then((rows) => setLiveSlugs(new Set(rows.map((r) => r.slug))))
+  }, [])
+  useEffect(refreshLive, [refreshLive])
+
+  if (selected) {
+    return (
+      <ConnectorDetail
+        def={selected}
+        connected={liveSlugs.has(selected.slug)}
+        onConnected={refreshLive}
+        onClose={() => setSelected(null)}
+      />
+    )
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -327,8 +471,9 @@ export function ConnectorsBrowser() {
           reference implementations make and cannot support. */}
       <div className="shrink-0 px-6 pt-3 text-[11px] text-muted-foreground">
         {counts.curated} curated
-        {counts.community > 0 && <> · {counts.community} community</>} · a directory, not an
-        installer — copy a block into your own runtime
+        {counts.community > 0 && <> · {counts.community} community</>} · {connectableCount}{' '}
+        {connectableCount === 1 ? 'runs' : 'run'} here; the rest are a directory, so copy their
+        config into a runtime you already use
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -341,7 +486,13 @@ export function ConnectorsBrowser() {
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {results.map((def, i) => (
-              <ConnectorCard key={def.slug} def={def} index={i} onOpen={setSelected} />
+              <ConnectorCard
+                key={def.slug}
+                def={def}
+                index={i}
+                connected={liveSlugs.has(def.slug)}
+                onOpen={setSelected}
+              />
             ))}
           </div>
         )}
