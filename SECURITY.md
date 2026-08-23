@@ -76,5 +76,34 @@ cookie). The server **refuses to start** on a non-loopback bind with no token â€
 set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. (`HOSTNAME` is ignored as a bind signal, so
 a container's auto-set hostname never silently widens the bind â€” use an explicit `HOST=`.)
 
+### Connectors run as you, and so does anything else on your machine
+
+Connecting an MCP connector starts a child process under your own user account. clawboo narrows what
+that child inherits: it is given an explicit allowlist of environment variables plus whatever
+credentials you entered for that connector, so it never sees your provider API keys, your cloud
+credentials, or clawboo's own vault key. (The MCP SDK adds a small fixed set of its own on top:
+`HOME`, `PATH`, `SHELL`, `TERM`, `USER` and their Windows equivalents, none of which carry a
+credential.)
+
+Arguments are passed as an argv array, never as a shell string, so a value from the catalog or from
+a path you supply cannot be interpreted as a command. On Windows a `.cmd` shim genuinely cannot be
+spawned directly, so it is routed through `cmd.exe` with every token escaped individually and the
+command line marked verbatim; that is a narrower thing than handing a string to a shell, but it is
+not "no shell involved".
+
+That is the environment vector, and it is the only one a local-first tool can close. **A connector
+child is still a process running as you.** It can read your home directory, your SSH keys, your
+`~/.aws` credentials, the clawboo database, and the vault files on disk. No local key scheme changes
+that. This is why only **curated** connectors can be connected today, and why community entries stay
+blocked until a sandbox exists.
+
+The same reasoning applies to the governance controls. On a loopback bind with no access token, every
+`/api/*` route is reachable by any process on the machine, including a connector child. Such a
+process can therefore mint itself a grant, or resolve one of its own approval prompts. **Treat the
+approval flow and the lethal-trifecta gate as controls against a confused or prompt-injected model,
+not as controls against local code execution.** If you need the stronger property, set
+`STUDIO_ACCESS_TOKEN` (see above); the token is stripped from every spawned child's environment, so a
+connector cannot read it.
+
 We do not currently run a paid bug-bounty program. We are grateful for responsible disclosure and will
 credit reporters who wish to be named.

@@ -222,7 +222,13 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
   // hundreds of times a night is one they stop reading, which is how the whole
   // governance layer becomes decorative. Read-only exfiltration is not left
   // unguarded: it is exactly what the trifecta gate above catches, and that gate
-  // cannot be turned off by policy.
+  // cannot be turned off by POLICY -- `approvalPolicy: 'never'` is evaluated
+  // after it, deliberately.
+  //
+  // It CAN be defeated by a local process, which resolves its own approval and
+  // never asks a human. That is a limit of running unauthenticated on loopback,
+  // not of this function, and SECURITY.md states it rather than leaving a reader
+  // to infer a guarantee from this comment.
   if (tool.risk === 'external' && isMutating(tool))
     return { kind: 'require_approval', grantId: grant.id, reason: 'risk-external', neverRemember }
 

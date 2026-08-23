@@ -36,6 +36,8 @@ export const MODE_RANK: Readonly<Record<GrantMode, number>> = Object.freeze({
  * How often a human is asked.
  * - `never`  never prompt on POLICY grounds. Does NOT bypass the trifecta/taint
  *            gate, which is evaluated earlier precisely so this cannot disarm it.
+ *            (A local process that resolves its OWN approval still can; see
+ *            SECURITY.md. Policy cannot.)
  * - `risk`   prompt only for tools the registry classified as risky (today's behaviour).
  * - `writes` prompt for every mutation.
  * - `always` prompt for every call, including reads.
