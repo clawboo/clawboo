@@ -28,12 +28,20 @@ export type ConnectorCategory =
  * Where the entry came from, and therefore how much we are willing to claim.
  * - `curated`   first-party, hand-written, smoke-tested by us.
  * - `community` ingested from the official registry snapshot. Automated checks only.
+ * - `custom`    the operator typed it in themselves. We vouch for nothing and say
+ *               so; the trust is the same as pasting a server into a runtime's own
+ *               config, which is a thing they can already do without us.
  *
  * The UI must render these as a hard visual split and never merge the counts into
  * a single "1000+" number. That claim is the one the reference implementations
  * make and cannot support.
+ *
+ * The distinction that matters for RUNNING one: `custom` is a command the
+ * operator chose, which is why it can be connected today. `community` is a
+ * one-click install of a package they may never have heard of, which is why it
+ * cannot until a sandbox exists.
  */
-export type ConnectorProvenance = 'curated' | 'community'
+export type ConnectorProvenance = 'curated' | 'community' | 'custom'
 
 /** How the connector authenticates. `none` renders as "Active", not "Connect". */
 export type ConnectorAuthKind = 'none' | 'api-key' | 'bearer' | 'oauth'
@@ -110,6 +118,30 @@ export interface ConnectorTrifectaHint {
   canEgress: boolean
 }
 
+/**
+ * An argument the operator supplies, described well enough to ask for it.
+ *
+ * `replacesArg` is what keeps this from being a second, parallel way of building
+ * argv: a catalog entry either has a placeholder token to substitute, or it
+ * appends. Both go through `resolveLaunchArgs`, so there is exactly one function
+ * that decides what a connector is actually run with.
+ */
+export interface ConnectorUserArgument {
+  /** Shown as the field label, e.g. "Folder clawboo may read and write". */
+  label: string
+  /** One line under the field. Plain verbs, no jargon. */
+  description: string
+  /** A realistic example, shown as the input placeholder. */
+  example: string
+  /**
+   * The exact argv token to replace. Omit to APPEND the value instead.
+   *
+   * `filesystem` carries `/path/to/allowed/dir` and needs substitution; `sqlite`
+   * carries nothing and needs an append.
+   */
+  replacesArg?: string
+}
+
 export interface ConnectorDefinition {
   /** Stable kebab-case identity. The dialect key and the catalog's primary key. */
   slug: string
@@ -133,6 +165,8 @@ export interface ConnectorDefinition {
    * ordinary. Verified by running it; do not remove without doing the same.
    */
   requiresUserArgument?: boolean
+  /** What that argument IS, so the UI can ask for it in words a user recognises. */
+  userArgument?: ConnectorUserArgument
   tags: string[]
   homepage?: string
   /** Registry id when the entry came from a snapshot, e.g. `io.github.org/server`. */

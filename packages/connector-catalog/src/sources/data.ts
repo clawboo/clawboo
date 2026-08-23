@@ -21,6 +21,11 @@ export const DATA_CONNECTORS: ConnectorDefinition[] = [
     // `Usage: mcp-server-sqlite-npx <database-path>`. Nothing in the args looks
     // wrong, which is exactly why this has to be declared rather than detected.
     requiresUserArgument: true,
+    userArgument: {
+      label: 'SQLite database file',
+      description: 'The .db file to query. It is opened directly, so it must already exist.',
+      example: '/Users/you/data/app.db',
+    },
     auth: { kind: 'none', inputs: [] },
     egressAllow: [],
     trifecta: { readsPrivateData: true, ingestsUntrustedContent: false, canEgress: false },

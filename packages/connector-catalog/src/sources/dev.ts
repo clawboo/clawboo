@@ -198,6 +198,13 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       pinnedVersion: '2026.7.10',
     },
     requiresUserArgument: true,
+    userArgument: {
+      label: 'Folder this connector may read and write',
+      description:
+        'Only this folder and everything inside it. The server refuses to start without one.',
+      example: '/Users/you/projects/notes',
+      replacesArg: '/path/to/allowed/dir',
+    },
     auth: { kind: 'none', inputs: [] },
     egressAllow: [],
     trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: false },

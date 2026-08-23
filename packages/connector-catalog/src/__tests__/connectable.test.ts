@@ -47,6 +47,21 @@ describe('connectRefusal', () => {
     expect(connectRefusal(connectorBySlug('sqlite')!)).toBe('needs-user-supplied-argument')
   })
 
+  it('does not crash on a REMOTE entry, which carries no launch args', () => {
+    // The placeholder backstop reads `launch.args`, which only a stdio launch
+    // has. It used to be unreachable for a remote because the sign-in check
+    // returned first; making that solvable made this reachable.
+    const github = connectorBySlug('github')!
+    expect(() => connectRefusal(github, true, true, true)).not.toThrow()
+    expect(connectRefusal(github, true, true, true)).toBeNull()
+  })
+
+  it('treats a remote connector as connectable ONCE signed in', () => {
+    const github = connectorBySlug('github')!
+    expect(connectRefusal(github, true, true, false)).toBe('remote-needs-oauth')
+    expect(connectRefusal(github, true, true, true)).toBeNull()
+  })
+
   it('allows the memory connector, which is the one with nothing to fill in', () => {
     expect(connectRefusal(connectorBySlug('memory')!)).toBeNull()
     expect(isConnectable(connectorBySlug('memory')!)).toBe(true)
