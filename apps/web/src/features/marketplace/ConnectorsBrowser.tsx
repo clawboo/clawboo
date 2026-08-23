@@ -578,10 +578,12 @@ function ConnectAction({
     )
   }
 
+  const remote = def.launch.transport !== 'stdio'
+
   async function run() {
     setBusy(true)
     try {
-      if (connected) await disconnectConnector(def.slug, def.displayName)
+      if (connected) await disconnectConnector(def.slug, def.displayName, remote)
       else {
         // The callback matters for a token the provider has revoked: the local
         // record still reads as authorized, so without re-reading the config the
@@ -598,8 +600,6 @@ function ConnectAction({
     }
   }
 
-  const remote = def.launch.transport !== 'stdio'
-
   return (
     <>
       {/* Still editable after it is satisfied. A credential can expire and a
@@ -612,14 +612,22 @@ function ConnectAction({
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs font-semibold text-foreground">
-              {connected ? 'Connected' : 'Run this connector'}
+              {connected ? 'Connected' : remote ? 'Connect to this provider' : 'Run this connector'}
             </div>
+            {/* BRANCHED ON THE TRANSPORT, because the two are not the same act.
+                A local connector is a child process on this machine and a
+                package download; a remote one is an authenticated HTTP session
+                to somebody else's server, where nothing is spawned and nothing
+                is downloaded. One sentence covering both was wrong for whichever
+                half the reader was looking at. */}
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {connected
-                ? 'Its tools are available to your agents. Disconnecting stops the process.'
-                : /* Named plainly: this starts a process on your machine, and the
-                   first run downloads the pinned package. */
-                  'clawboo starts this server as a local process and lists its tools. The first run downloads the pinned package.'}
+                ? remote
+                  ? 'Its tools are available to your agents. Disconnecting closes the connection; your sign-in is kept until you sign out.'
+                  : 'Its tools are available to your agents. Disconnecting stops the process.'
+                : remote
+                  ? `clawboo opens an authenticated connection to ${def.launch.transport === 'streamable-http' ? def.launch.url : ''} and lists its tools. Nothing runs on your machine.`
+                  : 'clawboo starts this server as a local process and lists its tools. The first run downloads the pinned package.'}
             </p>
           </div>
           <Button

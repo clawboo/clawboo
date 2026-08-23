@@ -84,7 +84,13 @@ export async function connectConnector(
 }
 
 /** Disconnect a connector. Returns whether it was connected in the first place. */
-export async function disconnectConnector(slug: string, displayName: string): Promise<boolean> {
+export async function disconnectConnector(
+  slug: string,
+  displayName: string,
+  /** Whether this connector is remote. Decides what the toast may claim was
+   *  stopped: a remote connector has no process on this machine. */
+  remote = false,
+): Promise<boolean> {
   try {
     const res = await apiFetch(`/api/connectors/${encodeURIComponent(slug)}/disconnect`, {
       method: 'POST',
@@ -101,9 +107,13 @@ export async function disconnectConnector(slug: string, displayName: string): Pr
     return false
   }
   useToastStore.getState().addToast({
-    // Says what actually happened: the process is gone, the config you pasted
-    // into your own runtime is not.
-    message: `${displayName} disconnected. Its process was stopped.`,
+    // Says what actually happened, which differs by transport: a local connector
+    // had a process to stop, a remote one never had one. Claiming otherwise told
+    // the operator a child had been killed on their machine when the connector
+    // had only ever been an HTTP session.
+    message: remote
+      ? `${displayName} disconnected. Your sign-in is kept until you sign out.`
+      : `${displayName} disconnected. Its process was stopped.`,
     type: 'info',
   })
   return true
