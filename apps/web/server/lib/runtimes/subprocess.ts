@@ -164,8 +164,17 @@ export async function shutdownLiveSubprocesses(
   // A connector has no handle and therefore no 'close' event, so its exit is
   // POLLED. 50ms is short enough to add nothing meaningful to shutdown and long
   // enough that the loop is not a spin.
+  const pollDeadline = Date.now() + timeoutMs
   const pidsGone = (async () => {
-    while (pids.some(isAlive)) await new Promise((r) => setTimeout(r, 50))
+    // Bounded by the SAME deadline the race uses. An unbounded loop would keep
+    // chaining timers for a pid that never dies, holding the event loop open
+    // long after the deadline had already won and the server tried to exit.
+    while (pids.some(isAlive) && Date.now() < pollDeadline) {
+      await new Promise((r) => {
+        const handle = setTimeout(r, 50)
+        handle.unref?.()
+      })
+    }
   })()
 
   const allClosed = Promise.all([

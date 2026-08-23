@@ -23,12 +23,36 @@ import { parseCapabilityId } from '@clawboo/capability-registry'
  * than the attachment: which adapter owns it, which runtime it runs under, and
  * its key inside that runtime. Agent and scope are excluded on purpose.
  *
- * Returns null for a record that is not a connector, so callers cannot
+ */
+export function connectorIdFor(sourceId: string, runtime: string, sourceKey: string): string {
+  return `conn:${sourceId}:${runtime}:${sourceKey}`
+}
+
+/**
+ * The identity for a capability RECORD.
+ *
+ * Returns null for a record that is not a connector, so a caller cannot
  * accidentally mint a grant identity for a skill.
  */
 export function connectorIdForRecord(record: CapabilityRecord): string | null {
   if (record.kind !== 'connector') return null
   const sourceId = parseCapabilityId(record.id)?.sourceId ?? null
   if (!sourceId) return null
-  return `conn:${sourceId}:${record.runtime}:${record.sourceKey}`
+  return connectorIdFor(sourceId, record.runtime, record.sourceKey)
+}
+
+/**
+ * The identity for a connector clawboo itself spawned.
+ *
+ * MUST equal what `connectorIdForRecord` derives from the record the connector
+ * source emits for the same connector, or the grant the supervisor keys on and
+ * the grant the projection looks up are different rows -- the tile gets an owner
+ * grant under one id while the broker denies `no-grant` under another. Built
+ * from the same function, and pinned by a test, because the two producers are in
+ * different files and nothing else would catch them drifting.
+ */
+export const CONNECTOR_SOURCE_RUNTIME = 'clawboo-native'
+
+export function connectorInstanceIdForSlug(slug: string): string {
+  return connectorIdFor('connector', CONNECTOR_SOURCE_RUNTIME, `mcp:${slug}`)
 }
