@@ -29,6 +29,7 @@
     "@clawboo/capability-registry": "workspace:*",
     "@clawboo/compaction": "workspace:*",
     "@clawboo/config": "workspace:*",
+    "@clawboo/connector-catalog": "workspace:*",
     "@clawboo/control-client": "workspace:*",
     "@clawboo/db": "workspace:*",
     "@clawboo/evals": "workspace:*",

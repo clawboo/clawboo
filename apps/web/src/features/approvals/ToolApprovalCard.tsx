@@ -26,6 +26,9 @@ export function ToolApprovalCard({
   showAgentName = false,
   compact = false,
 }: ToolApprovalCardProps) {
+  // Truthy covers both shapes: SQLite sends 1/0 through the API, and a hand-built
+  // fixture may use a boolean.
+  const rememberable = !approval.neverRemember
   const agents = useFleetStore((s) => s.agents)
   const agentName = approval.agentId
     ? (agents.find((a) => a.id === approval.agentId)?.name ?? approval.agentId)
@@ -79,7 +82,10 @@ export function ToolApprovalCard({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-1.5">
+      {/* TWO columns when this class cannot be remembered, not a disabled third.
+          The server refuses to mint a rule for it, so the button could only ever
+          behave as Allow Once while promising otherwise. */}
+      <div className={rememberable ? 'grid grid-cols-3 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
         <Button
           variant="primary"
           size="sm"
@@ -89,15 +95,17 @@ export function ToolApprovalCard({
           <Check size={13} strokeWidth={2} />
           Allow Once
         </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          fullWidth
-          onClick={() => onResolve(approval.id, 'allow_always')}
-        >
-          <Star size={12} strokeWidth={2} />
-          Always
-        </Button>
+        {rememberable && (
+          <Button
+            variant="secondary"
+            size="sm"
+            fullWidth
+            onClick={() => onResolve(approval.id, 'allow_always')}
+          >
+            <Star size={12} strokeWidth={2} />
+            Always
+          </Button>
+        )}
         <Button variant="danger" size="sm" fullWidth onClick={() => onResolve(approval.id, 'deny')}>
           <Ban size={12} strokeWidth={2} />
           Deny

@@ -10,7 +10,16 @@
 // the SPA imports these types to type the REST response.
 
 /** The five read()-adapters / multiplexer keys (the `id` namespace prefix). */
-export type CapabilitySourceId = 'native' | 'hermes' | 'claude-code' | 'codex' | 'openclaw'
+/**
+ * The adapter that OWNS a capability row.
+ *
+ * `connector` is clawboo's own outbound MCP connections -- servers clawboo spawns
+ * and holds itself, rather than ones a runtime happens to have attached. It is a
+ * source rather than a flag on `native` because its rows have a different owner,
+ * a different lifecycle, and a different manageability tier.
+ */
+export type CapabilitySourceId =
+  'native' | 'hermes' | 'claude-code' | 'codex' | 'openclaw' | 'connector'
 
 /**
  * Runtime that OWNS the capability. Open set (mirrors the executor RuntimeId).
@@ -51,6 +60,33 @@ export type CapabilityOrigin =
  * broken; the dashboard renders a disabled+hint row.
  */
 export type CapabilityStatus = 'ready' | 'disabled' | 'manageable-but-pending-auth' | 'unavailable'
+
+/**
+ * Live health: a first-class concept `CapabilityRecord` has never carried.
+ *
+ * Distinct from `status` (lifecycle: has a human turned it off?) and from
+ * `available` (is its declared requirement met?). This is the operational
+ * question: is the thing behind it actually answering right now.
+ *
+ * `drift` is the highest-signal value in the set. It means the server's tool
+ * list no longer hashes to what a human approved (a rug-pull) and it must
+ * never be collapsed into `error`, because the remediation is completely
+ * different: `error` says retry, `drift` says re-read what changed before you
+ * trust it again.
+ */
+export type CapabilityHealth = 'unknown' | 'ok' | 'needs-auth' | 'degraded' | 'error' | 'drift'
+
+/**
+ * The three legs of the "lethal trifecta", as a capability can contribute them.
+ * Structural mirror of `@clawboo/governance`'s `TrifectaTags`, declared locally
+ * so this package stays dependency-free: the same discipline `CapabilityAvailability`
+ * already follows for `@clawboo/db`'s `AvailabilityRequirement`.
+ */
+export interface CapabilityTrifecta {
+  readsPrivateData: boolean
+  ingestsUntrustedContent: boolean
+  canEgress: boolean
+}
 
 /**
  * Declarative availability — a capability is unavailable (greyed) until its
@@ -131,4 +167,80 @@ export interface CapabilityRecord {
   tenantId: string | null
   /** ISO timestamp — when this record was last read(). */
   syncedAt: string
+
+  // ─── Connector-era fields ─────────────────────────────────────────────────
+  // All OPTIONAL, so every existing producer and consumer compiles unchanged.
+  // A source that knows nothing about connectors simply omits them.
+
+  /**
+   * The grant authorizing this capability for its subject, when one exists.
+   *
+   * A grant is user INTENT and lives in its own table; this row is a cache that a
+   * source-scoped reconcile rewrites on every read. The id is carried here only
+   * so a renderer can join the two without a second fetch, never as the place
+   * the grant is stored.
+   */
+  grantId?: string | null
+
+  /** The connector instance this capability came from, for attribution. */
+  connectorId?: string | null
+
+  /**
+   * Live health, which is strictly richer than the boolean `available`.
+   *
+   * `available` answers "is its declared requirement satisfied". `health`
+   * answers "what is actually wrong", and that distinction is what lets a
+   * renderer show a pulsing key for `needs-auth` instead of the same flat grey
+   * it shows for a missing plugin.
+   */
+  health?: CapabilityHealth
+
+  /** One scrubbed line explaining a non-ok `health`. Never a secret, never a stack. */
+  healthDetail?: string | null
+
+  /** ISO timestamp of the last successful use. Drives graph desaturation. */
+  lastUsedAt?: string | null
+
+  /** How many subjects hold a grant on this. `>= 2` renders the shared "xN" chip. */
+  grantCount?: number
+
+  /**
+   * Tool calls under this grant waiting on a human right now.
+   *
+   * CAUSED BY a `require_approval` verdict but not itself one, which is why it
+   * is a plain count rather than part of the decision projection: it is the
+   * marching-edge signal, not an authorization.
+   */
+  pendingApprovals?: number
+
+  /** Which exfiltration-risk legs this capability can contribute. */
+  trifecta?: CapabilityTrifecta
+
+  /**
+   * The grant's lifecycle AS THE GATE SEES IT, which is not always what the row
+   * says: an expired-but-unswept grant projects `expired` because that is what
+   * the runtime would do with it. Renderers show this, never `row.state`.
+   */
+  grantState?: 'proposed' | 'active' | 'suspended' | 'revoked' | 'expired'
+
+  /**
+   * The projected grant's privilege ceiling.
+   *
+   * Threaded rather than assumed: a renderer that defaults to `read` on an
+   * `admin` grant UNDER-REPORTS what the agent can actually do, which is the
+   * one direction a governance surface must never be wrong in.
+   */
+  grantMode?: 'read' | 'write' | 'admin'
+
+  /**
+   * True for a record the server SYNTHESISED rather than read from a runtime.
+   *
+   * A grantee's twin tile is the only producer: agent B holds a grant on a
+   * connector its own runtime never reported. Consumers that assume every record
+   * id resolves through `getCapability` must skip these, and the client's
+   * inherit-if-empty grouping must not count them as "this agent has its own
+   * capabilities" -- doing so switches inheritance off and hides the agent's
+   * entire real fan.
+   */
+  synthetic?: boolean
 }

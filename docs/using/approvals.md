@@ -45,11 +45,11 @@ Each **tool / delegation approval** card (in the queue below) shows:
 
 Click one of the three actions on the card:
 
-| Action         | Exec approval                                        | Tool / delegation approval                             |
-| -------------- | ---------------------------------------------------- | ------------------------------------------------------ |
-| **Allow Once** | Permits this single run                              | Permits this single call (`allow_once`)                |
-| **Always**     | Allowlists the command pattern so it stops prompting | Records a sticky allow for this scope (`allow_always`) |
-| **Deny**       | Rejects the run                                      | Rejects the call (`deny`)                              |
+| Action         | Exec approval                                        | Tool / delegation approval                                                                                              |
+| -------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Allow Once** | Permits this single run                              | Permits this single call (`allow_once`)                                                                                 |
+| **Always**     | Allowlists the command pattern so it stops prompting | Mints a durable rule in `approval_rules`, bound to the grant, covering any arguments for that tool, expiring in 30 days |
+| **Deny**       | Rejects the run                                      | Rejects the call (`deny`)                                                                                               |
 
 What happens under the hood differs by surface:
 
@@ -111,7 +111,9 @@ Under the queue, the panel lists every broker tool with an **Available** / **Una
 </Warning>
 
 <Danger>
-**Always is sticky.** For an exec approval it allowlists the command pattern so it stops asking; for a tool/delegation it records a sticky allow for that scope. Use **Allow Once** when you want to keep the gate for next time.
+**Always is sticky.** For an exec approval it allowlists the command pattern so it stops asking. For a tool approval it mints a standing rule bound to the grant the call was made under, covering any arguments for that tool, and it expires after 30 days: a rule with no expiry would be a permission nobody revisits. Revoking the grant deletes its rules, so a later re-grant cannot silently inherit approvals you gave under different circumstances. Use **Allow Once** when you want to keep the gate for next time.
+
+**Sometimes there is no Always button.** Some prompts are marked unrememberable when they are raised, and for those the card offers only Allow Once and Deny. That covers a call whose run has accumulated the [lethal trifecta](/appendices/glossary) and a call made after the run ingested untrusted content. Both are properties of _this run_ rather than of the tool, so a standing allow would authorize a future run that looks nothing like it.
 </Danger>
 
 ## Related

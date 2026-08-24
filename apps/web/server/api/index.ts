@@ -82,6 +82,20 @@ import {
 } from './board'
 import { memorySearchGET, memorySavePOST, memoryBrowseGET, memoryProviderGET } from './memory'
 import { capabilitiesListGET, capabilitiesActionPOST } from './capabilities'
+import {
+  connectorAuthorizeAwaitPOST,
+  connectorAuthorizeDELETE,
+  connectorAuthorizePOST,
+  connectorConfigGET,
+  connectorConfigPUT,
+  connectorsCustomDELETE,
+  connectorsCustomGET,
+  connectorsCustomPOST,
+  connectorsConnectPOST,
+  connectorsDisconnectPOST,
+  connectorsListGET,
+} from './connectors'
+import { grantsCreatePOST, grantsListGET, grantsResumePOST, grantsRevokePOST } from './grants'
 import { toolsListGET, toolsApprovalsGET, toolsApprovalResolvePOST, toolsAuditGET } from './tools'
 import {
   mcpConfigGET,
@@ -310,6 +324,38 @@ router.get('/api/tools', toolsListGET)
 router.get('/api/tools/approvals', toolsApprovalsGET)
 router.post('/api/tools/approvals/:id/resolve', toolsApprovalResolvePOST)
 router.get('/api/tools/audit', toolsAuditGET)
+// Grants: the server half of the Ghost Graph's connector gestures. `:id/resume`
+// is the 8-second Undo behind the Detach toast, and is bounded server-side.
+// Connectors: the lifecycle of an outbound MCP connection. `connect` spawns a
+// child process, so the scope gate lives in the handler rather than the client.
+//
+// The SENSITIVE tier on every route that does real work off one request. These
+// spawn a child process, bind a socket and make outbound requests, or delete
+// stored credentials, and the general ceiling is high enough to allow thousands
+// of them. Reads stay on the general tier: the panel polls them.
+router.get('/api/connectors', connectorsListGET)
+router.post('/api/connectors/connect', sensitiveLimiter, connectorsConnectPOST)
+// Custom connectors: the operator points clawboo at a server of their own.
+// Registered BEFORE the :slug routes so `custom` is never read as a slug.
+router.get('/api/connectors/custom', connectorsCustomGET)
+router.post('/api/connectors/custom', sensitiveLimiter, connectorsCustomPOST)
+router.delete('/api/connectors/custom/:slug', sensitiveLimiter, connectorsCustomDELETE)
+router.post('/api/connectors/:slug/disconnect', sensitiveLimiter, connectorsDisconnectPOST)
+// Config: what an operator must supply before a connector can run. A credential
+// goes IN and comes back only as a boolean; a launch argument comes back in full,
+// because checking which folder a connector was handed is the point of asking.
+// OAuth sign-in for a remote connector. The callback does NOT land here: it
+// goes to an ephemeral loopback listener, because the redirect back is a
+// cross-site navigation and the origin guard refuses exactly that.
+router.post('/api/connectors/:slug/authorize', sensitiveLimiter, connectorAuthorizePOST)
+router.post('/api/connectors/:slug/authorize/await', connectorAuthorizeAwaitPOST)
+router.delete('/api/connectors/:slug/authorize', sensitiveLimiter, connectorAuthorizeDELETE)
+router.get('/api/connectors/:slug/config', connectorConfigGET)
+router.put('/api/connectors/:slug/config', sensitiveLimiter, connectorConfigPUT)
+router.get('/api/grants', grantsListGET)
+router.post('/api/grants', grantsCreatePOST)
+router.post('/api/grants/:id/revoke', grantsRevokePOST)
+router.post('/api/grants/:id/resume', grantsResumePOST)
 router.get('/api/mcp/config', mcpConfigGET)
 router.post('/api/mcp/tasks', mcpTasksPost)
 router.get('/api/mcp/tasks', mcpTasksSession)

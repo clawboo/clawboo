@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  IncompleteMcpSpecError,
   InvalidMcpIdentError,
-  NonStdioUnsupportedError,
   ReservedMcpServerNameError,
+  UnparseableMcpConfigError,
   mergeJsonMcpServers,
   mergeTomlMcpServer,
   toCodexTomlBlock,
@@ -45,9 +46,19 @@ describe('transcoder — dialects', () => {
     expect(block).toContain('command = "node"')
     expect(block).toContain('args = ["t.js"]')
   })
-  it('Codex (stdio-only) rejects an http spec', () => {
-    expect(() => toCodexTomlBlock({ name: 'x', transport: 'http', url: 'http://h' })).toThrow(
-      NonStdioUnsupportedError,
+  it('Codex emits url= for an http spec rather than refusing it', () => {
+    // It used to throw NonStdioUnsupportedError here while `codexDriver.ts` wrote
+    // exactly this block in production. The driver ships; the transcoder was wrong.
+    const block = toCodexTomlBlock({ name: 'x', transport: 'http', url: 'https://h/mcp' })
+    expect(block).toContain('[mcp_servers.x]')
+    expect(block).toContain('url = "https://h/mcp"')
+  })
+
+  it('rejects a dotted name, which TOML would silently nest', () => {
+    // `[mcp_servers.a.b]` declares table `b` under `a`, so Codex would register a
+    // server called `b`, and the merge could never find it again.
+    expect(() => toCodexTomlBlock({ name: 'a.b', transport: 'stdio', command: 'c' })).toThrow(
+      InvalidMcpIdentError,
     )
   })
   it('transcodeServer routes codex→toml and others→json', () => {
@@ -60,12 +71,55 @@ describe('transcoder — dialects', () => {
   })
 })
 
+describe('transcoder: incomplete specs', () => {
+  // `command` and `url` are both optional on CanonicalMcpServer because each is
+  // dead weight for the other transport. Nothing else enforces the pairing, so a
+  // spec missing its own transport's field used to transcode into `url = ""` or
+  // `command: ''`: a block the runtime happily writes and can never connect with.
+  it('rejects an http spec with no url, in every dialect', () => {
+    const spec = { name: 'x', transport: 'http' } as const
+    expect(() => toJsonEntry(spec)).toThrow(IncompleteMcpSpecError)
+    expect(() => toCodexTomlBlock(spec)).toThrow(IncompleteMcpSpecError)
+  })
+
+  it('rejects an http spec with an EMPTY url', () => {
+    expect(() => toJsonEntry({ name: 'x', transport: 'http', url: '' })).toThrow(
+      IncompleteMcpSpecError,
+    )
+  })
+
+  it('rejects a stdio spec with no command', () => {
+    const spec = { name: 'x', transport: 'stdio' } as const
+    expect(() => toJsonEntry(spec)).toThrow(IncompleteMcpSpecError)
+    expect(() => toCodexTomlBlock(spec)).toThrow(IncompleteMcpSpecError)
+  })
+})
+
 describe('transcoder — comment-preserving merge', () => {
   it('JSON merge preserves existing entries + adds the new one', () => {
     const existing = JSON.stringify({ mcpServers: { keep: { type: 'http', url: 'u1' } } })
     const merged = JSON.parse(mergeJsonMcpServers(existing, 'added', { type: 'http', url: 'u2' }))
     expect(merged.mcpServers.keep).toEqual({ type: 'http', url: 'u1' })
     expect(merged.mcpServers.added).toEqual({ type: 'http', url: 'u2' })
+  })
+
+  it('THROWS on an unparseable config instead of silently emptying it', () => {
+    // The regression this guards: the old catch reset `parsed = {}`, so the
+    // returned string held ONLY the new server. Writing that back over the
+    // user's file deleted every other MCP server and every other top-level key.
+    expect(() => mergeJsonMcpServers('{ not json', 'added', { type: 'http', url: 'u' })).toThrow(
+      UnparseableMcpConfigError,
+    )
+  })
+
+  it('preserves unrelated TOP-LEVEL keys, not just sibling servers', () => {
+    const existing = JSON.stringify({
+      $schema: 'https://example/schema.json',
+      mcpServers: { keep: { type: 'http', url: 'u1' } },
+    })
+    const merged = JSON.parse(mergeJsonMcpServers(existing, 'added', { type: 'http', url: 'u2' }))
+    expect(merged.$schema).toBe('https://example/schema.json')
+    expect(Object.keys(merged.mcpServers).sort()).toEqual(['added', 'keep'])
   })
 
   it('TOML merge PRESERVES comments + unrelated blocks (the load-bearing property)', () => {

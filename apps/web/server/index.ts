@@ -18,6 +18,8 @@ import {
 
 import { apiRouter } from './api/index'
 import { attachIdentity } from './lib/auth'
+import { reapOrphanedConnectors } from './lib/connectors/pidFile'
+import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { closeDb, getDb } from './lib/db'
 import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskWorkspaces } from './lib/worktrees'
@@ -533,6 +535,19 @@ async function main() {
     safeStart('routines-ticker', () =>
       startRoutinesTicker({ log, mcpBaseUrl: `http://127.0.0.1:${port}` }),
     )
+
+    // ── Orphaned connector children ───────────────────────────────────────────
+    // A connector child outlives a HARD stop: a crash or a SIGKILL runs no
+    // shutdown hook, and the child is a real process nobody is left holding. On
+    // the next boot clawboo would spawn a second one and never learn about the
+    // first. Reaped BEFORE anything can connect, so the file cleared here is
+    // always the previous process's.
+    safeStart('connector-reap', () => {
+      const report = reapOrphanedConnectors((pid) => killProcessTreeByPid(pid))
+      if (report.killed > 0 || report.expired > 0) {
+        log.info(report, 'Connectors: reaped children left by a previous run')
+      }
+    })
 
     // ── Boot probe ────────────────────────────────────────────────────────────
     // Snapshot the resolved state (state dir, vault, db, port) + every subsystem's

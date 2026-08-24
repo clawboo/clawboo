@@ -12,11 +12,109 @@
 // non-existent group (ESRCH) and we fall back to a direct `child.kill`, so this
 // can never signal the parent's process group.
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 
 import { isWindows } from '../platform'
 
 const DEFAULT_GRACE_MS = 3_000
+
+/**
+ * Kill a process tree given only its PID.
+ *
+ * The pid-only variant exists for children this process did not spawn a handle
+ * for. An outbound MCP connector is exactly that case: the SDK's transport owns
+ * the ChildProcess and exposes only `.pid`, while the thing that actually needs
+ * killing is the whole tree, because a catalog launch is an `npx` wrapper whose
+ * real server is a grandchild.
+ *
+ * Without a `close` event to clear it, the SIGKILL escalation here relies purely
+ * on its liveness probe, which is why that probe is not optional.
+ */
+/**
+ * Every descendant of `pid`, deepest first, via one `ps` snapshot.
+ *
+ * Needed because the group trick does not apply here. `process.kill(-pid)` only
+ * works when the child was spawned `detached` (setsid), and a connector's child
+ * is spawned by the MCP SDK's transport, which does not: it calls cross-spawn
+ * with a fixed options object carrying no `detached`. So the negative-pid signal
+ * ESRCHes and a naive fallback kills only the direct process -- which for an
+ * `npx -y <pkg>` launch is the WRAPPER, leaving the real server running.
+ *
+ * Deepest-first so a parent cannot re-parent or respawn a child between signals.
+ */
+function descendantsOf(pid: number): number[] {
+  let out: string
+  try {
+    // One snapshot rather than a walk per level: `ps` is a process spawn, and
+    // doing it per node would be slower than the thing it is trying to kill.
+    out = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      windowsHide: true,
+    })
+  } catch {
+    return []
+  }
+
+  const children = new Map<number, number[]>()
+  for (const line of out.split('\n')) {
+    const m = line.trim().match(/^(\d+)\s+(\d+)$/)
+    if (!m) continue
+    const child = Number(m[1])
+    const parent = Number(m[2])
+    const list = children.get(parent) ?? []
+    list.push(child)
+    children.set(parent, list)
+  }
+
+  const ordered: number[] = []
+  const walk = (node: number): void => {
+    for (const child of children.get(node) ?? []) walk(child)
+    if (node !== pid) ordered.push(node)
+  }
+  walk(pid)
+  return ordered
+}
+
+function signal(pid: number, sig: NodeJS.Signals): void {
+  try {
+    process.kill(pid, sig)
+  } catch {
+    /* already gone */
+  }
+}
+
+export function killProcessTreeByPid(pid: number, opts: { graceMs?: number } = {}): void {
+  if (!pid) return
+
+  if (isWindows) {
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    } catch {
+      /* best-effort: already gone */
+    }
+    return
+  }
+
+  // Snapshot the tree BEFORE signalling: once the root dies its children are
+  // re-parented to init and become unfindable by walking down from it.
+  const tree = [...descendantsOf(pid), pid]
+  for (const target of tree) signal(target, 'SIGTERM')
+
+  const timer = setTimeout(() => {
+    // Escalate against the SAME snapshot, with a liveness probe per pid: a freed
+    // pid can be recycled, and escalating blind would kill an unrelated process.
+    for (const target of tree) {
+      try {
+        process.kill(target, 0)
+        process.kill(target, 'SIGKILL')
+      } catch {
+        /* already exited */
+      }
+    }
+  }, opts.graceMs ?? DEFAULT_GRACE_MS)
+  timer.unref()
+}
 
 export function killProcessTree(child: ChildProcess | null, opts: { graceMs?: number } = {}): void {
   const pid = child?.pid
@@ -26,7 +124,7 @@ export function killProcessTree(child: ChildProcess | null, opts: { graceMs?: nu
     try {
       spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
     } catch {
-      /* best-effort — already gone */
+      /* best-effort: already gone */
     }
     return
   }

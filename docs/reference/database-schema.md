@@ -322,10 +322,43 @@ The append-only orchestration event stream: the always-on local trace store (a t
 
 ### `capabilities`
 
-The durable projection of every runtime's capabilities (skills / tools / connectors), read by the five `CapabilitySource` adapters and fanned by the `CapabilityMultiplexer`. One stream drives both the Ghost Graph and the Capabilities dashboard. The primary key `id` (`${source_id}:${rawKey}`) deterministically encodes the composite identity, so the PK is the upsert key; `source_id` scopes the read-reconcile so one source's re-read never deletes another source's rows.
+The durable projection of every runtime's capabilities (skills / tools / connectors), read by the six `CapabilitySource` adapters and fanned by the `CapabilityMultiplexer`. One stream drives both the Ghost Graph and the Capabilities dashboard. The primary key `id` (`${source_id}:${rawKey}`) deterministically encodes the composite identity, so the PK is the upsert key; `source_id` scopes the read-reconcile so one source's re-read never deletes another source's rows.
 
 - **Columns**: `id` (PK, text: `sourceId:rawKey`), `source_id` (the owning adapter: `native`|`hermes`|`claude-code`|`codex`|`openclaw`), `source_key`, `kind` (`skill`|`tool`|`connector`), `runtime` (open set), `scope` (`team`|`agent`|`global`), `agent_id` (`null` for team/global scope), `origin` (`brokered-mcp`|`curated-skill`|`filesystem-skill-md`|`mcp-connector`|`runtime-builtin`|`openclaw-extension`|`external-vendor-cli`), `manageability` (`managed`|`external-write`|`runtime-of-record`|`observe-only`), `name`, `description` (default `''`), `availability` (JSON | null), `available` (`0`/`1`, default `1`), `diagnostics` (JSON `string[]`, default `[]`), `provenance` (JSON | null), `status` (default `ready`), `tenant_id` (dormant), `synced_at`, `created_at`, `updated_at`.
 - **Indexes**: `idx_capabilities_source`, `idx_capabilities_runtime`, `idx_capabilities_agent`, `idx_capabilities_kind`.
+
+---
+
+## Connector and grant cluster
+
+### `connectors`
+
+One row per connector clawboo has actually connected, written by the supervisor once discovery has succeeded and never before: a row for a server that never answered would claim a connection that does not exist. Three nouns are kept apart on purpose. The catalog **type** is committed TypeScript in `@clawboo/connector-catalog`, this row is a configured **instance**, and a `capabilities` row is one callable **tool**.
+
+`spec_hash` and `tools_hash` are sha256 hex over the canonical strings `@clawboo/governance` produces, which is what makes a server that rewrites its own tool list detectable as drift. No secret material lands here: `spec` carries only `secret:NAME` references, which is also why it is safe to hash and to log.
+
+- **Columns**: `id` (PK, text), `slug`, `catalog_id` (null for a connector the operator added themselves), `display_name`, `transport` (`stdio`|`streamable-http`), `spec` (JSON), `spec_hash`, `tools_hash`, `egress_allow` (JSON `string[]`), `trifecta` (JSON), `health` (`unknown`|`ok`|`needs-auth`|`degraded`|`error`|`drift`, default `unknown`), `health_detail`, `failures` (default `0`), `tenant_id` (dormant), `created_at`, `updated_at`.
+- **Indexes**: `uniq_connectors_slug` (unique on `slug`).
+
+### `capability_grants`
+
+The grant spine. One row is **both** the permission `executeBrokeredCall` enforces and the edge an operator reads on the [Ghost Graph](/using/ghost-graph). The renderer calls the same `decideGrant` the gate calls, over the same candidate rows, so a badge cannot be computed by a second code path.
+
+`grant_key` is the canonicalised `(subject, capability)` composite, and it is the only column uniqueness can live on: a `UNIQUE` index over the five nullable identity columns does not enforce one grant per pair, because SQLite treats NULLs as distinct. Identity normalisation is enforced by `grantKey` in `@clawboo/db`: when `connector_id` is set, `capability_id` is stored NULL, because a `capabilities.id` folds the owning agent into its raw key and a grant keyed on one would be unfindable by the grantee.
+
+There is deliberately **no** `last_used_at` and **no** `use_count`. A team- or global-scoped grant is a hot single row on a single-writer database, and a contended write can block the event loop for the full retry budget. Both values are derived from `tool_call_audit` via `idx_tool_audit_grant`.
+
+- **Columns**: `id` (PK, text), `grant_key`, `subject_kind` (`agent`|`team`|`global`), `subject_id` (null for global), `capability_kind`, `connector_id`, `capability_id`, `tool_allow` (JSON glob list, default `["*"]`), `tool_deny` (JSON, default `[]`), `mode` (`read`|`write`|`admin`, default `read`), `approval_policy` (`never`|`risk`|`writes`|`always`, default `risk`), `state` (`proposed`|`active`|`suspended`|`revoked`|`expired`, default `active`), `origin` (`owner` = the runtime already attaches this, never drawn as an edge; `operator` = a human deliberately shared it, which is what draws one), `expires_at`, `spec_hash_pin`, `tools_hash_pin`, `call_ceiling_per_hour`, `granted_by`, `granted_at`, `revoked_at`, `revoked_reason`, `tenant_id` (dormant), `created_at`, `updated_at`.
+- **Indexes**: `uniq_capability_grants_key` (unique on `grant_key`), `idx_grants_subject`, `idx_grants_connector`, `idx_grants_capability`, `idx_grants_state`, `idx_grants_expires`.
+
+### `approval_rules`
+
+A remembered **Always**, bound to the grant it was approved under. Minted when an operator resolves a tool approval with `allow_always`, and cascade-deleted when that grant is revoked: a remembered approval outliving its grant would let a re-grant silently inherit permissions given under different circumstances.
+
+`expires_at` is **not null**, and that is load-bearing. The matcher treats a null expiry as immortal, and an immortal allow bought with one click is a permission nobody revisits. A rule whose prompt was marked never-rememberable (a lethal trifecta, a tainted run) is never minted at all.
+
+- **Columns**: `id` (PK, text), `rule_key` (canonical `(grant_id, tool_name, args_shape)` composite, for the same NULL reason as `grant_key`), `grant_id` (not null), `tool_name` (not null), `args_shape` (null = covers any arguments; a value scopes the rule to one argument shape and is strictly more specific), `decision` (`allow`|`deny`), `created_from_approval_id`, `expires_at` (not null), `tenant_id` (dormant), `created_at`.
+- **Indexes**: `uniq_approval_rules_key` (unique on `rule_key`).
 
 ---
 

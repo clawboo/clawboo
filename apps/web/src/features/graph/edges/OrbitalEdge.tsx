@@ -34,9 +34,20 @@ interface OrbitalEdgeProps {
   edge: EdgeProps
   /** Accent color (CSS color / var) — tile + edge read as one unit. */
   accent: string
+  /**
+   * Optional stroke GEOMETRY overrides, added for the grant edge.
+   *
+   * Geometry carries meaning that must survive zoom-out and reduced motion, so
+   * it is deliberately a static property of the stroke rather than an animation:
+   * dotted/solid/thick reads at any scale, a pulse does not.
+   */
+  dash?: string
+  width?: number
+  /** Marching dashes: reserved for "a human owes this edge a decision". */
+  march?: boolean
 }
 
-export function OrbitalEdge({ edge, accent }: OrbitalEdgeProps) {
+export function OrbitalEdge({ edge, accent, dash, width, march }: OrbitalEdgeProps) {
   const {
     id,
     target,
@@ -90,7 +101,7 @@ export function OrbitalEdge({ edge, accent }: OrbitalEdgeProps) {
 
   const delay = animates ? orbitStaggerDelay(orbitIndex, orbitCount, isVisible) : 0
   const gradId = `orbital-edge-${id}`
-  const strokeWidth = selected ? 2.5 : 1.75
+  const strokeWidth = width ?? (selected ? 2.5 : 1.75)
 
   // Two separate opacity channels, deliberately kept apart:
   //   • VISIBILITY (0 ↔ 1) is animated by framer alongside pathLength and
@@ -171,10 +182,15 @@ export function OrbitalEdge({ edge, accent }: OrbitalEdgeProps) {
         stroke={selected || !isVisible ? accent : `url(#${gradId})`}
         strokeWidth={strokeWidth}
         strokeLinecap="round"
+        strokeDasharray={dash}
         initial={false}
         animate={{
           pathLength: isVisible ? 1 : 0,
           opacity: isVisible ? 1 : 0,
+          // The march runs only when there is something to decide, and only when
+          // motion is allowed. Under reduced motion the dash pattern alone still
+          // distinguishes the state.
+          ...(march && dash && !reduceMotion ? { strokeDashoffset: [0, -16] } : {}),
         }}
         transition={
           animates
@@ -185,8 +201,15 @@ export function OrbitalEdge({ edge, accent }: OrbitalEdgeProps) {
                 opacity: isVisible
                   ? { duration: 0.2, delay }
                   : { duration: 0.16, delay: delay + 0.04 },
+                ...(march && dash && !reduceMotion
+                  ? { strokeDashoffset: { duration: 1.1, ease: 'linear', repeat: Infinity } }
+                  : {}),
               }
-            : { duration: 0 }
+            : march && dash && !reduceMotion
+              ? {
+                  strokeDashoffset: { duration: 1.1, ease: 'linear', repeat: Infinity },
+                }
+              : { duration: 0 }
         }
       />
 

@@ -41,6 +41,20 @@ function capSlug(sourceKey: string): string {
 /** Map a capability to a SkillNode category (picks the tile GLYPH — the tile
  *  ACCENT is type-coded in SkillNode: mint for skills/tools, slate for the
  *  built-ins rollup, violet for connectors, brand for the model). */
+/**
+ * How many CAPABILITY tiles one Boo may orbit.
+ *
+ * Eight is where the ring stops being readable: past it the discs overlap, the
+ * labels collide, and what was a legible set of abilities becomes a smear. An
+ * agent attached to a large MCP server can report forty, so this is a real limit
+ * rather than a defensive one.
+ *
+ * Counts CAPABILITIES only. Every Boo also carries a fixed "Default model" tile
+ * and, when it overflows, a "+N more" tile; both sit outside this budget because
+ * neither is a capability and neither scales with the inventory.
+ */
+export const MAX_CAPABILITY_ORBITALS = 8
+
 function capCategory(cap: CapabilityRecord): SkillCategory {
   if (cap.source === 'brokered-mcp' || cap.source === 'runtime-builtin') return 'code'
   if (cap.source === 'mcp-connector') return 'comm'
@@ -687,6 +701,21 @@ export function buildGraphElements(
     })
   }
 
+  /**
+   * Sort key for which capabilities earn an orbital slot.
+   *
+   * Lower is more important. Attention-seeking first, because a tile the
+   * operator has to act on is worthless if it is the one that got cut.
+   */
+  const rankCapability = (cap: CapabilityRecord): number => {
+    if (cap.health === 'drift') return 0
+    if (cap.health === 'needs-auth') return 1
+    if (cap.available === false || cap.status === 'disabled') return 2
+    if (cap.grantId) return 3
+    if (cap.kind === 'connector') return 4
+    return 5
+  }
+
   for (const agent of agents) {
     const files = agentFiles.get(agent.id)
 
@@ -696,13 +725,45 @@ export function buildGraphElements(
     const caps = files?.capabilities
     if (caps && caps.length > 0) {
       const seen = new Set<string>()
-      for (const cap of caps) {
+      // Orbital slots are finite: past roughly eight, tiles overlap, labels stop
+      // being readable, and the ring reads as a smear rather than as a set of
+      // things an agent can do. An agent attached to a large MCP server can
+      // easily report forty.
+      //
+      // ORDERED BY WHAT AN OPERATOR NEEDS TO SEE, not by name: anything asking
+      // for attention comes first, then connectors (fewer and more consequential
+      // than skills), then the rest. A tile that got cut is never silently gone
+      // -- the overflow chip below carries the count.
+      const ranked = [...caps].sort((a, b) => rankCapability(a) - rankCapability(b))
+      // De-duplicated BEFORE the slice. Two records can resolve to one node id
+      // (the same connector reported by two sources), and the loop below skips
+      // the repeat via `seen` -- so slicing first would count a tile toward the
+      // budget that never renders, and the overflow number would then not add up
+      // to what is on screen.
+      const uniqueKeys = new Set<string>()
+      const unique = ranked.filter((cap) => {
+        const key =
+          cap.kind === 'connector'
+            ? `resource-${agent.id}-${cap.connectorId ?? capSlug(cap.sourceKey)}`
+            : `skill-${agent.id}-${capSlug(cap.sourceKey)}`
+        if (uniqueKeys.has(key)) return false
+        uniqueKeys.add(key)
+        return true
+      })
+      const shown = unique.slice(0, MAX_CAPABILITY_ORBITALS)
+      const hiddenCount = unique.length - shown.length
+      for (const cap of shown) {
         const slug = capSlug(cap.sourceKey)
         // Policy-disabled capabilities (denied gateway tools, toggled-off MCP)
         // render greyed so they never read as "the agent has this".
         const enabled = cap.status !== 'disabled'
         if (cap.kind === 'connector') {
-          const nodeId = `resource-${agent.id}-${slug}`
+          // Node identity: the connector INSTANCE id when the record carries one,
+          // else the display slug. An instance-keyed tile survives a rename with
+          // its hand-placed position intact; slug keying (the only option for
+          // legacy rows) mints a new node id on rename and orphans the position.
+          const instanceKey = cap.connectorId ?? slug
+          const nodeId = `resource-${agent.id}-${instanceKey}`
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
           const meta = connectorMeta(cap.name)
@@ -717,18 +778,55 @@ export function buildGraphElements(
               agentIds: [agent.id],
               available: cap.available,
               enabled,
+              // Connector-era threading. All optional on CapabilityRecord: a
+              // server that has never heard of grants leaves them undefined and
+              // this renders byte-identically to the pre-grant graph.
+              capabilityId: cap.id,
+              connectorId: cap.connectorId ?? null,
+              grantIds: cap.grantId ? [cap.grantId] : undefined,
+              health: cap.health,
+              healthDetail: cap.healthDetail ?? null,
+              diagnostics: cap.diagnostics.length > 0 ? cap.diagnostics : undefined,
+              hint: cap.hint,
+              grantCount: cap.grantCount,
+              grantState: cap.grantState,
+              lastUsedAt: cap.lastUsedAt ? Date.parse(cap.lastUsedAt) : undefined,
+              writable: cap.writable,
             } satisfies ResourceNodeData,
             position: { x: 0, y: 0 },
           })
-          resourceEdges.push({
-            id: `resourceedge-${agent.id}-${slug}`,
-            type: 'resource',
-            source: `boo-${agent.id}`,
-            sourceHandle: 'center',
-            target: nodeId,
-            targetHandle: 'center',
-            data: {},
-          })
+          if (cap.grantId) {
+            // Grant-backed: the edge IS the authorization, so it renders as one.
+            resourceEdges.push({
+              id: `grantedge-${agent.id}-${instanceKey}`,
+              type: 'grant',
+              source: `boo-${agent.id}`,
+              sourceHandle: 'center',
+              target: nodeId,
+              targetHandle: 'center',
+              data: {
+                grantId: cap.grantId,
+                // The server projects these from `decideGrant`, so an
+                // expired-but-unswept grant renders `expired` because that is
+                // what the runtime would actually do with it. `active`/`read`
+                // remain the least-privilege floor for a server that predates
+                // the projection.
+                state: cap.grantState ?? 'active',
+                mode: cap.grantMode ?? 'read',
+                ...(cap.pendingApprovals ? { pendingApprovals: cap.pendingApprovals } : {}),
+              },
+            })
+          } else {
+            resourceEdges.push({
+              id: `resourceedge-${agent.id}-${instanceKey}`,
+              type: 'resource',
+              source: `boo-${agent.id}`,
+              sourceHandle: 'center',
+              target: nodeId,
+              targetHandle: 'center',
+              data: {},
+            })
+          }
         } else {
           const nodeId = `skill-${agent.id}-${slug}`
           if (seen.has(nodeId)) continue
@@ -764,6 +862,40 @@ export function buildGraphElements(
             data: isBuiltinRollup ? { accent: 'var(--secondary)' } : {},
           })
         }
+      }
+
+      // The overflow tile. A capability that lost its orbital slot is NEVER
+      // silently gone: this says how many, so the count on the ring always adds
+      // up to what the agent actually has. Rendered as a skill tile because it
+      // is a summary rather than a thing that can be called.
+      if (hiddenCount > 0) {
+        const nodeId = `skill-${agent.id}-more`
+        skillNodes.push({
+          id: nodeId,
+          type: 'skill' as const,
+          data: {
+            skillId: 'more',
+            name: `+${hiddenCount} more`,
+            category: 'other' as SkillCategory,
+            description: `${hiddenCount} more capabilities. Open the Capabilities panel to see them all.`,
+            agentIds: [agent.id],
+            available: true,
+            enabled: true,
+            installable: false,
+            isBuiltinRollup: true,
+            overflowCount: hiddenCount,
+          } as SkillNodeData,
+          position: { x: 0, y: 0 },
+        })
+        skillEdges.push({
+          id: `skilledge-${agent.id}-more`,
+          type: 'skill',
+          source: `boo-${agent.id}`,
+          sourceHandle: 'center',
+          target: nodeId,
+          targetHandle: 'center',
+          data: { accent: 'var(--secondary)' },
+        })
       }
     }
 

@@ -65,9 +65,17 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 **capability**: any skill, tool, or connector a runtime can use, normalized into one `CapabilityRecord`. The records are fanned in from per-runtime `CapabilitySource` adapters into one inventory that drives both the Ghost Graph and the Capabilities dashboard. See [capabilities](/concepts/capabilities).
 
-**CapabilitySource**: a per-runtime adapter whose `read()` projects that runtime's skills/tools/connectors into `CapabilityRecord`s. Five exist (native, hermes, claude-code, codex, openclaw); a multiplexer merges them and treats a source's failure as data, not an error. See [capabilities](/concepts/capabilities).
+**CapabilitySource**: an adapter whose `read()` projects a plane's skills/tools/connectors into `CapabilityRecord`s. Six exist: five per-runtime (native, hermes, claude-code, codex, openclaw) plus `connector` for Clawboo's own outbound MCP connections. A multiplexer merges them and treats a source's failure as data, not an error. See [capabilities](/concepts/capabilities).
 
 **manageability tier**: the per-capability field that decides whether Clawboo can write to it: `managed` (Clawboo owns the row), `external-write` (the runtime owns the store, Clawboo writes through it), `runtime-of-record` (Clawboo drives changes through the runtime's API), or `observe-only` (read-only). The UI and the write path are a pure function of this tier. See [capabilities](/concepts/capabilities).
+
+**connector**: an MCP server Clawboo connects to itself, either by spawning it as a local child process or by dialling a remote one over HTTPS with an OAuth token. Distinct from a connector a _runtime_ attaches, which Clawboo only observes. See [connectors](/using/connectors).
+
+**grant**: one row that is simultaneously the permission the tool broker enforces and the edge the Ghost Graph draws. The renderer and the gate call the same `decideGrant` over the same rows, so a badge cannot disagree with what a call would actually do. An **owner** grant records what a runtime already attaches and is never drawn; an **operator** grant is a deliberate human share, and that is the one that draws an edge and can be detached. See [connectors](/using/connectors).
+
+**drift**: a connected connector whose tool list no longer hashes to what a human approved, which is how a rug-pull shows up. Deliberately never collapsed into an error, because the remedy is different: an error says retry, drift says read what changed before trusting it again.
+
+**lethal trifecta**: the combination of reading private data, ingesting untrusted content, and being able to reach the network, accumulated across a whole run rather than judged per call. A call whose run has all three always prompts, and that approval can never be remembered.
 
 ## Verification
 

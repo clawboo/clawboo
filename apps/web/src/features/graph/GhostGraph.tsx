@@ -3,6 +3,7 @@ import '@xyflow/react/dist/style.css'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ConnectionMode,
   ReactFlow,
   Background,
   MiniMap,
@@ -57,13 +58,21 @@ import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { GraphContextMenu } from './GraphContextMenu'
+import { GrantComposer } from './GrantComposer'
 import { installSkillForAgent } from './operations/installSkill'
 import { removeRouting } from './operations/removeRouting'
 import { graphPhysics } from './graphPhysics'
 import { graphKeyAction } from './graphKeyAction'
 import { EdgeMarkers } from './edges/EdgeMarkers'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
-import type { BooNodeData, SkillNodeData, GraphEdge, LayoutData, GhostGraphScope } from './types'
+import type {
+  BooNodeData,
+  SkillNodeData,
+  ResourceNodeData,
+  GraphEdge,
+  LayoutData,
+  GhostGraphScope,
+} from './types'
 
 interface ContextMenuState {
   x: number
@@ -368,7 +377,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const [locked, setLocked] = useState(false)
 
   const nodesInitialized = useNodesInitialized()
-  const { fitView, zoomIn, zoomOut } = useReactFlow()
+  const { fitView, zoomIn, zoomOut, getNode } = useReactFlow()
 
   // Track the canvas wrapper size so we can (a) re-fit the graph when the
   // panel is resized (e.g. user drags the divider in the new vertical group
@@ -804,6 +813,34 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         return
       }
 
+      // Connector-to-Boo: share a grant-backed connector with a second agent.
+      // Validation already passed (the source handle only exists on grant-backed
+      // tiles), so this opens the composer rather than acting: the grant's mode
+      // is a decision, not a default. This branch used to fall through to the
+      // early return below: the drag validated, then silently did nothing.
+      if (sourceNode.type === 'resource' && targetNode.type === 'boo') {
+        const resourceData = sourceNode.data as ResourceNodeData
+        const booData = targetNode.data as BooNodeData
+        if ((resourceData.agentIds ?? []).includes(booData.agentId)) {
+          useToastStore.getState().addToast({
+            message: `${booData.name} already has ${resourceData.name}.`,
+            type: 'info',
+          })
+          return
+        }
+        useGraphStore.getState().setGrantComposer({
+          connectorName: resourceData.name,
+          capabilityId: resourceData.capabilityId ?? null,
+          connectorId: resourceData.connectorId ?? null,
+          sourceAgentName:
+            (nodes.find((n) => n.id === `boo-${resourceData.agentIds?.[0]}`)?.data
+              ?.name as string) ?? 'its current agent',
+          targetAgentId: booData.agentId,
+          targetAgentName: booData.name,
+        })
+        return
+      }
+
       if (sourceNode.type !== 'boo' || targetNode.type !== 'boo') return
 
       const sourceAgentId = sourceNode.data.agentId as string
@@ -896,14 +933,56 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     [nodes],
   )
 
+  // Why a connection is refused, so the rejection can be SAID rather than just
+  // felt as a drag that snaps back. Returns null when the pair is allowed.
+  const connectionRefusal = useCallback(
+    (sourceType: string | undefined, targetType: string | undefined, same: boolean) => {
+      if (sourceType === 'skill' && targetType === 'boo') return null
+      if (sourceType === 'resource' && targetType === 'boo') return null
+      if (sourceType === 'boo' && targetType === 'boo') {
+        return same ? 'An agent cannot route to itself.' : null
+      }
+      if (targetType !== 'boo') return 'Drop this on an agent.'
+      return 'That connection is not supported.'
+    },
+    [],
+  )
+
   const isValidConnection: IsValidConnection = useCallback(
     (connection) => {
-      const source = nodes.find((n) => n.id === connection.source)
-      const target = nodes.find((n) => n.id === connection.target)
-      if (source?.type === 'skill' && target?.type === 'boo') return true
-      return source?.type === 'boo' && target?.type === 'boo' && source.id !== target.id
+      // `getNode` instead of scanning `nodes`: this callback is a <ReactFlow>
+      // prop, so closing over the array re-creates it on EVERY position tick
+      // during a drag: React Flow's own perf guide names that the primary
+      // anti-pattern. `getNode` is referentially stable.
+      const source = connection.source ? getNode(connection.source) : undefined
+      const target = connection.target ? getNode(connection.target) : undefined
+      return connectionRefusal(source?.type, target?.type, source?.id === target?.id) === null
     },
-    [nodes],
+    [getNode, connectionRefusal],
+  )
+
+  // A refused drop must be SAID, not just felt as a thread snapping back. React
+  // Flow gives the attempted pair in connectionState; the reason comes from the
+  // same connectionRefusal the validity check uses: one function, one dialect.
+  const onConnectEnd = useCallback(
+    (
+      _event: MouseEvent | TouchEvent,
+      connectionState: {
+        isValid: boolean | null
+        fromNode: Node | null
+        toNode: Node | null
+      },
+    ) => {
+      if (connectionState.isValid !== false) return
+      const { fromNode, toNode } = connectionState
+      // Dropped on empty canvas: no target to refuse; the gesture just ends.
+      if (!fromNode || !toNode) return
+      const reason = connectionRefusal(fromNode.type, toNode.type, fromNode.id === toNode.id)
+      if (reason) {
+        useToastStore.getState().addToast({ message: reason, type: 'info' })
+      }
+    },
+    [connectionRefusal],
   )
 
   const onPaneClick = useCallback(() => {
@@ -983,8 +1062,11 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       if (e.type === 'dependency') {
         return e.hidden ? { ...e, hidden: false } : e
       }
-      if (e.type !== 'skill' && e.type !== 'resource') return e
-      // Skill / resource edges always have the parent Boo as `source`.
+      // `grant` belongs here too: it is an orbital edge like the others (it wraps
+      // OrbitalEdge), so without it a grant edge stays drawn while its tile is
+      // collapsed: a line to nothing.
+      if (e.type !== 'skill' && e.type !== 'resource' && e.type !== 'grant') return e
+      // Skill / resource / grant edges always have the parent Boo as `source`.
       // Visibility is animated INSIDE the edge component (OrbitalEdge draws
       // the path out of the Boo / retracts it on collapse), so edges stay
       // mounted with `data.isVisible` instead of React Flow's `hidden`
@@ -1265,8 +1347,16 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         onNodeMouseLeave={onNodeMouseLeave}
         onPaneClick={onPaneClick}
         onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
         isValidConnection={isValidConnection}
         connectOnClick={true}
+        // Strict, explicitly: loose mode permits source→source, and a reversed
+        // boo→boo edge would write routing into the WRONG agent's AGENTS.md.
+        connectionMode={ConnectionMode.Strict}
+        // 30 over the default 20: orbital tiles are 46px discs and the fan packs
+        // them close, so the default radius makes the last few degrees of a drag
+        // feel like threading a needle.
+        connectionRadius={30}
         connectionLineComponent={ConnectionLine}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -1354,6 +1444,11 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         )}
       </ReactFlow>
 
+      {/* J4 share dialog: mounted here (not inside ReactFlow) so it overlays
+          the canvas on the dialog layer; state lives in the graph store, set by
+          the onConnect resource→boo branch. */}
+      <GrantComposer />
+
       {/* Context menu */}
       {contextMenu && (
         <GraphContextMenu
@@ -1431,6 +1526,15 @@ const EDGE_META = {
     color: 'var(--violet)',
     desc: 'This agent has this MCP server attached.',
     file: 'Capabilities',
+  },
+  // A grant edge is a resource edge with a permission behind it. Without its own
+  // entry the panel falls through to `skill` and tells the user they are looking
+  // at a tool grant, which is the one thing an explain panel must never get wrong.
+  grant: {
+    label: 'Connector Grant',
+    color: 'var(--violet)',
+    desc: 'This agent holds a grant for this MCP connector.',
+    file: 'Grants',
   },
 } as const
 

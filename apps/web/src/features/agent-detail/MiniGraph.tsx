@@ -47,14 +47,15 @@ const BOO_CENTER = { x: 200, y: 100 }
 const NATIVE_EMPTY_PROVIDERS = new Set<string>()
 // Offset from each Boo's React Flow `node.position` (top-left of the
 // envelope) to its visual center. The Boo renders centered inside its
-// envelope (BOO_FOOTPRINT = 340 in `nodes/BooNode.tsx`), so the center is
-// at half the envelope size — same anchor used by `computeOrbitalPositions`,
-// the global `graphPhysics` singleton, and `TeamHaloLayer`. Without this,
-// the local physics engine would compute Boo center 80px left + 130px above
-// the actual visual center, slowly drifting orbital children off their
-// layout positions during drag interactions.
-const BOO_HALF_W = 170
-const BOO_HALF_H = 170
+// envelope (`BOO_FOOTPRINT = 280` in `nodes/BooNode.tsx`), so the center is at
+// half the envelope size: the same anchor used by `computeOrbitalPositions`,
+// the global `graphPhysics` singleton, and `TeamHaloLayer`, all of which use
+// 140. This file previously used 170 against a comment citing a 340 footprint
+// that does not exist, so the mini graph's physics anchor sat 30px below and
+// right of every Boo's real center and pulled orbital children off their layout
+// positions during drags.
+const BOO_HALF_W = 140
+const BOO_HALF_H = 140
 
 // Physics constants (simplified from graphPhysics.ts — local per mini graph)
 const SPRING_STRENGTH = 0.035

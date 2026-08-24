@@ -521,6 +521,22 @@ samp {
   }
 }
 
+/* Capability-tile badge pulse: reserved for the two states that are WAITING ON
+   A HUMAN (needs-auth, drift). Deliberately not used for informational states:
+   if every badge pulsed, none of them would read as urgent. Neutralized by the
+   prefers-reduced-motion guard below. */
+@keyframes clawboo-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.82);
+  }
+}
+
 /* One-shot "verified" pop for the connected-runtime disc (steady thereafter,
    never pulses). Neutralized by the prefers-reduced-motion guard below. */
 @keyframes clawboo-disc-pop {

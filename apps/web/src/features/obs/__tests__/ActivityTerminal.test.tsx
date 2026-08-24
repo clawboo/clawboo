@@ -33,6 +33,45 @@ function wire(seq: number, kind: string, data: Record<string, unknown>) {
 afterEach(() => cleanup())
 
 describe('presentEvent', () => {
+  it('renders a grant decision with its REASON, not a bare badge', () => {
+    // GrantDecisionData carries neither `message` nor `detail`, so the default
+    // branch produced an empty row: a denial invisible in the surface built to
+    // show it. "denied" with no reason is equally useless to an operator.
+    const denied = presentEvent(
+      parsed(1, 'grant_decision', {
+        decision: 'deny',
+        reason: 'lethal-trifecta',
+        toolName: 'gh_read',
+        grantId: 'g1',
+      }),
+    )
+    expect(denied).toMatchObject({ tone: 'error', badge: 'grant', label: 'gh_read' })
+    expect(denied?.body).toContain('lethal-trifecta')
+
+    expect(
+      presentEvent(parsed(2, 'grant_decision', { decision: 'allow', toolName: 't' }))?.tone,
+    ).toBe('success')
+    expect(
+      presentEvent(parsed(3, 'grant_decision', { decision: 'require_approval', toolName: 't' }))
+        ?.tone,
+    ).toBe('idle')
+  })
+
+  it('renders connector health with its detail', () => {
+    const row = presentEvent(
+      parsed(4, 'connector_health', {
+        connectorId: 'conn:native:x',
+        health: 'needs-auth',
+        detail: 'token expired',
+      }),
+    )
+    expect(row).toMatchObject({ tone: 'error', badge: 'connector', label: 'conn:native:x' })
+    expect(row?.body).toContain('token expired')
+    expect(
+      presentEvent(parsed(5, 'connector_health', { connectorId: 'c', health: 'ok' }))?.tone,
+    ).toBe('success')
+  })
+
   it('maps tool_call / tool_result / error / cost to the right tone + badge', () => {
     expect(presentEvent(parsed(1, 'tool_call', { name: 'edit', input: {} }))).toMatchObject({
       badge: 'tool',

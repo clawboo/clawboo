@@ -16,7 +16,7 @@ import path from 'node:path'
 
 import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
-import { killProcessTree } from './killTree'
+import { killProcessTree, killProcessTreeByPid } from './killTree'
 import { resolveWindowsSpawn } from './winSpawn'
 
 /**
@@ -32,6 +32,48 @@ import { resolveWindowsSpawn } from './winSpawn'
 const liveChildren = new Set<ChildProcess>()
 
 /**
+ * Connector children, tracked by PID because we never hold their handle.
+ *
+ * The MCP SDK's stdio transport owns the ChildProcess and exposes only `.pid`,
+ * and its own `close()` signals just that direct process -- which for an
+ * `npx -y <pkg>` launch is a wrapper, leaving the real server orphaned. Tracking
+ * the pid here puts connectors into the SAME awaited shutdown as every other
+ * spawned child, rather than into `cleanup()`, which runs after the wait and is
+ * followed immediately by `process.exit(0)` -- killing the SIGKILL escalation
+ * timer with the process, which is the exact failure this registry was written
+ * to prevent for runtime children.
+ */
+const liveConnectorPids = new Set<number>()
+
+/** Track a connector child so shutdown reaps its whole tree. */
+export function registerConnectorPid(pid: number | null | undefined): void {
+  if (typeof pid !== 'number' || pid <= 0) return
+  // Shutdown has already taken its snapshot, so a late registrant would outlive
+  // the server. Kill it on arrival instead, exactly as a late ChildProcess is.
+  if (shuttingDown) {
+    killProcessTreeByPid(pid)
+    return
+  }
+  liveConnectorPids.add(pid)
+}
+
+/** Stop tracking a connector child that closed cleanly. */
+export function unregisterConnectorPid(pid: number | null | undefined): void {
+  if (typeof pid === 'number') liveConnectorPids.delete(pid)
+}
+
+/** Whether a pid is still alive. `kill(pid, 0)` signals nothing and throws ESRCH
+ *  when the process is gone, which is the only handle-free liveness test. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Set once shutdown has begun. A run that spawns after this point is killed as
  * soon as it registers: shutdown has already taken its snapshot, so an unsignalled
  * late child would otherwise outlive the server.
@@ -44,8 +86,13 @@ let shuttingDown = false
  * it runs inside a signal handler, just before `process.exit`.
  */
 export function killLiveSubprocesses(): number {
-  shuttingDown = false
-  const count = liveChildren.size
+  // `true`, not `false`. The flag exists so a run that spawns AFTER shutdown
+  // begins is killed the moment it registers (see the registration guard). This
+  // function runs from the synchronous 'exit' hook, i.e. AFTER the async
+  // graceful path: clearing the flag here re-opened the exact window the flag
+  // was added to close, letting a late child outlive the server.
+  shuttingDown = true
+  const count = liveChildren.size + liveConnectorPids.size
   for (const child of liveChildren) {
     try {
       killProcessTree(child)
@@ -53,7 +100,15 @@ export function killLiveSubprocesses(): number {
       // Best effort — one stubborn child must not block the rest of shutdown.
     }
   }
+  for (const pid of liveConnectorPids) {
+    try {
+      killProcessTreeByPid(pid)
+    } catch {
+      /* best effort */
+    }
+  }
   liveChildren.clear()
+  liveConnectorPids.clear()
   return count
 }
 
@@ -82,13 +137,21 @@ export async function shutdownLiveSubprocesses(
 ): Promise<{ signalled: number; exited: number }> {
   shuttingDown = true
   const children = [...liveChildren]
-  if (children.length === 0) return { signalled: 0, exited: 0 }
+  const pids = [...liveConnectorPids]
+  if (children.length === 0 && pids.length === 0) return { signalled: 0, exited: 0 }
 
   for (const child of children) {
     try {
       killProcessTree(child)
     } catch {
       // Best effort — one stubborn child must not block the rest of shutdown.
+    }
+  }
+  for (const pid of pids) {
+    try {
+      killProcessTreeByPid(pid)
+    } catch {
+      /* best effort */
     }
   }
 
@@ -98,14 +161,31 @@ export async function shutdownLiveSubprocesses(
     // Never let the deadline itself hold the event loop open.
     timer.unref?.()
   })
-  const allClosed = Promise.all(
-    children.map((child) =>
+  // A connector has no handle and therefore no 'close' event, so its exit is
+  // POLLED. 50ms is short enough to add nothing meaningful to shutdown and long
+  // enough that the loop is not a spin.
+  const pollDeadline = Date.now() + timeoutMs
+  const pidsGone = (async () => {
+    // Bounded by the SAME deadline the race uses. An unbounded loop would keep
+    // chaining timers for a pid that never dies, holding the event loop open
+    // long after the deadline had already won and the server tried to exit.
+    while (pids.some(isAlive) && Date.now() < pollDeadline) {
+      await new Promise((r) => {
+        const handle = setTimeout(r, 50)
+        handle.unref?.()
+      })
+    }
+  })()
+
+  const allClosed = Promise.all([
+    ...children.map((child) =>
       // Already reaped (its 'close' fired) — nothing left to await.
       child.exitCode !== null || child.signalCode !== null
         ? Promise.resolve()
         : new Promise<void>((resolve) => child.once('close', () => resolve())),
     ),
-  ).then(() => undefined)
+    pidsGone,
+  ]).then(() => undefined)
 
   try {
     await Promise.race([allClosed, deadline])
@@ -116,9 +196,12 @@ export async function shutdownLiveSubprocesses(
   // Untrack only what this pass signalled. A child that registered during the wait
   // was killed on registration but stays tracked, so the synchronous fallback in
   // `cleanup()` still sees it rather than it vanishing from the registry.
-  const exited = children.reduce((n, c) => n + (liveChildren.has(c) ? 0 : 1), 0)
+  const exited =
+    children.reduce((n, c) => n + (liveChildren.has(c) ? 0 : 1), 0) +
+    pids.reduce((n, pid) => n + (isAlive(pid) ? 0 : 1), 0)
   for (const child of children) liveChildren.delete(child)
-  return { signalled: children.length, exited }
+  for (const pid of pids) liveConnectorPids.delete(pid)
+  return { signalled: children.length + pids.length, exited }
 }
 
 export interface ResolvedSpawn {

@@ -25,7 +25,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Core concepts](concepts/index.md): The concept map for Clawboo's orchestration model — agents, teams, the board, delegation, memory, governance, and the invariants that hold them together.
 - [The agent model](concepts/agent-model.md): What a Boo is, how Boo Zero leads, and how a runtime-agnostic agent record maps onto the five runtime classes.
 - [Architecture invariants](concepts/architecture-invariants.md): The load-bearing rules every Clawboo change preserves — registry of record, same-origin Gateway access, the pure event pipeline, and idempotent schema.
-- [Capabilities](concepts/capabilities.md): The unified capability inventory — one CapabilityRecord stream fanned from five per-runtime sources, with manageability tiers that decide what Clawboo can change.
+- [Capabilities](concepts/capabilities.md): The unified capability inventory, one CapabilityRecord stream fanned from six sources, with manageability tiers that decide what Clawboo can change.
 - [Delegation and orchestration](concepts/delegation-and-orchestration.md): How Clawboo turns structured delegation signals from runtime events into durable board mutations instead of scraping prose.
 - [Gateway and events](concepts/gateway-and-events.md): The OpenClaw Gateway flow through the same-origin WS proxy, and the Bridge→Policy→Handler event pipeline that turns raw frames into UI state.
 - [Governance](concepts/governance.md): USD budgets with an auto-pause kill-switch, tool-loop circuit breakers, depth/fan-out/cost caps, and the delegation approval handshake.
@@ -56,11 +56,12 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Using the board](using/board.md): Read and work the durable kanban board — columns, task cards, the team filter, the task-detail drawer, and the chat-fused board.
 - [Configuring Boo Zero](using/boo-zero.md): Set Boo Zero's display name, global brief, and per-team brief and rules — the universal team leader's identity and behavior.
 - [Capabilities dashboard](using/capabilities-dashboard.md): Use the Capabilities dashboard to browse the unified capability inventory and enable or disable the rows your runtimes let you manage.
+- [Connect an MCP server](using/connectors.md): Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
 - [Cost and budgets](using/cost-and-budgets.md): Track token usage on the Cost dashboard and set USD budgets (warn or cap) per agent, mission, or team from Governance.
 - [Using the Ghost Graph and Atlas](using/ghost-graph.md): Read and edit your fleet's org graph — dual-shape Boo nodes, peacock skill expand, team halos, connect mode, and the Atlas global view.
 - [Use the Governance dashboard](using/governance-dashboard.md): Set budgets, raise caps, resume paused scopes, review the enforced-in-code caps, the approval queue, and the forensic audit log.
 - [Using group chat](using/group-chat.md): Open a team's Group Chat, pass the Know-Your-Team gate, send messages, route with @mentions, and watch delegations land on the board.
-- [Browse and deploy from the Marketplace](using/marketplace.md): Search, inspect, and deploy single agents or whole teams from Clawboo's 304-agent / 82-team / 30-skill catalog.
+- [Browse and deploy from the Marketplace](using/marketplace.md): Search, inspect, and deploy single agents or whole teams from Clawboo's 304-agent / 82-team / 30-skill / 19-connector catalog.
 - [Browse and search shared memory](using/memory-browser.md): Use the Memory panel to search, save, and browse the facts and procedures your team's runtimes share.
 - [Using the Observability dashboard](using/observability-dashboard.md): Read traces, error taxonomy, fleet health, the delegation graph, and run the smoke evals from the Observability panel.
 - [Schedule recurring team work](using/scheduler.md): Use the Scheduler tab to create, pause, run, and delete Routines and OpenClaw cron from one unified surface.

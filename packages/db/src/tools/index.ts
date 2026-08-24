@@ -48,6 +48,19 @@ export {
 
 export { scrubArgsSummary, scrubResultSummary, scrubSecrets } from './scrub'
 
+export {
+  buildConnectorDescriptor,
+  type ConnectorDescriptorOptions,
+  type RemoteToolFacts,
+} from './connectorDescriptor'
+export {
+  CONNECTOR_TOOL_PREFIX,
+  isConnectorToolName,
+  namespacedToolName,
+  parseNamespacedToolName,
+  type NamespaceRejection,
+  type NamespaceResult,
+} from './namespace'
 export { ToolRegistry, createBuiltinRegistry, type VisibleTool } from './registry'
 export { BUILTIN_TOOLS, deletePathTool, echoTool, memoryNoteTool, webSearchTool } from './builtins'
 

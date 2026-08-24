@@ -14,6 +14,7 @@ import { listCapabilities, upsertCapabilities } from '@clawboo/db'
 
 import { getDb } from '../db'
 import { recordToInsert, rowToRecord } from './mapper'
+import { projectGrants } from './grantProjection'
 import { getCapabilityMultiplexer } from './registry'
 
 export interface CapabilityFilter {
@@ -61,13 +62,21 @@ export async function loadCapabilities(filter: CapabilityFilter = {}): Promise<C
     ? listCapabilities(db, { sourceIds: degradedIds }).map(rowToRecord)
     : []
 
-  // Fresh-wins dedup by id, then filter.
+  // Fresh-wins dedup by id.
   const seen = new Set<string>()
   const merged: CapabilityRecord[] = []
   for (const r of [...records, ...stale]) {
     if (seen.has(r.id)) continue
     seen.add(r.id)
-    if (matches(r, filter)) merged.push(r)
+    merged.push(r)
   }
-  return { records: merged, sources }
+
+  // PROJECT, THEN FILTER, and the order is load-bearing in both directions. A
+  // twin tile is derived from the granter's record, so filtering to the GRANTEE
+  // first removes the very row the twin comes from and the grantee never sees
+  // it. Filtering to the GRANTER first keeps that row, and the projection then
+  // appends a twin belonging to someone else -- a response that violates the
+  // agentId the caller asked for.
+  const projected = projectGrants(db, merged)
+  return { records: projected.filter((r) => matches(r, filter)), sources }
 }

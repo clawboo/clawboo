@@ -1,5 +1,6 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { AgentStatus } from '@clawboo/gateway-client'
+import type { CapabilityHealth } from '@clawboo/capability-registry'
 import type { ProviderId } from '@/features/onboarding/ProviderIcon'
 
 // ─── Skill category ───────────────────────────────────────────────────────────
@@ -55,6 +56,15 @@ export interface BooNodeData extends Record<string, unknown> {
 export type ConnectorServiceKind = 'memory' | 'tasks' | 'tools' | 'teamchat' | 'generic'
 
 export interface SkillNodeData extends Record<string, unknown> {
+  /**
+   * Set on the "+N more" tile, and only there.
+   *
+   * The orbital ring holds a fixed number of tiles, so a Boo with more
+   * capabilities than slots loses some. This carries the count that was cut, so
+   * the ring always accounts for everything the agent has rather than quietly
+   * showing a subset as if it were the whole set.
+   */
+  overflowCount?: number
   skillId: string
   name: string
   category: SkillCategory
@@ -159,6 +169,38 @@ export interface ResourceNodeData extends Record<string, unknown> {
   orbitIndex?: number
   /** See `SkillNodeData.orbitCount`. */
   orbitCount?: number
+
+  // ─── Connector-era fields ─────────────────────────────────────────────────
+
+  /** The namespaced `capabilities.id` this tile projects, for joins + audit links. */
+  capabilityId?: string
+  /**
+   * The owning connector INSTANCE.
+   *
+   * Load-bearing for identity: a tile keyed on the display slug mints a new node
+   * id when a connector is renamed, which orphans the position the user dragged
+   * it to. Keyed on an opaque instance id, a rename is just a label change.
+   */
+  connectorId?: string | null
+  /** Grants authorizing this tile for its Boo. Empty ⇒ observed but not granted. */
+  grantIds?: string[]
+  /** Live health: richer than `available`, and what the badge ladder reads. */
+  health?: CapabilityHealth
+  /** One scrubbed line explaining a non-ok health, shown in the tooltip. */
+  healthDetail?: string | null
+  /** Server-computed reasons a capability is unavailable (`auth-missing:openai`). */
+  diagnostics?: string[]
+  /** Source-supplied affordance hint, rendered verbatim, never a hardcoded string. */
+  hint?: string
+  /** `>= 2` renders the shared "xN" chip. */
+  grantCount?: number
+  /** Lifecycle of THIS tile's grant for its Boo, when grant-backed. Feeds the
+   *  badge ladder, where revoked/suspended outrank every health state. */
+  grantState?: 'proposed' | 'active' | 'suspended' | 'revoked' | 'expired'
+  /** Whether the owning source can act on this record (mirrors
+   *  `CapabilityRecord.writable`). Gates the toolbar's Enable/Disable: the
+   *  action set stays a pure function of the record, never a per-tile literal. */
+  writable?: boolean
 }
 
 // ─── Team-root node ──────────────────────────────────────────────────────────
@@ -200,6 +242,39 @@ export function isCapabilitySkillNode(node: GraphNode): boolean {
   return !d.isModel && !d.isLeadership
 }
 export type GraphEdge = Edge<Record<string, unknown>>
+
+// ─── Grant edge ───────────────────────────────────────────────────────────────
+//
+// The authorization edge: agent → capability. It is BOTH the permission record
+// and the thing you see, which is the point: a badge computed by a second code
+// path drifts from the gate that actually decides, and an operator trusts the
+// badge.
+//
+// Two orthogonal channels, so they can be read at once and at any zoom:
+//   GEOMETRY = privilege   (static: survives zoom-out, no animation budget)
+//   ANIMATION = state      (transient: pending, suspended, revoked, in-use)
+
+export type GrantEdgeState = 'proposed' | 'active' | 'suspended' | 'revoked' | 'expired'
+export type GrantEdgeMode = 'read' | 'write' | 'admin'
+
+export interface GrantEdgeData extends Record<string, unknown> {
+  grantId: string
+  state: GrantEdgeState
+  /** Drives stroke geometry: dotted / solid / double. */
+  mode: GrantEdgeMode
+  /** `> 0` ⇒ the amber dashed march. */
+  pendingApprovals?: number
+  /** Epoch ms. Desaturates as it ages: the prune signal. */
+  lastUsedAt?: number | null
+  expiresAt?: number | null
+}
+
+/** Type guard so a renderer can narrow `GraphEdge.data` without a cast. */
+export function isGrantEdgeData(data: unknown): data is GrantEdgeData {
+  if (!data || typeof data !== 'object') return false
+  const d = data as Record<string, unknown>
+  return typeof d['grantId'] === 'string' && typeof d['mode'] === 'string'
+}
 
 // ─── Parser output types ──────────────────────────────────────────────────────
 

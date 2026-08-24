@@ -8,6 +8,7 @@
 import {
   makeCapabilityId,
   type CapabilityAvailability,
+  type CapabilityHealth,
   type CapabilityKind,
   type CapabilityManageability,
   type CapabilityOrigin,
@@ -49,6 +50,11 @@ export interface BuildRecordInput {
   writable?: boolean
   /** Source-supplied affordance hint (e.g. a pending-auth command). */
   hint?: string
+  /** Live health, when the source actually knows it. Derived from `status`
+   *  otherwise, so the badge ladder always has something to read. */
+  health?: CapabilityHealth
+  /** One scrubbed line explaining a non-ok health. Never a secret, never a stack. */
+  healthDetail?: string | null
   tenantId?: string | null
 }
 
@@ -66,6 +72,7 @@ export function buildRecord(input: BuildRecordInput): CapabilityRecord {
   const evaluated = evalAvailability(input.availability ?? null)
   const available = input.available ?? evaluated.available
   const diagnostics = input.diagnostics ?? (available ? [] : evaluated.diagnostics)
+  const status = input.status ?? (available ? 'ready' : 'unavailable')
   return {
     id: makeCapabilityId(input.sourceId, rawKey),
     sourceKey: input.sourceKey,
@@ -82,11 +89,33 @@ export function buildRecord(input: BuildRecordInput): CapabilityRecord {
     diagnostics,
     provenance: input.provenance ?? null,
     status: input.status ?? (available ? 'ready' : 'unavailable'),
+    health: input.health ?? healthFromStatus(status, available),
+    ...(input.healthDetail !== undefined ? { healthDetail: input.healthDetail } : {}),
     writable: input.writable ?? isSourceWritable(input.origin, input.kind),
     ...(input.hint !== undefined ? { hint: input.hint } : {}),
     tenantId: input.tenantId ?? null,
     syncedAt: new Date().toISOString(),
   }
+}
+
+/**
+ * A baseline `health` for a source that did not state one.
+ *
+ * DERIVED RATHER THAN LEFT UNDEFINED, because the badge ladder reads `health`
+ * and every rung above `disabled` was unreachable while nothing produced it: a
+ * Codex capability that says `manageable-but-pending-auth` rendered with no
+ * badge, no grey and no Sign in button, exactly the case the ladder was built
+ * for. A source that knows better passes `health` explicitly and this never
+ * runs.
+ *
+ * `unknown` for a healthy row rather than `ok`: nothing has actually observed
+ * this capability answering, and claiming `ok` would be asserting liveness the
+ * projection never checked.
+ */
+function healthFromStatus(status: CapabilityStatus, available: boolean): CapabilityHealth {
+  if (status === 'manageable-but-pending-auth') return 'needs-auth'
+  if (status === 'unavailable' || !available) return 'error'
+  return 'unknown'
 }
 
 /** Resolve a declarative availability requirement into available + diagnostics. */

@@ -557,6 +557,10 @@ function labelFor(ev: ObsEvent): string {
       return `[${String(d['errorClass'] ?? '')}] ${String(d['message'] ?? '').slice(0, 50)}`
     if (ev.kind === 'span_start' || ev.kind === 'span_end') return String(d['name'] ?? '')
     if (ev.kind === 'task_created') return String(d['title'] ?? '')
+    if (ev.kind === 'grant_decision')
+      return `${String(d['toolName'] ?? '')} → ${String(d['decision'] ?? '')}`
+    if (ev.kind === 'connector_health')
+      return `${String(d['connectorId'] ?? '')} → ${String(d['health'] ?? '')}`
     return ''
   } catch {
     return ''

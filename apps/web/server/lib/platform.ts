@@ -33,6 +33,26 @@ export const isWindows = process.platform === 'win32'
  * or `null` if not found. On Windows uses `where` (which can return
  * multiple paths separated by CRLF — we take the first).
  */
+/**
+ * Choose the spawnable candidate from `where` output.
+ *
+ * PATHEXT order, falling back to whatever came first. The fallback matters: a
+ * path with no recognised extension may still be a real executable, and
+ * returning null because we did not recognise it would be worse than returning
+ * the thing Windows itself listed.
+ */
+function pickWindowsExecutable(lines: string[]): string | undefined {
+  const exts = (process.env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.startsWith('.'))
+  for (const ext of exts) {
+    const hit = lines.find((l) => l.toLowerCase().endsWith(ext))
+    if (hit) return hit
+  }
+  return lines[0]
+}
+
 export function findExecutable(name: string): string | null {
   try {
     const cmd = isWindows ? 'where' : 'which'
@@ -51,9 +71,18 @@ export function findExecutable(name: string): string | null {
       windowsHide: true,
     }).trim()
     if (!out) return null
-    // `where` on Windows may return multiple paths; first one wins.
-    const first = out.split(/\r?\n/)[0]
-    return first ? first.trim() : null
+    const lines = out
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+    if (lines.length === 0) return null
+    // On Windows `where` returns EVERY match, and for an npm-installed shim that
+    // is both `npx` (an extensionless POSIX shell script, not executable by
+    // CreateProcess) and `npx.cmd`. Taking the first line verbatim can therefore
+    // hand a caller a path that cannot be spawned at all, and one that
+    // `resolveWindowsSpawn` will not route through cmd.exe either, because its
+    // `.cmd|.bat` test does not match. Prefer a real executable extension.
+    return (isWindows ? pickWindowsExecutable(lines) : lines[0]) ?? null
   } catch {
     return null
   }

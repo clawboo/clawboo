@@ -56,17 +56,13 @@ export function ToastContainer() {
           {toasts.map((toast) => {
             const Icon = ICON_BY_TYPE[toast.type]
             return (
-              <motion.button
+              <motion.div
                 key={toast.id}
                 initial={{ x: 80, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: 80, opacity: 0 }}
                 transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-                onClick={() => removeToast(toast.id)}
-                // The message already went out through the live region, so the
-                // button's own name states what ACTIVATING it does.
-                aria-label={`Dismiss notification: ${toast.message}`}
-                className="flex max-w-[340px] cursor-pointer items-start gap-2.5 rounded-xl border border-border bg-surface px-4 py-3 text-left text-[13px] leading-snug text-foreground transition hover:border-border-strong"
+                className="flex max-w-[340px] items-start gap-2.5 rounded-xl border border-border bg-surface px-4 py-3 text-left text-[13px] leading-snug text-foreground transition hover:border-border-strong"
                 style={{ boxShadow: 'var(--shadow-floating)' }}
               >
                 <Icon
@@ -76,8 +72,33 @@ export function ToastContainer() {
                   className="mt-px shrink-0"
                   style={{ color: ICON_COLOR_BY_TYPE[toast.type] }}
                 />
-                <span>{toast.message}</span>
-              </motion.button>
+                {/* The card body stays the dismiss affordance (a plain div with a
+                    button-in-button would be invalid HTML, so the body is its own
+                    button and the action sits beside it). */}
+                <button
+                  type="button"
+                  onClick={() => removeToast(toast.id)}
+                  aria-label={`Dismiss notification: ${toast.message}`}
+                  className="flex-1 cursor-pointer text-left"
+                >
+                  {toast.message}
+                </button>
+                {toast.action && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Run-then-dismiss, in that order: the handler may read the
+                      // toast's own closure, and a dismissed card must never leave
+                      // a pending action behind.
+                      toast.action?.onAction()
+                      removeToast(toast.id)
+                    }}
+                    className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground transition hover:border-border-strong hover:bg-surface-raised"
+                  >
+                    {toast.action.label}
+                  </button>
+                )}
+              </motion.div>
             )
           })}
         </AnimatePresence>

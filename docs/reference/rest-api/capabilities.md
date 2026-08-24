@@ -5,7 +5,7 @@ description: "REST reference for the unified capability inventory: list every ru
 
 REST surface for the unified [capability inventory](/concepts/capabilities): one merged stream of every skill, tool, and connector across all five runtimes, plus a single manageability-gated action endpoint. `GET /api/capabilities` is the one read both the Ghost Graph and the Capabilities dashboard consume; `POST /api/capabilities/:action` installs a curated skill or connector, toggles a manageable capability, or resolves a pending tool-call approval.
 
-The read fans a `CapabilityMultiplexer` over five per-runtime `CapabilitySource` adapters (`native`, `hermes`, `claude-code`, `codex`, `openclaw`), persists each OK source's records, and serves last-good rows for any degraded source, so a blipped Gateway never blanks the inventory. The merged result carries both the records and a per-source read-status list.
+The read fans a `CapabilityMultiplexer` over six `CapabilitySource` adapters (`native`, `hermes`, `claude-code`, `codex`, `openclaw`, and `connector` for Clawboo's own outbound MCP connections), persists each OK source's records, and serves last-good rows for any degraded source, so a blipped Gateway never blanks the inventory. The merged result carries both the records and a per-source read-status list.
 
 <Note>
 A capability is acted on by a pure function of its `manageability` tier. `managed` and `external-write` rows are writable; `observe-only` rows (runtime built-ins, external-vendor CLIs) are read-only and reject `enable`/`disable` with **422**. A `runtime-of-record` row may also be non-writable when its source emits `writable: false`. See [Concepts → Capabilities](/concepts/capabilities) for the tier model.

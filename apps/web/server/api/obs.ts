@@ -123,7 +123,20 @@ function readRecentEvents(req: Request): OrchestrationEvent[] {
 // observes — board lifecycle events are already emitted server-side by the board
 // REST handlers, never accepted here. Best-effort per event (one bad row never
 // fails the batch).
-const INGEST_KINDS = new Set<OrchestrationEventKind>(['tool_call', 'tool_result', 'error'])
+// Kinds a RUNTIME MIRROR is allowed to push. Deliberately a hard allowlist, not
+// the full kind union: an external process must not be able to forge a
+// `status_changed` or an `approval_resolved`.
+//
+// `grant_decision` and `connector_health` are included because a brokered call
+// can originate in any of the five runtimes, and a decision the mirror cannot
+// report is a decision the audit stream silently loses.
+const INGEST_KINDS = new Set<OrchestrationEventKind>([
+  'tool_call',
+  'tool_result',
+  'error',
+  'grant_decision',
+  'connector_health',
+])
 const MAX_INGEST_BATCH = 200
 /** Tolerated clock skew ahead of the server for a mirrored event. */
 const INGEST_MAX_AHEAD_MS = 60_000
@@ -147,6 +160,71 @@ function ingestTs(v: unknown, now: number): number | undefined {
   return v
 }
 
+/** Longest free text a mirrored event may carry. A `detail` is one scrubbed line
+ *  by contract; anything past this is a stack trace or a dumped response body. */
+const MAX_INGEST_TEXT = 200
+/** Ids are ids. Generous enough for any real one, short enough to be no payload. */
+const MAX_INGEST_ID = 120
+
+const HEALTH_VALUES = new Set(['unknown', 'ok', 'needs-auth', 'degraded', 'error', 'drift'])
+const DECISION_VALUES = new Set(['allow', 'require_approval', 'deny'])
+
+/** Redact, then bound. Redaction alone is a pattern match, so a novel token shape
+ *  survives it; the length cap is what makes the worst case small. */
+function ingestText(v: unknown, max = MAX_INGEST_TEXT): string | null {
+  if (typeof v !== 'string' || v.length === 0) return null
+  return String(redactValue(v)).slice(0, max)
+}
+
+function ingestCount(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v : NaN
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined
+}
+
+/**
+ * Rebuild a mirrored payload from its DECLARED shape instead of storing whatever
+ * the client sent.
+ *
+ * The obs log redacts on display, which protects the reader but not the disk: a
+ * runtime that puts a token or a stack in `ConnectorHealthData.detail` (whose own
+ * doc comment says "never a secret, never a stack") would retain it verbatim, and
+ * `/api/obs/ingest` is reachable by any process that can talk to the local
+ * server. So the two connector-era kinds get parsed here: unknown fields are
+ * dropped, enums fall back to their neutral member, and free text is redacted and
+ * bounded before it is ever written.
+ *
+ * The three pre-existing kinds pass through unchanged. Narrowing them is a real
+ * improvement but a behaviour change for existing mirrors, and it does not belong
+ * in the same commit as the kinds being introduced.
+ */
+function normalizeIngestData(
+  kind: OrchestrationEventKind,
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  if (kind === 'connector_health') {
+    const health = raw['health']
+    const failures = ingestCount(raw['failures'])
+    return {
+      connectorId: ingestText(raw['connectorId'], MAX_INGEST_ID) ?? '',
+      health: typeof health === 'string' && HEALTH_VALUES.has(health) ? health : 'unknown',
+      detail: ingestText(raw['detail']),
+      ...(failures === undefined ? {} : { failures }),
+    }
+  }
+  if (kind === 'grant_decision') {
+    const decision = raw['decision']
+    return {
+      decision: typeof decision === 'string' && DECISION_VALUES.has(decision) ? decision : 'deny',
+      reason: ingestText(raw['reason'], MAX_INGEST_ID),
+      grantId: ingestText(raw['grantId'], MAX_INGEST_ID),
+      connectorId: ingestText(raw['connectorId'], MAX_INGEST_ID),
+      toolName: ingestText(raw['toolName'], MAX_INGEST_ID) ?? '',
+      ruleId: ingestText(raw['ruleId'], MAX_INGEST_ID),
+    }
+  }
+  return raw
+}
+
 export function obsIngestPOST(req: Request, res: Response): void {
   try {
     const body = req.body as { events?: unknown } | undefined
@@ -166,10 +244,12 @@ export function obsIngestPOST(req: Request, res: Response): void {
         taskId: strOrNull(ev['taskId']),
         agentId: strOrNull(ev['agentId']),
         runtime: strOrNull(ev['runtime']) ?? 'openclaw',
-        data:
+        data: normalizeIngestData(
+          kind as OrchestrationEventKind,
           ev['data'] && typeof ev['data'] === 'object'
             ? (ev['data'] as Record<string, unknown>)
             : {},
+        ),
       })
       count += 1
     }

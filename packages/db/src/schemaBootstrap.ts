@@ -360,10 +360,18 @@ const SCHEMA_DDL = `
       provenance_signature  TEXT,
       provenance_signed_at  INTEGER,
       enabled               INTEGER NOT NULL DEFAULT 1,
+      -- The connector this tool was discovered from. Null for a builtin, which
+      -- is every row today. Namespacing already keeps two connectors exposing
+      -- the same remote name from colliding on the PRIMARY KEY, so this column
+      -- is not what makes them storable: it is what makes them QUERYABLE, so
+      -- revoking a connector can find its tools instead of pattern-matching
+      -- their names.
+      connector_id          TEXT,
       created_at            INTEGER NOT NULL,
       updated_at            INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_tool_registry_owner ON tool_registry (owner);
+    CREATE INDEX IF NOT EXISTS idx_tool_registry_connector ON tool_registry (connector_id);
 
     CREATE TABLE IF NOT EXISTS tool_call_audit (
       id             TEXT    PRIMARY KEY,
@@ -375,10 +383,20 @@ const SCHEMA_DDL = `
       result_summary TEXT,
       is_error       INTEGER NOT NULL DEFAULT 0,
       tenant_id      TEXT,
+      -- Grant attribution. Nullable because most tool calls are core builtins that
+      -- no grant governs, and because every row written before this column existed
+      -- has to keep meaning what it meant.
+      grant_id       TEXT,
+      connector_id   TEXT,
+      rule_id        TEXT,
       created_at     INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_tool_audit_tool    ON tool_call_audit (tool_name);
     CREATE INDEX IF NOT EXISTS idx_tool_audit_created ON tool_call_audit (created_at);
+    -- (grant_id, created_at) so "when was this grant last used" is one indexed
+    -- read. That derivation is why capability_grants carries no last_used_at: a
+    -- team- or global-scoped grant would be a hot single row on a single-writer DB.
+    CREATE INDEX IF NOT EXISTS idx_tool_audit_grant   ON tool_call_audit (grant_id, created_at);
 
     CREATE TABLE IF NOT EXISTS tool_call_approvals (
       id           TEXT    PRIMARY KEY,
@@ -389,12 +407,20 @@ const SCHEMA_DDL = `
       status       TEXT    NOT NULL DEFAULT 'pending',
       task_id      TEXT,
       tenant_id    TEXT,
+      grant_id       TEXT,
+      connector_id   TEXT,
+      -- Set when the tool cannot be scoped to an argument shape, which is what
+      -- makes "Always" unofferable for it. Persisted rather than recomputed so the
+      -- resolve path cannot mint a durable rule the prompt never offered.
+      never_remember INTEGER NOT NULL DEFAULT 0,
+      rule_reason    TEXT,
       created_at   INTEGER NOT NULL,
       expires_at   INTEGER NOT NULL,
       resolved_at  INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_status  ON tool_call_approvals (status);
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_created ON tool_call_approvals (created_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_approvals_grant   ON tool_call_approvals (grant_id, status);
 
     -- ── Governance — see src/governance/ ─────────────────
     CREATE TABLE IF NOT EXISTS budgets (
@@ -515,7 +541,125 @@ const SCHEMA_DDL = `
       delivered_via   TEXT,
       tenant_id       TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_agent_inbox_pending ON agent_inbox (agent_id, delivered_at);`
+    CREATE INDEX IF NOT EXISTS idx_agent_inbox_pending ON agent_inbox (agent_id, delivered_at);
+
+    -- ── Connector INSTANCES: see src/grants/ ────────────────────────────────
+    -- Three nouns kept apart on purpose. The catalog TYPE is committed TypeScript
+    -- in @clawboo/connector-catalog, this row is a configured INSTANCE, and a
+    -- capabilities row is one callable TOOL. spec_hash / tools_hash are
+    -- sha256 hex over the canonical strings @clawboo/governance produces, so a
+    -- server that rewrites its own tool list is detectable as drift.
+    --
+    -- No secret material ever lands here: spec carries only secret:NAME
+    -- references, which is also why it is safe to hash and to log.
+    --
+    -- ONE ROW PER CONNECTED CONNECTOR, written by the supervisor once discovery
+    -- has succeeded, and never before: a row for a server that never answered
+    -- would make the directory claim a connection that does not exist.
+    CREATE TABLE IF NOT EXISTS connectors (
+      id            TEXT    PRIMARY KEY,
+      slug          TEXT    NOT NULL,
+      catalog_id    TEXT,
+      display_name  TEXT    NOT NULL,
+      transport     TEXT    NOT NULL,
+      spec          TEXT    NOT NULL DEFAULT '{}',
+      spec_hash     TEXT    NOT NULL,
+      tools_hash    TEXT,
+      egress_allow  TEXT    NOT NULL DEFAULT '[]',
+      trifecta      TEXT    NOT NULL DEFAULT '{"readsPrivateData":false,"ingestsUntrustedContent":false,"canEgress":false}',
+      health        TEXT    NOT NULL DEFAULT 'unknown',
+      health_detail TEXT,
+      failures      INTEGER NOT NULL DEFAULT 0,
+      tenant_id     TEXT,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_connectors_slug   ON connectors (slug);
+    CREATE INDEX IF NOT EXISTS        idx_connectors_health  ON connectors (health);
+    CREATE INDEX IF NOT EXISTS        idx_connectors_catalog ON connectors (catalog_id);
+
+    -- ── The grant spine: capability_grants IS the edge ──────────────────────
+    -- One row is BOTH the permission executeBrokeredCall enforces AND the Ghost
+    -- Graph edge an operator reads. The renderer calls the same decideGrant the
+    -- gate calls: a badge computed by a second code path is governance theatre,
+    -- and this schema exists to make that second path impossible rather than
+    -- merely discouraged.
+    --
+    -- grant_key is the canonicalised (subject, capability) composite, and it is
+    -- the ONLY column uniqueness can live on. A UNIQUE index over the five
+    -- nullable identity columns does NOT enforce one-grant-per-pair: SQLite treats
+    -- NULLs as distinct, so ('global',NULL,'connector',NULL,NULL) inserts twice.
+    --
+    -- IDENTITY NORMALISATION, enforced by grantKey: when connector_id is set,
+    -- capability_id is stored NULL. A capabilities.id folds the agent id into
+    -- its raw key, so keying a grant on it would make the granting agent's row
+    -- unfindable by the grantee's broker. connector_id is agent-independent by
+    -- construction, which is the whole reason it exists.
+    --
+    -- There is deliberately NO last_used_at and NO use_count. A team- or
+    -- global-scoped grant is a hot single row on a single-writer database, and a
+    -- contended write can block the event loop for the full retry budget. Both
+    -- values are DERIVED from tool_call_audit via idx_tool_audit_grant.
+    CREATE TABLE IF NOT EXISTS capability_grants (
+      id                    TEXT    PRIMARY KEY,
+      grant_key             TEXT    NOT NULL,
+      subject_kind          TEXT    NOT NULL,
+      subject_id            TEXT,
+      capability_kind       TEXT    NOT NULL,
+      connector_id          TEXT,
+      capability_id         TEXT,
+      tool_allow            TEXT    NOT NULL DEFAULT '["*"]',
+      tool_deny             TEXT    NOT NULL DEFAULT '[]',
+      mode                  TEXT    NOT NULL DEFAULT 'read',
+      approval_policy       TEXT    NOT NULL DEFAULT 'risk',
+      state                 TEXT    NOT NULL DEFAULT 'active',
+      -- 'owner'    the runtime config already attaches this connector to this
+      --            subject, so the authorization merely records what is already
+      --            true. Never rendered as an edge: the tile IS that statement.
+      -- 'operator' a human deliberately shared it. This is what draws an edge.
+      origin                TEXT    NOT NULL DEFAULT 'operator',
+      expires_at            INTEGER,
+      spec_hash_pin         TEXT,
+      tools_hash_pin        TEXT,
+      call_ceiling_per_hour INTEGER,
+      granted_by            TEXT,
+      granted_at            INTEGER NOT NULL,
+      revoked_at            INTEGER,
+      revoked_reason        TEXT,
+      tenant_id             TEXT,
+      created_at            INTEGER NOT NULL,
+      updated_at            INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_capability_grants_key ON capability_grants (grant_key);
+    CREATE INDEX IF NOT EXISTS idx_grants_subject    ON capability_grants (subject_kind, subject_id);
+    CREATE INDEX IF NOT EXISTS idx_grants_connector  ON capability_grants (connector_id);
+    CREATE INDEX IF NOT EXISTS idx_grants_capability ON capability_grants (capability_id);
+    CREATE INDEX IF NOT EXISTS idx_grants_state      ON capability_grants (state);
+    CREATE INDEX IF NOT EXISTS idx_grants_expires    ON capability_grants (expires_at);
+
+    -- ── approval_rules: durable allow_always, BOUND to a grant ──────────────
+    -- priorAllowAlways (src/governance/approvalScope.ts) already ships a durable
+    -- remembered-approval reader, so this table has to justify itself by what it
+    -- ADDS: an args-shape binding, a cascade-revoke with its grant, and an expiry.
+    --
+    -- expires_at is NOT NULL on purpose. The rule matcher treats a NULL expiry
+    -- as an IMMORTAL rule, so "every remembered approval expires" is a policy the
+    -- column enforces or nothing does.
+    CREATE TABLE IF NOT EXISTS approval_rules (
+      id                       TEXT    PRIMARY KEY,
+      rule_key                 TEXT    NOT NULL,
+      grant_id                 TEXT    NOT NULL,
+      tool_name                TEXT    NOT NULL,
+      args_shape               TEXT,
+      decision                 TEXT    NOT NULL,
+      created_from_approval_id TEXT,
+      expires_at               INTEGER NOT NULL,
+      tenant_id                TEXT,
+      created_at               INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_approval_rules_key    ON approval_rules (rule_key);
+    CREATE INDEX IF NOT EXISTS        idx_approval_rules_grant   ON approval_rules (grant_id);
+    CREATE INDEX IF NOT EXISTS        idx_approval_rules_expires ON approval_rules (expires_at);`
 
 /**
  * Bring the database up to the schema above, so the file is immediately usable
