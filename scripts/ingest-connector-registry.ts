@@ -94,30 +94,42 @@ function slugOf(name: string): string {
 }
 
 /**
- * Whether this row can become a definition clawboo could actually run.
+ * The first package on a row that clawboo could actually run, or null.
  *
- * DELIBERATELY STRICT, and every clause is a thing that would otherwise become a
- * card offering something that cannot work:
+ * SEARCHES THE LIST rather than taking `packages[0]`. A registry row often lists
+ * several: a Docker image, a remote wrapper, and an npm package, in whatever
+ * order the publisher wrote them. Judging the row by its first entry silently
+ * dropped servers whose second entry was a perfectly good pinned npm package.
+ *
+ * DELIBERATELY STRICT about what qualifies, and every clause is a thing that
+ * would otherwise become a card offering something that cannot work:
  * - a real npm or PyPI identity, because the consent step shows exact argv
  * - a pinnable version, because an unpinned `@latest` re-resolves on every spawn
  * - stdio only, because a remote entry needs OAuth discovery this path has not run
- * - not superseded, because the registry keeps old versions in the same list
  */
+function runnablePackage(row: RegistryRow): RegistryPackage | null {
+  for (const pkg of row.server?.packages ?? []) {
+    if (pkg.registryType !== 'npm' && pkg.registryType !== 'pypi') continue
+    if (!pkg.identifier || !pkg.version) continue
+    if ((pkg.transport?.type ?? 'stdio') !== 'stdio') continue
+    return pkg
+  }
+  return null
+}
+
+/** Whether this row can become a definition clawboo could actually run. */
 function usable(row: RegistryRow): boolean {
   const s = row.server
   if (!s?.name || !s.description?.trim() || !slugOf(s.name)) return false
   const official = row._meta?.['io.modelcontextprotocol.registry/official']
+  // Not superseded: the registry keeps old versions in the same list.
   if (official?.status !== 'active' || official.isLatest === false) return false
-  const pkg = s.packages?.[0]
-  if (!pkg) return false
-  if (pkg.registryType !== 'npm' && pkg.registryType !== 'pypi') return false
-  if (!pkg.identifier || !pkg.version) return false
-  return (pkg.transport?.type ?? 'stdio') === 'stdio'
+  return runnablePackage(row) !== null
 }
 
 function toEntry(row: RegistryRow): string {
   const s = row.server!
-  const pkg = s.packages![0]!
+  const pkg = runnablePackage(row)!
   const slug = slugOf(s.name!)
   const npm = pkg.registryType === 'npm'
   const command = npm ? 'npx' : 'uvx'

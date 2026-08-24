@@ -13,6 +13,8 @@ import type { ConnectorDefinition } from '@clawboo/connector-catalog'
 
 let cached: readonly ConnectorDefinition[] | null = null
 let inFlight: Promise<readonly ConnectorDefinition[]> | null = null
+/** The last load threw. Distinct from "loaded and empty", which never happens. */
+let failed = false
 
 /**
  * The community snapshot, fetched from the separate bundle entry.
@@ -31,6 +33,7 @@ async function loadCommunity(): Promise<readonly ConnectorDefinition[]> {
       // A failed chunk load must not take the shelf down. The curated directory
       // is the part that has to work offline, and it is already rendered.
       inFlight = null
+      failed = true
       return []
     })
   return inFlight
@@ -39,6 +42,14 @@ async function loadCommunity(): Promise<readonly ConnectorDefinition[]> {
 export interface CommunityConnectors {
   entries: readonly ConnectorDefinition[]
   loading: boolean
+  /**
+   * The snapshot could not be loaded.
+   *
+   * Reported separately because "we could not read the registry" and "the
+   * registry has nothing" are different facts, and rendering the first as the
+   * second tells the user the long tail is empty when it was never consulted.
+   */
+  error: boolean
   /** Pull the snapshot in. Safe to call repeatedly. */
   request: () => void
 }
@@ -46,6 +57,7 @@ export interface CommunityConnectors {
 export function useCommunityConnectors(wanted: boolean): CommunityConnectors {
   const [entries, setEntries] = useState<readonly ConnectorDefinition[]>(cached ?? [])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(failed)
 
   const request = useCallback(() => {
     if (cached) {
@@ -55,6 +67,7 @@ export function useCommunityConnectors(wanted: boolean): CommunityConnectors {
     setLoading(true)
     void loadCommunity().then((next) => {
       setEntries(next)
+      setError(failed)
       setLoading(false)
     })
   }, [])
@@ -63,15 +76,15 @@ export function useCommunityConnectors(wanted: boolean): CommunityConnectors {
     if (wanted) request()
   }, [wanted, request])
 
-  return { entries, loading, request }
+  return { entries, loading, error, request }
 }
 
 /**
- * Search the snapshot without pulling it in.
+ * Search an already-loaded snapshot.
  *
- * Returns null when it has not been loaded, which the caller renders as "nothing
- * here yet" rather than as "no results": those are different facts and conflating
- * them would tell a user the registry has nothing when it has not been consulted.
+ * Says nothing about whether it WAS loaded: an empty result here and a failed
+ * load are different facts, and the caller distinguishes them with `error`
+ * rather than by inspecting this return value.
  */
 export function searchCommunity(
   entries: readonly ConnectorDefinition[],

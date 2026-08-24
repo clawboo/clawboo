@@ -62,14 +62,20 @@ export function buildConnectorAwareness(input: ConnectorAwarenessInput): string 
     candidates.filter((e) => e.cost === cost).slice(0, PER_TIER),
   )
 
-  if (live.size === 0 && offered.length === 0) return null
+  if (input.connected.length === 0 && offered.length === 0) return null
 
   const lines: string[] = []
 
-  if (live.size > 0) {
-    const names = CURATED_CONNECTORS.filter((d) => live.has(d.slug)).map((d) => d.displayName)
+  // NAMED FROM THE LIVE SET, not from the catalog. Filtering the catalog by the
+  // live slugs silently dropped every custom connector, so an operator whose only
+  // connection was one they added themselves got the sentence "Connected and
+  // usable right now: ." with an empty list.
+  const liveNames = input.connected.map(
+    (slug) => CURATED_CONNECTORS.find((d) => d.slug === slug)?.displayName ?? slug,
+  )
+  if (liveNames.length > 0) {
     lines.push(
-      `Connected and usable right now: ${names.join(', ')}. Their tools are in your tool list, prefixed mcp__.`,
+      `Connected and usable right now: ${liveNames.join(', ')}. Their tools are in your tool list, prefixed mcp__.`,
     )
   }
 

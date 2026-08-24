@@ -77,17 +77,24 @@ function jsonEntry(def: ConnectorDefinition): Record<string, unknown> {
   }
 }
 
+/** The env var holding this connector's bearer token, or null. */
+function bearerTokenVar(def: ConnectorDefinition): string | null {
+  if (def.auth.kind !== 'bearer') return null
+  return def.auth.inputs.find((i) => i.required)?.key ?? def.auth.inputs[0]?.key ?? null
+}
+
 /**
  * The Authorization header a bearer-auth remote connector needs, or null.
  *
  * The VALUE IS A REFERENCE, never a secret: this string is rendered into a block
  * the operator copies into a file, and putting a token in it would be writing a
  * credential to disk in plaintext on their behalf. `${VAR}` is the substitution
- * every dialect here already uses for stdio env vars.
+ * the JSON dialects already use for stdio env vars. Codex does NOT substitute
+ * inside a header value, which is why its branch emits `bearer_token_env_var`
+ * instead of calling this.
  */
 function bearerHeader(def: ConnectorDefinition): Record<string, string> | null {
-  if (def.auth.kind !== 'bearer') return null
-  const key = def.auth.inputs.find((i) => i.required)?.key ?? def.auth.inputs[0]?.key
+  const key = bearerTokenVar(def)
   return key ? { Authorization: `Bearer \${${key}}` } : null
 }
 
@@ -107,13 +114,14 @@ export function connectorSnippet(def: ConnectorDefinition, dialect: SnippetDiale
     const lines = [`[mcp_servers.${key}]`]
     if (def.launch.transport === 'streamable-http') {
       lines.push(`url = ${tomlString(def.launch.url)}`)
-      const headers = bearerHeader(def)
-      if (headers) {
-        // Codex reads a header value from the environment through the same
-        // `${...}` substitution the stdio path uses for env vars.
-        for (const [name, value] of Object.entries(headers)) {
-          lines.push(`http_headers = { ${tomlString(name)} = ${tomlString(value)} }`)
-        }
+      const tokenVar = bearerTokenVar(def)
+      if (tokenVar) {
+        // `bearer_token_env_var`, NOT `http_headers`. Codex treats http_headers
+        // values as LITERAL strings, so `Authorization = "Bearer ${GITHUB_TOKEN}"`
+        // would send that text to GitHub verbatim. Codex's own migration tooling
+        // rewrites exactly that shape into this field, which is the one that
+        // reads the variable at run time.
+        lines.push(`bearer_token_env_var = ${tomlString(tokenVar)}`)
       }
     } else {
       lines.push(`command = ${tomlString(def.launch.command)}`)

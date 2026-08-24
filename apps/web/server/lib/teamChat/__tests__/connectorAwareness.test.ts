@@ -40,6 +40,14 @@ describe('buildConnectorAwareness', () => {
     expect(offered).not.toMatch(/Knowledge Graph Memory/)
   })
 
+  it('names a connected CUSTOM connector instead of an empty list', () => {
+    // The names came from filtering the catalog by the live slugs, so a connector
+    // the operator added themselves matched nothing and the sentence rendered as
+    // "Connected and usable right now: ." with an empty list.
+    const block = buildConnectorAwareness({ connected: ['my-own-server'], isUserFacing: true })!
+    expect(block).toMatch(/Connected and usable right now: my-own-server\./)
+  })
+
   it('caps the offer, because this rides every turn', () => {
     const block = buildConnectorAwareness({ connected: [], isUserFacing: true })!
     const offered = block.split('Not connected, but the user can add these:')[1]!.split('\n')[0]!

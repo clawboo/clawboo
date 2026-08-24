@@ -32,4 +32,13 @@ describe('isRemoteConnector', () => {
     expect(isRemoteConnector('linear')).toBe(true)
     expect(isRemoteConnector(null)).toBe(false)
   })
+
+  it('calls an UNKNOWN slug local, because a custom connector is not in the catalog', () => {
+    // `connectorBySlug` returns undefined for a connector the operator added, and
+    // `undefined?.launch.transport !== 'stdio'` is true. Every custom connector
+    // was therefore called remote, so turning one off claimed a session had
+    // closed while a child process on the machine was being killed.
+    expect(isRemoteConnector('a-connector-the-operator-added')).toBe(false)
+    expect(isRemoteConnector('')).toBe(false)
+  })
 })

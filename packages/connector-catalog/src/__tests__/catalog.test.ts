@@ -175,16 +175,23 @@ describe('the honesty invariants', () => {
     }
   })
 
-  it('a remote bearer entry emits a header that REFERENCES its token, never contains one', () => {
+  it('a remote bearer entry REFERENCES its token in every dialect, never contains one', () => {
     // The block is copied into a file on the operator's disk. Rendering the
     // token itself would be writing their credential to plaintext on their
     // behalf, from a package whose whole posture is that values never leave the
     // vault.
+    //
+    // HOW it references the token differs by client, which is the point: Codex
+    // reads header values as literals, so it gets `bearer_token_env_var` while
+    // the JSON dialects get an Authorization header. Asserting one shape for all
+    // three is what let a literal `${GITHUB_TOKEN}` ship to Codex users.
     const github = connectorBySlug('github')!
     for (const dialect of SNIPPET_DIALECTS) {
       const body = connectorSnippet(github, dialect.id).body
       expect(body, dialect.id).toContain('GITHUB_TOKEN')
-      expect(body, dialect.id).toMatch(/Authorization/i)
+      expect(body, dialect.id).toMatch(
+        dialect.id === 'codex' ? /bearer_token_env_var/ : /Authorization/i,
+      )
     }
   })
 

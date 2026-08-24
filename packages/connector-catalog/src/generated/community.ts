@@ -7,8 +7,8 @@
 // directly. Adding one is an explicit consent step that shows the exact argv.
 //
 // Source:  https://registry.modelcontextprotocol.io/v0/servers
-// Entries: 229 of 6000 registry rows (cap 400)
-// Digest:  6ebd0c69ac66f1e316e61c48f631519c75bc695736a21babf89649e76d5ce83e
+// Entries: 230 of 6000 registry rows (cap 400)
+// Digest:  a9f5636ecf45a5b9b7a202a5a93222c40a607e77812e93a73e061700e641b699
 //
 // Refreshing this file is a deliberate act: run the script, read the diff, bump
 // the version. Nothing auto-refreshes it.
@@ -1883,6 +1883,63 @@ export const COMMUNITY_SNAPSHOT: readonly ConnectorDefinition[] = Object.freeze(
     trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: true },
     tags: [],
     catalogId: 'ai.dinglebear/rytdl',
+  },
+  {
+    slug: 'soma',
+    displayName: 'Soma',
+    description:
+      'RMCP runtime for provider-backed agents with CLI, REST, HTTP MCP, plugins, and scaffold support.',
+    category: 'other',
+    provenance: 'community',
+    launch: {
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', '@dinglebear/soma@0.10.0'],
+      pinnedVersion: '0.10.0',
+    },
+    auth: {
+      kind: 'api-key',
+      inputs: [
+        {
+          key: 'SOMA_HOME',
+          description: 'Host data directory used by the local Soma CLI and stdio MCP runtime.',
+          required: true,
+          secret: true,
+        },
+        {
+          key: 'SOMA_PROVIDER_DIR',
+          description: 'Host directory scanned for drop-in provider manifests and modules.',
+          required: true,
+          secret: true,
+        },
+        {
+          key: 'SOMA_API_URL',
+          description:
+            'Optional deployed platform API or upstream API base URL used by the SomaClient compatibility layer. Leave unset for local provider/runtime mode.',
+          required: true,
+          secret: true,
+        },
+        {
+          key: 'SOMA_API_KEY',
+          description:
+            'Optional bearer token or upstream API key for provider-backed calls that use SomaClient. Keep secret.',
+          required: true,
+          secret: true,
+        },
+        {
+          key: 'RUST_LOG',
+          description: 'Rust tracing filter for local CLI and stdio MCP logs.',
+          required: true,
+          secret: true,
+        },
+      ],
+    },
+    // UNKNOWN, declared as the worst case. clawboo has not read this server, so
+    // assuming anything narrower would be vouching for it by omission.
+    egressAllow: ['*'],
+    trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: true },
+    tags: [],
+    catalogId: 'ai.dinglebear/soma',
   },
   {
     slug: 'synapse',

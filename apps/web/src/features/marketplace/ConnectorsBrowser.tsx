@@ -237,10 +237,14 @@ function CommunityConsent({
   onAdded: () => void
 }) {
   const [busy, setBusy] = useState(false)
-  const argv =
-    def.launch.transport === 'stdio'
-      ? `${def.launch.command} ${def.launch.args.join(' ')}`
-      : def.launch.url
+  // STDIO ONLY, asserted rather than branched. The ingest filters remote entries
+  // out and `verify:connectors` fails the build if one appears, so a remote
+  // branch here could not run; what it COULD do is hand a URL to
+  // `createCustomConnector`, whose body treats its `command` as a program to
+  // spawn. That is a URL executed as a local process.
+  if (def.launch.transport !== 'stdio') return null
+  const launch = def.launch
+  const argv = `${launch.command} ${launch.args.join(' ')}`
 
   return (
     <section className="rounded-xl border border-border bg-surface-subtle p-4">
@@ -253,8 +257,7 @@ function CommunityConsent({
         <code>{argv}</code>
       </pre>
       <p className="mt-2 text-[11px] text-muted-foreground">
-        From <code>{def.catalogId ?? def.slug}</code>, version{' '}
-        {def.launch.transport === 'stdio' ? def.launch.pinnedVersion : 'remote'}.
+        From <code>{def.catalogId ?? def.slug}</code>, version {launch.pinnedVersion}.
         {def.auth.inputs.length > 0 && (
           <> It will ask for {def.auth.inputs.map((i) => i.key).join(', ')}.</>
         )}
@@ -273,8 +276,8 @@ function CommunityConsent({
                 slug: def.slug,
                 displayName: def.displayName,
                 description: def.description,
-                command: def.launch.transport === 'stdio' ? def.launch.command : def.launch.url,
-                args: def.launch.transport === 'stdio' ? [...def.launch.args] : [],
+                command: launch.command,
+                args: [...launch.args],
               })
               if (ok) onAdded()
             } finally {
@@ -1318,12 +1321,16 @@ export function ConnectorsBrowser() {
               <span className="text-[11px] font-medium text-muted-foreground">
                 {community.loading
                   ? 'Looking in the MCP registry…'
-                  : `${communityResults.length} from the MCP registry, unchecked`}
+                  : community.error
+                    ? 'Could not load the registry list'
+                    : `${communityResults.length} from the MCP registry, unchecked`}
               </span>
               <div className="h-px flex-1 bg-border" />
             </div>
             <p className="mt-2 text-center text-[11px] text-muted-foreground">
-              clawboo has not read these. You decide.
+              {community.error
+                ? 'The curated connectors above are unaffected. Reload to try again.'
+                : 'clawboo has not read these. You decide.'}
             </p>
             {communityResults.length > 0 && (
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">

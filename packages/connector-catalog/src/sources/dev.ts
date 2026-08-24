@@ -49,8 +49,11 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
         url: 'https://github.com/settings/personal-access-tokens/new',
         steps: [
           'Create a fine-grained personal access token.',
-          'Pick the specific repositories your agents should see, not "all repositories".',
-          'Give it at least Contents: read and Issues: read, then copy it back here.',
+          'Pick the specific repositories your agents should work in, not "all repositories".',
+          // READ AND WRITE, because the entry's own description promises writes.
+          // Asking for read-only produced a token that connects, lists its tools,
+          // and then fails on the first thing the connector says it can do.
+          'Give it Read and write on Contents, Issues and Pull requests, then copy it back here.',
         ],
       },
     },

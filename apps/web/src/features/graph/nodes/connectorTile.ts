@@ -31,5 +31,10 @@ export function connectorSlugFromId(connectorId: string | null | undefined): str
  */
 export function isRemoteConnector(slug: string | null): boolean {
   if (!slug) return false
-  return connectorBySlug(slug)?.launch.transport !== 'stdio'
+  // UNKNOWN MEANS LOCAL, not remote. A custom connector the operator added is not
+  // in the committed catalog, so `connectorBySlug` returns undefined for it, and
+  // `undefined?.launch.transport !== 'stdio'` is true. Every custom connector
+  // would have been called remote, and turning one off would have claimed a
+  // session closed while a child process on the machine was being killed.
+  return connectorBySlug(slug)?.launch.transport === 'streamable-http'
 }
