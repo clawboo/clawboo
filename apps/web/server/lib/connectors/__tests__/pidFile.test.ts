@@ -128,16 +128,14 @@ describe('connector pid file', () => {
     expect(report.expired).toBe(1)
   })
 
-  it('refuses to signal when it cannot establish WHEN the process started', () => {
-    // The reason this platform check is a test and not a comment: the identity
-    // probe used to exist only for POSIX, so on Windows every recorded pid was
-    // signalled with nothing corroborating that it was still ours, and the
-    // signal is a whole-tree SIGKILL. Failing closed is what makes the guarantee
-    // the same everywhere.
+  it('refuses to signal a live pid whose process started AFTER our record', () => {
+    // The identity probe used to exist only for POSIX, so on Windows every
+    // recorded pid was signalled with nothing corroborating that it was still
+    // ours, and the signal is a whole-tree SIGKILL.
     //
-    // Asserted through the observable contract rather than by stubbing the
-    // probe: a pid that is live but whose start time cannot possibly match is
-    // the same decision path.
+    // What it must NOT do is treat "this host cannot answer" as "do not signal".
+    // That is not caution, it is disabling orphan reaping on a whole platform
+    // while still claiming to do it, which is what the kill test above pins.
     const killed: number[] = []
     writeFileSync(
       connectorPidFilePath(),
@@ -156,6 +154,29 @@ describe('connector pid file', () => {
     const report = reapOrphanedConnectors((pid) => killed.push(pid))
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
+  })
+
+  it('one dead record does not cost a live one its corroboration', () => {
+    // `ps -p` exits non-zero and prints NOTHING when ANY id in the list is
+    // invalid, so batching the probe made a single stale entry downgrade every
+    // other entry to boot-and-liveness. The probe list is filtered to live pids
+    // for exactly this reason.
+    const killed: number[] = []
+    const bootAt = Math.round((Date.now() - os.uptime() * 1000) / 10_000) * 10_000
+    writeFileSync(
+      connectorPidFilePath(),
+      JSON.stringify([
+        // Above every platform's pid_max, so it cannot be live.
+        { pid: 4_194_304, slug: 'context7', startedAt: Date.now(), bootAt },
+        { pid: process.pid, slug: 'memory', startedAt: Date.now(), bootAt },
+      ]),
+      'utf8',
+    )
+    const report = reapOrphanedConnectors((pid) => killed.push(pid))
+    expect(killed).toEqual([process.pid])
+    // Corroborated, not waved through: the live entry still had its start time
+    // checked, so nothing was signalled on weaker evidence.
+    expect(report.unverified).toBe(0)
   })
 
   it('treats a corrupt file as empty rather than throwing', () => {

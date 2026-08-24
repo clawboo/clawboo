@@ -61,51 +61,102 @@ function currentBootAt(): number {
 }
 
 /**
- * When the process currently holding `pid` actually started, or null.
+ * The dispositive identity check: WHEN did the process holding this pid start.
  *
- * The dispositive identity check. Comparing the COMMAND does not work: `ps`
- * reports `node`, not the absolute path we spawned, and an `npx` launch re-execs
- * into something else entirely. A start time cannot be confused that way: a
- * recycled pid necessarily started AFTER we recorded the original.
+ * Comparing the COMMAND does not work. `ps` reports `node`, not the absolute
+ * path we spawned, and an `npx` launch re-execs into something else entirely. A
+ * start time cannot be confused that way: a recycled pid necessarily started
+ * AFTER we recorded the original.
+ */
+interface StartTimes {
+  /** Whether the probe RAN. False means this host has no working mechanism, which
+   *  is a different fact from "that pid is not ours". */
+  ok: boolean
+  /** Epoch ms per pid, for the pids the probe could answer for. */
+  times: Map<number, number>
+}
+
+/** No answer at all. Callers fall back to boot time, age and liveness. */
+const NO_START_TIMES: StartTimes = { ok: false, times: new Map() }
+
+/**
+ * When the processes currently holding these pids started.
  *
- * BOTH PLATFORMS IMPLEMENTED, because a missing answer here is not a missing
- * nicety. The caller signals a whole process TREE with SIGKILL, so a platform
- * with no start time was a platform where the reaper killed whatever now held a
- * recycled number, with nothing to say otherwise.
+ * ONE CALL FOR THE WHOLE REAP, not one per pid. This runs during boot, and on
+ * Windows each probe is a PowerShell start: per-pid that was both slow enough to
+ * delay startup and slow enough to hit its own timeout on a loaded CI runner,
+ * which is how it came back empty and quietly disabled the reaper there.
  *
  * On POSIX, `lstart` rather than `etimes`: the latter is Linux-only and macOS
- * rejects it. On Windows there is no `ps`, so PowerShell reports the same fact;
- * it is emitted as a round-trip ISO string so parsing does not depend on the
- * machine's locale.
+ * rejects it. On Windows there is no `ps`, so PowerShell reports the same fact,
+ * emitted as a round-trip ISO string so parsing does not depend on the machine's
+ * locale.
  */
-function processStartedAt(pid: number): number | null {
-  // The pid reaches a command line below, and the only validation the record
-  // itself carries is `typeof pid === 'number'`. A float or a value large enough
-  // to format as `1e+21` would reach PowerShell as a malformed argument, so the
-  // shape is settled here rather than left to the shell to reject.
-  if (!Number.isInteger(pid) || pid <= 0) return null
+function processStartTimes(pids: readonly number[]): StartTimes {
+  // The pids reach a command line below, and the only validation a record
+  // carries is `typeof pid === 'number'`. A float, or a value large enough to
+  // format as `1e+21`, would arrive as a malformed argument.
+  const safe = pids.filter((p) => Number.isInteger(p) && p > 0)
+  if (safe.length === 0) return { ok: true, times: new Map() }
+
+  const times = new Map<number, number>()
   try {
-    const raw =
-      process.platform === 'win32'
-        ? execFileSync(
-            'powershell.exe',
-            [
-              '-NoProfile',
-              '-NonInteractive',
-              '-Command',
-              `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
-            ],
-            { encoding: 'utf8', timeout: 15_000, windowsHide: true },
-          ).trim()
-        : execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-            encoding: 'utf8',
-            timeout: 5_000,
-            windowsHide: true,
-          }).trim()
-    const parsed = Date.parse(raw)
-    return Number.isFinite(parsed) ? parsed : null
+    if (process.platform === 'win32') {
+      // `Get-CimInstance` rather than `Get-Process`: it reports CreationDate for
+      // every id in one query and does not need rights on each process object.
+      const filter = safe.map((p) => `ProcessId=${p}`).join(' or ')
+      const raw = execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `Get-CimInstance Win32_Process -Filter "${filter}" | ` +
+            `ForEach-Object { "$($_.ProcessId) $($_.CreationDate.ToUniversalTime().ToString('o'))" }`,
+        ],
+        { encoding: 'utf8', timeout: WINDOWS_PROBE_TIMEOUT_MS, windowsHide: true },
+      )
+      for (const line of raw.split(/\r?\n/)) {
+        const [id, stamp] = line.trim().split(/\s+/, 2)
+        const parsed = stamp ? Date.parse(stamp) : NaN
+        if (id && Number.isFinite(parsed)) times.set(Number(id), parsed)
+      }
+    } else {
+      const raw = execFileSync('ps', ['-o', 'pid=,lstart=', '-p', safe.join(',')], {
+        encoding: 'utf8',
+        timeout: 10_000,
+        windowsHide: true,
+      })
+      for (const line of raw.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        const space = trimmed.indexOf(' ')
+        if (space === -1) continue
+        const id = Number(trimmed.slice(0, space))
+        const parsed = Date.parse(trimmed.slice(space + 1).trim())
+        if (Number.isInteger(id) && Number.isFinite(parsed)) times.set(id, parsed)
+      }
+    }
   } catch {
-    return null
+    // `ps -p` exits non-zero when NONE of the pids exist, which is a legitimate
+    // answer rather than a broken probe. Anything else (no such binary, a
+    // timeout) means this host cannot answer at all.
+    return times.size > 0 ? { ok: true, times } : NO_START_TIMES
+  }
+  return { ok: true, times }
+}
+
+/** Generous, because this is one call at boot on a possibly loaded machine, and
+ *  a probe that times out is worse than a probe that takes a moment. */
+const WINDOWS_PROBE_TIMEOUT_MS = 30_000
+
+/** Whether ANY process holds this pid. Signal 0 checks existence without sending. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -163,10 +214,13 @@ export function forgetConnectorPid(pid: number): void {
 export interface ReapReport {
   killed: number
   /** Entries dropped UNSIGNALLED because they could not be trusted to still be
-   *  ours: recorded under a different boot, too old, now running something else,
-   *  or on a host that could not report a start time at all. Reported separately
-   *  so a surprising count is visible in the log. */
+   *  ours: recorded under a different boot, too old, or now running something
+   *  else. Reported separately so a surprising count is visible in the log. */
   expired: number
+  /** Signalled on boot time, age and liveness ALONE, because this host could not
+   *  report process start times. Not an error, but strictly weaker evidence, so
+   *  it is counted rather than hidden. */
+  unverified: number
 }
 
 /**
@@ -179,9 +233,24 @@ export function reapOrphanedConnectors(kill: (pid: number) => void): ReapReport 
   const entries = readAll()
   const now = Date.now()
   let killed = 0
+  let unverified = 0
   let expired = 0
 
   const bootAt = currentBootAt()
+  // ONE probe for the whole reap, over the pids still worth asking about, and
+  // ONLY the live ones. A dead or out-of-range pid poisons the whole batch:
+  // `ps -p` exits non-zero and prints NOTHING when any id is invalid, so one
+  // stale record would cost every other entry its corroboration and quietly
+  // downgrade the reap to boot-and-liveness. Liveness is a cheap in-process
+  // check, and an entry that fails it is skipped below anyway.
+  const probe = processStartTimes(
+    entries
+      .filter(
+        (e) => e.bootAt === bootAt && now - e.startedAt <= MAX_TRUSTED_AGE_MS && isAlive(e.pid),
+      )
+      .map((e) => e.pid),
+  )
+
   for (const entry of entries) {
     // A DIFFERENT BOOT makes the pid meaningless: the kernel has handed those
     // numbers out again, so the process holding it now is somebody else's. This
@@ -194,31 +263,35 @@ export function reapOrphanedConnectors(kill: (pid: number) => void): ReapReport 
       expired += 1
       continue
     }
-    try {
-      // Liveness only. This proves a process EXISTS, not that it is ours -- a
-      // recycled pid is alive by definition -- so it is a cheap early exit, not
-      // a safety check. The identity checks are above and below.
-      process.kill(entry.pid, 0)
-    } catch {
-      continue
-    }
+    // Liveness only. This proves a process EXISTS, not that it is ours: a
+    // recycled pid is alive by definition, so it is a cheap early exit, not a
+    // safety check. The identity checks are above and below.
+    if (!isAlive(entry.pid)) continue
     // Within one boot a pid can still be recycled, so corroborate WHEN the
     // process holding it started. A recycled pid started after we recorded the
     // original; ours started just before.
     //
-    // FAILS CLOSED. An unanswerable start time is not permission to proceed: the
-    // next line SIGKILLs a whole process tree, and this is the only check that
-    // separates our child from whatever else the kernel handed that number to.
-    // Leaving one connector running is the cheaper mistake, every time.
-    const startedAt = processStartedAt(entry.pid)
-    if (startedAt === null || startedAt > entry.startedAt + START_TIME_SLACK_MS) {
-      expired += 1
-      continue
+    // THE PROBE RUNNING AND THE PROBE ANSWERING ARE DIFFERENT FACTS, and
+    // conflating them is what broke this. When the probe ran, an id it has no
+    // entry for is not ours and a start time meaningfully later than our record
+    // is somebody else's, so both skip. When the probe could not run AT ALL,
+    // there is nothing to fail closed on: refusing to signal would not be
+    // caution, it would be disabling orphan reaping on that whole platform while
+    // still claiming to do it. Boot time, the age window and liveness still
+    // apply, and the count is reported so an operator can see the difference.
+    if (probe.ok) {
+      const startedAt = probe.times.get(entry.pid)
+      if (startedAt === undefined || startedAt > entry.startedAt + START_TIME_SLACK_MS) {
+        expired += 1
+        continue
+      }
+    } else {
+      unverified += 1
     }
     kill(entry.pid)
     killed += 1
   }
 
   writeAll([])
-  return { killed, expired }
+  return { killed, expired, unverified }
 }
