@@ -45,13 +45,22 @@ function definition(command: string, args: string[]): ConnectableDefinition {
 describe('native bridge serves connector tools', () => {
   let sandbox: string
   let db: ClawbooDb
+  let prevClawbooHome: string | undefined
 
   beforeEach(async () => {
     sandbox = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-conn-'))
+    // SANDBOX THE STATE DIR. Connecting writes the durable pid record through
+    // `resolveClawbooDir`, so without this the suite writes into the developer's
+    // real ~/.clawboo and its reap can drop the record of a connector they
+    // actually have running.
+    prevClawbooHome = process.env['CLAWBOO_HOME']
+    process.env['CLAWBOO_HOME'] = sandbox
     db = createDb(path.join(sandbox, 'test.db'))
   })
   afterEach(async () => {
     await resetConnectorsForTests()
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     // Windows will not unlink a file with an open handle.
     db.$client.close()
     await rm(sandbox, { recursive: true, force: true })

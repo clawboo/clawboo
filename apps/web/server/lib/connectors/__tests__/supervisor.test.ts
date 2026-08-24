@@ -56,9 +56,16 @@ describe('connector supervisor', () => {
   let dir: string
   let db: ClawbooDb
   let file: string
+  let prevClawbooHome: string | undefined
 
   beforeAll(() => {
     dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-supervisor-'))
+    // SANDBOX THE STATE DIR. Connecting writes the durable pid record through
+    // `resolveClawbooDir`, so without this the suite writes into the developer's
+    // real ~/.clawboo, and the reap at teardown can drop the record of a
+    // connector they actually have running.
+    prevClawbooHome = process.env['CLAWBOO_HOME']
+    process.env['CLAWBOO_HOME'] = dir
     db = createDb(path.join(dir, 'test.db'))
     file = path.join(dir, 'server.cjs')
     const req = createRequire(path.join(process.cwd(), 'package.json'))
@@ -74,6 +81,8 @@ describe('connector supervisor', () => {
     // unlink a file that still has an open handle, so the teardown fails with
     // EBUSY and takes the whole suite red on that platform only.
     db.$client.close()
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     rmSync(dir, { recursive: true, force: true })
   })
 

@@ -5,6 +5,9 @@
 // the server.
 
 import { spawn } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,8 +23,17 @@ import { killProcessTreeByPid } from '../../runtimes/killTree'
  */
 type Subprocess = typeof import('../../runtimes/subprocess')
 let mod: Subprocess
+let stateDir: string
+let prevClawbooHome: string | undefined
 
 beforeEach(async () => {
+  // SANDBOX THE STATE DIR. `unregisterConnectorPid` reaches the durable pid file
+  // through `resolveClawbooDir`, so without this the suite writes into the
+  // developer's real ~/.clawboo and can drop the record of a connector they
+  // actually have running.
+  stateDir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-reap-'))
+  prevClawbooHome = process.env['CLAWBOO_HOME']
+  process.env['CLAWBOO_HOME'] = stateDir
   vi.resetModules()
   mod = await import('../../runtimes/subprocess')
 })
@@ -52,6 +64,9 @@ function alive(pid: number): boolean {
 }
 
 afterEach(() => {
+  if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+  else process.env['CLAWBOO_HOME'] = prevClawbooHome
+  rmSync(stateDir, { recursive: true, force: true })
   // The SAME killer the product uses, not a hand-rolled negative-pid signal.
   // A process GROUP is a POSIX concept: on Windows `process.kill(-pid)` throws,
   // so every sleeper this file spawned outlived the run on that job.

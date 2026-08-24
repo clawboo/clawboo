@@ -29,6 +29,12 @@ describe('connector identity', () => {
     const { createRequire } = await import('node:module')
 
     const dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-identity-'))
+    // SANDBOX THE STATE DIR. Connecting writes the durable pid record through
+    // `resolveClawbooDir`, so without this the suite writes into the developer's
+    // real ~/.clawboo and its reap can drop the record of a connector they
+    // actually have running.
+    const prevClawbooHome = process.env['CLAWBOO_HOME']
+    process.env['CLAWBOO_HOME'] = dir
     try {
       const db = createDb(path.join(dir, 'test.db'))
       const req = createRequire(path.join(process.cwd(), 'package.json'))
@@ -68,6 +74,8 @@ s.connect(new StdioServerTransport())
       // to be closed before the directory goes.
       db.$client.close()
     } finally {
+      if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+      else process.env['CLAWBOO_HOME'] = prevClawbooHome
       rmSync(dir, { recursive: true, force: true })
     }
   }, 30_000)
