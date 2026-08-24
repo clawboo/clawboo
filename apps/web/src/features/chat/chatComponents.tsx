@@ -31,6 +31,15 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useMarketplaceStore } from '@/stores/marketplace'
+import { useViewStore } from '@/stores/view'
+import {
+  connectorBySlug,
+  connectorCost,
+  COST_COPY,
+  readConnectorAsk,
+  type ConnectorDefinition,
+} from '@clawboo/connector-catalog'
 import { useTeamStore } from '@/stores/team'
 import { useTheme } from '@/features/theme/useTheme'
 import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
@@ -478,6 +487,51 @@ export const ThinkingSection = memo(function ThinkingSection({
   )
 })
 
+// ─── ConnectorAskCard ────────────────────────────────────────────────────────
+
+/**
+ * The moment of ask, rendered where the asking happened.
+ *
+ * The agent said it needs something and stopped. Everything else about this
+ * feature lives in a panel the reader may never open, so this card is the whole
+ * point: it names what is missing and puts the action one click away, in the
+ * conversation, at the moment it matters.
+ */
+const ConnectorAskCard = memo(function ConnectorAskCard({
+  slugs,
+  prose,
+}: {
+  slugs: string[]
+  prose: string
+}) {
+  const defs = slugs.map((s) => connectorBySlug(s)).filter((d): d is ConnectorDefinition => !!d)
+  if (defs.length === 0) return null
+
+  const open = (slug: string) => {
+    useMarketplaceStore.getState().setMarketplaceTab('connectors')
+    useMarketplaceStore.getState().setOpenConnectorSlug(slug)
+    useViewStore.getState().navigateTo('marketplace')
+  }
+
+  return (
+    <div className="flex justify-center">
+      <div className="max-w-prose rounded-2xl border border-border bg-surface px-4 py-3">
+        {/* THE STORED SENTENCE, not one rebuilt from the slugs. Rebuilding it here
+            is what produced "Linear and Notion and Figma" next to a stored line
+            that read correctly. */}
+        <p className="text-xs leading-relaxed text-foreground">{prose}</p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {defs.map((d) => (
+            <Button key={d.slug} size="sm" onClick={() => open(d.slug)}>
+              {COST_COPY[connectorCost(d)].action} {d.displayName}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+})
+
 // ─── MetaMessageCard ─────────────────────────────────────────────────────────
 
 export const MetaMessageCard = memo(function MetaMessageCard({
@@ -485,6 +539,12 @@ export const MetaMessageCard = memo(function MetaMessageCard({
 }: {
   entry: TranscriptEntry
 }) {
+  // An agent that asked for a connector gets a CARD WITH A BUTTON, not a
+  // sentence naming something the reader then has to go and find. This is the
+  // only place the offer reaches somebody who never opens the marketplace.
+  const askedFor = readConnectorAsk(entry.text)
+  if (askedFor) return <ConnectorAskCard slugs={askedFor.slugs} prose={askedFor.prose} />
+
   return (
     <div className="flex justify-center">
       {/* A fixed card radius, NOT rounded-full: a short meta reads as a pill, but a

@@ -142,3 +142,15 @@ export function byCost(
     return a.displayName.localeCompare(b.displayName)
   })
 }
+
+/**
+ * Whether this cost is one the operator can pay WITHOUT leaving clawboo.
+ *
+ * The union behind every "N you can turn on right now" claim. Exported so the
+ * header and the shelf cannot drift into disagreeing about what "right now"
+ * means, which is the sort of thing that shows a user two numbers describing
+ * two different populations and lets them work out which is lying.
+ */
+export function isImmediate(cost: ConnectorCost): boolean {
+  return cost === 'on' || cost === 'ready' || cost === 'one-click'
+}

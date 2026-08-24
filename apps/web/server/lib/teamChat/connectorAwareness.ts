@@ -82,7 +82,11 @@ export function buildConnectorAwareness(input: ConnectorAwarenessInput): string 
   if (offered.length > 0) {
     lines.push(
       `Not connected, but the user can add these: ${offered.map(describe).join('; ')}.`,
-      'If one of them is what you need, say so plainly and stop. Name the connector and what you would do with it.',
+      'If one of them is what you need, say so plainly and stop. Name it and say what you would do with it.',
+      // The marker is what turns that sentence into a button. It is stripped
+      // before the reader sees the reply, and the user gets a card with Connect
+      // on it instead of a name they have to go and look up.
+      'Then add [[connect:slug]] on its own line, using the slug in brackets above, one line per connector. Use it ONLY when you actually need that connector for this request.',
     )
   }
 
@@ -105,7 +109,10 @@ export function buildConnectorAwareness(input: ConnectorAwarenessInput): string 
  */
 function describe(entry: { def: ConnectorDefinition; cost: string }): string {
   const { def, cost } = entry
-  if (cost === 'ready') return `${def.displayName} (one click, nothing to set up)`
-  if (cost === 'one-click') return `${def.displayName} (one click, they sign in)`
-  return `${def.displayName} (needs a key from ${def.auth.setupGuide?.console ?? def.displayName})`
+  // The SLUG travels with the name, because the marker is keyed on it and an
+  // agent cannot emit an identifier it was never shown.
+  const id = `[${def.slug}]`
+  if (cost === 'ready') return `${def.displayName} ${id} (one click, nothing to set up)`
+  if (cost === 'one-click') return `${def.displayName} ${id} (one click, they sign in)`
+  return `${def.displayName} ${id} (needs a key from ${def.auth.setupGuide?.console ?? def.displayName})`
 }

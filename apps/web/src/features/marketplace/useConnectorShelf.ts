@@ -16,6 +16,7 @@ import { apiFetch } from '@clawboo/control-client'
 import {
   byCost,
   connectorCost,
+  isImmediate,
   type ConnectorCost,
   type ConnectorDefinition,
 } from '@clawboo/connector-catalog'
@@ -87,7 +88,7 @@ export function useConnectorShelf(
 
   const ordered = useMemo(() => byCost(defs, costOf), [defs, costOf])
   const readyCount = useMemo(
-    () => defs.filter((d) => ['on', 'ready', 'one-click'].includes(costOf(d))).length,
+    () => defs.filter((d) => isImmediate(costOf(d))).length,
     [defs, costOf],
   )
 

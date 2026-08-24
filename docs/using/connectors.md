@@ -3,7 +3,7 @@ title: Connect an MCP server
 description: Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
 ---
 
-Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. The **Connectors** tab in the [Marketplace](/using/marketplace) lists 19 verified MCP servers, all of which Clawboo can connect for you, plus 229 more from the MCP registry that it has not checked.
+Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. The **Connectors** tab in the [Marketplace](/using/marketplace) lists 19 verified MCP servers, all of which Clawboo can connect for you, plus 230 more from the MCP registry that it has not checked.
 
 This is the one Marketplace tab that is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
 
@@ -59,7 +59,7 @@ Discovery is pinned to the server that answered: its OAuth metadata must live on
 
 ## The long tail
 
-Below the curated nineteen, behind its own divider, sit 229 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Unchecked**, or search for something the curated set does not have, and they appear. The two counts never merge into one total, because Clawboo has read nineteen of these and none of the rest.
+Below the curated nineteen, behind its own divider, sit 230 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Unchecked**, or search for something the curated set does not have, and they appear. The two counts never merge into one total, because Clawboo has read nineteen of these and none of the rest.
 
 They are a committed snapshot, not a live fetch, so the directory still works with no network and does not change under you between releases. Refreshing it is a deliberate act: someone runs the ingest, reads the diff, and ships it.
 
@@ -70,6 +70,14 @@ They are a committed snapshot, not a live fetch, so the directory still works wi
 > `npx -y pretrip-mcp@1.0.1`
 
 Confirming turns it into one of **your own** entries, with its origin recorded, and it lands on the ordinary key flow from there. Clawboo vouches for nothing, you see the command before it runs, and finding it and running it are two clicks apart rather than a retyped command line.
+
+## When an agent asks for one
+
+An agent that needs something it cannot reach names the connector and stops, rather than browsing to the vendor's website or asking you to sign in on its behalf. Clawboo turns that into a card in the conversation, with one button per connector, labelled with what that connector actually costs: **Connect** where a sign-in is all it takes, **Add key** where you have to fetch a token first.
+
+The button opens that connector's own page, not the tab. You are one click from the field you need to fill, at the moment you learned you needed it.
+
+The agent only knows to ask because each turn tells it which connectors are live, and names a few it could have with their prices. It is told never to work around a missing one. Nothing is connected on its say-so: the card is an offer, and you are the one who presses the button.
 
 ## What happens to its tools
 

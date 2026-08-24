@@ -27,6 +27,8 @@
 
 import { mkdir } from 'node:fs/promises'
 
+import { connectorAskBody, extractConnectorAsk } from '@clawboo/connector-catalog'
+import { persistTeamChatEntry } from './persistTeamChatEntry'
 import {
   postToRoom,
   readRoom,
@@ -214,14 +216,38 @@ export async function dispatchChatTurn(
 
   // POST the turn's output to the room as this runtime's named peer (the reliable,
   // uniform mechanism — sourced from the structured `done` summary, not scraped).
+  // An agent that needed a connector says so with a marker. Stripped here so the
+  // reader never sees it, and re-posted as a system line the panel renders as a
+  // card with a real button. Without this the awareness block produces a sentence
+  // naming the remedy and leaves the reader to go find it, which is the dead end
+  // this whole surface exists to remove.
+  const ask = extractConnectorAsk(terminal)
   const posted = postToRoom(db, {
     roomId,
     teamId,
     authorAgentId: agentId,
-    body: terminal,
+    body: ask.body || terminal,
     kind: 'peer',
   })
   deps.onPost?.(posted)
+  if (ask.slugs.length > 0) {
+    try {
+      // THE TRANSCRIPT PLANE, not the room. `postToRoom` feeds the agent-to-agent
+      // room, where this would do two wrong things at once: never reach the card
+      // (the browser renders meta entries, not room rows), and land in the next
+      // agent's context as a literal `clawboo:connect-ask ...` line it would then
+      // try to interpret. A meta entry renders and is read by nobody but the human.
+      persistTeamChatEntry(db, {
+        teamId,
+        agentId,
+        text: connectorAskBody(ask.slugs),
+        role: 'system',
+        kind: 'meta',
+      })
+    } catch {
+      /* the offer is best-effort: never fail a turn that produced an answer */
+    }
+  }
 
   // SAVE the between-turn state + record the session lineage (the heartbeat chain).
   saveChatLeaderState(db, roomId, agentId, {

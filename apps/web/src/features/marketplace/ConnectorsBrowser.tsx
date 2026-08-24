@@ -21,7 +21,7 @@ import {
   CONNECT_REFUSAL_COPY,
   connectorBySlug,
   connectorCounts,
-  isReachable,
+  isImmediate,
   needsArgumentOnly,
   needsCredentialOnly,
   needsSignInOnly,
@@ -114,6 +114,15 @@ function BrandMark({ def }: { def: ConnectorDefinition }) {
  * already names the actual obstacle below it; the heading now does too, so the
  * first three words tell the reader what is missing.
  */
+/**
+ * How many community entries to put on screen at once.
+ *
+ * A render bound, not a search bound: the divider reports the full match count,
+ * so narrowing the list is a job for the search box rather than a number the
+ * reader has to guess at.
+ */
+const COMMUNITY_RENDER_CAP = 60
+
 const CONNECT_REFUSAL_HEADING: Readonly<Record<ConnectRefusal, string>> = Object.freeze({
   'community-unsandboxed': 'Nobody has read this one',
   'remote-needs-registered-app': 'clawboo cannot sign in here',
@@ -1138,11 +1147,10 @@ export function ConnectorsBrowser() {
   const counts = connectorCounts()
   // Stated rather than implied. The header used to read "a directory, not an
   // installer", which was true when nothing here could run and is now false for
-  // exactly the connectable set.
-  // Everything an operator could get running once they have filled in whatever
-  // it asks for. `isReachable` exists precisely so this is one predicate rather
-  // than a hand-assembled union that forgets a case -- which it did, by two.
-  const connectableCount = useMemo(() => searchConnectors('').filter(isReachable).length, [])
+  // exactly the connectable set. The number it shows is what the shelf can turn
+  // on WITHOUT the reader first going somewhere else for a key, because a header
+  // promising nineteen next to eight cards asking for a token is the same broken
+  // promise `connectorCost` exists to stop a button from making.
 
   // The operator's own entries, merged with the committed catalog. Fetched
   // rather than bundled: they live in the database, so the browser cannot know
@@ -1187,6 +1195,15 @@ export function ConnectorsBrowser() {
   // One owner for live state, stored configuration, per-card busy and the card
   // actions. See useConnectorShelf: nineteen copies of that state drift.
   const shelf = useConnectorShelf(matched, setSelected)
+
+  // Counted over the WHOLE curated directory, never the filtered view. Counting
+  // the filtered set put "19 connectors, 0 you can turn on right now" on screen
+  // under a filter that shows none of them: two numbers describing two different
+  // populations, which reads as a bug in the product rather than in the sentence.
+  const immediateCount = useMemo(
+    () => searchConnectors('').filter((d) => isImmediate(shelf.costOf(d))).length,
+    [shelf],
+  )
   const results = shelf.ordered
 
   // THE LONG TAIL, and it stays behind a divider with its own count forever.
@@ -1196,15 +1213,24 @@ export function ConnectorsBrowser() {
   const wantsCommunity =
     categoryFilter === 'community' || (searchQuery.trim() !== '' && results.length === 0)
   const community = useCommunityConnectors(wantsCommunity)
+  // The FULL match set, before the render cap. Kept so the divider can say how
+  // many were found rather than how many fitted: "60 from the MCP registry" next
+  // to a snapshot of 230 understates the directory to exactly the person who
+  // opened this band to find out how big it is.
+  const communityMatches = useMemo(
+    () => (wantsCommunity ? searchCommunity(community.entries, searchQuery) : []),
+    [wantsCommunity, community.entries, searchQuery],
+  )
   const communityResults = useMemo(
-    () => (wantsCommunity ? searchCommunity(community.entries, searchQuery).slice(0, 60) : []),
+    () => communityMatches.slice(0, COMMUNITY_RENDER_CAP),
     [wantsCommunity, community.entries, searchQuery],
   )
 
   const categoryOptions: PillOption[] = useMemo(() => {
     const present = new Set(searchConnectors('').map((c) => c.category))
+    // NO 'all' ENTRY: CollapsiblePillRow renders its own All pill, and passing one
+    // too put two identical pills side by side.
     return [
-      { key: 'all', label: 'All' },
       // The deliberate route into breadth. Without it the long tail is reachable
       // only by a search that misses, which makes the product look smaller than
       // it is to anyone who never types a miss.
@@ -1279,7 +1305,7 @@ export function ConnectorsBrowser() {
           reference implementations make and cannot support. */}
       <div className="shrink-0 px-6 pt-3">
         <div className="text-sm font-semibold text-foreground">
-          {counts.curated} connectors, {connectableCount} you can turn on here
+          {counts.curated} connectors, {immediateCount} you can turn on right now
         </div>
         {counts.community > 0 && (
           <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -1323,7 +1349,9 @@ export function ConnectorsBrowser() {
                   ? 'Looking in the MCP registry…'
                   : community.error
                     ? 'Could not load the registry list'
-                    : `${communityResults.length} from the MCP registry, unchecked`}
+                    : communityMatches.length > communityResults.length
+                      ? `${communityResults.length} of ${communityMatches.length} from the MCP registry, unchecked`
+                      : `${communityResults.length} from the MCP registry, unchecked`}
               </span>
               <div className="h-px flex-1 bg-border" />
             </div>

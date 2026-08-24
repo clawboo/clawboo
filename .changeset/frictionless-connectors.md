@@ -27,12 +27,16 @@ connector". There is a real `Turn off`. `Sign in` runs the sign-in instead of
 showing a toast about it, and `Configure` opens that connector's card rather than
 dropping you on a panel with no indication which row was yours.
 
-Agents know what they could have. A user-facing turn now carries the connectors
-that are live, a few that are one click away, and an instruction not to work
-around a missing one: no browsing to a vendor's site to read what a connector
-would return, and no asking you to sign in on its behalf.
+Agents know what they could have, and can hand you the button. A user-facing turn
+now carries the connectors that are live, a few that are one click away with what
+each costs, and an instruction not to work around a missing one: no browsing to a
+vendor's site to read what a connector would return, and no asking you to sign in
+on its behalf. When an agent does need one, it names it and stops, and the answer
+arrives in the conversation as a card whose buttons are priced the same way the
+shelf prices them. Pressing one opens that connector's own page. Nothing connects
+on an agent's say-so.
 
-And the directory got much longer without getting less honest. 229 servers from
+And the directory got much longer without getting less honest. 230 servers from
 the official MCP registry sit below their own divider, with their own count that
 never merges into the curated one, loaded only when you ask for them. clawboo has
 not read any of them and says so. Adding one shows you the exact command before
