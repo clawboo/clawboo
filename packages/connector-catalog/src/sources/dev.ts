@@ -30,13 +30,17 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       // clawboo cannot register itself and has no app to fall back on. The tile
       // says so instead of offering a sign-in that fails every time.
       needsPreregisteredApp: true,
+      // The steps describe what the OPERATOR must do in their own client, not a
+      // sign-in clawboo performs. Telling them to approve a request in "the tab
+      // that opens" contradicted the tile directly above, which says clawboo
+      // cannot open one here.
       setupGuide: {
         console: 'GitHub',
         url: 'https://github.com/settings/installations',
         steps: [
-          'Approve the authorization request in the browser tab that opens.',
-          'Choose which organizations and repositories to grant, not "all repositories".',
-          'Return to clawboo. The connector tile clears its amber key badge on success.',
+          'Copy the config block below into a runtime that can sign in to GitHub itself.',
+          'Approve the authorization there, choosing specific organizations and repositories rather than "all repositories".',
+          'Nothing to return to clawboo for: this connector runs in that runtime, not here.',
         ],
       },
     },
