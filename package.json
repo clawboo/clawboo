@@ -21,7 +21,8 @@
     "check:docs": "pnpm --filter @clawboo/docs check-frontmatter",
     "test:clean-install": "node scripts/test-clean-install.mjs",
     "test:bundle-externals": "node scripts/check-bundle-externals.mjs",
-    "prepublish:check": "pnpm verify:catalog && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install"
+    "prepublish:check": "pnpm verify:catalog && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install",
+    "ingest:connectors": "tsx scripts/ingest-connector-registry.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",

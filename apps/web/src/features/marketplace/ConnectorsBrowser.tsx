@@ -15,21 +15,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
+import { Check, Copy, Info, KeyRound, Plug, Plus, SearchX } from 'lucide-react'
 import {
-  Check,
-  Copy,
-  Globe,
-  Info,
-  KeyRound,
-  Plug,
-  Plus,
-  SearchX,
-  ShieldAlert,
-  Terminal,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import {
+  COST_COPY,
   CONNECT_REFUSAL_COPY,
+  connectorBySlug,
   connectorCounts,
   isReachable,
   needsArgumentOnly,
@@ -37,15 +27,18 @@ import {
   needsSignInOnly,
   connectorSnippet,
   connectRefusal,
-  isConnectable,
   searchConnectors,
   SNIPPET_DIALECTS,
+  type ConnectRefusal,
   type ConnectorCategory,
+  type ConnectorCost,
   type ConnectorDefinition,
   type SnippetDialect,
 } from '@clawboo/connector-catalog'
 import { Button } from '@/features/shared/Button'
 import { Chip } from '@/features/shared/Chip'
+import { useConnectorShelf } from './useConnectorShelf'
+import { searchCommunity, useCommunityConnectors } from './useCommunityConnectors'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
@@ -64,6 +57,7 @@ import {
   signOutConnector,
   type ConnectorConfigState,
   type CredentialStatus,
+  type LiveConnectorRow,
 } from './connectConnector'
 
 // ─── Category pills ─────────────────────────────────────────────────────────
@@ -79,105 +73,219 @@ const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   search: 'Search',
   productivity: 'Productivity',
   finance: 'Finance',
+  other: 'Uncategorised',
 }
 
 /**
- * The status word a user reads.
+ * A brand mark, or the next best thing.
  *
- * A CONNECTABLE entry now reports its connection STATE. It used to say "Active"
- * on the grounds that a no-auth server is ready the moment it is attached, and
- * that was true while this tab was a directory and nothing more. It is exactly
- * the set that now offers a Connect button, so leaving it would put "Active"
- * next to "Connect" on the same tile and claim a state the backend does not
- * have.
+ * A monogram in the category's own colour rather than a fetched favicon. The
+ * obvious cheap trick is `google.com/s2/favicons?domain=`, and it is wrong here
+ * for a reason that has nothing to do with looks: it sends a third-party request
+ * per card and leaks which connectors the operator is browsing. A local-first
+ * shelf renders with the network off.
  */
-function authLabel(
-  def: ConnectorDefinition,
-  connected: boolean,
-): { label: string; icon?: LucideIcon; active: boolean } {
-  // `connected` is the live truth from the server, so it is checked FIRST and
-  // for every entry. Gating it on `isConnectable(def)` meant a connector that
-  // needed a key, a path or a sign-in never showed "Connected" even while its
-  // process was running, which is 14 of the 19.
-  if (connected) return { label: 'Connected', icon: Plug, active: true }
-  if (isConnectable(def)) return { label: 'Not connected', active: false }
-  if (def.auth.kind === 'oauth') return { label: 'Sign in', icon: KeyRound, active: false }
-  // "Add …" rather than "Needs …": both are now something the user can do here,
-  // not a statement about why they cannot.
-  if (needsArgumentOnly(def)) return { label: 'Add a path', icon: KeyRound, active: false }
-  if (needsCredentialOnly(def)) return { label: 'Add a key', icon: KeyRound, active: false }
-  if (def.auth.kind === 'none') return { label: 'Copy config', active: false }
-  return { label: 'Needs a key', icon: KeyRound, active: false }
+function BrandMark({ def }: { def: ConnectorDefinition }) {
+  const initials = def.displayName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0] ?? '')
+    .join('')
+    .toUpperCase()
+  return (
+    <div
+      className="flex size-10 shrink-0 items-center justify-center rounded-xl text-[13px] font-semibold"
+      style={{
+        background: 'color-mix(in srgb, var(--category-other) 14%, transparent)',
+        color: 'var(--category-other)',
+      }}
+      aria-hidden
+    >
+      {initials || <Plug size={18} />}
+    </div>
+  )
 }
 
-/** How many trifecta legs this connector can arm, at its most permissive. */
-function legCount(def: ConnectorDefinition): number {
-  const t = def.trifecta
-  return (t.readsPrivateData ? 1 : 0) + (t.ingestsUntrustedContent ? 1 : 0) + (t.canEgress ? 1 : 0)
-}
+/**
+ * The heading above a refusal.
+ *
+ * `Not connectable yet` is a CATEGORY, and it made every refusal read the same
+ * whether the answer was one field away or impossible. `CONNECT_REFUSAL_COPY`
+ * already names the actual obstacle below it; the heading now does too, so the
+ * first three words tell the reader what is missing.
+ */
+const CONNECT_REFUSAL_HEADING: Readonly<Record<ConnectRefusal, string>> = Object.freeze({
+  'community-unsandboxed': 'Nobody has read this one',
+  'remote-needs-registered-app': 'clawboo cannot sign in here',
+  'remote-needs-oauth': 'Needs you to sign in',
+  'needs-credential': 'Needs a key',
+  'needs-user-supplied-argument': 'Needs a folder to work in',
+})
 
 // ─── Card ───────────────────────────────────────────────────────────────────
 
+/**
+ * One connector, priced.
+ *
+ * THE CARD DOES THE WORK NOW. Every state has its action here, so nothing needs
+ * the detail view to get started, and the pill names what the entry will COST
+ * rather than reporting a status the reader has to interpret. The `3/3 risk`
+ * chip is gone from this surface: it counted trifecta legs, which describe what
+ * a connector can reach rather than whether it is safe, and a bare fraction next
+ * to a name reads as a score. That belongs in the detail pane where there is
+ * room to name the three legs.
+ *
+ * A DIV, NOT A BUTTON. The whole card opens the detail view and it also carries
+ * its own action, and a button inside a button is invalid and unclickable. The
+ * open affordance is an absolutely-positioned button behind the content; the
+ * action sits above it.
+ */
 function ConnectorCard({
   def,
   index,
-  connected,
+  cost,
+  busy,
   onOpen,
+  onAct,
 }: {
   def: ConnectorDefinition
   index: number
-  connected: boolean
+  cost: ConnectorCost
+  busy: boolean
   onOpen: (def: ConnectorDefinition) => void
+  onAct: (def: ConnectorDefinition, cost: ConnectorCost) => void
 }) {
-  const auth = authLabel(def, connected)
-  const legs = legCount(def)
-  const remote = def.launch.transport === 'streamable-http'
+  const copy = COST_COPY[cost]
 
   return (
-    <motion.button
-      type="button"
-      onClick={() => onOpen(def)}
+    <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, delay: Math.min(index * 0.02, 0.4) }}
-      className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 text-left transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="group relative flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong focus-within:border-border-strong"
       style={{ boxShadow: 'var(--shadow-raised)' }}
-      aria-label={`${def.displayName} connector: ${auth.label}, ${legs} of 3 risk signals`}
     >
-      <div className="flex items-center gap-3">
-        <div
-          className="flex size-10 shrink-0 items-center justify-center rounded-xl"
-          style={{ background: 'color-mix(in srgb, var(--category-other) 14%, transparent)' }}
-        >
-          <Plug size={18} style={{ color: 'var(--category-other)' }} aria-hidden />
-        </div>
+      {/* Behind the content, so the whole card opens the detail view without
+          swallowing the action button in front of it. */}
+      <button
+        type="button"
+        onClick={() => onOpen(def)}
+        className="absolute inset-0 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        aria-label={`${def.displayName}: ${copy.label}. Open details`}
+      />
+
+      <div className="pointer-events-none flex items-center gap-3">
+        <BrandMark def={def} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-foreground">{def.displayName}</div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            {remote ? <Globe size={11} aria-hidden /> : <Terminal size={11} aria-hidden />}
-            <span>{remote ? 'Remote' : 'Local process'}</span>
-            <span aria-hidden>·</span>
-            <span>{CATEGORY_LABELS[def.category]}</span>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            {CATEGORY_LABELS[def.category]}
           </div>
         </div>
       </div>
 
-      <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+      <p className="pointer-events-none line-clamp-2 text-xs leading-relaxed text-muted-foreground">
         {def.description}
       </p>
 
-      <div className="mt-auto flex flex-wrap items-center gap-1.5">
-        <Chip size="sm" icon={auth.icon} active={auth.active}>
-          {auth.label}
+      {/* `pointer-events-none` on the row, `auto` on the action alone. The row is
+          positioned, so it stacks above the open button behind the card, and
+          without this the dead space between the pill and the button swallowed
+          the click instead of opening the detail view. */}
+      <div className="pointer-events-none relative mt-auto flex items-center justify-between gap-2">
+        <Chip size="sm" icon={cost === 'on' ? Plug : undefined} active={cost === 'on'}>
+          {copy.label}
         </Chip>
-        {legs >= 2 && (
-          <Chip size="sm" icon={ShieldAlert} accent="var(--amber)">
-            {legs}/3 risk
-          </Chip>
-        )}
-        {def.provenance === 'community' && <Chip size="sm">Community</Chip>}
+        <Button
+          size="sm"
+          className="pointer-events-auto"
+          variant={copy.primary ? 'primary' : 'secondary'}
+          disabled={busy}
+          // NAMED, because nineteen buttons reading "Turn on" are nineteen
+          // identical announcements to a screen reader.
+          aria-label={`${copy.action} ${def.displayName}`}
+          onClick={() => onAct(def, cost)}
+        >
+          {busy ? 'Working…' : copy.action}
+        </Button>
       </div>
-    </motion.button>
+    </motion.div>
+  )
+}
+
+/**
+ * Adding a server clawboo has not read.
+ *
+ * REPLACES A REFUSAL, and the refusal was the interesting failure. It read "add
+ * it as a custom connector if you trust it", which names the exact remedy and
+ * then makes the user retype the command by hand into a different form. Four
+ * hundred entries behaving like that is a bigger directory, not a better product.
+ *
+ * Three things stay true at once here, which is the whole trick: clawboo vouches
+ * for nothing, the user sees the exact argv before anything runs, and the gap
+ * between finding it and running it is two clicks rather than a retyped command
+ * line. On confirm it becomes the operator's OWN entry, so it lands on the
+ * ordinary key flow and `catalogId` records where it came from.
+ */
+function CommunityConsent({
+  def,
+  onCancel,
+  onAdded,
+}: {
+  def: ConnectorDefinition
+  onCancel: () => void
+  onAdded: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const argv =
+    def.launch.transport === 'stdio'
+      ? `${def.launch.command} ${def.launch.args.join(' ')}`
+      : def.launch.url
+
+  return (
+    <section className="rounded-xl border border-border bg-surface-subtle p-4">
+      <h3 className="text-sm font-semibold text-foreground">Add {def.displayName}?</h3>
+      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+        clawboo has not checked this one. It will run on your machine, as you, with the same access
+        to your files and network that you have.
+      </p>
+      <pre className="mt-2 overflow-x-auto rounded-lg border border-border bg-surface p-2.5 text-[11px]">
+        <code>{argv}</code>
+      </pre>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        From <code>{def.catalogId ?? def.slug}</code>, version{' '}
+        {def.launch.transport === 'stdio' ? def.launch.pinnedVersion : 'remote'}.
+        {def.auth.inputs.length > 0 && (
+          <> It will ask for {def.auth.inputs.map((i) => i.key).join(', ')}.</>
+        )}
+      </p>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <Button size="sm" variant="secondary" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              const ok = await createCustomConnector({
+                slug: def.slug,
+                displayName: def.displayName,
+                description: def.description,
+                command: def.launch.transport === 'stdio' ? def.launch.command : def.launch.url,
+                args: def.launch.transport === 'stdio' ? [...def.launch.args] : [],
+              })
+              if (ok) onAdded()
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? 'Adding…' : 'I trust it, add it'}
+        </Button>
+      </div>
+    </section>
   )
 }
 
@@ -525,6 +633,22 @@ function ConnectAction({
   const [busy, setBusy] = useState(false)
   const [config, setConfig] = useState<ConnectorConfigState | null>(null)
 
+  /**
+   * Record new configuration in BOTH places.
+   *
+   * The pane holds its own copy for the form, and the shelf holds a set of which
+   * connectors are satisfied. Updating only the pane left the card behind it
+   * reading "Needs a key" for a key that had just been entered, which is the
+   * stale half of the same lie the price tag exists to stop.
+   */
+  const saveConfig = useCallback(
+    (next: ConnectorConfigState) => {
+      setConfig(next)
+      onChanged()
+    },
+    [onChanged],
+  )
+
   // Fetched for ANY connector with something to configure, not only an
   // unsatisfied one. A credential or folder that can never be seen or changed
   // again is worse than one that was never asked for: checking which folder a
@@ -552,11 +676,15 @@ function ConnectAction({
       return (
         <SignInPanel
           def={def}
-          onChanged={() => void fetchConnectorConfig(def.slug).then(setConfig)}
+          onChanged={() =>
+            void fetchConnectorConfig(def.slug).then((next) => {
+              if (next) saveConfig(next)
+            })
+          }
         />
       )
     }
-    if (config) return <ConfigForm def={def} state={config} onSaved={setConfig} />
+    if (config) return <ConfigForm def={def} state={config} onSaved={saveConfig} />
     // A failed fetch must not leave the tile spinning forever with no way out.
     return (
       <section className="rounded-xl border border-border bg-surface-subtle p-4 text-xs text-muted-foreground">
@@ -572,7 +700,7 @@ function ConnectAction({
       <section className="rounded-xl border border-border bg-surface-subtle p-4">
         <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
           <Info size={13} aria-hidden />
-          Not connectable yet
+          {CONNECT_REFUSAL_HEADING[refusal]}
         </div>
         {/* Verbatim from the shared predicate: the actual obstacle, not a status. */}
         <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
@@ -613,7 +741,7 @@ function ConnectAction({
           folder can be the wrong one, and neither is fixable from a panel that
           disappeared the moment it was filled in. */}
       {config && hasConfig && (
-        <ConfigForm def={def} state={config} onSaved={setConfig} collapsedByDefault />
+        <ConfigForm def={def} state={config} onSaved={saveConfig} collapsedByDefault />
       )}
       <section className="rounded-xl border border-border bg-surface-subtle p-4">
         <div className="flex items-center justify-between gap-3">
@@ -660,8 +788,8 @@ function ConnectAction({
           onConfirm={async () => {
             if (await signOutConnector(def.slug, def.displayName)) {
               const next = await fetchConnectorConfig(def.slug)
-              if (next) setConfig(next)
-              onChanged()
+              if (next) saveConfig(next)
+              else onChanged()
             }
           }}
         />
@@ -746,6 +874,45 @@ function RevokeRow({
   )
 }
 
+/**
+ * What this connector actually gave the fleet.
+ *
+ * The strongest replacement for a config block, because it is PROOF rather than
+ * instructions: these are the exact names the model will see. It is also the
+ * only place a dropped tool is visible, and a tool dropped for a duplicate name
+ * is otherwise silent.
+ */
+function ConnectedTools({ def, connected }: { def: ConnectorDefinition; connected: boolean }) {
+  const [rows, setRows] = useState<LiveConnectorRow[]>([])
+  useEffect(() => {
+    if (!connected) {
+      setRows([])
+      return
+    }
+    void listLiveConnectors().then(setRows)
+  }, [connected, def.slug])
+
+  const row = rows.find((r) => r.slug === def.slug)
+  if (!connected || !row) return null
+
+  return (
+    <section className="rounded-xl border border-border bg-surface-subtle p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {row.toolCount} {row.toolCount === 1 ? 'tool' : 'tools'} your agents can call
+      </h3>
+      <p className="mt-2 break-words text-xs leading-relaxed text-foreground">
+        {row.tools.map((name) => name.replace(/^mcp__[^_]+__/, '')).join(', ')}
+      </p>
+      {row.skipped.length > 0 && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          {row.skipped.length} dropped:{' '}
+          {row.skipped.map((s) => `${s.name} (${s.reason})`).join(', ')}
+        </p>
+      )}
+    </section>
+  )
+}
+
 function ConnectorDetail({
   def,
   connected,
@@ -794,38 +961,40 @@ function ConnectorDetail({
           your own runtime is the fallback for everything clawboo cannot run. */}
       <ConnectAction def={def} connected={connected} onChanged={onConnected} />
 
-      {/* What it is allowed to reach. Shown before the snippet on purpose: the
-          decision a user is making is "should this run at all", not "where do I
-          paste it". */}
+      {/* WHAT IT CAN DO, in sentences. This replaces the `3/3 risk` chip, and
+          prose beats a chip here for one reason: the fact being communicated is
+          a CONSEQUENCE, and a fraction cannot carry a consequence. Same three
+          booleans, same data, still feeding `decideGrant`. Only the badge died. */}
       <section className="rounded-xl border border-border bg-surface-subtle p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          What it can reach
+          What it can do
         </h3>
         <ul className="mt-2 space-y-1 text-xs text-foreground">
           <li>
             {def.launch.transport === 'stdio'
-              ? `Runs locally: ${def.launch.command} ${def.launch.args.join(' ')}`
-              : `Talks to ${def.launch.url}`}
+              ? 'Runs on this machine, as you.'
+              : `Talks to ${def.launch.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}.`}
           </li>
-          <li>
-            Network:{' '}
-            {def.egressAllow.length === 0
-              ? 'none, local only'
-              : def.egressAllow.includes('*')
-                ? 'any host (a browser can go anywhere)'
-                : def.egressAllow.join(', ')}
-          </li>
-          {def.auth.inputs.length > 0 && (
+          {def.trifecta.readsPrivateData && (
+            <li>Reads private data from your {def.displayName}.</li>
+          )}
+          {def.trifecta.ingestsUntrustedContent && (
+            <li>Reads things other people wrote, so treat what it hands back as untrusted.</li>
+          )}
+          {def.trifecta.canEgress && (
             <li>
-              Needs: {def.auth.inputs.map((i) => i.key).join(', ')}{' '}
-              <span className="text-muted-foreground">
-                (stored in clawboo&rsquo;s vault, never in a config file)
-              </span>
+              Can send data out to{' '}
+              {def.egressAllow.includes('*') ? 'any host it likes' : def.egressAllow.join(', ')}.
             </li>
           )}
-          {def.auth.scopesRationale && <li>Scopes: {def.auth.scopesRationale}</li>}
+          {!def.trifecta.canEgress && <li>Cannot reach the network.</li>}
         </ul>
       </section>
+
+      {/* The tools themselves, once it is running. The strongest possible
+          replacement for a config block: proof the thing works, in the words the
+          agent will actually see. */}
+      <ConnectedTools def={def} connected={connected} />
 
       {def.auth.setupGuide && (
         <section className="rounded-xl border border-border p-4">
@@ -848,55 +1017,97 @@ function ConnectorDetail({
         </section>
       )}
 
-      {/* The snippet. Framed as "paste this into your own runtime" because that is
-          literally what it does: clawboo writes nothing. */}
-      <section className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Add it to your runtime
-          </h3>
-          {/* A pressed-state group, NOT role="tablist". The ARIA tab pattern
-              obliges arrow-key roving, a roving tabindex and an aria-controls
-              tabpanel; announcing a widget that does not behave the way it was
-              announced is worse for a screen reader than plain buttons. */}
-          <div className="flex gap-1" role="group" aria-label="Config dialect">
-            {SNIPPET_DIALECTS.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                aria-pressed={dialect === d.id}
-                onClick={() => setDialect(d.id)}
-                className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
-                  dialect === d.id
-                    ? 'bg-surface-strong text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {d.label}
-              </button>
-            ))}
+      {/* EVERYTHING BELOW IS FOR OPERATORS, and it is collapsed because it stopped
+          being the path. The exact argv, the pinned version and the paste-into-
+          another-runtime block were primary content when this tab was a directory
+          and clawboo could run nothing. For 18 of 19 entries they are now the
+          fallback, and leaving them on top is what made the pane read as
+          documentation rather than as a product. Nothing is hidden: one click
+          away is not the same as gone. */}
+      <details className="rounded-xl border border-border">
+        <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-muted-foreground hover:text-foreground">
+          Technical details
+        </summary>
+        <div className="flex flex-col gap-3 border-t border-border p-4">
+          <ul className="space-y-1 text-[11px] text-foreground">
+            <li>
+              <span className="text-muted-foreground">Runs: </span>
+              <code>
+                {def.launch.transport === 'stdio'
+                  ? `${def.launch.command} ${def.launch.args.join(' ')}`
+                  : def.launch.url}
+              </code>
+            </li>
+            <li>
+              <span className="text-muted-foreground">Network: </span>
+              {def.egressAllow.length === 0 ? 'none, local only' : def.egressAllow.join(', ')}
+            </li>
+            {def.auth.inputs.length > 0 && (
+              <li>
+                <span className="text-muted-foreground">Reads: </span>
+                {def.auth.inputs.map((i) => i.key).join(', ')}{' '}
+                <span className="text-muted-foreground">
+                  (from clawboo&rsquo;s vault, never from a config file)
+                </span>
+              </li>
+            )}
+            {def.auth.scopesRationale && (
+              <li>
+                <span className="text-muted-foreground">Scopes: </span>
+                {def.auth.scopesRationale}
+              </li>
+            )}
+          </ul>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Use it somewhere else
+              </h4>
+              {/* A pressed-state group, NOT role="tablist". The ARIA tab pattern
+                  obliges arrow-key roving, a roving tabindex and an aria-controls
+                  tabpanel; announcing a widget that does not behave the way it was
+                  announced is worse for a screen reader than plain buttons. */}
+              <div className="flex gap-1" role="group" aria-label="Config dialect">
+                {SNIPPET_DIALECTS.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    aria-pressed={dialect === d.id}
+                    onClick={() => setDialect(d.id)}
+                    className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
+                      dialect === d.id
+                        ? 'bg-surface-strong text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <code>{snippet.file}</code>
+              <Button size="sm" variant="secondary" onClick={copy}>
+                {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+
+            <pre className="max-h-72 overflow-auto rounded-xl border border-border bg-surface-subtle p-3 text-[11px] leading-relaxed">
+              <code>{snippet.body}</code>
+            </pre>
+
+            {snippet.requiredEnv.length > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                You will also need to set {snippet.requiredEnv.join(', ')} in your environment. The
+                block references them by name so it stays safe to commit.
+              </p>
+            )}
           </div>
         </div>
-
-        <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-          <code>{snippet.file}</code>
-          <Button size="sm" variant="secondary" onClick={copy}>
-            {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
-
-        <pre className="max-h-72 overflow-auto rounded-xl border border-border bg-surface-subtle p-3 text-[11px] leading-relaxed">
-          <code>{snippet.body}</code>
-        </pre>
-
-        {snippet.requiredEnv.length > 0 && (
-          <p className="text-[11px] text-muted-foreground">
-            You will also need to set {snippet.requiredEnv.join(', ')} in your environment. The
-            block references them by name so it stays safe to commit.
-          </p>
-        )}
-      </section>
+      </details>
 
       {def.homepage && (
         <a
@@ -939,7 +1150,19 @@ export function ConnectorsBrowser() {
   }, [])
   useEffect(refreshCustom, [refreshCustom])
 
-  const results = useMemo(() => {
+  // A deep link from anywhere else, by slug: the graph's Configure button, and
+  // the in-chat connect card. Consumed once and cleared, so returning to the tab
+  // later lands on the shelf rather than re-opening whatever was last linked.
+  const openSlug = useMarketplaceStore((s) => s.openConnectorSlug)
+  const setOpenSlug = useMarketplaceStore((s) => s.setOpenConnectorSlug)
+  useEffect(() => {
+    if (!openSlug) return
+    const def = connectorBySlug(openSlug) ?? custom.find((c) => c.slug === openSlug) ?? null
+    if (def) setSelected(def)
+    setOpenSlug(null)
+  }, [openSlug, custom, setOpenSlug])
+
+  const matched = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     const mine = q
       ? custom.filter(
@@ -949,33 +1172,79 @@ export function ConnectorsBrowser() {
             c.description.toLowerCase().includes(q),
         )
       : custom
-    const matched = [...mine, ...searchConnectors(searchQuery)]
-    return categoryFilter === 'all' ? matched : matched.filter((c) => c.category === categoryFilter)
+    const all = [...mine, ...searchConnectors(searchQuery)]
+    if (categoryFilter === 'all') return all
+    // `community` is a BAND, not a category: selecting it shows the long tail
+    // below the divider and hides the curated grid rather than filtering it to
+    // an empty state that reads as "there is nothing here".
+    if (categoryFilter === 'community') return []
+    return all.filter((c) => c.category === categoryFilter)
   }, [searchQuery, categoryFilter, custom])
+
+  // One owner for live state, stored configuration, per-card busy and the card
+  // actions. See useConnectorShelf: nineteen copies of that state drift.
+  const shelf = useConnectorShelf(matched, setSelected)
+  const results = shelf.ordered
+
+  // THE LONG TAIL, and it stays behind a divider with its own count forever.
+  // Pulled in when the operator asks for it by name (`Not reviewed` filter) or
+  // when a curated search misses, never on first paint: it is roughly 220 KB and
+  // worth nothing until one of those two things happens.
+  const wantsCommunity =
+    categoryFilter === 'community' || (searchQuery.trim() !== '' && results.length === 0)
+  const community = useCommunityConnectors(wantsCommunity)
+  const communityResults = useMemo(
+    () => (wantsCommunity ? searchCommunity(community.entries, searchQuery).slice(0, 60) : []),
+    [wantsCommunity, community.entries, searchQuery],
+  )
 
   const categoryOptions: PillOption[] = useMemo(() => {
     const present = new Set(searchConnectors('').map((c) => c.category))
     return [
       { key: 'all', label: 'All' },
+      // The deliberate route into breadth. Without it the long tail is reachable
+      // only by a search that misses, which makes the product look smaller than
+      // it is to anyone who never types a miss.
+      { key: 'community', label: 'Unchecked' },
       ...[...present].sort().map((c) => ({ key: c, label: CATEGORY_LABELS[c] })),
     ]
   }, [])
 
-  // Which connectors are live, by slug. Fetched rather than assumed: a connector
-  // survives a page reload because the PROCESS is owned by the server, so a
-  // client-side guess would be wrong on every refresh.
-  const [liveSlugs, setLiveSlugs] = useState<ReadonlySet<string>>(new Set())
-  const refreshLive = useCallback(() => {
-    void listLiveConnectors().then((rows) => setLiveSlugs(new Set(rows.map((r) => r.slug))))
-  }, [])
-  useEffect(refreshLive, [refreshLive])
+  if (selected && selected.provenance === 'community') {
+    return (
+      <div className="flex h-full flex-col gap-4 overflow-y-auto px-6 py-5">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold text-foreground">{selected.displayName}</h2>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {selected.description}
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => setSelected(null)}>
+            Back
+          </Button>
+        </div>
+        <CommunityConsent
+          def={selected}
+          onCancel={() => setSelected(null)}
+          onAdded={() => {
+            // It is the operator's own entry now, so it leaves the community band
+            // and lands on the ordinary key flow with its provenance recorded.
+            setSelected(null)
+            refreshCustom()
+            shelf.refresh()
+          }}
+        />
+      </div>
+    )
+  }
 
   if (selected) {
     return (
       <ConnectorDetail
         def={selected}
-        connected={liveSlugs.has(selected.slug)}
-        onConnected={refreshLive}
+        connected={shelf.costOf(selected) === 'on'}
+        onConnected={shelf.refresh}
         onClose={() => setSelected(null)}
       />
     )
@@ -986,7 +1255,7 @@ export function ConnectorsBrowser() {
       <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
         <SearchInput
           size="sm"
-          placeholder="Search connectors…"
+          placeholder={`Search ${counts.curated} connectors, or type what you want to do`}
           value={searchQuery}
           onChange={setSearchQuery}
         />
@@ -998,17 +1267,26 @@ export function ConnectorsBrowser() {
         />
       </div>
 
-      {/* The count is always a SPLIT, never one total. "1000+" is the claim the
+      {/* Leads with the shelf's SIZE, then with what is within reach. The line
+          this replaces spent both numbers apologising: "the rest are a directory,
+          so copy their config into a runtime you already use" told a reader who
+          had not asked that most of what they were looking at was not for them.
+
+          The count is always a SPLIT, never one total. "1000+" is the claim the
           reference implementations make and cannot support. */}
-      <div className="shrink-0 px-6 pt-3 text-[11px] text-muted-foreground">
-        {counts.curated} curated
-        {counts.community > 0 && <> · {counts.community} community</>} · {connectableCount}{' '}
-        {connectableCount === 1 ? 'runs' : 'run'} here; the rest are a directory, so copy their
-        config into a runtime you already use
+      <div className="shrink-0 px-6 pt-3">
+        <div className="text-sm font-semibold text-foreground">
+          {counts.curated} connectors, {connectableCount} you can turn on here
+        </div>
+        {counts.community > 0 && (
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            plus {counts.community} clawboo has not checked
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        {results.length === 0 ? (
+        {results.length === 0 && !wantsCommunity ? (
           <EmptyState
             icon={SearchX}
             title="No connectors match"
@@ -1021,11 +1299,48 @@ export function ConnectorsBrowser() {
                 key={def.slug}
                 def={def}
                 index={i}
-                connected={liveSlugs.has(def.slug)}
+                cost={shelf.costOf(def)}
+                busy={shelf.busy(def.slug)}
                 onOpen={setSelected}
+                onAct={(d, c) => void shelf.act(d, c)}
               />
             ))}
           </div>
+        )}
+        {wantsCommunity && (
+          <section className="mt-6">
+            {/* A HARD VISUAL SPLIT, and the counts never merge into one total.
+                "419 connectors" is the claim every reference implementation makes
+                and none can support: clawboo has read 19 of these and none of the
+                rest, and the divider is where it says so. */}
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-[11px] font-medium text-muted-foreground">
+                {community.loading
+                  ? 'Looking in the MCP registry…'
+                  : `${communityResults.length} from the MCP registry, unchecked`}
+              </span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+              clawboo has not read these. You decide.
+            </p>
+            {communityResults.length > 0 && (
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {communityResults.map((def, i) => (
+                  <ConnectorCard
+                    key={def.slug}
+                    def={def}
+                    index={i}
+                    cost="not-reviewed"
+                    busy={false}
+                    onOpen={setSelected}
+                    onAct={setSelected}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         )}
         <AddCustomConnector onAdded={refreshCustom} />
       </div>

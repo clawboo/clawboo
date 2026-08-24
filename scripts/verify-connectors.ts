@@ -26,7 +26,7 @@
 import {
   CONNECTOR_DEFINITIONS,
   CURATED_CONNECTORS,
-  COMMUNITY_CONNECTORS,
+  connectRefusal,
   connectorSnippet,
   SECRET_LOOKING_VALUE,
   SNIPPET_DIALECTS,
@@ -75,18 +75,26 @@ function checkOffline(): void {
       fail(def.slug, 'api-key auth declares no inputs')
     if (def.auth.kind === 'none' && def.auth.inputs.length > 0)
       fail(def.slug, 'auth kind "none" but inputs are declared')
-    // A remote entry cannot carry env inputs: `connectorSnippet` emits
-    // `{ type, url }` for JSON and a bare `url = …` for Codex, with no place to
-    // reference a variable. Declaring one anyway would make `requiredEnv` tell
-    // the user to set something the pasted block never reads. Every remote entry
-    // is OAuth today; this is what keeps the next one from quietly shipping an
-    // unauthenticatable snippet.
-    if (def.launch.transport === 'streamable-http' && def.auth.inputs.length > 0)
+    // A remote entry may carry inputs ONLY as a bearer, because that is the one
+    // kind whose snippet has somewhere to put them. `connectorSnippet` emits an
+    // Authorization header referencing the variable for `bearer`, and nothing
+    // but `{ type, url }` for the rest, so declaring inputs on an OAuth remote
+    // would make `requiredEnv` tell the user to set something the pasted block
+    // never reads.
+    if (
+      def.launch.transport === 'streamable-http' &&
+      def.auth.inputs.length > 0 &&
+      def.auth.kind !== 'bearer'
+    )
       fail(
         def.slug,
-        'remote (streamable-http) entries cannot declare auth inputs: the snippet has no header ' +
-          'or env block to reference them. Teach connectorSnippet to emit headers first.',
+        'remote (streamable-http) entries may declare auth inputs only with auth.kind "bearer": ' +
+          'no other kind emits a header to reference them.',
       )
+    // ...and the converse, which is what makes the tile's price honest: a bearer
+    // remote with no input is a connector nothing can ever authenticate.
+    if (def.auth.kind === 'bearer' && def.auth.inputs.length === 0)
+      fail(def.slug, 'bearer auth declares no inputs, so nothing can supply the token')
 
     if (def.trifecta.canEgress && def.egressAllow.length === 0)
       fail(def.slug, 'can egress but declares no allowed hosts')
@@ -139,6 +147,58 @@ async function checkNpm(def: ConnectorDefinition & { launch: { transport: 'stdio
   }
 }
 
+/**
+ * The community band, checked as data rather than as a promise.
+ *
+ * These entries are NOT vouched for, which is the whole point of the band, so the
+ * gate does not assert anything about the servers themselves. What it does assert
+ * is that clawboo cannot accidentally start treating them as curated: the counts
+ * must stay separable, nothing may claim curated provenance, every entry must be
+ * pinned so a consent step can show real argv, and none may be connectable
+ * directly.
+ */
+function checkCommunity(entries: readonly ConnectorDefinition[]): void {
+  const CAP = 400
+  if (entries.length > CAP) fail('community', `${entries.length} entries exceeds the ${CAP} cap`)
+  const slugs = new Set<string>()
+  const curated = new Set(CURATED_CONNECTORS.map((c) => c.slug))
+  for (const def of entries) {
+    if (def.provenance !== 'community')
+      fail(def.slug, 'in the community snapshot but not marked community')
+    if (curated.has(def.slug))
+      fail(def.slug, 'shadows a curated slug, which would silently replace a vouched entry')
+    if (slugs.has(def.slug)) fail(def.slug, 'duplicate slug in the community snapshot')
+    slugs.add(def.slug)
+    if (def.launch.transport !== 'stdio') {
+      fail(
+        def.slug,
+        'remote community entries are not supported: no OAuth discovery has been run for them',
+      )
+      continue
+    }
+    // The consent step shows exact argv before anything runs, so an unpinned
+    // entry would show the user one command and execute whatever @latest resolves
+    // to on the day.
+    if (!def.launch.pinnedVersion)
+      fail(def.slug, 'no pinned version, so the consent step cannot show what will run')
+    if (!def.launch.args.some((a) => a.includes(def.launch.pinnedVersion)))
+      fail(def.slug, `argv does not carry the pinned version ${def.launch.pinnedVersion}`)
+    // Unread means unknown, and unknown has to be declared as the worst case
+    // rather than as a narrow claim nobody checked.
+    if (
+      !def.trifecta.readsPrivateData ||
+      !def.trifecta.ingestsUntrustedContent ||
+      !def.trifecta.canEgress
+    )
+      fail(
+        def.slug,
+        'community entry declares a narrowed trifecta, which is a claim clawboo has not verified',
+      )
+    if (connectRefusal(def, true, true, true) !== 'community-unsandboxed')
+      fail(def.slug, 'is directly connectable, bypassing the consent step')
+  }
+}
+
 async function checkEndpoint(
   def: ConnectorDefinition & { launch: { transport: 'streamable-http' } },
 ) {
@@ -176,11 +236,16 @@ async function main(): Promise<void> {
   console.log(
     `\n🔌 Clawboo connector catalog verify (${LIVE ? 'LIVE, network' : 'offline, no network'})`,
   )
+  // The snapshot is loaded HERE rather than imported at the top, mirroring the
+  // SPA: the curated directory must verify with no community bundle present, or
+  // the gate would stop proving that the offline promise holds on its own.
+  const { COMMUNITY_SNAPSHOT } = await import('../packages/connector-catalog/src/community.js')
   console.log(
-    `   ${CURATED_CONNECTORS.length} curated · ${COMMUNITY_CONNECTORS.length} community\n`,
+    `   ${CURATED_CONNECTORS.length} curated · ${COMMUNITY_SNAPSHOT.length} community (unchecked)\n`,
   )
 
   checkOffline()
+  checkCommunity(COMMUNITY_SNAPSHOT)
   if (LIVE) await checkLive()
 
   if (failures.length > 0) {
@@ -196,7 +261,9 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  console.log(`\n✅ All ${CONNECTOR_DEFINITIONS.length} connector entries pass\n`)
+  console.log(
+    `\n✅ ${CURATED_CONNECTORS.length} curated entries pass, ${COMMUNITY_SNAPSHOT.length} community entries are well-formed\n`,
+  )
 }
 
 main().catch((err) => {

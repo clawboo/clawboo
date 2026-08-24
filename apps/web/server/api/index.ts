@@ -91,6 +91,7 @@ import {
   connectorsCustomDELETE,
   connectorsCustomGET,
   connectorsCustomPOST,
+  connectorsConfiguredGET,
   connectorsConnectPOST,
   connectorsDisconnectPOST,
   connectorsListGET,
@@ -337,6 +338,9 @@ router.get('/api/connectors', connectorsListGET)
 router.post('/api/connectors/connect', sensitiveLimiter, connectorsConnectPOST)
 // Custom connectors: the operator points clawboo at a server of their own.
 // Registered BEFORE the :slug routes so `custom` is never read as a slug.
+// Which connectors already have what they asked for. ONE request for the whole
+// shelf, so a card's price tag is true rather than typical.
+router.get('/api/connectors/configured', connectorsConfiguredGET)
 router.get('/api/connectors/custom', connectorsCustomGET)
 router.post('/api/connectors/custom', sensitiveLimiter, connectorsCustomPOST)
 router.delete('/api/connectors/custom/:slug', sensitiveLimiter, connectorsCustomDELETE)

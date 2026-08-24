@@ -12,6 +12,8 @@ import { Handle, NodeToolbar, Position, useStore } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { useGraphStore } from '../store'
 import { useViewStore } from '@/stores/view'
+import { useMarketplaceStore } from '@/stores/marketplace'
+import { disconnectConnector, signInConnector } from '@/features/marketplace/connectConnector'
 import { useToastStore } from '@/stores/toast'
 import { disableCapability, enableCapability } from '@/lib/capabilitiesClient'
 import { detachGrant } from '../operations/revokeGrant'
@@ -19,6 +21,7 @@ import { useFloatingMotion } from '../useFloatingMotion'
 import { usePeacockTransition } from '../usePeacockTransition'
 import type { ResourceNodeData, ConnectorServiceKind } from '../types'
 import { capabilityBadge, capabilityReason } from './capabilityBadge'
+import { connectorSlugFromId, isRemoteConnector } from './connectorTile'
 
 // ─── ResourceNode — the MCP-connector tile ────────────────────────────────────
 //
@@ -361,18 +364,31 @@ export const ResourceNode = memo(function ResourceNode({
 // ─── ResourceToolbar ─────────────────────────────────────────────────────────
 //
 // Pure function of the record. Buttons render only when their action is real:
-//   Configure       always (opens the Capabilities panel, the detail surface)
+//   Configure       always. For a connector clawboo owns it deep-links to that
+//                   connector's card; otherwise the Capabilities panel.
 //   Disable/Enable  writable rows only (the existing REST write)
-//   Sign in         health 'needs-auth' only: the hint IS the action today
+//   Sign in         health 'needs-auth' only. Runs the real sign-in for a
+//                   clawboo connector; for another runtime's capability the
+//                   source-supplied hint is still all there is to offer.
+//   Turn off        a clawboo-owned connector only: stops the connection.
+//                   Deliberately distinct in label AND position from Stop
+//                   sharing, which revokes somebody else's access instead.
 //   Retry           health 'error' | 'degraded' only (re-reads the inventory)
-//   Detach          grant-backed rows only (revoke + the undo toast)
+//   Stop sharing    grant-backed rows only (revoke + the undo toast). Named for
+//                   what it does: it was `Detach`, which reads as "remove this
+//                   connector" and actually revokes another agent's share.
 
 const TOOLBAR_BTN =
   'rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-medium ' +
   'text-foreground transition-colors hover:border-border-strong hover:bg-surface-raised'
 
 function ResourceToolbar({ data }: { data: ResourceNodeData }) {
-  const { capabilityId, writable, enabled, health, hint, grantIds, name } = data
+  const { capabilityId, writable, enabled, health, hint, grantIds, name, connectorId } = data
+
+  // Only a connection clawboo itself owns, never another runtime's attached
+  // server. See ./connectorTile, where the gating is tested.
+  const connectorSlug = connectorSlugFromId(connectorId)
+  const remote = isRemoteConnector(connectorSlug)
   // A real ref, not a per-render object: the guard must survive re-renders or a
   // double-click races two toggle writes.
   const busyRef = useRef(false)
@@ -405,7 +421,18 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
       <button
         type="button"
         className={TOOLBAR_BTN}
-        onClick={() => useViewStore.getState().navigateTo('capabilities')}
+        onClick={() => {
+          // LANDS ON THE THING IT NAMES. It used to drop the reader on the
+          // Capabilities panel with no indication which row was theirs, which is
+          // a button that navigates rather than one that configures.
+          if (connectorSlug) {
+            useMarketplaceStore.getState().setMarketplaceTab('connectors')
+            useMarketplaceStore.getState().setOpenConnectorSlug(connectorSlug)
+            useViewStore.getState().navigateTo('marketplace')
+            return
+          }
+          useViewStore.getState().navigateTo('capabilities')
+        }}
       >
         Configure
       </button>
@@ -419,17 +446,43 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
           type="button"
           className={TOOLBAR_BTN}
           title={hint}
-          onClick={() =>
+          onClick={() => {
+            // A BUTTON THAT DOES THE THING. It used to render the hint as a toast
+            // and stop, which is a control that reports rather than acts. For a
+            // connector clawboo owns, the sign-in flow already exists.
+            if (connectorSlug) {
+              void signInConnector(connectorSlug, name).then((ok) => {
+                if (ok) useGraphStore.getState().triggerRefresh()
+              })
+              return
+            }
             useToastStore.getState().addToast({
-              // The source-supplied hint verbatim: the graph never paraphrases
-              // a per-runtime remedy into a string of its own.
+              // For a capability another RUNTIME owns, the source-supplied hint
+              // verbatim: the graph never paraphrases a per-runtime remedy.
               message: hint ?? `${name} needs sign-in.`,
               type: 'info',
               ttlMs: 8000,
             })
-          }
+          }}
         >
           Sign in
+        </button>
+      )}
+      {/* A REAL OFF SWITCH, distinct from Stop sharing below. Until now the only
+          way to stop a connector was to find it again in the marketplace panel,
+          and the one destructive-looking button on this toolbar revoked somebody
+          else's share instead. They must never share a label or a position. */}
+      {connectorSlug && (
+        <button
+          type="button"
+          className={TOOLBAR_BTN}
+          onClick={() => {
+            void disconnectConnector(connectorSlug, name, remote).then(() =>
+              useGraphStore.getState().triggerRefresh(),
+            )
+          }}
+        >
+          Turn off
         </button>
       )}
       {(health === 'error' || health === 'degraded') && (
@@ -451,7 +504,7 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
             void detachGrant({ grantId: grantIds![0]!, connectorName: name })
           }
         >
-          Detach
+          Stop sharing
         </button>
       )}
     </div>

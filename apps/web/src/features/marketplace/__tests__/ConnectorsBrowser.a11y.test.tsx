@@ -3,7 +3,7 @@
 // user deciding whether to start a local server needs the same information a
 // sighted one gets.
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
@@ -52,22 +52,44 @@ afterEach(() => {
 describe('ConnectorsBrowser accessibility', () => {
   it('the directory grid has no axe violations', async () => {
     const { container } = render(<ConnectorsBrowser />)
-    await screen.findByRole('button', { name: /Knowledge Graph Memory/i })
+    await screen.findByRole('button', { name: /Knowledge Graph Memory.*Open details/i })
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('a connector card names its state in its accessible name', async () => {
-    // The chips are decoration to a screen reader; the card's own label is what
-    // actually gets announced, so the risk count has to live there.
+  it('a connector card names its PRICE in its accessible name', async () => {
+    // The pill is decoration to a screen reader; the card's own label is what
+    // gets announced, so the cost has to live there. It used to announce a risk
+    // fraction, which told a screen-reader user a number with no unit and never
+    // told them what the entry would cost them.
     render(<ConnectorsBrowser />)
-    const card = await screen.findByRole('button', { name: /Knowledge Graph Memory/i })
-    expect(card.getAttribute('aria-label')).toMatch(/risk signals/i)
+    const card = await screen.findByRole('button', {
+      name: /Knowledge Graph Memory.*Open details/i,
+    })
+    const label = card.getAttribute('aria-label') ?? ''
+    expect(label).toMatch(/Ready/)
+    expect(label).toMatch(/open details/i)
+    expect(label).not.toMatch(/risk signals/i)
+  })
+
+  it('the card action is its own control, not nested inside the open button', async () => {
+    // A button inside a button is invalid and the inner one never fires, which
+    // is exactly how the Chip regression happened earlier in this feature.
+    render(<ConnectorsBrowser />)
+    const open = await screen.findByRole('button', {
+      name: /Knowledge Graph Memory.*Open details/i,
+    })
+    const action = within(open.parentElement!).getByRole('button', {
+      name: /^turn on knowledge graph memory$/i,
+    })
+    expect(open.contains(action)).toBe(false)
   })
 
   it('the detail pane has no axe violations', async () => {
     useMarketplaceStore.setState({ connectorSearchQuery: 'Knowledge Graph Memory' })
     const { container } = render(<ConnectorsBrowser />)
-    fireEvent.click(await screen.findByRole('button', { name: /Knowledge Graph Memory/i }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Knowledge Graph Memory.*Open details/i }),
+    )
     await waitFor(() => expect(screen.getByRole('button', { name: /^connect$/i })).toBeTruthy())
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -77,7 +99,7 @@ describe('ConnectorsBrowser accessibility', () => {
     // anyone can answer, least of all one about a secret.
     useMarketplaceStore.setState({ connectorSearchQuery: 'Notion' })
     const { container } = render(<ConnectorsBrowser />)
-    fireEvent.click(await screen.findByRole('button', { name: /Notion/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Notion.*Open details/i }))
     await waitFor(() => expect(screen.getByText(/Before it can run/i)).toBeTruthy())
 
     const field = container.querySelector('input[type="password"]')

@@ -20,27 +20,37 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
     category: 'dev',
     provenance: 'curated',
     launch: { transport: 'streamable-http', url: 'https://api.githubcopilot.com/mcp/' },
+    // BEARER, NOT OAUTH, and that single word is what turns this entry from a
+    // dead end into a one-field connect. GitHub's authorization server publishes
+    // no dynamic registration endpoint and clawboo ships no client secret, so
+    // the sign-in path could only ever fail three requests in. Its remote MCP
+    // server does accept a personal access token as `Authorization: Bearer`, and
+    // clawboo already carries a static bearer end to end.
+    //
+    // The OAuth door is deliberately left open rather than deleted: if GitHub
+    // ever publishes a registration endpoint, the discovery path already handles
+    // it and this becomes a one-line change back.
     auth: {
-      kind: 'oauth',
-      inputs: [],
+      kind: 'bearer',
+      inputs: [
+        {
+          key: 'GITHUB_TOKEN',
+          description: 'A fine-grained token, scoped to the repos you want your agents to see.',
+          docsUrl: 'https://github.com/settings/personal-access-tokens/new',
+          required: true,
+          secret: true,
+        },
+      ],
       scopes: ['repo', 'read:org'],
       scopesRationale:
         'Repository access to read and file issues and pull requests; org read to resolve team mentions.',
-      // GitHub's authorization server publishes no registration endpoint, so
-      // clawboo cannot register itself and has no app to fall back on. The tile
-      // says so instead of offering a sign-in that fails every time.
-      needsPreregisteredApp: true,
-      // The steps describe what the OPERATOR must do in their own client, not a
-      // sign-in clawboo performs. Telling them to approve a request in "the tab
-      // that opens" contradicted the tile directly above, which says clawboo
-      // cannot open one here.
       setupGuide: {
         console: 'GitHub',
-        url: 'https://github.com/settings/installations',
+        url: 'https://github.com/settings/personal-access-tokens/new',
         steps: [
-          'Copy the config block below into a runtime that can sign in to GitHub itself.',
-          'Approve the authorization there, choosing specific organizations and repositories rather than "all repositories".',
-          'Nothing to return to clawboo for: this connector runs in that runtime, not here.',
+          'Create a fine-grained personal access token.',
+          'Pick the specific repositories your agents should see, not "all repositories".',
+          'Give it at least Contents: read and Issues: read, then copy it back here.',
         ],
       },
     },

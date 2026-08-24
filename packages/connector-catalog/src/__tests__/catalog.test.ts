@@ -7,7 +7,9 @@ import {
   connectorBySlug,
   connectorCounts,
   connectorsByCategory,
+  connectorSnippet,
   searchConnectors,
+  SNIPPET_DIALECTS,
 } from '../index'
 
 // zod is a devDependency ONLY. The catalog ships as plain data, so the shape
@@ -152,15 +154,37 @@ describe('the honesty invariants', () => {
     }
   })
 
-  it('never declares auth inputs on a REMOTE entry', () => {
-    // `connectorSnippet` emits `{ type, url }` for JSON and a bare `url = …` for
-    // Codex. Neither has anywhere to reference a variable, so a remote entry that
-    // declared inputs would print "you will also need X" beside a block that
-    // reads nothing. Mirrored in scripts/verify-connectors.ts, which is the
-    // release gate; this is the one that fails in the dev loop.
+  it('declares inputs on a REMOTE entry only when the snippet can carry them', () => {
+    // The original invariant was "a remote entry never declares inputs", and its
+    // reason was that `connectorSnippet` emitted `{ type, url }` for JSON and a
+    // bare `url = …` for Codex, neither of which could reference a variable. A
+    // remote entry with inputs would then print "you will also need X" beside a
+    // block that reads nothing.
+    //
+    // A bearer entry now emits an Authorization header referencing the variable,
+    // so the reason no longer holds for that one kind. It still holds for every
+    // other kind, and that is what this asserts. Mirrored in
+    // scripts/verify-connectors.ts, which is the release gate.
     for (const c of CONNECTOR_DEFINITIONS) {
       if (c.launch.transport !== 'streamable-http') continue
+      if (c.auth.kind === 'bearer') {
+        expect(c.auth.inputs.length, c.slug).toBeGreaterThan(0)
+        continue
+      }
       expect(c.auth.inputs, c.slug).toHaveLength(0)
+    }
+  })
+
+  it('a remote bearer entry emits a header that REFERENCES its token, never contains one', () => {
+    // The block is copied into a file on the operator's disk. Rendering the
+    // token itself would be writing their credential to plaintext on their
+    // behalf, from a package whose whole posture is that values never leave the
+    // vault.
+    const github = connectorBySlug('github')!
+    for (const dialect of SNIPPET_DIALECTS) {
+      const body = connectorSnippet(github, dialect.id).body
+      expect(body, dialect.id).toContain('GITHUB_TOKEN')
+      expect(body, dialect.id).toMatch(/Authorization/i)
     }
   })
 

@@ -60,7 +60,13 @@ function requiredEnv(def: ConnectorDefinition): string[] {
 function jsonEntry(def: ConnectorDefinition): Record<string, unknown> {
   if (def.launch.transport === 'streamable-http') {
     // Claude Code aliases `streamable-http` to `http`; `http` is the portable spelling.
-    return { type: 'http', url: def.launch.url }
+    //
+    // A REMOTE ENTRY MAY CARRY A HEADER. Most remote connectors sign in with
+    // OAuth and reference nothing, but one that takes a token needs somewhere to
+    // put it, and without this the panel would say "you will also need
+    // GITHUB_TOKEN" beside a block that reads nothing.
+    const headers = bearerHeader(def)
+    return { type: 'http', url: def.launch.url, ...(headers ? { headers } : {}) }
   }
   const env = envBlock(def)
   return {
@@ -69,6 +75,20 @@ function jsonEntry(def: ConnectorDefinition): Record<string, unknown> {
     args: def.launch.args,
     ...(env ? { env } : {}),
   }
+}
+
+/**
+ * The Authorization header a bearer-auth remote connector needs, or null.
+ *
+ * The VALUE IS A REFERENCE, never a secret: this string is rendered into a block
+ * the operator copies into a file, and putting a token in it would be writing a
+ * credential to disk in plaintext on their behalf. `${VAR}` is the substitution
+ * every dialect here already uses for stdio env vars.
+ */
+function bearerHeader(def: ConnectorDefinition): Record<string, string> | null {
+  if (def.auth.kind !== 'bearer') return null
+  const key = def.auth.inputs.find((i) => i.required)?.key ?? def.auth.inputs[0]?.key
+  return key ? { Authorization: `Bearer \${${key}}` } : null
 }
 
 /**
@@ -87,6 +107,14 @@ export function connectorSnippet(def: ConnectorDefinition, dialect: SnippetDiale
     const lines = [`[mcp_servers.${key}]`]
     if (def.launch.transport === 'streamable-http') {
       lines.push(`url = ${tomlString(def.launch.url)}`)
+      const headers = bearerHeader(def)
+      if (headers) {
+        // Codex reads a header value from the environment through the same
+        // `${...}` substitution the stdio path uses for env vars.
+        for (const [name, value] of Object.entries(headers)) {
+          lines.push(`http_headers = { ${tomlString(name)} = ${tomlString(value)} }`)
+        }
+      }
     } else {
       lines.push(`command = ${tomlString(def.launch.command)}`)
       lines.push(`args = [${def.launch.args.map(tomlString).join(', ')}]`)

@@ -21,6 +21,7 @@ import {
 } from '@clawboo/db'
 import {
   CONNECT_REFUSAL_COPY,
+  CONNECTOR_DEFINITIONS,
   connectRefusal,
   connectorBySlug,
   launchArgsSatisfied,
@@ -40,6 +41,7 @@ import {
   clearConnectorCredential,
   credentialsSatisfied,
   credentialStatus,
+  resolveConnectorCredentials,
   getConnectorArgument,
   setConnectorArgument,
   setConnectorCredential,
@@ -64,6 +66,11 @@ import { redactValue } from '../lib/redact'
  */
 function findDefinition(slug: string): ConnectorDefinition | null {
   return connectorBySlug(slug) ?? customConnectorBySlug(getDb(), slug)
+}
+
+/** Everything browsable: the committed catalog plus the operator's own entries. */
+function allDefinitions(): ConnectorDefinition[] {
+  return [...CONNECTOR_DEFINITIONS, ...listCustomConnectors(getDb()).map(toDefinition)]
 }
 
 // POST /api/connectors/custom: point clawboo at a server of your own.
@@ -183,6 +190,30 @@ export function connectorConfigGET(req: Request, res: Response): void {
   }
 }
 
+/**
+ * Which connectors already have everything they asked for.
+ *
+ * ONE request for the whole shelf, because the alternative is one per card and
+ * the card is the surface that must not stall. It exists so the price on a tile
+ * is TRUE rather than merely typical: without it a connector whose key the
+ * operator entered last week still reads "Needs a key", which is the same class
+ * of lie as offering a Connect the server would refuse.
+ *
+ * Presence only. No value, no token, and no per-connector detail: that is what
+ * the per-slug route is for, and widening this one would turn a list the panel
+ * polls into a credential surface.
+ */
+export function connectorsConfiguredGET(_req: Request, res: Response): void {
+  try {
+    const slugs = allDefinitions()
+      .filter((def) => configState(def).satisfied)
+      .map((def) => def.slug)
+    res.json({ ok: true, slugs })
+  } catch (err) {
+    res.status(500).json({ error: redactValue(String(err)) })
+  }
+}
+
 /** The shape both config routes return. */
 function configState(def: ConnectorDefinition): {
   credentials: ReturnType<typeof credentialStatus>
@@ -193,7 +224,14 @@ function configState(def: ConnectorDefinition): {
 } {
   const argument = getConnectorArgument(getDb(), def.slug)
   const remote = def.launch.transport === 'streamable-http'
-  const authorized = remote ? isAuthorized(def.slug) : true
+  // A BEARER remote is answered by its credential, not by the OAuth store. The
+  // two slots are disjoint (`connector:<slug>:<KEY>` versus
+  // `connector-oauth-tokens:<slug>`), so asking `isAuthorized` about an entry
+  // that never runs the sign-in flow returns false forever. That made GitHub
+  // permanently unsatisfied here while `connectorsConnectPOST` would have
+  // accepted it: the card withheld an action the server allows, which is the
+  // forbidden half of this feature's one invariant.
+  const authorized = remote && def.auth.kind !== 'bearer' ? isAuthorized(def.slug) : true
   return {
     credentials: credentialStatus(def.slug, def.auth.inputs),
     argument,
@@ -326,15 +364,22 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     const argument = getConnectorArgument(getDb(), def.slug)
     const launch = def.launch
     const remote = launch.transport === 'streamable-http'
+    // A remote connector authenticates one of two ways, and only one of them is
+    // OAuth. A BEARER entry takes a token the operator pasted, so the sign-in
+    // machinery is skipped entirely: discovery would fail against a provider
+    // that publishes no registration endpoint, which is the exact reason the
+    // entry is a bearer one.
+    const bearer = remote && def.auth.kind === 'bearer'
     // Resolved BEFORE the refusal check, because a refreshable-but-expired token
     // still counts as authorized and this is what refreshes it.
-    const accessToken =
-      launch.transport === 'streamable-http' ? await getAccessToken(def.slug, launch.url) : null
+    const accessToken = remote && !bearer ? await getAccessToken(def.slug, launch.url) : null
     const refusal = connectRefusal(
       def,
       credentialsSatisfied(def.slug, def.auth.inputs),
       launchArgsSatisfied(def, argument ?? undefined),
-      !remote || accessToken !== null,
+      // A bearer entry's readiness is a credential question, which the first
+      // argument already answered. Only an OAuth remote needs a token here.
+      !remote || bearer || accessToken !== null,
     )
     if (refusal) {
       res.status(422).json({ error: CONNECT_REFUSAL_COPY[refusal], reason: refusal })
@@ -348,9 +393,19 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
       // an expired token, so consulting it per request is what keeps a
       // long-lived connection working instead of turning every call into an
       // opaque 401 once the first token expires.
-      ...(remote && accessToken
-        ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
-        : {}),
+      // A CALLBACK in both cases, never a resolved string. For OAuth that is what
+      // makes a refresh reach the next call; for a bearer it is what makes a
+      // rotated token take effect without a reconnect.
+      ...(bearer
+        ? {
+            accessToken: (): string | null =>
+              resolveConnectorCredentials(def.slug, def.auth.inputs)[
+                def.auth.inputs.find((i) => i.required)?.key ?? def.auth.inputs[0]?.key ?? ''
+              ] ?? null,
+          }
+        : remote && accessToken
+          ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
+          : {}),
     })
     res.json({
       ok: true,

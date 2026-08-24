@@ -23,6 +23,10 @@ export type ConnectorCategory =
   | 'search'
   | 'productivity'
   | 'finance'
+  // Uncategorised, and honestly so. The registry publishes no category, and
+  // guessing one from a description would be clawboo asserting something about a
+  // server it has not read. Only community entries carry this.
+  | 'other'
 
 /**
  * Where the entry came from, and therefore how much we are willing to claim.

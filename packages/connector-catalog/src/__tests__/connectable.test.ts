@@ -5,7 +5,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { CONNECTOR_DEFINITIONS, connectorBySlug } from '../index'
-import { connectRefusal, isConnectable, isReachable, needsSignInOnly } from '../connectable'
+import {
+  connectRefusal,
+  isConnectable,
+  isReachable,
+  needsCredentialOnly,
+  needsSignInOnly,
+} from '../connectable'
 
 describe('connectRefusal', () => {
   it('allows exactly the entries this release can actually run', () => {
@@ -26,17 +32,19 @@ describe('connectRefusal', () => {
     expect(connectRefusal(linear!)).toBe('remote-needs-oauth')
   })
 
-  it('refuses GITHUB permanently, because clawboo cannot register itself there', () => {
-    // Verified against the live provider: its authorization server publishes no
-    // registration endpoint. clawboo ships no OAuth app and no client secret, so
-    // a Sign in button for it would fail three requests into the flow every
-    // time. The refusal has to be terminal rather than "sign in first".
+  it('treats GITHUB as a token question, because that is what its server accepts', () => {
+    // Its authorization server publishes no registration endpoint, so the OAuth
+    // path cannot work. Its MCP server does take a personal access token as a
+    // bearer, which makes this a credential the operator can supply rather than
+    // a dead end that tells them to use a different product.
     const github = connectorBySlug('github')!
-    expect(github.auth.needsPreregisteredApp).toBe(true)
-    expect(connectRefusal(github, true, true, false)).toBe('remote-needs-registered-app')
-    // Even a stored token does not clear it: there is no way to have obtained one.
-    expect(connectRefusal(github, true, true, true)).toBe('remote-needs-registered-app')
-    expect(isReachable(github)).toBe(false)
+    expect(github.auth.kind).toBe('bearer')
+    expect(github.auth.needsPreregisteredApp).toBeUndefined()
+    expect(connectRefusal(github, false, true, false)).toBe('needs-credential')
+    expect(connectRefusal(github, true, true, false)).toBeNull()
+    // Solvable, so the panel renders a field rather than an explanation.
+    expect(needsCredentialOnly(github)).toBe(true)
+    expect(isReachable(github)).toBe(true)
   })
 
   it('refuses a connector that needs a credential', () => {
