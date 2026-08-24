@@ -5,7 +5,7 @@ description: The two read-fan-out multiplexers, CapabilitySource and ScheduleSou
 
 Clawboo has three "registry of record" seams that follow the same shape: a neutral record type, a per-source adapter trait, a multiplexer that fans the adapters into one stream, and a process-wide singleton that registers the concrete adapters. The first is [`AgentSource`](/internals/agent-source), _who exists_. This page covers the other two, which share `AgentSource`'s package shape but add a `read()` fan-in:
 
-- **`CapabilitySource`**, what every runtime _can do_. Five per-runtime adapters project a `CapabilityRecord` stream; the [Ghost Graph](/using/ghost-graph) and the [Capabilities dashboard](/concepts/capabilities) both consume it.
+- **`CapabilitySource`**, what every runtime _can do_. Six adapters project a `CapabilityRecord` stream, five per-runtime plus one for Clawboo's own outbound connectors; the [Ghost Graph](/using/ghost-graph) and the [Capabilities dashboard](/concepts/capabilities) both consume it.
 - **`ScheduleSource`**, _when_ work fires. Two adapters project a `ScheduleRecord` stream: Clawboo Routines (team-task cron) and the OpenClaw Gateway cron (a runtime's own-life cron).
 
 Both seams encode the same discipline: `read()` never rejects (degradation is data), writes are owner-routed by an id prefix, and the UI plus the write path are a pure function of a per-record or per-source _manageability_ tier; Clawboo may never offer an action the owning runtime forbids.

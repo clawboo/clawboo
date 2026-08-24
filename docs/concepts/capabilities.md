@@ -1,13 +1,13 @@
 ---
 title: Capabilities
-description: The unified capability inventory, one CapabilityRecord stream fanned from five per-runtime sources, with manageability tiers that decide what Clawboo can change.
+description: The unified capability inventory, one CapabilityRecord stream fanned from six sources, with manageability tiers that decide what Clawboo can change.
 ---
 
 A [capability](/appendices/glossary) is any skill, tool, or connector an agent can use. Clawboo runs [five runtimes](/runtimes/index), and each one tracks its own capabilities differently: a brokered MCP tool in a clawboo-owned table, a Hermes `SKILL.md` on disk, an OpenClaw Gateway extension behind `config.patch`, a built-in nobody can touch. The **capability inventory** normalizes all of that into one shape, the `CapabilityRecord`, fanned in from per-runtime adapters, merged by a multiplexer, and persisted to a durable table.
 
 One stream feeds two surfaces: the per-agent skill and connector nodes on the [Ghost Graph](/appendices/glossary), and the Capabilities dashboard. Every record carries a `manageability` tier, and that tier alone decides whether Clawboo can install, enable, or disable the capability, or merely observe it. The UI affordances and the write path are a pure function of the tier.
 
-This page explains the record shape, the five sources, the manageability tiers and how they route writes, the multiplexer's never-fail fan-in, the durable projection that survives a disconnected source, and the boundaries Clawboo deliberately does not cross.
+This page explains the record shape, the six sources, the manageability tiers and how they route writes, the multiplexer's never-fail fan-in, the durable projection that survives a disconnected source, and the boundaries Clawboo deliberately does not cross.
 
 ## What it is, and what it isn't
 
@@ -21,16 +21,17 @@ The inventory sits at the boundary between Clawboo's [shared plane and each runt
 
 ## The model
 
-Five `CapabilitySource` adapters each project their runtime's capabilities into `CapabilityRecord`s. A `CapabilityMultiplexer` fans their `read()` calls into one merged list. A service layer persists each healthy source's records and serves cached rows for any source that degraded. Both the Ghost Graph and the dashboard consume the merged result.
+Six `CapabilitySource` adapters each project a plane's capabilities into `CapabilityRecord`s. Five are per-runtime; the sixth is Clawboo's own outbound MCP connections. A `CapabilityMultiplexer` fans their `read()` calls into one merged list. A service layer persists each healthy source's records and serves cached rows for any source that degraded. Both the Ghost Graph and the dashboard consume the merged result.
 
 ```mermaid
 flowchart TD
-    subgraph sources["Five CapabilitySources"]
+    subgraph sources["Six CapabilitySources"]
         N["native\n(managed)"]
         H["hermes\n(observe-only)"]
         CC["claude-code\n(observe-only)"]
         CX["codex\n(external-write,\npending-auth)"]
         OC["openclaw\n(runtime-of-record)"]
+        CN["connector\n(observe-only,\nclawboo's own)"]
     end
 
     N --> MUX
@@ -38,6 +39,7 @@ flowchart TD
     CC --> MUX
     CX --> MUX
     OC --> MUX
+    CN --> MUX
 
     MUX["CapabilityMultiplexer\nread(): merge, never reject"]
     MUX --> SVC["service.loadCapabilities\npersist OK sources +\nserve cached rows for degraded"]
@@ -74,17 +76,20 @@ The `CapabilityRecord` is a superset of the tool broker's `ToolDescriptor`; it i
 
 The `id` is deterministic: it encodes `sourceId + runtime + scope + agentId + kind + sourceKey`, so the same capability re-reads to the same row, and the persistence layer can upsert by `id` rather than diffing.
 
-## The five sources
+## The six sources
 
 Each source is a `CapabilitySource` adapter, a `read()` that projects records plus a `write()` that the multiplexer routes by id prefix. The adapters live server-side; the package holds only the neutral types, the trait, and the multiplexer.
 
-| Source        | Owns                          | Manageability of its records    | What it reads                                                                                                                                            |
-| ------------- | ----------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `native`      | The clawboo-managed plane     | `managed`                       | The `tool_registry` brokered tools (global), each native agent's MCP toggles (`AgentConfig.tools`), and the per-agent `skills` table (curated installs). |
-| `hermes`      | Hermes's private self-model   | `observe-only`                  | `SKILL.md` files and `mcp.json` connectors under each Hermes per-identity home, plus a built-ins roll-up.                                                |
-| `claude-code` | Claude Code's own `~/.claude` | `observe-only`                  | The clawboo-attached MCP servers and Claude's built-ins. Clawboo has no persistent Claude store to manage.                                               |
-| `codex`       | An ephemeral per-run home     | `external-write` (auth-blocked) | The clawboo-attached MCP servers, surfaced `manageable-but-pending-auth` (real, but blocked behind `codex login`), plus built-ins.                       |
-| `openclaw`    | The Gateway config domain     | `runtime-of-record`             | `tools.allow`/`tools.deny`, `mcp.servers`, and plugins read over the shared operator connection, plus built-ins.                                         |
+| Source        | Owns                          | Manageability of its records    | What it reads                                                                                                                                                                |
+| ------------- | ----------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `native`      | The clawboo-managed plane     | `managed`                       | The `tool_registry` brokered tools (global), each native agent's MCP toggles (`AgentConfig.tools`), and the per-agent `skills` table (curated installs).                     |
+| `hermes`      | Hermes's private self-model   | `observe-only`                  | `SKILL.md` files and `mcp.json` connectors under each Hermes per-identity home, plus a built-ins roll-up.                                                                    |
+| `claude-code` | Claude Code's own `~/.claude` | `observe-only`                  | The clawboo-attached MCP servers and Claude's built-ins. Clawboo has no persistent Claude store to manage.                                                                   |
+| `codex`       | An ephemeral per-run home     | `external-write` (auth-blocked) | The clawboo-attached MCP servers, surfaced `manageable-but-pending-auth` (real, but blocked behind `codex login`), plus built-ins.                                           |
+| `openclaw`    | The Gateway config domain     | `runtime-of-record`             | `tools.allow`/`tools.deny`, `mcp.servers`, and plugins read over the shared operator connection, plus built-ins.                                                             |
+| `connector`   | Clawboo's own MCP connections | `observe-only`                  | The live outbound connectors Clawboo spawned or dialled itself. Global scope, because every agent reaches them through the same broker. See [Connectors](/using/connectors). |
+
+The `connector` source is the one place Clawboo owns the process and still records `observe-only`. That is deliberate: `managed` makes the dashboard render Enable and Disable buttons, and this source's `write()` refuses every action, so those buttons could only ever fail. Connecting and disconnecting are a REST surface of their own, because one spawns a process and completes a handshake and the other reaps a process tree. Neither is a capability toggle.
 
 Two details about the `native` source are worth calling out, because they're where "manage what's ceded" gets concrete:
 
@@ -122,7 +127,7 @@ The install request carries a `runtime`, but the REST handler ignores it and res
 
 ## The multiplexer and never-failing reads
 
-The `CapabilityMultiplexer` registers all five sources and fans their `read()` calls into one merged `{ records, sources }` result. The contract that makes the inventory robust is: **a source `read()` never rejects**: degradation is _data_. The multiplexer wraps each source in a try/catch, so even a source that violates its own contract becomes a degraded status entry rather than taking the whole inventory down. One dead Gateway can't blank the dashboard.
+The `CapabilityMultiplexer` registers all six sources and fans their `read()` calls into one merged `{ records, sources }` result. The contract that makes the inventory robust is: **a source `read()` never rejects**: degradation is _data_. The multiplexer wraps each source in a try/catch, so even a source that violates its own contract becomes a degraded status entry rather than taking the whole inventory down. One dead Gateway can't blank the dashboard.
 
 Writes route by ownership: an `install` routes by the spec's `via` field; an `enable`/`disable` routes by the capability id's source prefix (`parseCapabilityId` splits on the first `:`, so a `rawKey` containing a colon survives). An unknown source throws a typed `UnknownCapabilityError` that the REST layer maps to `404`; an `observe-only` write raises `UnsupportedCapabilityWriteError` → `422`.
 
