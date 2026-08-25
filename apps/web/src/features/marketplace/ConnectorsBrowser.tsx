@@ -809,10 +809,24 @@ function useConnectorConfig(def: ConnectorDefinition, onChanged: () => void) {
 
   useEffect(() => {
     if (!hasConfig) return
+    // THIS PANE IS REUSED across connectors: moving from one to another re-runs
+    // the effect without remounting, so a slow response for the connector just
+    // left can land after the new one's and write ITS credentials, argument and
+    // authorized flag under the new connector's name. Everything downstream
+    // (`satisfied`, the refusal, the stored path on screen) then describes the
+    // wrong connector. Cleared first so the pane never shows the previous
+    // connector's values while the new request is in flight.
+    let alive = true
+    setConfig(null)
+    setFailed(false)
     void fetchConnectorConfig(def.slug).then((next) => {
+      if (!alive) return
       if (next) setConfig(next)
       else setFailed(true)
     })
+    return () => {
+      alive = false
+    }
   }, [hasConfig, def.slug])
 
   /**

@@ -13,7 +13,7 @@
 // panel is eager, so the shared piece lives here and the marketplace imports it,
 // never the other way round.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch } from '@clawboo/control-client'
 import {
   connectorCost,
@@ -78,6 +78,13 @@ export interface ConnectorCostState {
 }
 
 export function useConnectorCostState(): ConnectorCostState {
+  // A GENERATION, because two untracked fetches race each other and the network.
+  // Connecting something fires a refresh while an earlier one is still in
+  // flight; if the earlier response lands second it restores the pre-connect
+  // snapshot, and the card goes back to offering Connect for something already
+  // running. Applied to BOTH reads together so live and configured can never be
+  // rendered from two different moments.
+  const generationRef = useRef(0)
   const [live, setLive] = useState<ReadonlySet<string>>(new Set())
   const [configured, setConfigured] = useState<{
     satisfied: ReadonlySet<string>
@@ -85,8 +92,12 @@ export function useConnectorCostState(): ConnectorCostState {
   }>({ satisfied: new Set(), supplied: new Set() })
 
   const refresh = useCallback(() => {
-    void fetchLive().then(setLive)
-    void fetchConfigured().then(setConfigured)
+    const generation = ++generationRef.current
+    void Promise.all([fetchLive(), fetchConfigured()]).then(([nextLive, nextConfigured]) => {
+      if (generation !== generationRef.current) return
+      setLive(nextLive)
+      setConfigured(nextConfigured)
+    })
   }, [])
   useEffect(refresh, [refresh])
 

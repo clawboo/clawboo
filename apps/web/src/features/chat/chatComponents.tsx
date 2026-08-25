@@ -515,6 +515,12 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
   // that key last week, and go on offering "Connect Linear" after they had
   // connected Linear from this very card.
   const { costOf, isLive } = useConnectorCostState()
+  // SINGLE-FLIGHT, and it is money that makes it matter. Every press posts a
+  // user message that wakes the agent for a real model turn, so a double click
+  // buys two turns and a held-down key buys as many as it can fire. Latched
+  // rather than merely debounced: once the nudge is delivered the card is done,
+  // and only a FAILED send unlatches it so the operator can retry.
+  const [resumeState, setResumeState] = useState<'idle' | 'sending' | 'sent'>('idle')
   const defs = slugs.map((s) => connectorBySlug(s)).filter((d): d is ConnectorDefinition => !!d)
   if (defs.length === 0) return null
 
@@ -560,7 +566,9 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
           <div className="mt-2.5">
             <Button
               size="sm"
+              disabled={resumeState !== 'idle'}
               onClick={() => {
+                setResumeState('sending')
                 void sendServerTeamMessage({
                   teamId,
                   targetAgentId: agentId,
@@ -568,10 +576,19 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
                   message: `${done.map((d) => d.displayName).join(' and ')} ${
                     done.length === 1 ? 'is' : 'are'
                   } connected now. Please go ahead with what you were doing.`,
+                }).then((ok) => {
+                  // Stay latched on success; unlatch only on failure, where the
+                  // toast has already told them what happened and a retry is
+                  // the right next move.
+                  setResumeState(ok ? 'sent' : 'idle')
                 })
               }}
             >
-              Continue
+              {resumeState === 'sending'
+                ? 'Sending…'
+                : resumeState === 'sent'
+                  ? 'Sent'
+                  : 'Continue'}
             </Button>
           </div>
         )}

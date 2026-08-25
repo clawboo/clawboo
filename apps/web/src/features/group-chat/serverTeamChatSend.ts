@@ -30,7 +30,15 @@ export interface SendServerTeamMessageParams {
  *  so the SSE-replayed user entry dedups against the optimistic one by entryId —
  *  no double-render. Best-effort: a failed POST toasts but leaves the bubble (it
  *  reflects intent; a retry re-sends). */
-export async function sendServerTeamMessage(params: SendServerTeamMessageParams): Promise<void> {
+/**
+ * Returns whether the server accepted the message.
+ *
+ * REPORTED rather than swallowed, because a caller that guards against
+ * double-submit needs to know the difference between "sent" and "failed": the
+ * first must stay locked, the second has to become retryable or the user is
+ * stuck looking at a dead button.
+ */
+export async function sendServerTeamMessage(params: SendServerTeamMessageParams): Promise<boolean> {
   const { teamId, targetAgentId, targetSessionKey, message } = params
   const entryId = crypto.randomUUID()
 
@@ -59,11 +67,14 @@ export async function sendServerTeamMessage(params: SendServerTeamMessageParams)
       useToastStore
         .getState()
         .addToast({ message: 'Could not reach the team. Try again?', type: 'error' })
+      return false
     }
+    return true
   } catch {
     useToastStore
       .getState()
       .addToast({ message: 'Could not reach the team. Try again?', type: 'error' })
+    return false
   }
 }
 
