@@ -30,3 +30,9 @@ const TEAM_SESSION_KEY_RE = /^agent:[^:]+:team:/
 export function isTeamSessionKey(sessionKey: string): boolean {
   return TEAM_SESSION_KEY_RE.test(sessionKey)
 }
+
+/** Extracts the teamId from a team-scoped sessionKey, or null if it is not one. */
+export function teamIdFromSessionKey(sessionKey: string): string | null {
+  const m = sessionKey.match(/^agent:[^:]+:team:(.+)$/)
+  return m?.[1] ?? null
+}

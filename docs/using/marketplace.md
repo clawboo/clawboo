@@ -29,7 +29,7 @@ The panel opens on the **Teams** tab by default. The toolbar shows all three tab
 | **Teams**      | 82    | Pre-wired `TeamTemplate`s (a roster of agents + routing)               | yes      |
 | **Agents**     | 304   | Individual `AgentCatalogEntry` records, one specialist each            | no       |
 | **Skills**     | 30    | `CatalogSkill` capability annotations you can add to an existing agent | no       |
-| **Connectors** | 19    | MCP servers Clawboo can connect and run for you, plus 230 unchecked    | no       |
+| **Connectors** | 19    | MCP servers Clawboo can connect and run for you, plus 400 unchecked    | no       |
 
 ### Teams tab
 
@@ -49,7 +49,7 @@ Adding a skill is different from deploying an agent. **Add** records a **capabil
 
 ### Connectors tab
 
-Verified MCP servers, and the one tab where the catalog is not only a catalog: Clawboo can start these itself. Each card shows one word for how far it is from working, and a button that does that thing. Below them, behind a divider, sit 230 more from the MCP registry that Clawboo has not checked. See [Connectors](/using/connectors) for the connect flow, credentials, sign-in and governance.
+Verified MCP servers, and the one tab where the catalog is not only a catalog: Clawboo can start these itself. Each card shows one word for how far it is from working, and a button that does that thing. Below them, behind a divider, sit 400 more from the MCP registry that Clawboo has not checked. See [Connectors](/using/connectors) for the connect flow, credentials, sign-in and governance.
 
 ## Search and filters
 

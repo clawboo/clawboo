@@ -54,6 +54,18 @@ export type ConnectorAuthKind = 'none' | 'api-key' | 'bearer' | 'oauth'
 export interface ConnectorInput {
   /** The env var or header name, e.g. `GITHUB_TOKEN`. */
   key: string
+  /**
+   * What the VENDOR calls this, e.g. "GitHub token".
+   *
+   * The field label. `key` is what the child process needs and means nothing to
+   * the person filling the field in: an operator who went to GitHub to make a
+   * token knows they made a "fine-grained personal access token", not a
+   * `GITHUB_TOKEN`. The env var name stays visible under Technical details,
+   * where somebody wiring this into another runtime will look for it.
+   *
+   * Falls back to `key` when a definition has not said.
+   */
+  label?: string
   /** One line, plain verbs: "A GitHub personal access token with repo scope." */
   description: string
   /** Where a human goes to mint it. Rendered as a link in the consent dialog. */

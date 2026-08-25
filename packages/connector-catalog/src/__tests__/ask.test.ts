@@ -79,3 +79,20 @@ describe('connectorAskBody prose', () => {
     expect(connectorAskBody(['linear', 'notion'])).toContain('Linear and Notion would each')
   })
 })
+
+describe('extractConnectorAsk leaves ordinary replies alone', () => {
+  it('returns a marker-free reply byte-identical, indentation and all', () => {
+    // The regression: the whitespace cleanup ran unconditionally, so a reply
+    // carrying an indented code block had its runs of spaces collapsed.
+    const reply = 'Here is the fix:\n\n    if (x)  {\n        return  y\n    }\n'
+    expect(extractConnectorAsk(reply).body).toBe(reply)
+  })
+
+  it('preserves indentation in a reply that DID carry a marker', () => {
+    const reply = 'Use this:\n\n    const  a = 1\n\n[[connect:linear]]'
+    const out = extractConnectorAsk(reply)
+    expect(out.slugs).toEqual(['linear'])
+    expect(out.body).toContain('    const  a = 1')
+    expect(out.body).not.toContain('[[connect:')
+  })
+})

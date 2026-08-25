@@ -60,5 +60,48 @@ export const createCustomConnectorBody = z.object({
   // Bounded so a definition cannot become an unbounded argv, and each entry
   // bounded so one cannot become a megabyte the child has to parse.
   args: z.array(z.string().max(2048)).max(64).default([]),
+  /**
+   * Environment variables this server needs, so the operator is actually asked
+   * for them.
+   *
+   * VALIDATED AS TIGHTLY AS `command`, and for the same reason: these keys
+   * become the allowlist of names `connectorChildEnv` will populate from the
+   * vault, so an unbounded or oddly-shaped key here is a name a child process
+   * receives. Restricted to the POSIX environment-variable shape and a small
+   * count, because a server needing more than a handful of secrets is not a
+   * shape this flow supports.
+   */
+  authInputs: z
+    .array(
+      z.object({
+        key: z
+          .string()
+          .min(1)
+          .max(64)
+          .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'environment variable names only'),
+        description: z.string().max(300).default(''),
+        required: z.boolean().default(true),
+      }),
+    )
+    .max(16)
+    .default([]),
+  /**
+   * Where this entry came from, when it came from the registry snapshot.
+   *
+   * Provenance survives the add. Without it a community entry the operator
+   * accepted becomes an anonymous custom connector, and the registry identity
+   * that would let anyone check what they actually installed is gone.
+   */
+  catalogId: z.string().max(200).optional(),
+  /**
+   * The exact version the operator was shown before approving, when there was
+   * one.
+   *
+   * A hand-typed connector genuinely has no pinned version and says so. One
+   * accepted from the registry snapshot does: the consent step showed
+   * `webhound-mcp@0.5.2` and named the version, so recording "user-supplied"
+   * afterwards contradicts the screen the operator agreed to.
+   */
+  pinnedVersion: z.string().max(64).optional(),
 })
 export type CreateCustomConnectorBody = z.infer<typeof createCustomConnectorBody>

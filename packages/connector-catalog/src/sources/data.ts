@@ -49,6 +49,7 @@ export const DATA_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'SUPABASE_ACCESS_TOKEN',
+          label: 'Supabase personal access token',
           description: 'A Supabase personal access token.',
           docsUrl: 'https://supabase.com/dashboard/account/tokens',
           required: true,
@@ -78,6 +79,7 @@ export const DATA_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'AIRTABLE_API_KEY',
+          label: 'Airtable personal access token',
           description: 'An Airtable personal access token with base read/write scope.',
           docsUrl: 'https://airtable.com/create/tokens',
           required: true,
@@ -107,6 +109,7 @@ export const DATA_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'EXA_API_KEY',
+          label: 'Exa API key',
           description: 'An Exa API key.',
           docsUrl: 'https://dashboard.exa.ai/api-keys',
           required: true,

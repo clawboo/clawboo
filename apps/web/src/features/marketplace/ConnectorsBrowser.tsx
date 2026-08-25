@@ -20,6 +20,7 @@ import {
   COST_COPY,
   CONNECT_REFUSAL_COPY,
   connectorBySlug,
+  cleanPastedSecret,
   connectorCounts,
   isImmediate,
   needsArgumentOnly,
@@ -46,6 +47,7 @@ import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import {
   connectConnector,
+  fetchPathSuggestions,
   createCustomConnector,
   deleteCustomConnector,
   disconnectConnector,
@@ -56,6 +58,7 @@ import {
   signInConnector,
   signOutConnector,
   type ConnectorConfigState,
+  type PathSuggestion,
   type CredentialStatus,
   type LiveConnectorRow,
 } from './connectConnector'
@@ -156,6 +159,7 @@ function ConnectorCard({
   busy,
   onOpen,
   onAct,
+  onConfigured,
 }: {
   def: ConnectorDefinition
   index: number
@@ -163,8 +167,38 @@ function ConnectorCard({
   busy: boolean
   onOpen: (def: ConnectorDefinition) => void
   onAct: (def: ConnectorDefinition, cost: ConnectorCost) => void
+  /** The card finished a save or a connect and the shelf should re-price. */
+  onConfigured: () => void
 }) {
   const copy = COST_COPY[cost]
+  // IN PLACE, NOT A NAVIGATION. A key and a folder are one field each, and
+  // sending the reader to a full-pane detail view to type one field was the
+  // single biggest source of felt resistance on this surface: half the
+  // catalogue was two clicks and a lost scroll position from its own action.
+  const inlineable = cost === 'needs-key' || cost === 'needs-folder'
+  const [expanded, setExpanded] = useState(false)
+  const [config, setConfig] = useState<ConnectorConfigState | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  useEffect(() => {
+    if (!expanded || config) return
+    let alive = true
+    void fetchConnectorConfig(def.slug).then((next) => {
+      if (!alive) return
+      if (next) setConfig(next)
+      else setLoadFailed(true)
+    })
+    return () => {
+      alive = false
+    }
+  }, [expanded, config, def.slug])
+
+  // Something else satisfied this connector while the form was open (the detail
+  // pane, another tab, an agent's card). Close rather than keep asking for what
+  // it already has.
+  useEffect(() => {
+    if (expanded && !inlineable) setExpanded(false)
+  }, [expanded, inlineable])
 
   return (
     <motion.div
@@ -213,11 +247,44 @@ function ConnectorCard({
           // NAMED, because nineteen buttons reading "Turn on" are nineteen
           // identical announcements to a screen reader.
           aria-label={`${copy.action} ${def.displayName}`}
-          onClick={() => onAct(def, cost)}
+          aria-expanded={inlineable ? expanded : undefined}
+          onClick={() => {
+            if (inlineable) setExpanded((v) => !v)
+            else onAct(def, cost)
+          }}
         >
-          {busy ? 'Working…' : copy.action}
+          {busy ? 'Working…' : expanded ? 'Cancel' : copy.action}
         </Button>
       </div>
+
+      {expanded && (
+        // `relative` + `pointer-events-auto`: the card's open-details button is
+        // absolutely positioned behind everything, and without both of these it
+        // swallows every click meant for this form.
+        <div className="pointer-events-auto relative border-t border-border pt-3">
+          {config ? (
+            <ConfigForm
+              def={def}
+              state={config}
+              connectAfterSave
+              compact
+              onSaved={(next) => {
+                setConfig(next)
+                onConfigured()
+                // Satisfied means the form has nothing left to ask. Leaving it
+                // open would show an empty box under a card that now says On.
+                if (next.satisfied) setExpanded(false)
+              }}
+            />
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              {loadFailed
+                ? 'Could not read what this connector needs. Check the clawboo server is running.'
+                : 'Checking what this needs…'}
+            </p>
+          )}
+        </div>
+      )}
     </motion.div>
   )
 }
@@ -287,6 +354,18 @@ function CommunityConsent({
                 description: def.description,
                 command: launch.command,
                 args: [...launch.args],
+                // CARRIED, both of them. Without the inputs the panel above
+                // promises a key will be asked for and nothing ever asks;
+                // without the catalogId the entry the operator accepted becomes
+                // anonymous, and the registry identity that would let anyone
+                // check what they installed is gone.
+                authInputs: def.auth.inputs.map((i) => ({
+                  key: i.key,
+                  description: i.description,
+                  required: i.required,
+                })),
+                ...(def.catalogId ? { catalogId: def.catalogId } : {}),
+                ...(launch.pinnedVersion ? { pinnedVersion: launch.pinnedVersion } : {}),
               })
               if (ok) onAdded()
             } finally {
@@ -324,17 +403,46 @@ function ConfigForm({
   state,
   onSaved,
   collapsedByDefault = false,
+  connectAfterSave = false,
+  compact = false,
 }: {
   def: ConnectorDefinition
   state: ConnectorConfigState
   onSaved: (next: ConnectorConfigState) => void
   /** Collapsed once everything is supplied: present but out of the way. */
   collapsedByDefault?: boolean
+  /**
+   * Rendered inside a card that already names the connector.
+   *
+   * Drops the panel chrome and the heading, because a bordered box with its own
+   * title nested inside a bordered card reads as two things rather than one
+   * card that opened.
+   */
+  compact?: boolean
+  /**
+   * Saving also connects, and the button says so.
+   *
+   * Only for the not-yet-connected flow. There is no reason a user should have
+   * to know that storing a key and starting the process are different
+   * operations: they typed the one thing that was missing, and "Save" that
+   * leaves the card still saying "Turn on" is a second click for our
+   * architecture's benefit, not theirs.
+   */
+  connectAfterSave?: boolean
 }) {
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [argument, setArgument] = useState(state.argument ?? '')
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(!collapsedByDefault)
+  // Real paths the server checked exist. One click instead of typing an
+  // absolute path from memory, which is the most error-prone input this whole
+  // surface asks for. Empty means the field stands alone, exactly as before.
+  const [pathChips, setPathChips] = useState<PathSuggestion[]>([])
+  useEffect(() => {
+    if (state.argumentSpec && open) {
+      void fetchPathSuggestions(def.slug).then(setPathChips)
+    }
+  }, [def.slug, state.argumentSpec, open])
 
   if (!open) {
     return (
@@ -377,6 +485,13 @@ function ConfigForm({
       })
       if (next) {
         setDraft({})
+        // Connect only when the save made it POSSIBLE. A partially filled form
+        // saves fine and stays a form; connecting on an unsatisfied config
+        // would surface the server's refusal as a failure of the field the
+        // user just filled correctly.
+        if (connectAfterSave && next.satisfied) {
+          await connectConnector(def.slug, def.displayName)
+        }
         onSaved(next)
       }
     } finally {
@@ -385,11 +500,13 @@ function ConfigForm({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-surface-subtle p-4">
-      <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-        <KeyRound size={13} aria-hidden />
-        Before it can run
-      </div>
+    <section className={compact ? 'pt-1' : 'rounded-xl border border-border bg-surface-subtle p-4'}>
+      {!compact && (
+        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+          <KeyRound size={13} aria-hidden />
+          Before it can run
+        </div>
+      )}
       {state.credentials.length > 0 && (
         <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
           Credentials are stored encrypted on this machine and passed only to this connector&rsquo;s
@@ -405,6 +522,25 @@ function ConfigForm({
           <span className="text-[11px] text-muted-foreground">
             {state.argumentSpec.description}
           </span>
+          {pathChips.length > 0 && (
+            <span className="flex flex-wrap gap-1.5 py-0.5">
+              {pathChips.map((chip) => (
+                <button
+                  key={chip.path}
+                  type="button"
+                  onClick={() => setArgument(chip.path)}
+                  title={chip.path}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+                    argument === chip.path
+                      ? 'border-accent bg-accent/10 text-accent'
+                      : 'border-border text-muted-foreground hover:border-accent/50 hover:text-foreground'
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </span>
+          )}
           <input
             type="text"
             spellCheck={false}
@@ -420,7 +556,12 @@ function ConfigForm({
         {state.credentials.map((cred: CredentialStatus) => (
           <label key={cred.key} className="flex flex-col gap-1">
             <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-              <code>{cred.key}</code>
+              {/* WHAT THE VENDOR CALLS IT. An operator who just made a token on
+                  GitHub knows they made a "GitHub token", not a GITHUB_TOKEN;
+                  the env var name is what the child process needs and lives
+                  under Technical details, where somebody wiring this into
+                  another runtime goes looking for it. */}
+              {cred.label ?? <code>{cred.key}</code>}
               {cred.required ? null : <span className="text-muted-foreground">(optional)</span>}
               {cred.present && (
                 <span className="text-[10px] text-mint" aria-label="already stored">
@@ -434,7 +575,13 @@ function ConfigForm({
               autoComplete="off"
               spellCheck={false}
               value={draft[cred.key] ?? ''}
-              onChange={(e) => setDraft((d) => ({ ...d, [cred.key]: e.target.value }))}
+              // CLEANED IN THE HANDLER, so the operator sees the value that will
+              // actually be stored. `Bearer ghp_x` and `"secret_x"` both look
+              // correct in a password field and both fail at the vendor with an
+              // error naming none of this.
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, [cred.key]: cleanPastedSecret(e.target.value) }))
+              }
               placeholder={cred.present ? 'saved, type to replace' : 'not set'}
               className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
             />
@@ -445,7 +592,9 @@ function ConfigForm({
                 rel="noopener noreferrer"
                 className="text-[11px] text-accent underline"
               >
-                Where to get this
+                {def.auth.setupGuide
+                  ? `Make one on ${def.auth.setupGuide.console}`
+                  : 'Where to get this'}
               </a>
             )}
           </label>
@@ -458,7 +607,13 @@ function ConfigForm({
           onClick={save}
           disabled={busy || (!hasCredentialInput && !argumentChanged)}
         >
-          {busy ? 'Saving…' : 'Save'}
+          {busy
+            ? connectAfterSave
+              ? 'Connecting…'
+              : 'Saving…'
+            : connectAfterSave
+              ? 'Save and connect'
+              : 'Save'}
         </Button>
       </div>
     </section>
@@ -633,17 +788,32 @@ function SignInPanel({ def, onChanged }: { def: ConnectorDefinition; onChanged: 
   )
 }
 
-function ConnectAction({
-  def,
-  connected,
-  onChanged,
-}: {
-  def: ConnectorDefinition
-  connected: boolean
-  onChanged: () => void
-}) {
-  const [busy, setBusy] = useState(false)
+/**
+ * One connector's stored configuration, owned by the pane rather than a section.
+ *
+ * SHARED, because two sections need it and they must not disagree: the action
+ * decides whether Connect is offered, and "What you gave it" shows what is in
+ * there. Two fetches would be two answers, and the moment they differ the pane
+ * is arguing with itself in front of the reader.
+ */
+function useConnectorConfig(def: ConnectorDefinition, onChanged: () => void) {
   const [config, setConfig] = useState<ConnectorConfigState | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  // Fetched for ANY connector with something to configure, not only an
+  // unsatisfied one. A credential or folder that can never be seen or changed
+  // again is worse than one that was never asked for: checking which folder a
+  // connector was handed is the entire reason for asking.
+  const hasConfig =
+    def.auth.inputs.length > 0 || def.userArgument !== undefined || needsSignInOnly(def)
+
+  useEffect(() => {
+    if (!hasConfig) return
+    void fetchConnectorConfig(def.slug).then((next) => {
+      if (next) setConfig(next)
+      else setFailed(true)
+    })
+  }, [hasConfig, def.slug])
 
   /**
    * Record new configuration in BOTH places.
@@ -661,20 +831,30 @@ function ConnectAction({
     [onChanged],
   )
 
-  // Fetched for ANY connector with something to configure, not only an
-  // unsatisfied one. A credential or folder that can never be seen or changed
-  // again is worse than one that was never asked for: checking which folder a
-  // connector was handed is the entire reason for asking.
-  const hasConfig =
-    def.auth.inputs.length > 0 || def.userArgument !== undefined || needsSignInOnly(def)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    if (!hasConfig) return
-    void fetchConnectorConfig(def.slug).then((next) => {
-      if (next) setConfig(next)
-      else setFailed(true)
-    })
-  }, [hasConfig, def.slug])
+  const reload = useCallback(async () => {
+    const next = await fetchConnectorConfig(def.slug)
+    if (next) saveConfig(next)
+    else onChanged()
+  }, [def.slug, saveConfig, onChanged])
+
+  return { config, setConfig, saveConfig, reload, failed, hasConfig }
+}
+
+type ConnectorConfigHandle = ReturnType<typeof useConnectorConfig>
+
+function ConnectAction({
+  def,
+  connected,
+  onChanged,
+  cfg,
+}: {
+  def: ConnectorDefinition
+  connected: boolean
+  onChanged: () => void
+  cfg: ConnectorConfigHandle
+}) {
+  const [busy, setBusy] = useState(false)
+  const { config, setConfig, saveConfig, reload, failed } = cfg
 
   const configGated = needsCredentialOnly(def) || needsArgumentOnly(def) || needsSignInOnly(def)
   const satisfied = config?.satisfied ?? false
@@ -685,18 +865,9 @@ function ConnectAction({
 
   if (configGated && !satisfied) {
     if (config && needsSignInOnly(def) && !config.authorized) {
-      return (
-        <SignInPanel
-          def={def}
-          onChanged={() =>
-            void fetchConnectorConfig(def.slug).then((next) => {
-              if (next) saveConfig(next)
-            })
-          }
-        />
-      )
+      return <SignInPanel def={def} onChanged={() => void reload()} />
     }
-    if (config) return <ConfigForm def={def} state={config} onSaved={saveConfig} />
+    if (config) return <ConfigForm def={def} state={config} onSaved={saveConfig} connectAfterSave />
     // A failed fetch must not leave the tile spinning forever with no way out.
     return (
       <section className="rounded-xl border border-border bg-surface-subtle p-4 text-xs text-muted-foreground">
@@ -719,7 +890,12 @@ function ConnectAction({
           {CONNECT_REFUSAL_COPY[refusal]}
         </p>
         <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-          You can still copy the config below into a runtime you already use.
+          {/* NAMES THE DISCLOSURE, because the block moved behind one. "the
+              config below" described a visible thing until the demotion, and a
+              sentence pointing at something not on screen is worse than no
+              sentence: the reader looks for it and concludes it is missing. */}
+          You can still run it somewhere else: open <strong>Technical details</strong> below and
+          copy the config into a runtime you already use.
         </p>
       </section>
     )
@@ -749,12 +925,6 @@ function ConnectAction({
 
   return (
     <>
-      {/* Still editable after it is satisfied. A credential can expire and a
-          folder can be the wrong one, and neither is fixable from a panel that
-          disappeared the moment it was filled in. */}
-      {config && hasConfig && (
-        <ConfigForm def={def} state={config} onSaved={saveConfig} collapsedByDefault />
-      )}
       <section className="rounded-xl border border-border bg-surface-subtle p-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -787,38 +957,6 @@ function ConnectAction({
           </Button>
         </div>
       </section>
-      {/* The way OUT, which nothing else offers. A stored token cannot be
-          inspected, so the only thing an operator can do with one is replace it
-          or forget it; without this the tokens are unreachable from the product
-          and a provider-side revocation has no local counterpart. */}
-      {remote && config?.authorized && (
-        <RevokeRow
-          title={`Signed in to ${def.displayName}`}
-          detail="Signing out deletes the stored tokens and stops the connection."
-          action="Sign out"
-          busyLabel="Signing out…"
-          onConfirm={async () => {
-            if (await signOutConnector(def.slug, def.displayName)) {
-              const next = await fetchConnectorConfig(def.slug)
-              if (next) saveConfig(next)
-              else onChanged()
-            }
-          }}
-        />
-      )}
-      {/* Only a custom entry can be removed: a curated one is part of the
-          catalog, and deleting it would be deleting a row of the product. */}
-      {def.provenance === 'custom' && (
-        <RevokeRow
-          title="Remove this connector"
-          detail="Deletes the definition you added. Its process is stopped first."
-          action="Remove"
-          busyLabel="Removing…"
-          onConfirm={async () => {
-            if (await deleteCustomConnector(def.slug, def.displayName)) onChanged()
-          }}
-        />
-      )}
     </>
   )
 }
@@ -887,6 +1025,76 @@ function RevokeRow({
 }
 
 /**
+ * What the operator handed this connector, and how to take it back.
+ *
+ * A LABELLED GROUP, and BELOW the consequences. These three controls used to
+ * sit above "What it can do", so the reader met "Remove this connector" and
+ * "Sign out" before the sentences explaining what the thing does. Destructive
+ * controls belong after the explanation, and the stored folder belongs next to
+ * them because it is the same question: what did I give this.
+ *
+ * Renders nothing when the answer is nothing, rather than an empty box.
+ */
+function WhatYouGaveIt({
+  def,
+  cfg,
+  onChanged,
+}: {
+  def: ConnectorDefinition
+  cfg: ConnectorConfigHandle
+  onChanged: () => void
+}) {
+  const { config, saveConfig, reload, hasConfig } = cfg
+  const remote = def.launch.transport !== 'stdio'
+  const showConfig = Boolean(config && hasConfig)
+  const showSignOut = remote && Boolean(config?.authorized)
+  const showRemove = def.provenance === 'custom'
+  if (!showConfig && !showSignOut && !showRemove) return null
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        What you gave it
+      </h3>
+      {/* Still editable after it is satisfied. A credential can expire and a
+          folder can be the wrong one, and neither is fixable from a panel that
+          disappeared the moment it was filled in. */}
+      {showConfig && config && (
+        <ConfigForm def={def} state={config} onSaved={saveConfig} collapsedByDefault />
+      )}
+      {/* The way OUT, which nothing else offers. A stored token cannot be
+          inspected, so the only thing an operator can do with one is replace it
+          or forget it; without this the tokens are unreachable from the product
+          and a provider-side revocation has no local counterpart. */}
+      {showSignOut && (
+        <RevokeRow
+          title={`Signed in to ${def.displayName}`}
+          detail="Signing out deletes the stored tokens and stops the connection."
+          action="Sign out"
+          busyLabel="Signing out…"
+          onConfirm={async () => {
+            if (await signOutConnector(def.slug, def.displayName)) await reload()
+          }}
+        />
+      )}
+      {/* Only a custom entry can be removed: a curated one is part of the
+          catalog, and deleting it would be deleting a row of the product. */}
+      {showRemove && (
+        <RevokeRow
+          title="Remove this connector"
+          detail="Deletes the definition you added. Its process is stopped first."
+          action="Remove"
+          busyLabel="Removing…"
+          onConfirm={async () => {
+            if (await deleteCustomConnector(def.slug, def.displayName)) onChanged()
+          }}
+        />
+      )}
+    </section>
+  )
+}
+
+/**
  * What this connector actually gave the fleet.
  *
  * The strongest replacement for a config block, because it is PROOF rather than
@@ -936,6 +1144,8 @@ function ConnectorDetail({
   onConnected: () => void
   onClose: () => void
 }) {
+  // OWNED HERE so the action and "What you gave it" read one answer.
+  const cfg = useConnectorConfig(def, onConnected)
   const [dialect, setDialect] = useState<SnippetDialect>('claude-code')
   const [copied, setCopied] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
@@ -959,6 +1169,9 @@ function ConnectorDetail({
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto px-6 py-5">
       <div className="flex items-start gap-3">
+        {/* The same mark that was on the card. Dropping it here left the pane
+            visually unanchored to the thing the reader just clicked. */}
+        <BrandMark def={def} />
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-foreground">{def.displayName}</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{def.description}</p>
@@ -971,7 +1184,7 @@ function ConnectorDetail({
       {/* The connect action, or the reason there isn't one. Above the snippet
           because running it here is now the primary verb; pasting a config into
           your own runtime is the fallback for everything clawboo cannot run. */}
-      <ConnectAction def={def} connected={connected} onChanged={onConnected} />
+      <ConnectAction def={def} connected={connected} onChanged={onConnected} cfg={cfg} />
 
       {/* WHAT IT CAN DO, in sentences. This replaces the `3/3 risk` chip, and
           prose beats a chip here for one reason: the fact being communicated is
@@ -1002,6 +1215,11 @@ function ConnectorDetail({
           {!def.trifecta.canEgress && <li>Cannot reach the network.</li>}
         </ul>
       </section>
+
+      {/* BETWEEN the consequences and the proof. What the reader handed over
+          sits after the explanation of what this thing does with it, and before
+          the list of what it gave back. */}
+      <WhatYouGaveIt def={def} cfg={cfg} onChanged={onConnected} />
 
       {/* The tools themselves, once it is running. The strongest possible
           replacement for a config block: proof the thing works, in the words the
@@ -1119,18 +1337,20 @@ function ConnectorDetail({
             )}
           </div>
         </div>
+        {/* INSIDE the disclosure. A bare source-and-documentation link dangling
+            below it was the one piece of developer material still on the
+            surface after everything else was tucked away. */}
+        {def.homepage && (
+          <a
+            href={def.homepage}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-block text-xs text-accent underline"
+          >
+            Connector source and documentation
+          </a>
+        )}
       </details>
-
-      {def.homepage && (
-        <a
-          href={def.homepage}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-accent underline"
-        >
-          Connector source and documentation
-        </a>
-      )}
     </div>
   )
 }
@@ -1189,6 +1409,11 @@ export function ConnectorsBrowser() {
     // below the divider and hides the curated grid rather than filtering it to
     // an empty state that reads as "there is nothing here".
     if (categoryFilter === 'community') return []
+    // The two COST-AXIS filters cannot narrow here: what a connector costs is
+    // known only after the shelf has read live and configured state, and the
+    // shelf takes this list as its input. They are applied to the priced result
+    // instead, below.
+    if (categoryFilter === 'ready-now' || categoryFilter === 'yours') return all
     return all.filter((c) => c.category === categoryFilter)
   }, [searchQuery, categoryFilter, custom])
 
@@ -1200,11 +1425,31 @@ export function ConnectorsBrowser() {
   // the filtered set put "19 connectors, 0 you can turn on right now" on screen
   // under a filter that shows none of them: two numbers describing two different
   // populations, which reads as a bug in the product rather than in the sentence.
-  const immediateCount = useMemo(
-    () => searchConnectors('').filter((d) => isImmediate(shelf.costOf(d))).length,
-    [shelf],
-  )
-  const results = shelf.ordered
+  //
+  // SPLIT, because a connector that is already running cannot also be one you
+  // can turn on. Folding both into one number meant the count never moved as the
+  // operator connected things, which is the one moment they would look at it.
+  const tally = useMemo(() => {
+    let on = 0
+    let ready = 0
+    for (const d of searchConnectors('')) {
+      const cost = shelf.costOf(d)
+      if (cost === 'on') on += 1
+      else if (isImmediate(cost)) ready += 1
+    }
+    return { on, ready }
+  }, [shelf])
+  // Applied AFTER pricing, for the reason above. "Ready now" is the two-word
+  // answer to "what can I have without leaving this screen"; "Yours" is the
+  // operator's own entries plus anything they have already put a key or a
+  // folder into, which is otherwise findable only by remembering its name.
+  const results = useMemo(() => {
+    if (categoryFilter === 'ready-now')
+      return shelf.ordered.filter((d) => isImmediate(shelf.costOf(d)))
+    if (categoryFilter === 'yours')
+      return shelf.ordered.filter((d) => d.provenance === 'custom' || shelf.isConfigured(d.slug))
+    return shelf.ordered
+  }, [categoryFilter, shelf])
 
   // THE LONG TAIL, and it stays behind a divider with its own count forever.
   // Pulled in when the operator asks for it by name (`Not reviewed` filter) or
@@ -1231,6 +1476,11 @@ export function ConnectorsBrowser() {
     // NO 'all' ENTRY: CollapsiblePillRow renders its own All pill, and passing one
     // too put two identical pills side by side.
     return [
+      // THE TWO-WORD ANSWER to the only question a browsing operator is really
+      // asking. It leads because the ordering already puts these first, and a
+      // filter that agrees with the sort is one the reader can trust.
+      { key: 'ready-now', label: 'Ready now' },
+      { key: 'yours', label: 'Yours' },
       // The deliberate route into breadth. Without it the long tail is reachable
       // only by a search that misses, which makes the product look smaller than
       // it is to anyone who never types a miss.
@@ -1305,7 +1555,13 @@ export function ConnectorsBrowser() {
           reference implementations make and cannot support. */}
       <div className="shrink-0 px-6 pt-3">
         <div className="text-sm font-semibold text-foreground">
-          {counts.curated} connectors, {immediateCount} you can turn on right now
+          {counts.curated} connectors
+          {tally.on > 0 && `, ${tally.on} on`}
+          {tally.ready > 0
+            ? `, ${tally.ready}${tally.on > 0 ? ' more' : ''} you can turn on right now`
+            : tally.on === 0
+              ? ', none ready to turn on yet'
+              : ''}
         </div>
         {counts.community > 0 && (
           <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -1321,6 +1577,20 @@ export function ConnectorsBrowser() {
             title="No connectors match"
             helper="Try a different search or clear the category filter."
           />
+        ) : results.length === 0 && searchQuery.trim() !== '' ? (
+          // A MISS IN BOTH SETS. The community fallthrough suppresses the empty
+          // state, so without this the screen answered a search for something
+          // nobody has written a server for with a divider reading "0 from the
+          // MCP registry" and nothing else: an inventory statement where the
+          // reader expected an answer.
+          <p className="pt-6 text-center text-xs text-muted-foreground">
+            Nothing set up for <span className="text-foreground">{searchQuery.trim()}</span> yet.
+            {community.loading
+              ? ' Looking in the MCP registry…'
+              : communityMatches.length > 0
+                ? ''
+                : ' The MCP registry has no match either.'}
+          </p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {results.map((def, i) => (
@@ -1332,51 +1602,61 @@ export function ConnectorsBrowser() {
                 busy={shelf.busy(def.slug)}
                 onOpen={setSelected}
                 onAct={(d, c) => void shelf.act(d, c)}
+                onConfigured={shelf.refresh}
               />
             ))}
           </div>
         )}
-        {wantsCommunity && (
-          <section className="mt-6">
-            {/* A HARD VISUAL SPLIT, and the counts never merge into one total.
+        {/* Nothing to divide off when the band is empty and not loading: a divider
+            announcing "0 from the MCP registry" is an inventory statement, and the
+            miss has already been reported above. An error still shows, because
+            "could not load" is a fact the reader needs. */}
+        {wantsCommunity &&
+          (communityResults.length > 0 || community.loading || community.error) && (
+            <section className="mt-6">
+              {/* A HARD VISUAL SPLIT, and the counts never merge into one total.
                 "419 connectors" is the claim every reference implementation makes
                 and none can support: clawboo has read 19 of these and none of the
                 rest, and the divider is where it says so. */}
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-[11px] font-medium text-muted-foreground">
-                {community.loading
-                  ? 'Looking in the MCP registry…'
-                  : community.error
-                    ? 'Could not load the registry list'
-                    : communityMatches.length > communityResults.length
-                      ? `${communityResults.length} of ${communityMatches.length} from the MCP registry, unchecked`
-                      : `${communityResults.length} from the MCP registry, unchecked`}
-              </span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            <p className="mt-2 text-center text-[11px] text-muted-foreground">
-              {community.error
-                ? 'The curated connectors above are unaffected. Reload to try again.'
-                : 'clawboo has not read these. You decide.'}
-            </p>
-            {communityResults.length > 0 && (
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {communityResults.map((def, i) => (
-                  <ConnectorCard
-                    key={def.slug}
-                    def={def}
-                    index={i}
-                    cost="not-reviewed"
-                    busy={false}
-                    onOpen={setSelected}
-                    onAct={setSelected}
-                  />
-                ))}
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {community.loading
+                    ? 'Looking in the MCP registry…'
+                    : community.error
+                      ? 'Could not load the registry list'
+                      : communityMatches.length > communityResults.length
+                        ? `${communityResults.length} of ${communityMatches.length} from the MCP registry, unchecked`
+                        : `${communityResults.length} from the MCP registry, unchecked`}
+                </span>
+                <div className="h-px flex-1 bg-border" />
               </div>
-            )}
-          </section>
-        )}
+              <p className="mt-2 text-center text-[11px] text-muted-foreground">
+                {community.error
+                  ? 'The curated connectors above are unaffected. Reload to try again.'
+                  : 'clawboo has not read these. You decide.'}
+              </p>
+              {communityResults.length > 0 && (
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {communityResults.map((def, i) => (
+                    <ConnectorCard
+                      key={def.slug}
+                      def={def}
+                      index={i}
+                      cost="not-reviewed"
+                      busy={false}
+                      onOpen={setSelected}
+                      onAct={setSelected}
+                      // A community card never expands in place: `not-reviewed`
+                      // is not an inlineable cost, and its action is the consent
+                      // step rather than a field.
+                      onConfigured={shelf.refresh}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
         <AddCustomConnector onAdded={refreshCustom} />
       </div>
     </div>

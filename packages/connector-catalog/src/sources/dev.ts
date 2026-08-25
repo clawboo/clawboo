@@ -35,6 +35,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'GITHUB_TOKEN',
+          label: 'GitHub token',
           description: 'A fine-grained token, scoped to the repos you want your agents to see.',
           docsUrl: 'https://github.com/settings/personal-access-tokens/new',
           required: true,
@@ -131,6 +132,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'SENTRY_AUTH_TOKEN',
+          label: 'Sentry auth token',
           description: 'A Sentry user auth token with project read scope.',
           docsUrl: 'https://sentry.io/settings/account/api/auth-tokens/',
           required: true,
@@ -249,6 +251,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'CLOUDFLARE_API_TOKEN',
+          label: 'Cloudflare API token',
           description: 'A scoped Cloudflare API token, not your global API key.',
           docsUrl: 'https://dash.cloudflare.com/profile/api-tokens',
           required: true,

@@ -42,3 +42,28 @@ never merges into the curated one, loaded only when you ask for them. clawboo ha
 not read any of them and says so. Adding one shows you the exact command before
 anything runs, and on confirm it becomes your own entry rather than something
 clawboo vouched for.
+
+Every remaining seam between wanting and having got one click shorter. Saving
+what a connector asked for also connects it, in one Save and connect button.
+The folder and file fields carry suggestion chips computed server-side, so
+every chip is a path that exists on this machine. A search that misses
+everything says so, instead of showing a divider announcing an inventory of
+zero. And the pinned-version contract on community entries is now enforced by
+a real check rather than by spelling: a registry row carrying a dist-tag or a
+range is refused at ingest and again in CI, because a consent step that shows
+one command must never run another.
+
+The long tail is now drawn from the whole registry. The ingest paged through a
+name-sorted listing under a fixed page bound, which did not sample the registry
+so much as truncate it alphabetically: it stopped partway through the letter C
+and never reached the namespace where nearly every well-known open-source MCP
+server publishes. It now walks all 24,000 entries, asks for latest versions
+only, and picks the 400 by most-recently-maintained rather than by alphabetical
+position. Entries that collide on a name keep their publisher instead of
+silently dropping, because sixty-six servers are called some variant of "mcp".
+
+And the snapshot's digest is checked. It was recorded and never verified, and
+could not have been verified as written, because the recorded hash covered the
+generator's raw output while the committed bytes are the formatted ones. It now
+covers the file's canonical form, and `pnpm verify:connectors` recomputes it, so
+a hand-edited entry fails CI instead of shipping.

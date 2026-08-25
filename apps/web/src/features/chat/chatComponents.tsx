@@ -18,6 +18,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   ChevronRight,
   Clock,
   SendHorizontal,
@@ -33,9 +34,11 @@ import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import { useViewStore } from '@/stores/view'
+import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
+import { agentIdFromSessionKey, teamIdFromSessionKey } from '@clawboo/team-orchestration'
+import { sendServerTeamMessage } from '@/features/group-chat/serverTeamChatSend'
 import {
   connectorBySlug,
-  connectorCost,
   COST_COPY,
   readConnectorAsk,
   type ConnectorDefinition,
@@ -500,10 +503,18 @@ export const ThinkingSection = memo(function ThinkingSection({
 const ConnectorAskCard = memo(function ConnectorAskCard({
   slugs,
   prose,
+  sessionKey,
 }: {
   slugs: string[]
   prose: string
+  /** Where the ask happened, so "Continue" can send back into the same room. */
+  sessionKey: string
 }) {
+  // PRICED FROM LIVE STATE, exactly as the shelf prices it. Reading the bare
+  // definition made this card offer "Add key Notion" to somebody who stored
+  // that key last week, and go on offering "Connect Linear" after they had
+  // connected Linear from this very card.
+  const { costOf, isLive } = useConnectorCostState()
   const defs = slugs.map((s) => connectorBySlug(s)).filter((d): d is ConnectorDefinition => !!d)
   if (defs.length === 0) return null
 
@@ -513,6 +524,14 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
     useViewStore.getState().navigateTo('marketplace')
   }
 
+  const done = defs.filter((d) => isLive(d.slug))
+  const pending = defs.filter((d) => !isLive(d.slug))
+  // Only a TEAM room can be resumed: the 1:1 agent chat has its own send path,
+  // and a Continue button that silently did nothing there would be worse than
+  // no button at all.
+  const teamId = teamIdFromSessionKey(sessionKey)
+  const agentId = agentIdFromSessionKey(sessionKey)
+
   return (
     <div className="flex justify-center">
       <div className="max-w-prose rounded-2xl border border-border bg-surface px-4 py-3">
@@ -520,13 +539,51 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
             is what produced "Linear and Notion and Figma" next to a stored line
             that read correctly. */}
         <p className="text-xs leading-relaxed text-foreground">{prose}</p>
-        <div className="mt-2.5 flex flex-wrap gap-2">
-          {defs.map((d) => (
-            <Button key={d.slug} size="sm" onClick={() => open(d.slug)}>
-              {COST_COPY[connectorCost(d)].action} {d.displayName}
+        {done.length > 0 && (
+          // CLOSING THE LOOP. The reader left this card, connected the thing,
+          // and came back; a card still saying "Connect Linear" would read as
+          // though it had not worked.
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-mint">
+            <Check size={12} aria-hidden />
+            {done.map((d) => d.displayName).join(', ')} connected.
+          </p>
+        )}
+        {pending.length === 0 && teamId && agentId && (
+          // THE LAST STEP, and the one whose absence made everything above feel
+          // unfinished: the agent stopped because it could not reach something,
+          // the reader went and connected it, and then nothing happened. They
+          // had to come back and retype the request.
+          //
+          // ONE CLICK, NOT AUTOMATIC. Firing a model turn on its own would spend
+          // the operator's money on a decision they never made, and this whole
+          // feature's rule is that nothing happens on an agent's say-so.
+          <div className="mt-2.5">
+            <Button
+              size="sm"
+              onClick={() => {
+                void sendServerTeamMessage({
+                  teamId,
+                  targetAgentId: agentId,
+                  targetSessionKey: sessionKey,
+                  message: `${done.map((d) => d.displayName).join(' and ')} ${
+                    done.length === 1 ? 'is' : 'are'
+                  } connected now. Please go ahead with what you were doing.`,
+                })
+              }}
+            >
+              Continue
             </Button>
-          ))}
-        </div>
+          </div>
+        )}
+        {pending.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {pending.map((d) => (
+              <Button key={d.slug} size="sm" onClick={() => open(d.slug)}>
+                {COST_COPY[costOf(d)].action} {d.displayName}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -543,7 +600,14 @@ export const MetaMessageCard = memo(function MetaMessageCard({
   // sentence naming something the reader then has to go and find. This is the
   // only place the offer reaches somebody who never opens the marketplace.
   const askedFor = readConnectorAsk(entry.text)
-  if (askedFor) return <ConnectorAskCard slugs={askedFor.slugs} prose={askedFor.prose} />
+  if (askedFor)
+    return (
+      <ConnectorAskCard
+        slugs={askedFor.slugs}
+        prose={askedFor.prose}
+        sessionKey={entry.sessionKey}
+      />
+    )
 
   return (
     <div className="flex justify-center">

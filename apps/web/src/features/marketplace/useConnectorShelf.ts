@@ -11,47 +11,23 @@
 // asked for. The second is the difference between a card that says "Needs a key"
 // truthfully and one that says it to somebody who entered that key last week.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { apiFetch } from '@clawboo/control-client'
+import { useCallback, useMemo, useState } from 'react'
 import {
   byCost,
-  connectorCost,
   isImmediate,
   type ConnectorCost,
   type ConnectorDefinition,
 } from '@clawboo/connector-catalog'
 
-import {
-  connectConnector,
-  disconnectConnector,
-  listLiveConnectors,
-  signInConnector,
-} from './connectConnector'
-
-/**
- * Which connectors already hold what they asked for.
- *
- * ONE request for the whole shelf. Per-card would be 19 round-trips on a surface
- * whose whole point is that it renders instantly from committed data.
- */
-async function fetchConfigured(): Promise<ReadonlySet<string>> {
-  try {
-    const res = await apiFetch('/api/connectors/configured')
-    if (!res.ok) return new Set()
-    const body = (await res.json()) as { slugs?: string[] }
-    return new Set(body.slugs ?? [])
-  } catch {
-    // A failed read means "not known", and `connectorCost` treats that as the
-    // cost CLASS rather than as unconfigured, so the shelf degrades to typical
-    // instead of to wrong.
-    return new Set()
-  }
-}
+import { connectConnector, disconnectConnector, signInConnector } from './connectConnector'
+import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
 
 export interface ConnectorShelf {
   /** Definitions ordered by distance from working. */
   ordered: ConnectorDefinition[]
   costOf: (def: ConnectorDefinition) => ConnectorCost
+  /** Whether the operator has stored something for this slug. */
+  isConfigured: (slug: string) => boolean
   busy: (slug: string) => boolean
   /** How many of the given set the operator could turn on right now. */
   readyCount: number
@@ -65,26 +41,10 @@ export function useConnectorShelf(
   /** Called when an action needs more from the user than a card can ask for. */
   openDetail: (def: ConnectorDefinition) => void,
 ): ConnectorShelf {
-  const [live, setLive] = useState<ReadonlySet<string>>(new Set())
-  const [configured, setConfigured] = useState<ReadonlySet<string>>(new Set())
+  // The two reads the price tag depends on, shared with the in-chat ask card so
+  // the two surfaces cannot price the same connector differently.
+  const { costOf, isConfigured, refresh } = useConnectorCostState()
   const [busySlugs, setBusySlugs] = useState<ReadonlySet<string>>(new Set())
-
-  const refresh = useCallback(() => {
-    void listLiveConnectors().then((rows) => setLive(new Set(rows.map((r) => r.slug))))
-    void fetchConfigured().then(setConfigured)
-  }, [])
-  useEffect(refresh, [refresh])
-
-  const costOf = useCallback(
-    (def: ConnectorDefinition): ConnectorCost =>
-      connectorCost(def, {
-        connected: live.has(def.slug),
-        // Only assert configured when the read succeeded and named this slug.
-        // Absence is "not known", not "unconfigured": see fetchConfigured.
-        ...(configured.has(def.slug) ? { configured: true } : {}),
-      }),
-    [live, configured],
-  )
 
   const ordered = useMemo(() => byCost(defs, costOf), [defs, costOf])
   const readyCount = useMemo(
@@ -139,5 +99,5 @@ export function useConnectorShelf(
 
   const busy = useCallback((slug: string) => busySlugs.has(slug), [busySlugs])
 
-  return { ordered, costOf, busy, readyCount, act, refresh }
+  return { ordered, costOf, isConfigured, busy, readyCount, act, refresh }
 }

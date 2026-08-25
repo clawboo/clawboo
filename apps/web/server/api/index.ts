@@ -92,6 +92,7 @@ import {
   connectorsCustomGET,
   connectorsCustomPOST,
   connectorsConfiguredGET,
+  connectorsPathSuggestionsGET,
   connectorsConnectPOST,
   connectorsDisconnectPOST,
   connectorsListGET,
@@ -341,6 +342,7 @@ router.post('/api/connectors/connect', sensitiveLimiter, connectorsConnectPOST)
 // Which connectors already have what they asked for. ONE request for the whole
 // shelf, so a card's price tag is true rather than typical.
 router.get('/api/connectors/configured', connectorsConfiguredGET)
+router.get('/api/connectors/path-suggestions', connectorsPathSuggestionsGET)
 router.get('/api/connectors/custom', connectorsCustomGET)
 router.post('/api/connectors/custom', sensitiveLimiter, connectorsCustomPOST)
 router.delete('/api/connectors/custom/:slug', sensitiveLimiter, connectorsCustomDELETE)

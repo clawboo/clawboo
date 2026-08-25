@@ -21,6 +21,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'NOTION_TOKEN',
+          label: 'Notion internal integration token',
           description: 'An internal integration token from your Notion workspace.',
           docsUrl: 'https://www.notion.so/my-integrations',
           required: true,
@@ -59,6 +60,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'FIGMA_API_KEY',
+          label: 'Figma personal access token',
           description: 'A Figma personal access token with file read scope.',
           docsUrl: 'https://www.figma.com/developers/api#access-tokens',
           required: true,
@@ -114,6 +116,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'STRIPE_SECRET_KEY',
+          label: 'Stripe secret key',
           description: 'A Stripe secret key. Use a TEST key (sk_test_…) unless you mean it.',
           docsUrl: 'https://dashboard.stripe.com/apikeys',
           required: true,

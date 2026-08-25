@@ -23,15 +23,21 @@
  * Exits 0 when everything passes; 1 otherwise.
  */
 
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import {
   CONNECTOR_DEFINITIONS,
   CURATED_CONNECTORS,
   connectRefusal,
+  connectorCounts,
   connectorSnippet,
+  isExactVersion,
   SECRET_LOOKING_VALUE,
   SNIPPET_DIALECTS,
   type ConnectorDefinition,
 } from '../packages/connector-catalog/src/index.js'
+import { COMMUNITY_SNAPSHOT_CAP, recordedDigest, snapshotDigest } from './lib/connector-snapshot.js'
 
 const LIVE = process.argv.includes('--live')
 
@@ -157,9 +163,54 @@ async function checkNpm(def: ConnectorDefinition & { launch: { transport: 'stdio
  * pinned so a consent step can show real argv, and none may be connectable
  * directly.
  */
+/**
+ * The snapshot is what it says it is.
+ *
+ * THE ONE GATE THAT COVERS CONTENT. Everything else here checks SHAPE, and
+ * shape is exactly what a hand-edit to an argv would preserve: swap
+ * `some-mcp@1.0.0` for something else, keep every field, and the entry sails
+ * through. This is a directory of unreviewed installers whose whole safety
+ * story is "the consent step shows you the exact command", so the file backing
+ * it has to be the file the ingest produced.
+ *
+ * Offline by construction, so it rides the ordinary CI run rather than the
+ * weekly live one.
+ */
+async function checkSnapshotDigest(): Promise<void> {
+  const file = path.join(process.cwd(), 'packages/connector-catalog/src/generated/community.ts')
+  let raw: string
+  try {
+    raw = await readFile(file, 'utf8')
+  } catch {
+    fail('community', 'the snapshot file could not be read')
+    return
+  }
+  const claimed = recordedDigest(raw)
+  if (!claimed) {
+    fail('community', 'the snapshot carries no digest, so nothing pins its contents')
+    return
+  }
+  const actual = await snapshotDigest(raw, file)
+  if (actual !== claimed)
+    fail(
+      'community',
+      `the snapshot does not match its digest (records ${claimed.slice(0, 12)}…, computes ` +
+        `${actual.slice(0, 12)}…). It was edited by hand: re-run \`pnpm ingest:connectors\` ` +
+        'and read the diff.',
+    )
+}
+
 function checkCommunity(entries: readonly ConnectorDefinition[]): void {
-  const CAP = 400
+  const CAP = COMMUNITY_SNAPSHOT_CAP
   if (entries.length > CAP) fail('community', `${entries.length} entries exceeds the ${CAP} cap`)
+  // The count module rides the main entry so the header can state the snapshot's
+  // size without its body. Generated together, but nothing else stops a hand
+  // edit or a partial regeneration from letting them drift.
+  if (connectorCounts().community !== entries.length)
+    fail(
+      'community',
+      `COMMUNITY_COUNT says ${connectorCounts().community} but the snapshot holds ${entries.length}`,
+    )
   const slugs = new Set<string>()
   const curated = new Set(CURATED_CONNECTORS.map((c) => c.slug))
   for (const def of entries) {
@@ -181,6 +232,16 @@ function checkCommunity(entries: readonly ConnectorDefinition[]): void {
     // to on the day.
     if (!def.launch.pinnedVersion)
       fail(def.slug, 'no pinned version, so the consent step cannot show what will run')
+    // EXACT, not merely present. `pkg@latest` satisfies both the presence check
+    // and the argv check below while resolving to different code every day, so
+    // without this the pinning contract is enforced only by spelling.
+    else if (
+      !isExactVersion(def.launch.pinnedVersion, def.launch.command === 'uvx' ? 'pypi' : 'npm')
+    )
+      fail(
+        def.slug,
+        `pinned version ${def.launch.pinnedVersion} is a tag or range, not one immutable release`,
+      )
     if (!def.launch.args.some((a) => a.includes(def.launch.pinnedVersion)))
       fail(def.slug, `argv does not carry the pinned version ${def.launch.pinnedVersion}`)
     // Unread means unknown, and unknown has to be declared as the worst case
@@ -246,6 +307,7 @@ async function main(): Promise<void> {
 
   checkOffline()
   checkCommunity(COMMUNITY_SNAPSHOT)
+  await checkSnapshotDigest()
   if (LIVE) await checkLive()
 
   if (failures.length > 0) {

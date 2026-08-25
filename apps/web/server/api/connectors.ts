@@ -22,12 +22,18 @@ import {
 import {
   CONNECT_REFUSAL_COPY,
   CONNECTOR_DEFINITIONS,
+  cleanPastedSecret,
   connectRefusal,
+  explainConnectFailure,
   connectorBySlug,
   launchArgsSatisfied,
   resolveLaunchArgs,
   type ConnectorDefinition,
 } from '@clawboo/connector-catalog'
+import { readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
+
 import type { Request, Response } from 'express'
 
 import {
@@ -205,10 +211,20 @@ export function connectorConfigGET(req: Request, res: Response): void {
  */
 export function connectorsConfiguredGET(_req: Request, res: Response): void {
   try {
-    const slugs = allDefinitions()
-      .filter((def) => configState(def).satisfied)
-      .map((def) => def.slug)
-    res.json({ ok: true, slugs })
+    const slugs: string[] = []
+    const supplied: string[] = []
+    for (const def of allDefinitions()) {
+      const state = configState(def)
+      if (state.satisfied) slugs.push(def.slug)
+      // TWO DIFFERENT FACTS, and conflating them mislabelled the shelf. A
+      // zero-input connector is `satisfied` the moment it exists, having asked
+      // for nothing; it is not something the operator put anything into. The
+      // "Yours" filter needs the second question, so it gets its own answer:
+      // did a person actually hand this connector a credential or a path.
+      if (state.credentials.some((c) => c.present) || state.argument !== null)
+        supplied.push(def.slug)
+    }
+    res.json({ ok: true, slugs, supplied })
   } catch (err) {
     res.status(500).json({ error: redactValue(String(err)) })
   }
@@ -278,12 +294,13 @@ export function connectorConfigPUT(req: Request, res: Response): void {
       setConnectorArgument(getDb(), def.slug, parsed.data.argument)
     }
     for (const [key, value] of entries) {
-      // Trimmed: a pasted token routinely carries a trailing newline, which the
-      // child would otherwise receive verbatim, and a whitespace-only value
-      // would report itself as present while being useless.
-      const trimmed = value.trim()
-      if (trimmed.length === 0) clearConnectorCredential(def.slug, key)
-      else setConnectorCredential(def.slug, key, trimmed)
+      // THE SAME CLEANER THE FIELD RUNS. A trailing newline, a `Bearer ` prefix
+      // copied out of a curl example, or the quotes off a shell export all look
+      // correct in a password field and all fail at the vendor. Applied here too
+      // rather than trusting the browser: this route is reachable without it.
+      const cleaned = cleanPastedSecret(value)
+      if (cleaned.length === 0) clearConnectorCredential(def.slug, key)
+      else setConnectorCredential(def.slug, key, cleaned)
     }
 
     // Credentials come back as presence only, so this route can never be used to
@@ -346,6 +363,9 @@ export function connectorsListGET(_req: Request, res: Response): void {
 
 // POST /api/connectors/connect { slug }
 export async function connectorsConnectPOST(req: Request, res: Response): Promise<void> {
+  // Hoisted so the catch below can NAME the connector. A failure sentence that
+  // cannot say which connector failed is barely better than the raw error.
+  let failedName = 'This connector'
   try {
     const parsed = connectConnectorBody.safeParse(req.body)
     if (!parsed.success) {
@@ -357,6 +377,7 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
       res.status(404).json({ error: `no catalog connector named ${parsed.data.slug}` })
       return
     }
+    failedName = def.displayName
     // The SAME predicate the browser renders. A client-side copy would drift,
     // and the first symptom would be a tile offering a button the server refuses.
     // Both solvable halves are evaluated HERE, because only the server can see
@@ -419,7 +440,13 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     // A spawn or handshake failure is an ordinary outcome here, not a server
     // fault: a 502 says "the connector did not come up", which is true and
     // actionable, where a 500 would read as a clawboo bug.
-    res.status(502).json({ error: redactValue(String(err)) })
+    //
+    // TRANSLATED, and redacted BEFORE translating: the raw text can carry a
+    // token through a child's stderr, and the sentence is built from the safe
+    // version. `detail` keeps the original for anyone debugging a real spawn
+    // problem, one line below rather than instead of the explanation.
+    const failure = explainConnectFailure(String(redactValue(String(err))), failedName)
+    res.status(502).json({ error: failure.message, detail: failure.detail })
   }
 }
 
@@ -433,6 +460,82 @@ export async function connectorsDisconnectPOST(req: Request, res: Response): Pro
       return
     }
     res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: redactValue(String(err)) })
+  }
+}
+
+// ─── Path suggestions ──────────────────────────────────────────────────────
+
+/**
+ * Real paths for the two connectors that ask for one.
+ *
+ * SERVER-COMPUTED so every chip is a path that exists on this machine right
+ * now. The browser cannot know that, and a suggestion that 404s on save is
+ * worse than a bare text field: it teaches the user the chips are decoration.
+ * For `filesystem` the offers are the folders people actually mean; for
+ * `sqlite` it is a shallow walk for database files, because the argument is a
+ * file that must already exist and typing its absolute path from memory is
+ * the single most error-prone input on the whole surface.
+ *
+ * Read-only by construction: nothing here opens, writes, or stats deeper than
+ * the walk below, and the walk never follows symlinks out of the tree.
+ */
+export function connectorsPathSuggestionsGET(req: Request, res: Response): void {
+  try {
+    const slug = String(req.query['slug'] ?? '')
+    const def = connectorBySlug(slug)
+    if (!def?.userArgument) {
+      res.status(404).json({ error: 'that connector does not take a path' })
+      return
+    }
+    const suggestions: { label: string; path: string }[] = []
+    const seen = new Set<string>()
+    const offer = (label: string, p: string, wantDir: boolean): void => {
+      try {
+        const st = statSync(p)
+        if (wantDir ? st.isDirectory() : st.isFile()) {
+          if (!seen.has(p)) {
+            seen.add(p)
+            suggestions.push({ label, path: p })
+          }
+        }
+      } catch {
+        /* not there: not offered */
+      }
+    }
+
+    if (slug === 'sqlite') {
+      // Depth-2 walk from where clawboo was launched, for files that look like
+      // databases. Capped, sorted for a stable order, symlinks not followed.
+      const root = process.cwd()
+      const found: string[] = []
+      const walk = (dir: string, depth: number): void => {
+        if (depth > 2 || found.length >= 25) return
+        let entries
+        try {
+          entries = readdirSync(dir, { withFileTypes: true })
+        } catch {
+          return
+        }
+        for (const e of entries) {
+          if (e.name.startsWith('.') || e.name === 'node_modules') continue
+          const full = path.join(dir, e.name)
+          if (e.isFile() && /\.(db|sqlite|sqlite3)$/i.test(e.name)) found.push(full)
+          else if (e.isDirectory()) walk(full, depth + 1)
+        }
+      }
+      walk(root, 0)
+      for (const f of found.sort().slice(0, 5)) offer(path.basename(f), f, false)
+    } else {
+      offer('Where clawboo runs', process.cwd(), true)
+      const home = homedir()
+      offer('Documents', path.join(home, 'Documents'), true)
+      offer('Desktop', path.join(home, 'Desktop'), true)
+      offer('Downloads', path.join(home, 'Downloads'), true)
+    }
+
+    res.json({ ok: true, suggestions: suggestions.slice(0, 5) })
   } catch (err) {
     res.status(500).json({ error: redactValue(String(err)) })
   }

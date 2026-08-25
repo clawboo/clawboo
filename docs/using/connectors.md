@@ -3,7 +3,7 @@ title: Connect an MCP server
 description: Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
 ---
 
-Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. The **Connectors** tab in the [Marketplace](/using/marketplace) lists 19 verified MCP servers, all of which Clawboo can connect for you, plus 230 more from the MCP registry that it has not checked.
+Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. The **Connectors** tab in the [Marketplace](/using/marketplace) lists 19 verified MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
 
 This is the one Marketplace tab that is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
 
@@ -26,16 +26,20 @@ The tile tells you which one you are looking at, and the detail pane's copy chan
 
 Every card carries one word for how far it is from working, and a button that does that thing. Nothing needs the detail pane to get started, and the shelf is ordered by distance, so the top of it is what you can have right now.
 
-| The card says      | The button    | What happens                                                              |
-| ------------------ | ------------- | ------------------------------------------------------------------------- |
-| **On**             | Turn off      | It is running. Its tools are in your agents' tool list                    |
-| **Ready**          | Turn on       | Nothing to set up. Five of the nineteen are like this                     |
-| **One click**      | Connect       | A tab opens at the provider's own consent screen, then it connects        |
-| **Needs a key**    | Add key       | One field. The value goes to the encrypted vault, never to a settings row |
-| **Needs a folder** | Choose folder | Name the directory the server may work in                                 |
-| **Not reviewed**   | Add it        | A registry entry. You are shown the exact command before anything runs    |
+| The card says      | The button    | What happens                                                                                               |
+| ------------------ | ------------- | ---------------------------------------------------------------------------------------------------------- |
+| **On**             | Turn off      | It is running. Its tools are in your agents' tool list                                                     |
+| **Ready**          | Turn on       | Nothing to set up. Five of the nineteen are like this                                                      |
+| **One click**      | Connect       | A tab opens at the provider's own consent screen, then it connects                                         |
+| **Needs a key**    | Add key       | One field, one **Save and connect** button. The value goes to the encrypted vault, never to a settings row |
+| **Needs a folder** | Choose folder | Pick from folders Clawboo verified exist, or type a path                                                   |
+| **Not reviewed**   | Add it        | A registry entry. You are shown the exact command before anything runs                                     |
 
 The same predicate decides the card and the API, so a button you can see is a button the server will accept.
+
+For a connector that needs a folder or a file, a row of suggestion chips sits above the field: your Documents, Desktop, and the folder Clawboo runs in, each one checked server-side to actually exist. For SQLite, Clawboo looks for `.db` files near where it runs and offers those. Clicking a chip fills the field; typing still works. Saving what a connector asked for also connects it, in the one button, because there is no reason you should have to know that storing a key and starting the process are different operations.
+
+A search that misses everything says so plainly: nothing set up, and whether the MCP registry has a match. It never leaves you staring at an empty grid.
 
 <Note>
 The card never scores a connector. It used to show a `3/3 risk` chip counting [lethal trifecta](/appendices/glossary) legs, which describe what a connector can **reach** rather than whether it is safe. The detail pane says the same three things in sentences, where a consequence fits and a fraction does not.
@@ -59,7 +63,7 @@ Discovery is pinned to the server that answered: its OAuth metadata must live on
 
 ## The long tail
 
-Below the curated nineteen, behind its own divider, sit 230 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Unchecked**, or search for something the curated set does not have, and they appear. The two counts never merge into one total, because Clawboo has read nineteen of these and none of the rest.
+Below the curated nineteen, behind its own divider, sit 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Unchecked**, or search for something the curated set does not have, and they appear. The two counts never merge into one total, because Clawboo has read nineteen of these and none of the rest.
 
 They are a committed snapshot, not a live fetch, so the directory still works with no network and does not change under you between releases. Refreshing it is a deliberate act: someone runs the ingest, reads the diff, and ships it.
 

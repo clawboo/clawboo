@@ -59,11 +59,17 @@ export function extractConnectorAsk(text: string): ConnectorAsk {
     }
     return ''
   })
-  // Collapse the hole the marker left. A marker on its own line leaves a blank
-  // line; one mid-sentence leaves a double space.
+  // UNTOUCHED when nothing matched. The cleanup below exists to close the hole
+  // a removed marker leaves; run unconditionally it rewrote every reply, and a
+  // reply is allowed to contain indented code whose runs of spaces mean
+  // something. Only a marker-carrying reply pays for its own hole.
+  if (slugs.length === 0 && body === text) return { body: text, slugs }
+  // A marker on its own line leaves that line blank. Empty the whitespace-only
+  // lines and collapse the blank runs; never touch a line that has content, so
+  // indentation survives even in a reply that carried a marker.
   return {
     body: body
-      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/^[ \t]+$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim(),
     slugs,
@@ -114,4 +120,21 @@ export function readConnectorAsk(body: string): { slugs: string[]; prose: string
   const slugs = (head ?? '').split(',').filter((s) => s && connectorBySlug(s))
   if (slugs.length === 0) return null
   return { slugs, prose: tail.join(' ').trim() }
+}
+
+/**
+ * A stable transcript id for one ask, so a re-driven turn cannot post the card twice.
+ *
+ * KEYED ON WHAT THE CARD OFFERS, not on the turn. The same agent asking for the
+ * same connectors again produces the same id and lands on the transcript's
+ * ON CONFLICT DO NOTHING, which is the right outcome: the first card is still
+ * in the chat and still works, and a second identical one below it is noise.
+ * A different set of slugs is a different offer and gets its own card.
+ */
+export function connectorAskEntryId(
+  teamId: string,
+  agentId: string,
+  slugs: readonly string[],
+): string {
+  return `connect-ask:${teamId}:${agentId}:${[...slugs].sort().join(',')}`
 }
