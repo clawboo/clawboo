@@ -61,8 +61,10 @@ describe('ConnectorAskCard', () => {
     await user.click(screen.getByRole('button', { name: /Add key Notion/ }))
 
     expect(useMarketplaceStore.getState().openConnectorSlug).toBe('notion')
-    expect(useMarketplaceStore.getState().marketplaceTab).toBe('connectors')
-    expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'marketplace' })
+    // ITS OWN DESTINATION now, not a tab inside the Marketplace. The slug is
+    // what makes this a deep link rather than a signpost: the reader lands on
+    // Notion's own pane, not on a list to search again.
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'connectors' })
   })
 
   it('leaves an ordinary meta line alone', () => {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Blocks, Bot, Plug, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
+import { Blocks, Bot, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { Select } from '@/features/shared/Select'
 import { Button } from '@/features/shared/Button'
@@ -41,8 +41,6 @@ import { TeamTemplateDetail } from './TeamTemplateDetail'
 import { AgentCard } from './AgentCard'
 import { AgentTemplateDetail } from './AgentTemplateDetail'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
-import { ConnectorsBrowser } from './ConnectorsBrowser'
-import { CONNECTOR_DEFINITIONS } from '@clawboo/connector-catalog'
 
 // ─── Skill category colours ─────────────────────────────────────────────────
 // Token-driven palette shared with SkillNode.tsx via `--category-*`.
@@ -369,7 +367,6 @@ export function MarketplacePanel() {
   const isAgentsTab = marketplaceTab === 'agents'
   const isTeamsTab = marketplaceTab === 'teams'
   const isSkillsTab = marketplaceTab === 'skills'
-  const isConnectorsTab = marketplaceTab === 'connectors'
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -403,6 +400,9 @@ export function MarketplacePanel() {
       />
 
       {/* Tabs — Teams lead (the headline surface), then Agents, then Skills.
+          Connectors left this row and became its own sidebar destination: the
+          other three are a shop you visit once, and connecting the tools your
+          agents use is a recurring errand that was three clicks deep here.
           `pt-3` gives the tab row breathing room below the header hairline so the
           space above the labels matches the space below them. */}
       <div className="shrink-0 px-6 pt-3">
@@ -413,16 +413,6 @@ export function MarketplacePanel() {
             { id: 'teams', label: 'Teams', icon: Users, count: TEAM_CATALOG.length },
             { id: 'agents', label: 'Agents', icon: Bot, count: AGENT_CATALOG.length },
             { id: 'skills', label: 'Skills', icon: Wrench, count: SKILL_CATALOG.length },
-            {
-              id: 'connectors',
-              label: 'Connectors',
-              icon: Plug,
-              // The merged count, because ConnectorsBrowser lists the merged
-              // catalog. The curated/community SPLIT is the browser's own header
-              // line; a tab badge that silently omitted community entries would
-              // disagree with the list one click away.
-              count: CONNECTOR_DEFINITIONS.length,
-            },
           ]}
         />
       </div>
@@ -432,14 +422,8 @@ export function MarketplacePanel() {
           without the flex slot its `h-full` resolves against a container that has
           already given the remaining height to the grid below, and its internal
           scroll region never gets a box to scroll inside. */}
-      {isConnectorsTab && (
-        <div className="min-h-0 flex-1">
-          <ConnectorsBrowser />
-        </div>
-      )}
-
       {/* Filter bar */}
-      {!isConnectorsTab && (
+      {
         <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
           {isTeamsTab && (
             <>
@@ -553,14 +537,14 @@ export function MarketplacePanel() {
             </>
           )}
         </div>
-      )}
+      }
 
       {/* Grid. Every child is gated on teams/agents/skills, so on the connectors
           tab this container is empty, but `flex-1` would still make it eat the
           remaining height and starve the browser above it. Dropped OUT of the
           flex layout rather than unmounted, to keep the ~100 lines below at their
           current indentation. */}
-      <div className={isConnectorsTab ? 'hidden' : 'flex-1 overflow-y-auto p-6'}>
+      <div className="flex-1 overflow-y-auto p-6">
         {isTeamsTab && (
           <TeamShowcaseGrid
             teams={filteredTeams}

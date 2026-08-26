@@ -3,7 +3,7 @@ title: Connect an MCP server
 description: Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
 ---
 
-Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. The **Connectors** tab in the [Marketplace](/using/marketplace) lists 19 verified MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
+Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. Open **Connectors** in the sidebar, under Marketplace. It lists 19 popular MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
 
 This is the one Marketplace tab that is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
 
@@ -22,27 +22,29 @@ This is the one Marketplace tab that is not purely a catalog. Deploying an agent
 
 The tile tells you which one you are looking at, and the detail pane's copy changes with it.
 
-## What each card costs you
+## The two lists
 
-Every card carries one word for how far it is from working, and a button that does that thing. Nothing needs the detail pane to get started, and the shelf is ordered by distance, so the top of it is what you can have right now.
+**Popular** is the set Clawboo has run and vouches for. **More connectors** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
 
-| The card says      | The button    | What happens                                                                                               |
-| ------------------ | ------------- | ---------------------------------------------------------------------------------------------------------- |
-| **On**             | Turn off      | It is running. Its tools are in your agents' tool list                                                     |
-| **Ready**          | Turn on       | Nothing to set up. Five of the nineteen are like this                                                      |
-| **One click**      | Connect       | A tab opens at the provider's own consent screen, then it connects                                         |
-| **Needs a key**    | Add key       | One field, one **Save and connect** button. The value goes to the encrypted vault, never to a settings row |
-| **Needs a folder** | Choose folder | Pick from folders Clawboo verified exist, or type a path                                                   |
-| **Not reviewed**   | Add it        | A registry entry. You are shown the exact command before anything runs                                     |
+A connected connector shows a green tick and nothing else. Everything else shows a button, and the button's verb is the price.
 
-The same predicate decides the card and the API, so a button you can see is a button the server will accept.
+| The button    | What happens                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| Turn on       | Nothing to set up. Five of the nineteen are like this                                                      |
+| Connect       | A tab opens at the provider's own consent screen, then it connects                                         |
+| Add key       | One field, one **Save and connect** button. The value goes to the encrypted vault, never to a settings row |
+| Choose folder | Pick from folders Clawboo verified exist, or type a path                                                   |
+| Add it        | A registry entry. You are shown the exact command before anything runs                                     |
+| Turn off      | Stops it. Appears on the row when you hover or focus it                                                    |
+
+The list is ordered by distance from working, so the top of it is what you can have right now. Nothing needs the detail pane to get started: a key or a folder opens in place, on the row. The same predicate decides the row and the API, so a button you can see is a button the server will accept.
 
 For a connector that needs a folder or a file, a row of suggestion chips sits above the field: your Documents, Desktop, and the folder Clawboo runs in, each one checked server-side to actually exist. For SQLite, Clawboo looks for `.db` files near where it runs and offers those. Clicking a chip fills the field; typing still works. Saving what a connector asked for also connects it, in the one button, because there is no reason you should have to know that storing a key and starting the process are different operations.
 
 A search that misses everything says so plainly: nothing set up, and whether the MCP registry has a match. It never leaves you staring at an empty grid.
 
 <Note>
-The card never scores a connector. It used to show a `3/3 risk` chip counting [lethal trifecta](/appendices/glossary) legs, which describe what a connector can **reach** rather than whether it is safe. The detail pane says the same three things in sentences, where a consequence fits and a fraction does not.
+The row never scores a connector. It used to show a `3/3 risk` chip counting [lethal trifecta](/appendices/glossary) legs, which describe what a connector can **reach** rather than whether it is safe. The detail pane says the same three things in sentences, where a consequence fits and a fraction does not.
 </Note>
 
 ## Signing in to a remote connector
@@ -115,7 +117,7 @@ A connector child is still a process running as you. It can read your home direc
 
 ## See also
 
-- [Marketplace](/using/marketplace) for the other three tabs
+- [Marketplace](/using/marketplace) for teams, agents and skills
 - [Ghost Graph](/using/ghost-graph) for sharing and revoking a connector
 - [Capabilities dashboard](/using/capabilities-dashboard) for the inventory view
 - [Approvals](/using/approvals) for what happens when a call needs one

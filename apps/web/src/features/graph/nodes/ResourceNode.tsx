@@ -426,9 +426,8 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
           // Capabilities panel with no indication which row was theirs, which is
           // a button that navigates rather than one that configures.
           if (connectorSlug) {
-            useMarketplaceStore.getState().setMarketplaceTab('connectors')
             useMarketplaceStore.getState().setOpenConnectorSlug(connectorSlug)
-            useViewStore.getState().navigateTo('marketplace')
+            useViewStore.getState().navigateTo('connectors')
             return
           }
           useViewStore.getState().navigateTo('capabilities')

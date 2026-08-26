@@ -67,3 +67,18 @@ could not have been verified as written, because the recorded hash covered the
 generator's raw output while the committed bytes are the formatted ones. It now
 covers the file's canonical form, and `pnpm verify:connectors` recomputes it, so
 a hand-edited entry fails CI instead of shipping.
+
+Connectors is its own place now, in the sidebar under Marketplace. It was the
+fourth tab of a shop you visit once, which is the wrong shelf for the recurring
+errand of connecting the tools your agents actually use.
+
+The list looks like one too. Every connector carries its real logo, extracted
+from the public-domain Simple Icons set and committed rather than fetched, so
+the shelf still renders with the network off and browsing it still leaks
+nothing. A connector that is a capability rather than a brand gets a glyph for
+what it does; the unchecked long tail gets a monogram tinted from its own name.
+Cards became rows, the state pill became the button's verb, and a connected
+connector is a green tick with no sentence attached.
+
+The two lists are named for the reader: Popular and More connectors, each with
+its own count. The counts still never merge into one total.

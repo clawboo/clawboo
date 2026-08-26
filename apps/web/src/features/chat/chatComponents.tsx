@@ -525,9 +525,8 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
   if (defs.length === 0) return null
 
   const open = (slug: string) => {
-    useMarketplaceStore.getState().setMarketplaceTab('connectors')
     useMarketplaceStore.getState().setOpenConnectorSlug(slug)
-    useViewStore.getState().navigateTo('marketplace')
+    useViewStore.getState().navigateTo('connectors')
   }
 
   const done = defs.filter((d) => isLive(d.slug))

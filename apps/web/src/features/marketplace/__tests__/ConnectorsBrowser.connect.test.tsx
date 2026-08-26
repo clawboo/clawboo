@@ -194,9 +194,13 @@ describe('ConnectorsBrowser connect affordance', () => {
     expect(card.getAttribute('aria-label')).not.toMatch(/Active/i)
     expect(card.getAttribute('aria-label')).not.toMatch(/\bOn\b/)
     const tile = card.parentElement!
-    expect(tile.textContent).toContain('Ready')
+    // THE VERB IS THE PRICE NOW. The row used to carry a "Ready" pill beside a
+    // "Turn on" button, which said the same thing twice; the pill went and the
+    // button kept the meaning. What must stay true is that a connector nobody
+    // has started is offered, not merely described.
     expect(tile.textContent).toContain('Turn on')
     expect(tile.textContent).not.toContain('Not connected')
+    expect(tile.textContent).not.toContain('Add key')
   })
 
   it('puts the action on the CARD, so nothing needs the detail view to start', async () => {
@@ -205,8 +209,11 @@ describe('ConnectorsBrowser connect affordance', () => {
     render(<ConnectorsBrowser />)
     const card = await screen.findByRole('button', { name: /Notion.*Open details/i })
     const tile = card.parentElement!
-    expect(tile.textContent).toContain('Needs a key')
+    // A DIFFERENT VERB for a different cost: "Add key" is a distinct promise
+    // from "Turn on", so the row still tells the reader what it will ask for
+    // without a pill repeating it.
     expect(tile.textContent).toContain('Add key')
+    expect(tile.textContent).not.toContain('Turn on')
   })
 
   it('drops the risk fraction from the card', async () => {

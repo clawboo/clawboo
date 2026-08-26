@@ -15,13 +15,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Check, Copy, Info, KeyRound, Plug, Plus, SearchX } from 'lucide-react'
+import { Check, Copy, Info, KeyRound, Plus, SearchX } from 'lucide-react'
 import {
   COST_COPY,
   CONNECT_REFUSAL_COPY,
   connectorBySlug,
   cleanPastedSecret,
-  connectorCounts,
   isImmediate,
   needsArgumentOnly,
   needsCredentialOnly,
@@ -37,11 +36,11 @@ import {
   type SnippetDialect,
 } from '@clawboo/connector-catalog'
 import { Button } from '@/features/shared/Button'
-import { Chip } from '@/features/shared/Chip'
 import { useConnectorShelf } from './useConnectorShelf'
 import { searchCommunity, useCommunityConnectors } from './useCommunityConnectors'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
+import { ConnectorMark } from '@/features/connectors/ConnectorMark'
 import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
@@ -77,36 +76,6 @@ const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   productivity: 'Productivity',
   finance: 'Finance',
   other: 'Uncategorised',
-}
-
-/**
- * A brand mark, or the next best thing.
- *
- * A monogram in the category's own colour rather than a fetched favicon. The
- * obvious cheap trick is `google.com/s2/favicons?domain=`, and it is wrong here
- * for a reason that has nothing to do with looks: it sends a third-party request
- * per card and leaks which connectors the operator is browsing. A local-first
- * shelf renders with the network off.
- */
-function BrandMark({ def }: { def: ConnectorDefinition }) {
-  const initials = def.displayName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0] ?? '')
-    .join('')
-    .toUpperCase()
-  return (
-    <div
-      className="flex size-10 shrink-0 items-center justify-center rounded-xl text-[13px] font-semibold"
-      style={{
-        background: 'color-mix(in srgb, var(--category-other) 14%, transparent)',
-        color: 'var(--category-other)',
-      }}
-      aria-hidden
-    >
-      {initials || <Plug size={18} />}
-    </div>
-  )
 }
 
 /**
@@ -202,66 +171,94 @@ function ConnectorCard({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18, delay: Math.min(index * 0.02, 0.4) }}
-      className="group relative flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong focus-within:border-border-strong"
-      style={{ boxShadow: 'var(--shadow-raised)' }}
+      transition={{ duration: 0.16, delay: Math.min(index * 0.012, 0.25) }}
+      className="group relative rounded-xl px-3 py-2.5 transition-colors duration-150 hover:bg-foreground/[0.03] focus-within:bg-foreground/[0.03]"
+      data-testid={`connector-row-${def.slug}`}
     >
-      {/* Behind the content, so the whole card opens the detail view without
+      {/* Behind the content, so the whole row opens the detail view without
           swallowing the action button in front of it. */}
       <button
         type="button"
         onClick={() => onOpen(def)}
-        className="absolute inset-0 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="absolute inset-0 cursor-pointer rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
         aria-label={`${def.displayName}: ${copy.label}. Open details`}
       />
 
-      <div className="pointer-events-none flex items-center gap-3">
-        <BrandMark def={def} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-foreground">{def.displayName}</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
-            {CATEGORY_LABELS[def.category]}
+      <div className="relative flex items-center gap-3">
+        <ConnectorMark slug={def.slug} displayName={def.displayName} size={30} />
+
+        <div className="pointer-events-none min-w-0 flex-1">
+          <div className="truncate text-[13.5px] font-medium leading-tight text-foreground">
+            {def.displayName}
           </div>
+          <div className="truncate text-[12px] leading-snug text-muted-foreground">
+            {def.description}
+          </div>
+        </div>
+
+        {/* `pointer-events-none` on the group, `auto` on the control alone: the
+            dead space between them would otherwise swallow the click meant for
+            the row behind it. */}
+        <div className="pointer-events-none flex shrink-0 items-center gap-2">
+          {cost === 'on' ? (
+            // A TICK, NOT A SENTENCE. The row already names the connector;
+            // repeating "Connected and running" beside every one of them is
+            // noise to scan past on the way to the ones still asking for
+            // something. Turn off appears on hover and on keyboard focus.
+            <>
+              <Check
+                size={15}
+                strokeWidth={2.6}
+                className="text-mint"
+                aria-label="Connected"
+                role="img"
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                className="pointer-events-auto opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100"
+                disabled={busy}
+                aria-label={`Turn off ${def.displayName}`}
+                onClick={() => onAct(def, cost)}
+              >
+                {busy ? 'Working…' : 'Turn off'}
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              className="pointer-events-auto"
+              // NEUTRAL, all of them. Filled buttons on the free connectors put
+              // a column of eight red rectangles down the page, which shouts
+              // where the reference surfaces stay quiet and makes the one row
+              // that IS connected harder to spot. The verb already carries the
+              // cost: "Turn on" and "Add key" are different promises without
+              // needing different weights, and the tick is the only colour the
+              // list needs.
+              variant="secondary"
+              disabled={busy}
+              // NAMED, because nineteen buttons reading "Turn on" are nineteen
+              // identical announcements to a screen reader.
+              aria-label={`${copy.action} ${def.displayName}`}
+              aria-expanded={inlineable ? expanded : undefined}
+              onClick={() => {
+                if (inlineable) setExpanded((v) => !v)
+                else onAct(def, cost)
+              }}
+            >
+              {busy ? 'Working…' : expanded ? 'Cancel' : copy.action}
+            </Button>
+          )}
         </div>
       </div>
 
-      <p className="pointer-events-none line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-        {def.description}
-      </p>
-
-      {/* `pointer-events-none` on the row, `auto` on the action alone. The row is
-          positioned, so it stacks above the open button behind the card, and
-          without this the dead space between the pill and the button swallowed
-          the click instead of opening the detail view. */}
-      <div className="pointer-events-none relative mt-auto flex items-center justify-between gap-2">
-        <Chip size="sm" icon={cost === 'on' ? Plug : undefined} active={cost === 'on'}>
-          {copy.label}
-        </Chip>
-        <Button
-          size="sm"
-          className="pointer-events-auto"
-          variant={copy.primary ? 'primary' : 'secondary'}
-          disabled={busy}
-          // NAMED, because nineteen buttons reading "Turn on" are nineteen
-          // identical announcements to a screen reader.
-          aria-label={`${copy.action} ${def.displayName}`}
-          aria-expanded={inlineable ? expanded : undefined}
-          onClick={() => {
-            if (inlineable) setExpanded((v) => !v)
-            else onAct(def, cost)
-          }}
-        >
-          {busy ? 'Working…' : expanded ? 'Cancel' : copy.action}
-        </Button>
-      </div>
-
       {expanded && (
-        // `relative` + `pointer-events-auto`: the card's open-details button is
+        // `relative` + `pointer-events-auto`: the row's open-details button is
         // absolutely positioned behind everything, and without both of these it
         // swallows every click meant for this form.
-        <div className="pointer-events-auto relative border-t border-border pt-3">
+        <div className="pointer-events-auto relative mt-3 border-t border-border pt-3">
           {config ? (
             <ConfigForm
               def={def}
@@ -272,7 +269,7 @@ function ConnectorCard({
                 setConfig(next)
                 onConfigured()
                 // Satisfied means the form has nothing left to ask. Leaving it
-                // open would show an empty box under a card that now says On.
+                // open would show an empty box under a row that now says On.
                 if (next.satisfied) setExpanded(false)
               }}
             />
@@ -1185,7 +1182,7 @@ function ConnectorDetail({
       <div className="flex items-start gap-3">
         {/* The same mark that was on the card. Dropping it here left the pane
             visually unanchored to the thing the reader just clicked. */}
-        <BrandMark def={def} />
+        <ConnectorMark slug={def.slug} displayName={def.displayName} size={40} />
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-foreground">{def.displayName}</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{def.description}</p>
@@ -1378,7 +1375,6 @@ export function ConnectorsBrowser() {
   const setCategoryFilter = useMarketplaceStore((s) => s.setConnectorCategoryFilter)
   const [selected, setSelected] = useState<ConnectorDefinition | null>(null)
 
-  const counts = connectorCounts()
   // Stated rather than implied. The header used to read "a directory, not an
   // installer", which was true when nothing here could run and is now false for
   // exactly the connectable set. The number it shows is what the shelf can turn
@@ -1427,7 +1423,12 @@ export function ConnectorsBrowser() {
     // known only after the shelf has read live and configured state, and the
     // shelf takes this list as its input. They are applied to the priced result
     // instead, below.
-    if (categoryFilter === 'ready-now' || categoryFilter === 'yours') return all
+    if (
+      categoryFilter === 'connected' ||
+      categoryFilter === 'not-connected' ||
+      categoryFilter === 'yours'
+    )
+      return all
     return all.filter((c) => c.category === categoryFilter)
   }, [searchQuery, categoryFilter, custom])
 
@@ -1453,13 +1454,15 @@ export function ConnectorsBrowser() {
     }
     return { on, ready }
   }, [shelf])
-  // Applied AFTER pricing, for the reason above. "Ready now" is the two-word
-  // answer to "what can I have without leaving this screen"; "Yours" is the
-  // operator's own entries plus anything they have already put a key or a
-  // folder into, which is otherwise findable only by remembering its name.
+  // Applied AFTER pricing, for the reason above. THREE STATES, not five: the
+  // two questions a reader actually arrives with are "what have I got" and
+  // "what can I add", and a row of six competing filters answered neither
+  // faster than scrolling did. "Yours" survives because an operator's own entry
+  // is otherwise findable only by remembering its name.
   const results = useMemo(() => {
-    if (categoryFilter === 'ready-now')
-      return shelf.ordered.filter((d) => isImmediate(shelf.costOf(d)))
+    if (categoryFilter === 'connected') return shelf.ordered.filter((d) => shelf.costOf(d) === 'on')
+    if (categoryFilter === 'not-connected')
+      return shelf.ordered.filter((d) => shelf.costOf(d) !== 'on')
     if (categoryFilter === 'yours')
       return shelf.ordered.filter((d) => d.provenance === 'custom' || shelf.isConfigured(d.slug))
     return shelf.ordered
@@ -1493,7 +1496,8 @@ export function ConnectorsBrowser() {
       // THE TWO-WORD ANSWER to the only question a browsing operator is really
       // asking. It leads because the ordering already puts these first, and a
       // filter that agrees with the sort is one the reader can trust.
-      { key: 'ready-now', label: 'Ready now' },
+      { key: 'connected', label: 'Connected' },
+      { key: 'not-connected', label: 'Not connected' },
       { key: 'yours', label: 'Yours' },
       // The deliberate route into breadth. Without it the long tail is reachable
       // only by a search that misses, which makes the product look smaller than
@@ -1545,10 +1549,19 @@ export function ConnectorsBrowser() {
 
   return (
     <div className="flex h-full flex-col">
+      {/* Its own surface now, so it gets its own title. As a Marketplace tab it
+          inherited that panel's header and opened straight onto a filter bar,
+          which read as a sub-screen of a shop rather than a place of its own. */}
+      <div className="shrink-0 px-6 pt-5">
+        <h2 className="text-[15px] font-semibold leading-none text-foreground">Connectors</h2>
+        <p className="mt-1.5 text-[12.5px] text-muted-foreground">
+          Tools your agents can use. Everything runs on this machine.
+        </p>
+      </div>
       <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
         <SearchInput
           size="sm"
-          placeholder={`Search ${counts.curated} connectors, or type what you want to do`}
+          placeholder="Search connectors"
           value={searchQuery}
           onChange={setSearchQuery}
         />
@@ -1560,118 +1573,127 @@ export function ConnectorsBrowser() {
         />
       </div>
 
-      {/* Leads with the shelf's SIZE, then with what is within reach. The line
-          this replaces spent both numbers apologising: "the rest are a directory,
-          so copy their config into a runtime you already use" told a reader who
-          had not asked that most of what they were looking at was not for them.
-
-          The count is always a SPLIT, never one total. "1000+" is the claim the
-          reference implementations make and cannot support. */}
-      <div className="shrink-0 px-6 pt-3">
-        <div className="text-sm font-semibold text-foreground">
-          {counts.curated} connectors
-          {tally.on > 0 && `, ${tally.on} on`}
-          {tally.ready > 0
-            ? `, ${tally.ready}${tally.on > 0 ? ' more' : ''} you can turn on right now`
-            : tally.on === 0
-              ? ', none ready to turn on yet'
-              : ''}
+      {/* WHAT IS ON, and nothing else. The line this replaces reported three
+          numbers at once and made the reader do arithmetic before they could
+          look for Notion: "19 connectors, 1 on, 7 more you can turn on right
+          now, plus 400 clawboo has not checked". The section headings below
+          carry the counts now, each one describing the list beneath it. The
+          split is still real and still never becomes a single total. */}
+      {tally.on > 0 && (
+        <div className="flex shrink-0 items-center gap-1.5 px-6 pt-2 text-[12px] text-muted-foreground">
+          <Check size={13} strokeWidth={2.6} className="text-mint" aria-hidden />
+          <span className="tabular-nums">{tally.on} connected</span>
         </div>
-        {counts.community > 0 && (
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
-            plus {counts.community} clawboo has not checked
-          </div>
-        )}
-      </div>
+      )}
 
+      {/* A MEASURE, not the full pane width. On a wide display the action sat
+          more than a thousand pixels from the name it belonged to, which reads
+          as two unrelated columns rather than as one row. */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        {results.length === 0 && !wantsCommunity ? (
-          <EmptyState
-            icon={SearchX}
-            title="No connectors match"
-            helper="Try a different search or clear the category filter."
-          />
-        ) : results.length === 0 && searchQuery.trim() !== '' ? (
-          // A MISS IN BOTH SETS. The community fallthrough suppresses the empty
-          // state, so without this the screen answered a search for something
-          // nobody has written a server for with a divider reading "0 from the
-          // MCP registry" and nothing else: an inventory statement where the
-          // reader expected an answer.
-          <p className="pt-6 text-center text-xs text-muted-foreground">
-            Nothing set up for <span className="text-foreground">{searchQuery.trim()}</span> yet.
-            {community.loading
-              ? ' Looking in the MCP registry…'
-              : communityMatches.length > 0
-                ? ''
-                : ' The MCP registry has no match either.'}
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {results.map((def, i) => (
-              <ConnectorCard
-                key={def.slug}
-                def={def}
-                index={i}
-                cost={shelf.costOf(def)}
-                busy={shelf.busy(def.slug)}
-                onOpen={setSelected}
-                onAct={(d, c) => void shelf.act(d, c)}
-                onConfigured={shelf.refresh}
-              />
-            ))}
-          </div>
-        )}
-        {/* Nothing to divide off when the band is empty and not loading: a divider
+        <div className="mx-auto w-full max-w-3xl">
+          {results.length === 0 && !wantsCommunity ? (
+            <EmptyState
+              icon={SearchX}
+              title="No connectors match"
+              helper="Try a different search or clear the category filter."
+            />
+          ) : results.length === 0 && searchQuery.trim() !== '' ? (
+            // A MISS IN BOTH SETS. The community fallthrough suppresses the empty
+            // state, so without this the screen answered a search for something
+            // nobody has written a server for with a divider reading "0 from the
+            // MCP registry" and nothing else: an inventory statement where the
+            // reader expected an answer.
+            <p className="pt-6 text-center text-xs text-muted-foreground">
+              Nothing set up for <span className="text-foreground">{searchQuery.trim()}</span> yet.
+              {community.loading
+                ? ' Looking in the MCP registry…'
+                : communityMatches.length > 0
+                  ? ''
+                  : ' The MCP registry has no match either.'}
+            </p>
+          ) : (
+            <>
+              <div className="flex items-baseline gap-2 px-3 pb-0.5 pt-1">
+                <h3 className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                  Popular
+                </h3>
+                <span className="text-[11px] tabular-nums text-muted-foreground/70">
+                  {results.length}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                {results.map((def, i) => (
+                  <ConnectorCard
+                    key={def.slug}
+                    def={def}
+                    index={i}
+                    cost={shelf.costOf(def)}
+                    busy={shelf.busy(def.slug)}
+                    onOpen={setSelected}
+                    onAct={(d, c) => void shelf.act(d, c)}
+                    onConfigured={shelf.refresh}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+          {/* Nothing to divide off when the band is empty and not loading: a divider
             announcing "0 from the MCP registry" is an inventory statement, and the
             miss has already been reported above. An error still shows, because
             "could not load" is a fact the reader needs. */}
-        {wantsCommunity &&
-          (communityResults.length > 0 || community.loading || community.error) && (
-            <section className="mt-6">
-              {/* A HARD VISUAL SPLIT, and the counts never merge into one total.
-                "419 connectors" is the claim every reference implementation makes
-                and none can support: clawboo has read 19 of these and none of the
-                rest, and the divider is where it says so. */}
-              <div className="flex items-center gap-3">
-                <div className="h-px flex-1 bg-border" />
-                <span className="text-[11px] font-medium text-muted-foreground">
-                  {community.loading
-                    ? 'Looking in the MCP registry…'
-                    : community.error
-                      ? 'Could not load the registry list'
-                      : communityMatches.length > communityResults.length
-                        ? `${communityResults.length} of ${communityMatches.length} from the MCP registry, unchecked`
-                        : `${communityResults.length} from the MCP registry, unchecked`}
-                </span>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-              <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                {community.error
-                  ? 'The curated connectors above are unaffected. Reload to try again.'
-                  : 'clawboo has not read these. You decide.'}
-              </p>
-              {communityResults.length > 0 && (
-                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {communityResults.map((def, i) => (
-                    <ConnectorCard
-                      key={def.slug}
-                      def={def}
-                      index={i}
-                      cost="not-reviewed"
-                      busy={false}
-                      onOpen={setSelected}
-                      onAct={setSelected}
-                      // A community card never expands in place: `not-reviewed`
-                      // is not an inlineable cost, and its action is the consent
-                      // step rather than a field.
-                      onConfigured={shelf.refresh}
-                    />
-                  ))}
+          {wantsCommunity &&
+            (communityResults.length > 0 || community.loading || community.error) && (
+              <section className="mt-6">
+                {/* A SECTION, not a warning band. The counts still never merge
+                into one total ("419 connectors" is the claim every reference
+                implementation makes and none can support), but the heading now
+                says what the list IS rather than what clawboo has not done to
+                it. The one-line note below carries the provenance, once. */}
+                <div className="flex items-baseline gap-2 px-3 pb-0.5 pt-1">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+                    More connectors
+                  </h3>
+                  <span className="text-[11px] tabular-nums text-muted-foreground/70">
+                    {community.loading
+                      ? '…'
+                      : community.error
+                        ? // No count when there is nothing to count. A dash beside
+                          // the heading reads as a value; the line below already
+                          // says the list could not be read.
+                          ''
+                        : communityMatches.length > communityResults.length
+                          ? `${communityResults.length} of ${communityMatches.length}`
+                          : communityResults.length}
+                  </span>
                 </div>
-              )}
-            </section>
-          )}
-        <AddCustomConnector onAdded={refreshCustom} />
+                <p className="px-3 pb-2 text-[11.5px] text-muted-foreground">
+                  {community.error
+                    ? 'Could not load the registry list. The ones above are unaffected.'
+                    : 'From the MCP registry. clawboo has not checked these.'}
+                </p>
+                {communityResults.length > 0 && (
+                  <div className="flex flex-col">
+                    {communityResults.map((def, i) => (
+                      <ConnectorCard
+                        key={def.slug}
+                        def={def}
+                        index={i}
+                        cost="not-reviewed"
+                        busy={false}
+                        onOpen={setSelected}
+                        onAct={setSelected}
+                        // A community card never expands in place: `not-reviewed`
+                        // is not an inlineable cost, and its action is the consent
+                        // step rather than a field.
+                        onConfigured={shelf.refresh}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          <AddCustomConnector onAdded={refreshCustom} />
+        </div>
       </div>
     </div>
   )

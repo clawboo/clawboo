@@ -19,7 +19,7 @@ export interface InstalledSkillRecord {
 
 // ─── Store ──────────────────────────────────────────────────────────────────────
 
-export type MarketplaceTab = 'skills' | 'agents' | 'teams' | 'connectors'
+export type MarketplaceTab = 'skills' | 'agents' | 'teams'
 
 export type SortBy = 'name' | 'category'
 

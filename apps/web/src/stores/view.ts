@@ -18,6 +18,7 @@ export const NAV_VIEWS = [
   'fleet',
   'cost',
   'marketplace',
+  'connectors',
   'scheduler',
   'system',
   'obs',
