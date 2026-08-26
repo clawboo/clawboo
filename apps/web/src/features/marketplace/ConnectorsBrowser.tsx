@@ -1554,8 +1554,14 @@ export function ConnectorsBrowser() {
           which read as a sub-screen of a shop rather than a place of its own. */}
       <div className="shrink-0 px-6 pt-5">
         <h2 className="text-[15px] font-semibold leading-none text-foreground">Connectors</h2>
+        {/* SCOPED, because four of the nineteen are remote and nothing runs
+            locally for them. "Everything runs on this machine" is the local-first
+            claim worth making and it was simply false for GitHub, Linear, Sentry
+            and Stripe. The detail pane already branches on the transport for
+            exactly this reason; the header was the one place still saying it
+            flat. */}
         <p className="mt-1.5 text-[12.5px] text-muted-foreground">
-          Tools your agents can use. Everything runs on this machine.
+          Tools your agents can use. Most run on this machine; a few connect to the provider.
         </p>
       </div>
       <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
