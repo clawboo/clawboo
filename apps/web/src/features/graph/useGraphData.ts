@@ -859,7 +859,21 @@ export function buildGraphElements(
             targetHandle: 'center',
             // Edges inherit their tile's type accent (SkillEdge falls back to
             // mint — the skill/tool accent — when no accent is threaded).
-            data: isBuiltinRollup ? { accent: 'var(--secondary)' } : {},
+            //
+            // THE CAPABILITY ID RIDES THE EDGE, because the edge is what the
+            // operator selects to remove it. Without it the canvas could
+            // install a skill by dragging and offer no way to take it off,
+            // which made the surface add-only.
+            //
+            // `removable` is narrower than "has an id" on purpose: an observed
+            // or inherited capability has a record but is not something this
+            // agent was given, so removing it here would be a delete that
+            // reappears on the next inventory read.
+            data: {
+              ...(isBuiltinRollup ? { accent: 'var(--secondary)' } : {}),
+              capabilityId: cap.id,
+              removable: cap.source === 'curated-skill',
+            },
           })
         }
       }
@@ -1276,6 +1290,28 @@ export function buildGraphElements(
   }
   for (const node of booNodes) {
     ;(node.data as BooNodeData).edgeCount = edgeCounts.get(node.id) ?? 0
+  }
+
+  // WHAT EACH BOO CARRIES, counted from the edges that were just built rather
+  // than from the capability records: the edges are what the ring will actually
+  // render, so a count taken here can never promise a tile the ring does not
+  // draw. Routes are the agent-to-agent edges this Boo is the SOURCE of --
+  // "who I delegate to" -- because that is the direction the operator authored.
+  const ringCounts = new Map<string, { skills: number; connectors: number; routes: number }>()
+  const bump = (id: string, key: 'skills' | 'connectors' | 'routes') => {
+    const cur = ringCounts.get(id) ?? { skills: 0, connectors: 0, routes: 0 }
+    cur[key] += 1
+    ringCounts.set(id, cur)
+  }
+  for (const e of skillEdges) bump(e.source, 'skills')
+  for (const e of resourceEdges) bump(e.source, 'connectors')
+  for (const e of visibleDepEdges) bump(e.source, 'routes')
+  for (const node of booNodes) {
+    ;(node.data as BooNodeData).ringCounts = ringCounts.get(node.id) ?? {
+      skills: 0,
+      connectors: 0,
+      routes: 0,
+    }
   }
 
   const rawNodes: GraphNode[] = [...booNodes, ...teamRootNodes, ...skillNodes, ...resourceNodes]

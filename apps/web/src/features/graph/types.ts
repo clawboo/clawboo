@@ -38,6 +38,16 @@ export interface BooNodeData extends Record<string, unknown> {
   runtime: string | null
   isStreaming: boolean
   edgeCount?: number
+  /**
+   * What this Boo carries, shown on its rim.
+   *
+   * THE NODE'S ONLY ADVERTISEMENT. Everything an agent owns lives in an orbital
+   * ring behind a single unlabelled click, and the Boo carried no chevron, no
+   * badge and no count -- so a first-time user had no way to learn the ring was
+   * there, and every authoring gesture starts inside it. Counting on the face
+   * is what turns the node into a door.
+   */
+  ringCounts?: { skills: number; connectors: number; routes: number }
   teamId: string | null
   teamName?: string
   teamColor?: string

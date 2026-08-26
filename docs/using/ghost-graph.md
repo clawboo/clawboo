@@ -32,6 +32,34 @@ The graph reads your fleet from the agent registry and the capability inventory;
 
 The selected team in the sidebar is **preserved** when you enter Atlas, so the two graphs keep independent saved layouts (Atlas positions are global and split by layout mode; team positions are keyed `team-<id>`). Switching scopes never overwrites the other's positions.
 
+## Building on the canvas
+
+Every Boo carries one port on its right edge. Pull a thread out of it and let go.
+
+| Where you let go             | What happens                                 |
+| ---------------------------- | -------------------------------------------- |
+| On another Boo               | Routes the first agent to the second         |
+| On a skill or connector tile | Gives that agent the capability              |
+| On empty canvas              | Opens a picker of what the thread can end in |
+
+The picker lists only what that thread can legally end in, grouped into Agents, Skills and Connectors. Picking a row creates the thing where you dropped it, already connected. Typing a name under **Agents** creates a new Boo in the same team as the one you pulled from, already routed to it.
+
+A connector that needs a key or a folder is listed but greyed, with the reason. Those are set up in [Connectors](/using/connectors), because a credential is a form and not a canvas gesture.
+
+Each Boo shows what it carries under its name: `3 skills · 2 connectors · 1 route`. Clicking the Boo opens that ring.
+
+### Taking something back
+
+Select any edge and press Backspace, or use **Delete** in the panel that opens when you click it. Routes, skills and shares all come off the same way. A share carries an eight-second Undo.
+
+Some edges refuse, and say why: a runtime built-in came with the agent, and the model tile is part of the Boo rather than something added to it.
+
+### What is not here
+
+Creating a team, adding a custom MCP server, entering a credential, choosing a folder, and editing a personality are not on the canvas. Each needs more than a name or a pick, and a canvas button that opens another window is worse than no button. They live in the Marketplace, Connectors, and the agent's own view.
+
+An agent's runtime cannot be changed after it is created, anywhere.
+
 ## The canvas
 
 ```mermaid

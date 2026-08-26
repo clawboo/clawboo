@@ -11,8 +11,6 @@ import {
 import { Handle, NodeToolbar, Position, useStore } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { useGraphStore } from '../store'
-import { useViewStore } from '@/stores/view'
-import { useMarketplaceStore } from '@/stores/marketplace'
 import { disconnectConnector, signInConnector } from '@/features/marketplace/connectConnector'
 import { useToastStore } from '@/stores/toast'
 import { disableCapability, enableCapability } from '@/lib/capabilitiesClient'
@@ -418,23 +416,13 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
 
   return (
     <div className="flex items-center gap-1.5" role="toolbar" aria-label={`${name} actions`}>
-      <button
-        type="button"
-        className={TOOLBAR_BTN}
-        onClick={() => {
-          // LANDS ON THE THING IT NAMES. It used to drop the reader on the
-          // Capabilities panel with no indication which row was theirs, which is
-          // a button that navigates rather than one that configures.
-          if (connectorSlug) {
-            useMarketplaceStore.getState().setOpenConnectorSlug(connectorSlug)
-            useViewStore.getState().navigateTo('connectors')
-            return
-          }
-          useViewStore.getState().navigateTo('capabilities')
-        }}
-      >
-        Configure
-      </button>
+      {/* CONFIGURE IS GONE, and deliberately not replaced by a link. It was the
+          only button on this toolbar that navigated; the other five act in
+          place, so it was the one that broke the rule the toolbar otherwise
+          keeps. Deep connector configuration is a credential or a folder, which
+          is a form and not a canvas action, and it lives in the Connectors
+          destination in the sidebar. A graph that advertises a door it should
+          not open is worse than one that stays quiet about it. */}
       {writable === true && capabilityId && (
         <button type="button" className={TOOLBAR_BTN} onClick={() => void toggleEnabled()}>
           {enabled === false ? 'Enable' : 'Disable'}
