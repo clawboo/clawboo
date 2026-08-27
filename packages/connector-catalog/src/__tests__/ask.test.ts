@@ -28,7 +28,12 @@ describe('extractConnectorAsk', () => {
   it('drops a slug the catalog does not have', () => {
     // A model will occasionally invent a plausible name, and a card offering to
     // connect something that does not exist is an affordance that cannot work.
-    const { slugs } = extractConnectorAsk('[[connect:salesforce]] [[connect:linear]]')
+    //
+    // The fixture used to be `salesforce`, which stopped being a miss the day
+    // the brokered apps landed. A real product name is the wrong shape for this
+    // test: any of them can become a connector later and turn it green for a
+    // reason that has nothing to do with what it checks.
+    const { slugs } = extractConnectorAsk('[[connect:not-a-real-connector]] [[connect:linear]]')
     expect(slugs).toEqual(['linear'])
   })
 

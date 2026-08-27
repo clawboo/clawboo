@@ -29,6 +29,7 @@ import path from 'node:path'
 import {
   CONNECTOR_DEFINITIONS,
   CURATED_CONNECTORS,
+  connectorBySlug,
   connectRefusal,
   connectorCounts,
   connectorSnippet,
@@ -57,6 +58,25 @@ function checkOffline(): void {
     seen.add(def.slug)
 
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(def.slug)) fail(def.slug, 'slug is not kebab-safe')
+
+    // THE DEDUPE GUARANTEE, checked rather than intended. A brokered app that
+    // shadows one of clawboo's own connectors would put the same service on the
+    // shelf twice under two different connect paths, and the one that won would
+    // depend on array order in a file nobody reads. The loop above already
+    // fails a duplicate slug outright; these two check the parts a duplicate
+    // slug would not catch.
+    if (def.brokeredBy) {
+      const broker = connectorBySlug(def.brokeredBy.connector)
+      if (!broker)
+        fail(def.slug, `brokeredBy names ${def.brokeredBy.connector}, which is not in the catalog`)
+      else if (broker.brokeredBy) fail(def.slug, 'a broker cannot itself be brokered')
+      if (!def.brokeredBy.toolkit) fail(def.slug, 'brokeredBy has no toolkit name')
+      // The broker's own reachability is the entry's reachability, so a copy
+      // that has drifted is a connector pointing somewhere the broker is not.
+      if (broker && def.launch !== broker.launch) {
+        fail(def.slug, "brokered launch is a copy rather than the broker's own")
+      }
+    }
 
     if (def.launch.transport === 'stdio') {
       const { pinnedVersion, args, command } = def.launch

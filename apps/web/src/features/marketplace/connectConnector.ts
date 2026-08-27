@@ -410,3 +410,58 @@ export async function fetchPathSuggestions(slug: string): Promise<PathSuggestion
     return []
   }
 }
+
+/**
+ * Connect a brokered app: the broker first, then the app.
+ *
+ * ONE BROKER SESSION FOR ALL OF THEM. The obvious implementation reuses the
+ * ordinary one-click path per app, and it is wrong in a way that only shows up
+ * later: every brokered entry carries the broker's own launch URL, so signing
+ * in to Gmail would open a Composio authorization under the slug `gmail`, and
+ * connecting forty-one apps would leave forty-one separate sessions to the same
+ * endpoint, each holding its own token. The broker is connected once, under its
+ * own name, and every app is linked through that.
+ */
+export async function connectBrokeredApp(
+  def: { slug: string; displayName: string; brokeredBy: { connector: string } },
+  broker: { slug: string; displayName: string },
+  onNeedsSignIn?: () => void,
+): Promise<boolean> {
+  // The broker's own connection, using the ordinary path. A no-op when it is
+  // already live, which is the common case after the first app.
+  if (!(await signInConnector(broker.slug, broker.displayName))) return false
+  if (!(await connectConnector(broker.slug, broker.displayName, onNeedsSignIn))) return false
+
+  let res: Response
+  try {
+    res = await apiFetch(`/api/connectors/${encodeURIComponent(def.slug)}/link`, { method: 'POST' })
+  } catch {
+    useToastStore.getState().addToast({
+      message: `Could not reach the server. ${def.displayName} was not connected.`,
+      type: 'error',
+    })
+    return false
+  }
+
+  const body = (await res.json().catch(() => ({}))) as { error?: string; url?: string }
+  if (!res.ok) {
+    useToastStore.getState().addToast({
+      message: body.error ?? `${def.displayName} could not be connected.`,
+      type: 'error',
+    })
+    return false
+  }
+
+  // A link means the app still needs its own approval. No link means the broker
+  // considers it already connected, which is a success rather than a silence.
+  if (body.url) {
+    window.open(body.url, '_blank', 'noopener,noreferrer')
+    useToastStore.getState().addToast({
+      message: `Approve ${def.displayName} in the tab that opened.`,
+      type: 'info',
+    })
+    return true
+  }
+  useToastStore.getState().addToast({ message: `${def.displayName} connected.`, type: 'success' })
+  return true
+}

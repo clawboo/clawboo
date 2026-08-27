@@ -14,12 +14,18 @@
 import { useCallback, useMemo, useState } from 'react'
 import {
   byCost,
+  connectorBySlug,
   isImmediate,
   type ConnectorCost,
   type ConnectorDefinition,
 } from '@clawboo/connector-catalog'
 
-import { connectConnector, disconnectConnector, signInConnector } from './connectConnector'
+import {
+  connectBrokeredApp,
+  connectConnector,
+  disconnectConnector,
+  signInConnector,
+} from './connectConnector'
 import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
 
 export interface ConnectorShelf {
@@ -77,6 +83,21 @@ export function useConnectorShelf(
       }
       mark(def.slug, true)
       try {
+        // BROKERED FIRST, because everything below assumes the connector opens
+        // its own session and a brokered one does not. Placed INSIDE the try so
+        // it shares the busy marker and the refresh in `finally`; hoisting it
+        // above `mark` would leave the row un-spinnered and the shelf stale.
+        if (def.brokeredBy) {
+          const broker = connectorBySlug(def.brokeredBy.connector)
+          if (broker) {
+            await connectBrokeredApp(
+              { slug: def.slug, displayName: def.displayName, brokeredBy: def.brokeredBy },
+              { slug: broker.slug, displayName: broker.displayName },
+              () => openDetail(def),
+            )
+          }
+          return
+        }
         if (cost === 'on') {
           await disconnectConnector(def.slug, def.displayName, def.launch.transport !== 'stdio')
         } else if (cost === 'one-click') {

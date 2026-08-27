@@ -139,6 +139,12 @@ export function byCost(
     // ordering axis, not a third band, so a reviewed entry that needs a key
     // still outranks an unreviewed one that needs nothing.
     if (a.provenance !== b.provenance) return a.provenance === 'curated' ? -1 : 1
+    // A NAME PEOPLE ARRIVE KNOWING outranks one they do not, inside a rank.
+    // Written as a partition rather than as a rule about pairs: a comparator
+    // that only fires when BOTH sides are popular is not transitive, and a
+    // non-transitive comparator gives a different list depending on which
+    // pairs the sort engine happens to compare.
+    if (Boolean(a.popular) !== Boolean(b.popular)) return a.popular ? -1 : 1
     return a.displayName.localeCompare(b.displayName)
   })
 }

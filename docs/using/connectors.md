@@ -24,13 +24,13 @@ The tile tells you which one you are looking at, and the detail pane's copy chan
 
 ## The two lists
 
-### Reaching apps Clawboo cannot sign in to
+### Gmail, Slack, Jira and the rest
 
-Clawboo cannot register an OAuth app with Google, Atlassian or Salesforce, so its own connectors stop where brokered sign-in begins: there is no Gmail, Slack, Drive or Jira entry, and there cannot be one.
+Clawboo cannot register an OAuth app with Google, Atlassian or Salesforce, so for a long time it had no Gmail, no Slack and no Jira. Those apps are in the list now. Press **Connect** on one and it connects, the same as any other row.
 
-**Composio** is the way past that. It is a hosted broker with its own directory of apps, and its endpoint is an ordinary MCP server that signs you in the same way Linear and Sentry do. Connect it once and the apps you link inside Composio become reachable from Clawboo.
+Behind that button, Clawboo reaches them through Composio, a broker with its own directory of apps. You do not have to set Composio up first: the first brokered app you connect brings it along, once, and every app after that reuses the same connection. An app Clawboo can reach on its own never goes through the broker, so nothing appears in the list twice.
 
-Understand the trade before you use it. Composio signs you in to each app and keeps that app's access and refresh tokens on its own servers. Clawboo holds only a token for Composio itself. Anything you connect through it is reachable by Composio, not only by your agents. The connector's detail view says this too, under Scopes.
+The trade is worth knowing once. Composio signs you in to each app and keeps that app's tokens on its own servers; Clawboo holds only a token for Composio. Composio's own approval page says so when it opens, and the connector's detail view repeats it under Scopes.
 
 **Popular** and **More connectors** are the sets Clawboo has run and vouches for, split by how likely you are to recognise the name. **From the community** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
 

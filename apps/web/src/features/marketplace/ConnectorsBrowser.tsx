@@ -825,8 +825,15 @@ function SignInPanel({ def, onChanged }: { def: ConnectorDefinition; onChanged: 
             Sign in to {def.displayName}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Opens {def.displayName} in a new tab. clawboo registers itself with them for this
-            install and keeps the resulting token on this machine, encrypted.
+            {def.brokeredBy
+              ? // A BROKERED APP SIGNS IN SOMEWHERE ELSE. The direct sentence
+                // below claims clawboo registers itself and keeps the token,
+                // and for these forty-one entries neither half is true: the
+                // broker registers, and the broker keeps it. Saying it here
+                // costs one line and stops the detail view from describing a
+                // flow that is not the one about to run.
+                `Opens ${def.displayName} in a new tab. Sign-in is handled by Composio, which keeps the resulting token; clawboo holds only a token for Composio.`
+              : `Opens ${def.displayName} in a new tab. clawboo registers itself with them for this install and keeps the resulting token on this machine, encrypted.`}
           </p>
         </div>
         <Button
@@ -1363,53 +1370,60 @@ function ConnectorDetail({
             )}
           </ul>
 
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Use it somewhere else
-              </h4>
-              {/* A pressed-state group, NOT role="tablist". The ARIA tab pattern
+          {/* NOTHING TO EXPORT FOR A BROKERED APP. This section emits a config
+            block to paste into another runtime, and a brokered entry's launch
+            is the broker's endpoint: pasting it elsewhere would point that
+            runtime at Composio's whole surface rather than at this one app,
+            which is both wrong and more access than the reader asked for. */}
+          {!def.brokeredBy && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Use it somewhere else
+                </h4>
+                {/* A pressed-state group, NOT role="tablist". The ARIA tab pattern
                   obliges arrow-key roving, a roving tabindex and an aria-controls
                   tabpanel; announcing a widget that does not behave the way it was
                   announced is worse for a screen reader than plain buttons. */}
-              <div className="flex gap-1" role="group" aria-label="Config dialect">
-                {SNIPPET_DIALECTS.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    aria-pressed={dialect === d.id}
-                    onClick={() => setDialect(d.id)}
-                    className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
-                      dialect === d.id
-                        ? 'bg-surface-strong text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {d.label}
-                  </button>
-                ))}
+                <div className="flex gap-1" role="group" aria-label="Config dialect">
+                  {SNIPPET_DIALECTS.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      aria-pressed={dialect === d.id}
+                      onClick={() => setDialect(d.id)}
+                      className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
+                        dialect === d.id
+                          ? 'bg-surface-strong text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <code>{snippet.file}</code>
+                <Button size="sm" variant="secondary" onClick={copy}>
+                  {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+
+              <pre className="max-h-72 overflow-auto rounded-xl border border-border bg-surface-subtle p-3 text-[11px] leading-relaxed">
+                <code>{snippet.body}</code>
+              </pre>
+
+              {snippet.requiredEnv.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  You will also need to set {snippet.requiredEnv.join(', ')} in your environment.
+                  The block references them by name so it stays safe to commit.
+                </p>
+              )}
             </div>
-
-            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-              <code>{snippet.file}</code>
-              <Button size="sm" variant="secondary" onClick={copy}>
-                {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
-                {copied ? 'Copied' : 'Copy'}
-              </Button>
-            </div>
-
-            <pre className="max-h-72 overflow-auto rounded-xl border border-border bg-surface-subtle p-3 text-[11px] leading-relaxed">
-              <code>{snippet.body}</code>
-            </pre>
-
-            {snippet.requiredEnv.length > 0 && (
-              <p className="text-[11px] text-muted-foreground">
-                You will also need to set {snippet.requiredEnv.join(', ')} in your environment. The
-                block references them by name so it stays safe to commit.
-              </p>
-            )}
-          </div>
+          )}
         </div>
         {/* INSIDE the disclosure. A bare source-and-documentation link dangling
             below it was the one piece of developer material still on the

@@ -94,6 +94,7 @@ import {
   connectorsConfiguredGET,
   connectorsPathSuggestionsGET,
   connectorsConnectPOST,
+  connectorLinkPOST,
   connectorsDisconnectPOST,
   connectorsListGET,
 } from './connectors'
@@ -347,6 +348,9 @@ router.get('/api/connectors/custom', connectorsCustomGET)
 router.post('/api/connectors/custom', sensitiveLimiter, connectorsCustomPOST)
 router.delete('/api/connectors/custom/:slug', sensitiveLimiter, connectorsCustomDELETE)
 router.post('/api/connectors/:slug/disconnect', sensitiveLimiter, connectorsDisconnectPOST)
+// Ask a broker to connect one of its upstream apps. Rate-limited with the other
+// writes: it opens an authorization flow at a third party.
+router.post('/api/connectors/:slug/link', sensitiveLimiter, connectorLinkPOST)
 // Config: what an operator must supply before a connector can run. A credential
 // goes IN and comes back only as a boolean; a launch argument comes back in full,
 // because checking which folder a connector was handed is the point of asking.

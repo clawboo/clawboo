@@ -39,6 +39,7 @@ import type { Request, Response } from 'express'
 import {
   connectConnector,
   connectorInstanceId,
+  getLiveConnector,
   disconnectConnector,
   listLiveConnectors,
   type ConnectableDefinition,
@@ -63,6 +64,7 @@ import { awaitAuthorization, beginAuthorization, getAccessToken } from '../lib/c
 import { clearOAuth, isAuthorized } from '../lib/connectors/oauthStore'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
+import { approvalUrlFrom, buildLinkArgs, isRefusal } from '../lib/connectors/brokeredLink'
 
 /**
  * Resolve a slug to a definition, custom entries included.
@@ -356,6 +358,70 @@ export function connectorsListGET(_req: Request, res: Response): void {
         toolsHash: c.toolsHash,
       })),
     })
+  } catch (err) {
+    res.status(500).json({ error: redactValue(String(err)) })
+  }
+}
+
+// POST /api/connectors/:slug/link
+//
+// Ask a broker to connect one of its upstream apps. The whole flow lives on the
+// broker's ALREADY OPEN session: there is no second credential, no API key, and
+// no second Composio scope to drift out of step with the first. That is the
+// reason this route exists rather than a REST client.
+export async function connectorLinkPOST(req: Request, res: Response): Promise<void> {
+  try {
+    const slug = String(req.params['slug'] ?? '')
+    const def = findDefinition(slug)
+    if (!def) {
+      res.status(404).json({ error: `no catalog connector named ${slug}` })
+      return
+    }
+    const brokered = def.brokeredBy
+    if (!brokered) {
+      res.status(400).json({ error: `${def.displayName} is not reached through a broker` })
+      return
+    }
+    const live = getLiveConnector(connectorInstanceId(brokered.connector))
+    if (!live) {
+      // NOT AN ERROR THE OPERATOR CAUSED. The browser connects the broker first
+      // and only then calls this, so reaching here means the broker dropped
+      // between the two. Saying which one is missing is what lets the client
+      // retry the right step instead of the whole flow.
+      res.status(409).json({ error: 'broker-not-connected', broker: brokered.connector })
+      return
+    }
+
+    const tools = await live.session.listTools()
+    const tool = tools.find((t) => /manage_connections/i.test(t.name))
+    if (!tool) {
+      res.status(502).json({
+        error: `${def.displayName} could not be connected: the broker offers no tool for managing connections.`,
+      })
+      return
+    }
+
+    const args = buildLinkArgs(tool.inputSchema, brokered.toolkit)
+    if (isRefusal(args)) {
+      // SURFACED, NEVER SWALLOWED. This is the branch that fires when the
+      // broker has changed its tool since this was written, and a silent
+      // no-op here would look exactly like a button that does nothing.
+      res.status(502).json({ error: `${def.displayName} could not be connected. ${args.reason}` })
+      return
+    }
+
+    const result = await live.session.callTool(tool.name, args)
+    if (result.isError) {
+      // Redacted before it is quoted back. A broker's error text is written by
+      // the broker, and this is the one path where its words reach the screen.
+      const detail = String(redactValue(result.text)).slice(0, 300)
+      res.status(502).json({ error: `${def.displayName} could not be connected. ${detail}` })
+      return
+    }
+    // The URL is the only thing that crosses back. The tool's raw text can carry
+    // account identifiers, so it is not returned even on success.
+    const url = approvalUrlFrom(result.text)
+    res.json({ ok: true, ...(url ? { url } : {}) })
   } catch (err) {
     res.status(500).json({ error: redactValue(String(err)) })
   }

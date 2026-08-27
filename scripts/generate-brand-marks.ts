@@ -46,6 +46,18 @@ const ALIASES: Readonly<Record<string, string>> = {
   'chrome-devtools': 'googlechrome',
   'sentry-local': 'sentry',
   'stripe-local': 'stripe',
+  // clawboo's slug and simple-icons' slug are independent namespaces, and for
+  // these the punctuation simply differs. Written out rather than solved with a
+  // strip-the-hyphens rule, because such a rule also matches things that are
+  // not the same product.
+  'google-calendar': 'googlecalendar',
+  'google-drive': 'googledrive',
+  'google-docs': 'googledocs',
+  'google-sheets': 'googlesheets',
+  'google-bigquery': 'googlebigquery',
+  'google-analytics': 'googleanalytics',
+  'whatsapp-business': 'whatsapp',
+  'x-twitter': 'x',
 }
 
 /**
