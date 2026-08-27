@@ -6,6 +6,7 @@ import type { ConnectorDefinition } from '../types'
 export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
   {
     slug: 'composio',
+    popular: true,
     displayName: 'Composio',
     description: 'Reach Gmail, Slack, Jira, Salesforce and hundreds more through Composio.',
     category: 'productivity',
@@ -51,6 +52,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'notion',
+    popular: true,
     displayName: 'Notion',
     description: 'Read and write Notion pages, databases, and comments.',
     category: 'docs',
@@ -90,6 +92,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'figma',
+    popular: true,
     displayName: 'Figma',
     description: 'Read Figma files, frames, and design tokens for implementation.',
     category: 'docs',
@@ -120,6 +123,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'stripe',
+    popular: true,
     displayName: 'Stripe',
     description: 'Inspect customers, payments, and subscriptions in Stripe.',
     category: 'finance',

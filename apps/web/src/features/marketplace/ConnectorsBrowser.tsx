@@ -101,6 +101,52 @@ const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
  */
 const COMMUNITY_PAGE_SIZE = 60
 
+/**
+ * One titled run of connector rows.
+ *
+ * `offset` keeps the entrance stagger continuous across bands, so the list
+ * animates in as one column rather than restarting at each heading.
+ */
+function ShelfBand({
+  title,
+  defs,
+  offset,
+  shelf,
+  onOpen,
+}: {
+  title: string
+  defs: readonly ConnectorDefinition[]
+  offset: number
+  shelf: ReturnType<typeof useConnectorShelf>
+  onOpen: (def: ConnectorDefinition) => void
+}) {
+  if (defs.length === 0) return null
+  return (
+    <section className="mt-1">
+      <div className="flex items-baseline gap-2 px-3 pb-0.5 pt-1">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+          {title}
+        </h3>
+        <span className="text-[11px] tabular-nums text-muted-foreground/70">{defs.length}</span>
+      </div>
+      <div className="flex flex-col">
+        {defs.map((def, i) => (
+          <ConnectorCard
+            key={def.slug}
+            def={def}
+            index={offset + i}
+            cost={shelf.costOf(def)}
+            busy={shelf.busy(def.slug)}
+            onOpen={onOpen}
+            onAct={(d, c) => void shelf.act(d, c)}
+            onConfigured={shelf.refresh}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 const CONNECT_REFUSAL_HEADING: Readonly<Record<ConnectRefusal, string>> = Object.freeze({
   'community-unsandboxed': 'Nobody has read this one',
   'remote-needs-registered-app': 'clawboo cannot sign in here',
@@ -146,6 +192,17 @@ function ConnectorCard({
   onConfigured: () => void
 }) {
   const copy = COST_COPY[cost]
+  // ONE VERB ON THE SHELF. The catalogue distinguishes "Turn on" from "Connect"
+  // from "Add key" from "Add it", and on a card read on its own that precision
+  // is worth something. In a single scrolling list it reads as four different
+  // kinds of thing, and the reader starts wondering which one is the real one.
+  // Whatever a connector needs still appears the moment the button is pressed,
+  // which is where a field is an answer rather than a warning.
+  //
+  // The other surfaces keep the specific verbs: the chat card offers one
+  // connector at a time, where naming the cost up front is a promise about what
+  // the next tap does rather than a taxonomy to decode.
+  const action = cost === 'on' ? copy.action : cost === 'blocked' ? copy.action : 'Connect'
   // IN PLACE, NOT A NAVIGATION. A key and a folder are one field each, and
   // sending the reader to a full-pane detail view to type one field was the
   // single biggest source of felt resistance on this surface: half the
@@ -247,14 +304,14 @@ function ConnectorCard({
               disabled={busy}
               // NAMED, because nineteen buttons reading "Turn on" are nineteen
               // identical announcements to a screen reader.
-              aria-label={`${copy.action} ${def.displayName}`}
+              aria-label={`${action} ${def.displayName}`}
               aria-expanded={inlineable ? expanded : undefined}
               onClick={() => {
                 if (inlineable) setExpanded((v) => !v)
                 else onAct(def, cost)
               }}
             >
-              {busy ? 'Working…' : expanded ? 'Cancel' : copy.action}
+              {busy ? 'Working…' : expanded ? 'Cancel' : action}
             </Button>
           )}
         </div>
@@ -1477,6 +1534,17 @@ export function ConnectorsBrowser() {
   // Constant for the life of the build, so it is read once rather than memoised.
   const counts = connectorCounts()
 
+  // THREE BANDS, READ TOP TO BOTTOM. Names people arrive already knowing, then
+  // the rest of what clawboo has run, then the open registry. The reader never
+  // has to learn what "curated" or "unchecked" mean to use the page: the order
+  // is the claim, and it descends from most recognised to least.
+  const [popularResults, moreResults] = useMemo(() => {
+    const popular: ConnectorDefinition[] = []
+    const more: ConnectorDefinition[] = []
+    for (const def of results) (def.popular ? popular : more).push(def)
+    return [popular, more]
+  }, [results])
+
   // Reset on every change to the question being asked, so a narrowed search
   // never inherits a deep page from the previous one.
   const [communityPage, setCommunityPage] = useState(1)
@@ -1532,13 +1600,16 @@ export function ConnectorsBrowser() {
       // THE TWO-WORD ANSWER to the only question a browsing operator is really
       // asking. It leads because the ordering already puts these first, and a
       // filter that agrees with the sort is one the reader can trust.
+      // ONE STATE FILTER. There were three, and two of them answered the same
+      // question: "Connected" and "Yours" returned nearly the same rows for
+      // anyone who had not hand-added a server, and "Not connected" was the
+      // inverse of a filter that was already there. A reader deciding between
+      // three overlapping pills is doing the product's sorting for it.
+      //
+      // NO PROVENANCE PILL either. "Unchecked" named a distinction that matters
+      // to whoever maintains the catalogue and to nobody choosing a connector;
+      // the third band is reached by reading down the list instead.
       { key: 'connected', label: 'Connected' },
-      { key: 'not-connected', label: 'Not connected' },
-      { key: 'yours', label: 'Yours' },
-      // The deliberate route into breadth. Without it the long tail is reachable
-      // only by a search that misses, which makes the product look smaller than
-      // it is to anyone who never types a miss.
-      { key: 'community', label: 'Unchecked' },
       ...[...present].sort().map((c) => ({ key: c, label: CATEGORY_LABELS[c] })),
     ]
   }, [])
@@ -1596,9 +1667,7 @@ export function ConnectorsBrowser() {
             and Stripe. The detail pane already branches on the transport for
             exactly this reason; the header was the one place still saying it
             flat. */}
-        <p className="mt-1.5 text-[12.5px] text-muted-foreground">
-          Tools your agents can use. Most run on this machine; a few connect to the provider.
-        </p>
+        <p className="mt-1.5 text-[12.5px] text-muted-foreground">Tools your agents can use.</p>
       </div>
       <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
         <SearchInput
@@ -1654,33 +1723,25 @@ export function ConnectorsBrowser() {
                   : ' The MCP registry has no match either.'}
             </p>
           ) : results.length > 0 ? (
-            // GUARDED ON A NON-EMPTY LIST. Under the registry filter `results`
-            // is empty by construction, so the unguarded branch drew a
-            // "Popular 0" heading with no cards directly above the registry
-            // band: a heading for a section that had been filtered away.
+            // EACH BAND GUARDED ON ITS OWN CONTENTS. A heading with nothing
+            // under it is a section the reader goes looking for and cannot
+            // find, and every filter here can empty one band while leaving the
+            // other full.
             <>
-              <div className="flex items-baseline gap-2 px-3 pb-0.5 pt-1">
-                <h3 className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-                  Popular
-                </h3>
-                <span className="text-[11px] tabular-nums text-muted-foreground/70">
-                  {results.length}
-                </span>
-              </div>
-              <div className="flex flex-col">
-                {results.map((def, i) => (
-                  <ConnectorCard
-                    key={def.slug}
-                    def={def}
-                    index={i}
-                    cost={shelf.costOf(def)}
-                    busy={shelf.busy(def.slug)}
-                    onOpen={setSelected}
-                    onAct={(d, c) => void shelf.act(d, c)}
-                    onConfigured={shelf.refresh}
-                  />
-                ))}
-              </div>
+              <ShelfBand
+                title="Popular"
+                defs={popularResults}
+                offset={0}
+                shelf={shelf}
+                onOpen={setSelected}
+              />
+              <ShelfBand
+                title="More connectors"
+                defs={moreResults}
+                offset={popularResults.length}
+                shelf={shelf}
+                onOpen={setSelected}
+              />
             </>
           ) : null}
           {/* Nothing to divide off when the band is empty and not loading: a divider
@@ -1697,7 +1758,7 @@ export function ConnectorsBrowser() {
                 it. The one-line note below carries the provenance, once. */}
                 <div className="flex items-baseline gap-2 px-3 pb-0.5 pt-1">
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-                    More connectors
+                    From the community
                   </h3>
                   <span className="text-[11px] tabular-nums text-muted-foreground/70">
                     {community.loading
@@ -1712,11 +1773,18 @@ export function ConnectorsBrowser() {
                           : communityResults.length}
                   </span>
                 </div>
-                <p className="px-3 pb-2 text-[11.5px] text-muted-foreground">
-                  {community.error
-                    ? 'Could not load the registry list. The ones above are unaffected.'
-                    : 'From the MCP registry. clawboo has not checked these.'}
-                </p>
+                {/* NO PROVENANCE PARAGRAPH. It used to read "clawboo has not
+                  checked these", which is true, and which nobody choosing a
+                  connector needs before they have chosen one. The warning did
+                  not go away: it moved to the consent step, where it is about
+                  to matter and cannot be scrolled past. An error still shows,
+                  because a list that failed to load is a fact about the screen
+                  in front of the reader. */}
+                {community.error && (
+                  <p className="px-3 pb-2 text-[11.5px] text-muted-foreground">
+                    Could not load this list. The ones above are unaffected.
+                  </p>
+                )}
                 {communityResults.length > 0 && (
                   <div className="flex flex-col">
                     {communityResults.map((def, i) => (
@@ -1763,12 +1831,8 @@ export function ConnectorsBrowser() {
             is the rule the provenance split turns on. */}
           {categoryFilter === 'all' && communityQuery === '' && (
             <div className="mt-6 flex flex-col items-center gap-1.5 border-t border-border pt-5">
-              <p className="m-0 text-center text-[12px] text-muted-foreground">
-                <span className="tabular-nums text-foreground">{counts.community}</span> more in the
-                MCP registry that clawboo has not checked.
-              </p>
               <Button size="sm" variant="secondary" onClick={() => setCategoryFilter('community')}>
-                Browse the registry
+                Show {counts.community} more
               </Button>
             </div>
           )}

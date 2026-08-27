@@ -79,7 +79,7 @@ describe('ConnectorsBrowser accessibility', () => {
       name: /Knowledge Graph Memory.*Open details/i,
     })
     const action = within(open.parentElement!).getByRole('button', {
-      name: /^turn on knowledge graph memory$/i,
+      name: /^connect knowledge graph memory$/i,
     })
     expect(open.contains(action)).toBe(false)
   })

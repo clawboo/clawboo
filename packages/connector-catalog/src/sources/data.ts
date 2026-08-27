@@ -34,6 +34,7 @@ export const DATA_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'supabase',
+    popular: true,
     displayName: 'Supabase',
     description: 'Query tables, inspect schema, and manage a Supabase project.',
     category: 'data',
@@ -64,6 +65,7 @@ export const DATA_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'airtable',
+    popular: true,
     displayName: 'Airtable',
     description: 'Read and write Airtable bases, tables, and records.',
     category: 'data',

@@ -194,13 +194,15 @@ describe('ConnectorsBrowser connect affordance', () => {
     expect(card.getAttribute('aria-label')).not.toMatch(/Active/i)
     expect(card.getAttribute('aria-label')).not.toMatch(/\bOn\b/)
     const tile = card.parentElement!
-    // THE VERB IS THE PRICE NOW. The row used to carry a "Ready" pill beside a
-    // "Turn on" button, which said the same thing twice; the pill went and the
-    // button kept the meaning. What must stay true is that a connector nobody
-    // has started is offered, not merely described.
-    expect(tile.textContent).toContain('Turn on')
+    // ONE VERB ON THE SHELF. The row once carried a "Ready" pill beside a
+    // "Turn on" button, saying the same thing twice; then the four costs each
+    // kept their own verb, which read as four kinds of thing in one list. What
+    // must stay true is that a connector nobody has started is OFFERED rather
+    // than described, and that the row never reports a status where an action
+    // belongs.
+    expect(tile.textContent).toContain('Connect')
     expect(tile.textContent).not.toContain('Not connected')
-    expect(tile.textContent).not.toContain('Add key')
+    expect(tile.textContent).not.toContain('Turn on')
   })
 
   it('puts the action on the CARD, so nothing needs the detail view to start', async () => {
@@ -209,11 +211,12 @@ describe('ConnectorsBrowser connect affordance', () => {
     render(<ConnectorsBrowser />)
     const card = await screen.findByRole('button', { name: /Notion.*Open details/i })
     const tile = card.parentElement!
-    // A DIFFERENT VERB for a different cost: "Add key" is a distinct promise
-    // from "Turn on", so the row still tells the reader what it will ask for
-    // without a pill repeating it.
-    expect(tile.textContent).toContain('Add key')
-    expect(tile.textContent).not.toContain('Turn on')
+    // THE SAME VERB for a costlier connector. Notion needs a key and Knowledge
+    // Graph Memory needs nothing, and both say Connect: the field appears on
+    // press, which is where it is an answer rather than a warning. The shelf
+    // sorts by cost, so the cheap ones are already above this one.
+    expect(tile.textContent).toContain('Connect')
+    expect(tile.textContent).not.toContain('Add key')
   })
 
   it('drops the risk fraction from the card', async () => {

@@ -15,6 +15,7 @@ import type { ConnectorDefinition } from '../types'
 export const DEV_CONNECTORS: ConnectorDefinition[] = [
   {
     slug: 'github',
+    popular: true,
     displayName: 'GitHub',
     description: 'Read and write issues, pull requests, and repository contents.',
     category: 'dev',
@@ -65,6 +66,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'linear',
+    popular: true,
     displayName: 'Linear',
     description: 'Read and update Linear issues, projects, and cycles.',
     category: 'issues',
@@ -91,6 +93,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'sentry',
+    popular: true,
     displayName: 'Sentry',
     description: 'Inspect errors, issues, and stack traces from Sentry.',
     category: 'observability',
@@ -147,6 +150,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'playwright',
+    popular: true,
     displayName: 'Playwright',
     description: 'Drive a real browser: navigate, click, fill forms, and read the page.',
     category: 'browser',
@@ -168,6 +172,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'chrome-devtools',
+    popular: true,
     displayName: 'Chrome DevTools',
     description: 'Inspect a running page: console, network, performance traces.',
     category: 'browser',
@@ -236,6 +241,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'cloudflare',
+    popular: true,
     displayName: 'Cloudflare',
     description: 'Inspect and manage Workers, KV, R2, and DNS on your Cloudflare account.',
     category: 'dev',

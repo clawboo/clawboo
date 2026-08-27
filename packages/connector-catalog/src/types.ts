@@ -172,6 +172,17 @@ export interface ConnectorUserArgument {
 }
 
 export interface ConnectorDefinition {
+  /**
+   * Whether this belongs in the shelf's first band.
+   *
+   * A NAME PEOPLE ARRIVE ALREADY KNOWING, rather than a ranking. The registry
+   * publishes no popularity data and clawboo measures none, so this is an
+   * editorial call: a reader scanning for "the thing I use at work" should find
+   * it without scrolling, and a capability like `memory` or `filesystem` is
+   * useful without being something anyone comes looking for by name.
+   */
+  popular?: boolean
+
   /** Stable kebab-case identity. The dialect key and the catalog's primary key. */
   slug: string
   displayName: string

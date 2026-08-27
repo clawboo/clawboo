@@ -217,15 +217,29 @@ function collect(): { curated: Mark[]; community: Mark[] } {
   return { curated: build(searchConnectors('')), community: build(COMMUNITY_SNAPSHOT) }
 }
 
+/**
+ * A JS string literal for an arbitrary value.
+ *
+ * JSON.stringify RATHER THAN a hand-rolled quote escape. The obvious version,
+ * `'${v.replace(/'/g, "\\'")}'`, escapes the quote and not the backslash, so a
+ * value ending in one closes the literal it was supposed to stay inside. Every
+ * value here happens to be quote-free and backslash-free today, which is
+ * exactly the condition that makes the bug invisible until simple-icons ships a
+ * title with an apostrophe in it.
+ */
+function literal(value: string): string {
+  return JSON.stringify(value)
+}
+
 function render(marks: Mark[]): string {
   return marks
     .map((m) => {
-      const key = /^[a-z][a-z0-9]*$/.test(m.slug) ? m.slug : `'${m.slug}'`
+      const key = /^[a-z][a-z0-9]*$/.test(m.slug) ? m.slug : literal(m.slug)
       return `  ${key}: {
-    title: '${m.title.replace(/'/g, "\\'")}',
-    hex: '${m.hex}',
-    darkHex: '${m.darkHex}',
-    d: '${m.d.replace(/'/g, "\\'")}',
+    title: ${literal(m.title)},
+    hex: ${literal(m.hex)},
+    darkHex: ${literal(m.darkHex)},
+    d: ${literal(m.d)},
   },`
     })
     .join('\n')

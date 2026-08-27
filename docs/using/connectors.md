@@ -32,13 +32,13 @@ Clawboo cannot register an OAuth app with Google, Atlassian or Salesforce, so it
 
 Understand the trade before you use it. Composio signs you in to each app and keeps that app's access and refresh tokens on its own servers. Clawboo holds only a token for Composio itself. Anything you connect through it is reachable by Composio, not only by your agents. The connector's detail view says this too, under Scopes.
 
-**Popular** is the set Clawboo has run and vouches for. **More connectors** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
+**Popular** and **More connectors** are the sets Clawboo has run and vouches for, split by how likely you are to recognise the name. **From the community** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
 
 A connected connector shows a green tick and nothing else. Everything else shows a button, and the button's verb is the price.
 
 | The button    | What happens                                                                                               |
 | ------------- | ---------------------------------------------------------------------------------------------------------- |
-| Turn on       | Nothing to set up. Five of the nineteen are like this                                                      |
+| Turn on       | Nothing to set up. Five of the twenty are like this                                                        |
 | Connect       | A tab opens at the provider's own consent screen, then it connects                                         |
 | Add key       | One field, one **Save and connect** button. The value goes to the encrypted vault, never to a settings row |
 | Choose folder | Pick from folders Clawboo verified exist, or type a path                                                   |
@@ -73,7 +73,7 @@ Discovery is pinned to the server that answered: its OAuth metadata must live on
 
 ## The long tail
 
-Below the curated twenty, behind its own divider, sit 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Unchecked**, or search for anything at all, and they appear alongside the curated results rather than instead of them. The two counts never merge into one total, because Clawboo has read twenty of these and none of the rest.
+The list reads top to bottom in three bands: **Popular** first, then **More connectors**, then **From the community**. That last band is 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Show 400 more** at the foot of the list, or type at least two characters in the search box, and they appear alongside the results above rather than instead of them. A single character brings them in too, but only when nothing else matches it. The counts never merge into one total, because Clawboo has run the first two bands and none of the third.
 
 The band shows sixty at a time, with the ones whose name Clawboo recognises first. **Show 60 more** walks the rest. The registry itself holds far more than 400: Clawboo commits a snapshot of the most recently updated servers that pass its runnability checks, so the number is a reviewed slice rather than the whole directory.
 
