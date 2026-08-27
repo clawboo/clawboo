@@ -18,10 +18,13 @@ already wired. Typing a name creates a Boo in the same team as the one you
 pulled from, already routed to it. Each Boo shows what it carries under its
 name, so the ring stops being a secret.
 
-Removing works the same way for everything. Select an edge and press Backspace:
-routes, skills and shares all come off, and a share carries an eight-second
-Undo. Edges that cannot be removed say why rather than offering a delete that
-silently does nothing.
+Removing works the same way for everything. Click an edge and press Remove
+Connection in its panel, or select it and press Backspace: routes, skills and
+shares all come off, and a share carries an eight-second Undo. That Backspace is edge-only and
+sits beside React Flow's own key handling rather than enabling it, because the
+built-in path removes an agent from the screen without telling the server. Edges
+that cannot be removed say why rather than offering a delete that silently does
+nothing.
 
 Spawning no longer rearranges the canvas. A node with no saved position looked
 identical to a stale layout blob, so every spawn discarded every hand-placed
@@ -41,3 +44,6 @@ handlers returned early when there was no OpenClaw Gateway, which is every
 native install, silently swallowing connect and delete. And the agent detail
 view's smaller graph carried its own narrower copy of the connection rules, so a
 gesture that worked on one canvas snapped back on the other with nothing said.
+That graph now shares the rule and scopes it: it draws one agent, so routing and
+sharing say there is no second endpoint instead of validating and doing
+nothing.

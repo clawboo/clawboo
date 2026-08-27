@@ -46,3 +46,26 @@ describe('connectionGrammar', () => {
     expect(isConnectionAllowed(undefined, undefined, false)).toBe(false)
   })
 })
+
+describe('connectionGrammar: the single-agent surface', () => {
+  // The agent detail view draws ONE Boo. Widening its validity to match the big
+  // canvas without widening its handler made a resource drop validate, land,
+  // and do nothing: exactly the silent no-op the shared grammar exists to stop.
+  it('refuses routing there, because there is no second agent to route to', () => {
+    expect(connectionRefusal('boo', 'boo', false, 'single-agent')).toMatch(/only one agent/i)
+    expect(isConnectionAllowed('boo', 'boo', false, 'single-agent')).toBe(false)
+  })
+
+  it('refuses sharing there, and points at the surface that can do it', () => {
+    expect(connectionRefusal('resource', 'boo', false, 'single-agent')).toMatch(/full graph/i)
+  })
+
+  it('still allows the one direction that surface CAN write', () => {
+    expect(connectionRefusal('skill', 'boo', false, 'single-agent')).toBeNull()
+  })
+
+  it('leaves the full canvas unnarrowed', () => {
+    expect(connectionRefusal('boo', 'boo', false, 'canvas')).toBeNull()
+    expect(connectionRefusal('resource', 'boo', false, 'canvas')).toBeNull()
+  })
+})

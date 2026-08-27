@@ -13,19 +13,17 @@
 // custom server, a team) is absent entirely rather than linked away.
 
 import {
+  byCost,
   connectorCost,
   COST_COPY,
+  isImmediate,
   searchConnectors,
+  type ConnectorCost,
   type ConnectorDefinition,
 } from '@clawboo/connector-catalog'
 
 import { SKILL_CATALOG } from '@/features/marketplace/catalog'
-import type { ThreadOption } from './ThreadPicker'
-
-/** Costs the canvas can pay on its own: one click, no field. */
-function canPayOnCanvas(cost: string): boolean {
-  return cost === 'ready' || cost === 'one-click'
-}
+import type { ThreadOption } from './threadPickerRows'
 
 export interface ThreadOptionsInput {
   /** The node the thread came from. Only a Boo can spawn today. */
@@ -35,7 +33,7 @@ export interface ThreadOptionsInput {
   /** Connector slugs already live, likewise. */
   liveConnectorSlugs: ReadonlySet<string>
   /** Prices a connector against live + configured state. */
-  costOf: (def: ConnectorDefinition) => string
+  costOf: (def: ConnectorDefinition) => ConnectorCost
 }
 
 /**
@@ -53,33 +51,38 @@ export function threadOptionsFor(input: ThreadOptionsInput): ThreadOption[] {
 
   const options: ThreadOption[] = []
 
-  for (const skill of SKILL_CATALOG) {
-    if (input.ownedSkillNames.has(skill.name)) continue
-    options.push({
-      id: `skill:${skill.id}`,
-      group: 'Skills',
-      label: skill.name,
-      hint: skill.description,
-      action: 'Add',
-    })
-  }
-
-  for (const def of searchConnectors('')) {
+  // CONNECTORS FIRST, and ordered by what they cost. The list used to open with
+  // thirty-two skills, so the first connector sat past a full screen of
+  // scrolling; and within connectors the first one visible was `github`, which
+  // is inert here because it needs a key. Leading with what can be finished in
+  // one click is the same ordering the shelf already uses.
+  for (const def of byCost(searchConnectors(''), input.costOf)) {
     if (input.liveConnectorSlugs.has(def.slug)) continue
     const cost = input.costOf(def)
-    const copy = COST_COPY[cost as keyof typeof COST_COPY]
+    const copy = COST_COPY[cost]
     options.push({
       id: `connector:${def.slug}`,
-      group: 'Connectors',
+      kind: 'connector',
       label: def.displayName,
       hint: def.description,
       slug: def.slug,
       action: copy?.action,
       // Listed but inert. The reason is the same sentence the shelf uses, so a
       // reader who has seen one surface recognises the other.
-      ...(canPayOnCanvas(cost)
+      ...(isImmediate(cost)
         ? {}
         : { disabledReason: `${copy?.action ?? 'Set up'} in the Connectors tab first` }),
+    })
+  }
+
+  for (const skill of SKILL_CATALOG) {
+    if (input.ownedSkillNames.has(skill.name)) continue
+    options.push({
+      id: `skill:${skill.id}`,
+      kind: 'skill',
+      label: skill.name,
+      hint: skill.description,
+      action: 'Add',
     })
   }
 

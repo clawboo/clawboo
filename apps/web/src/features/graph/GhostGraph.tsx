@@ -72,7 +72,7 @@ import { connectorBySlug } from '@clawboo/connector-catalog'
 import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
 import { connectConnector, signInConnector } from '@/features/marketplace/connectConnector'
 import { graphPhysics } from './graphPhysics'
-import { graphKeyAction } from './graphKeyAction'
+import { edgeKeyAction, graphKeyAction, isTypingTarget, readKeyEvent } from './graphKeyAction'
 import { EdgeMarkers } from './edges/EdgeMarkers'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import type {
@@ -763,6 +763,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // stamps `data-id` on each node element, which is the bridge back to the store
   // node. Listening here (rather than replacing the node's own onKeyDown) leaves
   // React Flow's selection + arrow-key node movement intact.
+  // A REF rather than a dependency: `handleDeleteEdge` closes over `edges`, so
+  // depending on it would re-create this wrapper handler on every graph change.
+  const handleDeleteEdgeRef = useRef<((edgeId: string) => Promise<void>) | null>(null)
+
   const onWrapperKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     const action = graphKeyAction(event)
     if (!action) return
@@ -963,7 +967,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // same connectionRefusal the validity check uses: one function, one dialect.
   // Prices a connector exactly as the Connectors shelf does, so a row offered
   // here and the same row two clicks away can never disagree.
-  const { costOf: connectorCostOf } = useConnectorCostState()
+  const { costOf: connectorCostOf, refresh: refreshConnectorCosts } = useConnectorCostState()
 
   /** Open a Boo's ring if it is closed. Idempotent, so callers need not check. */
   const expandBoo = useCallback((booNodeId: string) => {
@@ -1036,10 +1040,15 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         } else {
           await connectConnector(def.slug, def.displayName)
         }
+        // BOTH refreshes. `triggerRefresh` rebuilds the graph; this one re-reads
+        // live and configured state, which is what prices the picker. Without
+        // it, reopening the picker offered the connector that was just turned
+        // on, still labelled "Turn on".
+        refreshConnectorCosts()
         useGraphStore.getState().triggerRefresh()
       }
     },
-    [threadDrop, getNode, expandBoo, connectorCostOf],
+    [threadDrop, getNode, expandBoo, connectorCostOf, refreshConnectorCosts],
   )
 
   /** Create an agent at the drop point, already routed from the source. */
@@ -1121,6 +1130,34 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     [screenToFlowPosition],
   )
 
+  // EDGE REMOVAL FROM THE KEYBOARD, and edge-only.
+  //
+  // ON THE DOCUMENT, not the canvas wrapper. Clicking an SVG edge path leaves
+  // focus on <body>, so a React onKeyDown on the wrapper never fires for the one
+  // gesture this exists for; that is why React Flow's own key handling is
+  // document-level too. Registered only while an edge is actually selected, so
+  // an idle canvas carries no ambient listener.
+  //
+  // BUBBLE PHASE, per the house rule: a capture-phase key listener runs before
+  // the dismissable-layer stack and before every React onKeyDown, so two
+  // overlays would act on one keystroke.
+  //
+  // React Flow's own `deleteKeyCode` stays null and must: its Backspace path
+  // splices an AGENT out of the local store with no confirmation and no server
+  // call, so the agent is untouched and silently returns on reload. This path
+  // can only ever reach the selected edge.
+  useEffect(() => {
+    if (!selectedEdgeId) return
+    const onKey = (e: KeyboardEvent) => {
+      const action = edgeKeyAction({ ...readKeyEvent(e), typing: isTypingTarget(e.target) })
+      if (action !== 'remove') return
+      e.preventDefault()
+      void handleDeleteEdgeRef.current?.(selectedEdgeId)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selectedEdgeId])
+
   const onPaneClick = useCallback(() => {
     setSelectedEdgeId(null)
     setContextMenu(null)
@@ -1147,6 +1184,9 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     },
     [edges, getNode, setSelectedEdgeId],
   )
+  // Published for the wrapper key handler, which is declared earlier and must
+  // not close over `edges`.
+  handleDeleteEdgeRef.current = handleDeleteEdge
 
   // ── Derive selected edge for explain panel ───────────────────────────────────
   const selectedEdge = selectedEdgeId ? (edges.find((e) => e.id === selectedEdgeId) ?? null) : null

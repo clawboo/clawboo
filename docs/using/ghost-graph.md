@@ -42,7 +42,9 @@ Every Boo carries one port on its right edge. Pull a thread out of it and let go
 | On a skill or connector tile | Gives that agent the capability              |
 | On empty canvas              | Opens a picker of what the thread can end in |
 
-The picker lists only what that thread can legally end in, grouped into Agents, Skills and Connectors. Picking a row creates the thing where you dropped it, already connected. Typing a name under **Agents** creates a new Boo in the same team as the one you pulled from, already routed to it.
+The picker asks what kind of thing you want first: **Connectors**, **Skills**, or **New agent**. Pick one and it shows that list, ordered so the entries you can finish in a single click come first. The back arrow, Escape, or backspacing to an empty box all return to the choice.
+
+If you already know the name, just type. Searching from the first screen looks across every kind at once and skips the second step, and the last row offers to create an agent named after whatever you typed. A new Boo lands in the same team as the one you pulled from, already routed to it.
 
 A connector that needs a key or a folder is listed but greyed, with the reason. Those are set up in [Connectors](/using/connectors), because a credential is a form and not a canvas gesture.
 
@@ -50,7 +52,9 @@ Each Boo shows what it carries under its name: `3 skills · 2 connectors · 1 ro
 
 ### Taking something back
 
-Select any edge and press Backspace, or use **Delete** in the panel that opens when you click it. Routes, skills and shares all come off the same way. A share carries an eight-second Undo.
+Click an edge to open its panel, then **Remove Connection**. Or select an edge and press Backspace or Delete, which works anywhere except while you are typing in a field. Routes, skills and shares all come off the same way, and a share carries an eight-second Undo.
+
+Backspace removes the selected **edge** only. It never deletes an agent: that stays on the right-click menu, which asks the server rather than only removing the node from your screen.
 
 Some edges refuse, and say why: a runtime built-in came with the agent, and the model tile is part of the Boo rather than something added to it.
 

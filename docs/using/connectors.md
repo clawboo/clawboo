@@ -3,7 +3,7 @@ title: Connect an MCP server
 description: Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
 ---
 
-Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. Open **Connectors** in the sidebar, under Marketplace. It lists 19 popular MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
+Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. Open **Connectors** in the sidebar, under Marketplace. It lists 20 popular MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
 
 This is the one Marketplace tab that is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
 
@@ -23,6 +23,14 @@ This is the one Marketplace tab that is not purely a catalog. Deploying an agent
 The tile tells you which one you are looking at, and the detail pane's copy changes with it.
 
 ## The two lists
+
+### Reaching apps Clawboo cannot sign in to
+
+Clawboo cannot register an OAuth app with Google, Atlassian or Salesforce, so its own connectors stop where brokered sign-in begins: there is no Gmail, Slack, Drive or Jira entry, and there cannot be one.
+
+**Composio** is the way past that. It is a hosted broker with its own directory of apps, and its endpoint is an ordinary MCP server that signs you in the same way Linear and Sentry do. Connect it once and the apps you link inside Composio become reachable from Clawboo.
+
+Understand the trade before you use it. Composio signs you in to each app and keeps that app's access and refresh tokens on its own servers. Clawboo holds only a token for Composio itself. Anything you connect through it is reachable by Composio, not only by your agents. The connector's detail view says this too, under Scopes.
 
 **Popular** is the set Clawboo has run and vouches for. **More connectors** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
 
@@ -65,7 +73,9 @@ Discovery is pinned to the server that answered: its OAuth metadata must live on
 
 ## The long tail
 
-Below the curated nineteen, behind its own divider, sit 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Unchecked**, or search for something the curated set does not have, and they appear. The two counts never merge into one total, because Clawboo has read nineteen of these and none of the rest.
+Below the curated twenty, behind its own divider, sit 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Unchecked**, or search for anything at all, and they appear alongside the curated results rather than instead of them. The two counts never merge into one total, because Clawboo has read twenty of these and none of the rest.
+
+The band shows sixty at a time, with the ones whose name Clawboo recognises first. **Show 60 more** walks the rest. The registry itself holds far more than 400: Clawboo commits a snapshot of the most recently updated servers that pass its runnability checks, so the number is a reviewed slice rather than the whole directory.
 
 They are a committed snapshot, not a live fetch, so the directory still works with no network and does not change under you between releases. Refreshing it is a deliberate act: someone runs the ingest, reads the diff, and ships it.
 

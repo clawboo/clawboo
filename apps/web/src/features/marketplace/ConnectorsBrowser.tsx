@@ -20,6 +20,7 @@ import {
   COST_COPY,
   CONNECT_REFUSAL_COPY,
   connectorBySlug,
+  connectorCounts,
   cleanPastedSecret,
   isImmediate,
   needsArgumentOnly,
@@ -40,8 +41,9 @@ import { useConnectorShelf } from './useConnectorShelf'
 import { searchCommunity, useCommunityConnectors } from './useCommunityConnectors'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
-import { ConnectorMark } from '@/features/connectors/ConnectorMark'
+import { ConnectorMark, hasBrandMark } from '@/features/connectors/ConnectorMark'
 import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
+import { wantsCommunityBand } from './communityBand'
 import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import {
@@ -87,13 +89,17 @@ const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
  * first three words tell the reader what is missing.
  */
 /**
- * How many community entries to put on screen at once.
+ * How many community entries a page shows.
  *
- * A render bound, not a search bound: the divider reports the full match count,
- * so narrowing the list is a job for the search box rather than a number the
- * reader has to guess at.
+ * A PAGE, not a ceiling. This was a hard cap with no way past it, which made
+ * the registry band a permanent window onto the same sixty entries: the file is
+ * ordered by the publisher's reverse-DNS name, so the visible sixty were every
+ * publisher that sorts before `io.github`, and the three hundred and twenty
+ * seven entries published under it could not be reached by scrolling at all.
+ * The count beside the heading now reads "shown of found", and the button under
+ * the last card asks for the next page.
  */
-const COMMUNITY_RENDER_CAP = 60
+const COMMUNITY_PAGE_SIZE = 60
 
 const CONNECT_REFUSAL_HEADING: Readonly<Record<ConnectRefusal, string>> = Object.freeze({
   'community-unsandboxed': 'Nobody has read this one',
@@ -1468,24 +1474,54 @@ export function ConnectorsBrowser() {
     return shelf.ordered
   }, [categoryFilter, shelf])
 
+  // Constant for the life of the build, so it is read once rather than memoised.
+  const counts = connectorCounts()
+
+  // Reset on every change to the question being asked, so a narrowed search
+  // never inherits a deep page from the previous one.
+  const [communityPage, setCommunityPage] = useState(1)
+  useEffect(() => setCommunityPage(1), [searchQuery, categoryFilter])
+
+  const communityQuery = searchQuery.trim()
   // THE LONG TAIL, and it stays behind a divider with its own count forever.
-  // Pulled in when the operator asks for it by name (`Not reviewed` filter) or
-  // when a curated search misses, never on first paint: it is roughly 220 KB and
-  // worth nothing until one of those two things happens.
-  const wantsCommunity =
-    categoryFilter === 'community' || (searchQuery.trim() !== '' && results.length === 0)
+  // Never on first paint: it is roughly 220 KB and worth nothing until the
+  // operator asks a question it could answer.
+  //
+  // A CURATED HIT USED TO SUPPRESS IT ENTIRELY. The condition was `results
+  // .length === 0`, so one vouched-for match hid every registry match behind
+  // it: searching "search" matches Exa on a tag and buried sixty-seven registry
+  // entries, "file" buried twenty. Search is the only way into this band, and
+  // it failed silently on exactly the generic words someone browsing types.
+  //
+  // The single-character path is kept deliberately. Nine one-character queries
+  // return no curated match at all, and each of them opens the band today; a
+  // flat two-character minimum would have replaced those nine working searches
+  // with an empty state while the registry held matches.
+  const wantsCommunity = wantsCommunityBand({
+    categoryFilter,
+    query: communityQuery,
+    curatedHits: results.length,
+  })
   const community = useCommunityConnectors(wantsCommunity)
   // The FULL match set, before the render cap. Kept so the divider can say how
   // many were found rather than how many fitted: "60 from the MCP registry" next
   // to a snapshot of 230 understates the directory to exactly the person who
   // opened this band to find out how big it is.
-  const communityMatches = useMemo(
-    () => (wantsCommunity ? searchCommunity(community.entries, searchQuery) : []),
-    [wantsCommunity, community.entries, searchQuery],
-  )
+  const communityMatches = useMemo(() => {
+    if (!wantsCommunity) return []
+    const found = searchCommunity(community.entries, communityQuery)
+    // THE ONES SOMEONE RECOGNISES, FIRST. The snapshot is written in publisher
+    // order, which is meaningless to a reader and put all thirty-three entries
+    // carrying a real logo behind the first page bar five. Sorting on "do we
+    // have a mark for this" is a proxy for "is this a service you have heard
+    // of", and it is the only signal available: the registry publishes no
+    // popularity data of any kind. Sort is stable, so publisher order still
+    // decides within each group.
+    return [...found].sort((a, b) => Number(hasBrandMark(b.slug)) - Number(hasBrandMark(a.slug)))
+  }, [wantsCommunity, community.entries, communityQuery])
   const communityResults = useMemo(
-    () => communityMatches.slice(0, COMMUNITY_RENDER_CAP),
-    [wantsCommunity, community.entries, searchQuery],
+    () => communityMatches.slice(0, COMMUNITY_PAGE_SIZE * communityPage),
+    [communityMatches, communityPage],
   )
 
   const categoryOptions: PillOption[] = useMemo(() => {
@@ -1617,7 +1653,11 @@ export function ConnectorsBrowser() {
                   ? ''
                   : ' The MCP registry has no match either.'}
             </p>
-          ) : (
+          ) : results.length > 0 ? (
+            // GUARDED ON A NON-EMPTY LIST. Under the registry filter `results`
+            // is empty by construction, so the unguarded branch drew a
+            // "Popular 0" heading with no cards directly above the registry
+            // band: a heading for a section that had been filtered away.
             <>
               <div className="flex items-baseline gap-2 px-3 pb-0.5 pt-1">
                 <h3 className="text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
@@ -1642,7 +1682,7 @@ export function ConnectorsBrowser() {
                 ))}
               </div>
             </>
-          )}
+          ) : null}
           {/* Nothing to divide off when the band is empty and not loading: a divider
             announcing "0 from the MCP registry" is an inventory statement, and the
             miss has already been reported above. An error still shows, because
@@ -1696,8 +1736,42 @@ export function ConnectorsBrowser() {
                     ))}
                   </div>
                 )}
+                {/* THE WAY PAST SIXTY. Everything here is already in memory, so
+                  this costs no request and no import; it exists because a list
+                  that stops without saying so reads as the whole directory. */}
+                {communityMatches.length > communityResults.length && (
+                  <div className="mt-3 flex justify-center">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setCommunityPage((n) => n + 1)}
+                    >
+                      {communityMatches.length - communityResults.length > COMMUNITY_PAGE_SIZE
+                        ? `Show ${COMMUNITY_PAGE_SIZE} more`
+                        : `Show the last ${communityMatches.length - communityResults.length}`}
+                    </Button>
+                  </div>
+                )}
               </section>
             )}
+          {/* THE SECOND POPULATION, NAMED WHERE IT IS MISSED. On the default
+            view the registry band does not render at all, which is correct (it
+            is a lazy 220 KB) but left the shelf looking like the whole of
+            clawboo's connector support. This costs nothing: the count is a
+            constant on the static path, and the button is what loads the band.
+            The two numbers stay adjacent and separate rather than summed, which
+            is the rule the provenance split turns on. */}
+          {categoryFilter === 'all' && communityQuery === '' && (
+            <div className="mt-6 flex flex-col items-center gap-1.5 border-t border-border pt-5">
+              <p className="m-0 text-center text-[12px] text-muted-foreground">
+                <span className="tabular-nums text-foreground">{counts.community}</span> more in the
+                MCP registry that clawboo has not checked.
+              </p>
+              <Button size="sm" variant="secondary" onClick={() => setCategoryFilter('community')}>
+                Browse the registry
+              </Button>
+            </div>
+          )}
           <AddCustomConnector onAdded={refreshCustom} />
         </div>
       </div>

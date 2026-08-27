@@ -544,15 +544,20 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
     [nodes],
   )
 
-  // THE SHARED GRAMMAR, not a second narrower copy. This used to allow only
-  // skill→boo while the Ghost Graph also allowed resource→boo and boo→boo, so
-  // a gesture that worked on one canvas snapped back on the other with nothing
-  // said. See features/graph/connectionGrammar.
+  // THE SHARED GRAMMAR, scoped rather than re-implemented. This panel draws one
+  // Boo, so routing and sharing have no second endpoint here and the grammar
+  // says so in its own words. It used to carry a private narrower copy that
+  // returned a bare boolean, which is how the two surfaces drifted silently.
   const isValidConnection: IsValidConnection = useCallback(
     (connection) => {
       const source = nodes.find((n) => n.id === connection.source)
       const target = nodes.find((n) => n.id === connection.target)
-      return isConnectionAllowed(source?.type, target?.type, source?.id === target?.id)
+      return isConnectionAllowed(
+        source?.type,
+        target?.type,
+        source?.id === target?.id,
+        'single-agent',
+      )
     },
     [nodes],
   )
