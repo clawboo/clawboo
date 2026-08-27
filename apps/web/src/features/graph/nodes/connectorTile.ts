@@ -38,3 +38,45 @@ export function isRemoteConnector(slug: string | null): boolean {
   // session closed while a child process on the machine was being killed.
   return connectorBySlug(slug)?.launch.transport === 'streamable-http'
 }
+
+/**
+ * The slug whose LOGO this tile should draw, or null.
+ *
+ * DELIBERATELY MORE PERMISSIVE THAN `connectorSlugFromId`, and the difference is
+ * the whole reason this is a second function rather than a flag on the first.
+ * That one answers "which connector do I send a disconnect at", where a wrong
+ * answer acts on something the operator did not choose, so it refuses anything
+ * clawboo did not dial itself. This one answers "whose logo is this", where the
+ * worst case is a recognisable picture on a tile that already carries the name
+ * underneath it.
+ *
+ * That extra reach is the point: a runtime attaches its own MCP servers, and
+ * `conn:codex:codex:mcp:github` is GitHub whether or not clawboo dialled it.
+ * Refusing to draw the logo there would leave the one tile a reader could have
+ * identified at a glance looking like every anonymous one.
+ *
+ * THE CATALOG IS THE FILTER. A candidate has to resolve to a committed entry
+ * that owns a brand mark, so `tools` and `clawboo-memory` fall through to the
+ * service glyph rather than matching something they are not.
+ */
+export function connectorBrandSlug(
+  connectorId: string | null | undefined,
+  hasMark: (slug: string) => boolean,
+  fullName?: string | null,
+): string | null {
+  const owned = connectorSlugFromId(connectorId)
+  if (owned && hasMark(owned)) return owned
+
+  const candidates = [connectorId?.split(':').pop(), fullName]
+    .map((c) => c?.trim().toLowerCase())
+    .filter((c): c is string => Boolean(c))
+
+  for (const candidate of candidates) {
+    if (hasMark(candidate)) return candidate
+    // A runtime routinely prefixes its own servers. Stripping it is safe here
+    // because the catalog still has to recognise what is left.
+    const stripped = candidate.replace(/^clawboo-/, '')
+    if (stripped !== candidate && hasMark(stripped)) return stripped
+  }
+  return null
+}

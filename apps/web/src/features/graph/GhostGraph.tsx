@@ -64,6 +64,7 @@ import { installSkillForAgent } from './operations/installSkill'
 import { edgeRemovalRefusal, removeEdge } from './operations/removeEdge'
 import { hasRoutingTo, withRoutingAppended } from './operations/routingLine'
 import { spawnAgent } from './operations/spawnNode'
+import { ConnectorMarkStyles } from '@/features/connectors/ConnectorMark'
 import { ThreadPicker, type ThreadOption } from './ThreadPicker'
 import { threadOptionsFor } from './threadOptions'
 import { connectorSlugFromId } from './nodes/connectorTile'
@@ -1280,6 +1281,11 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           DependencyEdge's `markerEnd="url(#dependency-arrow)"`).
           Mounted once — marker IDs are global to the document. */}
       <EdgeMarkers />
+
+      {/* Brand colours for connector orbitals. Mounted at the canvas rather
+          than per tile: the declarations are identical, and forty of them would
+          be forty style nodes fighting over the same custom properties. */}
+      <ConnectorMarkStyles />
 
       {/* Team halos layer — behind ReactFlow, matches pane pan/zoom.
           Only renders in the global Atlas scope; team-scoped instances

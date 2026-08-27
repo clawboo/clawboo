@@ -36,3 +36,18 @@ call anyway is how an operator ends up connected to something they did not pick.
 Thirty-two of the forty-one carry their real logo. The nine that do not, Slack
 and Salesforce among them, have no mark in the public-domain icon set, so they
 draw the same monogram every unbranded entry does.
+
+Connector orbitals draw the connector's own logo. A tile reading Gmail under a
+generic cable glyph is one the eye has to read; the same tile under Gmail's mark
+is one it recognises, which is the entire job of an orbital at that size. The
+violet disc stays, because on this canvas colour says what KIND of thing a tile
+is, and only the glyph changes.
+
+Which logo to draw is a separate question from which connector to act on, so it
+is a separate function. The acting one refuses anything clawboo did not dial
+itself, because a wrong answer there disconnects something the operator did not
+choose. The drawing one reaches further on purpose: a server a runtime attached
+is still GitHub, and refusing to draw its mark would leave the one tile a reader
+could identify at a glance looking like every anonymous one. The catalog is the
+filter either way, so a server called `tools` still falls through to its service
+glyph rather than matching something it is not.

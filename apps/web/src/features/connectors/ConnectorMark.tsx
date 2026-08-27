@@ -47,6 +47,55 @@ function markFor(slug: string): BrandMarkData | undefined {
 }
 
 /**
+ * This connector's brand mark, or undefined.
+ *
+ * Exported for surfaces that own their own frame. The shelf wants the whole
+ * tile; a graph orbital already has a disc and a ring and needs only the path
+ * to put inside them.
+ */
+export function brandMarkFor(slug: string): BrandMarkData | undefined {
+  return markFor(slug)
+}
+
+/** The CSS custom property carrying a slug's theme-correct brand colour. */
+export function brandColorVar(slug: string): string {
+  return `var(${cssVarFor(slug)})`
+}
+
+/**
+ * Just the logo, at the size asked for, in the current text colour.
+ *
+ * NO TILE. `ConnectorMark` draws a rounded square with a tinted ground, which
+ * is right in a list and wrong inside something that already has a shape. The
+ * caller sets `color`, so one mark can be violet on a canvas and full brand
+ * colour in a row without either of them knowing about the other.
+ */
+export const ConnectorGlyph = memo(function ConnectorGlyph({
+  slug,
+  title,
+  size = 20,
+}: {
+  slug: string
+  title: string
+  size?: number
+}) {
+  const brand = markFor(slug)
+  if (!brand) return null
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="currentColor"
+      role="img"
+      aria-label={`${title} logo`}
+    >
+      <path d={brand.d} />
+    </svg>
+  )
+})
+
+/**
  * Whether this connector draws a real logo rather than a glyph or a monogram.
  *
  * Exported because ordering a list by it is the closest thing to a popularity

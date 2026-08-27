@@ -19,7 +19,8 @@ import { useFloatingMotion } from '../useFloatingMotion'
 import { usePeacockTransition } from '../usePeacockTransition'
 import type { ResourceNodeData, ConnectorServiceKind } from '../types'
 import { capabilityBadge, capabilityReason } from './capabilityBadge'
-import { connectorSlugFromId, isRemoteConnector } from './connectorTile'
+import { connectorBrandSlug, connectorSlugFromId, isRemoteConnector } from './connectorTile'
+import { brandColorVar, ConnectorGlyph, hasBrandMark } from '@/features/connectors/ConnectorMark'
 
 // ─── ResourceNode — the MCP-connector tile ────────────────────────────────────
 //
@@ -97,6 +98,16 @@ export const ResourceNode = memo(function ResourceNode({
   const off = enabled === false
   const greyed = unavailable || off
   const Icon = SERVICE_ICON[serviceKind ?? 'generic'] ?? Cable
+  // THE REAL LOGO WHEN THERE IS ONE. A tile reading "Gmail" under a generic
+  // cable is a tile the eye has to read; the same tile under Gmail's own mark
+  // is one it recognises, which is the whole job of an orbital at this size.
+  //
+  // TYPE COLOUR SURVIVES THE SWAP. Violet still says "this is a connector",
+  // exactly as mint says skill and slate says built-in, so the accent is not
+  // handed over to the brand. Only the glyph changes, and only where a
+  // committed mark exists: everything else keeps its service glyph rather than
+  // falling back to a monogram, which would be a downgrade.
+  const brandSlug = connectorBrandSlug(connectorId, hasBrandMark, fullName ?? name)
   // Float with the SKILL motion profile: connector tiles are visual peers of
   // skill tiles in the same orbital fan, so a static tile next to gently
   // bobbing siblings would read as frozen/broken, not calm.
@@ -238,7 +249,19 @@ export const ResourceNode = memo(function ResourceNode({
                 boxShadow: `0 2px 8px color-mix(in srgb, ${VIOLET} 20%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.07)`,
               }}
             >
-              <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
+              {brandSlug ? (
+                // THE GLYPH TAKES THE BRAND, THE DISC KEEPS THE TYPE. The model
+                // orbital already sets this precedent: it is tinted by whoever
+                // makes the model while staying an orbital. Colouring a logo
+                // violet would make Gmail and Jira and Slack indistinguishable
+                // at the size this renders, which is the opposite of the reason
+                // to draw a logo at all.
+                <span style={{ display: 'flex', color: brandColorVar(brandSlug) }}>
+                  <ConnectorGlyph slug={brandSlug} title={name} size={20} />
+                </span>
+              ) : (
+                <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
+              )}
             </motion.div>
 
             {/* ONE badge, top-right of the disc. Suppressed while collapsed: a
