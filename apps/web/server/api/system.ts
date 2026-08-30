@@ -12,7 +12,7 @@ import {
   probeGatewayPort,
 } from '../lib/processManager'
 import { findListenerPid } from '@clawboo/process-lookup'
-import { getModelsFromCli } from '../lib/modelCache'
+import { getContextWindowFromCli, getModelsFromCli } from '../lib/modelCache'
 import { isWindows, resolveShimName } from '../lib/platform'
 import {
   detectOauthProfileProviders,
@@ -1097,6 +1097,23 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
 
     if (typeof modelField === 'string' && modelField) {
       modelObj['primary'] = modelField
+      // THE BUDGET IS WRITTEN WITH THE MODEL, never separately.
+      //
+      // A runtime that resolves the wrong context budget does not fail loudly.
+      // It starts compacting early, and compaction cannot shrink tool
+      // definitions, so it frees nothing and the turn dies with no output. That
+      // is what happened on a real install: a model with a 204,800-token window
+      // was given a budget of 32,768 (its max OUTPUT tokens), and four
+      // consecutive turns died without ever calling the model.
+      //
+      // The number written here is NOT inferred. It is the runtime's own
+      // catalog answer for the exact model key being written on the line above,
+      // which is why it is safe to write into the runtime's own knob. When the
+      // catalog has no entry, nothing is written and the runtime keeps whatever
+      // it resolved for itself: a guess here would be believed, and a wrong
+      // budget is the failure being prevented.
+      const window = await getContextWindowFromCli(modelField)
+      if (window !== null) defaults['contextTokens'] = window
     }
     if (Array.isArray(fallbacks)) {
       modelObj['fallbacks'] = fallbacks.filter((f): f is string => typeof f === 'string')
