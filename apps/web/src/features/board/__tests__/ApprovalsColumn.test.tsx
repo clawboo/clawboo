@@ -48,7 +48,7 @@ describe('ApprovalsColumn', () => {
     )
     render(<ApprovalsColumn teamFilter="all" />)
     expect(await screen.findByTestId('board-column-approvals', {}, T)).toBeInTheDocument()
-    expect(screen.getByText('delete_path')).toBeInTheDocument()
+    expect(screen.getByText(/wants to delete a file/i)).toBeInTheDocument()
     expect(screen.queryByTestId('board-approvals-rail')).not.toBeInTheDocument()
   })
 
@@ -63,8 +63,8 @@ describe('ApprovalsColumn', () => {
       }),
     )
     render(<ApprovalsColumn teamFilter="all" />)
-    await screen.findByText('delete_path', {}, T)
-    await userEvent.click(screen.getByRole('button', { name: /allow once/i }))
+    await screen.findByText(/wants to delete a file/i, {}, T)
+    await userEvent.click(screen.getByRole('button', { name: /delete it/i }))
     await waitFor(() => expect(resolved.id).toBe('tc-1'), T)
     expect(resolved.decision).toBe('allow_once')
   })

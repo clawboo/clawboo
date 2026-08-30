@@ -24,6 +24,8 @@ import { randomUUID } from 'node:crypto'
 import type { AgentConfig, NativeEvent } from '@clawboo/adapter-native'
 import { DEFAULT_MAX_TURNS } from '@clawboo/adapter-native'
 import { compactToolOutput } from '@clawboo/compaction'
+
+import { boundToolOutput } from './boundToolOutput'
 import type { ClawbooDb } from '@clawboo/db'
 import type { StartOpts, Usage } from '@clawboo/executor'
 import { dateStamp } from '@clawboo/executor/tiers'
@@ -137,7 +139,7 @@ export class Conversation {
   }
 
   async run(): Promise<void> {
-    const { config, client, opts, ctx, emit } = this.deps
+    const { config, client, opts, ctx, emit, db } = this.deps
     const uuid = this.deps.uuid ?? randomUUID
     this.sessionId = `native-${uuid()}`
     emit({ type: 'init', sessionId: this.sessionId, model: client.activeModel() })
@@ -296,12 +298,22 @@ export class Conversation {
         results.push({
           type: 'tool-result',
           id: c.id,
-          // Compact the output BEFORE it enters the model transcript (re-sent every
-          // turn) so a large tool result — a whole file dump — can't inflate the prompt
-          // past the context window. Pass-through-safe + failure-preserving: small
-          // outputs and error lines are returned unchanged. The obs/UI emit above keeps
-          // the FULL output; only the model context is compacted.
-          output: compactToolOutput(c.name, outcome.output).text,
+          // Compact, then BOUND, before this enters the model transcript, which
+          // is re-sent every turn.
+          //
+          // Compaction alone is a noise reducer with no ceiling: it dedups and
+          // elides, so a large but non-repetitive result passes through at close
+          // to full size. That is why the bound is here too, and why it is here
+          // SPECIFICALLY. A local tool never crosses the MCP seam where every
+          // other clawboo tool result is bounded (packages/mcp shared.ts), so
+          // this is the one path that would otherwise stay unlimited: today
+          // `list_files` on a directory with a hundred thousand entries returns
+          // one line per entry, straight into the prompt.
+          //
+          // Bounding is lossless by reference. The full bytes are stored first
+          // and the view carries the handle plus the literal call that reads the
+          // rest, and the obs/UI emit above already kept the whole thing.
+          output: boundToolOutput(db, c.name, compactToolOutput(c.name, outcome.output).text),
           isError: outcome.isError,
         })
       }
