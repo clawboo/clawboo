@@ -41,7 +41,7 @@ export function ToolApprovalQueue({ showEmpty = false }: { showEmpty?: boolean }
     <div data-testid="tool-approval-queue" className="flex flex-col gap-2">
       <div className={KICKER}>Approvals · {approvals.length}</div>
       {approvals.map((a) => (
-        <ToolApprovalCard key={a.id} approval={a} onResolve={resolveTool} showAgentName />
+        <ToolApprovalCard key={a.id} approval={a} onResolve={resolveTool} />
       ))}
     </div>
   )

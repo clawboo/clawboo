@@ -30,6 +30,28 @@ export interface ToolApproval {
    * SQLite has no boolean: the API sends the integer column through as-is.
    */
   neverRemember?: number | boolean | null
+  /**
+   * The grant this call was attributed to, when the gate found one.
+   *
+   * Load-bearing for the card, not just for audit: `resolveApproval` refuses to
+   * mint a standing rule without it, and it is NULL for every brokered app call
+   * because the grant gate does not govern a broker meta-tool. Offering "Always"
+   * there would promise something the server then declines to do.
+   *
+   * Sent by the API today (the route spreads the whole row); it was simply never
+   * declared here.
+   */
+  grantId?: string | null
+  /**
+   * The SERVER's reading of the tool, and the tool's own description.
+   *
+   * These are what let the card say something useful about a connector nobody
+   * hard-coded knowledge for, which on a general platform is most of them. Only
+   * the server may state that a call is read-only, so this is where that claim
+   * comes from.
+   */
+  toolClass?: 'read' | 'write' | 'destructive' | null
+  toolSummary?: string | null
 }
 
 export type ToolDecision = 'allow_once' | 'allow_always' | 'deny'
@@ -39,8 +61,14 @@ export interface ApprovalScope {
   agentId?: string
   /** Team scope: approvals for any agent in this team. `null`/undefined = no team filter. */
   teamId?: string | null
-  /** Also include approvals not attributable to any agent (`agentId === null`). The Board
-   *  wants these (they are still pending work); a chat scoped to an agent/team does not. */
+  /**
+   * Also include approvals not attributable to any agent (`agentId === null`).
+   *
+   * The Board wants these, and so does an open chat: a run that cannot be
+   * attributed still blocks on the answer, and the person able to give it is
+   * whoever is on screen. Left out, the gate is invisible everywhere the user
+   * actually is.
+   */
   includeUnscoped?: boolean
 }
 
@@ -125,7 +153,16 @@ export function usePendingApprovals(scope: ApprovalScope): {
 
   const matches = useCallback(
     (agentId: string | null): boolean => {
-      if (scope.agentId) return agentId === scope.agentId
+      // AN UNATTRIBUTABLE APPROVAL BELONGS TO WHOEVER IS LOOKING. A run with no
+      // agent identity still raises real gates: an OpenClaw session reaches the
+      // tools server over one process-wide URL that cannot carry an agent, so
+      // its approvals arrive with `agentId: null`. Excluding them here meant the
+      // chat that was WAITING on the answer was the one place it never appeared,
+      // and the call sat until it timed out while the agent reported the stall
+      // as a service outage.
+      if (scope.agentId) {
+        return agentId === scope.agentId || (!!scope.includeUnscoped && agentId == null)
+      }
       if (teamAgentIds) {
         return (
           (agentId != null && teamAgentIds.has(agentId)) ||

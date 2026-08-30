@@ -10,7 +10,9 @@ import { usePendingApprovals, type ToolApproval } from './usePendingApprovals'
 // ─── InlineApprovalTray ────────────────────────────────────────────────────
 // Renders pending approvals (BOTH OpenClaw exec AND MCP tool / delegation) right
 // above the composer for the current chat — the Claude/ChatGPT pattern where the
-// gate appears where it was asked. Scoped to this agent (1:1) or team (group).
+// gate appears where it was asked. Scoped to this agent (1:1) or team (group),
+// PLUS anything blocked that names no agent at all: a run whose transport cannot
+// carry an identity still waits on a human, and the chat is where that human is.
 // Returns null when empty — zero DOM footprint.
 
 const MAX_INLINE_CARDS = 3
@@ -26,11 +28,12 @@ type TrayItem =
 
 export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps) {
   const showAgentName = Boolean(teamId)
-  // Exec + tool/delegation approvals scoped to this chat. A tool approval not
-  // attributable to any agent (agentId null) does not belong to a specific chat, so
-  // it stays out of the tray (it still shows on the Board's "Needs approval" column).
+  // Exec + tool/delegation approvals for this chat, and the unattributable ones.
   const { exec, tool, total, resolveTool } = usePendingApprovals(
-    agentId ? { agentId } : teamId ? { teamId } : {},
+    // UNATTRIBUTED APPROVALS COME TOO. A run with no agent identity still blocks
+    // on an answer, and the only person who can give it is whoever has a chat
+    // open. Excluding them put the gate everywhere except where it was needed.
+    agentId ? { agentId, includeUnscoped: true } : teamId ? { teamId, includeUnscoped: true } : {},
   )
 
   const items = useMemo<TrayItem[]>(() => {
@@ -64,13 +67,7 @@ export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps)
           it.kind === 'exec' ? (
             <InlineApprovalCard key={it.key} approval={it.exec} showAgentName={showAgentName} />
           ) : (
-            <ToolApprovalCard
-              key={it.key}
-              approval={it.tool}
-              onResolve={resolveTool}
-              showAgentName={showAgentName}
-              compact
-            />
+            <ToolApprovalCard key={it.key} approval={it.tool} onResolve={resolveTool} compact />
           ),
         )}
       </AnimatePresence>
