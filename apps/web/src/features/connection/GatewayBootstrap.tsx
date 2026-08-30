@@ -68,6 +68,7 @@ import { apiFetch, consumeApiSSE, pushAgentSync, listAgents } from '@clawboo/con
 import { fetchAgentModelMap } from '@/lib/agentModelMap'
 import type { AgentState } from '@/stores/fleet'
 import type { SystemInfo } from '@/stores/system'
+import { recallSession } from '@/features/chat/currentSession'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -386,7 +387,11 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
       id: a.id,
       name: a.identity?.name ?? a.name ?? a.id,
       status: 'idle' as const,
-      sessionKey: `agent:${a.id}:${mainKey}`,
+      // The session the user was last on WINS over the agent's main session.
+      // Boot used to hard-code main, which quietly undid every `/reset`: the
+      // messages were stored under the new key and the chat reopened on the old
+      // one, so the reply read as vanished.
+      sessionKey: recallSession(a.id) ?? `agent:${a.id}:${mainKey}`,
       model: agentModels.get(a.id) ?? null,
       createdAt: null,
       streamingText: null,

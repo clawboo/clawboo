@@ -3,6 +3,7 @@
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { apiFetch } from '@clawboo/control-client'
+import { rememberSession } from './currentSession'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -81,6 +82,11 @@ export async function sendChatMessage({
       const newSessionKey = result?.key
 
       if (newSessionKey) {
+        // REMEMBERED, not just adopted. The fleet store is in-memory, and boot
+        // rebuilds every agent from the Gateway on the main session, so without
+        // this a reload silently returns the user to the conversation they just
+        // reset away from and their reply looks lost.
+        rememberSession(agentId, newSessionKey)
         useChatStore.getState().clearTranscript(sessionKey)
 
         useFleetStore.setState((state) => ({
