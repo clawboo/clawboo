@@ -13,6 +13,7 @@ import {
   approvalHistory,
   costRecords,
   getSetting,
+  setSetting,
   settings,
   teams,
   type ClawbooDb,
@@ -116,6 +117,34 @@ const AUTH_RETRY_FLOOR_MS = 120_000
 // invariant. These are added to the Gateway's `tools.deny` on connect so the
 // enforcement is at the runtime level, not just a prompt the model may ignore.
 const SUBAGENT_SPAWN_TOOLS = ['sessions_spawn', 'sessions_yield'] as const
+
+// Extra tool ids the OPERATOR has chosen to deny, as a JSON array of strings.
+//
+// WHOSE OPINION THIS IS. Denying a tool for prompt size was tried with a
+// clawboo-authored list and reverted: the four builtins on it cost 11,256 bytes a
+// turn, which is a real number and still not a reason for clawboo to decide that
+// an agent may not generate an image. clawboo is a general platform, so which
+// capabilities matter is the operator's call on their install, not a constant in
+// this file. The invariant above is the one exception, and it is a team-model
+// rule rather than a size decision.
+//
+// Empty by default, so nothing is denied that the operator did not name.
+const SETTING_OPERATOR_DENY = 'agent-source:openclaw:operatorDeny'
+
+// The deny ids clawboo itself last wrote.
+//
+// WHY A RECORD IS NEEDED. `tools.deny` is a flat array of ids with no provenance,
+// and the patch below re-asserts the union with whatever is already there, so
+// without this an id clawboo added could never be taken away again: dropping it
+// from the constant would leave it in the Gateway config forever, and removing
+// every id clawboo knows about would delete the operator's own denials of the
+// same tools. Recording what clawboo wrote is what makes the set revocable.
+//
+// The one case this cannot resolve is an operator who independently denies a tool
+// clawboo also denies. Clawboo has no way to see that, so switching the set off
+// removes the id and the operator has to re-add it. Deny-wins means the failure
+// is a capability coming back, not a capability being lost.
+const SETTING_OWNED_DENY = 'agent-source:openclaw:ownedDeny'
 
 function parseJson(value: string | null): unknown | null {
   if (!value) return null
@@ -258,9 +287,38 @@ export class OpenClawAgentSource implements AgentSource {
       const currentDeny = Array.isArray(rawDeny)
         ? rawDeny.filter((x): x is string => typeof x === 'string')
         : []
-      const desiredDeny = Array.from(new Set([...currentDeny, ...SUBAGENT_SPAWN_TOOLS]))
-      const denyOk = SUBAGENT_SPAWN_TOOLS.every((t) => currentDeny.includes(t))
-      const entry = (server: 'memory' | 'tasks') => ({
+
+      // What clawboo asserts right now: the team invariant above, plus whatever
+      // the operator has asked for. clawboo contributes no opinion of its own
+      // about which capabilities are worth their prompt cost.
+      const db = this.db()
+      const operatorChosen = (() => {
+        const parsed = parseJson(getSetting(db, SETTING_OPERATOR_DENY))
+        return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+      })()
+      const ownedDeny = Array.from(
+        new Set([...SUBAGENT_SPAWN_TOOLS, ...operatorChosen]),
+      ) as readonly string[]
+
+      // OURS, BUT NO LONGER WANTED. Anything clawboo wrote last time and does not
+      // want now is dropped; everything else in the config is the operator's and
+      // is carried through untouched. Without the diff the union below would make
+      // every id clawboo ever added permanent.
+      const previouslyOwned = (() => {
+        const parsed = parseJson(getSetting(db, SETTING_OWNED_DENY))
+        return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+      })()
+      const retired = new Set(previouslyOwned.filter((t) => !ownedDeny.includes(t)))
+      const operatorDeny = currentDeny.filter((t) => !retired.has(t))
+      const desiredDeny = Array.from(new Set([...operatorDeny, ...ownedDeny]))
+
+      // Compared as SETS, because a retired id has to count as a difference too:
+      // an every() over the wanted ids alone would report agreement while a tool
+      // clawboo had stopped denying was still denied in the Gateway.
+      const denyOk =
+        desiredDeny.length === currentDeny.length &&
+        desiredDeny.every((t) => currentDeny.includes(t))
+      const entry = (server: 'memory' | 'tasks' | 'tools') => ({
         url: mcpHttpUrl(baseUrl, server),
         transport: 'streamable-http' as const,
       })
@@ -276,27 +334,63 @@ export class OpenClawAgentSource implements AgentSource {
       // an in-Gateway autonomous tool call can't be per-run scoped without
       // reaching into the Gateway) — an organizational, not security, boundary
       // for the local-first single-user model; the multi-tenant horizon is parked.
+      // TOOLS IS REGISTERED, and its omission was a plain gap rather than a
+      // decision: an OpenClaw agent could reach no connector at all, so an agent
+      // the operator had granted Gmail answered that it had no email tools while
+      // a native agent with the identical grant answered from the inbox.
+      //
+      // Its session is UNBOUND, for the same reason TeamChat is absent: one
+      // process-wide config serves every OpenClaw agent, so a signed
+      // `scopeAgentId` would hand one agent another's identity. An unbound
+      // session matches no agent-scoped grant, so every brokered app call from
+      // an OpenClaw agent asks the operator for approval rather than resolving
+      // silently. That is the honest behaviour for an identity this config
+      // cannot carry, and it is the answer the approval policy already gives for
+      // an app nobody has granted.
       const desired = {
         'clawboo-memory': entry('memory'),
         'clawboo-tasks': entry('tasks'),
+        'clawboo-tools': entry('tools'),
       }
       // Idempotent: skip the patch when the MCP servers are registered AND the
       // sub-agent tools are already denied. This fires on EVERY reconnect, and the
       // Gateway rate-limits control-plane writes to 3 per 60s — re-patching
       // unchanged config would burn that budget (and spam the log) for nothing.
-      const alreadyRegistered = Object.entries(desired).every(
-        ([name, e]) => current[name]?.url === e.url,
+      // OURS, BUT NO LONGER WANTED. The patch below is a merge, so an entry an
+      // older build wrote is never removed by writing a smaller map: a
+      // `clawboo-teamchat` registered before it was excluded survives forever,
+      // which leaves an OpenClaw agent holding the unbound `team_chat` tool the
+      // exclusion exists to deny it. Only the `clawboo-` namespace is pruned;
+      // the operator's own servers are never touched.
+      const stale = Object.keys(current).filter(
+        (name) => name.startsWith('clawboo-') && !Object.hasOwn(desired, name),
       )
+      const alreadyRegistered =
+        stale.length === 0 &&
+        Object.entries(desired).every(([name, e]) => current[name]?.url === e.url)
       if (alreadyRegistered && denyOk) return
       // The Gateway deep-merges partials, so unrelated config — the user's own MCP
       // servers, other `mcp.*` keys, existing `tools.*` — is preserved; we re-assert
       // `current` (servers) + the deny UNION to keep the merge explicit.
-      const servers = { ...current, ...desired }
+      const servers: Record<string, { url: string; transport: 'streamable-http' } | null> = {
+        ...current,
+        ...desired,
+      }
+      // NULL, NOT ABSENT. The Gateway applies an RFC 7386 merge patch, where a key
+      // is removed only by sending it as null and a key that is merely missing is
+      // left alone. Dropping stale names from the map therefore pruned nothing:
+      // `clawboo-teamchat` stayed registered on this install through every
+      // reconnect, which is the unbound `team_chat` tool the exclusion exists to
+      // deny, still in the hands of every OpenClaw agent.
+      for (const name of stale) servers[name] = null
       await client.config.patch({ mcp: { servers }, tools: { deny: desiredDeny } }, baseHash)
+      // Recorded only AFTER the write lands, so a failed patch does not leave
+      // clawboo believing it owns ids the Gateway never received.
+      setSetting(db, SETTING_OWNED_DENY, JSON.stringify(ownedDeny))
       this.log(
         'info',
-        { baseUrl, denied: SUBAGENT_SPAWN_TOOLS },
-        'agent-source: registered clawboo MCP servers + denied sub-agent tools in Gateway config',
+        { baseUrl, denied: ownedDeny, retired: [...retired] },
+        'agent-source: registered clawboo MCP servers + applied the clawboo deny set in Gateway config',
       )
     } catch (err) {
       this.log('warn', { err: String(err) }, 'agent-source: MCP registration failed (non-blocking)')
