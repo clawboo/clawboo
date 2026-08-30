@@ -10,6 +10,7 @@
 // drain (`teamChat/serverDeliver.ts`) so the two surfaces cannot drift.
 
 import { getDescriptor, isRuntimeId } from './runtimes/descriptor'
+import { isContextOverflowMessage } from './runtimes/native/providers/types'
 
 /**
  * A run whose stream died without ever reaching a terminal (a dropped connection,
@@ -40,5 +41,35 @@ export function runFailureText(
       ? `${name} has no provider key connected. Open Settings → Runtimes → ${name} to connect a provider.`
       : 'This runtime has no provider key connected. Open Settings → Runtimes to connect a provider.'
   }
+  // A CONTEXT-OVERFLOW LABEL IS RARELY ABOUT AN OVERSIZED PROMPT, and passing it
+  // through verbatim sent an operator round the same loop five times.
+  //
+  // The message a coding runtime emits here reads "prompt too large for the
+  // model. Try /reset (or /new)". On the install this was traced through, the
+  // prompt was ~32,000 tokens against a model with a 204,800-token window, so it
+  // was nowhere near too large. What had happened is that the runtime resolved a
+  // context budget of 32,768 (the model's max COMPLETION tokens, not its context
+  // window), decided at 32,106 that it had to compact, and then could not: tool
+  // definitions were 50,405 bytes of every prompt and compaction cannot reach
+  // those, and what remained was smaller than the 20,000-token window compaction
+  // protects, so its summarizer was handed an empty conversation and returned a
+  // "conversation is empty" template. Nothing was freed, the turn produced no
+  // text, and it repeated until the run gave up.
+  //
+  // `/reset` clears the conversation, which is the one part that was not the
+  // problem, so the advice sends the operator somewhere that cannot help. What
+  // fixes it permanently is telling the runtime the model's real window.
+  if (isContextOverflowMessage(errorMessage ?? '')) {
+    return (
+      'This run stopped because the runtime believed it was out of context room. ' +
+      'That is usually a wrong context-window setting rather than a genuinely oversized prompt: ' +
+      'a runtime that resolves a small budget starts compacting early, and compaction cannot shrink ' +
+      'tool definitions, so it frees nothing and the turn fails again. ' +
+      "Check the model's real context window in Settings → Runtimes, and reduce how many connectors " +
+      'this agent is granted if its tool list has grown. Starting a fresh session clears the ' +
+      'conversation but not the cause.'
+    )
+  }
+
   return `The run failed: ${errorMessage ?? 'unknown error'}`
 }
