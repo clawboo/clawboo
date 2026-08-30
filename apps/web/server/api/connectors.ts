@@ -18,6 +18,7 @@ import {
   createCustomConnectorBody,
   setConnectorConfigBody,
   type ClawbooDb,
+  listConnectors,
 } from '@clawboo/db'
 import {
   CONNECT_REFUSAL_COPY,
@@ -39,7 +40,6 @@ import type { Request, Response } from 'express'
 import {
   connectConnector,
   connectorInstanceId,
-  getLiveConnector,
   disconnectConnector,
   listLiveConnectors,
   type ConnectableDefinition,
@@ -64,7 +64,7 @@ import { awaitAuthorization, beginAuthorization, getAccessToken } from '../lib/c
 import { clearOAuth, isAuthorized } from '../lib/connectors/oauthStore'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
-import { approvalUrlFrom, buildLinkArgs, isRefusal } from '../lib/connectors/brokeredLink'
+import { isTransient, retryTransient } from '../lib/connectors/transientRetry'
 
 /**
  * Resolve a slug to a definition, custom entries included.
@@ -117,7 +117,7 @@ export async function connectorsCustomDELETE(req: Request, res: Response): Promi
     const slug = (req.params['slug'] as string | undefined) ?? ''
     // Disconnect FIRST: removing the definition of something still running would
     // orphan the process with nothing left that knows how to stop it.
-    await disconnectConnector(connectorInstanceId(slug))
+    await disconnectConnector(connectorInstanceId(slug), getDb())
     if (!deleteCustomConnector(getDb(), slug)) {
       res.status(404).json({ error: 'no such custom connector' })
       return
@@ -132,23 +132,42 @@ export async function connectorsCustomDELETE(req: Request, res: Response): Promi
 // connector. Returns a URL for the operator to open; the callback lands on an
 // ephemeral loopback listener, never on this server.
 export async function connectorAuthorizePOST(req: Request, res: Response): Promise<void> {
+  // Hoisted so the catch can NAME the connector. A failure sentence that cannot
+  // say which connector failed is barely better than the raw error it replaced.
+  let failedName = 'This connector'
   try {
     const def = findDefinition((req.params['slug'] as string | undefined) ?? '')
     if (!def) {
       res.status(404).json({ error: 'no such connector' })
       return
     }
-    if (def.launch.transport !== 'streamable-http') {
+    failedName = def.displayName
+    const launch = def.launch
+    if (launch.transport !== 'streamable-http') {
       res.status(400).json({ error: 'only remote connectors sign in' })
       return
     }
-    const { authorizeUrl } = await beginAuthorization(def.slug, def.launch.url, def.auth?.scopes)
+    // Read out here: the narrowing above does not survive into the closure below.
+    const launchUrl = launch.url
+    const scopes = def.auth?.scopes
+    // RETRIED, because this is three network round trips (discovery, dynamic
+    // registration, and the provider's own metadata) and any one of them
+    // dropping used to surface as a raw `TypeError: fetch failed` on a button
+    // that had just been pressed. Measured against a live provider, the fourth
+    // attempt is what succeeded.
+    const { authorizeUrl } = await retryTransient(() =>
+      beginAuthorization(def.slug, launchUrl, scopes),
+    )
     res.json({ ok: true, authorizeUrl })
   } catch (err) {
     // 502: the failure is almost always the provider's discovery or registration
     // endpoint, not a fault in this server, and "GitHub does not support dynamic
     // registration" is a sentence the operator can act on.
-    res.status(502).json({ error: redactValue(String(err)) })
+    res.status(502).json({
+      error: isTransient(err)
+        ? `Could not reach ${failedName}. The request did not leave this machine, so this is network rather than the connector.`
+        : `${failedName} could not start sign-in. ${String(redactValue(String(err))).slice(0, 200)}`,
+    })
   }
 }
 
@@ -170,7 +189,7 @@ export async function connectorAuthorizeDELETE(req: Request, res: Response): Pro
     // Disconnect first: a live session is holding a token we are about to
     // forget, and leaving it running would keep using a credential the operator
     // just asked us to drop.
-    await disconnectConnector(connectorInstanceId(slug))
+    await disconnectConnector(connectorInstanceId(slug), getDb())
     clearOAuth(slug)
     res.json({ ok: true })
   } catch (err) {
@@ -363,70 +382,6 @@ export function connectorsListGET(_req: Request, res: Response): void {
   }
 }
 
-// POST /api/connectors/:slug/link
-//
-// Ask a broker to connect one of its upstream apps. The whole flow lives on the
-// broker's ALREADY OPEN session: there is no second credential, no API key, and
-// no second Composio scope to drift out of step with the first. That is the
-// reason this route exists rather than a REST client.
-export async function connectorLinkPOST(req: Request, res: Response): Promise<void> {
-  try {
-    const slug = String(req.params['slug'] ?? '')
-    const def = findDefinition(slug)
-    if (!def) {
-      res.status(404).json({ error: `no catalog connector named ${slug}` })
-      return
-    }
-    const brokered = def.brokeredBy
-    if (!brokered) {
-      res.status(400).json({ error: `${def.displayName} is not reached through a broker` })
-      return
-    }
-    const live = getLiveConnector(connectorInstanceId(brokered.connector))
-    if (!live) {
-      // NOT AN ERROR THE OPERATOR CAUSED. The browser connects the broker first
-      // and only then calls this, so reaching here means the broker dropped
-      // between the two. Saying which one is missing is what lets the client
-      // retry the right step instead of the whole flow.
-      res.status(409).json({ error: 'broker-not-connected', broker: brokered.connector })
-      return
-    }
-
-    const tools = await live.session.listTools()
-    const tool = tools.find((t) => /manage_connections/i.test(t.name))
-    if (!tool) {
-      res.status(502).json({
-        error: `${def.displayName} could not be connected: the broker offers no tool for managing connections.`,
-      })
-      return
-    }
-
-    const args = buildLinkArgs(tool.inputSchema, brokered.toolkit)
-    if (isRefusal(args)) {
-      // SURFACED, NEVER SWALLOWED. This is the branch that fires when the
-      // broker has changed its tool since this was written, and a silent
-      // no-op here would look exactly like a button that does nothing.
-      res.status(502).json({ error: `${def.displayName} could not be connected. ${args.reason}` })
-      return
-    }
-
-    const result = await live.session.callTool(tool.name, args)
-    if (result.isError) {
-      // Redacted before it is quoted back. A broker's error text is written by
-      // the broker, and this is the one path where its words reach the screen.
-      const detail = String(redactValue(result.text)).slice(0, 300)
-      res.status(502).json({ error: `${def.displayName} could not be connected. ${detail}` })
-      return
-    }
-    // The URL is the only thing that crosses back. The tool's raw text can carry
-    // account identifiers, so it is not returned even on success.
-    const url = approvalUrlFrom(result.text)
-    res.json({ ok: true, ...(url ? { url } : {}) })
-  } catch (err) {
-    res.status(500).json({ error: redactValue(String(err)) })
-  }
-}
-
 // POST /api/connectors/connect { slug }
 export async function connectorsConnectPOST(req: Request, res: Response): Promise<void> {
   // Hoisted so the catch below can NAME the connector. A failure sentence that
@@ -474,26 +429,33 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     }
 
     const db: ClawbooDb = getDb()
-    const { connector, display } = await connectConnector(db, {
-      ...toConnectable(def, resolveLaunchArgs(def, argument ?? undefined)),
-      // The CALLBACK, not the string resolved above. `getAccessToken` refreshes
-      // an expired token, so consulting it per request is what keeps a
-      // long-lived connection working instead of turning every call into an
-      // opaque 401 once the first token expires.
-      // A CALLBACK in both cases, never a resolved string. For OAuth that is what
-      // makes a refresh reach the next call; for a bearer it is what makes a
-      // rotated token take effect without a reconnect.
-      ...(bearer
-        ? {
-            accessToken: (): string | null =>
-              resolveConnectorCredentials(def.slug, def.auth.inputs)[
-                def.auth.inputs.find((i) => i.required)?.key ?? def.auth.inputs[0]?.key ?? ''
-              ] ?? null,
-          }
-        : remote && accessToken
-          ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
-          : {}),
-    })
+    // RETRIED ON A DROPPED REQUEST, not on a refusal. A remote handshake that
+    // never left the machine is the single most common failure on this route,
+    // and making the operator press Connect again to paper over it is how a
+    // working connector came to look broken. A provider that ANSWERED with a
+    // rejection is not retried: that answer will not change.
+    const { connector, display } = await retryTransient(() =>
+      connectConnector(db, {
+        ...toConnectable(def, resolveLaunchArgs(def, argument ?? undefined)),
+        // The CALLBACK, not the string resolved above. `getAccessToken` refreshes
+        // an expired token, so consulting it per request is what keeps a
+        // long-lived connection working instead of turning every call into an
+        // opaque 401 once the first token expires.
+        // A CALLBACK in both cases, never a resolved string. For OAuth that is what
+        // makes a refresh reach the next call; for a bearer it is what makes a
+        // rotated token take effect without a reconnect.
+        ...(bearer
+          ? {
+              accessToken: (): string | null =>
+                resolveConnectorCredentials(def.slug, def.auth.inputs)[
+                  def.auth.inputs.find((i) => i.required)?.key ?? def.auth.inputs[0]?.key ?? ''
+                ] ?? null,
+            }
+          : remote && accessToken
+            ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
+            : {}),
+      }),
+    )
     res.json({
       ok: true,
       connectorId: connector.connectorId,
@@ -520,7 +482,7 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
 export async function connectorsDisconnectPOST(req: Request, res: Response): Promise<void> {
   try {
     const slug = (req.params['slug'] as string | undefined) ?? ''
-    const closed = await disconnectConnector(connectorInstanceId(slug))
+    const closed = await disconnectConnector(connectorInstanceId(slug), getDb())
     if (!closed) {
       res.status(404).json({ error: 'connector is not connected' })
       return
@@ -605,4 +567,85 @@ export function connectorsPathSuggestionsGET(req: Request, res: Response): void 
   } catch (err) {
     res.status(500).json({ error: redactValue(String(err)) })
   }
+}
+
+// ─── Boot restore ────────────────────────────────────────────────────────────
+
+/**
+ * Reconnect the connectors the operator left running.
+ *
+ * WHY IT LIVES HERE, in an api module rather than a lib one. Restoring is the
+ * connect recipe with no human present: the same definition lookup, the same
+ * launch argument, the same credential and token resolution, and above all the
+ * SAME refusal predicate. Somewhere else it would be a second copy of that
+ * recipe, and the first thing to drift would be the refusal, which is what stops
+ * a connector spawning with a credential it no longer has.
+ *
+ * NOT AWAITED BY BOOT. A cold `npx` can hold a handshake open for the better
+ * part of a minute; the server must be answering requests long before that.
+ * Every connector is attempted independently so one dead server cannot strand
+ * the rest, and a failure is left to the ordinary health path rather than
+ * retried in a loop nobody asked for.
+ */
+export async function restoreConnectorsAtBoot(db: ClawbooDb): Promise<number> {
+  let restored = 0
+  for (const row of listConnectors(db)) {
+    // ONLY WHAT THE OPERATOR LEFT ON. `desiredState` is the one field that can
+    // tell a graceful shutdown from a deliberate Disconnect; health cannot,
+    // because neither path writes it.
+    if (row.desiredState !== 'connected') continue
+
+    const def = findDefinition(row.slug)
+    if (!def) continue
+
+    try {
+      const launch = def.launch
+      const remote = launch.transport === 'streamable-http'
+      const bearer = remote && def.auth.kind === 'bearer'
+      const argument = getConnectorArgument(db, def.slug)
+      const accessToken = remote && !bearer ? await getAccessToken(def.slug, launch.url) : null
+
+      // The SAME predicate the Connect button answers to. A connector whose key
+      // was removed, or whose sign-in has lapsed, must stay down rather than
+      // spawn and fail: the shelf already knows how to say why.
+      if (
+        connectRefusal(
+          def,
+          credentialsSatisfied(def.slug, def.auth.inputs),
+          launchArgsSatisfied(def, argument ?? undefined),
+          !remote || bearer || accessToken !== null,
+        )
+      ) {
+        continue
+      }
+
+      // RETRIED LIKE THE BUTTON IS. A remote handshake that never left the
+      // machine is the most common failure on this path, and a boot is when it
+      // is most likely: the network is often still coming up. Without this the
+      // one connector most prone to a transient failure is exactly the one that
+      // does not come back, and the operator is told to reconnect it by hand
+      // again. Only transport failures retry; a refusal is an answer.
+      await retryTransient(() =>
+        connectConnector(
+          db,
+          {
+            ...toConnectable(def, resolveLaunchArgs(def, argument ?? undefined)),
+            ...(remote && accessToken
+              ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
+              : {}),
+          },
+          // NOBODY IS LOOKING AT THIS ONE. A press of Connect re-consents to the
+          // spec on screen; a boot does not, so the grant pins are left alone
+          // and a spec that changed while we were down still reads as drift.
+          { restoring: true },
+        ),
+      )
+      restored += 1
+    } catch {
+      // One connector that will not come up must not stop the others, and a
+      // restore is not a place to surface an error nobody asked for. The shelf
+      // reports it as disconnected, which is the truth.
+    }
+  }
+  return restored
 }

@@ -93,7 +93,14 @@ export const riskClassifierInspector: Inspector = (_call, descriptor): Inspector
       message: `"${descriptor.name}" is destructive and needs approval.`,
     }
   }
-  if (descriptor.risk === 'external') {
+  // EXTERNAL AND MUTATING, which is the rule the grant layer already applies
+  // (governance/grants/decide.ts: `risk === 'external' && isMutating(tool)`).
+  // This asked about every external call, read-only ones included, so a broker's
+  // catalogue SEARCH prompted exactly as loudly as a send. The message names
+  // "side effects", which a read-only tool does not have, and the practical
+  // result was an agent waiting on an approval nobody was watching for and then
+  // reporting the timeout as a service outage.
+  if (descriptor.risk === 'external' && descriptor.readOnly !== true) {
     return {
       kind: 'require_approval',
       message: `"${descriptor.name}" has external side effects and needs approval.`,

@@ -7,6 +7,7 @@
 // on every page load.
 
 export * from './types'
+export * from './brokeredApps'
 export * from './catalog'
 export * from './snippet'
 export * from './connectable'

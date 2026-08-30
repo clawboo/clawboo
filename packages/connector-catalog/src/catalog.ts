@@ -6,7 +6,6 @@
 // honesty posture requires, and so the counts are always reportable as
 // "N curated · M community" rather than one impressive-looking total.
 
-import { BROKERED_CONNECTORS } from './sources/brokered'
 import { DATA_CONNECTORS } from './sources/data'
 import { DEV_CONNECTORS } from './sources/dev'
 import { PRODUCTIVITY_CONNECTORS } from './sources/productivity'
@@ -18,13 +17,6 @@ export const CURATED_CONNECTORS: readonly ConnectorDefinition[] = Object.freeze(
   ...DEV_CONNECTORS,
   ...DATA_CONNECTORS,
   ...PRODUCTIVITY_CONNECTORS,
-  // BROKERED ENTRIES ARE CURATED ENTRIES. They are hand-written and verified
-  // the same way, and the only thing that differs is that clawboo reaches them
-  // through another connector instead of opening a session itself. Sorting them
-  // into a fourth provenance would have meant a new arm in every switch over
-  // provenance and a second unreviewed-looking band on a shelf that already
-  // has one.
-  ...BROKERED_CONNECTORS,
 ])
 
 /**
