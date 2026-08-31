@@ -8,7 +8,7 @@
 //
 // Loaded ONCE per session and held. A second search must not re-parse 229 entries.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import type { ConnectorDefinition } from '@clawboo/connector-catalog'
 
 let cached: readonly ConnectorDefinition[] | null = null
@@ -59,6 +59,20 @@ export function useCommunityConnectors(wanted: boolean): CommunityConnectors {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(failed)
 
+  // THE FETCH OUTLIVES THE COMPONENT. `loadCommunity` is a network read and the
+  // marketplace panel is routinely closed before it lands, so the three setState
+  // calls below would run against an unmounted tree. React 19 reaches for
+  // `window` while scheduling that update, so in a torn-down test environment it
+  // surfaces as an unhandled `ReferenceError: window is not defined` that fails
+  // the whole suite while every test passes.
+  const alive = useRef(true)
+  useEffect(
+    () => () => {
+      alive.current = false
+    },
+    [],
+  )
+
   const request = useCallback(() => {
     if (cached) {
       setEntries(cached)
@@ -66,6 +80,7 @@ export function useCommunityConnectors(wanted: boolean): CommunityConnectors {
     }
     setLoading(true)
     void loadCommunity().then((next) => {
+      if (!alive.current) return
       setEntries(next)
       setError(failed)
       setLoading(false)
