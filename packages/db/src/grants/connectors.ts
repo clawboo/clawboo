@@ -57,6 +57,10 @@ export function upsertConnector(db: ClawbooDb, input: UpsertConnectorInput): DbC
           egressAllow: row.egressAllow,
           trifecta: row.trifecta,
           health: row.health,
+          // Carried deliberately: without it a disconnect writes the intent and
+          // the very next upsert clobbers it back, so a connector the operator
+          // switched off would resurrect itself on the following boot.
+          desiredState: row.desiredState,
           healthDetail: row.healthDetail,
           failures: row.failures,
           updatedAt: now,

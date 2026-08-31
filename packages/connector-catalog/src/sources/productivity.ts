@@ -33,6 +33,18 @@ export const COMPOSIO_CONNECTOR: ConnectorDefinition = {
   auth: {
     kind: 'oauth',
     inputs: [],
+    // `offline_access` IS THE ONE THAT MATTERS, and leaving it off is what made
+    // this connector demand a fresh sign-in every few minutes. Without it the
+    // authorization server issues no refresh token, so the moment the
+    // short-lived access token expires `getAccessToken` finds nothing to redeem
+    // and returns null. That reads all the way up as "this needs signing in"
+    // and opens another browser tab: sign in, close the tab, press Connect,
+    // sign in again.
+    //
+    // `openid` accompanies it because this is an OIDC provider. These two are
+    // the whole request; no data scope is asked for here, because the apps
+    // behind the broker are authorized at the broker rather than at clawboo.
+    scopes: ['openid', 'offline_access'],
     // SAID PLAINLY, because it is the part a reader would otherwise discover
     // afterwards. Connecting an app through a broker means the broker holds
     // that app's tokens, not clawboo, and can use them whenever it likes.

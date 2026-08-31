@@ -41,6 +41,9 @@ import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/res
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { mountSpa } from './lib/serveSpa'
+import { restoreConnectorsAtBoot } from './api/connectors'
+import { refreshConnectedApps } from './lib/connectors/composio'
+import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
 
 /** A duration env var, defaulted and BOUNDED to a positive integer. The bare
  *  `Number(...) || fallback` pattern rejects 0/''/NaN but accepts a negative,
@@ -547,6 +550,29 @@ async function main() {
       if (report.killed > 0 || report.expired > 0) {
         log.info(report, 'Connectors: reaped children left by a previous run')
       }
+    })
+
+    // ── Connector restore ─────────────────────────────────────────────────────
+    // A connector lives in memory, so every restart used to drop every one of
+    // them and the operator had to reconnect the same servers by hand every
+    // time. The credentials, tokens and launch arguments were durable all along;
+    // only the session was not. Reconnects exactly what the operator left running
+    // (see `desiredState`), never one they switched off.
+    //
+    // AFTER THE REAP, so a child left by a previous process is killed before a
+    // new one is spawned, and NOT awaited: a cold `npx` install can take the
+    // better part of a minute and the server must be serving long before that.
+    safeStart('connector-restore', () => {
+      void restoreConnectorsAtBoot(getDb())
+        .then(async (restored) => {
+          if (restored > 0) log.info({ restored }, 'Connectors: restored previous session')
+          // WARM THE BROKER'S APP LIST TOO. The graph draws a node per connected
+          // app from a cache that nothing filled at boot, so the apps an
+          // operator had granted stayed invisible until something happened to
+          // open the marketplace. Failure is silent: it is a cache.
+          await refreshConnectedApps(BROKERED_TOOLKITS).catch(() => undefined)
+        })
+        .catch(() => undefined)
     })
 
     // ── Boot probe ────────────────────────────────────────────────────────────
