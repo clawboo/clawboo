@@ -107,7 +107,20 @@ export function mcpHttpUrl(
     if (scope.delegate) p.set('delegate', '1')
     if (scope.attachSecret) p.set('scopeSig', signAttachScope(scope.attachSecret, scope))
   } else {
-    return base // tools stays bare
+    // Tools: the run's AGENT, because a connector tool is governed per agent.
+    //
+    // This used to stay bare, and it could afford to while connecting a
+    // connector also minted a fleet-wide grant: the gate found that grant
+    // whoever asked, so an unidentified attach still worked. Now that a
+    // connector reaches an agent only through an agent-scoped grant, an
+    // unidentified attach can match nothing, and every connector call from a
+    // spawned coding runtime would be denied `grant:no-grant` while the tools
+    // stayed on the list. Signed and delegate-pinned exactly like tasks above,
+    // so a tools URL replayed onto teamchat with `delegate=1` cannot verify.
+    if (scope.teamId) p.set('scopeTeamId', scope.teamId)
+    if (scope.agentId) p.set('scopeAgentId', scope.agentId)
+    if (scope.attachSecret)
+      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false }))
   }
   const q = p.toString()
   return q ? `${base}?${q}` : base
