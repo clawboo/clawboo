@@ -15,7 +15,7 @@
 // `/chat` ingest 404s a non-server-orchestrated team); the thin client opens this
 // stream only for server-orchestrated teams.
 
-import { agents, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
+import { agents, latestChatMessageId, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
 import { buildTeamSessionKey } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
@@ -54,9 +54,6 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   const lastEventId =
     typeof req.headers['last-event-id'] === 'string' ? req.headers['last-event-id'] : undefined
   const sinceParam = typeof req.query['since'] === 'string' ? req.query['since'] : undefined
-  let cursor = Number(lastEventId ?? sinceParam)
-  if (!Number.isFinite(cursor) || cursor < 0) cursor = 0
-
   // Resolve the shared connection BEFORE advertising success: a failure here
   // must surface as a real error response, not a 200 plus a ': connected'
   // marker the client has already been told to trust.
@@ -73,6 +70,19 @@ export function teamChatStreamGET(req: Request, res: Response): void {
 
   let closed = false
   const sessionKeys = resolveTeamSessionKeys(db, teamId)
+
+  // A RESUMING client says where it got to and gets everything after that. A FRESH
+  // client starts at the head, because it has already loaded each member's recent
+  // page over `/api/chat-history` and this stream's job is the live tail. Starting
+  // at 0 re-sent the whole room, which cost nothing while every reset emptied the
+  // transcripts and costs the entire history now that none does.
+  let cursor = Number(lastEventId ?? sinceParam)
+  if (!Number.isFinite(cursor) || cursor < 0) {
+    cursor =
+      lastEventId === undefined && sinceParam === undefined
+        ? latestChatMessageId(db, sessionKeys)
+        : 0
+  }
 
   // Tier 1 — committed turns. Tail the durable rows past the id cursor; the `data`
   // column is already the serialised TranscriptEntry, written straight to the wire.

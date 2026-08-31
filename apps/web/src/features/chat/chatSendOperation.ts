@@ -3,12 +3,7 @@
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { apiFetch } from '@clawboo/control-client'
-import {
-  archiveConversation,
-  isResetCommand,
-  RESET_NOTICE,
-  RESET_UNSAVED_NOTICE,
-} from './resetConversation'
+import { isResetCommand, resetConversationContext, RESET_FAILED_NOTICE } from './resetConversation'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -78,20 +73,21 @@ export async function sendChatMessage({
   const trimmed = message.trim()
   if (!trimmed) return
 
-  // ── Start a fresh conversation ─────────────────────────────────────────────
-  // The chat stays on the key it is already on. The command goes through to the
-  // runtime, which is what actually ends the conversation the model is holding:
-  // clearing only our side would leave the model answering from turns the person
-  // can no longer see. See resetConversation.ts for what this replaced.
+  // ── Start fresh ────────────────────────────────────────────────────────────
+  // The chat stays on the key it is already on and keeps every message. Two things
+  // have to happen for a reset to be real: our side stops resuming, and the RUNTIME
+  // stops carrying the conversation. Doing only the first leaves the model answering
+  // from a thread the divider says it has let go of.
+  // See resetConversation.ts for the two designs this replaced.
   if (isResetCommand(trimmed)) {
-    const saved = await archiveConversation(sessionKey)
+    const divider = await resetConversationContext([sessionKey])
     useFleetStore.setState((state) => ({
       agents: state.agents.map((a) =>
         a.id === agentId ? { ...a, streamingText: null, runId: null } : a,
       ),
     }))
 
-    let text = saved ? RESET_NOTICE : RESET_UNSAVED_NOTICE
+    let text = divider ? divider.text : RESET_FAILED_NOTICE
     try {
       await client.call('chat.send', {
         sessionKey,
@@ -100,16 +96,18 @@ export async function sendChatMessage({
         idempotencyKey: generateId(),
       })
     } catch {
-      // The screen is clear but the model is not. Say so, because the difference
-      // is visible the moment it answers from something the person cannot see.
+      // Our side let go but the runtime did not, and the difference shows the moment
+      // it answers from something the divider says it is no longer holding.
       text =
-        'Your conversation is saved and the chat is clear, but the agent could not be reached, so it may still remember the earlier messages.'
+        'The chat could not reach your agent, so it may still be carrying the conversation above.'
     }
-    const resetEntry = makeEntry(
-      { kind: 'meta', role: 'system', text, sessionKey, confirmed: true },
-      generateId(),
-      now(),
-    )
+    const resetEntry = divider
+      ? { ...divider, text }
+      : makeEntry(
+          { kind: 'meta', role: 'system', text, sessionKey, confirmed: true },
+          generateId(),
+          now(),
+        )
     useChatStore.getState().appendTranscript(sessionKey, [resetEntry])
     return
   }

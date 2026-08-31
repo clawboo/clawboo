@@ -108,24 +108,6 @@ describe('teamOnboardingGET — chat-history override', () => {
     expect(body['userIntroduced']).toBe(false)
   })
 
-  it('a team that started fresh still counts as used', async () => {
-    // Starting fresh moves the room's messages to `<key>#reset:<ts>`, which no longer
-    // ends in `:team:<id>`. Matching only the live shape would read a used team as
-    // brand-new and hand it back the "introduce yourself" gate it already passed.
-    // Having reset is the opposite of never having been used.
-    setOnboarding(TEAM, { agentsIntroduced: true, userIntroduced: false, userIntroText: '' })
-    seedChat(`agent:some-member:team:${TEAM}#reset:1788000000000`)
-    const { body } = await get(TEAM)
-    expect(body['userIntroduced']).toBe(true)
-  })
-
-  it('another team’s archive does not leak the override either', async () => {
-    setOnboarding(TEAM, { agentsIntroduced: true, userIntroduced: false, userIntroText: '' })
-    seedChat('agent:x:team:other-team#reset:1788000000000')
-    const { body } = await get(TEAM)
-    expect(body['userIntroduced']).toBe(false)
-  })
-
   it('an already-fully-onboarded team is returned as-is', async () => {
     setOnboarding(TEAM, { agentsIntroduced: true, userIntroduced: true, userIntroText: 'boss' })
     const { body } = await get(TEAM)

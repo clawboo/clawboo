@@ -3,4 +3,4 @@
 // route, which already own the TranscriptEntry shaping + idempotency.)
 export * from './listChatMessagesSince'
 export * from './listRecentChatMessages'
-export * from './archiveChatSession'
+export * from './latestChatMessageId'

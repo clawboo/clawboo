@@ -1176,6 +1176,13 @@ export interface RenderWindow {
   hiddenCount: number
   /** Reveal `RENDER_WINDOW_STEP` more, preserving the reading position. */
   loadEarlier: () => void
+  /**
+   * Whether the affordance should show at all. Not the same as `hiddenCount > 0`:
+   * once the window has revealed everything loaded there can still be older
+   * messages on the server, and hiding the control at that moment would strand the
+   * person one click short of the rest of their conversation.
+   */
+  canLoadEarlier: boolean
 }
 
 /**
@@ -1190,11 +1197,17 @@ export function useRenderWindow({
   resetKey,
   scrollRef,
   atBottom,
+  hasMoreEarlier = false,
+  fetchEarlier,
 }: {
   total: number
   resetKey: string
   scrollRef: RefObject<HTMLDivElement | null>
   atBottom: boolean
+  /** True when the server holds messages older than the ones loaded. */
+  hasMoreEarlier?: boolean
+  /** Pull the next page of older messages into the store. */
+  fetchEarlier?: () => void
 }): RenderWindow {
   const [limit, setLimit] = useState(RENDER_WINDOW_INITIAL)
   const [pinnedStart, setPinnedStart] = useState<number | null>(null)
@@ -1233,11 +1246,24 @@ export function useRenderWindow({
     anchorRef.current = null
   }, [resetKey, isEmpty])
 
+  // Read at click time without joining the callback's dep list, so the callback
+  // identity stays stable across every fetch-state change.
+  const fetchEarlierRef = useRef(fetchEarlier)
+  fetchEarlierRef.current = fetchEarlier
+  const hasMoreEarlierRef = useRef(hasMoreEarlier)
+  hasMoreEarlierRef.current = hasMoreEarlier
+
   const loadEarlier = useCallback(() => {
     const el = scrollRef.current
     anchorRef.current = el ? el.scrollHeight - el.scrollTop : null
     setLimit((prev) => prev + RENDER_WINDOW_STEP)
     setPinnedStart((prev) => (prev === null ? null : Math.max(0, prev - RENDER_WINDOW_STEP)))
+    // Reveal first, then top up. This click is what exhausts the loaded messages,
+    // so the next page has to be on its way before the person reaches the top, or
+    // the control disappears mid-scroll and the conversation looks like it ends.
+    if (startRef.current - RENDER_WINDOW_STEP <= 0 && hasMoreEarlierRef.current) {
+      fetchEarlierRef.current?.()
+    }
   }, [scrollRef])
 
   // Restore the reading position after older blocks are prepended.
@@ -1262,7 +1288,7 @@ export function useRenderWindow({
     el.scrollTop = el.scrollHeight - anchor
   }, [limit, scrollRef])
 
-  return { start, hiddenCount: start, loadEarlier }
+  return { start, hiddenCount: start, loadEarlier, canLoadEarlier: start > 0 || hasMoreEarlier }
 }
 
 /**
@@ -1284,7 +1310,11 @@ export function LoadEarlierButton({
         type="button"
         onClick={onClick}
         data-testid="load-earlier"
-        aria-label={`Load earlier messages (${hiddenCount} hidden)`}
+        aria-label={
+          hiddenCount > 0
+            ? `Load earlier messages (${hiddenCount} hidden)`
+            : 'Load earlier messages'
+        }
         className="surface-floating-tier flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground"
       >
         <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />
@@ -1292,7 +1322,7 @@ export function LoadEarlierButton({
         {/* `text-muted-foreground`, not `text-foreground/45`: #123 moved the
             de-emphasised `font-data` text in this file onto the muted token for
             contrast, and this badge is part of a control's visible label. */}
-        <span className="font-data text-muted-foreground">{hiddenCount}</span>
+        {hiddenCount > 0 && <span className="font-data text-muted-foreground">{hiddenCount}</span>}
       </button>
     </div>
   )
@@ -1305,6 +1335,8 @@ export const MessageList = memo(function MessageList({
   agentName,
   isRunning,
   sessionKey,
+  hasMoreEarlier,
+  fetchEarlier,
 }: {
   blocks: RenderBlock[]
   streamingText: string | null
@@ -1313,6 +1345,10 @@ export const MessageList = memo(function MessageList({
   isRunning: boolean
   /** Identifies the conversation, so the render window resets when it changes. */
   sessionKey?: string | null
+  /** True when the server holds messages older than the ones loaded. */
+  hasMoreEarlier?: boolean
+  /** Pull the next page of older messages into the store. */
+  fetchEarlier?: () => void
 }) {
   const { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom } =
     useChatAutoScroll(`${blocks.length}|${streamingText ?? ''}`)
@@ -1320,11 +1356,13 @@ export const MessageList = memo(function MessageList({
   // Nothing needs hoisting into the window here (as `GroupChatPanel` does for a
   // long-running stream): the live StreamingCard is appended AFTER the mapped
   // blocks (below), outside the window entirely, so it can never be sliced away.
-  const { start, hiddenCount, loadEarlier } = useRenderWindow({
+  const { start, hiddenCount, loadEarlier, canLoadEarlier } = useRenderWindow({
     total: blocks.length,
     resetKey: sessionKey ?? agentId,
     scrollRef,
     atBottom,
+    ...(hasMoreEarlier !== undefined ? { hasMoreEarlier } : {}),
+    ...(fetchEarlier ? { fetchEarlier } : {}),
   })
   const visible = start === 0 ? blocks : blocks.slice(start)
 
@@ -1358,7 +1396,7 @@ export const MessageList = memo(function MessageList({
           </div>
         ) : (
           <div className="flex flex-col pb-2">
-            {hiddenCount > 0 && (
+            {canLoadEarlier && (
               <LoadEarlierButton hiddenCount={hiddenCount} onClick={loadEarlier} />
             )}
 

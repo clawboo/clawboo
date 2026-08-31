@@ -9,12 +9,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
-import {
-  archiveConversation,
-  isResetCommand,
-  RESET_NOTICE,
-  RESET_UNSAVED_NOTICE,
-} from './resetConversation'
+import { isResetCommand, resetConversationContext, RESET_FAILED_NOTICE } from './resetConversation'
 import { stopAgentRun } from './stopChatOperation'
 import { sendNativeAgentMessage, stopNativeAgentChat } from './nativeAgentChatSend'
 import { useNativeAgentChatStream } from './useNativeAgentChatStream'
@@ -71,20 +66,77 @@ export function ChatPanel({
 
   // ── Load persisted history when an agent is selected and transcript is empty ─
   // Runs whenever sessionKey changes; skips if already in-memory from this session.
+  //
+  // A conversation is never cleared now, so it outgrows one page. The route returns
+  // the MOST RECENT page plus a cursor, and `earlier` below walks it backwards as
+  // the person scrolls up.
+  const [earlierCursor, setEarlierCursor] = useState<number | null>(null)
+  const [hasMoreEarlier, setHasMoreEarlier] = useState(false)
+  const fetchingEarlier = useRef(false)
+
   useEffect(() => {
     if (!sessionKey) return
+    setEarlierCursor(null)
+    setHasMoreEarlier(false)
+    fetchingEarlier.current = false
     const existing = useChatStore.getState().transcripts.get(sessionKey)
     if (existing && existing.length > 0) return
 
     apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`)
       .then((r) => r.json())
-      .then(({ entries: historical }: { entries?: TranscriptEntry[] }) => {
-        if (historical && historical.length > 0) {
-          useChatStore.getState().appendTranscript(sessionKey, historical)
-        }
-      })
+      .then(
+        ({
+          entries: historical,
+          hasMore,
+          nextBefore,
+        }: {
+          entries?: TranscriptEntry[]
+          hasMore?: boolean
+          nextBefore?: number | null
+        }) => {
+          if (historical && historical.length > 0) {
+            useChatStore.getState().appendTranscript(sessionKey, historical)
+          }
+          setHasMoreEarlier(hasMore === true)
+          setEarlierCursor(nextBefore ?? null)
+        },
+      )
       .catch(() => {})
   }, [sessionKey])
+
+  /** Pull the page before the oldest message currently loaded. */
+  const fetchEarlier = useCallback(() => {
+    // One page in flight at a time: the affordance can be clicked repeatedly while
+    // a request is open, and each extra call would fetch the SAME page again.
+    if (!sessionKey || !hasMoreEarlier || earlierCursor === null) return
+    if (fetchingEarlier.current) return
+    fetchingEarlier.current = true
+    void apiFetch(
+      `/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}&before=${earlierCursor}`,
+    )
+      .then((r) => r.json())
+      .then(
+        ({
+          entries: older,
+          hasMore,
+          nextBefore,
+        }: {
+          entries?: TranscriptEntry[]
+          hasMore?: boolean
+          nextBefore?: number | null
+        }) => {
+          if (older && older.length > 0) {
+            useChatStore.getState().prependTranscript(sessionKey, older)
+          }
+          setHasMoreEarlier(hasMore === true)
+          setEarlierCursor(nextBefore ?? null)
+        },
+      )
+      .catch(() => {})
+      .finally(() => {
+        fetchingEarlier.current = false
+      })
+  }, [sessionKey, hasMoreEarlier, earlierCursor])
 
   // ── Native 1:1 chat (the Boo-Zero personal chat + any clawboo-native agent) ──
   // A native agent is NOT an OpenClaw Gateway agent, so its 1:1 chat is driven
@@ -192,22 +244,23 @@ export function ChatPanel({
       // chat requires a live client.
       if (!isNativeChat && !client) return
 
-      // Start a fresh conversation. A native chat has no runtime session to
-      // command: its continuity is a stored resume pointer, which the archive
-      // route drops along with setting the conversation aside. The Gateway path
-      // handles the same command inside `sendChatMessage`, where the command
-      // also has to reach the runtime.
+      // Start fresh. A native chat has no runtime session to command: its
+      // continuity is a stored resume pointer, which the route drops. The
+      // transcript is deliberately NOT cleared, so the person keeps every message
+      // and gains a divider marking where the boo stopped carrying them. The
+      // Gateway path handles the same command inside `sendChatMessage`, where the
+      // command also has to reach the runtime.
       const trimmed = message.trim()
       if (isNativeChat && isResetCommand(trimmed)) {
-        const saved = await archiveConversation(sessionKey)
+        const divider = await resetConversationContext([sessionKey])
         useChatStore.getState().appendTranscript(sessionKey, [
-          {
+          divider ?? {
             entryId: crypto.randomUUID(),
             runId: null,
             sessionKey,
             kind: 'meta',
             role: 'system',
-            text: saved ? RESET_NOTICE : RESET_UNSAVED_NOTICE,
+            text: RESET_FAILED_NOTICE,
             source: 'local-send',
             timestampMs: Date.now(),
             sequenceKey: nextSeq(),
@@ -381,6 +434,8 @@ export function ChatPanel({
         agentName={agent.name}
         isRunning={isRunning}
         sessionKey={sessionKey}
+        hasMoreEarlier={hasMoreEarlier}
+        fetchEarlier={fetchEarlier}
       />
 
       {/* Inline approval cards for this agent */}

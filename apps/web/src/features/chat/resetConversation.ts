@@ -1,67 +1,69 @@
-// Starting a fresh conversation without losing the last one.
+// Starting fresh without losing the conversation.
 //
-// `/reset` and `/new` both mean the same thing to a person: clear the desk. The
-// runtime underneath treats them as synonyms too, and keeps both names only so an
-// install can choose to re-read its startup files on one and not the other.
+// WHAT THIS MEANS NOW. `/reset` and `/new` end what the BOO is carrying, not what
+// the person can see. Every message stays exactly where it is, in the same chat, and
+// a divider marks the point past which the boo is no longer holding the thread. A
+// teammate who says "let us start fresh on this" does not erase your shared history;
+// they stop carrying the old thread in their head, and you can both still look back.
 //
-// WHAT USED TO HAPPEN, AND WHY IT WAS TWO DIFFERENT BUGS. On a native agent the
-// command DELETED every stored message, so a person clearing their screen lost the
-// conversation permanently. On a Gateway agent it asked for a brand new session
-// key and moved the chat onto it, which left the old conversation stranded under a
-// key nothing points at any more. Same two words, two different kinds of loss.
+// WHAT THIS REPLACED, TWICE. The first version deleted every stored message on the
+// native path and, on the Gateway path, asked for a brand new session key and moved
+// the chat onto it, stranding the old conversation under a key nothing pointed at.
+// The second version moved the messages aside into an archive, which fixed the loss
+// but put them somewhere the product could not reach. Not moving them at all is both
+// simpler and the thing people actually expect: every comparable product keeps the
+// old conversation reachable, and the cheapest way to be reachable is to never leave.
 //
-// WHAT HAPPENS NOW. The conversation moves aside under an archive key and the chat
-// stays on the SAME key it has always been on. That is what the runtime does with
-// its own transcripts, and it means the address of a chat never changes: no
-// bookkeeping to remember which conversation an agent is "really" on, and nothing
-// to strand.
+// WHAT THE BOO STILL KNOWS AFTERWARDS. Its character survives in full: the system
+// prompt is rebuilt from the agent's own files on every run, so personality, role and
+// instructions come back untouched. Facts do not come back automatically. Memory is a
+// set of tools the boo chooses to call, so the divider promises only what is true.
 
 import { apiFetch } from '@clawboo/control-client'
-
-import { useChatStore } from '@/stores/chat'
+import type { TranscriptEntry } from '@clawboo/protocol'
 
 /**
  * Words that mean "clear the desk". Both, because both are already documented.
  *
- * Case-insensitive: a person typing on a phone gets `/Reset` from autocapitalise,
- * and treating that as an ordinary message hands the boo a literal "/Reset" to
- * interpret instead of clearing the chat.
+ * Case-insensitive: a phone autocapitalises the first letter, and treating `/Reset`
+ * as an ordinary message hands the boo a literal "/Reset" to interpret instead.
  */
 export function isResetCommand(text: string): boolean {
   const trimmed = text.trim().toLowerCase()
   return trimmed === '/reset' || trimmed === '/new'
 }
 
-/** What the chat says after a reset. Plain enough to need no explanation. */
-export const RESET_NOTICE = 'Starting fresh. Your earlier conversation is saved.'
+/** Shown when the chat could not reach the server, so nothing actually reset. */
+export const RESET_FAILED_NOTICE =
+  'Could not start fresh just now: the server could not be reached. Your boo is still carrying the conversation above.'
 
 /**
- * Set the current conversation aside and empty the chat.
+ * End the model's conversation on every listed session, and return the divider.
  *
- * The screen clears either way, and the return value says whether the save landed.
- * A failed archive is a server that could not be reached, and refusing to clear on
- * top of that would leave the person looking at a chat that ignored them. The
- * messages are still on disk under the live key, so the next load shows them again
- * rather than losing anything, which is the opposite of what "saved" implies and
- * is why the caller has to be able to tell the difference.
+ * A team room resets each teammate's own session but shows ONE divider, because the
+ * person is looking at a single merged timeline.
+ *
+ * Returns null when the request failed, and the caller says so rather than drawing a
+ * divider that claims something the boo did not do. Nothing is destroyed either way,
+ * so there is nothing to roll back.
  */
-export async function archiveConversation(sessionKey: string): Promise<boolean> {
-  useChatStore.getState().clearTranscript(sessionKey)
+export async function resetConversationContext(
+  sessionKeys: string[],
+  noticeSessionKey?: string,
+): Promise<TranscriptEntry | null> {
   try {
-    const res = await apiFetch(
-      `/api/chat-history/archive?sessionKey=${encodeURIComponent(sessionKey)}`,
-      {
-        method: 'POST',
-      },
-    )
-    return res.ok
+    const res = await apiFetch('/api/chat-history/reset-context', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionKeys,
+        ...(noticeSessionKey ? { noticeSessionKey } : {}),
+      }),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { entry?: TranscriptEntry }
+    return body.entry ?? null
   } catch {
-    // Nothing was destroyed, so there is nothing to roll back. The caller says so
-    // rather than promising a save that did not happen.
-    return false
+    return null
   }
 }
-
-/** What the chat says when the screen cleared but the save did not land. */
-export const RESET_UNSAVED_NOTICE =
-  'The chat is clear, but your earlier conversation could not be saved just now. It is still on disk and will be back next time this chat loads.'

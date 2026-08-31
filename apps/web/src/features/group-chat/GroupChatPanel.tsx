@@ -12,10 +12,9 @@ import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import { connectionStatusTone } from '@/features/connection/connectionStatusDisplay'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import {
-  archiveConversation,
   isResetCommand,
-  RESET_NOTICE,
-  RESET_UNSAVED_NOTICE,
+  resetConversationContext,
+  RESET_FAILED_NOTICE,
 } from '@/features/chat/resetConversation'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
@@ -603,22 +602,22 @@ export function GroupChatPanel({
     async (message: string) => {
       // Dismiss the guided first-task hint once the user actually sends.
       setFirstTaskTip(false)
-      // Start a fresh team conversation. A team has no single session behind it:
-      // the room a person sees is every teammate's own conversation merged, so
-      // clearing the desk means setting each of those aside. They keep their keys,
-      // so the merge that builds this view needs to know nothing about resets.
+      // Start fresh in a team room. A team has no single session behind it: the
+      // room a person sees is every teammate's own conversation merged, so every
+      // one of them has to stop carrying the thread. The room keeps every message
+      // and shows ONE divider, because the person is looking at one timeline.
       // Intercepted here rather than sent onward, which would deliver the leader a
       // literal "/reset" to interpret.
       if (isResetCommand(message)) {
-        const results = await Promise.all(
-          [...teamSessionKeys.values()].map((sk) => archiveConversation(sk)),
-        )
-        const saved = results.every(Boolean)
-        // A native teammate forgets because the archive dropped its resume pointer.
-        // An OpenClaw teammate keeps its conversation inside the Gateway, so the
-        // command has to reach the runtime as well. Without this one boo in the
-        // room answers from a conversation nobody else can see any more, which is
-        // worse than not resetting at all because it is invisible.
+        const keys = [...teamSessionKeys.values()]
+        const firstSk = keys[0]
+        if (!firstSk) return
+        const divider = await resetConversationContext(keys, firstSk)
+        // A native teammate stops because the route dropped its resume pointer. An
+        // OpenClaw teammate keeps its conversation inside the Gateway, so the
+        // command has to reach the runtime too. Without this one boo in the room
+        // answers from a thread the divider says the room has let go of, which is
+        // worse than not resetting because it is invisible.
         const client = useConnectionStore.getState().client
         if (client) {
           await Promise.all(
@@ -641,24 +640,21 @@ export function GroupChatPanel({
               }),
           )
         }
-        const firstSk = teamSessionKeys.values().next().value
-        if (firstSk) {
-          useChatStore.getState().appendTranscript(firstSk, [
-            {
-              entryId: crypto.randomUUID(),
-              runId: null,
-              sessionKey: firstSk,
-              kind: 'meta',
-              role: 'system',
-              text: saved ? RESET_NOTICE : RESET_UNSAVED_NOTICE,
-              source: 'local-send',
-              timestampMs: Date.now(),
-              sequenceKey: nextSeq(),
-              confirmed: true,
-              fingerprint: crypto.randomUUID(),
-            },
-          ])
-        }
+        useChatStore.getState().appendTranscript(firstSk, [
+          divider ?? {
+            entryId: crypto.randomUUID(),
+            runId: null,
+            sessionKey: firstSk,
+            kind: 'meta',
+            role: 'system',
+            text: RESET_FAILED_NOTICE,
+            source: 'local-send',
+            timestampMs: Date.now(),
+            sequenceKey: nextSeq(),
+            confirmed: true,
+            fingerprint: crypto.randomUUID(),
+          },
+        ])
         return
       }
       // `/rule <text>` — intercept BEFORE routing to any agent. Appends the

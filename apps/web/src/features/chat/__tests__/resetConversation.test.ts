@@ -57,7 +57,25 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url: String(url), method: init?.method ?? 'GET' })
-      return new Response(JSON.stringify({ ok: true }), {
+      const body = String(url).includes('/reset-context')
+        ? {
+            ok: true,
+            entry: {
+              entryId: 'divider-1',
+              runId: null,
+              sessionKey: SESSION,
+              kind: 'meta',
+              role: 'system',
+              text: 'Starting fresh from here. Everything above stays for you to read, but your boo is no longer carrying it.',
+              source: 'local-send',
+              timestampMs: 99,
+              sequenceKey: 99,
+              confirmed: true,
+              fingerprint: 'divider-1',
+            },
+          }
+        : { ok: true }
+      return new Response(JSON.stringify(body), {
         headers: { 'Content-Type': 'application/json' },
       })
     }),
@@ -75,15 +93,14 @@ const texts = (sessionKey: string) =>
   (useChatStore.getState().transcripts.get(sessionKey) ?? []).map((e) => e.text)
 
 describe.each(['/reset', '/new'])('%s', (command) => {
-  it('archives instead of deleting', async () => {
+  it('resets the context and never touches a message', async () => {
     const { client } = makeClient()
     await sendChatMessage({ client, agentId: 'a1', sessionKey: SESSION, message: command })
 
-    const archive = calls.find((c) => c.url.includes('/api/chat-history/archive'))
-    expect(archive?.method).toBe('POST')
-    expect(archive?.url).toContain(encodeURIComponent(SESSION))
-    // The destructive route must not be anywhere near this path.
+    expect(calls.some((c) => c.url.includes('/api/chat-history/reset-context'))).toBe(true)
+    // Neither the destructive route nor the old archive route belongs on this path.
     expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
+    expect(calls.some((c) => c.url.includes('/archive'))).toBe(false)
   })
 
   it('leaves the chat on the key it was already on', async () => {
@@ -105,7 +122,8 @@ describe.each(['/reset', '/new'])('%s', (command) => {
     expect(send?.params).toMatchObject({ sessionKey: SESSION, message: command })
   })
 
-  it('clears the transcript and says the conversation is saved', async () => {
+  it('KEEPS every earlier message on screen and adds a divider', async () => {
+    // The whole point: a person can still read what came before, in the same chat.
     useChatStore.getState().appendTranscript(SESSION, [
       {
         entryId: 'old',
@@ -124,27 +142,29 @@ describe.each(['/reset', '/new'])('%s', (command) => {
     const { client } = makeClient()
     await sendChatMessage({ client, agentId: 'a1', sessionKey: SESSION, message: command })
 
-    expect(texts(SESSION)).not.toContain('an earlier message')
-    expect(texts(SESSION).join(' ')).toContain('saved')
+    expect(texts(SESSION)).toContain('an earlier message')
+    expect(texts(SESSION).join(' ')).toContain('Starting fresh from here')
   })
 
   it('never sends the command itself as a visible message', async () => {
     const { client } = makeClient()
     await sendChatMessage({ client, agentId: 'a1', sessionKey: SESSION, message: command })
     expect(texts(SESSION)).not.toContain(command)
-    // ...and never persists one either.
+    // ...and never persists one as a message either. The only write on this path
+    // is the context reset itself.
     const posts = calls.filter(
-      (c) => c.method === 'POST' && !c.url.includes('/archive') && c.url.includes('chat-history'),
+      (c) =>
+        c.method === 'POST' && c.url.includes('chat-history') && !c.url.includes('/reset-context'),
     )
     expect(posts).toHaveLength(0)
   })
 
   it('warns when the runtime could not be reached', async () => {
-    // The desk is clear but the model is not, and the difference shows the moment
-    // it answers from something the person cannot see.
+    // Our side let go but the runtime did not, and the difference shows the moment
+    // it answers from a thread the divider says it has released.
     const { client } = makeClient(true)
     await sendChatMessage({ client, agentId: 'a1', sessionKey: SESSION, message: command })
-    expect(texts(SESSION).join(' ')).toContain('may still remember')
+    expect(texts(SESSION).join(' ')).toContain('may still be carrying')
   })
 })
 
@@ -164,10 +184,10 @@ describe('isResetCommand', () => {
   })
 })
 
-describe('a failed archive', () => {
-  it('clears the screen but does not claim the conversation was saved', async () => {
-    // The messages are still on disk under the live key, so the next load shows them
-    // again. Saying "saved" would be the one thing that is not true.
+describe('a failed reset', () => {
+  it('says so instead of drawing a divider the boo did not honour', async () => {
+    // Nothing was reset, so the boo is still carrying the conversation. A divider
+    // here would be the one thing that is not true.
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('nope', { status: 500 })),
@@ -176,7 +196,7 @@ describe('a failed archive', () => {
     await sendChatMessage({ client, agentId: 'a1', sessionKey: SESSION, message: '/reset' })
 
     const said = texts(SESSION).join(' ')
-    expect(said).not.toContain('is saved')
-    expect(said).toContain('could not be saved')
+    expect(said).not.toContain('Starting fresh from here')
+    expect(said).toContain('Could not start fresh')
   })
 })

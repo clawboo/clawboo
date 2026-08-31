@@ -14,7 +14,7 @@ import {
   chatHistoryGET,
   chatHistoryPOST,
   chatHistoryDELETE,
-  chatHistoryARCHIVE,
+  chatHistoryRESETCONTEXT,
 } from './chatHistory'
 import { costRecordsGET, costRecordsPOST } from './costRecords'
 import { costRecordsSummaryGET } from './costRecordsSummary'
@@ -187,8 +187,9 @@ router.post('/api/approvals', approvalsPOST)
 router.get('/api/chat-history', chatHistoryGET)
 router.post('/api/chat-history', chatHistoryPOST)
 router.delete('/api/chat-history', chatHistoryDELETE)
-// Sets the current conversation aside without destroying it (what `/reset` does).
-router.post('/api/chat-history/archive', chatHistoryARCHIVE)
+// Ends the model's conversation and drops a divider, leaving every message in place
+// (what `/reset` does).
+router.post('/api/chat-history/reset-context', chatHistoryRESETCONTEXT)
 
 // Cost records — summary must be before the shorter prefix
 router.get('/api/cost-records/summary', costRecordsSummaryGET)

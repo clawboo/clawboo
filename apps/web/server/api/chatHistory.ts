@@ -1,12 +1,7 @@
 import type { Request, Response } from 'express'
-import {
-  archiveChatSession,
-  archivedSessionsCondition,
-  chatMessages,
-  pruneSessionArchives,
-  setSetting,
-} from '@clawboo/db'
-import { eq, and, asc } from 'drizzle-orm'
+import { chatMessages, setSetting } from '@clawboo/db'
+import { randomUUID } from 'node:crypto'
+import { eq, and, desc, lt } from 'drizzle-orm'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { getDb } from '../lib/db'
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
@@ -25,13 +20,27 @@ function queryString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-// ─── GET /api/chat-history?sessionKey=<key>&limit=<n> ─────────────────────────
-// Returns the last N transcript entries for a session, ordered by timestamp ASC.
+// ─── GET /api/chat-history?sessionKey=<key>&limit=<n>&before=<rowId> ──────────
+// Returns a page of transcript entries for a session, oldest-first within the page.
+//
+// THE PAGE IS THE MOST RECENT ONE, which is not what this route used to do. It
+// ordered ASC and took the first N, so a conversation longer than the limit opened
+// on its OLDEST messages with the recent ones simply absent. Nothing caught it
+// because starting fresh used to empty the transcript, so no chat ever got long
+// enough to notice. Now that a conversation is never cleared, every long-lived chat
+// would hit it, so the page walks BACKWARD from the newest row.
+//
+// `before` is a row id from a previous response's `nextBefore`, which is how the
+// chat scrolls further back. A row id rather than a timestamp: it is unique and
+// monotonic, so a page boundary can never straddle two entries sharing one
+// millisecond, and the caller never has to have kept a row's timestamp.
 
 export async function chatHistoryGET(req: Request, res: Response): Promise<void> {
   const sessionKey = queryString(req.query['sessionKey'])
   const limitParam = queryString(req.query['limit'])
   const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 200, 1000) : 200
+  const beforeParam = queryString(req.query['before'])
+  const before = beforeParam ? Number.parseInt(beforeParam, 10) : Number.NaN
 
   if (!sessionKey) {
     res.status(400).json({ error: 'sessionKey required' })
@@ -41,14 +50,25 @@ export async function chatHistoryGET(req: Request, res: Response): Promise<void>
   try {
     const db = getDb()
 
+    const where = Number.isSafeInteger(before)
+      ? and(eq(chatMessages.sessionKey, sessionKey), lt(chatMessages.id, before))
+      : eq(chatMessages.sessionKey, sessionKey)
+
+    // Ask for one more row than requested: whether that extra row exists answers
+    // "is there anything further back" without a second COUNT query.
     const rows = await db
       .select()
       .from(chatMessages)
-      .where(eq(chatMessages.sessionKey, sessionKey))
-      .orderBy(asc(chatMessages.timestampMs))
-      .limit(limit)
+      .where(where)
+      .orderBy(desc(chatMessages.id))
+      .limit(limit + 1)
 
-    const entries: TranscriptEntry[] = rows
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
+    // Oldest-first, the order every existing reader of this route expects.
+    page.reverse()
+
+    const entries: TranscriptEntry[] = page
       .map((row) => {
         try {
           return JSON.parse(row.data) as TranscriptEntry
@@ -58,7 +78,12 @@ export async function chatHistoryGET(req: Request, res: Response): Promise<void>
       })
       .filter((e): e is TranscriptEntry => e !== null)
 
-    res.json({ entries })
+    res.json({
+      entries,
+      hasMore,
+      // The cursor for the next page back, or null once this page reached the start.
+      nextBefore: hasMore ? (page[0]?.id ?? null) : null,
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -135,24 +160,21 @@ export function parseTeamSessionKey(
   return { agentId: rest.slice(0, at), teamId: rest.slice(at + sep.length) }
 }
 
-// ─── Forgetting a conversation ────────────────────────────────────────────────
+// ─── Ending a conversation ────────────────────────────────────────────────────
 // Two different intents, deliberately two different verbs.
 //
-// A RESET means "start fresh". The person wants a clean slate in front of them,
-// not their history destroyed. That is the archive route below.
+// STARTING FRESH means "carry none of this into your next reply". It is about the
+// model's context, not about the person's history, so it moves NO messages: the
+// chat keeps everything on screen and gains a divider marking where the boo's
+// memory of the conversation stops. That is the route below.
 //
-// A DELETE means the agent itself is gone, so its conversations go with it. That
+// DELETING means the agent itself is gone, so its conversation goes with it. That
 // is the only caller of the destructive route (see deleteAgentOperation).
-//
-// Both drop the resume pointers, because both end the conversation the model is
-// still holding: without that, a "fresh" chat would answer from turns the person
-// can no longer see.
 
 /** Forget the harness sessions that would otherwise carry old turns forward. */
 function dropResumePointers(db: ReturnType<typeof getDb>, sessionKey: string): void {
   // A native 1:1 chat carries conversation continuity in a resumable harness session
-  // (see driveAgentChat). Ending its conversation = a fresh one, so drop the resume
-  // pointer too, else the model would still "remember" the turns that went away.
+  // (see driveAgentChat). Starting fresh means the next turn must not resume it.
   const nativeMatch = sessionKey.match(/^agent:(.+):native$/)
   if (nativeMatch) setSetting(db, nativeChatSessionSettingKey(nativeMatch[1]!), '')
   // A native TEAM session (`agent:<id>:team:<teamId>`) carries the same resumable
@@ -162,39 +184,77 @@ function dropResumePointers(db: ReturnType<typeof getDb>, sessionKey: string): v
 }
 
 /**
- * How many past conversations one chat keeps.
+ * What the chat shows at the point the boo's memory of it stops.
  *
- * Old conversations are not hurting anyone, and the runtime underneath keeps its
- * own resets too, but it pairs that with an enforced backstop rather than growing
- * without limit. Twenty is far more than a chat with no history browser can show
- * and small enough that a long-lived install stays explainable.
+ * Persisted, unlike the old notice, because it is now a permanent landmark in a
+ * transcript that outlives the reset: scrolling past it later is how a person
+ * understands why the boo does not recall what is written above it.
  */
-const ARCHIVES_PER_SESSION = 20
+export const CONTEXT_DIVIDER_TEXT =
+  'Starting fresh from here. Everything above stays for you to read, but your boo is no longer carrying it.'
 
-// ─── POST /api/chat-history/archive?sessionKey=<key> ──────────────────────────
-// Sets the current conversation aside and leaves the chat empty. Nothing is lost.
+// ─── POST /api/chat-history/reset-context ─────────────────────────────────────
+// Body: { sessionKeys: string[], noticeSessionKey?: string }
+// Ends the model's conversation on every listed key and drops ONE divider into the
+// transcript. Touches no existing message.
 
-export async function chatHistoryARCHIVE(req: Request, res: Response): Promise<void> {
-  const sessionKey = queryString(req.query['sessionKey'])
-  if (!sessionKey) {
-    res.status(400).json({ error: 'sessionKey required' })
+type ResetContextBody = { sessionKeys?: unknown; noticeSessionKey?: unknown }
+
+export async function chatHistoryRESETCONTEXT(req: Request, res: Response): Promise<void> {
+  const body = (req.body ?? {}) as ResetContextBody
+  const keys = Array.isArray(body.sessionKeys)
+    ? body.sessionKeys.filter((k): k is string => typeof k === 'string' && k.length > 0)
+    : []
+  if (keys.length === 0) {
+    res.status(400).json({ error: 'sessionKeys[] required' })
+    return
+  }
+  // One divider, even for a team room, where every teammate's context resets but
+  // the person is looking at a single merged timeline.
+  const noticeKey = typeof body.noticeSessionKey === 'string' ? body.noticeSessionKey : keys[0]!
+  if (!keys.includes(noticeKey)) {
+    res.status(400).json({ error: 'noticeSessionKey must be one of sessionKeys' })
     return
   }
 
   try {
     const db = getDb()
-    const archived = archiveChatSession(db, sessionKey)
-    pruneSessionArchives(db, sessionKey, ARCHIVES_PER_SESSION)
-    dropResumePointers(db, sessionKey)
-    res.json({ ok: true, archived })
+    for (const key of keys) dropResumePointers(db, key)
+
+    const now = Date.now()
+    const entryId = `context-reset-${randomUUID()}`
+    const entry: TranscriptEntry = {
+      entryId,
+      runId: null,
+      sessionKey: noticeKey,
+      kind: 'meta',
+      role: 'system',
+      text: CONTEXT_DIVIDER_TEXT,
+      source: 'local-send',
+      timestampMs: now,
+      sequenceKey: now,
+      confirmed: true,
+      fingerprint: entryId,
+    }
+    await db
+      .insert(chatMessages)
+      .values({
+        sessionKey: noticeKey,
+        gatewayUrl: '',
+        entryId,
+        timestampMs: now,
+        data: JSON.stringify(entry),
+      })
+      .onConflictDoNothing()
+
+    res.json({ ok: true, entry })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
 }
 
 // ─── DELETE /api/chat-history?sessionKey=<key> ────────────────────────────────
-// Destroys a conversation and every past conversation behind it. Used when the
-// agent itself is deleted, so nothing is left to browse and nothing is kept.
+// Destroys every message for a session. Used when the agent itself is deleted.
 
 export async function chatHistoryDELETE(req: Request, res: Response): Promise<void> {
   const sessionKey = queryString(req.query['sessionKey'])
@@ -206,10 +266,6 @@ export async function chatHistoryDELETE(req: Request, res: Response): Promise<vo
   try {
     const db = getDb()
     await db.delete(chatMessages).where(and(eq(chatMessages.sessionKey, sessionKey)))
-    // Past conversations live under `<key>#reset:<ts>`, so the exact-key delete
-    // above leaves them behind. For a deleted agent that is a leak nothing can
-    // reach: the chat that owned them is gone.
-    await db.delete(chatMessages).where(archivedSessionsCondition(sessionKey))
     dropResumePointers(db, sessionKey)
     res.json({ ok: true })
   } catch (err) {
