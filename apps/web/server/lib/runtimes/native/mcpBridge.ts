@@ -29,6 +29,8 @@ import {
 
 import { connectorToolsForServer, onConnectorsChanged } from '../../connectors/supervisor'
 import type { NativeToolOutcome } from './fileTools'
+import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
+import { connectedAppsNow } from '../../connectors/composio'
 
 export interface McpBridgeOptions {
   /** The connection the in-process servers read/write through. The caller owns
@@ -119,6 +121,14 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
     clients.push(
       await connectInMemoryClient(
         createToolsServer(db, {
+          // THE BROKER'S OWN VOCABULARY, so the per-app gate can read which
+          // upstream app a Composio meta-tool call is aimed at. The catalog
+          // owns this list; @clawboo/db must not depend on it.
+          broker: { brokeredToolkits: BROKERED_TOOLKITS },
+          // What an UNBOUND caller is told it can reach. An OpenClaw session
+          // carries no agent identity, so no grant is findable and the model
+          // would otherwise be told nothing at all about the apps it holds.
+          brokeredConnected: [...connectedAppsNow().connected],
           agentId: opts.agentId,
           // The team the run belongs to, so a TEAM-scoped grant is findable. A
           // null teamId makes every one of them invisible to the gate, and the
