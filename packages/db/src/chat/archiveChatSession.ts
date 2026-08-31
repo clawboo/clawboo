@@ -16,6 +16,16 @@
 // THE SUFFIX IS DELIBERATELY NOT A VALID LIVE KEY. Live keys are colon-separated
 // (`agent:<id>:main`), so a `#` cannot be produced by any key builder and an
 // archived row can never be mistaken for a live one by a prefix match.
+//
+// THE ENTRY ID MOVES WITH THE ROW, for the same reason the session key does.
+// `entry_id` is uniquely indexed across the whole table and exists only to make
+// an insert idempotent, so an archived row left holding its original id keeps
+// occupying the LIVE namespace. Some writers key an entry on what it says rather
+// than on when it was said: a connector offer is `connect-ask:<team>:<agent>:<slugs>`
+// precisely so the same offer cannot stack twice. Leave that id archived and the
+// offer can never be shown again in that room, because the insert lands on the
+// conflict and does nothing. The original id stays inside the row's `data` payload,
+// which is what any reader of an archived conversation renders from.
 
 import { eq, sql, type SQL } from 'drizzle-orm'
 
@@ -58,16 +68,19 @@ export function isArchivedSessionKey(sessionKey: string): boolean {
  */
 export function archiveChatSession(db: ClawbooDb, sessionKey: string, at = Date.now()): number {
   const rows = db
-    .select({ id: chatMessages.id })
+    .select({ id: chatMessages.id, entryId: chatMessages.entryId })
     .from(chatMessages)
     .where(eq(chatMessages.sessionKey, sessionKey))
     .all()
   if (rows.length === 0) return 0
 
-  db.update(chatMessages)
-    .set({ sessionKey: archivedSessionKey(sessionKey, at) })
-    .where(eq(chatMessages.sessionKey, sessionKey))
-    .run()
+  const archived = archivedSessionKey(sessionKey, at)
+  for (const row of rows) {
+    db.update(chatMessages)
+      .set({ sessionKey: archived, entryId: `${ARCHIVE_MARK}${at}:${row.entryId}` })
+      .where(eq(chatMessages.id, row.id))
+      .run()
+  }
   return rows.length
 }
 

@@ -9,7 +9,12 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
-import { archiveConversation, isResetCommand, RESET_NOTICE } from './resetConversation'
+import {
+  archiveConversation,
+  isResetCommand,
+  RESET_NOTICE,
+  RESET_UNSAVED_NOTICE,
+} from './resetConversation'
 import { stopAgentRun } from './stopChatOperation'
 import { sendNativeAgentMessage, stopNativeAgentChat } from './nativeAgentChatSend'
 import { useNativeAgentChatStream } from './useNativeAgentChatStream'
@@ -194,7 +199,7 @@ export function ChatPanel({
       // also has to reach the runtime.
       const trimmed = message.trim()
       if (isNativeChat && isResetCommand(trimmed)) {
-        await archiveConversation(sessionKey)
+        const saved = await archiveConversation(sessionKey)
         useChatStore.getState().appendTranscript(sessionKey, [
           {
             entryId: crypto.randomUUID(),
@@ -202,7 +207,7 @@ export function ChatPanel({
             sessionKey,
             kind: 'meta',
             role: 'system',
-            text: RESET_NOTICE,
+            text: saved ? RESET_NOTICE : RESET_UNSAVED_NOTICE,
             source: 'local-send',
             timestampMs: Date.now(),
             sequenceKey: nextSeq(),

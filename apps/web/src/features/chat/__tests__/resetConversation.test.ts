@@ -12,6 +12,7 @@ import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 
 import { sendChatMessage } from '../chatSendOperation'
+import { isResetCommand } from '../resetConversation'
 
 const SESSION = 'agent:a1:main'
 
@@ -144,5 +145,38 @@ describe.each(['/reset', '/new'])('%s', (command) => {
     const { client } = makeClient(true)
     await sendChatMessage({ client, agentId: 'a1', sessionKey: SESSION, message: command })
     expect(texts(SESSION).join(' ')).toContain('may still remember')
+  })
+})
+
+describe('isResetCommand', () => {
+  it('accepts both names, in any case', () => {
+    // A phone autocapitalises the first letter. Treating `/Reset` as an ordinary
+    // message hands the boo a literal "/Reset" to interpret instead of clearing.
+    for (const text of ['/reset', '/new', '/Reset', '/NEW', '  /Reset  ']) {
+      expect(isResetCommand(text), text).toBe(true)
+    }
+  })
+
+  it('does not fire on anything else', () => {
+    for (const text of ['/resets', '/reset now', 'reset', '/newline', '', '/rule /reset']) {
+      expect(isResetCommand(text), text).toBe(false)
+    }
+  })
+})
+
+describe('a failed archive', () => {
+  it('clears the screen but does not claim the conversation was saved', async () => {
+    // The messages are still on disk under the live key, so the next load shows them
+    // again. Saying "saved" would be the one thing that is not true.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('nope', { status: 500 })),
+    )
+    const { client } = makeClient()
+    await sendChatMessage({ client, agentId: 'a1', sessionKey: SESSION, message: '/reset' })
+
+    const said = texts(SESSION).join(' ')
+    expect(said).not.toContain('is saved')
+    expect(said).toContain('could not be saved')
   })
 })

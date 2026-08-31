@@ -10,7 +10,7 @@
 
 import type { Request, Response } from 'express'
 import { chatMessages, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
-import { like } from 'drizzle-orm'
+import { like, or } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 
 interface OnboardingState {
@@ -33,12 +33,21 @@ function settingsKey(teamId: string): string {
  *  session key — i.e. it has been used. Such a team should NOT be re-gated behind the
  *  "Know Your Team" onboarding flow. (Post-S08b there is no agent-intro parade, so a
  *  genuinely new team has no chat until the user sends its first message, which happens
- *  only after the gate — so this cleanly distinguishes "used" from "brand-new".) */
+ *  only after the gate — so this cleanly distinguishes "used" from "brand-new".)
+ *
+ *  A conversation the team started fresh counts too. Starting fresh moves the room's
+ *  messages to `<key>#reset:<ts>`, which no longer ENDS in `:team:<id>`, so matching
+ *  only the live shape would read a used team as brand-new and hand it back the
+ *  "introduce yourself" gate it already passed. Having reset is the opposite of
+ *  never having been used. */
 function hasTeamChatActivity(db: ClawbooDb, teamId: string): boolean {
+  const live = `%:team:${teamId}`
   const row = db
     .select({ id: chatMessages.id })
     .from(chatMessages)
-    .where(like(chatMessages.sessionKey, `%:team:${teamId}`))
+    .where(
+      or(like(chatMessages.sessionKey, live), like(chatMessages.sessionKey, `${live}#reset:%`)),
+    )
     .limit(1)
     .get()
   return row != null

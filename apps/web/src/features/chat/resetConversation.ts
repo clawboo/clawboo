@@ -20,9 +20,15 @@ import { apiFetch } from '@clawboo/control-client'
 
 import { useChatStore } from '@/stores/chat'
 
-/** Words that mean "clear the desk". Both, because both are already documented. */
+/**
+ * Words that mean "clear the desk". Both, because both are already documented.
+ *
+ * Case-insensitive: a person typing on a phone gets `/Reset` from autocapitalise,
+ * and treating that as an ordinary message hands the boo a literal "/Reset" to
+ * interpret instead of clearing the chat.
+ */
 export function isResetCommand(text: string): boolean {
-  const trimmed = text.trim()
+  const trimmed = text.trim().toLowerCase()
   return trimmed === '/reset' || trimmed === '/new'
 }
 
@@ -32,18 +38,30 @@ export const RESET_NOTICE = 'Starting fresh. Your earlier conversation is saved.
 /**
  * Set the current conversation aside and empty the chat.
  *
- * The screen clears either way. A failed archive is a server that could not be
- * reached, and refusing to clear on top of that would leave the person looking at
- * a chat that ignored them; the messages are still on disk under the live key, so
- * the next load shows them again rather than losing anything.
+ * The screen clears either way, and the return value says whether the save landed.
+ * A failed archive is a server that could not be reached, and refusing to clear on
+ * top of that would leave the person looking at a chat that ignored them. The
+ * messages are still on disk under the live key, so the next load shows them again
+ * rather than losing anything, which is the opposite of what "saved" implies and
+ * is why the caller has to be able to tell the difference.
  */
-export async function archiveConversation(sessionKey: string): Promise<void> {
+export async function archiveConversation(sessionKey: string): Promise<boolean> {
   useChatStore.getState().clearTranscript(sessionKey)
   try {
-    await apiFetch(`/api/chat-history/archive?sessionKey=${encodeURIComponent(sessionKey)}`, {
-      method: 'POST',
-    })
+    const res = await apiFetch(
+      `/api/chat-history/archive?sessionKey=${encodeURIComponent(sessionKey)}`,
+      {
+        method: 'POST',
+      },
+    )
+    return res.ok
   } catch {
-    // Best-effort: nothing was destroyed, so there is nothing to roll back.
+    // Nothing was destroyed, so there is nothing to roll back. The caller says so
+    // rather than promising a save that did not happen.
+    return false
   }
 }
+
+/** What the chat says when the screen cleared but the save did not land. */
+export const RESET_UNSAVED_NOTICE =
+  'The chat is clear, but your earlier conversation could not be saved just now. It is still on disk and will be back next time this chat loads.'

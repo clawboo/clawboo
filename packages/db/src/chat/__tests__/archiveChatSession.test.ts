@@ -65,6 +65,60 @@ describe('archiveChatSession', () => {
     expect(db.select().from(chatMessages).all()).toHaveLength(2)
   })
 
+  it('frees the entry ids it takes with it', () => {
+    // `entry_id` is uniquely indexed across the WHOLE table and exists only to make
+    // an insert idempotent. Some writers key an entry on what it SAYS rather than on
+    // when it was said (a connector offer is `connect-ask:<team>:<agent>:<slugs>`, so
+    // the same offer cannot stack twice). Leave that id sitting on an archived row and
+    // the offer can never be shown again: the insert lands on the conflict and does
+    // nothing, in a chat where the original card is no longer on screen.
+    db.insert(chatMessages)
+      .values({
+        sessionKey: 'agent:boo:main',
+        gatewayUrl: 'ws://t',
+        entryId: 'connect-ask:t1:boo:slack',
+        timestampMs: 1,
+        data: JSON.stringify({ kind: 'meta', text: 'connect Slack?' }),
+      })
+      .run()
+
+    archiveChatSession(db, 'agent:boo:main', 9_000)
+
+    // The same id inserts cleanly again, into the fresh conversation.
+    expect(() =>
+      db
+        .insert(chatMessages)
+        .values({
+          sessionKey: 'agent:boo:main',
+          gatewayUrl: 'ws://t',
+          entryId: 'connect-ask:t1:boo:slack',
+          timestampMs: 2,
+          data: JSON.stringify({ kind: 'meta', text: 'connect Slack?' }),
+        })
+        .run(),
+    ).not.toThrow()
+    expect(liveCount('agent:boo:main')).toBe(1)
+  })
+
+  it('keeps the original entry id inside the row, for anyone reading the archive', () => {
+    // Only the COLUMN moves. What a reader renders from is `data`, so the archived
+    // conversation still knows what each of its entries was.
+    db.insert(chatMessages)
+      .values({
+        sessionKey: 'agent:boo:main',
+        gatewayUrl: 'ws://t',
+        entryId: 'e-1',
+        timestampMs: 1,
+        data: JSON.stringify({ entryId: 'e-1', kind: 'user', text: 'hi' }),
+      })
+      .run()
+    archiveChatSession(db, 'agent:boo:main', 9_000)
+
+    const row = db.select().from(chatMessages).all()[0]!
+    expect(row.entryId).not.toBe('e-1')
+    expect(JSON.parse(row.data).entryId).toBe('e-1')
+  })
+
   it('produces a key no live key builder could ever produce', () => {
     // Live keys are colon-separated, so a prefix match can never mistake an
     // archive for a live conversation.

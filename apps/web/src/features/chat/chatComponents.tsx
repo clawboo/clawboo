@@ -1222,10 +1222,10 @@ export function useRenderWindow({
     else setPinnedStart((prev) => (prev === null ? startRef.current : prev))
   }, [atBottom])
 
-  // Reset on a new conversation. `resetKey` covers an agent/team switch and a
-  // Gateway `/reset` that mints a fresh session key; `total === 0` additionally
-  // covers the native `/reset`, which CLEARS the transcript under the SAME key
-  // (`ChatPanel`), so an expanded window can't survive into the next chat.
+  // Reset on a new conversation. `resetKey` covers an agent/team switch; `total === 0`
+  // covers starting fresh, which empties the transcript under the SAME key on every
+  // runtime now (see resetConversation.ts), so an expanded window can't survive into
+  // the next chat.
   const isEmpty = total === 0
   useEffect(() => {
     setLimit(RENDER_WINDOW_INITIAL)

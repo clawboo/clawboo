@@ -20,7 +20,8 @@ The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-
 | GET    | `/api/cost-records/summary`           | 30-day aggregation: totals, per-agent, time series   | No      |
 | GET    | `/api/chat-history`                   | Load a session's transcript entries                  | No      |
 | POST   | `/api/chat-history`                   | Batch-insert transcript entries (idempotent)         | No      |
-| DELETE | `/api/chat-history`                   | Clear a session's transcript                         | No      |
+| POST   | `/api/chat-history/archive`           | Set a session's conversation aside, keeping it       | No      |
+| DELETE | `/api/chat-history`                   | Destroy a session's transcript and its archives      | No      |
 | GET    | `/api/graph-layout`                   | Load saved Ghost Graph node positions                | No      |
 | POST   | `/api/graph-layout`                   | Upsert Ghost Graph node positions                    | No      |
 | GET    | `/api/personality`                    | Load an agent's personality slider values            | No      |
@@ -200,6 +201,8 @@ curl http://localhost:18790/api/cost-records/summary
 
 Persists per-session chat transcripts in the `chat_messages` table. Each row stores a JSON-serialized `TranscriptEntry`; reads parse the JSON back, skipping any corrupt row.
 
+Two different verbs end a conversation, and the difference matters. **Archive** is what `/reset` and `/new` call: the messages move to `<sessionKey>#reset:<epochMs>` and stay on disk. **Delete** is what agent deletion calls: the conversation and every archive behind it are destroyed. Archived rows also carry an archived `entry_id`, so the ids they used are free for the fresh conversation to reuse.
+
 ### `GET /api/chat-history`
 
 Loads a session's transcript entries, oldest first.
@@ -287,9 +290,46 @@ curl -X POST http://localhost:18790/api/chat-history \
   -d '{"sessionKey":"<session-key>","gatewayUrl":"ws://localhost:18789","entries":[{"entryId":"e1","timestampMs":1700000000000}]}'
 ```
 
+### `POST /api/chat-history/archive`
+
+Sets a session's conversation aside and leaves the chat empty. Nothing is deleted: every row is re-keyed to `<sessionKey>#reset:<epochMs>`, and its `entry_id` is re-keyed with it so the live id namespace is free again. Also clears the native resume pointers for that session (the 1:1 pointer, or the per-team one for a team key) so the model starts the next turn without the archived turns.
+
+The 20 most recent archives per session are kept; older ones are dropped.
+
+Calling this on a session with no messages is a no-op and returns `archived: 0`, so a second reset does not stack an archive of nothing.
+
+- **Query params**: `sessionKey` (required).
+- **Request body**: none.
+
+#### Responses
+
+**`400 Bad Request`**: missing `sessionKey`:
+
+```json
+{ "error": "sessionKey required" }
+```
+
+**`200 OK`**: archived, with the number of messages moved:
+
+```ts
+{ ok: true, archived: number }
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+#### Example
+
+```bash
+curl -X POST "http://localhost:18790/api/chat-history/archive?sessionKey=<session-key>"
+```
+
 ### `DELETE /api/chat-history`
 
-Clears every message for a session. Used when an agent is deleted.
+Destroys every message for a session **and every archive behind it**. Used when an agent is deleted, so nothing is left to browse. To end a conversation without losing it, use the archive route above.
 
 - **Query params**: `sessionKey` (required).
 - **Request body**: none.

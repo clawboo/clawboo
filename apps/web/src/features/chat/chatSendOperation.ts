@@ -3,7 +3,12 @@
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { apiFetch } from '@clawboo/control-client'
-import { archiveConversation, isResetCommand, RESET_NOTICE } from './resetConversation'
+import {
+  archiveConversation,
+  isResetCommand,
+  RESET_NOTICE,
+  RESET_UNSAVED_NOTICE,
+} from './resetConversation'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -79,14 +84,14 @@ export async function sendChatMessage({
   // clearing only our side would leave the model answering from turns the person
   // can no longer see. See resetConversation.ts for what this replaced.
   if (isResetCommand(trimmed)) {
-    await archiveConversation(sessionKey)
+    const saved = await archiveConversation(sessionKey)
     useFleetStore.setState((state) => ({
       agents: state.agents.map((a) =>
         a.id === agentId ? { ...a, streamingText: null, runId: null } : a,
       ),
     }))
 
-    let text = RESET_NOTICE
+    let text = saved ? RESET_NOTICE : RESET_UNSAVED_NOTICE
     try {
       await client.call('chat.send', {
         sessionKey,

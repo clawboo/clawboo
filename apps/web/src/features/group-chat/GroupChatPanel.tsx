@@ -15,6 +15,7 @@ import {
   archiveConversation,
   isResetCommand,
   RESET_NOTICE,
+  RESET_UNSAVED_NOTICE,
 } from '@/features/chat/resetConversation'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
@@ -609,7 +610,37 @@ export function GroupChatPanel({
       // Intercepted here rather than sent onward, which would deliver the leader a
       // literal "/reset" to interpret.
       if (isResetCommand(message)) {
-        await Promise.all([...teamSessionKeys.values()].map((sk) => archiveConversation(sk)))
+        const results = await Promise.all(
+          [...teamSessionKeys.values()].map((sk) => archiveConversation(sk)),
+        )
+        const saved = results.every(Boolean)
+        // A native teammate forgets because the archive dropped its resume pointer.
+        // An OpenClaw teammate keeps its conversation inside the Gateway, so the
+        // command has to reach the runtime as well. Without this one boo in the
+        // room answers from a conversation nobody else can see any more, which is
+        // worse than not resetting at all because it is invisible.
+        const client = useConnectionStore.getState().client
+        if (client) {
+          await Promise.all(
+            participants
+              .filter((a) => a.runtime === 'openclaw')
+              .map(async (a) => {
+                const sk = teamSessionKeys.get(a.id)
+                if (!sk) return
+                try {
+                  await client.call('chat.send', {
+                    sessionKey: sk,
+                    message: '/reset',
+                    deliver: false,
+                    idempotencyKey: crypto.randomUUID(),
+                  })
+                } catch {
+                  // Best-effort per teammate: one unreachable boo must not stop the
+                  // rest of the room from starting fresh.
+                }
+              }),
+          )
+        }
         const firstSk = teamSessionKeys.values().next().value
         if (firstSk) {
           useChatStore.getState().appendTranscript(firstSk, [
@@ -619,7 +650,7 @@ export function GroupChatPanel({
               sessionKey: firstSk,
               kind: 'meta',
               role: 'system',
-              text: RESET_NOTICE,
+              text: saved ? RESET_NOTICE : RESET_UNSAVED_NOTICE,
               source: 'local-send',
               timestampMs: Date.now(),
               sequenceKey: nextSeq(),
