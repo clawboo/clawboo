@@ -11,6 +11,11 @@ import { useBoardStore } from '@/stores/board'
 import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import { connectionStatusTone } from '@/features/connection/connectionStatusDisplay'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
+import {
+  archiveConversation,
+  isResetCommand,
+  RESET_NOTICE,
+} from '@/features/chat/resetConversation'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
 import { sendServerTeamMessage, stopServerTeam } from './serverTeamChatSend'
@@ -597,17 +602,32 @@ export function GroupChatPanel({
     async (message: string) => {
       // Dismiss the guided first-task hint once the user actually sends.
       setFirstTaskTip(false)
-      // `/reset` / `/new` — deliberately NOT a team-chat command: a team has no
-      // single session to reset (each teammate + Boo Zero has its own, all
-      // server-orchestrated). Intercept it here so it gives clear feedback rather
-      // than being sent to the leader as a literal "/reset" message. (1:1 agent
-      // chat keeps `/reset`, where it maps to a real `sessions.create`.)
-      const cmd = message.trim().toLowerCase()
-      if (cmd === '/reset' || cmd === '/new') {
-        useToastStore.getState().addToast({
-          message: 'Reset isn’t available in team chat.',
-          type: 'error',
-        })
+      // Start a fresh team conversation. A team has no single session behind it:
+      // the room a person sees is every teammate's own conversation merged, so
+      // clearing the desk means setting each of those aside. They keep their keys,
+      // so the merge that builds this view needs to know nothing about resets.
+      // Intercepted here rather than sent onward, which would deliver the leader a
+      // literal "/reset" to interpret.
+      if (isResetCommand(message)) {
+        await Promise.all([...teamSessionKeys.values()].map((sk) => archiveConversation(sk)))
+        const firstSk = teamSessionKeys.values().next().value
+        if (firstSk) {
+          useChatStore.getState().appendTranscript(firstSk, [
+            {
+              entryId: crypto.randomUUID(),
+              runId: null,
+              sessionKey: firstSk,
+              kind: 'meta',
+              role: 'system',
+              text: RESET_NOTICE,
+              source: 'local-send',
+              timestampMs: Date.now(),
+              sequenceKey: nextSeq(),
+              confirmed: true,
+              fingerprint: crypto.randomUUID(),
+            },
+          ])
+        }
         return
       }
       // `/rule <text>` — intercept BEFORE routing to any agent. Appends the

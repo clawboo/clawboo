@@ -21,6 +21,7 @@ import {
   type RuntimeEvent,
 } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
+import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
@@ -38,14 +39,14 @@ import { publishChatDelta } from '../teamChat/chatDeltaBus'
 
 const NATIVE_RUNTIME = 'clawboo-native'
 
-/** The 1:1 chat session key for an agent (the session ChatPanel reads/writes). */
-export function nativeChatSessionKey(agentId: string): string {
-  return `agent:${agentId}:native`
-}
+// The 1:1 chat key lives with the other session-key shapes so every writer agrees
+// on what a person's chat is. Re-exported here because this module is where the
+// 1:1 chat path is read from.
+export { nativeChatSessionKey }
 
 /** Settings-KV key holding the LATEST native harness session id for an agent's 1:1
  *  chat — the resumable handle so each turn CONTINUES the conversation instead of
- *  starting fresh. Cleared on `/reset` (see `chatHistoryDELETE`) + swept on agent
+ *  starting fresh. Cleared on `/reset` (see `chatHistoryARCHIVE`) + swept on agent
  *  delete (see `perAgentSettingKeys`). */
 export function nativeChatSessionSettingKey(agentId: string): string {
   return `native-chat-session:${agentId}`

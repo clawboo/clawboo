@@ -110,6 +110,24 @@ The footer's **Preview SOUL.md** toggle shows the merged result (role descriptio
 | **Activity**    | The live observability terminal scoped to this agent: tool calls, results, and errors as they stream.                                                |
 | **Brief**       | Boo Zero only. Holds Boo Zero's display name override and Global Brief (its load-bearing identity surface). The tab is hidden for every other agent. |
 
+## Start a fresh conversation
+
+Type `/reset` (or `/new`) in the chat composer and send. The two are the same command, and both are kept because OpenClaw itself keeps both: an install can configure its startup files to be re-read on one and not the other, and neither name is more obvious than the other to a person reaching for it.
+
+What happens:
+
+1. the conversation on screen is set aside under an archive key (`<sessionKey>#reset:<timestamp>`) rather than deleted, so nothing is lost;
+2. the resume pointer is dropped, so the model starts the next turn with no memory of the archived turns;
+3. the chat stays on the **same session key** it has always been on.
+
+That third point is the part that matters. Earlier builds asked the Gateway for a brand new key on every reset and moved the chat onto it, which left the old conversation stranded under a key nothing pointed at any more. A chat's address never changes now, so there is no bookkeeping about which conversation an agent is "really" on.
+
+The command works in the 1:1 chat for every runtime, and in team chat, where it sets aside each teammate's own conversation in the room. The dashboard keeps the 20 most recent archived conversations per chat and drops older ones.
+
+<Note>
+There is no history browser yet: archived conversations are kept on disk in `chat_messages`, not shown in the UI. Deleting the agent removes its archives along with everything else.
+</Note>
+
 ## Create a Boo
 
 Click **Create Boo** in the agent list (or the fleet sidebar) to open `CreateBooModal`.
@@ -131,7 +149,7 @@ Hover a Boo in the agent list and click the trash icon. `deleteAgentOperation`:
 1. archives the agent via `DELETE /api/agents/:agentId`; the server deletes it upstream (the Gateway) and removes the SQLite row plus its FK-referenced cost/approval rows. If the connection is down, the server falls back to a SQLite-only cleanup and returns `{ ok: true, upstreamDeleted: false }`;
 2. removes it from the in-memory fleet store;
 3. re-identifies [Boo Zero](/appendices/glossary) from the remaining agents (in case the deleted Boo was the leader);
-4. clears its transcript and deletes its chat history.
+4. clears its transcript and deletes its chat history, archived conversations included.
 
 <Danger>
 Deletion is not reversible. The agent's files and config are removed from both the runtime and SQLite. There is no undo.

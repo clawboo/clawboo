@@ -3,7 +3,7 @@
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { apiFetch } from '@clawboo/control-client'
-import { rememberSession } from './currentSession'
+import { archiveConversation, isResetCommand, RESET_NOTICE } from './resetConversation'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -73,57 +73,39 @@ export async function sendChatMessage({
   const trimmed = message.trim()
   if (!trimmed) return
 
-  // ── Handle slash commands ──────────────────────────────────────────────────
-  if (trimmed === '/reset' || trimmed === '/new') {
+  // ── Start a fresh conversation ─────────────────────────────────────────────
+  // The chat stays on the key it is already on. The command goes through to the
+  // runtime, which is what actually ends the conversation the model is holding:
+  // clearing only our side would leave the model answering from turns the person
+  // can no longer see. See resetConversation.ts for what this replaced.
+  if (isResetCommand(trimmed)) {
+    await archiveConversation(sessionKey)
+    useFleetStore.setState((state) => ({
+      agents: state.agents.map((a) =>
+        a.id === agentId ? { ...a, streamingText: null, runId: null } : a,
+      ),
+    }))
+
+    let text = RESET_NOTICE
     try {
-      const result = await client.call<{ key: string; agentId: string }>('sessions.create', {
-        agentId,
+      await client.call('chat.send', {
+        sessionKey,
+        message: trimmed,
+        deliver: false,
+        idempotencyKey: generateId(),
       })
-      const newSessionKey = result?.key
-
-      if (newSessionKey) {
-        // REMEMBERED, not just adopted. The fleet store is in-memory, and boot
-        // rebuilds every agent from the Gateway on the main session, so without
-        // this a reload silently returns the user to the conversation they just
-        // reset away from and their reply looks lost.
-        rememberSession(agentId, newSessionKey)
-        useChatStore.getState().clearTranscript(sessionKey)
-
-        useFleetStore.setState((state) => ({
-          agents: state.agents.map((a) =>
-            a.id === agentId
-              ? { ...a, sessionKey: newSessionKey, streamingText: null, runId: null }
-              : a,
-          ),
-        }))
-
-        const resetEntry = makeEntry(
-          {
-            kind: 'meta',
-            role: 'system',
-            text: 'Session reset — starting fresh.',
-            sessionKey: newSessionKey,
-          },
-          crypto.randomUUID(),
-          Date.now(),
-        )
-        useChatStore.getState().appendTranscript(newSessionKey, [resetEntry])
-      }
     } catch {
-      // sessions.create may not exist on this Gateway version — clear locally
-      useChatStore.getState().clearTranscript(sessionKey)
-      const noteEntry = makeEntry(
-        {
-          kind: 'meta',
-          role: 'system',
-          text: 'Conversation cleared. (Note: Gateway session was not reset — your Gateway may not support sessions.create.)',
-          sessionKey,
-        },
-        crypto.randomUUID(),
-        Date.now(),
-      )
-      useChatStore.getState().appendTranscript(sessionKey, [noteEntry])
+      // The screen is clear but the model is not. Say so, because the difference
+      // is visible the moment it answers from something the person cannot see.
+      text =
+        'Your conversation is saved and the chat is clear, but the agent could not be reached, so it may still remember the earlier messages.'
     }
+    const resetEntry = makeEntry(
+      { kind: 'meta', role: 'system', text, sessionKey, confirmed: true },
+      generateId(),
+      now(),
+    )
+    useChatStore.getState().appendTranscript(sessionKey, [resetEntry])
     return
   }
 

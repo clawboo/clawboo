@@ -9,6 +9,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
+import { archiveConversation, isResetCommand, RESET_NOTICE } from './resetConversation'
 import { stopAgentRun } from './stopChatOperation'
 import { sendNativeAgentMessage, stopNativeAgentChat } from './nativeAgentChatSend'
 import { useNativeAgentChatStream } from './useNativeAgentChatStream'
@@ -25,6 +26,7 @@ import {
 } from '@/features/connection/connectionStatusDisplay'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 import { parseTeamOrAgentMention } from '@/lib/parseTeamOrAgentMention'
+import { nextSeq } from '@/lib/sequenceKey'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
 import { TeamChips } from './TeamChips'
 
@@ -185,15 +187,29 @@ export function ChatPanel({
       // chat requires a live client.
       if (!isNativeChat && !client) return
 
-      // Native `/reset` — clear the local + persisted 1:1 history (there is no
-      // Gateway session to recreate). The Gateway path handles `/reset` inside
-      // `sendChatMessage` (sessions.create).
+      // Start a fresh conversation. A native chat has no runtime session to
+      // command: its continuity is a stored resume pointer, which the archive
+      // route drops along with setting the conversation aside. The Gateway path
+      // handles the same command inside `sendChatMessage`, where the command
+      // also has to reach the runtime.
       const trimmed = message.trim()
-      if (isNativeChat && (trimmed === '/reset' || trimmed === '/new')) {
-        useChatStore.getState().clearTranscript(sessionKey)
-        void apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(sessionKey)}`, {
-          method: 'DELETE',
-        }).catch(() => {})
+      if (isNativeChat && isResetCommand(trimmed)) {
+        await archiveConversation(sessionKey)
+        useChatStore.getState().appendTranscript(sessionKey, [
+          {
+            entryId: crypto.randomUUID(),
+            runId: null,
+            sessionKey,
+            kind: 'meta',
+            role: 'system',
+            text: RESET_NOTICE,
+            source: 'local-send',
+            timestampMs: Date.now(),
+            sequenceKey: nextSeq(),
+            confirmed: true,
+            fingerprint: crypto.randomUUID(),
+          },
+        ])
         return
       }
 

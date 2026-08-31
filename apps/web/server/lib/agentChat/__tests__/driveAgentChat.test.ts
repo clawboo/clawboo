@@ -322,7 +322,7 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('deleting a native chat history clears the resume pointer (/reset → fresh conversation)', async () => {
+  it('deleting a native chat history clears the resume pointer (a deleted agent remembers nothing)', async () => {
     const key = nativeChatSessionSettingKey('native-x')
     setSetting(db, key, 'native-abc123')
     expect(getSetting(db, key)).toBe('native-abc123')

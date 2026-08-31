@@ -122,15 +122,16 @@ Every team also has a durable **peer-chat room** underneath the group chat, wher
 
 ## Options / variations
 
-| Action                      | How                                                        | What it does                                                                                                |
-| --------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Address the leader          | Send with no `@`                                           | Routes to Boo Zero (default), then team-internal lead, then first member                                    |
-| Address one teammate        | `@AgentName your message`                                  | Longest-prefix match at message start; `@mention` stripped before the agent sees it                         |
-| Address Boo Zero explicitly | `@Boo Zero …`                                              | Boo Zero is in the mention roster even though it is teamless                                                |
-| Add a durable rule          | `/rule <text>`                                             | Persists to `/api/team-rules/:teamId`; injected on every future turn                                        |
-| Stop the team               | Click the red Stop button                                  | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`                            |
-| Insert a mention            | Click an agent chip                                        | Inserts `@AgentName` into the composer                                                                      |
-| Read further back           | Click **Load earlier messages** at the top of the timeline | Reveals 100 more items; the chat renders the most recent ~150 by default so a long session stays responsive |
+| Action                      | How                                                        | What it does                                                                                                 |
+| --------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Address the leader          | Send with no `@`                                           | Routes to Boo Zero (default), then team-internal lead, then first member                                     |
+| Address one teammate        | `@AgentName your message`                                  | Longest-prefix match at message start; `@mention` stripped before the agent sees it                          |
+| Address Boo Zero explicitly | `@Boo Zero …`                                              | Boo Zero is in the mention roster even though it is teamless                                                 |
+| Add a durable rule          | `/rule <text>`                                             | Persists to `/api/team-rules/:teamId`; injected on every future turn                                         |
+| Start a fresh conversation  | `/reset` or `/new`                                         | Sets each teammate's conversation aside (kept, not deleted) and clears the room. See [Agents](/using/agents) |
+| Stop the team               | Click the red Stop button                                  | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`                             |
+| Insert a mention            | Click an agent chip                                        | Inserts `@AgentName` into the composer                                                                       |
+| Read further back           | Click **Load earlier messages** at the top of the timeline | Reveals 100 more items; the chat renders the most recent ~150 by default so a long session stays responsive  |
 
 ## Verify it worked
 

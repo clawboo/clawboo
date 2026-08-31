@@ -1,5 +1,11 @@
 import type { Request, Response } from 'express'
-import { chatMessages, setSetting } from '@clawboo/db'
+import {
+  archiveChatSession,
+  archivedSessionsCondition,
+  chatMessages,
+  pruneSessionArchives,
+  setSetting,
+} from '@clawboo/db'
 import { eq, and, asc } from 'drizzle-orm'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { getDb } from '../lib/db'
@@ -129,8 +135,66 @@ export function parseTeamSessionKey(
   return { agentId: rest.slice(0, at), teamId: rest.slice(at + sep.length) }
 }
 
+// ─── Forgetting a conversation ────────────────────────────────────────────────
+// Two different intents, deliberately two different verbs.
+//
+// A RESET means "start fresh". The person wants a clean slate in front of them,
+// not their history destroyed. That is the archive route below.
+//
+// A DELETE means the agent itself is gone, so its conversations go with it. That
+// is the only caller of the destructive route (see deleteAgentOperation).
+//
+// Both drop the resume pointers, because both end the conversation the model is
+// still holding: without that, a "fresh" chat would answer from turns the person
+// can no longer see.
+
+/** Forget the harness sessions that would otherwise carry old turns forward. */
+function dropResumePointers(db: ReturnType<typeof getDb>, sessionKey: string): void {
+  // A native 1:1 chat carries conversation continuity in a resumable harness session
+  // (see driveAgentChat). Ending its conversation = a fresh one, so drop the resume
+  // pointer too, else the model would still "remember" the turns that went away.
+  const nativeMatch = sessionKey.match(/^agent:(.+):native$/)
+  if (nativeMatch) setSetting(db, nativeChatSessionSettingKey(nativeMatch[1]!), '')
+  // A native TEAM session (`agent:<id>:team:<teamId>`) carries the same resumable
+  // continuity for the leader/user-facing turn, under a per-(agent, team) pointer.
+  const teamKey = parseTeamSessionKey(sessionKey)
+  if (teamKey) setSetting(db, nativeTeamSessionSettingKey(teamKey.agentId, teamKey.teamId), '')
+}
+
+/**
+ * How many past conversations one chat keeps.
+ *
+ * Old conversations are not hurting anyone, and the runtime underneath keeps its
+ * own resets too, but it pairs that with an enforced backstop rather than growing
+ * without limit. Twenty is far more than a chat with no history browser can show
+ * and small enough that a long-lived install stays explainable.
+ */
+const ARCHIVES_PER_SESSION = 20
+
+// ─── POST /api/chat-history/archive?sessionKey=<key> ──────────────────────────
+// Sets the current conversation aside and leaves the chat empty. Nothing is lost.
+
+export async function chatHistoryARCHIVE(req: Request, res: Response): Promise<void> {
+  const sessionKey = queryString(req.query['sessionKey'])
+  if (!sessionKey) {
+    res.status(400).json({ error: 'sessionKey required' })
+    return
+  }
+
+  try {
+    const db = getDb()
+    const archived = archiveChatSession(db, sessionKey)
+    pruneSessionArchives(db, sessionKey, ARCHIVES_PER_SESSION)
+    dropResumePointers(db, sessionKey)
+    res.json({ ok: true, archived })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
 // ─── DELETE /api/chat-history?sessionKey=<key> ────────────────────────────────
-// Clears all messages for a session (used when agent is deleted).
+// Destroys a conversation and every past conversation behind it. Used when the
+// agent itself is deleted, so nothing is left to browse and nothing is kept.
 
 export async function chatHistoryDELETE(req: Request, res: Response): Promise<void> {
   const sessionKey = queryString(req.query['sessionKey'])
@@ -142,17 +206,11 @@ export async function chatHistoryDELETE(req: Request, res: Response): Promise<vo
   try {
     const db = getDb()
     await db.delete(chatMessages).where(and(eq(chatMessages.sessionKey, sessionKey)))
-    // A native 1:1 chat carries conversation continuity in a resumable harness session
-    // (see driveAgentChat). Clearing its history = a fresh conversation, so drop the
-    // resume pointer too — else the model would still "remember" the deleted turns.
-    const nativeMatch = sessionKey.match(/^agent:(.+):native$/)
-    if (nativeMatch) setSetting(db, nativeChatSessionSettingKey(nativeMatch[1]!), '')
-    // A native TEAM session (`agent:<id>:team:<teamId>`) carries the same resumable
-    // continuity for the leader/user-facing turn. Clearing its history = a fresh
-    // conversation, so drop the per-(agent, team) resume pointer too (else the leader
-    // would still "remember" the wiped turns).
-    const teamKey = parseTeamSessionKey(sessionKey)
-    if (teamKey) setSetting(db, nativeTeamSessionSettingKey(teamKey.agentId, teamKey.teamId), '')
+    // Past conversations live under `<key>#reset:<ts>`, so the exact-key delete
+    // above leaves them behind. For a deleted agent that is a leak nothing can
+    // reach: the chat that owned them is gone.
+    await db.delete(chatMessages).where(archivedSessionsCondition(sessionKey))
+    dropResumePointers(db, sessionKey)
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

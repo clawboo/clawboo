@@ -10,7 +10,12 @@ import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
 
 import { settingsGET, settingsPOST } from './settings'
 import { approvalsGET, approvalsPOST } from './approvals'
-import { chatHistoryGET, chatHistoryPOST, chatHistoryDELETE } from './chatHistory'
+import {
+  chatHistoryGET,
+  chatHistoryPOST,
+  chatHistoryDELETE,
+  chatHistoryARCHIVE,
+} from './chatHistory'
 import { costRecordsGET, costRecordsPOST } from './costRecords'
 import { costRecordsSummaryGET } from './costRecordsSummary'
 import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
@@ -182,6 +187,8 @@ router.post('/api/approvals', approvalsPOST)
 router.get('/api/chat-history', chatHistoryGET)
 router.post('/api/chat-history', chatHistoryPOST)
 router.delete('/api/chat-history', chatHistoryDELETE)
+// Sets the current conversation aside without destroying it (what `/reset` does).
+router.post('/api/chat-history/archive', chatHistoryARCHIVE)
 
 // Cost records — summary must be before the shorter prefix
 router.get('/api/cost-records/summary', costRecordsSummaryGET)

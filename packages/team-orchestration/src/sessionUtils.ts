@@ -18,17 +18,28 @@ export function buildTeamSessionKey(agentId: string, teamId: string): string {
 
 /**
  * True when `sessionKey` is a team-scoped key (`agent:<agentId>:team:<teamId>`).
- * The de-double signal: a runtime adapter run on a team key is persisted under the
- * team transcript by the orchestrator, so the runtime's own per-agent chat write
- * (e.g. the native driver's `agent:<id>:native`) must be skipped to keep the team
- * turn out of the agent's 1:1 history. Distinguishes the team key from the 1:1
- * (`agent:<id>:native`), board-task (`runtime:...:task:...`), and peer-chat
- * (`teamchat:...`) key shapes.
+ * A team run's transcript is persisted under the team key by the orchestrator, so
+ * this marks the turns that belong to a room rather than to one person's chat.
+ * Distinct from the 1:1 key (`agent:<id>:native`), a board task
+ * (`runtime:...:task:...`), and peer chat (`teamchat:...`).
  */
 const TEAM_SESSION_KEY_RE = /^agent:[^:]+:team:/
 
 export function isTeamSessionKey(sessionKey: string): boolean {
   return TEAM_SESSION_KEY_RE.test(sessionKey)
+}
+
+/**
+ * The 1:1 chat key for an agent: the conversation a person has with one boo.
+ *
+ * One agent runs in several places at once, each with its own key, and only this
+ * one is a chat someone is looking at. Anything that writes into a person's chat
+ * has to recognise THIS key rather than rule out the other shapes it knows of: a
+ * boo working three board tasks in parallel would otherwise drop three replies
+ * into the chat, unprompted, with no question in front of them.
+ */
+export function nativeChatSessionKey(agentId: string): string {
+  return `agent:${agentId}:native`
 }
 
 /** Extracts the teamId from a team-scoped sessionKey, or null if it is not one. */
