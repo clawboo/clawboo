@@ -25,6 +25,16 @@ import {
 import { SKILL_CATALOG } from '@/features/marketplace/catalog'
 import type { ThreadOption } from './threadPickerRows'
 
+/** One app reachable through a broker, as the picker needs it. */
+export interface BrokeredAppOption {
+  /** The broker's own name for it, which is what a grant is keyed on. */
+  toolkit: string
+  name: string
+  description: string
+  /** clawboo's slug, for the logo only. */
+  slug: string
+}
+
 export interface ThreadOptionsInput {
   /** The node the thread came from. Only a Boo can spawn today. */
   fromNodeType: string | null
@@ -34,6 +44,16 @@ export interface ThreadOptionsInput {
   liveConnectorSlugs: ReadonlySet<string>
   /** Prices a connector against live + configured state. */
   costOf: (def: ConnectorDefinition) => ConnectorCost
+  /**
+   * Apps this install has authorised at the broker, and which toolkits this
+   * agent already holds.
+   *
+   * SEPARATE FROM THE CATALOG, because they are a different kind of row: an app
+   * is reached THROUGH a connector rather than being one, so it has no launch,
+   * no credentials and no cost. Empty when nothing is brokered.
+   */
+  brokeredApps?: readonly BrokeredAppOption[]
+  agentToolkits?: ReadonlySet<string>
 }
 
 /**
@@ -66,12 +86,33 @@ export function threadOptionsFor(input: ThreadOptionsInput): ThreadOption[] {
       label: def.displayName,
       hint: def.description,
       slug: def.slug,
-      action: copy?.action,
+      // A DIFFERENT VERB FOR A DIFFERENT SURFACE. The shelf offers "Turn off"
+      // for a connector that is on, because there it is a switch for the whole
+      // install. Here the thread names one agent, this agent does not have the
+      // connector (the live-slug check above just proved it), and what the press
+      // does is give it to them. Reusing the shelf's verb would offer to switch
+      // off a connection the operator is trying to share.
+      action: cost === 'on' ? 'Give access' : copy?.action,
       // Listed but inert. The reason is the same sentence the shelf uses, so a
       // reader who has seen one surface recognises the other.
       ...(isImmediate(cost)
         ? {}
         : { disabledReason: `${copy?.action ?? 'Set up'} in the Connectors tab first` }),
+    })
+  }
+
+  // APPS BEFORE SKILLS, and after the connectors they are reached through. Each
+  // is one press away from being this agent's, which is the ordering the whole
+  // list already uses.
+  for (const app of input.brokeredApps ?? []) {
+    if (input.agentToolkits?.has(app.toolkit)) continue
+    options.push({
+      id: `brokered:${app.toolkit}`,
+      kind: 'connector',
+      label: app.name,
+      hint: app.description,
+      slug: app.slug,
+      action: 'Give access',
     })
   }
 

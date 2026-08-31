@@ -2,7 +2,7 @@
 //
 // Every overlay in the app (dropdown, popover, context menu, modal, drawer,
 // sheet, wizard) registers itself here while it is open. Exactly ONE `keydown`
-// and ONE `mousedown` listener exist; each hands the event to the TOPMOST open
+// and ONE `pointerdown` listener exist; each hands the event to the TOPMOST open
 // layer and to nobody else. That replaces the old convention of hand-rolling a
 // pair of listeners per overlay, where every layer independently decided the
 // event was "outside me" and dismissed itself. Two overlays therefore closed on
@@ -117,7 +117,7 @@ function onKeyDown(e: KeyboardEvent): void {
   top.onEscape?.()
 }
 
-function onMouseDown(e: MouseEvent): void {
+function onPointerDown(e: PointerEvent): void {
   const top = topLayer(ownsPress)
   if (!top) return // no press-owning overlay open: stay completely inert
   const target = e.target
@@ -129,7 +129,22 @@ function onMouseDown(e: MouseEvent): void {
 
 if (typeof document !== 'undefined') {
   document.addEventListener('keydown', onKeyDown)
-  document.addEventListener('mousedown', onMouseDown)
+  // POINTERDOWN, NOT MOUSEDOWN, and the difference is load-bearing.
+  //
+  // React Flow binds d3-zoom to `.react-flow__renderer`, the ancestor of the
+  // pane and of every node, and d3's `mousedown` handlers open with
+  // `event.stopImmediatePropagation()` (d3-zoom/src/zoom.js:270, and d3-drag
+  // does the same for node drags). A press anywhere on the canvas therefore
+  // never reached a document-level `mousedown` listener, so EVERY popover drawn
+  // over the graph ignored presses outside it. Measured in the running app:
+  //
+  //   press on .react-flow__pane   pointerdown 1   mousedown(bubble) 0
+  //
+  // `pointerdown` is a separate event dispatched before `mousedown`; nothing in
+  // React Flow or this app stops it. Capture-phase `mousedown` would also clear
+  // d3, but it would still miss touch, where d3 stops `touchstart` the same way
+  // and no compatibility `mousedown` is guaranteed to follow.
+  document.addEventListener('pointerdown', onPointerDown)
 }
 
 /**

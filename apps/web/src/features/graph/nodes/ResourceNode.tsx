@@ -33,9 +33,8 @@ import { brandColorVar, ConnectorGlyph, hasBrandMark } from '@/features/connecto
 
 const VIOLET = 'var(--violet)'
 const CIRCLE = 46 // matches the regular SkillNode tile
-/** Below this zoom, orbital tiles collapse to flat dots (see the LOD note). */
+/** Below this zoom, orbital tiles drop their label, badge and motion. */
 const LOD_ZOOM = 0.4
-const LOD_DOT = 10
 
 // Each clawboo MCP server gets a MEANINGFUL glyph (lucide, never emoji):
 // memory → Database, tasks → Kanban, tools → Wrench, team chat → Messages.
@@ -153,21 +152,36 @@ export const ResourceNode = memo(function ResourceNode({
         style={{ width: CIRCLE, height: CIRCLE, position: 'relative' }}
         title={reason ? `${tooltipBase}: ${reason}` : tooltipBase}
       >
+        {/* THE WHOLE DISC, NOT A PIP. This drew a 10px dot inside a 46px tile,
+            which at fleet zoom is a few screen pixels: adding a connector looked
+            like nothing had been added, and the tile only "came back" on zooming
+            in. The label, the badge, the toolbar and the per-frame float are
+            still dropped here, which is what the threshold was actually for. */}
         <div
           aria-hidden
           style={{
             position: 'absolute',
-            top: (CIRCLE - LOD_DOT) / 2,
-            left: (CIRCLE - LOD_DOT) / 2,
-            width: LOD_DOT,
-            height: LOD_DOT,
+            inset: 0,
             borderRadius: '50%',
-            // Badge color wins at this zoom: at fleet scale the only thing worth
-            // a pixel is "something here needs you".
-            background: badge ? badge.color : VIOLET,
-            opacity: greyed ? 0.4 : 0.9,
+            background: `color-mix(in srgb, ${VIOLET} 15%, var(--surface))`,
+            // Badge colour still wins at this zoom. It rides the ring rather
+            // than replacing the tile, so "something needs you" reads without
+            // the connector itself disappearing to say it.
+            border: `1.5px solid ${badge ? badge.color : `color-mix(in srgb, ${VIOLET} 65%, transparent)`}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: greyed ? 0.4 : 1,
           }}
-        />
+        >
+          {brandSlug ? (
+            <span style={{ display: 'flex', color: brandColorVar(brandSlug) }}>
+              <ConnectorGlyph slug={brandSlug} title={name} size={20} />
+            </span>
+          ) : (
+            <Icon size={20} strokeWidth={2} style={{ color: VIOLET }} />
+          )}
+        </div>
         <Handle type="target" position={Position.Left} style={centerHandleStyle} />
         <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
         {/* The grant SOURCE handle survives fleet zoom too. Dropping it here

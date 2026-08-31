@@ -27,9 +27,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Blocks, Cable, ChevronLeft, Plus, Search, type LucideIcon } from 'lucide-react'
+import { ChevronLeft, Plus, Search } from 'lucide-react'
 
-import { ConnectorMark, ConnectorMarkStyles } from '@/features/connectors/ConnectorMark'
+import {
+  ConnectorMark,
+  ConnectorMarkStyles,
+  hasBrandMark,
+} from '@/features/connectors/ConnectorMark'
+import { ConnectorsMark, NewAgentMark, SkillsMark } from './ThreadPickerMarks'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import {
   nextEnabled,
@@ -58,12 +63,12 @@ const PANEL_W = 300
 const PANEL_MAX_H = 380
 const LIST_MAX_H = 320
 
-const KIND_META: Readonly<Record<ThreadKind, { label: string; Icon: LucideIcon; tint: string }>> = {
+const KIND_META: Readonly<Record<ThreadKind, { label: string; tint: string }>> = {
   // Tints are the minimap's own node accents, so the chooser reads as a map of
   // the canvas rather than a second taxonomy invented for this menu.
-  connector: { label: 'Connectors', Icon: Cable, tint: 'var(--violet)' },
-  skill: { label: 'Skills', Icon: Blocks, tint: 'var(--mint)' },
-  agent: { label: 'New agent', Icon: Plus, tint: 'var(--primary)' },
+  connector: { label: 'Connectors', tint: 'var(--violet)' },
+  skill: { label: 'Skills', tint: 'var(--mint)' },
+  agent: { label: 'New agent', tint: 'var(--primary)' },
 }
 
 export function ThreadPicker({
@@ -93,6 +98,18 @@ export function ThreadPicker({
 
   const counts = useMemo(() => threadCounts(options), [options])
   const q = query.trim().toLowerCase()
+
+  // THE TILE PREVIEWS THIS LIST, so the marks come from the rows actually on
+  // offer rather than a hard-coded trio. Only connectors that resolve to a real
+  // brand mark qualify: a monogram fanned behind two logos looks like a bug.
+  const markSlugs = useMemo(
+    () =>
+      options
+        .filter((o) => o.kind === 'connector' && o.slug !== undefined && hasBrandMark(o.slug))
+        .slice(0, 3)
+        .map((o) => o.slug as string),
+    [options],
+  )
 
   const { rows, sections } = useMemo(
     () => threadPickerRows({ kind, query, options, allowNewAgent }),
@@ -301,6 +318,7 @@ export function ThreadPicker({
                         index={i}
                         active={i === activeIndex}
                         counts={counts}
+                        markSlugs={markSlugs}
                         onHover={() => rowEnabled(row) && setActiveIndex(i)}
                         onCommit={() => commit(row)}
                       />
@@ -332,6 +350,7 @@ function RowView({
   index,
   active,
   counts,
+  markSlugs,
   onHover,
   onCommit,
 }: {
@@ -339,6 +358,8 @@ function RowView({
   index: number
   active: boolean
   counts: { connector: number; connectorReady: number; skill: number }
+  /** Connectors to preview on the chooser's connector tile. */
+  markSlugs: readonly string[]
   onHover: () => void
   onCommit: () => void
 }) {
@@ -367,15 +388,13 @@ function RowView({
         onClick={onCommit}
         className={`${base} cursor-pointer py-2.5 ${highlight}`}
       >
-        <span
-          className="flex size-8 shrink-0 items-center justify-center rounded-[9px]"
-          style={{
-            background: `color-mix(in srgb, ${meta.tint} 13%, transparent)`,
-            color: meta.tint,
-          }}
-        >
-          <meta.Icon size={16} strokeWidth={1.9} aria-hidden />
-        </span>
+        {row.kind === 'connector' ? (
+          <ConnectorsMark slugs={markSlugs} tint={meta.tint} />
+        ) : row.kind === 'skill' ? (
+          <SkillsMark tint={meta.tint} />
+        ) : (
+          <NewAgentMark tint={meta.tint} />
+        )}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] leading-tight text-foreground">
             {meta.label}

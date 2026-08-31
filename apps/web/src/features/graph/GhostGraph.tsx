@@ -38,6 +38,8 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button, IconButton } from '@/features/shared/Button'
+import { useBrokeredApps } from '@/features/connectors/useBrokeredApps'
+import { grantConnectorToAgent } from './operations/grantConnector'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -411,6 +413,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // Track layout state in refs to avoid stale closure issues
   const layoutRanRef = useRef(false)
   const prevNodeLengthRef = useRef(0)
+  /** Boos + team roots at the last layout, so an orbital cannot move the camera. */
+  const prevLayoutCountRef = useRef(0)
+  /** Whether the camera has ever framed this graph. The first pass must fit. */
+  const layoutFittedRef = useRef(false)
   const elkGenerationRef = useRef(0)
   const prevLayoutKeyRef = useRef(layoutKey)
   // Flipping atlasLayout requires a fresh layout dispatch even
@@ -549,6 +555,20 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       layoutRanRef.current = false
     }
 
+    // THE CAMERA FOLLOWS THE LAID-OUT SET, NOT EVERY NODE. Giving an agent a
+    // connector adds an ORBITAL, which ELK never positions and which hangs off a
+    // Boo that has not moved, so nothing needing a new frame has changed. The
+    // fit fired anyway, and because `pickFittableNodes` includes the orbitals of
+    // an expanded Boo (and the pick had just expanded one) the frame grew from
+    // "the Boos" to "the Boos plus a full ring", which reads as the canvas
+    // lurching backwards the moment you add something.
+    const layoutNodeCount = nodes.filter((n) => n.type === 'boo' || n.type === 'team-root').length
+    const cameraShouldMove =
+      reLayoutRequested ||
+      !layoutFittedRef.current ||
+      layoutNodeCount !== prevLayoutCountRef.current
+    prevLayoutCountRef.current = layoutNodeCount
+
     if (layoutRanRef.current) return
     layoutRanRef.current = true
 
@@ -679,6 +699,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       }
 
       requestAnimationFrame(() => {
+        if (!cameraShouldMove) return
+        layoutFittedRef.current = true
         // Tight padding gives Boos visual prominence; maxZoom caps the fit so
         // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
         // `nodes` filter excludes the invisible-by-default orbital children —
@@ -969,6 +991,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // Prices a connector exactly as the Connectors shelf does, so a row offered
   // here and the same row two clicks away can never disagree.
   const { costOf: connectorCostOf, refresh: refreshConnectorCosts } = useConnectorCostState()
+  const { apps: brokeredApps, refresh: refreshBrokeredApps } = useBrokeredApps()
 
   /** Open a Boo's ring if it is closed. Idempotent, so callers need not check. */
   const expandBoo = useCallback((booNodeId: string) => {
@@ -988,6 +1011,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       : null
     const owned = new Set<string>()
     const live = new Set<string>()
+    const held = new Set<string>()
     for (const n of nodes) {
       const d = n.data as { skillId?: string; name?: string; connectorId?: string }
       if (!sourceAgentId) continue
@@ -997,15 +1021,23 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       if (n.type === 'resource' && n.id.startsWith(`resource-${sourceAgentId}-`)) {
         const slug = connectorSlugFromId(d.connectorId ?? null)
         if (slug) live.add(slug)
+        // An app tile's identity ends in `:app:<toolkit>`, which is what a
+        // brokered row is keyed on. Without this the picker keeps offering an
+        // app the agent already holds.
+        const app = /:app:([^:]+)$/.exec(d.connectorId ?? '')
+        if (app?.[1]) held.add(app[1])
       }
     }
+    const heldToolkits: ReadonlySet<string> = held
     return threadOptionsFor({
       fromNodeType: threadDrop.fromNodeType,
       ownedSkillNames: owned,
       liveConnectorSlugs: live,
       costOf: (def) => connectorCostOf(def),
+      brokeredApps,
+      agentToolkits: heldToolkits,
     })
-  }, [threadDrop, nodes, connectorCostOf])
+  }, [threadDrop, nodes, connectorCostOf, brokeredApps])
 
   /** Commit a picked row: create the thing, wired to the source, where it fell. */
   const handleThreadPick = useCallback(
@@ -1029,18 +1061,78 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         if (skill) await installSkillForAgent(skill.name, agentId, agentName)
         return
       }
+      // An app reached THROUGH a broker. Nothing is connected here: the broker's
+      // session already carries it, and the only thing missing is this agent's
+      // permission to use that one app.
+      if (option.id.startsWith('brokered:')) {
+        const toolkit = option.id.slice('brokered:'.length)
+        // The base identity comes from the SERVER. It is the one string the
+        // browser must not spell for itself: a grant minted under a second
+        // spelling is a grant the broker never looks up.
+        const session = await connectConnector('composio', 'Composio', undefined, true)
+        if (!session) return
+        await grantConnectorToAgent(
+          {
+            targetAgentId: agentId,
+            connectorId: `${session.connectorId}:app:${toolkit}`,
+            capabilityId: null,
+            mode: 'write',
+            approvalPolicy: 'risk',
+          },
+          { connectorName: option.label, targetAgentName: agentName },
+        )
+        refreshBrokeredApps()
+        useGraphStore.getState().triggerRefresh()
+        return
+      }
+
       if (option.id.startsWith('connector:')) {
         const slug = option.id.slice('connector:'.length)
         const def = connectorBySlug(slug)
         if (!def) return
         const cost = connectorCostOf(def)
-        if (cost === 'one-click') {
+        let connected: Awaited<ReturnType<typeof connectConnector>> = null
+        if (cost === 'on') {
+          // ALREADY RUNNING, so this press is only about access. The route is
+          // idempotent and hands back the connectorId a grant is keyed on, which
+          // is the one thing the browser cannot spell for itself: the server owns
+          // that identity, and a second spelling here would mint grants under an
+          // id the broker never looks up. Quiet, because nothing connected.
+          connected = await connectConnector(def.slug, def.displayName, undefined, true)
+        } else if (cost === 'one-click') {
           if (await signInConnector(def.slug, def.displayName)) {
-            await connectConnector(def.slug, def.displayName)
+            connected = await connectConnector(def.slug, def.displayName)
           }
         } else {
-          await connectConnector(def.slug, def.displayName)
+          connected = await connectConnector(def.slug, def.displayName)
         }
+
+        // THE GESTURE NAMED AN AGENT, so it is consent for that agent and no
+        // other. Connecting from the Connectors panel grants nobody, because
+        // nothing there says who should have it; a thread pulled off this Boo
+        // does say, and finishing it with a second trip to the grant composer
+        // would ask a question the drag already answered.
+        if (connected) {
+          await grantConnectorToAgent(
+            {
+              targetAgentId: agentId,
+              connectorId: connected.connectorId,
+              capabilityId: null,
+              // WRITE, NOT READ, and the difference is between working and not.
+              // `requiredMode` (governance/grants/decide.ts:39) answers `read`
+              // only for a tool whose server sent `readOnlyHint` AND whose
+              // catalog entry is curated; everything else needs `write`. A read
+              // grant would therefore be a grant that denies almost every call,
+              // which looks exactly like the connector being broken. Still not
+              // `admin`: a gesture with no dialog cannot consent to destructive
+              // tools, and those keep asking.
+              mode: 'write',
+              approvalPolicy: 'risk',
+            },
+            { connectorName: def.displayName, targetAgentName: agentName },
+          )
+        }
+
         // BOTH refreshes. `triggerRefresh` rebuilds the graph; this one re-reads
         // live and configured state, which is what prices the picker. Without
         // it, reopening the picker offered the connector that was just turned
@@ -1049,7 +1141,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         useGraphStore.getState().triggerRefresh()
       }
     },
-    [threadDrop, getNode, expandBoo, connectorCostOf, refreshConnectorCosts],
+    [threadDrop, getNode, expandBoo, connectorCostOf, refreshConnectorCosts, refreshBrokeredApps],
   )
 
   /** Create an agent at the drop point, already routed from the source. */
@@ -1112,6 +1204,13 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           'clientX' in event
             ? { x: event.clientX, y: event.clientY }
             : { x: event.changedTouches[0]?.clientX ?? 0, y: event.changedTouches[0]?.clientY ?? 0 }
+        // RE-PRICE ON OPEN. The rows come from the live graph, but what each one
+        // COSTS came from a snapshot taken when this canvas mounted, and nothing
+        // revalidated it. Connect something in the Connectors tab, come back
+        // here, and the picker still described the world as it was on mount:
+        // the connector read as "Turn on" long after it was on. The read is
+        // cheap and its result lands before anyone can pick a row.
+        refreshConnectorCosts()
         setThreadDrop({
           screen: point,
           flow: screenToFlowPosition(point),
@@ -1128,7 +1227,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         useToastStore.getState().addToast({ message: reason, type: 'info' })
       }
     },
-    [screenToFlowPosition],
+    [screenToFlowPosition, refreshConnectorCosts],
   )
 
   // EDGE REMOVAL FROM THE KEYBOARD, and edge-only.
