@@ -173,24 +173,6 @@ export interface ConnectorUserArgument {
 
 export interface ConnectorDefinition {
   /**
-   * Reached THROUGH another connector, named here rather than implied.
-   *
-   * A FACT ABOUT REACHABILITY, not about review. clawboo cannot register an
-   * OAuth app with Google or Atlassian or Salesforce, so the apps it can offer
-   * on its own stop exactly where brokered sign-in begins. An entry carrying
-   * this is still hand-written and still verified, which is why `provenance`
-   * stays `curated`; what differs is that clawboo opens no session under its
-   * name and holds no token for it. The broker holds both.
-   *
-   * `connector` is the broker's slug in this same catalogue, so its launch and
-   * egress are read from one place instead of copied onto forty entries.
-   * `toolkit` is the name the BROKER knows this app by, which is frequently not
-   * the slug clawboo uses: the two namespaces are independent and pretending
-   * otherwise is how the wrong app gets connected.
-   */
-  brokeredBy?: { connector: string; toolkit: string }
-
-  /**
    * Whether this belongs in the shelf's first band.
    *
    * A NAME PEOPLE ARRIVE ALREADY KNOWING, rather than a ranking. The registry

@@ -26,11 +26,13 @@ The tile tells you which one you are looking at, and the detail pane's copy chan
 
 ### Gmail, Slack, Jira and the rest
 
-Clawboo cannot register an OAuth app with Google, Atlassian or Salesforce, so for a long time it had no Gmail, no Slack and no Jira. Those apps are in the list now. Press **Connect** on one and it connects, the same as any other row.
+Clawboo cannot register an OAuth application with Google, Atlassian or Salesforce, so for a long time it had no Gmail, no Slack and no Jira. Those apps are in the list now, in their own band, reached through **Composio**.
 
-Behind that button, Clawboo reaches them through Composio, a broker with its own directory of apps. You do not have to set Composio up first: the first brokered app you connect brings it along, once, and every app after that reuses the same connection. An app Clawboo can reach on its own never goes through the broker, so nothing appears in the list twice.
+Paste a Composio project key into the field on that band, once. From then on, press **Connect** on an app, approve it at the provider, and it stays connected. The key lives in Clawboo's encrypted vault and is never sent back to the browser: the app only ever learns whether one exists.
 
-The trade is worth knowing once. Composio signs you in to each app and keeps that app's tokens on its own servers; Clawboo holds only a token for Composio. Composio's own approval page says so when it opens, and the connector's detail view repeats it under Scopes.
+Every app you connect appears as its own node on the graph, attached to the agents that can reach it. That is deliberate. One node marked "Composio" would hide the fact that an agent can read your email; a Gmail node says it plainly, and it is the form in which you can reason about it or take it away.
+
+The trade is worth knowing once. Composio signs you in to each app and keeps that app's tokens on its own servers. Clawboo holds only the project key. Anything you connect there is reachable by Composio, not only by your agents.
 
 **Popular** and **More connectors** are the sets Clawboo has run and vouches for, split by how likely you are to recognise the name. **From the community** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
 
@@ -73,9 +75,9 @@ Discovery is pinned to the server that answered: its OAuth metadata must live on
 
 ## The long tail
 
-The list reads top to bottom in three bands: **Popular** first, then **More connectors**, then **From the community**. That last band is 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Show 400 more** at the foot of the list, or type at least two characters in the search box, and they appear alongside the results above rather than instead of them. A single character brings them in too, but only when nothing else matches it. The counts never merge into one total, because Clawboo has run the first two bands and none of the third.
+The list reads top to bottom in three bands: **Popular** first, then **More connectors**, then **From the community**. That last band is 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Show 400 more** at the foot of the list, or type at least two characters in the search box, and they appear alongside the results above rather than instead of them. That first press opens the band; after it, the button reads **Show 60 more** and walks the rest a page at a time. A single character brings them in too, but only when nothing else matches it. The counts never merge into one total, because Clawboo has run the first two bands and none of the third.
 
-The band shows sixty at a time, with the ones whose name Clawboo recognises first. **Show 60 more** walks the rest. The registry itself holds far more than 400: Clawboo commits a snapshot of the most recently updated servers that pass its runnability checks, so the number is a reviewed slice rather than the whole directory.
+The band shows sixty at a time, with the ones whose name Clawboo recognises first. The registry itself holds far more than 400: Clawboo commits a snapshot of the most recently updated servers that pass its runnability checks, so the number is a reviewed slice rather than the whole directory.
 
 They are a committed snapshot, not a live fetch, so the directory still works with no network and does not change under you between releases. Refreshing it is a deliberate act: someone runs the ingest, reads the diff, and ships it.
 

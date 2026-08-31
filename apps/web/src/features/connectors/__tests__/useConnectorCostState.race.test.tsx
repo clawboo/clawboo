@@ -28,6 +28,13 @@ function deferredLiveFetch(): {
     if (url.includes('/api/connectors/configured')) {
       return Promise.resolve(new Response(JSON.stringify({ slugs: [] }), { status: 200 }))
     }
+    // MATCHED BEFORE THE CATCH-ALL BELOW. The hook now makes a third read, for
+    // apps a broker reports as connected, and its URL also starts
+    // `/api/connectors`. Letting it fall through counted it as a liveness call
+    // and every gate assertion here was out by one.
+    if (url.includes('/api/connectors/brokered')) {
+      return Promise.resolve(new Response(JSON.stringify({ connected: [] }), { status: 200 }))
+    }
     if (url.includes('/api/connectors')) {
       return new Promise<Response>((resolve) => {
         resolvers.push((slugs) =>

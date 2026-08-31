@@ -93,10 +93,14 @@ export function useConnectorCostState(): ConnectorCostState {
 
   const refresh = useCallback(() => {
     const generation = ++generationRef.current
-    void Promise.all([fetchLive(), fetchConfigured()]).then(([nextLive, nextConfigured]) => {
-      if (generation !== generationRef.current) return
-      setLive(nextLive)
-      setConfigured(nextConfigured)
+    // SETTLED SEPARATELY, NOT TOGETHER. `Promise.all` held every answer behind
+    // the slowest one, so the whole shelf rendered late whenever a single read
+    // was slow. Each lands as it arrives, behind the same generation guard.
+    void fetchLive().then((next) => {
+      if (generation === generationRef.current) setLive(next)
+    })
+    void fetchConfigured().then((next) => {
+      if (generation === generationRef.current) setConfigured(next)
     })
   }, [])
   useEffect(refresh, [refresh])

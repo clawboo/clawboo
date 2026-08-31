@@ -47,6 +47,15 @@ export async function connectConnector(
   /** Called when the server refuses because the stored authorization is no
    *  longer usable, so the caller can offer sign-in again. */
   onNeedsSignIn?: () => void,
+  /**
+   * Skip the success toast.
+   *
+   * For a caller that already knows the connector is running and is here only
+   * for its id: the route is idempotent, so this is a lookup rather than a
+   * connect, and announcing "connected" would report something that did not
+   * just happen. Failures still speak.
+   */
+  quiet = false,
 ): Promise<ConnectSuccess | null> {
   let res: Response
   try {
@@ -77,14 +86,17 @@ export async function connectConnector(
   }
 
   const body = (await res.json()) as ConnectSuccess
+  if (quiet) return body
   const skipped = body.skipped?.length ?? 0
   useToastStore.getState().addToast({
-    // No longer qualified by transport. The in-process tools server a native run
-    // builds now takes the same connector tools an HTTP-attached agent sees, so
-    // naming one of the two would be the inaccurate half.
+    // NOT "available to your agents", which this said while connecting also
+    // granted the connector to the whole fleet. Connecting now makes a connector
+    // available and gives it to nobody; an agent gets it when the operator draws
+    // an edge to it. Saying otherwise would describe permissions the agent does
+    // not have.
     message: skipped
-      ? `${displayName} connected. ${body.tools.length} tools available to your agents, ${skipped} skipped.`
-      : `${displayName} connected. ${body.tools.length} tools available to your agents.`,
+      ? `${displayName} connected. ${body.tools.length} tools, ${skipped} skipped. Connect it to an agent to use it.`
+      : `${displayName} connected. ${body.tools.length} tools. Connect it to an agent to use it.`,
     type: 'success',
   })
   return body
@@ -409,59 +421,4 @@ export async function fetchPathSuggestions(slug: string): Promise<PathSuggestion
   } catch {
     return []
   }
-}
-
-/**
- * Connect a brokered app: the broker first, then the app.
- *
- * ONE BROKER SESSION FOR ALL OF THEM. The obvious implementation reuses the
- * ordinary one-click path per app, and it is wrong in a way that only shows up
- * later: every brokered entry carries the broker's own launch URL, so signing
- * in to Gmail would open a Composio authorization under the slug `gmail`, and
- * connecting forty-one apps would leave forty-one separate sessions to the same
- * endpoint, each holding its own token. The broker is connected once, under its
- * own name, and every app is linked through that.
- */
-export async function connectBrokeredApp(
-  def: { slug: string; displayName: string; brokeredBy: { connector: string } },
-  broker: { slug: string; displayName: string },
-  onNeedsSignIn?: () => void,
-): Promise<boolean> {
-  // The broker's own connection, using the ordinary path. A no-op when it is
-  // already live, which is the common case after the first app.
-  if (!(await signInConnector(broker.slug, broker.displayName))) return false
-  if (!(await connectConnector(broker.slug, broker.displayName, onNeedsSignIn))) return false
-
-  let res: Response
-  try {
-    res = await apiFetch(`/api/connectors/${encodeURIComponent(def.slug)}/link`, { method: 'POST' })
-  } catch {
-    useToastStore.getState().addToast({
-      message: `Could not reach the server. ${def.displayName} was not connected.`,
-      type: 'error',
-    })
-    return false
-  }
-
-  const body = (await res.json().catch(() => ({}))) as { error?: string; url?: string }
-  if (!res.ok) {
-    useToastStore.getState().addToast({
-      message: body.error ?? `${def.displayName} could not be connected.`,
-      type: 'error',
-    })
-    return false
-  }
-
-  // A link means the app still needs its own approval. No link means the broker
-  // considers it already connected, which is a success rather than a silence.
-  if (body.url) {
-    window.open(body.url, '_blank', 'noopener,noreferrer')
-    useToastStore.getState().addToast({
-      message: `Approve ${def.displayName} in the tab that opened.`,
-      type: 'info',
-    })
-    return true
-  }
-  useToastStore.getState().addToast({ message: `${def.displayName} connected.`, type: 'success' })
-  return true
 }

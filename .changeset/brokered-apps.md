@@ -2,52 +2,40 @@
 'clawboo': minor
 ---
 
-Gmail, Slack, Jira and thirty-eight more, as ordinary rows.
+Gmail, Slack, Jira and thirty-eight more, through Composio.
 
-clawboo cannot register an OAuth application with Google or Atlassian or
-Salesforce, so the connectors it could offer stopped exactly where brokered
-sign-in begins. That was not an oversight, it was a boundary, and it is why a
-connector directory with twenty entries had none of the apps most people use.
+Apps clawboo cannot sign in to on its own now sit in their own band on the
+connectors page. Paste a Composio project key once, press Connect on an app,
+approve it at the provider, and it stays connected. Every connected app also
+appears as its own node on the graph, attached to the agents that can reach it.
+That last part is deliberate: a single node marked Composio would hide the fact
+that an agent can read your email, where a Gmail node says it plainly, and a
+thing you can see is a thing you can take away.
 
-Forty-one of them now sit in the shelf beside clawboo's own connectors, sorted
-by how likely you are to recognise the name rather than grouped under whoever
-brokers them. Press Connect on Gmail and it connects. The broker comes along on
-the first one and every app after that reuses the same connection, so there is
-one session rather than forty-one, and one token rather than forty-one.
+This replaces a first attempt that did not work, and the reason it did not is
+worth writing down.
 
-Nothing appears twice. GitHub, Linear, Notion, Sentry, Stripe, Figma, Airtable,
-Supabase, Cloudflare and SQLite are all brokered too, and all of them are absent
-from the brokered list: clawboo's own connector wins, and the catalog verifier
-fails the build if a slug collides.
+That version attached to Composio's MCP endpoint, which is the surface meant for
+MCP clients like Claude Desktop, and then tried to run product features by
+calling the model-facing meta-tools and reading their free-text answers. Every
+piece of machinery it grew existed to recover typed facts from prose: a JSON
+Schema sniffer that guessed argument shapes at runtime, a parser for status
+words, a retry ladder for a default action whose own description says it "always
+creates a new auth link", and finally a third loading state to cover a three
+second read on page load. Pressing Connect on an already-connected app minted a
+fresh consent link and sent the operator back to the provider, every time.
 
-No API key anywhere. The whole flow runs over the broker's own MCP session,
-which clawboo already opens through the ordinary OAuth path that Linear and
-Sentry use. An earlier draft of this reached for a project key and a REST
-client, and that would have created a second, separately scoped way into the
-same service: two doors, two sets of connections, and no way to tell which one
-an app went through.
+Composio's documentation points applications at their API instead, and their own
+reference application does the whole integration in a few hundred lines, because
+a typed answer needs no recovery. This now does the same: one typed client, one
+call that says which apps are connected, one call that starts an authorization.
 
-The call is built from the broker's own published schema rather than from a
-memorised argument shape, and it refuses rather than improvising. A tool that
-takes fields clawboo has no value for, or an action enum with nothing in it that
-starts a connection, produces a sentence naming what was missing. Sending the
-call anyway is how an operator ends up connected to something they did not pick.
+Eight hundred and eighty lines went, and two hundred and forty came back. Gone
+with them: forty-one apps declared as catalog connectors that could never be
+launched and never held a session, the `brokeredBy` escape hatch and the eleven
+branch sites that existed to tell everything downstream that this kind of
+connector was not really one, and the schema inference layer entirely. The
+catalog is twenty honest connectors again.
 
-Thirty-two of the forty-one carry their real logo. The nine that do not, Slack
-and Salesforce among them, have no mark in the public-domain icon set, so they
-draw the same monogram every unbranded entry does.
-
-Connector orbitals draw the connector's own logo. A tile reading Gmail under a
-generic cable glyph is one the eye has to read; the same tile under Gmail's mark
-is one it recognises, which is the entire job of an orbital at that size. The
-violet disc stays, because on this canvas colour says what KIND of thing a tile
-is, and only the glyph changes.
-
-Which logo to draw is a separate question from which connector to act on, so it
-is a separate function. The acting one refuses anything clawboo did not dial
-itself, because a wrong answer there disconnects something the operator did not
-choose. The drawing one reaches further on purpose: a server a runtime attached
-is still GitHub, and refusing to draw its mark would leave the one tile a reader
-could identify at a glance looking like every anonymous one. The catalog is the
-filter either way, so a server called `tools` still falls through to its service
-glyph rather than matching something it is not.
+The key is written to the encrypted vault and never returned. Every response
+about it carries a boolean and nothing else.
