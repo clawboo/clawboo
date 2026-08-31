@@ -13,6 +13,7 @@ import { parseApprovalRequestPayload } from '@/features/approvals/useApprovalAct
 import { nextSeq } from '@/lib/sequenceKey'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { nextMirroredStatus } from './socketStatusMirror'
+import { userStoppedRecently } from '@/features/chat/stopChatOperation'
 
 // ─── useGatewayEvents ─────────────────────────────────────────────────────────
 //
@@ -33,6 +34,63 @@ const CHARS_PER_TOKEN = 4
  * Runs BEFORE the pending-approval early-return below on purpose: the tokens
  * were spent whether or not the status patch is applied.
  */
+/**
+/**
+ * Provider phrasings for "the prompt did not fit".
+ *
+ * COPIED, not imported, for the same reason as the sentence below: the server's
+ * `isContextOverflowMessage` lives beside runtime code that must never enter the
+ * browser bundle. Kept character-for-character with
+ * `apps/web/server/lib/runtimes/native/providers/types.ts`, and both sides are
+ * pinned by tests, so a change to one breaks the other's test.
+ */
+const CONTEXT_OVERFLOW_RE =
+  /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|exceeds? (?:the )?(?:maximum )?context|too many tokens|reduce the length of the (?:messages|prompt)/i
+
+/**
+ * The sentence for a Gateway run that ended in `error` having said nothing.
+ *
+ * PARITY WITH THE SERVER'S `runFailureText`, COPIED RATHER THAN IMPORTED. That
+ * module reaches `runtimes/descriptor`, which is server code and must never
+ * enter the browser bundle, and `apps/web/src` may not import from
+ * `apps/web/server` at all.
+ *
+ * The no-provider-key arm is deliberately absent: it names a clawboo runtime to
+ * go and fix, and a Gateway session is an OpenClaw agent whose keys live
+ * somewhere this app cannot point at. The no-reason case borrows the wording the
+ * team drain already uses for a run that reported nothing, rather than telling
+ * the operator "unknown error" and leaving them there.
+ */
+export function gatewayRunFailureText(reason: string | null | undefined): string {
+  const trimmed = reason?.trim()
+  if (!trimmed) {
+    return 'The run ended without reporting a result. The connection to the runtime may have dropped; try sending again.'
+  }
+  // A CONTEXT-OVERFLOW LABEL IS RARELY ABOUT AN OVERSIZED PROMPT, and this is
+  // the arm an OpenClaw chat actually reaches, so it matters more here than on
+  // the server copy. Traced on a real install: a prompt of about 32,000 tokens
+  // against a model with a 204,800-token window, failing because the runtime had
+  // resolved a budget of 32,768 (the model's max OUTPUT tokens), started
+  // compacting at 32,106, and could not free anything, since compaction cannot
+  // reach tool definitions and they were 50,405 bytes of every prompt.
+  //
+  // The runtime's own advice is "/reset (or /new)", which clears the
+  // conversation: the one part that was not the problem. An operator followed it
+  // five times.
+  if (CONTEXT_OVERFLOW_RE.test(trimmed)) {
+    return (
+      'This run stopped because the runtime believed it was out of context room. ' +
+      'That is usually a wrong context-window setting rather than a genuinely oversized prompt: ' +
+      'a runtime that resolves a small budget starts compacting early, and compaction cannot shrink ' +
+      'tool definitions, so it frees nothing and the turn fails again. ' +
+      "Check the model's real context window in Settings, and reduce how many connectors this " +
+      'agent is granted if its tool list has grown. Starting a fresh session clears the ' +
+      'conversation but not the cause.'
+    )
+  }
+  return `The run failed: ${trimmed}`
+}
+
 export function recordChatCost(agentId: string, runId: string | null, cost: ChatCost): void {
   let inputTokens = cost.inputTokens ?? 0
 
@@ -122,6 +180,80 @@ export function useGatewayEvents(client: GatewayClient | null): void {
     })
 
     // ── Event handler with all deps wired to Zustand stores ────────────────
+    const appendOutputLines = (
+      agentId: string,
+      lines: string[],
+      eventSessionKey?: string,
+      /** The run to stamp, for a caller that fires after the terminal patch
+       *  has already cleared it off the fleet store. */
+      runIdOverride?: string | null,
+      /** Write as a SYSTEM NOTICE rather than as the agent speaking. A failed run
+       *  did not say this; clawboo is saying it about the run. */
+      asNotice = false,
+    ): void => {
+      if (lines.length === 0) return
+      const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
+      const sessionKey = eventSessionKey ?? agent?.sessionKey
+      if (!sessionKey) return
+
+      // Team sessions are owned by the SERVER orchestrator: it persists each
+      // turn (persistTeamChatEntry) and streams it back over the team-chat SSE
+      // (useTeamChatStream). The browser's Gateway connection ALSO sees these
+      // broadcast frames — committing + POSTing them here would double-write the
+      // turn (a distinct entryId per Gateway final-frame, so the store-level
+      // dedup misses cross-source / cross-second copies). Skip: the SSE is the
+      // sole source of team chat. 1:1 sessions still commit normally.
+      //
+      // LOAD-BEARING: `stores/chat.ts` no longer backstops this. Its layer-2
+      // dedup was narrowed to exact-frame identity (#71) precisely because the
+      // timestamp-independent team rule it used to carry was collapsing genuine
+      // re-utterances. Reintroducing a browser-side write into a team session
+      // would make the cross-writer duplicate visible again.
+      if (isTeamSessionKey(sessionKey)) return
+
+      // Anchor the commit batch to when streaming STARTED for this session,
+      // not when it commits. Without this, a long-streaming leader's commit
+      // lands AFTER fast specialists' commits even though the leader's
+      // response began first. Stream-start lives in the chat store so
+      // renderers can subscribe AND `appendOutputLines` can read it here.
+      // Falls back to commit time for tool-only batches that never streamed.
+      const streamStart = useChatStore.getState().streamStartedAt.get(sessionKey) ?? null
+      if (streamStart !== null) {
+        useChatStore.getState().clearStreamStart(sessionKey)
+      }
+      const timestamp = streamStart ?? Date.now()
+      const entries: TranscriptEntry[] = lines.map((text) => ({
+        entryId: crypto.randomUUID(),
+        runId: runIdOverride ?? agent?.runId ?? null,
+        sessionKey,
+        kind: asNotice
+          ? ('meta' as const)
+          : text.startsWith('[[tool]]') || text.startsWith('[[tool-result]]')
+            ? ('tool' as const)
+            : ('assistant' as const),
+        role: asNotice ? ('system' as const) : ('assistant' as const),
+        text,
+        source: 'runtime-chat' as const,
+        timestampMs: timestamp,
+        // Each line in the batch gets a unique strictly-increasing
+        // sequenceKey so the merged-view sort can break ties even when
+        // every line shares the same timestamp.
+        sequenceKey: nextSeq(),
+        confirmed: true,
+        fingerprint: crypto.randomUUID(),
+      }))
+
+      useChatStore.getState().appendTranscript(sessionKey, entries)
+
+      // Best-effort persistence — never throw in an event handler
+      const gwUrl = useConnectionStore.getState().gatewayUrl ?? ''
+      void apiFetch('/api/chat-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey, gatewayUrl: gwUrl, entries }),
+      }).catch(() => {})
+    }
+
     const handler = createEventHandler({
       // State queries
       getAgentRunId: (agentId) =>
@@ -163,6 +295,65 @@ export function useGatewayEvents(client: GatewayClient | null): void {
               // Still append output lines, but skip the status patch.
               useFleetStore.getState().updateLastSeen(intent.agentId, Date.now())
               break
+            }
+            // RECOVER THE PROSE BEFORE THE PATCH CLEARS THE RUN. A terminal
+            // frame that re-carries no assistant text (`aborted`, `error`, or a
+            // `final` whose message has only tool lines) appended nothing above,
+            // so the clear below used to delete the reply the operator had just
+            // watched stream and put nothing in its place.
+            //
+            // BEFORE `patchAgent`, deliberately: the patch sets `runId: null`,
+            // and a recovered entry stamped with a null run loses its token and
+            // cost footer, which is keyed on the run.
+            if (intent.sessionKey && !isTeamSessionKey(intent.sessionKey)) {
+              const sessionKey = intent.sessionKey
+              const live = useChatStore.getState().streamingText.get(sessionKey)
+              // PROSE, not "any line". A tool-only final carries `[[tool]]`
+              // entries, so gating on an empty list would miss exactly the case
+              // where a run ends with tool output and the prose is dropped.
+              const committedProse = intent.outputLines.some(
+                (l) => !l.startsWith('[[tool]]') && !l.startsWith('[[tool-result]]'),
+              )
+              const stopped = userStoppedRecently(sessionKey)
+              const recent = (useChatStore.getState().transcripts.get(sessionKey) ?? []).slice(-10)
+              let saidSomething = committedProse
+              if (live && live.trim() !== '' && !committedProse && !stopped) {
+                // The approval-pending branch above commits WITHOUT clearing the
+                // card, so this text may already be in the transcript and a
+                // second copy would both render and persist.
+                if (!recent.some((e) => e.kind === 'assistant' && e.text === live)) {
+                  appendOutputLines(intent.agentId, [live], sessionKey, intent.runId)
+                }
+                saidSomething = true
+              }
+
+              // A FAILED RUN THAT SAID NOTHING MUST STILL SAY WHY. Without this
+              // the turn is a silent non-response: an optimistic bubble, a brief
+              // Working badge, then nothing under a header that has gone red.
+              // The native path has written this notice for a while
+              // (agentChat/driveAgentChat.ts:226-235); the Gateway path never did.
+              //
+              // The intent already carries both halves: `work.ts:149-152` sets
+              // `status: 'error'` and puts the runtime's own message on
+              // `streamText`, so nothing new has to be plumbed for this.
+              if (intent.patch.status === 'error' && !saidSomething && !stopped) {
+                // A LATER error frame for a run that already answered must not
+                // append a failure under a good reply. `saidSomething` covers
+                // only this commit, so the run's own transcript is checked too.
+                const runAlreadySpoke = recent.some(
+                  (e) =>
+                    e.kind === 'assistant' && intent.runId !== null && e.runId === intent.runId,
+                )
+                if (!runAlreadySpoke) {
+                  appendOutputLines(
+                    intent.agentId,
+                    [gatewayRunFailureText(intent.patch.streamText)],
+                    sessionKey,
+                    intent.runId,
+                    true,
+                  )
+                }
+              }
             }
             // outputLines already handled by appendOutputLines above;
             // apply the final status patch (idle/error, runId cleared)
@@ -225,68 +416,7 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       },
 
       // Append committed output lines to the chat transcript
-      appendOutputLines: (agentId, lines, eventSessionKey?) => {
-        if (lines.length === 0) return
-        const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
-        const sessionKey = eventSessionKey ?? agent?.sessionKey
-        if (!sessionKey) return
-
-        // Team sessions are owned by the SERVER orchestrator: it persists each
-        // turn (persistTeamChatEntry) and streams it back over the team-chat SSE
-        // (useTeamChatStream). The browser's Gateway connection ALSO sees these
-        // broadcast frames — committing + POSTing them here would double-write the
-        // turn (a distinct entryId per Gateway final-frame, so the store-level
-        // dedup misses cross-source / cross-second copies). Skip: the SSE is the
-        // sole source of team chat. 1:1 sessions still commit normally.
-        //
-        // LOAD-BEARING: `stores/chat.ts` no longer backstops this. Its layer-2
-        // dedup was narrowed to exact-frame identity (#71) precisely because the
-        // timestamp-independent team rule it used to carry was collapsing genuine
-        // re-utterances. Reintroducing a browser-side write into a team session
-        // would make the cross-writer duplicate visible again.
-        if (isTeamSessionKey(sessionKey)) return
-
-        // Anchor the commit batch to when streaming STARTED for this session,
-        // not when it commits. Without this, a long-streaming leader's commit
-        // lands AFTER fast specialists' commits even though the leader's
-        // response began first. Stream-start lives in the chat store so
-        // renderers can subscribe AND `appendOutputLines` can read it here.
-        // Falls back to commit time for tool-only batches that never streamed.
-        const streamStart = useChatStore.getState().streamStartedAt.get(sessionKey) ?? null
-        if (streamStart !== null) {
-          useChatStore.getState().clearStreamStart(sessionKey)
-        }
-        const timestamp = streamStart ?? Date.now()
-        const entries: TranscriptEntry[] = lines.map((text) => ({
-          entryId: crypto.randomUUID(),
-          runId: agent?.runId ?? null,
-          sessionKey,
-          kind:
-            text.startsWith('[[tool]]') || text.startsWith('[[tool-result]]')
-              ? ('tool' as const)
-              : ('assistant' as const),
-          role: 'assistant' as const,
-          text,
-          source: 'runtime-chat' as const,
-          timestampMs: timestamp,
-          // Each line in the batch gets a unique strictly-increasing
-          // sequenceKey so the merged-view sort can break ties even when
-          // every line shares the same timestamp.
-          sequenceKey: nextSeq(),
-          confirmed: true,
-          fingerprint: crypto.randomUUID(),
-        }))
-
-        useChatStore.getState().appendTranscript(sessionKey, entries)
-
-        // Best-effort persistence — never throw in an event handler
-        const gwUrl = useConnectionStore.getState().gatewayUrl ?? ''
-        void apiFetch('/api/chat-history', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionKey, gatewayUrl: gwUrl, entries }),
-        }).catch(() => {})
-      },
+      appendOutputLines,
 
       // Re-fetch agent sessions after a chat final (best-effort). Routes through
       // the AgentSource (server delegates to the Gateway).
