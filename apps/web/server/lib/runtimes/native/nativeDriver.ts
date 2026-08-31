@@ -13,7 +13,7 @@ import path from 'node:path'
 import type { NativeDriver, NativeEvent } from '@clawboo/adapter-native'
 import { chatMessages, type ClawbooDb } from '@clawboo/db'
 import type { StartOpts } from '@clawboo/executor'
-import { isTeamSessionKey } from '@clawboo/team-orchestration'
+import { isTeamSessionKey, nativeChatSessionKey } from '@clawboo/team-orchestration'
 
 import { getDb } from '../../db'
 import type { RuntimeRunContext } from '../types'
@@ -93,12 +93,16 @@ export function createNativeDriver(
   const db = deps.db ?? getDb()
 
   const push = (ev: NativeEvent): void => {
-    // Persist the agent's reply into its 1:1 history — UNLESS this run is a
-    // team-chat run (sessionKey `agent:<id>:team:<teamId>`). For a team run the
-    // server orchestrator already persists the terminal under the team key (via
-    // serverDeliver.persistTurn → persistTeamChatEntry); writing it here too would
-    // leak the team turn into the agent's 1:1 chat panel (a live ChatPanel surface).
-    if (ev.type === 'result' && ev.ok && !isTeamSessionKey(opts.sessionKey))
+    // Persist the agent's reply into its 1:1 chat, and ONLY when this run IS that
+    // chat. An agent runs in several places: its 1:1 chat, a team room, a board
+    // task, each with its own session key, and each of the others already records
+    // the turn where it belongs (a team run through `serverDeliver.persistTurn`, a
+    // board task as the report-up comment `executorRunner` writes). Recognising
+    // the 1:1 key rather than ruling out the shapes we happen to know about is
+    // what keeps a person's chat a conversation: a boo working three board tasks
+    // in parallel would otherwise drop three replies into it, unprompted, with no
+    // question in front of them.
+    if (ev.type === 'result' && ev.ok && opts.sessionKey === nativeChatSessionKey(opts.agentId))
       persistNativeChatEntry(db, opts.agentId, ev.summary)
     if (!subscribed) {
       buffered.push(ev)

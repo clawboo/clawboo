@@ -1,8 +1,13 @@
-// Native driver de-double: the driver's `agent:<id>:native` chat write is gated OFF
-// for a team-chat run (sessionKey `agent:<id>:team:<teamId>`), because the server
-// orchestrator already persists that turn under the team key. Without the gate a
-// team turn would leak into the agent's 1:1 ChatPanel history (a live surface).
-// Drives a real Conversation with a SCRIPTED provider client + null MCP.
+// What is allowed to appear in a person's 1:1 chat with a boo.
+//
+// One agent runs in several places at once, each with its own session key: the 1:1
+// chat, a team room, a board task. Only the first is a conversation someone is
+// looking at, and the other two already record their turns where they belong (the
+// orchestrator persists a team turn under the team key; `executorRunner` writes a
+// board task's report-up as a task comment). So the driver writes to the chat only
+// when the run IS the chat. A boo working three board tasks in parallel would
+// otherwise drop three replies into the chat, unprompted, with nothing in front of
+// them. Drives a real Conversation with a SCRIPTED provider client + null MCP.
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
@@ -36,7 +41,7 @@ function textClient(text: string): RoutedProviderClient {
   }
 }
 
-describe('native driver — :native chat write de-double for team runs', () => {
+describe('native driver: what reaches the 1:1 chat', () => {
   let sandbox: string
   let cwd: string
   let db: ClawbooDb
@@ -75,7 +80,17 @@ describe('native driver — :native chat write de-double for team runs', () => {
     })
   }
 
-  it('SKIPS the :native write for a team-scoped sessionKey', async () => {
+  it('writes the reply when the run IS the 1:1 chat', async () => {
+    await runToResult({
+      agentId: 'nat-solo',
+      sessionKey: 'agent:nat-solo:native',
+      message: 'do the thing',
+    })
+    expect(nativeRows('nat-solo')).toHaveLength(1)
+  })
+
+  it('stays out of the chat for a team run', async () => {
+    // The orchestrator already persisted this turn under the team key.
     await runToResult({
       agentId: 'nat-team',
       sessionKey: 'agent:nat-team:team:T',
@@ -84,12 +99,27 @@ describe('native driver — :native chat write de-double for team runs', () => {
     expect(nativeRows('nat-team')).toHaveLength(0)
   })
 
-  it('KEEPS the :native write for a non-team sessionKey (1:1 / board task)', async () => {
+  it('stays out of the chat for a board task', async () => {
+    // Board work belongs to the board: the report-up lands as a task comment, and
+    // the task drawer is where a person reads it. Landing it here instead puts an
+    // unprompted reply in a chat nobody asked a question in, and a boo assigned
+    // several tasks lands one per task.
     await runToResult({
-      agentId: 'nat-solo',
+      agentId: 'nat-task',
       sessionKey: 'runtime:clawboo-native:task:t1',
       message: 'do the thing',
     })
-    expect(nativeRows('nat-solo')).toHaveLength(1)
+    expect(nativeRows('nat-task')).toHaveLength(0)
+  })
+
+  it('stays out of the chat for any other shape a run may be given', async () => {
+    // The rule recognises the chat key rather than ruling out the shapes we happen
+    // to know about, so a key invented later cannot leak by default.
+    await runToResult({
+      agentId: 'nat-x',
+      sessionKey: 'teamchat:room:R',
+      message: 'do the thing',
+    })
+    expect(nativeRows('nat-x')).toHaveLength(0)
   })
 })
