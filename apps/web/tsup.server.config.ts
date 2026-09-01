@@ -30,15 +30,21 @@ export default defineConfig({
     '@anthropic-ai/sdk',
     'openai',
     'croner',
-    // The Composio API client, for the same reason as the provider SDKs: it is a
-    // pure-JS HTTP client with zero dependencies, and `connectors/composio` is
-    // imported STATICALLY from the server entry, so a clean `npx clawboo` install
-    // that could not resolve it would fail to boot rather than lose one connector.
-    // Bundling also pins it, which matters more than usual while it is an alpha.
-    '@composio/client',
   ],
   // OTel is lazy-imported and kept EXTERNAL so it
   // never bloats the bundled dist/server.js; the lazy import resolves it at runtime
   // (dev) or degrades to event-log-only if absent (lean bundled CLI).
-  external: ['better-sqlite3', 'ws', 'pino', 'pino-pretty', /^@opentelemetry\//],
+  // Declared runtime dependencies of the PUBLISHED package (apps/cli), resolved
+  // from node_modules at boot rather than inlined. `@composio/client` joins them
+  // rather than being bundled: it is imported statically from the server entry, so
+  // it has to be present, and `apps/cli` declaring it is how the other externals
+  // here already guarantee that. Bundling it instead broke the Windows build.
+  external: [
+    'better-sqlite3',
+    'ws',
+    'pino',
+    'pino-pretty',
+    '@composio/client',
+    /^@opentelemetry\//,
+  ],
 })
