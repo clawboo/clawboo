@@ -4,7 +4,7 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev --concurrency=20",
-    "lint": "turbo lint",
+    "lint": "turbo lint && pnpm lint:repo",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "test:coverage": "turbo test -- --coverage --coverage.reporter=text",
@@ -21,7 +21,10 @@
     "check:docs": "pnpm --filter @clawboo/docs check-frontmatter",
     "test:clean-install": "node scripts/test-clean-install.mjs",
     "test:bundle-externals": "node scripts/check-bundle-externals.mjs",
-    "prepublish:check": "pnpm verify:catalog && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install"
+    "prepublish:check": "pnpm verify:catalog && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install",
+    "ingest:connectors": "tsx scripts/ingest-connector-registry.ts",
+    "lint:repo": "eslint scripts/ --max-warnings 0",
+    "generate:brand-marks": "tsx scripts/generate-brand-marks.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
@@ -42,6 +45,7 @@
     "lint-staged": "^15.0.0",
     "msw": "^2.15.0",
     "prettier": "^3.9.6",
+    "simple-icons": "^16.28.0",
     "tsup": "^8.4.0",
     "tsx": "^4.23.10",
     "turbo": "^2.10.8",

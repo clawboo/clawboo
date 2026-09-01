@@ -7,15 +7,20 @@ import {
   createBuiltinRegistry,
   defaultAvailabilityContext,
   evaluateAvailability,
+  brokeredMetaToolKind,
   executeBrokeredCall,
+  readToolResult,
+  grantedBrokeredToolkits,
+  isToolVisibleToAgent,
   type AvailabilityContext,
   ToolRegistry,
   type BrokerOptions,
   type ClawbooDb,
   type ToolDescriptor,
 } from '@clawboo/db'
-import type { z } from 'zod'
+import { z } from 'zod'
 
+import { DEFAULT_TOOL_RESULT_BUDGET_BYTES, makeResultCeiling } from '../ceiling'
 import { buildServer, textResult, type Server, type ToolDef } from '../shared'
 
 export interface ToolsServerOptions {
@@ -31,6 +36,14 @@ export interface ToolsServerOptions {
    * make is denied `no-grant` with nothing in the record explaining why.
    */
   teamId?: string
+  /** Recorded on a stored tool result, so a spill is attributable. */
+  tenantId?: string
+  /**
+   * Bytes one tool result may occupy in a model's context. Defaults to
+   * `DEFAULT_TOOL_RESULT_BUDGET_BYTES`; a host that knows its model's window can
+   * pass something better.
+   */
+  toolResultBudgetBytes?: number
   /**
    * Extra descriptors to serve alongside the builtins, and the connector each
    * one belongs to.
@@ -57,6 +70,16 @@ export interface ToolsServerOptions {
   onConnectorsChanged?: (notify: () => void) => () => void
   /** Broker knobs (provenance enforcement, approval TTL/timeout, compaction). */
   broker?: Omit<BrokerOptions, 'registry'>
+  /**
+   * Broker apps the install has authorised, for a caller with NO agent identity.
+   *
+   * An OpenClaw session is unbound by construction (one process-wide config
+   * serves every agent), so no agent-scoped grant is findable and the granted
+   * list is always empty. Naming nothing left the model reporting that it had
+   * Composio but no email service, which is the bug this exists to stop. These
+   * are reachable subject to an approval, so they are named as such.
+   */
+  brokeredConnected?: readonly string[]
 }
 
 export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}): Server {
@@ -93,44 +116,196 @@ export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}):
     return { registry, connectorOf }
   }
 
-  const toolsNow = (): ToolDef[] => {
-    const { registry, connectorOf } = compose()
-    return registry
-      .list()
-      .filter((descriptor) => evaluateAvailability(descriptor, availability).visible)
-      .map((descriptor) => ({
-        name: descriptor.name,
-        description: descriptor.description,
-        inputSchema: descriptor.inputSchema as z.ZodObject<z.ZodRawShape>,
-        ...(descriptor.jsonSchema ? { jsonSchema: descriptor.jsonSchema } : {}),
-        handler: async (args: Record<string, unknown>) => {
-          // Re-composed at CALL time: the registry the broker resolves against
-          // must contain the tool being called, and a session that started
-          // before this connector existed would otherwise hold a stale one.
-          const live = compose()
-          const connectorId =
-            live.connectorOf.get(descriptor.name) ?? connectorOf.get(descriptor.name)
-          const result = await executeBrokeredCall(
-            db,
-            { name: descriptor.name, args },
-            {
-              agentId: opts.agentId,
-              availability,
-              // Both are spread CONDITIONALLY so a builtin-only construction
-              // produces exactly the context it produced before this change.
-              ...(opts.teamId ? { teamId: opts.teamId } : {}),
-              ...(connectorId ? { connectorId } : {}),
-            },
-            { registry: live.registry, ...opts.broker },
-          )
-          // Carry a typed denial (availability/provenance/inspector/approval) on
-          // `_meta` so an in-process caller can surface a policy-denied signal.
-          return textResult(result.output, result.isError, result.denied)
-        },
-      }))
+  /**
+   * The description the model reads, with the broker's apps named.
+   *
+   * A BROKER'S TOOLS ARE NAMED FOR THE BROKER. An agent granted Gmail sees seven
+   * tools called `COMPOSIO_*` and no mention of email anywhere, so asked to check
+   * its inbox it answered that it had Composio connected but no email service.
+   * That was an accurate reading of its own tool list. Naming the granted apps
+   * here is the one place the model is guaranteed to look.
+   */
+  const describeFor = (
+    descriptor: ToolDescriptor,
+    connectorId: string | null,
+    /** Resolved ONCE per list, not per tool: see `toolsNow`. */
+    grantedApps: readonly string[],
+  ): string => {
+    // CLAWBOO ADDS, IT NEVER EDITS. A description is a vendor's contract with the
+    // model, and it is the only retrieval signal the model has for choosing a
+    // tool. Shortening one to save prompt was tried and reverted: a byte cap over
+    // the registry on this install would have cut 12,643 bytes across five tools,
+    // and on `sequentialthinking` it kept the preamble while deleting seven of the
+    // tool's eight parameter definitions. Vendors front-load prose and back-load
+    // the contract, so any size-driven cut lands on the part that matters, and it
+    // lands silently. Everything below only APPENDS clawboo's own authoritative
+    // context to what the server said.
+    const base = descriptor.description
+
+    const known = opts.broker?.brokeredToolkits
+    if (!connectorId || !known || known.length === 0) return base
+    if (brokeredMetaToolKind(descriptor.name) !== 'app-facing') return base
+    const apps = grantedApps
+    if (apps.length > 0) {
+      // Upper-cased because that is how the broker prefixes its own tool slugs,
+      // so an agent told GMAIL can go straight to GMAIL_FETCH_EMAILS.
+      const named = apps.map((a) => a.toUpperCase()).join(', ')
+      return `${base}\n\nApps this agent may use: ${named}.`
+    }
+    // NO IDENTITY, so no grant could be found. Say what is reachable and that it
+    // will be asked about, rather than leaving the model to conclude it has no
+    // email service while holding a working email connector.
+    const available = opts.brokeredConnected ?? []
+    if (!opts.agentId && available.length > 0) {
+      const named = available.map((a) => a.toUpperCase()).join(', ')
+      return `${base}\n\nApps reachable here, each subject to the operator approving the first call: ${named}.`
+    }
+    return base
   }
 
-  const server = buildServer('clawboo-tools', toolsNow)
+  // Reads back a result the ceiling stored. Marked `structuredResult` so the
+  // ceiling never trims its own recovery path: a page that came back trimmed
+  // would need a second handle to recover, and so on without end.
+  const readToolResultTool: ToolDef = {
+    name: 'read_tool_result',
+    structuredResult: true,
+    description:
+      'Read a tool result that was too large to return in full. Pass the handle from the notice in the truncated result. Page through it with offset and limit (both in bytes), or pass search to get only the matching lines with their byte offsets so you can seek straight to one.',
+    inputSchema: z.object({
+      handle: z.string(),
+      offset: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).optional(),
+      search: z.string().optional(),
+    }),
+    handler: (args) => {
+      const handle = String(args['handle'] ?? '')
+      const limit = Math.min(
+        Number(args['limit'] ?? DEFAULT_TOOL_RESULT_BUDGET_BYTES),
+        opts.toolResultBudgetBytes ?? DEFAULT_TOOL_RESULT_BUDGET_BYTES,
+      )
+      const page = readToolResult(db, handle, {
+        limit,
+        ...(args['offset'] != null ? { offset: Number(args['offset']) } : {}),
+        ...(args['search'] != null ? { search: String(args['search']) } : {}),
+      })
+      if (!page) {
+        // An unknown handle is NOT an empty result. Saying so is what stops the
+        // model reporting "there was nothing there" about bytes that expired.
+        return textResult(
+          `No stored result for handle ${JSON.stringify(handle)}. It may have expired. Re-run the original tool call with narrower arguments to get the data again.`,
+          true,
+        )
+      }
+      const partialStore =
+        page.storedBytes < page.totalBytes
+          ? ` The stored copy itself is partial: ${page.storedBytes} of ${page.totalBytes} bytes were kept.`
+          : ''
+      const next = page.more
+        ? ` Read the next page with {"handle":"${handle}","offset":${page.nextOffset},"limit":${limit}}.`
+        : ' This is the end of the result.'
+      return textResult(`${page.text}\n\n[${page.totalBytes} bytes total.${partialStore}${next}]`)
+    },
+  }
+
+  const toolsNow = (): ToolDef[] => {
+    const { registry, connectorOf } = compose()
+
+    // ONCE PER LIST, NOT ONCE PER TOOL. The granted-app lookup asks the grant
+    // table for every toolkit the broker knows, and the answer is identical for
+    // every tool on the same connector. Called from `describeFor` it ran that
+    // sweep for each app-facing meta-tool: forty-one queries times five tools on
+    // every `tools/list`, and a list happens on every turn.
+    const grantedByConnector = new Map<string, readonly string[]>()
+    const grantedFor = (connectorId: string | null): readonly string[] => {
+      const known = opts.broker?.brokeredToolkits
+      if (!connectorId || !known || known.length === 0) return []
+      const hit = grantedByConnector.get(connectorId)
+      if (hit) return hit
+      const apps = grantedBrokeredToolkits(
+        db,
+        connectorId,
+        { agentId: opts.agentId ?? null, teamId: opts.teamId ?? null },
+        known,
+      )
+      grantedByConnector.set(connectorId, apps)
+      return apps
+    }
+    return (
+      registry
+        .list()
+        .filter((descriptor) => evaluateAvailability(descriptor, availability).visible)
+        // GRANTS DECIDE WHAT IS EVEN OFFERED, not just what succeeds. A connector
+        // tool this agent has not been given was listed with its full schema and
+        // then refused on use: the model spent context reading a capability it
+        // could never have, and its failure said `grant:no-grant` rather than
+        // anything it could act on. `connectorOf` already holds the one fact the
+        // gate cannot recover from a tool name, so the same question the gate asks
+        // is answerable right here, without charging a rate window or writing an
+        // audit row for a call nobody made.
+        .filter((descriptor) =>
+          isToolVisibleToAgent(db, descriptor, {
+            agentId: opts.agentId ?? null,
+            teamId: opts.teamId ?? null,
+            connectorId: connectorOf.get(descriptor.name) ?? null,
+          }),
+        )
+        .map((descriptor) => ({
+          name: descriptor.name,
+          description: describeFor(
+            descriptor,
+            connectorOf.get(descriptor.name) ?? null,
+            grantedFor(connectorOf.get(descriptor.name) ?? null),
+          ),
+          inputSchema: descriptor.inputSchema as z.ZodObject<z.ZodRawShape>,
+          ...(descriptor.jsonSchema ? { jsonSchema: descriptor.jsonSchema } : {}),
+          handler: async (args: Record<string, unknown>) => {
+            // Re-composed at CALL time: the registry the broker resolves against
+            // must contain the tool being called, and a session that started
+            // before this connector existed would otherwise hold a stale one.
+            const live = compose()
+            const connectorId =
+              live.connectorOf.get(descriptor.name) ?? connectorOf.get(descriptor.name)
+            const result = await executeBrokeredCall(
+              db,
+              { name: descriptor.name, args },
+              {
+                agentId: opts.agentId,
+                availability,
+                // Both are spread CONDITIONALLY so a builtin-only construction
+                // produces exactly the context it produced before this change.
+                ...(opts.teamId ? { teamId: opts.teamId } : {}),
+                ...(connectorId ? { connectorId } : {}),
+              },
+              { registry: live.registry, ...opts.broker },
+            )
+            // Carry a typed denial (availability/provenance/inspector/approval) on
+            // `_meta` so an in-process caller can surface a policy-denied signal.
+            return textResult(result.output, result.isError, result.denied)
+          },
+        }))
+    )
+  }
+
+  /**
+   * Everything served: the governed tools, plus the retrieval tool.
+   *
+   * `read_tool_result` is appended here rather than registered as a descriptor so
+   * it can never be gated by a grant, hidden by availability, or shadowed by a
+   * connector tool of the same name. The one tool that recovers a truncated
+   * result has to be reachable exactly when the model is holding one.
+   */
+  const servedTools = (): ToolDef[] => [...toolsNow(), readToolResultTool]
+
+  // The size ceiling. `read_tool_result` lives on THIS server because every
+  // runtime attaches it, so a handle minted for a memory or tasks result is
+  // redeemable here.
+  const ceiling = makeResultCeiling(db, {
+    agentId: opts.agentId ?? null,
+    tenantId: opts.tenantId ?? null,
+    ...(opts.toolResultBudgetBytes ? { budgetBytes: opts.toolResultBudgetBytes } : {}),
+  })
+
+  const server = buildServer('clawboo-tools', servedTools, ceiling)
 
   // Turn the declared `listChanged` capability into a real one. Best-effort: a
   // notification that fails must never take down the session it was announcing

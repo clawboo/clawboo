@@ -3,9 +3,77 @@
 
 import type { ConnectorDefinition } from '../types'
 
+/**
+ * The broker every entry in ./brokered.ts is reached through.
+ *
+ * Exported BY NAME so those forty-one read its launch and egress from here
+ * rather than restating them, and so nothing has to find it with a lookup that
+ * could miss.
+ */
+export const COMPOSIO_CONNECTOR: ConnectorDefinition = {
+  slug: 'composio',
+  popular: true,
+  displayName: 'Composio',
+  description: 'Reach Gmail, Slack, Jira, Salesforce and hundreds more through Composio.',
+  category: 'productivity',
+  provenance: 'curated',
+  // A BROKER, and the only one in this file. Every other curated entry talks
+  // to one service; this one talks to a company that talks to hundreds. That
+  // is the whole reason to carry it: clawboo cannot register an OAuth app
+  // with Google or Atlassian or Salesforce, so the connectors it can offer
+  // stop exactly where brokered sign-in begins.
+  //
+  // Its endpoint is a standards-compliant MCP resource server, so nothing
+  // here is special-cased: it advertises its authorization server at
+  // /.well-known/oauth-protected-resource, that server offers dynamic client
+  // registration with PKCE and a public client, and clawboo's ordinary OAuth
+  // path handles all of it. There is no API key to paste and no Composio
+  // code anywhere in this repo.
+  launch: { transport: 'streamable-http', url: 'https://connect.composio.dev/mcp' },
+  auth: {
+    kind: 'oauth',
+    inputs: [],
+    // `offline_access` IS THE ONE THAT MATTERS, and leaving it off is what made
+    // this connector demand a fresh sign-in every few minutes. Without it the
+    // authorization server issues no refresh token, so the moment the
+    // short-lived access token expires `getAccessToken` finds nothing to redeem
+    // and returns null. That reads all the way up as "this needs signing in"
+    // and opens another browser tab: sign in, close the tab, press Connect,
+    // sign in again.
+    //
+    // `openid` accompanies it because this is an OIDC provider. These two are
+    // the whole request; no data scope is asked for here, because the apps
+    // behind the broker are authorized at the broker rather than at clawboo.
+    scopes: ['openid', 'offline_access'],
+    // SAID PLAINLY, because it is the part a reader would otherwise discover
+    // afterwards. Connecting an app through a broker means the broker holds
+    // that app's tokens, not clawboo, and can use them whenever it likes.
+    scopesRationale:
+      "Composio signs you in to each app and keeps that app's access and refresh tokens on its own servers. clawboo holds only a token for Composio itself. Anything you connect here is reachable by Composio, not just by your agents.",
+    setupGuide: {
+      console: 'Composio',
+      url: 'https://composio.dev',
+      steps: [
+        'Approve the authorization request in the browser tab that opens.',
+        'Connect the apps you want from inside Composio.',
+        'Return to clawboo. The tile clears its amber key badge on success.',
+      ],
+    },
+  },
+  egressAllow: ['connect.composio.dev', 'login.composio.dev', 'backend.composio.dev'],
+  // Every leg is true and cannot be narrowed. A broker reads whatever the
+  // apps behind it read, carries back whatever they contain, and sends
+  // wherever they send.
+  trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: true },
+  tags: ['broker', 'gmail', 'slack', 'jira', 'salesforce', 'hubspot', 'calendar', 'oauth'],
+  homepage: 'https://docs.composio.dev',
+}
+
 export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
+  COMPOSIO_CONNECTOR,
   {
     slug: 'notion',
+    popular: true,
     displayName: 'Notion',
     description: 'Read and write Notion pages, databases, and comments.',
     category: 'docs',
@@ -21,6 +89,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'NOTION_TOKEN',
+          label: 'Notion internal integration token',
           description: 'An internal integration token from your Notion workspace.',
           docsUrl: 'https://www.notion.so/my-integrations',
           required: true,
@@ -44,6 +113,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'figma',
+    popular: true,
     displayName: 'Figma',
     description: 'Read Figma files, frames, and design tokens for implementation.',
     category: 'docs',
@@ -59,6 +129,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'FIGMA_API_KEY',
+          label: 'Figma personal access token',
           description: 'A Figma personal access token with file read scope.',
           docsUrl: 'https://www.figma.com/developers/api#access-tokens',
           required: true,
@@ -73,6 +144,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'stripe',
+    popular: true,
     displayName: 'Stripe',
     description: 'Inspect customers, payments, and subscriptions in Stripe.',
     category: 'finance',
@@ -114,6 +186,7 @@ export const PRODUCTIVITY_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'STRIPE_SECRET_KEY',
+          label: 'Stripe secret key',
           description: 'A Stripe secret key. Use a TEST key (sk_test_…) unless you mean it.',
           docsUrl: 'https://dashboard.stripe.com/apikeys',
           required: true,

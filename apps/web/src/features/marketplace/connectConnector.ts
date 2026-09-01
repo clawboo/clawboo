@@ -26,8 +26,15 @@ async function readError(res: Response): Promise<string> {
 async function readRefusal(res: Response): Promise<{ message: string; reason?: string }> {
   return res
     .json()
-    .then((b: { error?: string; reason?: string }) => ({
-      message: b.error ?? `HTTP ${res.status}`,
+    .then((b: { error?: string; reason?: string; detail?: string }) => ({
+      // The SENTENCE, with the raw text appended only when it adds something.
+      // A connect failure now arrives already translated (see
+      // explainConnectFailure); `detail` is the original, kept because a real
+      // spawn problem needs it and dropped when it merely repeats the sentence.
+      message:
+        b.error && b.detail && b.detail !== b.error
+          ? `${b.error} (${b.detail.slice(0, 160)})`
+          : (b.error ?? `HTTP ${res.status}`),
       ...(b.reason ? { reason: b.reason } : {}),
     }))
     .catch(() => ({ message: `HTTP ${res.status}` }))
@@ -40,6 +47,15 @@ export async function connectConnector(
   /** Called when the server refuses because the stored authorization is no
    *  longer usable, so the caller can offer sign-in again. */
   onNeedsSignIn?: () => void,
+  /**
+   * Skip the success toast.
+   *
+   * For a caller that already knows the connector is running and is here only
+   * for its id: the route is idempotent, so this is a lookup rather than a
+   * connect, and announcing "connected" would report something that did not
+   * just happen. Failures still speak.
+   */
+  quiet = false,
 ): Promise<ConnectSuccess | null> {
   let res: Response
   try {
@@ -70,14 +86,17 @@ export async function connectConnector(
   }
 
   const body = (await res.json()) as ConnectSuccess
+  if (quiet) return body
   const skipped = body.skipped?.length ?? 0
   useToastStore.getState().addToast({
-    // No longer qualified by transport. The in-process tools server a native run
-    // builds now takes the same connector tools an HTTP-attached agent sees, so
-    // naming one of the two would be the inaccurate half.
+    // NOT "available to your agents", which this said while connecting also
+    // granted the connector to the whole fleet. Connecting now makes a connector
+    // available and gives it to nobody; an agent gets it when the operator draws
+    // an edge to it. Saying otherwise would describe permissions the agent does
+    // not have.
     message: skipped
-      ? `${displayName} connected. ${body.tools.length} tools available to your agents, ${skipped} skipped.`
-      : `${displayName} connected. ${body.tools.length} tools available to your agents.`,
+      ? `${displayName} connected. ${body.tools.length} tools, ${skipped} skipped. Connect it to an agent to use it.`
+      : `${displayName} connected. ${body.tools.length} tools. Connect it to an agent to use it.`,
     type: 'success',
   })
   return body
@@ -141,6 +160,8 @@ export async function listLiveConnectors(): Promise<LiveConnectorRow[]> {
 
 export interface CredentialStatus {
   key: string
+  /** What the vendor calls this. The field label; `key` is the env var name. */
+  label?: string
   description: string
   required: boolean
   secret: boolean
@@ -222,6 +243,12 @@ export interface CustomConnectorInput {
   description?: string
   command: string
   args: string[]
+  /** Environment variables the server needs, so the operator is actually asked. */
+  authInputs?: { key: string; description: string; required: boolean }[]
+  /** Registry identity, when this came from the community snapshot. */
+  catalogId?: string
+  /** The exact version the operator was shown before approving. */
+  pinnedVersion?: string
 }
 
 /** The operator's own connector definitions, already in catalog shape. */
@@ -372,4 +399,26 @@ export async function signOutConnector(slug: string, displayName: string): Promi
     type: 'info',
   })
   return true
+}
+
+export interface PathSuggestion {
+  label: string
+  path: string
+}
+
+/**
+ * Real paths the server verified exist, for a connector that takes one.
+ *
+ * Empty on any failure: the text field is the fallback and it is always there,
+ * so a suggestion request is never worth an error state of its own.
+ */
+export async function fetchPathSuggestions(slug: string): Promise<PathSuggestion[]> {
+  try {
+    const res = await apiFetch(`/api/connectors/path-suggestions?slug=${encodeURIComponent(slug)}`)
+    if (!res.ok) return []
+    const body = (await res.json()) as { suggestions?: PathSuggestion[] }
+    return body.suggestions ?? []
+  } catch {
+    return []
+  }
 }

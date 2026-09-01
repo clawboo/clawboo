@@ -30,3 +30,54 @@ export function graphKeyAction(e: GraphKeyEvent): GraphKeyAction {
   }
   return null
 }
+
+// ─── Edge keys ───────────────────────────────────────────────────────────────
+
+export type EdgeKeyAction = 'remove' | null
+
+/**
+ * Whether this keystroke should remove the selected edge.
+ *
+ * SEPARATE FROM REACT FLOW'S OWN `deleteKeyCode`, which stays `null` and must:
+ * its Backspace path runs through `applyNodeChanges` and splices an AGENT out
+ * of the local store with no confirmation and no server call, so the agent is
+ * untouched and silently reappears on reload. This is the edge-only path, and
+ * it can never reach a node.
+ *
+ * Refuses while the user is typing. A canvas-level key listener that deletes on
+ * Backspace would otherwise eat the last character of every search box and
+ * rename field on the surface.
+ */
+export function edgeKeyAction(e: GraphKeyEvent & { typing: boolean }): EdgeKeyAction {
+  if (e.typing) return null
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null
+  return e.key === 'Backspace' || e.key === 'Delete' ? 'remove' : null
+}
+
+/** Is the event coming from somewhere that takes text? */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  if (!el || !el.tagName) return false
+  const tag = el.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable === true
+}
+
+/**
+ * Copy the fields these matrices read off a native keyboard event.
+ *
+ * NOT A SPREAD, and that is the whole point. `key`, `altKey` and the rest are
+ * getters on `KeyboardEvent.prototype`, not own enumerable properties, so
+ * `{ ...event }` yields an object carrying none of them and every matrix above
+ * reads `undefined` and returns null. The failure is silent at runtime and
+ * invisible to a unit test built from object literals, which is exactly the
+ * combination that ships.
+ */
+export function readKeyEvent(e: GraphKeyEvent): GraphKeyEvent {
+  return {
+    key: e.key,
+    altKey: e.altKey,
+    shiftKey: e.shiftKey,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+  }
+}

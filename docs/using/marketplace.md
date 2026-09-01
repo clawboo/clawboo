@@ -5,7 +5,7 @@ description: Search, inspect, and deploy single agents or whole teams from Clawb
 
 Use this page when you want to add agents to your fleet: either one specialist at a time or a pre-wired [team](/appendices/glossary). The **Marketplace** is a static, committed catalog of 304 agents, 82 teams, 30 skills, and 19 MCP connectors you can browse offline and deploy with two clicks.
 
-The catalog itself never changes at runtime; it is codegen'd from upstream MIT-licensed repos at pinned commits (see [Marketplace catalog reference](/reference/marketplace-catalog)). What this page covers is the dashboard surface that browses it: the four tabs, the search and filter controls, the detail modals, and the two deploy paths. The UI is `MarketplacePanel`; deploying funnels into the same team-create + agent-create pipeline documented in [Teams](/using/teams).
+The catalog itself never changes at runtime; it is codegen'd from upstream MIT-licensed repos at pinned commits (see [Marketplace catalog reference](/reference/marketplace-catalog)). What this page covers is the dashboard surface that browses it: the three tabs, the search and filter controls, the detail modals, and the two deploy paths. The UI is `MarketplacePanel`; deploying funnels into the same team-create + agent-create pipeline documented in [Teams](/using/teams).
 
 ## Prerequisites
 
@@ -22,14 +22,13 @@ Open the Marketplace from the **Marketplace** nav button (shopping-cart icon) in
 
 The panel opens on the **Teams** tab by default. The toolbar shows all three tab toggles with live counts: `Teams (82)`, `Agents (304)`, `Skills (30)`. Each tab keeps its own search query and filters, so switching tabs never loses your place.
 
-## The four tabs
+## The three tabs
 
-| Tab            | Count | What it lists                                                          | Default? |
-| -------------- | ----- | ---------------------------------------------------------------------- | -------- |
-| **Teams**      | 82    | Pre-wired `TeamTemplate`s (a roster of agents + routing)               | yes      |
-| **Agents**     | 304   | Individual `AgentCatalogEntry` records, one specialist each            | no       |
-| **Skills**     | 30    | `CatalogSkill` capability annotations you can add to an existing agent | no       |
-| **Connectors** | 19    | MCP servers Clawboo can connect and run for you                        | no       |
+| Tab        | Count | What it lists                                                          | Default? |
+| ---------- | ----- | ---------------------------------------------------------------------- | -------- |
+| **Teams**  | 82    | Pre-wired `TeamTemplate`s (a roster of agents + routing)               | yes      |
+| **Agents** | 304   | Individual `AgentCatalogEntry` records, one specialist each            | no       |
+| **Skills** | 30    | `CatalogSkill` capability annotations you can add to an existing agent | no       |
 
 ### Teams tab
 
@@ -47,9 +46,9 @@ Each skill renders as a `SkillCard` with a category dot, a neutral **Curated** t
 Adding a skill is different from deploying an agent. **Add** records a **capability annotation** on an *existing* agent in your fleet (you pick the target from a dropdown); it `POST`s to `/api/skills`, which injection-scans the entry before recording it. The annotation surfaces on the [Ghost Graph](/using/ghost-graph) and the [Capabilities dashboard](/using/capabilities-dashboard) — it labels intent, it does **not** provision a runtime tool (an agent's executable tools come from the MCP broker). Deploying an agent or team *creates new Boos*.
 </Note>
 
-### Connectors tab
-
-Verified MCP servers, and the one tab where the catalog is not only a catalog: Clawboo can start these itself. Each tile shows what the connector reaches, its risk signals, and what it still needs from you. See [Connectors](/using/connectors) for the connect flow, credentials, sign-in and governance.
+<Note>
+Connectors used to be a fourth tab here. It is now its own sidebar destination, directly under **Marketplace**. The three tabs above are a catalog you browse once; connecting the tools your agents use is a recurring errand, and it was three clicks deep. See [Connectors](/using/connectors).
+</Note>
 
 ## Search and filters
 

@@ -209,13 +209,16 @@ describe('executor runner — native runtime integration', () => {
     expect(existsSync(sessionsDir)).toBe(true)
     expect(readdirSync(sessionsDir).some((f) => f.endsWith('.json'))).toBe(true)
 
-    // The leader-chat narration entry landed in chat history.
+    // Board work stays on the board. The report-up is already asserted above as a
+    // task comment, which is what the task drawer renders; landing it in the 1:1
+    // chat too would put a reply in a conversation nobody asked a question in, once
+    // per task a boo happens to be working.
     const chatRows = db
       .select()
       .from(chatMessages)
       .where(eq(chatMessages.sessionKey, 'agent:native-spec-1:native'))
       .all()
-    expect(chatRows.length).toBeGreaterThan(0)
+    expect(chatRows).toHaveLength(0)
 
     // Obs: the run's trace carries the tool round + per-turn cost + terminal.
     const trace = listEvents(db, { taskId, limit: 1000 })

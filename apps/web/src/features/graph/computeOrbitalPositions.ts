@@ -18,6 +18,23 @@ function fnv1a(str: string): number {
 // with enough angular variance that the two rings don't visually merge.
 const SKILL_RADIUS = { min: 150, max: 220 }
 const RESOURCE_RADIUS = { min: 230, max: 285 }
+
+/**
+ * The fan size these radii were tuned for.
+ *
+ * The arc cannot open past a full circle, so once a Boo has more than a ringful the
+ * angular gap between tiles shrinks and the discs collide at a FIXED radius. That is
+ * what the old eight-tile cap was really protecting against, and capping meant a Boo
+ * with forty capabilities silently showed eight of them. The canvas is infinite; the
+ * ring was not. Growing the radius in step with the count keeps the gap between
+ * neighbours roughly constant instead, because arc length is radius times angle.
+ */
+const COMFORTABLE_ORBIT_COUNT = 8
+
+/** How much to push the rings out for a fan of `count`. Never pulls them in. */
+function radiusScale(count: number): number {
+  return Math.max(1, count / COMFORTABLE_ORBIT_COUNT)
+}
 const JITTER_RANGE = 12
 
 // Offset from each Boo's React Flow `node.position` (top-left of the
@@ -86,9 +103,14 @@ function distributeOnArc(
   const spread = arcSpread(count)
   const startAngle = baseAngle - spread / 2
   const angleStep = count === 1 ? 0 : spread / (count - 1)
+  // Both rings scale by the SAME factor, taken from the whole fan rather than this
+  // arc's own length, so the skills ring can never grow past the connectors ring and
+  // swap their order.
+  const scale = radiusScale(orbitCount)
+  const scaledRange = { min: radiusRange.min * scale, max: radiusRange.max * scale }
 
   // Max distance from parent center before a saved position is considered stale
-  const staleThreshold = radiusRange.max * 2
+  const staleThreshold = scaledRange.max * 2
 
   return children.map((node, i) => {
     // Stamp the fan position (drives the peacock expand sweep order) on every
@@ -116,7 +138,7 @@ function distributeOnArc(
     const radiusNorm = ((hash >>> 8) & 0xff) / 255
     const jitterNorm = ((hash >>> 0) & 0xff) / 255
 
-    const baseRadius = radiusRange.min + radiusNorm * (radiusRange.max - radiusRange.min)
+    const baseRadius = scaledRange.min + radiusNorm * (scaledRange.max - scaledRange.min)
     const jitterOffset = (jitterNorm - 0.5) * 2 * JITTER_RANGE
     const radius = baseRadius + jitterOffset
 

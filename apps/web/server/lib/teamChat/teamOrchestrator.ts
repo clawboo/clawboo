@@ -35,6 +35,7 @@ import { booZeroForTeam, ensureNativeBooZero } from './booZero'
 import { auditCapHit } from './capHitAudit'
 import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
+import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
 import { NATIVE_SIGNAL_CONTEXT_KEY } from '../runtimes/native/nativeDriver'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
@@ -213,19 +214,16 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // one answer whether the question comes from the reflection router or from the
     // prompt builder.
     leaderAgentId: () => resolveLeaderId(db, teamId),
+    // STRIPS CONNECTOR-ASK MARKERS, because this path's context is what teaches
+    // them (buildServerTeamContext). Persisting raw text shipped the marker to
+    // the reader verbatim, with no card, on exactly the turns taught to emit it.
+    // A `false` return makes the drain publish a CLEARING delta so a
+    // streamed-but-uncommitted turn (including a marker-only one, whose stripped
+    // body is empty) never leaves a lingering StreamingCard.
     persistTurn: (sk, text) => {
       const agentId = agentIdFromSessionKey(sk)
       if (!agentId) return false
-      // Report back whether the entry actually reached the transcript — a `false`
-      // makes the drain publish a CLEARING delta so a streamed-but-uncommitted turn
-      // never leaves a lingering StreamingCard.
-      return persistTeamChatEntry(db, {
-        teamId,
-        agentId,
-        text,
-        role: 'assistant',
-        kind: 'assistant',
-      })
+      return persistAssistantTurnWithAsk(db, { teamId, agentId, text })
     },
     // A system notice, not the agent's turn: `role: 'system'` also keeps it clear
     // of the assistant-only control-token drop, so a failure reason can never be

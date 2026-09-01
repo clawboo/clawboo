@@ -20,7 +20,8 @@ The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-
 | GET    | `/api/cost-records/summary`           | 30-day aggregation: totals, per-agent, time series   | No      |
 | GET    | `/api/chat-history`                   | Load a session's transcript entries                  | No      |
 | POST   | `/api/chat-history`                   | Batch-insert transcript entries (idempotent)         | No      |
-| DELETE | `/api/chat-history`                   | Clear a session's transcript                         | No      |
+| POST   | `/api/chat-history/reset-context`     | End the model's conversation; keep every message     | No      |
+| DELETE | `/api/chat-history`                   | Destroy a session's transcript                       | No      |
 | GET    | `/api/graph-layout`                   | Load saved Ghost Graph node positions                | No      |
 | POST   | `/api/graph-layout`                   | Upsert Ghost Graph node positions                    | No      |
 | GET    | `/api/personality`                    | Load an agent's personality slider values            | No      |
@@ -200,16 +201,21 @@ curl http://localhost:18790/api/cost-records/summary
 
 Persists per-session chat transcripts in the `chat_messages` table. Each row stores a JSON-serialized `TranscriptEntry`; reads parse the JSON back, skipping any corrupt row.
 
+Two different verbs end a conversation, and the difference matters. **Reset context** is what `/reset` and `/new` call: it ends what the model is carrying and writes a divider, and moves no message at all. **Delete** is what agent deletion calls: the conversation is destroyed. Nothing else removes a message.
+
+`GET` returns the **most recent** page and a cursor for walking backwards, which is how a chat that is never cleared stays readable.
+
 ### `GET /api/chat-history`
 
-Loads a session's transcript entries, oldest first.
+Loads a page of a session's transcript entries, oldest first **within the page**. The page is the most RECENT one, and `before` walks backwards from there.
 
 - **Query params**:
 
-| Param        | Type   | Default | Notes                                                           |
-| ------------ | ------ | ------- | --------------------------------------------------------------- |
-| `sessionKey` | string | n/a     | **Required**; the session to load                               |
-| `limit`      | number | 200     | Clamped to a max of 1000; a non-numeric value falls back to 200 |
+| Param        | Type   | Default | Notes                                                                   |
+| ------------ | ------ | ------- | ----------------------------------------------------------------------- |
+| `sessionKey` | string | n/a     | **Required**; the session to load                                       |
+| `limit`      | number | 200     | Clamped to a max of 1000; a non-numeric value falls back to 200         |
+| `before`     | number | n/a     | A `nextBefore` from a previous response; a non-numeric value is ignored |
 
 - **Request body**: none.
 
@@ -221,10 +227,14 @@ Loads a session's transcript entries, oldest first.
 { "error": "sessionKey required" }
 ```
 
-**`200 OK`**: the parsed transcript entries (rows that fail JSON parse are dropped):
+**`200 OK`**: the parsed transcript entries (rows that fail JSON parse are dropped), plus the cursor for the page before this one:
 
 ```ts
-{ entries: TranscriptEntry[] }
+{
+  entries: TranscriptEntry[]
+  hasMore: boolean            // true when older messages exist
+  nextBefore: number | null   // pass back as `before`; null once the start is reached
+}
 ```
 
 **`500 Internal Server Error`**: a DB failure:
@@ -287,9 +297,52 @@ curl -X POST http://localhost:18790/api/chat-history \
   -d '{"sessionKey":"<session-key>","gatewayUrl":"ws://localhost:18789","entries":[{"entryId":"e1","timestampMs":1700000000000}]}'
 ```
 
+### `POST /api/chat-history/reset-context`
+
+Ends the model's conversation on every listed session and writes one divider into the transcript. **No existing message is touched**: nothing is moved, re-keyed, or deleted. Also clears the native resume pointers for each key (the 1:1 pointer, or the per-team one for a team key) so the next turn starts without the earlier turns.
+
+A team room passes every teammate's session key and one `noticeSessionKey`, because the person is looking at a single merged timeline and should see one divider, not one per teammate.
+
+- **Request body**:
+
+```ts
+{
+  sessionKeys: string[]        // required, non-empty
+  noticeSessionKey?: string    // must be one of sessionKeys; defaults to the first
+}
+```
+
+#### Responses
+
+**`400 Bad Request`**: no usable keys, or a notice key outside the list:
+
+```json
+{ "error": "sessionKeys[] required" }
+```
+
+**`200 OK`**: the divider that was written, ready to append to the open transcript:
+
+```ts
+{ ok: true, entry: TranscriptEntry }
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+#### Example
+
+```bash
+curl -X POST http://localhost:18790/api/chat-history/reset-context \
+  -H 'Content-Type: application/json' \
+  -d '{"sessionKeys":["agent:my-boo:native"]}'
+```
+
 ### `DELETE /api/chat-history`
 
-Clears every message for a session. Used when an agent is deleted.
+Destroys every message for a session. Used when an agent is deleted. To end a conversation without losing it, use the reset-context route above.
 
 - **Query params**: `sessionKey` (required).
 - **Request body**: none.

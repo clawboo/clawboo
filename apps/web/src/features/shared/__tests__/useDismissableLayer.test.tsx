@@ -332,6 +332,40 @@ describe('useDismissableLayer — press outside', () => {
     unmount()
   })
 
+  it('dismisses through a target that stops mousedown, as the graph canvas does', async () => {
+    // THE GRAPH CANVAS CASE. React Flow pans with d3-drag, which binds
+    // `mousedown.drag` and opens its handler with stopImmediatePropagation
+    // (d3-drag/src/drag.js:58). While this stack listened on `mousedown`, no
+    // press anywhere on the canvas ever reached it, so a popover opened over the
+    // graph could not be dismissed by clicking away from it.
+    const onPressOutside = vi.fn()
+    function Host() {
+      const ref = useRef<HTMLDivElement>(null)
+      useDismissableLayer({
+        active: true,
+        level: 'popover',
+        contains: (t) => Boolean(ref.current?.contains(t)),
+        onPressOutside,
+      })
+      return (
+        <>
+          <div ref={ref}>inside</div>
+          <button
+            type="button"
+            onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
+            data-testid="pane"
+          >
+            canvas
+          </button>
+        </>
+      )
+    }
+    const { unmount } = render(<Host />)
+    await userEvent.click(screen.getByTestId('pane'))
+    expect(onPressOutside).toHaveBeenCalledTimes(1)
+    unmount()
+  })
+
   it('a press-only layer stays invisible to hasOpenLayer()', () => {
     // The Settings modal takes part in press dismissal but leaves Escape to the
     // app shell — so it must not make the shell stand down.

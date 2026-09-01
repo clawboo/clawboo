@@ -141,3 +141,28 @@ describe('tomlKey quoting', () => {
     expect(connectorSnippet(dotted, 'codex').body).toContain('[mcp_servers."a.b"]')
   })
 })
+
+describe('a bearer connector in every dialect', () => {
+  // The block is copied into a file on the operator's disk, so it must reference
+  // the token rather than contain it, and it must reference it in the form each
+  // client actually substitutes.
+  const github = connectorBySlug('github')!
+
+  it('uses Codex’s bearer field, not a header it would treat as a literal', () => {
+    // Codex reads `http_headers` values as literal strings, so
+    // `Authorization = "Bearer ${GITHUB_TOKEN}"` would send that text to GitHub
+    // verbatim. Codex's own migration tooling rewrites exactly that shape into
+    // `bearer_token_env_var`, which is the field that reads the variable.
+    const body = connectorSnippet(github, 'codex').body
+    expect(body).toContain('bearer_token_env_var = "GITHUB_TOKEN"')
+    expect(body).not.toContain('http_headers')
+    expect(body).not.toContain('Bearer ${')
+  })
+
+  it('uses an Authorization header in the JSON dialects', () => {
+    for (const dialect of ['claude-code', 'vscode'] as const) {
+      const body = connectorSnippet(github, dialect).body
+      expect(body, dialect).toContain('"Authorization": "Bearer ${GITHUB_TOKEN}"')
+    }
+  })
+})

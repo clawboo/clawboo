@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createDb, listGrants, type ClawbooDb } from '@clawboo/db'
+import { createDb, ensureOwnerGrant, getConnector, listGrants, type ClawbooDb } from '@clawboo/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import {
@@ -85,6 +85,19 @@ describe('connector supervisor', () => {
     else process.env['CLAWBOO_HOME'] = prevClawbooHome
     rmSync(dir, { recursive: true, force: true })
   })
+
+  /** The agent-scoped owner grant the capability projection mints, pins and all. */
+  function grantToAgent(connectorId: string, specHash: string, toolsHash: string): void {
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'agent-under-test',
+      capabilityKind: 'connector',
+      connectorId,
+      capabilityId: null,
+      specHashPin: specHash,
+      toolsHashPin: toolsHash,
+    })
+  }
 
   it('connects, namespaces the tools, and skips what it cannot represent', async () => {
     const { connector } = await connectConnector(db, definition(process.execPath, [file]))
@@ -204,16 +217,16 @@ describe('connector supervisor', () => {
     expect(JSON.parse(rows[rows.length - 1]!.data)['health']).toBe('error')
   }, 30_000)
 
-  it('mints the owner grant AT CONNECT, not on the next inventory read', async () => {
-    // Left to the capability projection, a tool call landing before any
-    // GET /api/capabilities would deny grant:no-grant for a connector the user
-    // had just connected -- a race whose symptom looks like a governance bug.
+  it('GRANTS NOBODY at connect', async () => {
+    // Connecting used to mint a grant whose subject was `global`, and a global
+    // grant is returned to every caller whatever agent they named
+    // (grants/repository.ts:105), so one connect handed the whole fleet
+    // `mode: admin` on it. Connecting is an availability act; who may reach a
+    // connector is the operator's decision, made by drawing an edge.
     await resetConnectorsForTests()
     const { connector } = await connectConnector(db, definition(process.execPath, [file]))
     const grants = listGrants(db).filter((g) => g.connectorId === connector.connectorId)
-    expect(grants).toHaveLength(1)
-    expect(grants[0]!.origin).toBe('owner')
-    expect(grants[0]!.state).toBe('active')
+    expect(grants).toEqual([])
   }, 30_000)
 
   it('ARMS drift: the grant pins the hash seen at connect, the row moves on reconnect', async () => {
@@ -223,6 +236,9 @@ describe('connector supervisor', () => {
     // two can actually differ.
     await resetConnectorsForTests()
     const { connector } = await connectConnector(db, definition(process.execPath, [file]))
+    // The grant an agent gets when the operator gives it this connector, pinned
+    // at birth the way the capability projection pins it.
+    grantToAgent(connector.connectorId, connector.specHash, connector.toolsHash)
     const pinned = listGrants(db).find((g) => g.connectorId === connector.connectorId)!
     expect(pinned.toolsHashPin).toBe(connector.toolsHash)
 
@@ -255,6 +271,7 @@ describe('connector supervisor', () => {
     // would erase the one signal that catches a rug-pull.
     await resetConnectorsForTests()
     const first = await connectConnector(db, definition(process.execPath, [file]))
+    grantToAgent(first.connector.connectorId, first.connector.specHash, first.connector.toolsHash)
     const before = listGrants(db).find((g) => g.connectorId === first.connector.connectorId)!
     expect(before.specHashPin).toBe(first.connector.specHash)
 
@@ -293,6 +310,49 @@ describe('connector supervisor', () => {
     const [, stopped] = await Promise.all([connecting, disconnecting])
     expect(stopped).toBe(true)
     expect(connectorToolsForServer()).toHaveLength(0)
+  }, 45_000)
+
+  it('records the operator INTENT, so a restart restores only what was left on', async () => {
+    // The boot restore reads `desiredState`. Nothing else can tell a graceful
+    // shutdown from a deliberate Disconnect: neither path writes `health`, so a
+    // restore driven off health would either resurrect a connector the operator
+    // switched off or never restore anything at all.
+    await resetConnectorsForTests()
+    const { connector } = await connectConnector(db, definition(process.execPath, [file]))
+    expect(getConnector(db, connector.connectorId)?.desiredState).toBe('connected')
+
+    await disconnectConnector(connector.connectorId, db)
+    expect(getConnector(db, connector.connectorId)?.desiredState).toBe('disconnected')
+
+    // ...and connecting again flips it back, or a reconnect would be forgotten.
+    await connectConnector(db, definition(process.execPath, [file]))
+    expect(getConnector(db, connector.connectorId)?.desiredState).toBe('connected')
+  }, 45_000)
+
+  it('a RESTORE re-consents to nothing, so a spec that changed still reads as drift', async () => {
+    // A press of Connect means "I am looking at this command and I accept it",
+    // which is why a reconnect re-pins the spec. A boot has nobody looking, so
+    // re-pinning there would silently accept a command that changed while the
+    // server was down and erase the drift signal on every restart.
+    await resetConnectorsForTests()
+    const first = await connectConnector(db, definition(process.execPath, [file]))
+    grantToAgent(first.connector.connectorId, first.connector.specHash, first.connector.toolsHash)
+
+    await disconnectConnector(first.connector.connectorId)
+    const changed = path.join(dir, 'restore.cjs')
+    const req = createRequire(path.join(process.cwd(), 'package.json'))
+    writeFileSync(
+      changed,
+      serverSource((s) => req.resolve(`@modelcontextprotocol/sdk/${s}`)),
+    )
+
+    const again = await connectConnector(db, definition(process.execPath, [changed]), {
+      restoring: true,
+    })
+    expect(again.connector.specHash).not.toBe(first.connector.specHash)
+    const after = listGrants(db).find((g) => g.connectorId === first.connector.connectorId)!
+    // The pin did NOT move: the operator never saw the new command.
+    expect(after.specHashPin).toBe(first.connector.specHash)
   }, 45_000)
 
   it('disconnects and stops serving its tools', async () => {

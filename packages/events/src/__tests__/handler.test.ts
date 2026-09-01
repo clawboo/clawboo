@@ -143,6 +143,57 @@ describe('createEventHandler — commitChat closed-run guard', () => {
     expect(countOf(h.dispatched, 'commitChat')).toBe(1)
   })
 
+  it('still commits the final when the LIFECYCLE end arrived first', () => {
+    // THE OPENCLAW WIRE ORDER, and the vanishing 1:1 reply. OpenClaw emits its
+    // `agent` end frame BEFORE the `chat` final. Treating that close as "this run
+    // is finished" dropped the final that followed, so the reply rendered as a
+    // live streaming card and then disappeared: nothing appended, nothing
+    // persisted, and every recovery belt downstream sat inside a dispatch that
+    // was never reached. A lifecycle close means the run STOPPED, not that it
+    // delivered.
+    const h = harness('r1')
+    h.handler.applyIntents([terminalStatus('r1')], CHAT_EVENT)
+    h.handler.applyIntents([commitChat('r1', ['the reply'])], CHAT_EVENT)
+    expect(h.appended).toEqual([['the reply']])
+    expect(countOf(h.dispatched, 'commitChat')).toBe(1)
+  })
+
+  it('still drops a replayed final after the run committed once', () => {
+    // The narrowing must not cost the guard its original job: a run that already
+    // COMMITTED has said everything, so a second final is a replay.
+    const h = harness('r1')
+    h.handler.applyIntents([commitChat('r1', ['hello'])], CHAT_EVENT)
+    h.handler.applyIntents([terminalStatus('r1')], CHAT_EVENT)
+    h.handler.applyIntents([commitChat('r1', ['hello'])], CHAT_EVENT)
+    expect(h.appended).toEqual([['hello']])
+    expect(countOf(h.dispatched, 'commitChat')).toBe(1)
+  })
+
+  it('drops a REPLAYED final under the real wire order too', () => {
+    // THE HOLE THE FIRST ATTEMPT LEFT. Marking the run closed used a pre/post
+    // runId comparison, but under the real order the lifecycle end has already
+    // nulled the runId before the final arrives, so the comparison read
+    // null-to-null and never marked anything. A replayed final then appended the
+    // reply a second time: the triple-render bug, back by another door.
+    const h = harness('r1')
+    h.handler.applyIntents([terminalStatus('r1')], CHAT_EVENT)
+    h.handler.applyIntents([commitChat('r1', ['the reply'])], CHAT_EVENT)
+    h.handler.applyIntents([commitChat('r1', ['the reply'])], CHAT_EVENT)
+    expect(h.appended).toEqual([['the reply']])
+    expect(countOf(h.dispatched, 'commitChat')).toBe(1)
+  })
+
+  it('never lets a stale final flip a NEWLY started run to idle', () => {
+    // The guard's other job. A replay arriving inside the 30s window, after the
+    // agent has started its next run, carries a terminal patch; letting it
+    // through would clear the live run's id and strand it.
+    const h = harness('r1')
+    h.handler.applyIntents([terminalStatus('r1')], CHAT_EVENT)
+    h.startRun('r2')
+    h.handler.applyIntents([commitChat('r1', ['stale'])], CHAT_EVENT)
+    expect(h.currentRunId()).toBe('r2')
+  })
+
   it('lets a DIFFERENT run commit after the first closed', () => {
     const h = harness('r1')
     h.handler.applyIntents([commitChat('r1', ['first'])], CHAT_EVENT)

@@ -28,6 +28,14 @@
 import { mkdir } from 'node:fs/promises'
 
 import {
+  connectorAskBody,
+  connectorAskEntryId,
+  extractConnectorAsk,
+} from '@clawboo/connector-catalog'
+import { listLiveConnectors } from '../connectors/supervisor'
+import { buildConnectorAwareness } from './connectorAwareness'
+import { persistTeamChatEntry } from './persistTeamChatEntry'
+import {
   postToRoom,
   readRoom,
   recordRotation,
@@ -155,7 +163,21 @@ export async function dispatchChatTurn(
   // (isUser=false) so they're context to synthesize, never user instructions.
   const newPosts = readRoom(db, { roomId, sinceSeq: prior.lastSeenSeq, excludeAuthorId: agentId })
   const evidence = newPosts.map((p) => formatPeerPost(p)).join('\n\n')
-  const context = [prior.lastSummary ? `Your last turn:\n${prior.lastSummary}` : '', evidence]
+  // The SAME clause the deliver path injects, because this dispatcher strips the
+  // marker the clause teaches. Teaching on one path and stripping on the other
+  // left the exchange stripping a form no exchange agent had ever been shown,
+  // and an exchange agent working around a missing connector with nothing
+  // telling it not to. An exchange turn is user-triggered and lands in a room
+  // the user is watching, so it is user-facing by construction.
+  const connectorsBlock = buildConnectorAwareness({
+    connected: listLiveConnectors().map((c) => c.slug),
+    isUserFacing: true,
+  })
+  const context = [
+    prior.lastSummary ? `Your last turn:\n${prior.lastSummary}` : '',
+    evidence,
+    connectorsBlock ?? '',
+  ]
     .filter(Boolean)
     .join('\n\n')
   const message =
@@ -214,21 +236,54 @@ export async function dispatchChatTurn(
 
   // POST the turn's output to the room as this runtime's named peer (the reliable,
   // uniform mechanism — sourced from the structured `done` summary, not scraped).
-  const posted = postToRoom(db, {
-    roomId,
-    teamId,
-    authorAgentId: agentId,
-    body: terminal,
-    kind: 'peer',
-  })
-  deps.onPost?.(posted)
+  // An agent that needed a connector says so with a marker. Stripped here so the
+  // reader never sees it, and re-posted as a system line the panel renders as a
+  // card with a real button. Without this the awareness block produces a sentence
+  // naming the remedy and leaves the reader to go find it, which is the dead end
+  // this whole surface exists to remove.
+  const ask = extractConnectorAsk(terminal)
+  // THE STRIPPED BODY, with no fall back to the raw text. A runtime whose entire
+  // reply is `[[connect:github]]` has said nothing to a reader, and falling back
+  // put the marker itself in the room as the agent's answer and then fed it back
+  // as prior context next turn, where the next runtime reads a control token as
+  // something to imitate. When there is no prose, there is no peer post: the ask
+  // still reaches the human as the meta entry below, which is the whole point.
+  const visible = ask.body.trim()
+  const posted = visible
+    ? postToRoom(db, { roomId, teamId, authorAgentId: agentId, body: visible, kind: 'peer' })
+    : null
+  if (posted) deps.onPost?.(posted)
+  if (ask.slugs.length > 0) {
+    try {
+      // THE TRANSCRIPT PLANE, not the room. `postToRoom` feeds the agent-to-agent
+      // room, where this would do two wrong things at once: never reach the card
+      // (the browser renders meta entries, not room rows), and land in the next
+      // agent's context as a literal `clawboo:connect-ask ...` line it would then
+      // try to interpret. A meta entry renders and is read by nobody but the human.
+      persistTeamChatEntry(db, {
+        teamId,
+        agentId,
+        text: connectorAskBody(ask.slugs),
+        role: 'system',
+        kind: 'meta',
+        // Same id scheme as the deliver path: one card per distinct offer,
+        // however many times or via whichever dispatcher the agent asks.
+        entryId: connectorAskEntryId(teamId, agentId, ask.slugs),
+      })
+    } catch {
+      /* the offer is best-effort: never fail a turn that produced an answer */
+    }
+  }
 
   // SAVE the between-turn state + record the session lineage (the heartbeat chain).
   saveChatLeaderState(db, roomId, agentId, {
-    lastSeenSeq: posted.seq,
+    // Own post when there was one; otherwise the watermark of what this turn
+    // actually consumed, so skipping a post cannot rewind the cursor and replay
+    // the same peer messages on the next turn.
+    lastSeenSeq: posted?.seq ?? newPosts.reduce((m, p) => Math.max(m, p.seq), prior.lastSeenSeq),
     nativeSessionId,
     runtime: participant.runtime,
-    lastSummary: terminal.slice(0, 400),
+    lastSummary: visible.slice(0, 400),
     turnIndex: nextTurnIndex,
   })
   if (nextTurnIndex >= 2) {

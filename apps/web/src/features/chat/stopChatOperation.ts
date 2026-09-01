@@ -54,6 +54,7 @@ export async function stopAgentRun(params: StopAgentRunParams): Promise<void> {
   })
   if (sessionKey) {
     useChatStore.getState().setStreamingText(sessionKey, null)
+    noteUserStop(sessionKey)
   }
 
   // 2. Best-effort server-side abort. The Gateway responds with
@@ -71,4 +72,35 @@ export async function stopAgentRun(params: StopAgentRunParams): Promise<void> {
   // work on the session.
   aborts.push(client.sessions.abort(sessionKey).catch(() => undefined))
   await Promise.allSettled(aborts)
+}
+
+// ─── User-stop signal ────────────────────────────────────────────────────────
+//
+// WHO NEEDS THIS. The Gateway event path commits whatever prose was on screen
+// when a run ends without re-carrying its text, so the reply the operator
+// watched is not deleted. A run the operator STOPPED is the one case where that
+// is wrong: they asked for the partial to go away, and a delta landing between
+// the Stop and the `aborted` terminal would otherwise repopulate the card and
+// get it persisted. The native path has the same guard as an explicit
+// `userAborted` flag; the Gateway path has no such variable to read, so the
+// intent is recorded here instead.
+
+const stops = new Map<string, number>()
+
+/** How long a Stop suppresses the recovery belt. Longer than any terminal lag. */
+const STOP_TTL_MS = 10_000
+
+function noteUserStop(sessionKey: string): void {
+  stops.set(sessionKey, Date.now())
+}
+
+/** Whether the operator stopped this session moments ago. */
+export function userStoppedRecently(sessionKey: string, now = Date.now()): boolean {
+  const at = stops.get(sessionKey)
+  if (at === undefined) return false
+  if (now - at > STOP_TTL_MS) {
+    stops.delete(sessionKey)
+    return false
+  }
+  return true
 }

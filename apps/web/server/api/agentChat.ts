@@ -4,7 +4,12 @@
 // stream (a pure DB-tail of `agent:<id>:native` + the live delta bus). OpenClaw
 // agents keep the Gateway 1:1 path; these routes 404 a non-native agent.
 
-import { chatMessages, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
+import {
+  chatMessages,
+  latestChatMessageId,
+  listChatMessagesSince,
+  type ClawbooDb,
+} from '@clawboo/db'
 import type { Request, Response } from 'express'
 
 import {
@@ -122,13 +127,23 @@ export function agentChatStreamGET(req: Request, res: Response): void {
   const lastEventId =
     typeof req.headers['last-event-id'] === 'string' ? req.headers['last-event-id'] : undefined
   const sinceParam = typeof req.query['since'] === 'string' ? req.query['since'] : undefined
-  let cursor = Number(lastEventId ?? sinceParam)
-  if (!Number.isFinite(cursor) || cursor < 0) cursor = 0
-
   // Resolve the shared connection BEFORE advertising success: a failure here
   // must surface as a real error response, not a 200 plus a ': connected'
   // marker the client has already been told to trust.
   const db = getDb()
+
+  // A RESUMING client says where it got to and gets everything after that. A FRESH
+  // client starts at the head, because it has already loaded the recent page over
+  // `/api/chat-history` and this stream's job is the live tail. Starting at 0 sent
+  // the entire conversation a second time, which cost nothing while every reset
+  // emptied the transcript and costs the whole history now that none does.
+  let cursor = Number(lastEventId ?? sinceParam)
+  if (!Number.isFinite(cursor) || cursor < 0) {
+    cursor =
+      lastEventId === undefined && sinceParam === undefined
+        ? latestChatMessageId(db, [sessionKey])
+        : 0
+  }
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',

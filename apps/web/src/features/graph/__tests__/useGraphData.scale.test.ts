@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentState } from '@/stores/fleet'
 import type { Team } from '@/stores/team'
 
-import { buildGraphElements, MAX_CAPABILITY_ORBITALS } from '../useGraphData'
+import { ATLAS_ORBITAL_CEILING, buildGraphElements } from '../useGraphData'
 
 function agents(n: number): AgentState[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -74,7 +74,9 @@ function build(agentCount: number, capsPer: number) {
     list.map((a) => [a.id, { capabilities: caps(a.id, capsPer), agentsMd: null }]),
   )
   const started = performance.now()
-  const out = buildGraphElements(list, files, teams(10))
+  // ATLAS scope: this suite is about the all-teams view, which is the only place
+  // node count is a real cost and therefore the only place a ceiling applies.
+  const out = buildGraphElements(list, files, teams(10), null, null, null, 'atlas')
   return { ...out, ms: performance.now() - started }
 }
 
@@ -87,17 +89,19 @@ describe('buildGraphElements at scale', () => {
     expect(ms).toBeLessThan(5_000)
   })
 
-  it('node count grows LINEARLY with agents, because the ring is capped', () => {
-    // The point of the cap: 40 capabilities and 400 both produce the same
-    // number of tiles, so a large MCP server cannot make the graph unbounded.
+  it('node count stays bounded in ATLAS, however many capabilities an agent has', () => {
+    // A focused view draws every capability, because one Boo has room. Atlas cannot:
+    // its cost is node count across every agent at once, so 40 capabilities and 400
+    // must produce the same number of tiles or a single large MCP server makes the
+    // all-teams view unrenderable.
     const small = build(50, 10)
     const huge = build(50, 400)
     const orbitalsOf = (nodes: { type?: string }[]) =>
       nodes.filter((n) => n.type === 'skill' || n.type === 'resource').length
 
     expect(orbitalsOf(huge.rawNodes)).toBeLessThanOrEqual(
-      // capped capabilities + the model tile + the overflow tile, per agent
-      50 * (MAX_CAPABILITY_ORBITALS + 2),
+      // ceiling + the model tile + the overflow tile, per agent
+      50 * (ATLAS_ORBITAL_CEILING + 2),
     )
     expect(orbitalsOf(huge.rawNodes)).toBeGreaterThan(orbitalsOf(small.rawNodes) - 50)
   })

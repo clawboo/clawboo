@@ -18,6 +18,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   ChevronRight,
   Clock,
   SendHorizontal,
@@ -31,6 +32,17 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useMarketplaceStore } from '@/stores/marketplace'
+import { useViewStore } from '@/stores/view'
+import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
+import { agentIdFromSessionKey, teamIdFromSessionKey } from '@clawboo/team-orchestration'
+import { sendServerTeamMessage } from '@/features/group-chat/serverTeamChatSend'
+import {
+  connectorBySlug,
+  COST_COPY,
+  readConnectorAsk,
+  type ConnectorDefinition,
+} from '@clawboo/connector-catalog'
 import { useTeamStore } from '@/stores/team'
 import { useTheme } from '@/features/theme/useTheme'
 import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
@@ -478,6 +490,121 @@ export const ThinkingSection = memo(function ThinkingSection({
   )
 })
 
+// ─── ConnectorAskCard ────────────────────────────────────────────────────────
+
+/**
+ * The moment of ask, rendered where the asking happened.
+ *
+ * The agent said it needs something and stopped. Everything else about this
+ * feature lives in a panel the reader may never open, so this card is the whole
+ * point: it names what is missing and puts the action one click away, in the
+ * conversation, at the moment it matters.
+ */
+const ConnectorAskCard = memo(function ConnectorAskCard({
+  slugs,
+  prose,
+  sessionKey,
+}: {
+  slugs: string[]
+  prose: string
+  /** Where the ask happened, so "Continue" can send back into the same room. */
+  sessionKey: string
+}) {
+  // PRICED FROM LIVE STATE, exactly as the shelf prices it. Reading the bare
+  // definition made this card offer "Add key Notion" to somebody who stored
+  // that key last week, and go on offering "Connect Linear" after they had
+  // connected Linear from this very card.
+  const { costOf, isLive } = useConnectorCostState()
+  // SINGLE-FLIGHT, and it is money that makes it matter. Every press posts a
+  // user message that wakes the agent for a real model turn, so a double click
+  // buys two turns and a held-down key buys as many as it can fire. Latched
+  // rather than merely debounced: once the nudge is delivered the card is done,
+  // and only a FAILED send unlatches it so the operator can retry.
+  const [resumeState, setResumeState] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const defs = slugs.map((s) => connectorBySlug(s)).filter((d): d is ConnectorDefinition => !!d)
+  if (defs.length === 0) return null
+
+  const open = (slug: string) => {
+    useMarketplaceStore.getState().setOpenConnectorSlug(slug)
+    useViewStore.getState().navigateTo('connectors')
+  }
+
+  const done = defs.filter((d) => isLive(d.slug))
+  const pending = defs.filter((d) => !isLive(d.slug))
+  // Only a TEAM room can be resumed: the 1:1 agent chat has its own send path,
+  // and a Continue button that silently did nothing there would be worse than
+  // no button at all.
+  const teamId = teamIdFromSessionKey(sessionKey)
+  const agentId = agentIdFromSessionKey(sessionKey)
+
+  return (
+    <div className="flex justify-center">
+      <div className="max-w-prose rounded-2xl border border-border bg-surface px-4 py-3">
+        {/* THE STORED SENTENCE, not one rebuilt from the slugs. Rebuilding it here
+            is what produced "Linear and Notion and Figma" next to a stored line
+            that read correctly. */}
+        <p className="text-xs leading-relaxed text-foreground">{prose}</p>
+        {done.length > 0 && (
+          // CLOSING THE LOOP. The reader left this card, connected the thing,
+          // and came back; a card still saying "Connect Linear" would read as
+          // though it had not worked.
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-mint">
+            <Check size={12} aria-hidden />
+            {done.map((d) => d.displayName).join(', ')} connected.
+          </p>
+        )}
+        {pending.length === 0 && teamId && agentId && (
+          // THE LAST STEP, and the one whose absence made everything above feel
+          // unfinished: the agent stopped because it could not reach something,
+          // the reader went and connected it, and then nothing happened. They
+          // had to come back and retype the request.
+          //
+          // ONE CLICK, NOT AUTOMATIC. Firing a model turn on its own would spend
+          // the operator's money on a decision they never made, and this whole
+          // feature's rule is that nothing happens on an agent's say-so.
+          <div className="mt-2.5">
+            <Button
+              size="sm"
+              disabled={resumeState !== 'idle'}
+              onClick={() => {
+                setResumeState('sending')
+                void sendServerTeamMessage({
+                  teamId,
+                  targetAgentId: agentId,
+                  targetSessionKey: sessionKey,
+                  message: `${done.map((d) => d.displayName).join(' and ')} ${
+                    done.length === 1 ? 'is' : 'are'
+                  } connected now. Please go ahead with what you were doing.`,
+                }).then((ok) => {
+                  // Stay latched on success; unlatch only on failure, where the
+                  // toast has already told them what happened and a retry is
+                  // the right next move.
+                  setResumeState(ok ? 'sent' : 'idle')
+                })
+              }}
+            >
+              {resumeState === 'sending'
+                ? 'Sending…'
+                : resumeState === 'sent'
+                  ? 'Sent'
+                  : 'Continue'}
+            </Button>
+          </div>
+        )}
+        {pending.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {pending.map((d) => (
+              <Button key={d.slug} size="sm" onClick={() => open(d.slug)}>
+                {COST_COPY[costOf(d)].action} {d.displayName}
+              </Button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+})
+
 // ─── MetaMessageCard ─────────────────────────────────────────────────────────
 
 export const MetaMessageCard = memo(function MetaMessageCard({
@@ -485,6 +612,19 @@ export const MetaMessageCard = memo(function MetaMessageCard({
 }: {
   entry: TranscriptEntry
 }) {
+  // An agent that asked for a connector gets a CARD WITH A BUTTON, not a
+  // sentence naming something the reader then has to go and find. This is the
+  // only place the offer reaches somebody who never opens the marketplace.
+  const askedFor = readConnectorAsk(entry.text)
+  if (askedFor)
+    return (
+      <ConnectorAskCard
+        slugs={askedFor.slugs}
+        prose={askedFor.prose}
+        sessionKey={entry.sessionKey}
+      />
+    )
+
   return (
     <div className="flex justify-center">
       {/* A fixed card radius, NOT rounded-full: a short meta reads as a pill, but a
@@ -1036,6 +1176,13 @@ export interface RenderWindow {
   hiddenCount: number
   /** Reveal `RENDER_WINDOW_STEP` more, preserving the reading position. */
   loadEarlier: () => void
+  /**
+   * Whether the affordance should show at all. Not the same as `hiddenCount > 0`:
+   * once the window has revealed everything loaded there can still be older
+   * messages on the server, and hiding the control at that moment would strand the
+   * person one click short of the rest of their conversation.
+   */
+  canLoadEarlier: boolean
 }
 
 /**
@@ -1050,11 +1197,17 @@ export function useRenderWindow({
   resetKey,
   scrollRef,
   atBottom,
+  hasMoreEarlier = false,
+  fetchEarlier,
 }: {
   total: number
   resetKey: string
   scrollRef: RefObject<HTMLDivElement | null>
   atBottom: boolean
+  /** True when the server holds messages older than the ones loaded. */
+  hasMoreEarlier?: boolean
+  /** Pull the next page of older messages into the store. */
+  fetchEarlier?: () => void
 }): RenderWindow {
   const [limit, setLimit] = useState(RENDER_WINDOW_INITIAL)
   const [pinnedStart, setPinnedStart] = useState<number | null>(null)
@@ -1082,10 +1235,10 @@ export function useRenderWindow({
     else setPinnedStart((prev) => (prev === null ? startRef.current : prev))
   }, [atBottom])
 
-  // Reset on a new conversation. `resetKey` covers an agent/team switch and a
-  // Gateway `/reset` that mints a fresh session key; `total === 0` additionally
-  // covers the native `/reset`, which CLEARS the transcript under the SAME key
-  // (`ChatPanel`), so an expanded window can't survive into the next chat.
+  // Reset on a new conversation. `resetKey` covers an agent/team switch; `total === 0`
+  // covers starting fresh, which empties the transcript under the SAME key on every
+  // runtime now (see resetConversation.ts), so an expanded window can't survive into
+  // the next chat.
   const isEmpty = total === 0
   useEffect(() => {
     setLimit(RENDER_WINDOW_INITIAL)
@@ -1093,11 +1246,24 @@ export function useRenderWindow({
     anchorRef.current = null
   }, [resetKey, isEmpty])
 
+  // Read at click time without joining the callback's dep list, so the callback
+  // identity stays stable across every fetch-state change.
+  const fetchEarlierRef = useRef(fetchEarlier)
+  fetchEarlierRef.current = fetchEarlier
+  const hasMoreEarlierRef = useRef(hasMoreEarlier)
+  hasMoreEarlierRef.current = hasMoreEarlier
+
   const loadEarlier = useCallback(() => {
     const el = scrollRef.current
     anchorRef.current = el ? el.scrollHeight - el.scrollTop : null
     setLimit((prev) => prev + RENDER_WINDOW_STEP)
     setPinnedStart((prev) => (prev === null ? null : Math.max(0, prev - RENDER_WINDOW_STEP)))
+    // Reveal first, then top up. This click is what exhausts the loaded messages,
+    // so the next page has to be on its way before the person reaches the top, or
+    // the control disappears mid-scroll and the conversation looks like it ends.
+    if (startRef.current - RENDER_WINDOW_STEP <= 0 && hasMoreEarlierRef.current) {
+      fetchEarlierRef.current?.()
+    }
   }, [scrollRef])
 
   // Restore the reading position after older blocks are prepended.
@@ -1122,7 +1288,7 @@ export function useRenderWindow({
     el.scrollTop = el.scrollHeight - anchor
   }, [limit, scrollRef])
 
-  return { start, hiddenCount: start, loadEarlier }
+  return { start, hiddenCount: start, loadEarlier, canLoadEarlier: start > 0 || hasMoreEarlier }
 }
 
 /**
@@ -1144,7 +1310,11 @@ export function LoadEarlierButton({
         type="button"
         onClick={onClick}
         data-testid="load-earlier"
-        aria-label={`Load earlier messages (${hiddenCount} hidden)`}
+        aria-label={
+          hiddenCount > 0
+            ? `Load earlier messages (${hiddenCount} hidden)`
+            : 'Load earlier messages'
+        }
         className="surface-floating-tier flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground"
       >
         <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />
@@ -1152,7 +1322,7 @@ export function LoadEarlierButton({
         {/* `text-muted-foreground`, not `text-foreground/45`: #123 moved the
             de-emphasised `font-data` text in this file onto the muted token for
             contrast, and this badge is part of a control's visible label. */}
-        <span className="font-data text-muted-foreground">{hiddenCount}</span>
+        {hiddenCount > 0 && <span className="font-data text-muted-foreground">{hiddenCount}</span>}
       </button>
     </div>
   )
@@ -1165,6 +1335,8 @@ export const MessageList = memo(function MessageList({
   agentName,
   isRunning,
   sessionKey,
+  hasMoreEarlier,
+  fetchEarlier,
 }: {
   blocks: RenderBlock[]
   streamingText: string | null
@@ -1173,6 +1345,10 @@ export const MessageList = memo(function MessageList({
   isRunning: boolean
   /** Identifies the conversation, so the render window resets when it changes. */
   sessionKey?: string | null
+  /** True when the server holds messages older than the ones loaded. */
+  hasMoreEarlier?: boolean
+  /** Pull the next page of older messages into the store. */
+  fetchEarlier?: () => void
 }) {
   const { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom } =
     useChatAutoScroll(`${blocks.length}|${streamingText ?? ''}`)
@@ -1180,11 +1356,13 @@ export const MessageList = memo(function MessageList({
   // Nothing needs hoisting into the window here (as `GroupChatPanel` does for a
   // long-running stream): the live StreamingCard is appended AFTER the mapped
   // blocks (below), outside the window entirely, so it can never be sliced away.
-  const { start, hiddenCount, loadEarlier } = useRenderWindow({
+  const { start, hiddenCount, loadEarlier, canLoadEarlier } = useRenderWindow({
     total: blocks.length,
     resetKey: sessionKey ?? agentId,
     scrollRef,
     atBottom,
+    ...(hasMoreEarlier !== undefined ? { hasMoreEarlier } : {}),
+    ...(fetchEarlier ? { fetchEarlier } : {}),
   })
   const visible = start === 0 ? blocks : blocks.slice(start)
 
@@ -1218,7 +1396,7 @@ export const MessageList = memo(function MessageList({
           </div>
         ) : (
           <div className="flex flex-col pb-2">
-            {hiddenCount > 0 && (
+            {canLoadEarlier && (
               <LoadEarlierButton hiddenCount={hiddenCount} onClick={loadEarlier} />
             )}
 

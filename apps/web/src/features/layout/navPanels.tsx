@@ -39,6 +39,9 @@ const PANEL_SOURCES: Record<NavView, RetryableLazy<ComponentType>> = {
       },
     })),
   ),
+  connectors: createRetryableLazy(() =>
+    import('@/features/connectors/ConnectorsPanel').then((m) => ({ default: m.ConnectorsPanel })),
+  ),
   fleet: createRetryableLazy(() =>
     import('@/features/fleet/FleetHealth').then((m) => ({ default: m.FleetHealth })),
   ),

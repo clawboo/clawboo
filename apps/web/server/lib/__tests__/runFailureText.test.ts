@@ -38,3 +38,45 @@ describe('runFailureText', () => {
     expect(runFailureText(null, 'clawboo-native')).toBe('The run failed: unknown error')
   })
 })
+
+// ── The context-overflow label ───────────────────────────────────────────────
+// Added after an operator was sent round the same loop five times. The runtime's
+// own advice is "/reset (or /new)", and on the traced install the prompt was
+// ~32,000 tokens against a 204,800-token window: nowhere near too large. The
+// runtime had resolved the model's max COMPLETION tokens (32,768) as its context
+// budget, started compacting at 32,106, and could not free anything because tool
+// definitions were 50,405 bytes of every prompt and compaction cannot reach
+// those. `/reset` clears the one part that was never the problem.
+
+describe('runFailureText — a context-overflow label', () => {
+  const RAW =
+    'Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model.'
+
+  it('explains the likely cause instead of repeating the label', () => {
+    const text = runFailureText(RAW, 'openclaw')
+    expect(text).not.toContain('/reset')
+    expect(text).not.toContain('prompt too large')
+    expect(text).toMatch(/context-window setting/i)
+    expect(text).toMatch(/tool definitions/i)
+  })
+
+  it('says plainly that a fresh session does not fix the cause', () => {
+    expect(runFailureText(RAW, 'openclaw')).toMatch(/clears the conversation but not the cause/i)
+  })
+
+  it('catches the phrasings other providers use for the same condition', () => {
+    for (const raw of [
+      'prompt is too long: 210000 tokens > 200000 maximum',
+      "This model's maximum context length is 32768 tokens",
+      'Please reduce the length of the messages',
+    ]) {
+      expect(runFailureText(raw, 'openclaw')).toMatch(/context-window setting/i)
+    }
+  })
+
+  it('leaves an unrelated failure verbatim, so real errors still reach the user', () => {
+    expect(runFailureText('ECONNREFUSED 127.0.0.1:18789', 'openclaw')).toBe(
+      'The run failed: ECONNREFUSED 127.0.0.1:18789',
+    )
+  })
+})

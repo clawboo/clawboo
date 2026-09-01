@@ -1,10 +1,21 @@
+import {
+  composioAuthorizePOST,
+  composioKeyDELETE,
+  composioKeyPUT,
+  composioStatusGET,
+} from './composio'
 import { Router, type Router as RouterType } from 'express'
 
 import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
 
 import { settingsGET, settingsPOST } from './settings'
 import { approvalsGET, approvalsPOST } from './approvals'
-import { chatHistoryGET, chatHistoryPOST, chatHistoryDELETE } from './chatHistory'
+import {
+  chatHistoryGET,
+  chatHistoryPOST,
+  chatHistoryDELETE,
+  chatHistoryRESETCONTEXT,
+} from './chatHistory'
 import { costRecordsGET, costRecordsPOST } from './costRecords'
 import { costRecordsSummaryGET } from './costRecordsSummary'
 import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
@@ -91,6 +102,8 @@ import {
   connectorsCustomDELETE,
   connectorsCustomGET,
   connectorsCustomPOST,
+  connectorsConfiguredGET,
+  connectorsPathSuggestionsGET,
   connectorsConnectPOST,
   connectorsDisconnectPOST,
   connectorsListGET,
@@ -174,6 +187,9 @@ router.post('/api/approvals', approvalsPOST)
 router.get('/api/chat-history', chatHistoryGET)
 router.post('/api/chat-history', chatHistoryPOST)
 router.delete('/api/chat-history', chatHistoryDELETE)
+// Ends the model's conversation and drops a divider, leaving every message in place
+// (what `/reset` does).
+router.post('/api/chat-history/reset-context', chatHistoryRESETCONTEXT)
 
 // Cost records — summary must be before the shorter prefix
 router.get('/api/cost-records/summary', costRecordsSummaryGET)
@@ -337,10 +353,28 @@ router.get('/api/connectors', connectorsListGET)
 router.post('/api/connectors/connect', sensitiveLimiter, connectorsConnectPOST)
 // Custom connectors: the operator points clawboo at a server of their own.
 // Registered BEFORE the :slug routes so `custom` is never read as a slug.
+// Which connectors already have what they asked for. ONE request for the whole
+// shelf, so a card's price tag is true rather than typical.
+router.get('/api/connectors/configured', connectorsConfiguredGET)
+router.get('/api/connectors/path-suggestions', connectorsPathSuggestionsGET)
+// Which brokered apps are already connected. Registered before the :slug
+// routes so `brokered` is never read as a connector slug.
+// The broker's own surface. Registered before the :slug connector routes so
+// `composio` is never read as a connector slug.
+router.get('/api/connectors/composio', composioStatusGET)
+router.put('/api/connectors/composio/key', sensitiveLimiter, composioKeyPUT)
+router.delete('/api/connectors/composio/key', sensitiveLimiter, composioKeyDELETE)
+router.post(
+  '/api/connectors/composio/apps/:slug/authorize',
+  sensitiveLimiter,
+  composioAuthorizePOST,
+)
 router.get('/api/connectors/custom', connectorsCustomGET)
 router.post('/api/connectors/custom', sensitiveLimiter, connectorsCustomPOST)
 router.delete('/api/connectors/custom/:slug', sensitiveLimiter, connectorsCustomDELETE)
 router.post('/api/connectors/:slug/disconnect', sensitiveLimiter, connectorsDisconnectPOST)
+// Ask a broker to connect one of its upstream apps. Rate-limited with the other
+// writes: it opens an authorization flow at a third party.
 // Config: what an operator must supply before a connector can run. A credential
 // goes IN and comes back only as a boolean; a launch argument comes back in full,
 // because checking which folder a connector was handed is the point of asking.

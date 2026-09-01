@@ -169,8 +169,29 @@ export function flattenContent(content: unknown): string {
   return parts.join('\n')
 }
 
+/**
+ * An error's message, plus the cause chain that actually explains it.
+ *
+ * `fetch failed` IS THE WHOLE MESSAGE undici puts on a network error, and on its
+ * own it tells an operator nothing: refused, DNS, TLS, expired session and reset
+ * connection all arrive under that one sentence. The reason lives on `cause`,
+ * which is exactly what a report like "the connector broke" needs and exactly
+ * what was being thrown away here.
+ */
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  if (!(err instanceof Error)) return String(err)
+  const parts: string[] = [err.message]
+  const seen = new Set<unknown>([err])
+  let cause: unknown = (err as { cause?: unknown }).cause
+  // Bounded: a cause chain is normally two deep, and a cyclic one would
+  // otherwise spin here rather than surfacing anything.
+  while (cause && parts.length < 4 && !seen.has(cause)) {
+    seen.add(cause)
+    const text = cause instanceof Error ? cause.message : String(cause)
+    if (text && !parts.includes(text)) parts.push(text)
+    cause = cause instanceof Error ? (cause as { cause?: unknown }).cause : undefined
+  }
+  return parts.join(': ')
 }
 
 /**
@@ -240,13 +261,28 @@ export async function connectHttpConnector(spec: HttpConnectorSpec): Promise<Con
         }
       : {}),
   })
-  return finishConnect(transport, spec, {
-    // No child process, so nothing to reap and nothing to report.
-    pid: () => null,
-    // A remote server's failure explanation arrives in the HTTP response the SDK
-    // already surfaces, so there is no side channel to drain here.
-    diagnostic: () => '',
-  })
+  try {
+    return await finishConnect(transport, spec, {
+      // No child process, so nothing to reap and nothing to report.
+      pid: () => null,
+      // A remote server's failure explanation arrives in the HTTP response the SDK
+      // already surfaces, so there is no side channel to drain here.
+      diagnostic: () => '',
+    })
+  } catch (err) {
+    // NAME THE HOST WHEN NOTHING ELSE CAN BE SAID. `fetch failed` with an empty
+    // cause is what undici reports when the request never left: no route, DNS
+    // refused, a sandbox with no outbound network. It is indistinguishable on
+    // screen from an expired token or a rejected handshake, and it sent at least
+    // one reader looking for a bug in a connector that was working fine.
+    if (err instanceof ConnectorHandshakeError && /fetch failed/i.test(err.message)) {
+      throw new ConnectorHandshakeError(
+        `could not reach ${new URL(spec.url).host}. The request never left this machine, so check network access rather than the connector.`,
+        err.pid,
+      )
+    }
+    throw err
+  }
 }
 
 /** Connect to a stdio MCP server, completing the handshake before returning. */

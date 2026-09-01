@@ -5,9 +5,13 @@ import { parseToolMarkdown } from '@clawboo/protocol'
 //
 // Selects what to show in a Boo's live activity band when the agent is running.
 // Priority: in-flight streaming text > most recent assistant message > most
-// recent tool call (formatted as `[[tool: <label>]]`). Skips thinking/meta/user
-// — we want to show what the agent is *doing*, not its private reasoning or
-// the user's own prompt.
+// recent tool call. Skips thinking/meta/user — we want to show what the agent is
+// *doing*, not its private reasoning or the user's own prompt.
+//
+// A tool call carries the BARE label, not a rendered string. It used to hand back
+// the literal `[[tool: <label>]]`, which the band printed verbatim, so a person
+// watching their Boo work read internal markup instead of a sentence. Formatting
+// belongs to whatever draws it.
 
 export type PickedActivity =
   | { kind: 'streaming'; text: string }
@@ -33,7 +37,7 @@ export function pickLatestActivity(
     if (e.kind === 'tool') {
       const parsed = parseToolMarkdown(e.text)
       const label = parsed.label?.trim() || 'tool'
-      return { kind: 'tool', text: `[[tool: ${label}]]` }
+      return { kind: 'tool', text: label }
     }
     // skip 'thinking', 'meta', 'user'
   }

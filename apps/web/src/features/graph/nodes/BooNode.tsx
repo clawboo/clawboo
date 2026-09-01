@@ -97,15 +97,18 @@ type GlowConfig = { color: string; pulse: boolean }
 const STATUS_GLOW: Record<string, GlowConfig | null> = {
   idle: null,
   running: { color: 'rgb(var(--mint-rgb) / 0.55)', pulse: true },
-  error: { color: 'rgb(var(--amber-rgb) / 0.55)', pulse: false },
+  error: { color: 'rgb(var(--destructive-rgb) / 0.55)', pulse: false },
   sleeping: { color: 'rgb(var(--foreground-rgb) / 0.3)', pulse: false },
 }
 
+// Error and sleeping used to share amber, which made "this needs you" and "this is
+// deliberately resting" the same mark. Error takes the destructive red the rest of
+// the product already uses for failure; sleeping keeps the quiet neutral it means.
 const STATUS_DOT: Record<string, string> = {
   idle: 'var(--category-other)',
   running: 'var(--mint)',
-  error: 'var(--amber)',
-  sleeping: 'var(--amber)',
+  error: 'var(--destructive)',
+  sleeping: 'var(--category-other)',
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -132,6 +135,30 @@ const handleConnecting: React.CSSProperties = {
   height: 12,
   borderRadius: '50%',
   transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
+}
+
+/**
+ * The always-visible port.
+ *
+ * Sized for a pointer rather than for tidiness: 20px is the smallest disc that
+ * reads as a target at the zoom levels the canvas actually sits at, and the
+ * three handles it replaces were 8px.
+ */
+const portStyle: React.CSSProperties = {
+  background: 'rgb(var(--surface-rgb, 255 255 255) / 1)',
+  border: '1.5px solid rgb(var(--foreground-rgb) / 0.28)',
+  width: 20,
+  height: 20,
+  borderRadius: '50%',
+  transition: 'background 0.15s, border-color 0.15s, transform 0.15s',
+}
+
+/** Engaged: the thread is out, or connect mode is on. */
+const portStyleActive: React.CSSProperties = {
+  ...portStyle,
+  background: 'rgb(var(--primary-rgb) / 0.12)',
+  border: '1.5px solid rgb(var(--primary-rgb))',
+  transform: 'scale(1.1)',
 }
 
 const centerHandleStyle: React.CSSProperties = {
@@ -169,11 +196,19 @@ export const BooNode = memo(function BooNode({
   selected,
   dragging,
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
-  const { agentId, name, status } = data
+  const { agentId, name, status, ringCounts } = data
+  // SELECTOR, not the whole store: BooNode renders once per agent, and a
+  // whole-store subscription would re-render every Boo on any graph change.
+  const isExpanded = useGraphStore((s) => s.expandedBooNodeIds.has(`boo-${agentId}`))
   const floatRef = useFloatingMotion(agentId, 'boo', dragging)
   // Decorative hover lift — dropped under reduced motion (see SkillNode).
   const reduceMotion = useReducedMotion()
-  const showCard = status === 'running'
+  // The card is how a Boo says what it is doing, and an error is the thing a person
+  // most needs to read. Gating it on `running` alone meant the moment a run failed
+  // the card unmounted, taking the error line inside `BooLiveActivity` with it: that
+  // branch could never be seen by anyone. An errored Boo keeps its card so the
+  // reason stays on screen.
+  const showCard = status === 'running' || status === 'error'
   // Runtime brand badge — shown on every Boo (Atlas + team graph + agent-detail
   // MiniGraph) so the agent's runtime is legible at a glance.
   const runtime = data.runtime
@@ -396,6 +431,8 @@ export const BooNode = memo(function BooNode({
               cardStatusColor={cardStatusColor}
               lastSeenLabel={lastSeenLabel}
               runtime={runtime}
+              ringCounts={ringCounts}
+              isExpanded={isExpanded}
               avatarFlip={avatarFlip}
               nameFlip={nameFlip}
               statusFlip={statusFlip}
@@ -412,13 +449,24 @@ export const BooNode = memo(function BooNode({
               cardStatusColor={cardStatusColor}
               lastSeenLabel={lastSeenLabel}
               runtime={runtime}
+              ringCounts={ringCounts}
+              isExpanded={isExpanded}
               avatarFlip={avatarFlip}
               nameFlip={nameFlip}
               statusFlip={statusFlip}
             />
           )}
 
-          {/* ── Interactive handles (visible on hover / connect) ────────────── */}
+          {/* ── The port ─────────────────────────────────────────────────────
+              ONE, AND ALWAYS VISIBLE. This replaced three 8x8px handles at
+              22% border opacity that only appeared on hover: the canvas could
+              already author skills, shares and routes, and every one of those
+              gestures started from something a first-time user could not see.
+              A 20px disc carrying a + is the only advertisement the graph has
+              that it can be built on.
+
+              The TARGET handle stays where it was (top) but shares the port's
+              visibility, so a thread can still be dropped ON a Boo. */}
           <Handle
             type="target"
             position={Position.Top}
@@ -439,11 +487,28 @@ export const BooNode = memo(function BooNode({
             type="source"
             id="right"
             position={Position.Right}
-            className={
-              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-            }
-            style={isConnecting || connectMode ? handleConnecting : handleBase}
+            className="opacity-100"
+            style={isConnecting || connectMode ? portStyleActive : portStyle}
           />
+          {/* The + glyph, drawn OVER the handle and click-through so the handle
+              keeps the whole 20px hit area. Purely decorative: the drag is the
+              handle's. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute z-10 select-none font-semibold leading-none transition-colors duration-150"
+            style={{
+              right: -10,
+              top: '50%',
+              transform: 'translate(50%, -50%)',
+              fontSize: 13,
+              color:
+                isConnecting || connectMode
+                  ? 'rgb(var(--primary-rgb))'
+                  : 'rgb(var(--foreground-rgb) / 0.5)',
+            }}
+          >
+            +
+          </span>
         </motion.div>
       </div>
 
@@ -474,6 +539,53 @@ export const BooNode = memo(function BooNode({
   )
 })
 
+// ─── RingCounts ──────────────────────────────────────────────────────────────
+
+/**
+ * What this Boo carries, on its face.
+ *
+ * THE NODE'S ONLY ADVERTISEMENT. Every skill and connector an agent owns lives
+ * in an orbital ring behind one unlabelled click, and the Boo carried no
+ * chevron, badge or count -- so nothing on screen said the ring existed, and
+ * every authoring gesture starts inside it.
+ *
+ * Silent at zero: a Boo with nothing yet should read as empty, not as three
+ * zeroes. Dimmed once the ring is open, because then the tiles themselves are
+ * the answer and the summary would be repeating them.
+ */
+function RingCounts({
+  counts,
+  expanded,
+}: {
+  counts: BooNodeData['ringCounts']
+  expanded: boolean
+}) {
+  if (!counts) return null
+  const total = counts.skills + counts.connectors + counts.routes
+  if (total === 0) return null
+  const parts: string[] = []
+  if (counts.skills > 0) parts.push(`${counts.skills} skill${counts.skills === 1 ? '' : 's'}`)
+  if (counts.connectors > 0)
+    parts.push(`${counts.connectors} connector${counts.connectors === 1 ? '' : 's'}`)
+  if (counts.routes > 0) parts.push(`${counts.routes} route${counts.routes === 1 ? '' : 's'}`)
+  const label = parts.join(' · ')
+  return (
+    <span
+      title={label}
+      style={{
+        fontSize: 10,
+        letterSpacing: '0.04em',
+        color: 'var(--muted-foreground)',
+        opacity: expanded ? 0.4 : 0.85,
+        transition: 'opacity 0.18s',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      · {label}
+    </span>
+  )
+}
+
 // ─── CardContent ─────────────────────────────────────────────────────────────
 
 interface ContentProps {
@@ -486,6 +598,10 @@ interface ContentProps {
   cardStatusColor: string
   lastSeenLabel: string | null
   runtime: string | null
+  /** What the ring holds. Rendered on the face so the node advertises its door. */
+  ringCounts: BooNodeData['ringCounts']
+  /** Ring already open: the counts step back rather than compete with the tiles. */
+  isExpanded: boolean
   avatarFlip: MutableRefObject<FlipState>
   nameFlip: MutableRefObject<FlipState>
   statusFlip: MutableRefObject<FlipState>
@@ -500,6 +616,8 @@ function CardContent({
   cardStatusColor,
   lastSeenLabel,
   runtime,
+  ringCounts,
+  isExpanded,
   avatarFlip,
   nameFlip,
   statusFlip,
@@ -555,9 +673,12 @@ function CardContent({
           >
             {activityVerb}
             {lastSeenLabel ? ` · seen ${lastSeenLabel}` : ''}
+            <RingCounts counts={ringCounts} expanded={isExpanded} />
           </div>
         </div>
         <div ref={statusRef} style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          {/* Pulse means "happening now". An errored card is stopped, so its dot is
+              steady: a throbbing error reads as work still in progress. */}
           {status === 'running' ? (
             <motion.div
               style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
@@ -589,17 +710,10 @@ function CardContent({
         <BooLiveActivity agentId={agentId} />
       </div>
 
-      {/* FOOTER — reserved real estate (per-Boo metric slot, future) */}
-      <div
-        style={{
-          padding: '6px 12px',
-          borderTop: '1px solid var(--border)',
-          fontSize: 10,
-          color: 'var(--muted-foreground)',
-          flexShrink: 0,
-          minHeight: 24,
-        }}
-      />
+      {/* No footer. It used to reserve a 24px band for a future per-Boo metric and
+          drew a divider above it, so every running card ended in a ruled-off empty
+          stripe that reads as content that failed to load. Reserving space for
+          something unbuilt costs a person's attention on every card, every run. */}
     </>
   )
 }
@@ -622,6 +736,8 @@ function CircleContent({
   cardStatusColor,
   lastSeenLabel,
   runtime,
+  ringCounts,
+  isExpanded,
   avatarFlip,
   nameFlip,
   statusFlip,
@@ -715,6 +831,7 @@ function CircleContent({
           >
             {activityVerb}
           </span>
+          <RingCounts counts={ringCounts} expanded={isExpanded} />
         </div>
       </div>
 

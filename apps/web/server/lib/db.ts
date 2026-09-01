@@ -18,6 +18,7 @@ import path from 'node:path'
 import { resolveClawbooDir } from '@clawboo/config'
 import { ensureSchema, openDb, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
+import { retireFleetWideConnectorGrants } from './connectors/retireFleetWideGrants'
 
 const log = createLogger('db')
 
@@ -59,6 +60,17 @@ export function getDb(): ClawbooDb {
       log.info(
         { count: added.length, columns: added.map((c) => `${c.table}.${c.column}`) },
         'SQLite: added missing columns to an existing database',
+      )
+    }
+    // A permission change is never silent. An older build granted every
+    // connector to the whole fleet on connect; those rows still answer for every
+    // agent until they are retired, and after this the operator's own edges are
+    // the only thing that gives an agent a connector.
+    const retired = retireFleetWideConnectorGrants(db)
+    if (retired > 0) {
+      log.info(
+        { count: retired },
+        'Retired fleet-wide connector grants: connectors are now granted per agent',
       )
     }
   } catch (err) {

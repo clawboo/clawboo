@@ -70,14 +70,17 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().transcripts.get('s1')).toHaveLength(2)
     })
 
-    it('caps at 500 entries', () => {
-      const batch = Array.from({ length: 510 }, (_, i) => makeEntry({ entryId: `e${i}` }))
+    it('caps at 2000 entries, keeping the most recent', () => {
+      // An ARRAY bound, not a rendering one: `useRenderWindow` already limits the
+      // DOM. It was 500 while starting fresh emptied the chat; a conversation that
+      // is never cleared and can be paged backwards needs room for several pages of
+      // scrollback to survive the next reply landing.
+      const batch = Array.from({ length: 2010 }, (_, i) => makeEntry({ entryId: `e${i}` }))
       useChatStore.getState().appendTranscript('s1', batch)
       const entries = useChatStore.getState().transcripts.get('s1')
-      expect(entries).toHaveLength(500)
-      // Should keep the last 500 (e10–e509)
-      expect(entries![0].entryId).toBe('e10')
-      expect(entries![499].entryId).toBe('e509')
+      expect(entries).toHaveLength(2000)
+      expect(entries![0]!.entryId).toBe('e10')
+      expect(entries![1999]!.entryId).toBe('e2009')
     })
 
     it('returns same state ref if all entries are duplicates', () => {
@@ -367,5 +370,68 @@ describe('useChatStore', () => {
       const after = useChatStore.getState().streamStartedAt
       expect(after).not.toBe(before)
     })
+  })
+})
+
+describe('prependTranscript', () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      transcripts: new Map(),
+      streamingText: new Map(),
+      streamStartedAt: new Map(),
+      lastTokenUsage: new Map(),
+    })
+  })
+
+  // Scrolling back through a conversation that is never cleared. `appendTranscript`
+  // cannot serve this: it appends and then trims the FRONT, which is exactly where a
+  // page of history lands, so history routed through it would be placed after the
+  // new messages and then dropped.
+  const store = () => useChatStore.getState()
+  const texts = (key: string) => (store().transcripts.get(key) ?? []).map((e) => e.text)
+
+  it('puts older entries in front of what is already loaded', () => {
+    const recent = makeEntry({ entryId: 'recent', text: 'newer' })
+    const older = makeEntry({ entryId: 'older', text: 'older' })
+    store().appendTranscript('k', [recent])
+    store().prependTranscript('k', [older])
+    expect(texts('k')).toEqual(['older', 'newer'])
+  })
+
+  it('does not re-add a page that is already loaded', () => {
+    const e = makeEntry({ entryId: 'dupe', text: 'once' })
+    store().appendTranscript('k', [e])
+    store().prependTranscript('k', [e])
+    expect(texts('k')).toEqual(['once'])
+  })
+
+  it('keeps two genuinely identical old messages', () => {
+    // Content dedup exists to collapse a commit batch appended twice in one tick. A
+    // page of history is neither, and a person who said the same thing twice must
+    // see it twice when they scroll back to it.
+    const a = makeEntry({ entryId: 'a', text: 'ok', timestampMs: 5, sequenceKey: 5 })
+    const b = makeEntry({ entryId: 'b', text: 'ok', timestampMs: 5, sequenceKey: 5 })
+    store().prependTranscript('k', [a, b])
+    expect(texts('k')).toEqual(['ok', 'ok'])
+  })
+
+  it('is a no-op for an empty page', () => {
+    store().appendTranscript('k', [makeEntry({ entryId: 'only' })])
+    const before = store().transcripts
+    store().prependTranscript('k', [])
+    expect(store().transcripts).toBe(before)
+  })
+
+  it('survives a live message landing on top of paged-in history', () => {
+    // The cap used to be 500 and trimmed the front, so the next reply threw away the
+    // history the person had just pulled in.
+    const older = Array.from({ length: 600 }, (_, i) =>
+      makeEntry({ entryId: `old-${i}`, text: `old-${i}` }),
+    )
+    store().prependTranscript('k', older)
+    store().appendTranscript('k', [makeEntry({ entryId: 'live', text: 'live' })])
+    const kept = texts('k')
+    expect(kept).toContain('old-0')
+    expect(kept[kept.length - 1]).toBe('live')
   })
 })

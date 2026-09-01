@@ -51,8 +51,23 @@ export class NativeAdapter implements RuntimeAdapter {
       // Routable surface, not an exhaustive list — AgentConfig picks the model;
       // any provider-supported id works.
       models: ['claude-haiku-4-5', 'claude-sonnet-4-6', 'gpt-4o-mini', 'gpt-4o'],
-      // Conservative floor across routable providers; drives the proactive
-      // session-rotation watermark.
+      // The rotation watermark's denominator, and a DELIBERATE OVER-ESTIMATE
+      // rather than the "conservative floor" it was once described as.
+      //
+      // This runtime routes anywhere: ollama (as little as 2,048 served),
+      // moonshot (8k to 32k), openai (128k), anthropic (200k). One number cannot
+      // be right for all of them, so the question is which way to be wrong.
+      //
+      // TOO HIGH is the safe direction here. Rotation fires late, the run
+      // eventually hits the provider's own limit, and `isContextOverflowMessage`
+      // turns that into one clean typed terminal (conversation.ts:232). TOO LOW
+      // is the dangerous direction: it rotates a healthy session repeatedly, and
+      // on a runtime that compacts it is how a session deadlocks against a
+      // budget it never needed. A real per-model window would be better than
+      // either, and clawboo can now resolve one for 1,069 models
+      // (lib/modelCache.ts getContextWindowFromCli); what is missing is a
+      // normalization step between this runtime's BARE model ids and that
+      // catalog's PREFIXED keys, which is deliberately not guessed at here.
       contextWindowTokens: 200000,
       // Native-preservation seam: clawboo IS this runtime's substrate. Its
       // private plane — persisted conversation transcripts — lives in a stable

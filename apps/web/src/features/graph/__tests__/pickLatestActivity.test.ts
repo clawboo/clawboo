@@ -42,13 +42,16 @@ describe('pickLatestActivity', () => {
     expect(result).toEqual({ kind: 'assistant', text: 'most recent reply' })
   })
 
-  it('formats latest tool entry as [[tool: <label>]]', () => {
+  it('returns the BARE tool label, not rendered markup', () => {
+    // The band used to print `[[tool: run_shell]]` at the person watching their Boo
+    // work, because this function baked the wrapper in. Formatting belongs to
+    // whatever draws it; this only says which tool.
     const entries = [
       entry('user', 'do the thing', 1),
       entry('tool', '[[tool]] run_shell\n```json\n{"cmd":"ls"}\n```', 2),
     ]
     const result = pickLatestActivity(null, entries)
-    expect(result).toEqual({ kind: 'tool', text: '[[tool: run_shell]]' })
+    expect(result).toEqual({ kind: 'tool', text: 'run_shell' })
   })
 
   it('skips thinking and walks back to the prior assistant entry', () => {

@@ -120,11 +120,17 @@ export function groupAgentCapabilities(
 ): Map<string, CapabilityRecord[]> {
   const agentScoped = new Map<string, CapabilityRecord[]>()
   const globalByRuntime = new Map<string, CapabilityRecord[]>()
+  // A GLOBAL CONNECTOR RECORD IS DROPPED HERE, deliberately. It says a connector
+  // exists and is running, which is a fact about the install rather than about
+  // any agent, and no agent may be drawn holding it on that basis alone. The
+  // agent-scoped record the grant projection emits is what puts one on a ring.
   for (const r of records) {
     if (r.scope === 'agent' && r.agentId) {
       const arr = agentScoped.get(r.agentId) ?? []
       arr.push(r)
       agentScoped.set(r.agentId, arr)
+    } else if (r.scope === 'global' && isConnectorSourced(r)) {
+      continue
     } else if (r.scope === 'global' && r.runtime) {
       const arr = globalByRuntime.get(r.runtime) ?? []
       arr.push(r)
@@ -141,21 +147,22 @@ export function groupAgentCapabilities(
     // rendered. It is just not evidence of a real per-agent inventory.
     const ownReal = own.filter((r) => !r.synthetic)
     const inherited = (runtime ? globalByRuntime.get(runtime) : undefined) ?? []
+    // A CONNECTOR IS NOT INHERITED. It used to be, on the reasoning that clawboo
+    // owns the process and every agent reaches it through the same broker, so a
+    // connector record is global by construction. That was true while connecting
+    // also minted a fleet-wide grant: every agent really could call it, and
+    // drawing it on every ring was honest.
+    //
+    // It is no longer true. Connecting makes a connector available and gives it
+    // to nobody; an agent reaches it only through a grant, and the grant
+    // projection emits an AGENT-SCOPED record for exactly those. So the
+    // agent-scoped records are now the whole answer, and fanning the global one
+    // across the fleet would draw an edge for access the agent does not have,
+    // which is the one thing this picture must never do.
     if (ownReal.length > 0) {
-      // CONNECTORS ARE INHERITED EVEN THEN, and they are the one source that is.
-      // clawboo owns the process and every agent reaches it through the same
-      // broker, so a connector record is global by construction and there is no
-      // agent-scoped version of it to find. Excluding it with the rest of the
-      // globals meant a connected connector never appeared on the ring of any
-      // agent that had a skill of its own, which is most of them: the headline
-      // feature was invisible in the graph for exactly the fleets most likely to
-      // use it.
-      const connectors = inherited.filter((r) => isConnectorSourced(r))
-      const seen = new Set(own.map((r) => r.id))
-      out.set(agentId, [...own, ...connectors.filter((r) => !seen.has(r.id))])
-    } else {
-      const merged = [...inherited, ...own]
-      if (merged.length > 0) out.set(agentId, merged)
+      out.set(agentId, own)
+    } else if (inherited.length > 0 || own.length > 0) {
+      out.set(agentId, [...inherited, ...own])
     }
   }
   return out

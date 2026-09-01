@@ -3,7 +3,7 @@ title: Connect an MCP server
 description: Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
 ---
 
-Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. The **Connectors** tab in the [Marketplace](/using/marketplace) lists 19 verified MCP servers, and 18 of them Clawboo can connect for you.
+Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. Open **Connectors** in the sidebar, under Marketplace. It lists 20 popular MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
 
 This is the one Marketplace tab that is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
 
@@ -22,22 +22,46 @@ This is the one Marketplace tab that is not purely a catalog. Deploying an agent
 
 The tile tells you which one you are looking at, and the detail pane's copy changes with it.
 
-## What a connector needs first
+## The two lists
 
-A tile will not offer **Connect** until its requirement is met, because the server would refuse it anyway. The same predicate decides both, so the button and the API can never disagree.
+### Gmail, Slack, Jira and the rest
 
-| The tile says                       | What to do                                                                                                     |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Needs a credential                  | Enter the API key in the panel. It goes to the encrypted vault, never to a settings row                        |
-| Needs a path you supply             | Type the folder or database file the server may work in                                                        |
-| Sign in to this provider            | Press **Sign in**; a tab opens at the provider's own consent screen                                            |
-| Requires a pre-registered OAuth app | Nothing. Clawboo cannot sign itself in here; copy the config block into a runtime that already has credentials |
+Clawboo cannot register an OAuth application with Google, Atlassian or Salesforce, so for a long time it had no Gmail, no Slack and no Jira. Those apps are in the list now, in their own band, reached through **Composio**.
 
-That last row is GitHub today, and it is the one entry of the 19 that cannot be run from the tab. Its authorization server publishes no dynamic registration endpoint, and Clawboo ships no OAuth app of its own.
+Paste a Composio project key into the field on that band, once. From then on, press **Connect** on an app, approve it at the provider, and it stays connected. The key lives in Clawboo's encrypted vault and is never sent back to the browser: the app only ever learns whether one exists.
+
+Every app you connect appears as its own node on the graph, attached to the agents that can reach it. That is deliberate. One node marked "Composio" would hide the fact that an agent can read your email; a Gmail node says it plainly, and it is the form in which you can reason about it or take it away.
+
+The trade is worth knowing once. Composio signs you in to each app and keeps that app's tokens on its own servers. Clawboo holds only the project key. Anything you connect there is reachable by Composio, not only by your agents.
+
+**Popular** and **More connectors** are the sets Clawboo has run and vouches for, split by how likely you are to recognise the name. **From the community** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
+
+A connected connector shows a green tick and nothing else. Everything else shows a button, and the button's verb is the price.
+
+| The button    | What happens                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| Turn on       | Nothing to set up. Five of the twenty are like this                                                        |
+| Connect       | A tab opens at the provider's own consent screen, then it connects                                         |
+| Add key       | One field, one **Save and connect** button. The value goes to the encrypted vault, never to a settings row |
+| Choose folder | Pick from folders Clawboo verified exist, or type a path                                                   |
+| Add it        | A registry entry. You are shown the exact command before anything runs                                     |
+| Turn off      | Stops it. Appears on the row when you hover or focus it                                                    |
+
+The list is ordered by distance from working, so the top of it is what you can have right now. Nothing needs the detail pane to get started: a key or a folder opens in place, on the row. The same predicate decides the row and the API, so a button you can see is a button the server will accept.
+
+For a connector that needs a folder or a file, a row of suggestion chips sits above the field: your Documents, Desktop, and the folder Clawboo runs in, each one checked server-side to actually exist. For SQLite, Clawboo looks for `.db` files near where it runs and offers those. Clicking a chip fills the field; typing still works. Saving what a connector asked for also connects it, in the one button, because there is no reason you should have to know that storing a key and starting the process are different operations.
+
+A search that misses everything says so plainly: nothing set up, and whether the MCP registry has a match. It never leaves you staring at an empty grid.
+
+<Note>
+The row never scores a connector. It used to show a `3/3 risk` chip counting [lethal trifecta](/appendices/glossary) legs, which describe what a connector can **reach** rather than whether it is safe. The detail pane says the same three things in sentences, where a consequence fits and a fraction does not.
+</Note>
 
 ## Signing in to a remote connector
 
 Clawboo has no registered OAuth app and cannot keep a client secret, so it registers **itself** with the provider, once per install, using [dynamic client registration](https://www.rfc-editor.org/rfc/rfc7591). The redirect lands on an ephemeral loopback listener rather than on an API route, because the redirect back is a cross-site navigation and Clawboo's always-on origin guard refuses exactly that.
+
+A provider that publishes no registration endpoint cannot be signed into this way, and **GitHub** is the live case. Its MCP server accepts a personal access token instead, so its card reads **Needs a key**: create a fine-grained token scoped to the repositories your agents should work in, give it read and write on Contents, Issues and Pull requests, and paste it in.
 
 Tokens and the client registration live in the same encrypted vault as connector credentials, namespaced per connector, and are never returned by any API. **Sign out** deletes both and stops the connection.
 
@@ -49,7 +73,29 @@ Discovery is pinned to the server that answered: its OAuth metadata must live on
 
 **Add your own MCP server** takes a command or a URL. A custom connector is connectable, and it gets no less access than a curated one: Clawboo assumes it reads private data, ingests untrusted content and can reach the network, because it cannot know otherwise. Adding one is the same act of trust as writing that command into any other MCP client's config.
 
-Only **community** entries stay blocked, and the reason is different: installing one is a one-click install of somebody else's package, chosen from a list rather than by you.
+## The long tail
+
+The list reads top to bottom in three bands: **Popular** first, then **More connectors**, then **From the community**. That last band is 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Show 400 more** at the foot of the list, or type at least two characters in the search box, and they appear alongside the results above rather than instead of them. That first press opens the band; after it, the button reads **Show 60 more** and walks the rest a page at a time. A single character brings them in too, but only when nothing else matches it. The counts never merge into one total, because Clawboo has run the first two bands and none of the third.
+
+The band shows sixty at a time, with the ones whose name Clawboo recognises first. The registry itself holds far more than 400: Clawboo commits a snapshot of the most recently updated servers that pass its runnability checks, so the number is a reviewed slice rather than the whole directory.
+
+They are a committed snapshot, not a live fetch, so the directory still works with no network and does not change under you between releases. Refreshing it is a deliberate act: someone runs the ingest, reads the diff, and ships it.
+
+**Add it** opens a confirmation, not a connection. It shows the exact command, the package and version it came from, and what it will ask you for:
+
+> Clawboo has not checked this one. It will run on your machine, as you, with the same access to your files and network that you have.
+>
+> `npx -y pretrip-mcp@1.0.1`
+
+Confirming turns it into one of **your own** entries, with its origin recorded, and it lands on the ordinary key flow from there. Clawboo vouches for nothing, you see the command before it runs, and finding it and running it are two clicks apart rather than a retyped command line.
+
+## When an agent asks for one
+
+An agent that needs something it cannot reach names the connector and stops, rather than browsing to the vendor's website or asking you to sign in on its behalf. Clawboo turns that into a card in the conversation, with one button per connector, labelled with what that connector actually costs: **Connect** where a sign-in is all it takes, **Add key** where you have to fetch a token first.
+
+The button opens that connector's own page, not the tab. You are one click from the field you need to fill, at the moment you learned you needed it.
+
+The agent only knows to ask because each turn tells it which connectors are live, and names a few it could have with their prices. It is told never to work around a missing one. Nothing is connected on its say-so: the card is an offer, and you are the one who presses the button.
 
 ## What happens to its tools
 
@@ -59,7 +105,7 @@ Every connector-supplied tool is **grant-governed** from the moment you connect.
 
 ## Governance
 
-Connecting mints an **owner** grant, which records that Clawboo attached this connector. It is real and it gates real calls, but it is never drawn as an edge: the tile itself is that statement. Dragging a connector tile onto a second agent on the [Ghost Graph](/using/ghost-graph) creates an **operator** grant, which is the one that draws an edge and carries a Detach control.
+Connecting mints an **owner** grant, which records that Clawboo attached this connector. It is real and it gates real calls, but it is never drawn as an edge: the tile itself is that statement. Dragging a connector tile onto a second agent on the [Ghost Graph](/using/ghost-graph) creates an **operator** grant, which is the one that draws an edge and carries a **Stop sharing** control. A connector tile also carries **Turn off**, which stops the connector itself. The two are deliberately never in the same position, because they do different things to different people.
 
 The badge on a tile is not a second reading of a status column. The graph and the broker call the same `decideGrant`, over the same rows, so an expired grant renders as expired because that is what the runtime would do with it. A connector whose tool list no longer hashes to what you approved shows **drift**, and that is deliberately not collapsed into an error: the remediation is to read what changed, not to retry.
 
@@ -73,7 +119,7 @@ A connector child is still a process running as you. It can read your home direc
 
 ## Troubleshooting
 
-**The first connect takes a minute.** A cold `npx` downloads the pinned package before the handshake completes. The tile stays in a working state throughout, and a disconnect issued during that window waits for the attempt rather than reporting "not connected".
+**The first connect takes a minute.** A cold `npx` downloads the pinned package before the handshake completes. The card shows **Working** throughout, and a disconnect issued during that window waits for the attempt rather than reporting that nothing was connected.
 
 **"Could not list tools".** The server came up and then failed discovery. Its own last words are included in the error where it printed any. The child is stopped, so nothing is left running.
 
@@ -83,7 +129,8 @@ A connector child is still a process running as you. It can read your home direc
 
 ## See also
 
-- [Marketplace](/using/marketplace) for the other three tabs
+- [Marketplace](/using/marketplace) for teams, agents and skills
 - [Ghost Graph](/using/ghost-graph) for sharing and revoking a connector
 - [Capabilities dashboard](/using/capabilities-dashboard) for the inventory view
 - [Approvals](/using/approvals) for what happens when a call needs one
+- [Ghost Graph](/using/ghost-graph) for `Turn off` and `Stop sharing` on a connector tile

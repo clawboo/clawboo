@@ -23,6 +23,10 @@ export type ConnectorCategory =
   | 'search'
   | 'productivity'
   | 'finance'
+  // Uncategorised, and honestly so. The registry publishes no category, and
+  // guessing one from a description would be clawboo asserting something about a
+  // server it has not read. Only community entries carry this.
+  | 'other'
 
 /**
  * Where the entry came from, and therefore how much we are willing to claim.
@@ -50,6 +54,18 @@ export type ConnectorAuthKind = 'none' | 'api-key' | 'bearer' | 'oauth'
 export interface ConnectorInput {
   /** The env var or header name, e.g. `GITHUB_TOKEN`. */
   key: string
+  /**
+   * What the VENDOR calls this, e.g. "GitHub token".
+   *
+   * The field label. `key` is what the child process needs and means nothing to
+   * the person filling the field in: an operator who went to GitHub to make a
+   * token knows they made a "fine-grained personal access token", not a
+   * `GITHUB_TOKEN`. The env var name stays visible under Technical details,
+   * where somebody wiring this into another runtime will look for it.
+   *
+   * Falls back to `key` when a definition has not said.
+   */
+  label?: string
   /** One line, plain verbs: "A GitHub personal access token with repo scope." */
   description: string
   /** Where a human goes to mint it. Rendered as a link in the consent dialog. */
@@ -156,6 +172,17 @@ export interface ConnectorUserArgument {
 }
 
 export interface ConnectorDefinition {
+  /**
+   * Whether this belongs in the shelf's first band.
+   *
+   * A NAME PEOPLE ARRIVE ALREADY KNOWING, rather than a ranking. The registry
+   * publishes no popularity data and clawboo measures none, so this is an
+   * editorial call: a reader scanning for "the thing I use at work" should find
+   * it without scrolling, and a capability like `memory` or `filesystem` is
+   * useful without being something anyone comes looking for by name.
+   */
+  popular?: boolean
+
   /** Stable kebab-case identity. The dialect key and the catalog's primary key. */
   slug: string
   displayName: string

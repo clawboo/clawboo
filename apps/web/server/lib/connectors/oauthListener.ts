@@ -64,12 +64,23 @@ export interface ListenerOptions {
   preferredPort?: number
 }
 
-/** A page the user sees in the tab the provider redirected. Plain, self-closing. */
-function resultPage(title: string, detail: string): string {
+/**
+ * A page the user sees in the tab the provider redirected.
+ *
+ * THE CLOSING LINE DEPENDS ON THE OUTCOME, and it did not used to. Both the
+ * success page and the failure page ended with "You can close this tab", so a
+ * sign-in that had FAILED still sent the operator back to clawboo believing it
+ * had worked. They pressed the button again, met the same wall, and read the
+ * whole thing as a loop rather than as one failure they could retry.
+ */
+function resultPage(title: string, detail: string, ok: boolean): string {
+  const footer = ok
+    ? 'You can close this tab.'
+    : 'Nothing was connected. Close this tab and try again in clawboo.'
   return `<!doctype html><meta charset="utf-8"><title>${title}</title>
 <body style="font-family:system-ui;padding:3rem;max-width:32rem;margin:auto;color:#111">
 <h1 style="font-size:1.1rem">${title}</h1><p style="color:#555">${detail}</p>
-<p style="color:#888;font-size:.85rem">You can close this tab.</p></body>`
+<p style="color:#888;font-size:.85rem">${footer}</p></body>`
 }
 
 /** How long the user has to finish signing in before the listener gives up. */
@@ -94,6 +105,7 @@ export async function startOAuthListener(opts: ListenerOptions = {}): Promise<Li
       resultPage(
         outcome.ok ? 'Connected' : 'Sign-in was not completed',
         escapeHtml(outcome.detail),
+        outcome.ok,
       ),
     )
   }

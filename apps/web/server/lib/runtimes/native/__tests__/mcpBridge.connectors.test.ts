@@ -8,7 +8,7 @@ import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createDb, type ClawbooDb } from '@clawboo/db'
+import { createDb, ensureOwnerGrant, type ClawbooDb } from '@clawboo/db'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
@@ -66,6 +66,23 @@ describe('native bridge serves connector tools', () => {
     await rm(sandbox, { recursive: true, force: true })
   })
 
+  /**
+   * Give ONE agent this connector.
+   *
+   * Connecting grants nobody, so a bridge test that wants to reach a connector
+   * tool has to say who may. That is the product rule, and stating it here is
+   * cheaper than every test wondering why a call was denied.
+   */
+  function grant(connectorId: string, agentId: string): void {
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: agentId,
+      capabilityKind: 'connector',
+      connectorId,
+      capabilityId: null,
+    })
+  }
+
   it('lists a connected connector’s tool, namespaced, alongside the builtins', async () => {
     const file = path.join(sandbox, 'server.cjs')
     const req = createRequire(path.join(process.cwd(), 'package.json'))
@@ -73,7 +90,10 @@ describe('native bridge serves connector tools', () => {
       file,
       FIXTURE((s) => req.resolve(`@modelcontextprotocol/sdk/${s}`)),
     )
-    await connectConnector(db, definition(process.execPath, [file]))
+    const { connector: listed } = await connectConnector(db, definition(process.execPath, [file]))
+    // The list is grant-filtered now, so a tool this agent has not been given is
+    // not merely refused on use, it is never offered.
+    grant(listed.connectorId, 'a1')
 
     const bridge = await connectMcpBridge({
       db,
@@ -114,11 +134,17 @@ describe('native bridge serves connector tools', () => {
         file,
         FIXTURE((s) => req.resolve(`@modelcontextprotocol/sdk/${s}`)),
       )
-      await connectConnector(db, definition(process.execPath, [file]))
+      const late = await connectConnector(db, definition(process.execPath, [file]))
 
-      // Re-listing now returns it, without the session reconnecting.
+      // GRANTED TO NOBODY YET, so it is not offered at all. Connecting makes a
+      // connector available; it does not give it to an agent, and a tool the
+      // agent could never call must not spend its context.
+      expect((await bridge!.listTools()).map((t) => t.name)).not.toContain('mcp__memory__ping')
+
+      // Given to this agent, it appears without the session reconnecting, and
+      // it is callable: the half a stale dispatcher would miss.
+      grant(late.connector.connectorId, 'a1')
       expect((await bridge!.listTools()).map((t) => t.name)).toContain('mcp__memory__ping')
-      // ...and it is callable, which is the half a stale dispatcher would miss.
       expect((await bridge!.callTool('mcp__memory__ping', {})).output).toBe('pong')
     } finally {
       await bridge!.close()
@@ -133,6 +159,7 @@ describe('native bridge serves connector tools', () => {
       FIXTURE((s) => req.resolve(`@modelcontextprotocol/sdk/${s}`)),
     )
     const { connector } = await connectConnector(db, definition(process.execPath, [file]))
+    grant(connector.connectorId, 'a1')
 
     const bridge = await connectMcpBridge({
       db,
@@ -157,7 +184,8 @@ describe('native bridge serves connector tools', () => {
       file,
       FIXTURE((s) => req.resolve(`@modelcontextprotocol/sdk/${s}`)),
     )
-    await connectConnector(db, definition(process.execPath, [file]))
+    const { connector } = await connectConnector(db, definition(process.execPath, [file]))
+    grant(connector.connectorId, 'a1')
 
     const bridge = await connectMcpBridge({
       db,
@@ -169,6 +197,22 @@ describe('native bridge serves connector tools', () => {
       // Proves the whole chain: bridge -> broker -> grant gate -> connector.
       expect(out.isError).toBe(false)
       expect(out.output).toBe('pong')
+
+      // AND THAT THE GRANT IS WHAT DID IT. A second agent, on the same live
+      // connector, is refused: the grant names one agent and nobody else.
+      const other = await connectMcpBridge({
+        db,
+        agentId: 'a2',
+        enable: { tasks: false, memory: false, tools: true },
+      })
+      try {
+        // Not listed, so not dispatchable: the refusal now happens before the
+        // model ever spends a token reading the schema.
+        expect((await other!.listTools()).map((t) => t.name)).not.toContain('mcp__memory__ping')
+        expect((await other!.callTool('mcp__memory__ping', {})).output).toContain('unknown tool')
+      } finally {
+        await other!.close()
+      }
     } finally {
       await bridge!.close()
     }
