@@ -189,9 +189,13 @@ function dropResumePointers(db: ReturnType<typeof getDb>, sessionKey: string): v
  * Persisted, unlike the old notice, because it is now a permanent landmark in a
  * transcript that outlives the reset: scrolling past it later is how a person
  * understands why the boo does not recall what is written above it.
+ *
+ * The second sentence is the honest half. A reset drops the conversation but not the
+ * boo's saved notes, which it is handed back on its next turn (see memoryRecall), and
+ * "anything it saved" is true whether that turns out to be a lot or nothing at all.
  */
 export const CONTEXT_DIVIDER_TEXT =
-  'Starting fresh from here. Everything above stays for you to read, but your boo is no longer carrying it.'
+  'Starting fresh from here. Everything above stays for you to read. Your boo is no longer carrying the conversation, though it still has anything it saved to memory.'
 
 // ─── POST /api/chat-history/reset-context ─────────────────────────────────────
 // Body: { sessionKeys: string[], noticeSessionKey?: string }

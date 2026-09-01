@@ -66,7 +66,7 @@ beforeEach(() => {
               sessionKey: SESSION,
               kind: 'meta',
               role: 'system',
-              text: 'Starting fresh from here. Everything above stays for you to read, but your boo is no longer carrying it.',
+              text: 'Starting fresh from here. Everything above stays for you to read. Your boo is no longer carrying the conversation, though it still has anything it saved to memory.',
               source: 'local-send',
               timestampMs: 99,
               sequenceKey: 99,

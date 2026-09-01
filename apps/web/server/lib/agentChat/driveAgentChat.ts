@@ -25,6 +25,7 @@ import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
+import { buildMemoryRecall } from './memoryRecall'
 import { runFailureText } from '../runFailureText'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
@@ -121,6 +122,10 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
 
   let adapter: RuntimeAdapter
   let homeDir: string | null = null
+  // A run with no session to resume is the first turn of a conversation or the first
+  // turn after a reset. Both are the moment the boo has its character but none of the
+  // facts, so both get its own notes handed back (see memoryRecall).
+  const resumingPriorTurn = Boolean(getSetting(db, nativeChatSessionSettingKey(agentId)))
   if (params.makeAdapter) {
     const injected = params.makeAdapter(agentId)
     if (!injected) return
@@ -141,7 +146,9 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     // the harness reloads the persisted transcript from the persistent home
     // (loadSessionTranscript(homeDir, resume)) instead of starting fresh each turn.
     // Empty pointer (first turn / after /reset) → a fresh session.
-    const priorSessionId = getSetting(db, nativeChatSessionSettingKey(agentId)) || null
+    const priorSessionId = resumingPriorTurn
+      ? getSetting(db, nativeChatSessionSettingKey(agentId))
+      : null
     const ctx: RuntimeRunContext = {
       model: null,
       resume: homeDir ? priorSessionId : null,
@@ -164,7 +171,14 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       // No childToolBlocklist / delegate tool: a 1:1 run is a conversation, not a
       // delegation. The native driver omits the `delegate` tool for a non-team
       // session key by construction (see nativeDriver.ts).
-      run = await adapter.start({ taskId: null, teamId: null }, { agentId, sessionKey, message })
+      // `context` rides turn ONE only (the native conversation folds it into the
+      // first message and never again), which is exactly the lifetime a reminder
+      // wants: it places the boo, then gets out of the way.
+      const recall = resumingPriorTurn ? null : await buildMemoryRecall(db, agentId)
+      run = await adapter.start(
+        { taskId: null, teamId: null },
+        { agentId, sessionKey, message, ...(recall ? { context: recall } : {}) },
+      )
     } catch {
       return
     }

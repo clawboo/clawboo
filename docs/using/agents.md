@@ -128,7 +128,11 @@ In a team chat every teammate's own conversation is reset, and the room shows on
 
 Its **character comes back in full**. The system prompt is rebuilt from the agent's own files on every single run, so personality, role and custom instructions are untouched by a reset.
 
-**Facts do not come back on their own.** Memory is a set of tools (`memory_save`, `memory_search`, `memory_browse`) the boo chooses to call, so anything it saved earlier is still there to be found, but it will not recall it unprompted. If you need it to pick up a specific thread, say so in your first message after the divider.
+**Its notes come back too.** On the first turn after a reset the boo is handed its own saved memory: up to eight of the most recent facts it recorded, capped so the reminder never crowds out the conversation. That is what keeps a reset feeling like "let's start this topic fresh" rather than talking to someone with amnesia. The block rides the first turn only, so it never repeats.
+
+Two limits worth knowing. Only the boo's **own** notes and globally-scoped ones are included; facts belonging to a team room stay in that room. And the notes are delivered as background to consult, explicitly not as instructions to follow, because their content was written by whoever talked to the boo.
+
+If nothing was ever saved, nothing is injected and the boo genuinely starts blank. Memory is filled by the `memory_save` tool, so a boo that never chose to save anything has nothing to recall.
 
 <Note>
 Deleting the agent still deletes its conversation. That is the only thing that removes messages.
