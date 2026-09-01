@@ -30,6 +30,7 @@ import { installSkillForAgent } from '@/features/graph/operations/installSkill'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
+import { ConnectorMarkStyles } from '@/features/connectors/ConnectorMark'
 import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
 import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
@@ -172,10 +173,16 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
     const particles: Particle[] = []
     const pMap = new Map<string, Particle>()
 
-    // Build parent map
+    // Build parent map.
+    //
+    // `grant` belongs here with the other two. A connector reached through a grant
+    // is drawn as a `grant` edge rather than a `resource` one (useGraphData stamps
+    // the type from `cap.grantId`), and a tile with no parent here gets no particle
+    // below, so it is the one tile that never follows its Boo. It sat where the
+    // layout first put it while everything else moved, on a stretched line.
     const parentMap = new Map<string, string>()
     for (const edge of layoutEdges) {
-      if (edge.type === 'skill' || edge.type === 'resource') {
+      if (edge.type === 'skill' || edge.type === 'resource' || edge.type === 'grant') {
         parentMap.set(edge.target, edge.source)
       }
     }
@@ -609,6 +616,12 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
       defaultEdgeOptions={{ animated: false }}
     >
       <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="var(--canvas-dot)" />
+      {/* Connector brand colours. Every mark is drawn in `currentColor` and takes
+          its hue from a `--cm-<slug>` variable this component emits, so without it
+          Gmail's M and every other logo fall back to the theme foreground and read
+          as dead. The Ghost Graph mounts it; this graph draws the same tiles and
+          has to as well. */}
+      <ConnectorMarkStyles />
     </ReactFlow>
   )
 }

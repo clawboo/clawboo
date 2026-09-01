@@ -97,15 +97,18 @@ type GlowConfig = { color: string; pulse: boolean }
 const STATUS_GLOW: Record<string, GlowConfig | null> = {
   idle: null,
   running: { color: 'rgb(var(--mint-rgb) / 0.55)', pulse: true },
-  error: { color: 'rgb(var(--amber-rgb) / 0.55)', pulse: false },
+  error: { color: 'rgb(var(--destructive-rgb) / 0.55)', pulse: false },
   sleeping: { color: 'rgb(var(--foreground-rgb) / 0.3)', pulse: false },
 }
 
+// Error and sleeping used to share amber, which made "this needs you" and "this is
+// deliberately resting" the same mark. Error takes the destructive red the rest of
+// the product already uses for failure; sleeping keeps the quiet neutral it means.
 const STATUS_DOT: Record<string, string> = {
   idle: 'var(--category-other)',
   running: 'var(--mint)',
-  error: 'var(--amber)',
-  sleeping: 'var(--amber)',
+  error: 'var(--destructive)',
+  sleeping: 'var(--category-other)',
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -200,7 +203,12 @@ export const BooNode = memo(function BooNode({
   const floatRef = useFloatingMotion(agentId, 'boo', dragging)
   // Decorative hover lift — dropped under reduced motion (see SkillNode).
   const reduceMotion = useReducedMotion()
-  const showCard = status === 'running'
+  // The card is how a Boo says what it is doing, and an error is the thing a person
+  // most needs to read. Gating it on `running` alone meant the moment a run failed
+  // the card unmounted, taking the error line inside `BooLiveActivity` with it: that
+  // branch could never be seen by anyone. An errored Boo keeps its card so the
+  // reason stays on screen.
+  const showCard = status === 'running' || status === 'error'
   // Runtime brand badge — shown on every Boo (Atlas + team graph + agent-detail
   // MiniGraph) so the agent's runtime is legible at a glance.
   const runtime = data.runtime
@@ -669,6 +677,8 @@ function CardContent({
           </div>
         </div>
         <div ref={statusRef} style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          {/* Pulse means "happening now". An errored card is stopped, so its dot is
+              steady: a throbbing error reads as work still in progress. */}
           {status === 'running' ? (
             <motion.div
               style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
@@ -700,17 +710,10 @@ function CardContent({
         <BooLiveActivity agentId={agentId} />
       </div>
 
-      {/* FOOTER — reserved real estate (per-Boo metric slot, future) */}
-      <div
-        style={{
-          padding: '6px 12px',
-          borderTop: '1px solid var(--border)',
-          fontSize: 10,
-          color: 'var(--muted-foreground)',
-          flexShrink: 0,
-          minHeight: 24,
-        }}
-      />
+      {/* No footer. It used to reserve a 24px band for a future per-Boo metric and
+          drew a divider above it, so every running card ended in a ruled-off empty
+          stripe that reads as content that failed to load. Reserving space for
+          something unbuilt costs a person's attention on every card, every run. */}
     </>
   )
 }

@@ -97,7 +97,10 @@ export const BooLiveActivity = memo(function BooLiveActivity({ agentId }: { agen
           }}
         />
       )}
-      {activity.text}
+      {/* A tool call reads as a sentence. `pickLatestActivity` hands back the bare
+          label now, so the band says "Using read_file" rather than printing the
+          internal `[[tool: …]]` markup at the person watching. */}
+      {activity.kind === 'tool' ? `Using ${activity.text}` : activity.text}
     </div>
   )
 })

@@ -42,18 +42,25 @@ function capSlug(sourceKey: string): string {
  *  ACCENT is type-coded in SkillNode: mint for skills/tools, slate for the
  *  built-ins rollup, violet for connectors, brand for the model). */
 /**
- * How many CAPABILITY tiles one Boo may orbit.
+ * The ring's comfortable size, and the Atlas ceiling.
  *
- * Eight is where the ring stops being readable: past it the discs overlap, the
- * labels collide, and what was a legible set of abilities becomes a smear. An
- * agent attached to a large MCP server can report forty, so this is a real limit
- * rather than a defensive one.
+ * This used to be a hard cap everywhere: a Boo showed eight capabilities and rolled
+ * the rest into "+N more", so an agent on a large MCP server reporting forty had
+ * thirty-two silently absent from the graph. The crowding it protected against was
+ * never the canvas, which is infinite. It was that the arc cannot open past a full
+ * circle, so extra tiles just packed tighter at a fixed radius.
+ * `computeOrbitalPositions` grows the radius with the fan now, so a focused view
+ * draws every capability.
  *
- * Counts CAPABILITIES only. Every Boo also carries a fixed "Default model" tile
- * and, when it overflows, a "+N more" tile; both sit outside this budget because
- * neither is a capability and neither scales with the inventory.
+ * ATLAS STILL NEEDS A CEILING, for a different reason: node count. Fifty agents at
+ * four hundred capabilities is twenty thousand React Flow nodes, and no radius
+ * arithmetic saves that. So the all-teams view keeps a bound (a generous one) until
+ * grouped orbitals land, and a focused view has none.
  */
-export const MAX_CAPABILITY_ORBITALS = 8
+export const COMFORTABLE_ORBITAL_COUNT = 8
+
+/** The most tiles one Boo may draw in the all-teams view. */
+export const ATLAS_ORBITAL_CEILING = 24
 
 function capCategory(cap: CapabilityRecord): SkillCategory {
   if (cap.source === 'brokered-mcp' || cap.source === 'runtime-builtin') return 'code'
@@ -750,7 +757,11 @@ export function buildGraphElements(
         uniqueKeys.add(key)
         return true
       })
-      const shown = unique.slice(0, MAX_CAPABILITY_ORBITALS)
+      // A focused view draws EVERYTHING: one Boo has all the room it needs and the
+      // ring grows to fit. Atlas keeps a ceiling because its cost is node count
+      // across every agent at once, which no amount of radius fixes.
+      const ceiling = scope === 'atlas' ? ATLAS_ORBITAL_CEILING : unique.length
+      const shown = unique.slice(0, ceiling)
       const hiddenCount = unique.length - shown.length
       for (const cap of shown) {
         const slug = capSlug(cap.sourceKey)
@@ -1305,7 +1316,16 @@ export function buildGraphElements(
   }
   for (const e of skillEdges) bump(e.source, 'skills')
   for (const e of resourceEdges) bump(e.source, 'connectors')
-  for (const e of visibleDepEdges) bump(e.source, 'routes')
+  // Routes are the ones a PERSON authored, so synthetic backbone edges do not count.
+  // The count used to come from `visibleDepEdges`, which in Atlas is only the
+  // invented Boo-Zero-to-team-root scaffold: Boo Zero read "2 routes" because two
+  // teams existed, every teammate read none, and the real AGENTS.md routes were
+  // excluded entirely because they render as secondary. A number describing an
+  // invisible layout artifact is worse than no number.
+  for (const e of depEdges) {
+    if ((e.data as { isSynthetic?: boolean } | undefined)?.isSynthetic) continue
+    bump(e.source, 'routes')
+  }
   for (const node of booNodes) {
     ;(node.data as BooNodeData).ringCounts = ringCounts.get(node.id) ?? {
       skills: 0,

@@ -1718,7 +1718,16 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
               margin: 0,
             }}
             nodeColor={(node) => {
-              if (node.type === 'boo') return 'var(--primary)'
+              // A Boo carries its STATUS here, matching `STATUS_DOT` on the node
+              // itself. Painting every Boo brand-red threw status away in the one
+              // place you look when zoomed too far out to read the nodes, which is
+              // the only reason to look at a minimap at all.
+              if (node.type === 'boo') {
+                const status = (node.data as { status?: string }).status
+                if (status === 'running') return 'var(--mint)'
+                if (status === 'error') return 'var(--destructive)'
+                return 'var(--category-other)'
+              }
               // Atlas team-root junctions are invisible — hide them in the
               // MiniMap too.
               if (node.type === 'team-root') return 'transparent'
@@ -1728,7 +1737,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
               if (node.type === 'skill') return isVisible ? 'var(--mint)' : 'transparent'
               // Violet = the MCP-connector type accent (matches ResourceNode).
               if (node.type === 'resource') return isVisible ? 'var(--violet)' : 'transparent'
-              return 'var(--amber)'
+              // Unreachable: `nodeTypes` registers exactly the four handled above.
+              return 'transparent'
             }}
             nodeComponent={GhostGraphMiniMapNode}
             maskColor="var(--canvas-mask)"
