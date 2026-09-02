@@ -11,6 +11,7 @@ import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
 import { execSettingsGET, execSettingsAllGET, execSettingsPOST } from './execSettings'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
+import { catalogAgentGET, catalogIndexGET, catalogTeamGET } from './catalog'
 import {
   systemStatusGET,
   installOpenclawPOST,
@@ -192,6 +193,13 @@ router.post('/api/exec-settings', execSettingsPOST)
 // Personality
 router.get('/api/personality', personalityGET)
 router.post('/api/personality', personalityPOST)
+
+// Marketplace catalog. The content lives in `catalog/` and is excluded from the
+// npm tarball; these serve the compiled seed merged with every pack whose bytes
+// verified. See lib/catalogIndex.ts.
+router.get('/api/catalog/index', catalogIndexGET)
+router.get('/api/catalog/agents/:id', catalogAgentGET)
+router.get('/api/catalog/teams/:id', catalogTeamGET)
 
 // Skills
 router.get('/api/skills', skillsGET)
