@@ -13,6 +13,10 @@ The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-
 
 ## Routes
 
+The 20 `/api/connectors*` and `/api/grants*` registrations are counted in this group by
+the [index](/reference/rest-api) but are not written up per route below. Use
+[Connectors](/using/connectors) for what they do until they get their own page.
+
 | Method | Path                                  | Summary                                               | Stream? |
 | ------ | ------------------------------------- | ----------------------------------------------------- | ------- |
 | GET    | `/api/cost-records`                   | List cost records (period + agent filter)             | No      |
