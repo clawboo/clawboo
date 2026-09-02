@@ -13,8 +13,8 @@
 
 import {
   SqliteMemoryStore,
+  evaluateInjection,
   resolveEmbeddingProvider,
-  scanForInjection,
   scrubSecrets,
   type ClawbooDb,
   type EmbeddingProvider,
@@ -84,7 +84,17 @@ export async function buildMemoryInjection(input: BuildMemoryInjectionInput): Pr
     for (const r of results) {
       // Recall-sanitize: a poisoned "fact" must not smuggle instructions into a
       // teammate's run — drop any candidate that trips the injection scanner.
-      if (scanForInjection(`${r.title}\n${r.content}`).length > 0) continue
+      // The text is bound for a prompt, but `strict` promotes machine-directed
+      // findings to blocking too: dropping one recalled fact costs nothing, so
+      // this stays the drop-on-any-finding gate it has always been.
+      if (
+        evaluateInjection(`${r.title}\n${r.content}`, {
+          surface: 'prompt',
+          strict: true,
+          scope: `memory:${r.id}`,
+        }).blocked
+      )
+        continue
       // Defense-in-depth scrub: facts are scrubbed on write, but a pre-existing
       // or externally-written fact must never re-surface a secret into context.
       const line = `- ${oneLine(scrubText(r.title))}: ${oneLine(scrubText(r.content))}`

@@ -28,7 +28,13 @@ import { pickLatestActivity, type PickedActivityKind } from './pickLatestActivit
 export interface BooActivity {
   /** The line to show. Never empty. */
   text: string
-  kind: PickedActivityKind
+  /**
+   * `obs` is this hook's own, not the picker's: a board run's line arrives from
+   * `runActivity` already phrased as something a person reads ("editing
+   * pricing.css"), whereas the picker's `tool` is a bare identifier
+   * ("read_file"). Only the latter wants a verb in front of it.
+   */
+  kind: PickedActivityKind | 'obs'
   /** The run failed; the caller should say so rather than keep animating. */
   isError: boolean
 }
@@ -45,10 +51,10 @@ export function useBooActivity(agentId: string): BooActivity | null {
   const obsLine = useRunActivityStore((s) => s.byAgent.get(agentId) ?? null)
 
   return useMemo(() => {
-    if (status === 'error') return { text: 'ran into an error', kind: 'tool', isError: true }
+    if (status === 'error') return { text: 'ran into an error', kind: 'obs', isError: true }
     const picked =
       pickLatestActivity(streamingText, entries) ??
-      (obsLine ? ({ kind: 'tool', text: obsLine } as const) : null)
+      (obsLine ? ({ kind: 'obs', text: obsLine } as const) : null)
     if (!picked) return null
     const text = picked.text.trim()
     if (!text) return null

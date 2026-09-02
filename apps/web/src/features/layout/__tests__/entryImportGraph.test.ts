@@ -1,5 +1,5 @@
-// Guards the SPA's eager import graph — specifically, that the ~4.4 MB marketplace
-// agent + team catalogs stay OFF the entry chunk.
+// Guards the SPA's import graph: the marketplace catalog must stay out of the
+// bundle entirely, not merely off the entry chunk.
 //
 // Why a test and not just a code review: PR #94 made `MarketplacePanel` lazy and added
 // vendor `manualChunks`, and the catalog still shipped in the entry chunk because
@@ -22,8 +22,26 @@ import { describe, expect, it } from 'vitest'
 const SRC_DIR = path.resolve(__dirname, '../../..')
 const ENTRY = path.join(SRC_DIR, 'main.tsx')
 
-/** Module data that must never be reachable from the entry via static imports. */
-const FORBIDDEN = ['features/marketplace/agents/', 'features/marketplace/teams/']
+/**
+ * The generated seed: the ONE catalog data module in the bundle.
+ *
+ * The corpus directories this used to name (`features/marketplace/agents/`,
+ * `features/marketplace/teams/`) no longer exist — the catalog is JSON packs
+ * under `catalog/`, outside `src/` and outside the npm tarball. So there is no
+ * corpus in the module graph left to police, and the rule that replaces it is
+ * the one that can still be violated: the seed is the only catalog DATA seam,
+ * `catalogClient.ts` is the only catalog FETCH seam, and the seed stays small.
+ */
+const SEED_DIR = 'features/marketplace/seed/'
+const SEED_BARREL = 'src/features/marketplace/seed/index.ts'
+const SEED_DATA = 'src/features/marketplace/seed/packs.ts'
+
+/**
+ * The seed is compiled into every install, so its bytes are paid whether or not
+ * anyone opens the marketplace. `scripts/catalog/budget.mjs` enforces the same
+ * ceiling on the built artifact; this catches it in the suite that runs first.
+ */
+const SEED_MAX_BYTES = 128 * 1024
 
 /** Non-code imports (`main.tsx` pulls `./app/globals.css`). */
 const ASSET_EXTENSIONS = [
@@ -146,11 +164,11 @@ function explain(offenders: string[], parent: Map<string, string>, what: string)
     '',
     chainTo(first, parent),
     '',
-    'These are ~4.4 MB of static data and MUST stay behind a dynamic import(), or every',
-    'dashboard load pays to parse them. Reach the create-team modal through',
-    '`@/features/teams/CreateTeamModalLazy`, or add your own React.lazy boundary.',
-    'If the import is types-only, write `import type` — it is not counted then.',
-    'See apps/web/vite.config.ts (the `marketplace-catalog` chunk) and issue #83.',
+    'The catalog is JSON packs under catalog/, fetched at runtime through',
+    '`features/marketplace/catalogClient.ts`. Only the small generated seed is',
+    'compiled in, and only the lazy marketplace surfaces may reach it.',
+    'If the import is types-only, write `import type`: it is not counted then.',
+    'See catalog/README.md and issue #83.',
   ].join('\n')
 }
 
@@ -165,11 +183,11 @@ describe('SPA eager import graph', () => {
     expect(reached.size).toBeGreaterThan(120)
   })
 
-  it('never reaches the marketplace agent or team catalogs', () => {
-    const offenders = [...reached].filter((f) => FORBIDDEN.some((d) => toPosix(f).includes(d)))
+  it('never reaches the compiled catalog seed', () => {
+    const offenders = [...reached].filter((f) => toPosix(f).includes(SEED_DIR))
     // Thrown rather than passed as an `expect` message: vitest evaluates that message
     // eagerly, and building the chain needs an offender to exist.
-    if (offenders.length > 0) throw new Error(explain(offenders, parent, 'the marketplace catalog'))
+    if (offenders.length > 0) throw new Error(explain(offenders, parent, 'the catalog seed'))
     expect(offenders).toEqual([])
   })
 
@@ -192,5 +210,122 @@ describe('SPA eager import graph', () => {
     expect(reachedRel).toContain('src/features/teams/CreateTeamModalLazy.tsx')
     // ...and stops there: the wrapper reaches the modal only through a dynamic import.
     expect(reachedRel).not.toContain('src/features/teams/CreateTeamModal.tsx')
+  })
+})
+
+// ─── The permanent rule ──────────────────────────────────────────────────────
+//
+// The reachability tests above are a FLOOR, not a ceiling: they prove the eager
+// path does not reach the seed, which stays true the moment someone moves an
+// import behind a lazy boundary.
+//
+// The rule that replaces the old corpus walk is about SEAMS. There are exactly
+// two ways app code may obtain catalog data:
+//
+//   `features/marketplace/seed`         the compiled builtin pack (offline)
+//   `features/marketplace/catalogClient` everything else, fetched at runtime
+//
+// Anything else — a second generated data module, a fixture that grew into a
+// catalog, a direct import of `seed/packs.ts` past its barrel — is how the
+// megabytes come back. This walks EVERY file under src/, statically and
+// dynamically, and names the ones that reach the seed data module directly.
+
+/** Modules allowed to import the generated seed DATA rather than its barrel. */
+const SEED_DATA_ALLOWLIST = [SEED_BARREL, 'src/features/layout/__tests__/entryImportGraph.test.ts']
+
+/** The seam modules themselves, which are expected to import the seed barrel. */
+const SEED_CONSUMERS = [
+  'src/features/marketplace/catalogClient.ts',
+  'src/features/marketplace/useCatalog.ts',
+]
+
+function* allSourceFiles(dir: string): Generator<string> {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules') continue
+      yield* allSourceFiles(full)
+    } else if (/\.tsx?$/.test(entry.name)) {
+      yield full
+    }
+  }
+}
+
+/** Dynamic `import()` specifiers, which `staticImportsOf` deliberately excludes. */
+function dynamicImportsOf(file: string): string[] {
+  const source = ts.createSourceFile(
+    file,
+    fs.readFileSync(file, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  )
+  const out: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length > 0 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      out.push(node.arguments[0].text)
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(source, visit)
+  return out
+}
+
+describe('the marketplace has exactly two data seams', () => {
+  const seedImporters: string[] = []
+  const dataImporters: string[] = []
+  for (const file of allSourceFiles(SRC_DIR)) {
+    const relPath = rel(file)
+    if (relPath === SEED_BARREL || relPath === SEED_DATA) continue
+    for (const specifier of [...staticImportsOf(file), ...dynamicImportsOf(file)]) {
+      const resolved = resolve(specifier, file)
+      if (!resolved) continue
+      const target = rel(resolved)
+      if (target === SEED_DATA && !SEED_DATA_ALLOWLIST.includes(relPath)) {
+        dataImporters.push(`${relPath} -> ${specifier}`)
+      }
+      if (target === SEED_BARREL) seedImporters.push(relPath)
+    }
+  }
+
+  it('routes every seed read through the barrel, never the generated data module', () => {
+    expect(dataImporters).toEqual([])
+  })
+
+  it('keeps the seed behind the fetch layer, which is the only other seam', () => {
+    // The seed is the OFFLINE half of the catalog. If a card, a grid or a panel
+    // starts reading it directly, the fetched half stops being authoritative and
+    // the two drift.
+    expect([...new Set(seedImporters)].sort()).toEqual(SEED_CONSUMERS)
+  })
+
+  // Positive control: the rule above passes trivially if the fetch layer was
+  // deleted and every surface went back to importing data under a name this
+  // walker does not recognise.
+  it('has a fetch layer that the browse surfaces actually use', () => {
+    const client = path.join(SRC_DIR, 'features/marketplace/catalogClient.ts')
+    expect(fs.existsSync(client), 'catalogClient.ts must exist').toBe(true)
+    const panel = fs.readFileSync(
+      path.join(SRC_DIR, 'features/marketplace/MarketplacePanel.tsx'),
+      'utf8',
+    )
+    expect(panel).toContain('useCatalogIndex')
+  })
+
+  it('keeps the compiled seed under its byte budget', () => {
+    const bytes = [SEED_BARREL, SEED_DATA].reduce(
+      (n, f) => n + fs.statSync(path.join(SRC_DIR, f.replace(/^src\//, ''))).size,
+      0,
+    )
+    expect(
+      bytes,
+      `the seed is ${Math.round(bytes / 1024)} KB. It is the builtin pack and nothing ` +
+        `else — check catalog.config.json \`seed\`.`,
+    ).toBeLessThan(SEED_MAX_BYTES)
   })
 })

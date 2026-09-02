@@ -1,0 +1,404 @@
+{
+  "agents": [
+    {
+      "body": "agents/deep-module-designer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Designs modules that hide a lot of behaviour behind a small interface, and decides where the seam belongs before any code moves.",
+      "emoji": "🧱",
+      "id": "craft-deep-module-designer",
+      "name": "Deep Module Designer",
+      "packId": "mattpocock-craft",
+      "role": "Deep Module Designer",
+      "skillIds": [
+        "deep-module-design",
+        "code-search",
+        "file-reader",
+        "plan-writing",
+        "subagent-delegation",
+        "parallel-dispatch"
+      ],
+      "slug": "deep-module-designer",
+      "tags": ["module-design", "interfaces", "seams", "testability"]
+    },
+    {
+      "body": "agents/domain-modeller.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Sharpens the words a project uses while the work is happening, keeps the glossary honest, and records the decisions people will forget.",
+      "emoji": "📖",
+      "id": "craft-domain-modeller",
+      "name": "Domain Modeller",
+      "packId": "mattpocock-craft",
+      "role": "Domain Modeller",
+      "skillIds": [
+        "domain-glossary",
+        "adr-writing",
+        "file-writer",
+        "file-reader",
+        "code-search",
+        "note-taker"
+      ],
+      "slug": "domain-modeller",
+      "tags": ["domain-model", "glossary", "adr", "ubiquitous-language"]
+    },
+    {
+      "body": "agents/decision-wayfinder.json",
+      "category": "project-management",
+      "color": "#0284C7",
+      "description": "Charts work too large for one session as a map of decision tickets, then resolves them one at a time until the route is clear.",
+      "emoji": "🧭",
+      "id": "craft-decision-wayfinder",
+      "name": "Decision Wayfinder",
+      "packId": "mattpocock-craft",
+      "role": "Decision Wayfinder",
+      "skillIds": [
+        "plan-writing",
+        "plan-execution",
+        "subagent-delegation",
+        "note-taker",
+        "interview-grilling"
+      ],
+      "slug": "decision-wayfinder",
+      "tags": ["planning", "decisions", "scoping", "backlog"]
+    },
+    {
+      "body": "agents/design-interviewer.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Interviews you round by round until every decision behind a plan is settled, recommending an answer to each question instead of only asking it.",
+      "emoji": "❓",
+      "id": "craft-design-interviewer",
+      "name": "Design Interviewer",
+      "packId": "mattpocock-craft",
+      "role": "Design Interviewer",
+      "skillIds": [
+        "interview-grilling",
+        "brainstorming",
+        "plan-writing",
+        "subagent-delegation",
+        "note-taker"
+      ],
+      "slug": "design-interviewer",
+      "tags": ["stress-test", "interview", "decisions", "planning"]
+    },
+    {
+      "body": "agents/plain-language-explainer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Re-pitches an explanation that did not land, in short controlled sentences and the project's own agreed vocabulary.",
+      "emoji": "🗣️",
+      "id": "craft-plain-language-explainer",
+      "name": "Plain Language Explainer",
+      "packId": "mattpocock-craft",
+      "role": "Plain Language Explainer",
+      "skillIds": ["summarizer", "markdown-renderer", "file-reader", "domain-glossary"],
+      "slug": "plain-language-explainer",
+      "tags": ["clarity", "plain-language", "explanation", "glossary"]
+    },
+    {
+      "body": "agents/questionnaire-author.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Turns a question you cannot answer alone into a written questionnaire aimed at the one person who holds the missing knowledge.",
+      "emoji": "📋",
+      "id": "craft-questionnaire-author",
+      "name": "Questionnaire Author",
+      "packId": "mattpocock-craft",
+      "role": "Questionnaire Author",
+      "skillIds": [
+        "questionnaire-authoring",
+        "file-writer",
+        "email-draft",
+        "note-taker",
+        "interview-grilling"
+      ],
+      "slug": "questionnaire-author",
+      "tags": ["questionnaire", "discovery", "async", "stakeholders"]
+    },
+    {
+      "body": "agents/learning-coach.json",
+      "category": "education",
+      "color": "#FBBF24",
+      "description": "Runs a workspace that teaches one topic across many sessions: a stated mission, short lessons, reference sheets and a record of what stuck.",
+      "emoji": "🎓",
+      "id": "craft-learning-coach",
+      "name": "Learning Coach",
+      "packId": "mattpocock-craft",
+      "role": "Learning Coach",
+      "skillIds": [
+        "teaching-loop",
+        "quiz-generator",
+        "web-search",
+        "file-writer",
+        "citation-formatter",
+        "note-taker"
+      ],
+      "slug": "learning-coach",
+      "tags": ["teaching", "lessons", "retention", "glossary"]
+    },
+    {
+      "body": "agents/handoff-writer.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Compacts a long working session into a handoff a fresh worker can pick up, pointing at the existing artifacts instead of copying them.",
+      "emoji": "🔁",
+      "id": "craft-handoff-writer",
+      "name": "Handoff Writer",
+      "packId": "mattpocock-craft",
+      "role": "Handoff Writer",
+      "skillIds": ["session-handoff", "summarizer", "file-writer", "note-taker"],
+      "slug": "handoff-writer",
+      "tags": ["handoff", "continuity", "context", "summary"]
+    },
+    {
+      "body": "agents/agent-instruction-writer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes and prunes the documents an automated worker reads, so the same process runs every time instead of being a coin flip.",
+      "emoji": "🧾",
+      "id": "craft-agent-instruction-writer",
+      "name": "Agent Instruction Writer",
+      "packId": "mattpocock-craft",
+      "role": "Agent Instruction Writer",
+      "skillIds": [
+        "skill-authoring",
+        "file-writer",
+        "file-reader",
+        "markdown-renderer",
+        "summarizer"
+      ],
+      "slug": "agent-instruction-writer",
+      "tags": ["agent-docs", "instructions", "pruning", "context"]
+    },
+    {
+      "body": "agents/fragment-miner.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Interviews you for raw material and files every usable fragment, refusing to impose a structure before the pile is worth shaping.",
+      "emoji": "⛏️",
+      "id": "craft-fragment-miner",
+      "name": "Fragment Miner",
+      "packId": "mattpocock-craft",
+      "role": "Fragment Miner",
+      "skillIds": ["interview-grilling", "brainstorming", "file-writer", "note-taker"],
+      "slug": "fragment-miner",
+      "tags": ["writing", "ideation", "fragments", "notes"]
+    },
+    {
+      "body": "agents/article-shaper.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Turns a pile of raw material into an article one block at a time, grounding every idea before a later block leans on it.",
+      "emoji": "✍️",
+      "id": "craft-article-shaper",
+      "name": "Article Shaper",
+      "packId": "mattpocock-craft",
+      "role": "Article Shaper",
+      "skillIds": ["file-reader", "file-writer", "markdown-renderer", "summarizer"],
+      "slug": "article-shaper",
+      "tags": ["writing", "editing", "structure", "drafting"]
+    },
+    {
+      "body": "agents/beat-sequencer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Builds a piece one beat at a time, offering two or three reachable next moves at each step and writing only the one you pick.",
+      "emoji": "🎬",
+      "id": "craft-beat-sequencer",
+      "name": "Beat Sequencer",
+      "packId": "mattpocock-craft",
+      "role": "Beat Sequencer",
+      "skillIds": ["file-reader", "file-writer", "markdown-renderer", "brainstorming"],
+      "slug": "beat-sequencer",
+      "tags": ["writing", "narrative", "beats", "structure"]
+    }
+  ],
+  "counts": {
+    "agents": 12,
+    "skills": 7,
+    "teams": 3
+  },
+  "description": "Twelve agents and three teams for the craft around building software rather than the building itself: deep module design, domain vocabulary and written decisions, mapping work too large for one session, and the thinking-partner and writing slice that small teams lean on hardest. Adapted from the MIT-licensed repository mattpocock/skills: every body was rewritten from scratch into the Clawboo document set, the units that duplicate agents already in the catalog were dropped, and the teams, routing, skills, categories and colours are Clawboo's.",
+  "id": "mattpocock-craft",
+  "idPrefix": "craft",
+  "name": "Engineering Craft",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Matt Pocock"],
+    "color": "#84CC16",
+    "importedAt": "2026-08-27T00:00:00.000Z",
+    "label": "Engineering Craft",
+    "license": "MIT",
+    "ref": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+    "repo": "https://github.com/mattpocock/skills",
+    "sourceId": "mattpocock-craft"
+  },
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "category": "file",
+      "description": "Records a hard-to-reverse decision as one short numbered document: the context, the choice made, and the reason a future reader will look for.",
+      "id": "adr-writing",
+      "name": "ADR Writing",
+      "tags": ["adr", "decision", "record"]
+    },
+    {
+      "category": "file",
+      "description": "Keeps one agreed word per idea in a project glossary, names the words it rules out, and holds no implementation detail at all.",
+      "id": "domain-glossary",
+      "name": "Domain Glossary",
+      "tags": ["glossary", "ubiquitous-language", "context"]
+    },
+    {
+      "category": "comm",
+      "description": "Puts a whole round of numbered questions to a person, each carrying a recommended answer, then waits before opening the next round.",
+      "id": "interview-grilling",
+      "name": "Interview Grilling",
+      "tags": ["stress-test", "questions", "plan"]
+    },
+    {
+      "category": "comm",
+      "description": "Writes a discovery questionnaire aimed at the gap between what a recipient knows and what the sender needs, ordered most important first.",
+      "id": "questionnaire-authoring",
+      "name": "Questionnaire Authoring",
+      "tags": ["questionnaire", "delegation", "decision"]
+    },
+    {
+      "category": "comm",
+      "description": "Runs a stateful teaching workspace: a stated mission, short sourced lessons, reference sheets, and a numbered record of what has landed.",
+      "id": "teaching-loop",
+      "name": "Teaching Loop",
+      "tags": ["teach", "glossary", "learning-record"]
+    },
+    {
+      "category": "other",
+      "description": "Compacts a working session into a handoff that points at the artifacts already holding the detail, with sensitive values removed.",
+      "id": "session-handoff",
+      "name": "Session Handoff",
+      "tags": ["handoff", "compaction", "continuity"]
+    },
+    {
+      "category": "code",
+      "description": "Designs a module interface more than once, compares the alternatives on depth, locality and seam placement, then recommends one.",
+      "id": "deep-module-design",
+      "name": "Deep Module Design",
+      "tags": ["module", "interface", "design-it-twice"]
+    }
+  ],
+  "teams": [
+    {
+      "body": "teams/codebase-design-studio.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Settles the vocabulary, stress-tests the open decisions, and designs the module interfaces before any of it is committed to code.",
+      "emoji": "🏛️",
+      "id": "craft-codebase-design-studio",
+      "members": [
+        {
+          "agentId": "craft-decision-wayfinder",
+          "name": "Decision Wayfinder",
+          "role": "Decision Wayfinder"
+        },
+        {
+          "agentId": "craft-design-interviewer",
+          "name": "Design Interviewer",
+          "role": "Design Interviewer"
+        },
+        {
+          "agentId": "craft-domain-modeller",
+          "name": "Domain Modeller",
+          "role": "Domain Modeller"
+        },
+        {
+          "agentId": "craft-deep-module-designer",
+          "name": "Deep Module Designer",
+          "role": "Deep Module Designer"
+        }
+      ],
+      "name": "Codebase Design Studio",
+      "packId": "mattpocock-craft",
+      "slug": "codebase-design-studio",
+      "tags": ["design", "architecture", "decisions", "vocabulary"]
+    },
+    {
+      "body": "teams/writing-room.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Takes a piece from an empty page to a finished draft: mine the fragments, choose a shape, then make every sentence land.",
+      "emoji": "📝",
+      "id": "craft-writing-room",
+      "members": [
+        {
+          "agentId": "craft-fragment-miner",
+          "name": "Fragment Miner",
+          "role": "Fragment Miner"
+        },
+        {
+          "agentId": "craft-article-shaper",
+          "name": "Article Shaper",
+          "role": "Article Shaper"
+        },
+        {
+          "agentId": "craft-beat-sequencer",
+          "name": "Beat Sequencer",
+          "role": "Beat Sequencer"
+        },
+        {
+          "agentId": "craft-plain-language-explainer",
+          "name": "Plain Language Explainer",
+          "role": "Plain Language Explainer"
+        },
+        {
+          "agentId": "craft-agent-instruction-writer",
+          "name": "Agent Instruction Writer",
+          "role": "Agent Instruction Writer"
+        }
+      ],
+      "name": "Writing Room",
+      "packId": "mattpocock-craft",
+      "slug": "writing-room",
+      "tags": ["writing", "drafting", "editing", "clarity"]
+    },
+    {
+      "body": "teams/decision-desk.json",
+      "category": "project-management",
+      "color": "#0284C7",
+      "description": "Works a decision nobody can make in one sitting: map it, grill it, ask the person who knows, and hand the remainder on cleanly.",
+      "emoji": "🗂️",
+      "id": "craft-decision-desk",
+      "members": [
+        {
+          "agentId": "craft-decision-wayfinder",
+          "name": "Decision Wayfinder",
+          "role": "Decision Wayfinder"
+        },
+        {
+          "agentId": "craft-design-interviewer",
+          "name": "Design Interviewer",
+          "role": "Design Interviewer"
+        },
+        {
+          "agentId": "craft-questionnaire-author",
+          "name": "Questionnaire Author",
+          "role": "Questionnaire Author"
+        },
+        {
+          "agentId": "craft-learning-coach",
+          "name": "Learning Coach",
+          "role": "Learning Coach"
+        },
+        {
+          "agentId": "craft-handoff-writer",
+          "name": "Handoff Writer",
+          "role": "Handoff Writer"
+        }
+      ],
+      "name": "Decision Desk",
+      "packId": "mattpocock-craft",
+      "slug": "decision-desk",
+      "tags": ["decisions", "planning", "research", "handoff"]
+    }
+  ],
+  "version": "1.0.0"
+}

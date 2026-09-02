@@ -18,6 +18,7 @@ import {
   type TaskDetail,
   type WorkspaceDetail,
 } from '@/lib/boardClient'
+import { useFleetStore } from '@/stores/fleet'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { IconButton } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
@@ -168,14 +169,26 @@ export function TaskDetailDrawer({
   const comments = (detail?.comments ?? []) as {
     body?: string
     authorType?: string
+    authorAgentId?: string | null
     createdAt?: number
   }[]
   // The delegated agent's deliverable is its report-up comment(s) — surface them as
-  // a prominent, readable "Output" section so clicking the task shows what the agent
+  // a prominent, readable section so clicking the task shows what the agent
   // produced, formatting preserved. The Comments section below keeps the full log.
+  //
+  // This is also the ONLY place a board reply lands: a boo's task work stays on the
+  // task rather than arriving unprompted in the person's 1:1 chat (see the native
+  // driver). Naming the boo is what makes that read as a teammate reporting back
+  // instead of an anonymous block of output.
   const agentOutputs = comments.filter(
     (c) => c.authorType === 'agent' && typeof c.body === 'string' && c.body.trim().length > 0,
   )
+  const assigneeId = (task?.['assigneeAgentId'] as string | null | undefined) ?? null
+  const reporterId = agentOutputs.find((c) => c.authorAgentId)?.authorAgentId ?? assigneeId
+  const reporterName = useFleetStore(
+    (st) => st.agents.find((a) => a.id === reporterId)?.name ?? null,
+  )
+  const outputTitle = reporterName ? `${reporterName}'s report` : 'Report'
 
   return (
     <Modal
@@ -240,7 +253,7 @@ export function TaskDetailDrawer({
         ) : (
           <>
             {agentOutputs.length > 0 && (
-              <Section icon={<FileText size={13} />} title="Output">
+              <Section icon={<FileText size={13} />} title={outputTitle}>
                 <div className="flex flex-col gap-2">
                   {agentOutputs.map((c, i) => (
                     <div

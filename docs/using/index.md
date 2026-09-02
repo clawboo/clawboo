@@ -20,7 +20,7 @@ These live in the left two columns and follow the currently selected team. The t
 These are the bottom nav buttons in `AgentListColumn`. Each switches the main content area to a full-screen panel; all are always available (no feature gates).
 
 - **[Board](/using/board)**: The durable kanban board, fused with chat. Columns by task status; cards carry runtime, verification, and cost badges.
-- **[Marketplace](/using/marketplace)**: Browse and deploy the 304 first-class agents and 82 workflow teams across a Skills / Agents / Teams tab strip.
+- **[Marketplace](/using/marketplace)**: Browse and deploy the 436 first-class agents and 85 workflow teams across a Skills / Agents / Teams tab strip.
 - **[Cost & budgets](/using/cost-and-budgets)**: The **Tokens Used** dashboard: per-agent and per-team token usage and trends, plus USD budgets via the Governance surface.
 - **[Scheduler](/using/scheduler)**: The Routines tab for recurring team-task and runtime-own-life schedules.
 - **[Memory](/using/memory-browser)**: Search, save, and browse the shared Memory-MCP tier (facts and procedures).

@@ -1,0 +1,9 @@
+{
+  "id": "home-personal-crm",
+  "routing": {
+    "home-crm-context-recaller": "# AGENTS\n\nWhen the recall shows a promise that was never kept:\n  @Relationship Keeper, please record this as outstanding against the person.\nWhen there is no usable context for a suggested reconnect:\n  @Reconnect Prompter, please pick a different person this week.",
+    "home-crm-reconnect-prompter": "# AGENTS\n\nWhen a suggestion needs recent history behind it:\n  @Context Recaller, please pull the last exchanges before I suggest an opening.\nWhen someone should move to a slower cadence:\n  @Relationship Keeper, please update the cadence so I stop surfacing them.",
+    "home-crm-relationship-keeper": "# AGENTS\n\nWhen people are overdue against their cadence:\n  @Reconnect Prompter, please pick the handful worth reaching out to and say why.\nWhen a name comes back with no recent context:\n  @Context Recaller, please pull the last few exchanges so the reader is not starting cold."
+  },
+  "workflowNarrative": "The Relationship Keeper is the entry point and owns the record: one entry per person, short factual notes, and a contact cadence chosen deliberately for each relationship rather than applied uniformly.\n\nThe Reconnect Prompter takes the overdue set and reduces it to two or three people worth reaching out to this week, each with a genuine reason. A prompt without a reason is a chore, and chores do not get done.\n\nThe Context Recaller is called only for the names that come back, pulling the last few exchanges so a message does not start from nothing. The team suggests and remembers; it never writes to anyone, and it keeps nothing in the record that would be uncomfortable to read aloud."
+}

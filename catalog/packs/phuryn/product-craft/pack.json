@@ -1,0 +1,329 @@
+{
+  "agents": [
+    {
+      "body": "agents/interview-guide.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Writes discovery interview guides that ask about past behaviour instead of future intentions, so the answers come back as evidence.",
+      "emoji": "🎤",
+      "id": "pmcraft-interview-guide",
+      "name": "Discovery Interview Guide Writer",
+      "packId": "phuryn-product-craft",
+      "role": "Discovery Interview Guide Writer",
+      "skillIds": ["file-reader", "file-writer", "note-taker", "markdown-renderer", "summarizer"],
+      "slug": "interview-guide",
+      "tags": ["discovery", "interviews", "research-design", "jobs-to-be-done"]
+    },
+    {
+      "body": "agents/interview-synthesis.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Turns raw interview notes into a structured record of needs, pains and workarounds, with a verbatim quote standing behind every claim.",
+      "emoji": "🧾",
+      "id": "pmcraft-interview-synthesis",
+      "name": "Interview Synthesist",
+      "packId": "phuryn-product-craft",
+      "role": "Interview Synthesist",
+      "skillIds": ["file-reader", "summarizer", "note-taker", "file-writer", "markdown-renderer"],
+      "slug": "interview-synthesis",
+      "tags": ["synthesis", "interviews", "research", "evidence"]
+    },
+    {
+      "body": "agents/opportunity-mapper.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Builds the tree that connects one measurable outcome to customer opportunities, candidate solutions, and the experiments that would settle them.",
+      "emoji": "🌳",
+      "id": "pmcraft-opportunity-mapper",
+      "name": "Opportunity Mapper",
+      "packId": "phuryn-product-craft",
+      "role": "Opportunity Mapper",
+      "skillIds": [
+        "brainstorming",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "summarizer"
+      ],
+      "slug": "opportunity-mapper",
+      "tags": ["discovery", "opportunity-mapping", "outcomes", "structuring"]
+    },
+    {
+      "body": "agents/assumption-tester.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Surfaces the beliefs a plan depends on, ranks them by how much damage a wrong one causes, and designs the cheapest test that could disprove one.",
+      "emoji": "🧪",
+      "id": "pmcraft-assumption-tester",
+      "name": "Assumption Tester",
+      "packId": "phuryn-product-craft",
+      "role": "Assumption Tester",
+      "skillIds": [
+        "brainstorming",
+        "file-reader",
+        "file-writer",
+        "plan-writing",
+        "markdown-renderer"
+      ],
+      "slug": "assumption-tester",
+      "tags": ["assumptions", "risk", "experiments", "validation"]
+    },
+    {
+      "body": "agents/prd-author.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Writes a requirements document a designer and an engineer can both act on, and refuses to write one before the problem is actually settled.",
+      "emoji": "📄",
+      "id": "pmcraft-prd-author",
+      "name": "PRD Author",
+      "packId": "phuryn-product-craft",
+      "role": "Requirements Document Author",
+      "skillIds": ["file-reader", "file-writer", "markdown-renderer", "summarizer", "plan-writing"],
+      "slug": "prd-author",
+      "tags": ["prd", "requirements", "specification", "writing"]
+    },
+    {
+      "body": "agents/story-writer.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Breaks a requirement into slices that each deliver value alone, with acceptance criteria specific enough to argue about before the build starts.",
+      "emoji": "🗂️",
+      "id": "pmcraft-story-writer",
+      "name": "Story Writer",
+      "packId": "phuryn-product-craft",
+      "role": "User Story Writer",
+      "skillIds": ["file-reader", "file-writer", "markdown-renderer", "note-taker", "summarizer"],
+      "slug": "story-writer",
+      "tags": ["user-stories", "acceptance-criteria", "backlog", "slicing"]
+    },
+    {
+      "body": "agents/prioritisation-facilitator.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Runs a scoring pass with a named framework, exposes the guesses inside every number, and makes the team say out loud what is not being built.",
+      "emoji": "⚖️",
+      "id": "pmcraft-prioritisation-facilitator",
+      "name": "Prioritisation Facilitator",
+      "packId": "phuryn-product-craft",
+      "role": "Prioritisation Facilitator",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "file-reader",
+        "file-writer",
+        "summarizer"
+      ],
+      "slug": "prioritisation-facilitator",
+      "tags": ["prioritisation", "trade-offs", "scoring", "backlog"]
+    },
+    {
+      "body": "agents/pre-mortem.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Runs the session where the launch has already failed, separates the real risks from the loud ones, and turns each into an owned mitigation.",
+      "emoji": "🧯",
+      "id": "pmcraft-pre-mortem",
+      "name": "Pre-Mortem Facilitator",
+      "packId": "phuryn-product-craft",
+      "role": "Pre-Mortem Facilitator",
+      "skillIds": ["brainstorming", "file-reader", "note-taker", "file-writer", "plan-writing"],
+      "slug": "pre-mortem",
+      "tags": ["risk", "pre-mortem", "launch", "facilitation"]
+    },
+    {
+      "body": "agents/metric-architect.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Defines the one metric a team steers by, the inputs that move it and the guardrails that stop it being gamed, then writes the instrumentation spec.",
+      "emoji": "🎯",
+      "id": "pmcraft-metric-architect",
+      "name": "Metric Architect",
+      "packId": "phuryn-product-craft",
+      "role": "Product Metric Architect",
+      "skillIds": [
+        "data-visualizer",
+        "csv-analyzer",
+        "file-writer",
+        "markdown-renderer",
+        "summarizer"
+      ],
+      "slug": "metric-architect",
+      "tags": ["metrics", "measurement", "instrumentation", "analytics"]
+    },
+    {
+      "body": "agents/experiment-readout.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Reads a finished test, states what the numbers can and cannot support, and returns a ship, kill or rerun call with the reasoning attached.",
+      "emoji": "📉",
+      "id": "pmcraft-experiment-readout",
+      "name": "Experiment Readout Analyst",
+      "packId": "phuryn-product-craft",
+      "role": "Experiment Readout Analyst",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "data-visualizer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "experiment-readout",
+      "tags": ["experiments", "statistics", "analysis", "decision"]
+    },
+    {
+      "body": "agents/okr-coach.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Turns a vague quarterly ambition into objectives and key results that measure outcomes, then checks them against the failure modes teams repeat.",
+      "emoji": "🧭",
+      "id": "pmcraft-okr-coach",
+      "name": "OKR Coach",
+      "packId": "phuryn-product-craft",
+      "role": "Objectives and Key Results Coach",
+      "skillIds": ["brainstorming", "file-writer", "markdown-renderer", "summarizer", "note-taker"],
+      "slug": "okr-coach",
+      "tags": ["okrs", "goals", "planning", "outcomes"]
+    },
+    {
+      "body": "agents/stakeholder-navigator.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Maps who can block a launch and who only needs telling, then writes the update each of them will actually read, at the cadence they need it.",
+      "emoji": "🤝",
+      "id": "pmcraft-stakeholder-navigator",
+      "name": "Stakeholder Navigator",
+      "packId": "phuryn-product-craft",
+      "role": "Stakeholder Communications Lead",
+      "skillIds": ["email-draft", "note-taker", "file-writer", "summarizer", "calendar-manager"],
+      "slug": "stakeholder-navigator",
+      "tags": ["stakeholders", "communication", "alignment", "launch"]
+    }
+  ],
+  "counts": {
+    "agents": 12,
+    "skills": 0,
+    "teams": 3
+  },
+  "description": "Twelve product-management specialists and three teams covering the craft a product team actually runs on: discovery interviews and their synthesis, opportunity mapping, assumption testing, requirements and story writing, prioritisation, pre-mortems, metric definition, goal setting, experiment readouts and stakeholder communication. Adapted from an MIT-licensed upstream collection of short skill documents, which were rewritten into full Clawboo agent documents with the author's paid-newsletter and course links removed.",
+  "id": "phuryn-product-craft",
+  "idPrefix": "pmcraft",
+  "name": "Product Craft",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Pawel Huryn"],
+    "color": "#7C3AED",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Product Craft",
+    "license": "MIT",
+    "ref": "18468a95b427e70e258b51389796367c6f684e7d",
+    "repo": "https://github.com/phuryn/pm-skills",
+    "sourceId": "phuryn-product-craft"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/continuous-discovery.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Runs the loop from interview to opportunity to experiment, so a team keeps learning instead of doing one round of research before a big build.",
+      "emoji": "🔍",
+      "id": "pmcraft-continuous-discovery",
+      "members": [
+        {
+          "agentId": "pmcraft-opportunity-mapper",
+          "name": "Opportunity Mapper",
+          "role": "Opportunity Mapper"
+        },
+        {
+          "agentId": "pmcraft-interview-guide",
+          "name": "Discovery Interview Guide Writer",
+          "role": "Discovery Interview Guide Writer"
+        },
+        {
+          "agentId": "pmcraft-interview-synthesis",
+          "name": "Interview Synthesist",
+          "role": "Interview Synthesist"
+        },
+        {
+          "agentId": "pmcraft-assumption-tester",
+          "name": "Assumption Tester",
+          "role": "Assumption Tester"
+        }
+      ],
+      "name": "Continuous Discovery",
+      "packId": "phuryn-product-craft",
+      "slug": "continuous-discovery",
+      "tags": ["discovery", "research", "opportunities", "experiments"]
+    },
+    {
+      "body": "teams/requirements-desk.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Takes a settled problem and produces what a build runs on: a requirements document, sliced stories, a defensible order, and an owned risk register.",
+      "emoji": "📐",
+      "id": "pmcraft-requirements-desk",
+      "members": [
+        {
+          "agentId": "pmcraft-prd-author",
+          "name": "PRD Author",
+          "role": "Requirements Document Author"
+        },
+        {
+          "agentId": "pmcraft-story-writer",
+          "name": "Story Writer",
+          "role": "User Story Writer"
+        },
+        {
+          "agentId": "pmcraft-prioritisation-facilitator",
+          "name": "Prioritisation Facilitator",
+          "role": "Prioritisation Facilitator"
+        },
+        {
+          "agentId": "pmcraft-pre-mortem",
+          "name": "Pre-Mortem Facilitator",
+          "role": "Pre-Mortem Facilitator"
+        }
+      ],
+      "name": "Requirements Desk",
+      "packId": "phuryn-product-craft",
+      "slug": "requirements-desk",
+      "tags": ["requirements", "backlog", "prioritisation", "risk"]
+    },
+    {
+      "body": "teams/outcomes-and-alignment.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Defines what a team is trying to move, sets goals against it, reads the evidence honestly, and keeps the people around the team correctly informed.",
+      "emoji": "📊",
+      "id": "pmcraft-outcomes-and-alignment",
+      "members": [
+        {
+          "agentId": "pmcraft-metric-architect",
+          "name": "Metric Architect",
+          "role": "Product Metric Architect"
+        },
+        {
+          "agentId": "pmcraft-okr-coach",
+          "name": "OKR Coach",
+          "role": "Objectives and Key Results Coach"
+        },
+        {
+          "agentId": "pmcraft-experiment-readout",
+          "name": "Experiment Readout Analyst",
+          "role": "Experiment Readout Analyst"
+        },
+        {
+          "agentId": "pmcraft-stakeholder-navigator",
+          "name": "Stakeholder Navigator",
+          "role": "Stakeholder Communications Lead"
+        }
+      ],
+      "name": "Outcomes and Alignment",
+      "packId": "phuryn-product-craft",
+      "slug": "outcomes-and-alignment",
+      "tags": ["metrics", "okrs", "experiments", "stakeholders"]
+    }
+  ],
+  "version": "1.0.0"
+}

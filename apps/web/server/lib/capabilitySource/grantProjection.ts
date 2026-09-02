@@ -66,15 +66,33 @@ export function projectGrants(db: ClawbooDb, records: CapabilityRecord[]): Capab
   if (connectors.length === 0) return records
 
   // 1. Owner grants: one per (agent, connector) the runtime already attaches.
+  //
+  // AGENT-SCOPED ONLY. An owner grant records a fact the runtime already made
+  // true: this agent's own config attaches this connector, so a grant merely
+  // describes it. A record with no agentId is not that fact. It used to mint a
+  // GLOBAL grant instead, and a global grant is handed to every caller
+  // regardless of which agent asked (grants/repository.ts:105), so connecting
+  // one connector silently authorised the entire fleet with mode `admin` and
+  // `toolAllow: ['*']`. Who may reach a connector is the operator's decision,
+  // expressed by drawing an edge, and nothing here may make it for them.
   for (const record of connectors) {
+    if (!record.agentId) continue
     const connectorId = connectorIdForRecord(record)
     if (!connectorId) continue
+    // PINNED AT BIRTH. The pins are what arm drift detection: `decideGrant`
+    // compares the connector row's live hashes against them and skips the
+    // comparison entirely when a pin is null. The supervisor used to set them
+    // while minting the global grant, so moving the mint here without the pins
+    // would leave every grant unarmed and quietly retire a security feature.
+    const row = getConnector(db, connectorId)
     ensureOwnerGrant(db, {
-      subjectKind: record.agentId ? 'agent' : 'global',
+      subjectKind: 'agent',
       subjectId: record.agentId,
       capabilityKind: 'connector',
       connectorId,
       capabilityId: null,
+      ...(row?.specHash ? { specHashPin: row.specHash } : {}),
+      ...(row?.toolsHash ? { toolsHashPin: row.toolsHash } : {}),
     })
   }
 

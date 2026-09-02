@@ -89,7 +89,10 @@ export interface ToolDescriptor {
    * a second vocabulary. Populated by `buildConnectorDescriptor` from a
    * connector's `tools/list`, but ONLY for a CURATED catalog entry: the MCP spec
    * calls annotations untrusted hints, so the trust has to come from the catalog
-   * vouching for the package rather than from the server's own say-so.
+   * vouching for the package rather than from the server's own say-so. It is
+   * also set BY NAME for a broker's own read-only meta-tools
+   * (`isBrokeredReadOnlyMetaTool`), which are clawboo's rather than a vendor's,
+   * so `readOnly: true` does not by itself mean an annotation was vouched for.
    *
    * CONSEQUENCE WORTH KNOWING: `requiredMode` treats anything not declaring
    * `readOnly: true` as a write, so a `mode: 'read'` grant denies every

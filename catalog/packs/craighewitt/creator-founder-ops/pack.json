@@ -1,0 +1,410 @@
+{
+  "agents": [
+    {
+      "body": "agents/channel-strategist.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Decides what a video channel is for, audits whether the last dozen uploads agree with that, and turns the answer into a dated calendar.",
+      "emoji": "📺",
+      "id": "creatorops-channel-strategist",
+      "name": "Channel Strategist",
+      "packId": "craighewitt-creator-ops",
+      "role": "Channel Strategist",
+      "skillIds": [
+        "web-search",
+        "trend-analyzer",
+        "spreadsheet-reader",
+        "summarizer",
+        "plan-writing"
+      ],
+      "slug": "channel-strategist",
+      "tags": ["youtube", "channel-strategy", "positioning", "content-calendar"]
+    },
+    {
+      "body": "agents/script-architect.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Turns an idea into a structured long-form script: the opening, the beats that keep viewers through the middle, and the close that earns the next video.",
+      "emoji": "🎬",
+      "id": "creatorops-script-architect",
+      "name": "Video Script Architect",
+      "packId": "craighewitt-creator-ops",
+      "role": "Video Script Architect",
+      "skillIds": [
+        "file-writer",
+        "file-reader",
+        "markdown-renderer",
+        "brainstorming",
+        "summarizer"
+      ],
+      "slug": "script-architect",
+      "tags": ["scripting", "retention", "video-structure", "hooks"]
+    },
+    {
+      "body": "agents/video-packager.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Writes the title, briefs the cover image and builds the description and chapters, treating all three as one packaging decision rather than three chores.",
+      "emoji": "🏷️",
+      "id": "creatorops-video-packager",
+      "name": "Video Packager",
+      "packId": "craighewitt-creator-ops",
+      "role": "Video Packager",
+      "skillIds": [
+        "brainstorming",
+        "file-writer",
+        "markdown-renderer",
+        "web-search",
+        "image-resizer"
+      ],
+      "slug": "video-packager",
+      "tags": ["titles", "thumbnails", "metadata", "click-through"]
+    },
+    {
+      "body": "agents/account-intel.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Researches target accounts and the people inside them, maps the buying committee, and returns a brief a seller can read in a minute.",
+      "emoji": "🔍",
+      "id": "creatorops-account-intel",
+      "name": "Account Intelligence Analyst",
+      "packId": "craighewitt-creator-ops",
+      "role": "Account Intelligence Analyst",
+      "skillIds": ["web-search", "web-scraper", "note-taker", "summarizer", "file-writer"],
+      "slug": "account-intel",
+      "tags": ["account-research", "icp", "buying-committee", "trigger-events"]
+    },
+    {
+      "body": "agents/outbound-writer.json",
+      "category": "sales",
+      "color": "#10B981",
+      "description": "Writes cold outreach that sounds like a person: short emails, call openers, social notes and referral asks, sequenced across channels with one idea each.",
+      "emoji": "✉️",
+      "id": "creatorops-outbound-writer",
+      "name": "Outbound Sequence Writer",
+      "packId": "craighewitt-creator-ops",
+      "role": "Outbound Sequence Writer",
+      "skillIds": [
+        "email-draft",
+        "file-writer",
+        "markdown-renderer",
+        "brainstorming",
+        "note-taker"
+      ],
+      "slug": "outbound-writer",
+      "tags": ["cold-outreach", "sequences", "copywriting", "prospecting"]
+    },
+    {
+      "body": "agents/discovery-lead.json",
+      "category": "sales",
+      "color": "#10B981",
+      "description": "Plans discovery calls and demos, prepares answers to the objections that will actually come up, and debriefs the call into notes the deal can be run from.",
+      "emoji": "🎧",
+      "id": "creatorops-discovery-lead",
+      "name": "Discovery and Demo Lead",
+      "packId": "craighewitt-creator-ops",
+      "role": "Discovery and Demo Lead",
+      "skillIds": ["meeting-notes", "note-taker", "file-writer", "summarizer", "plan-writing"],
+      "slug": "discovery-lead",
+      "tags": ["discovery", "demo", "qualification", "objection-handling"]
+    },
+    {
+      "body": "agents/deal-desk.json",
+      "category": "sales",
+      "color": "#10B981",
+      "description": "Prepares the negotiation before it starts, prices and writes the proposal, and makes sure every concession is traded rather than given away.",
+      "emoji": "🤝",
+      "id": "creatorops-deal-desk",
+      "name": "Negotiation and Pricing Desk",
+      "packId": "craighewitt-creator-ops",
+      "role": "Negotiation and Pricing Desk",
+      "skillIds": [
+        "spreadsheet-reader",
+        "file-writer",
+        "markdown-renderer",
+        "summarizer",
+        "plan-writing"
+      ],
+      "slug": "deal-desk",
+      "tags": ["negotiation", "pricing", "proposals", "deal-desk"]
+    },
+    {
+      "body": "agents/pipeline-analyst.json",
+      "category": "sales",
+      "color": "#10B981",
+      "description": "Builds a forecast from historical conversion rather than optimism, runs the pipeline review, and reads wins and losses for what actually decided them.",
+      "emoji": "📊",
+      "id": "creatorops-pipeline-analyst",
+      "name": "Pipeline and Forecast Analyst",
+      "packId": "craighewitt-creator-ops",
+      "role": "Pipeline and Forecast Analyst",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "data-visualizer",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "pipeline-analyst",
+      "tags": ["forecasting", "pipeline-review", "win-loss", "revenue-ops"]
+    },
+    {
+      "body": "agents/management-coach.json",
+      "category": "ops",
+      "color": "#F59E0B",
+      "description": "Helps a founder hand work off properly, hire for the gap they actually have, and run the one-to-ones and hard conversations they keep postponing.",
+      "emoji": "🧭",
+      "id": "creatorops-management-coach",
+      "name": "Founder Management Coach",
+      "packId": "craighewitt-creator-ops",
+      "role": "Founder Management Coach",
+      "skillIds": ["note-taker", "file-writer", "markdown-renderer", "plan-writing", "summarizer"],
+      "slug": "management-coach",
+      "tags": ["delegation", "hiring", "one-to-ones", "management"]
+    },
+    {
+      "body": "agents/operating-cadence.json",
+      "category": "ops",
+      "color": "#F59E0B",
+      "description": "Runs the weekly and quarterly reviews and the monthly look at the numbers, so a founder always knows where the business stands without a panic.",
+      "emoji": "🗓️",
+      "id": "creatorops-operating-cadence",
+      "name": "Operating Cadence Lead",
+      "packId": "craighewitt-creator-ops",
+      "role": "Operating Cadence Lead",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "data-visualizer",
+        "plan-writing",
+        "file-writer"
+      ],
+      "slug": "operating-cadence",
+      "tags": ["weekly-review", "quarterly-planning", "metrics", "operating-rhythm"]
+    },
+    {
+      "body": "agents/strategy-sparring.json",
+      "category": "ops",
+      "color": "#F59E0B",
+      "description": "Argues with a founder about a hard decision, surfaces the assumption holding it up, and records what was decided and why so it can be checked later.",
+      "emoji": "🥊",
+      "id": "creatorops-strategy-sparring",
+      "name": "Strategy Sparring Partner",
+      "packId": "craighewitt-creator-ops",
+      "role": "Strategy Sparring Partner",
+      "skillIds": ["brainstorming", "note-taker", "file-writer", "summarizer", "plan-writing"],
+      "slug": "strategy-sparring",
+      "tags": ["decision-making", "strategy", "assumptions", "decision-log"]
+    },
+    {
+      "body": "agents/chief-of-staff.json",
+      "category": "ops",
+      "color": "#F59E0B",
+      "description": "Runs the daily desk: the morning brief, the meeting prep, the inbox triage and the relationships that quietly go cold without a reminder.",
+      "emoji": "🗂️",
+      "id": "creatorops-chief-of-staff",
+      "name": "Founder Chief of Staff",
+      "packId": "craighewitt-creator-ops",
+      "role": "Founder Chief of Staff",
+      "skillIds": ["calendar-manager", "email-draft", "note-taker", "meeting-notes", "summarizer"],
+      "slug": "chief-of-staff",
+      "tags": ["executive-support", "meeting-prep", "inbox", "relationships"]
+    },
+    {
+      "body": "agents/back-office-clerk.json",
+      "category": "ops",
+      "color": "#0EA5E9",
+      "description": "Produces invoices and expense reports from short instructions and reads a contract back in plain language with the risky clauses marked.",
+      "emoji": "🧾",
+      "id": "creatorops-back-office-clerk",
+      "name": "Back-Office Clerk",
+      "packId": "craighewitt-creator-ops",
+      "role": "Back-Office Clerk",
+      "skillIds": [
+        "file-reader",
+        "pdf-reader",
+        "spreadsheet-reader",
+        "file-writer",
+        "markdown-renderer"
+      ],
+      "slug": "back-office-clerk",
+      "tags": ["invoicing", "expenses", "contract-review", "admin"]
+    },
+    {
+      "body": "agents/deck-builder.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Turns notes and numbers into presentable output: a slide deck with an argument, a carousel, a simple dashboard or a diagram of how a process works.",
+      "emoji": "🖥️",
+      "id": "creatorops-deck-builder",
+      "name": "Business Deck Builder",
+      "packId": "craighewitt-creator-ops",
+      "role": "Business Deck Builder",
+      "skillIds": [
+        "markdown-renderer",
+        "file-writer",
+        "data-visualizer",
+        "brainstorming",
+        "image-resizer"
+      ],
+      "slug": "deck-builder",
+      "tags": ["slide-decks", "carousels", "dashboards", "diagrams"]
+    }
+  ],
+  "counts": {
+    "agents": 14,
+    "skills": 0,
+    "teams": 4
+  },
+  "description": "Fourteen operators and four desks for the person running a small business: a video channel, a full sales cycle, the founder's own operating rhythm, and the back office underneath all of it. Adapted from an MIT-licensed upstream skill collection, with the interactive scripts reworked into Clawboo agent documents, named commercial tools removed, and every team and routing edge written by the Clawboo maintainers.",
+  "id": "craighewitt-creator-ops",
+  "idPrefix": "creatorops",
+  "name": "Creator and Founder Operations",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Craig Hewitt"],
+    "color": "#14B8A6",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Creator and Founder Operations",
+    "license": "MIT",
+    "ref": "fdbf39b61fbc8cb7cea67949bfb5e8fc567bbc51",
+    "repo": "https://github.com/TheCraigHewitt/skills",
+    "sourceId": "craighewitt-creator-ops"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/channel-desk.json",
+      "category": "content",
+      "color": "#EC4899",
+      "description": "Runs a video channel end to end: what to publish and why, the script that holds attention, and the packaging that gets it opened at all.",
+      "emoji": "📺",
+      "id": "creatorops-channel-desk",
+      "members": [
+        {
+          "agentId": "creatorops-channel-strategist",
+          "name": "Channel Strategist",
+          "role": "Channel Strategist"
+        },
+        {
+          "agentId": "creatorops-script-architect",
+          "name": "Video Script Architect",
+          "role": "Video Script Architect"
+        },
+        {
+          "agentId": "creatorops-video-packager",
+          "name": "Video Packager",
+          "role": "Video Packager"
+        }
+      ],
+      "name": "Channel Operator Desk",
+      "packId": "craighewitt-creator-ops",
+      "slug": "channel-desk",
+      "tags": ["youtube", "video-production", "content-strategy", "packaging"]
+    },
+    {
+      "body": "teams/sales-desk.json",
+      "category": "sales",
+      "color": "#10B981",
+      "description": "A full sales cycle in one team: account research, outbound that sounds human, discovery and demos, priced proposals, and a forecast that holds.",
+      "emoji": "💼",
+      "id": "creatorops-sales-desk",
+      "members": [
+        {
+          "agentId": "creatorops-pipeline-analyst",
+          "name": "Pipeline and Forecast Analyst",
+          "role": "Pipeline and Forecast Analyst"
+        },
+        {
+          "agentId": "creatorops-account-intel",
+          "name": "Account Intelligence Analyst",
+          "role": "Account Intelligence Analyst"
+        },
+        {
+          "agentId": "creatorops-outbound-writer",
+          "name": "Outbound Sequence Writer",
+          "role": "Outbound Sequence Writer"
+        },
+        {
+          "agentId": "creatorops-discovery-lead",
+          "name": "Discovery and Demo Lead",
+          "role": "Discovery and Demo Lead"
+        },
+        {
+          "agentId": "creatorops-deal-desk",
+          "name": "Negotiation and Pricing Desk",
+          "role": "Negotiation and Pricing Desk"
+        }
+      ],
+      "name": "Sales Operations Desk",
+      "packId": "craighewitt-creator-ops",
+      "slug": "sales-desk",
+      "tags": ["sales", "outbound", "discovery", "forecasting"]
+    },
+    {
+      "body": "teams/founder-desk.json",
+      "category": "ops",
+      "color": "#F59E0B",
+      "description": "The rhythm a small company runs on: weekly and quarterly reviews, the hard decisions, the people work, and a daily desk that stays clear.",
+      "emoji": "🧭",
+      "id": "creatorops-founder-desk",
+      "members": [
+        {
+          "agentId": "creatorops-operating-cadence",
+          "name": "Operating Cadence Lead",
+          "role": "Operating Cadence Lead"
+        },
+        {
+          "agentId": "creatorops-strategy-sparring",
+          "name": "Strategy Sparring Partner",
+          "role": "Strategy Sparring Partner"
+        },
+        {
+          "agentId": "creatorops-management-coach",
+          "name": "Founder Management Coach",
+          "role": "Founder Management Coach"
+        },
+        {
+          "agentId": "creatorops-chief-of-staff",
+          "name": "Founder Chief of Staff",
+          "role": "Founder Chief of Staff"
+        }
+      ],
+      "name": "Founder Operating Desk",
+      "packId": "craighewitt-creator-ops",
+      "slug": "founder-desk",
+      "tags": ["founder", "operating-rhythm", "decisions", "management"]
+    },
+    {
+      "body": "teams/back-office.json",
+      "category": "ops",
+      "color": "#0EA5E9",
+      "description": "The administrative floor of a small company: the daily desk and inbox, the invoices and contracts, and anything that has to be presented.",
+      "emoji": "🗄️",
+      "id": "creatorops-back-office",
+      "members": [
+        {
+          "agentId": "creatorops-chief-of-staff",
+          "name": "Founder Chief of Staff",
+          "role": "Founder Chief of Staff"
+        },
+        {
+          "agentId": "creatorops-back-office-clerk",
+          "name": "Back-Office Clerk",
+          "role": "Back-Office Clerk"
+        },
+        {
+          "agentId": "creatorops-deck-builder",
+          "name": "Business Deck Builder",
+          "role": "Business Deck Builder"
+        }
+      ],
+      "name": "Back Office Desk",
+      "packId": "craighewitt-creator-ops",
+      "slug": "back-office",
+      "tags": ["admin", "invoicing", "operations", "presentations"]
+    }
+  ],
+  "version": "1.0.0"
+}

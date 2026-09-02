@@ -39,6 +39,7 @@ import { useReducedMotion } from 'framer-motion'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useAgentScreenshot } from '@/features/workspace/useAgentScreenshot'
+import { useBrowserGrant } from '@/features/workspace/useBrowserGrant'
 
 import { freshestAgent, useAgentFrames } from './useAgentFrames'
 
@@ -87,6 +88,9 @@ export function BrowserDock({
   // Probed only while open: a closed dock has no reason to poll N routes.
   const frames = useAgentFrames(agentIds, open)
   const { meta, checked, src } = useAgentScreenshot(open ? selectedAgentId : null, open)
+  // An ungranted browser and an unused one look identical on screen. They are
+  // not the same fact, and only one of them is something a person can act on.
+  const grant = useBrowserGrant(open ? selectedAgentId : null, open)
 
   // Open onto the freshest frame rather than whichever agent the graph listed
   // first, so the dock shows something the moment it appears. The ref resets on
@@ -277,7 +281,9 @@ export function BrowserDock({
               ? ''
               : agents.length === 0
                 ? 'No agents on this graph yet.'
-                : 'Nothing captured yet.'}
+                : grant === 'missing'
+                  ? 'No browser granted to this Boo.'
+                  : 'Nothing captured yet.'}
           </p>
         )}
       </div>

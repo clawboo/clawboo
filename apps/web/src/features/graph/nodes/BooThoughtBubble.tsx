@@ -108,7 +108,15 @@ export const BooThoughtBubble = memo(function BooThoughtBubble({
   // reads in mono. Using one font for both made every line look like a command,
   // including sentences.
   const isReasoning = activity?.kind === 'thinking' || activity?.kind === 'streaming'
-  const line = activity?.text ?? 'thinking'
+  // A tool call reads as a sentence. The picker hands back the bare label now,
+  // so the bubble says "Using read_file" rather than printing an identifier at
+  // the person watching. A board run's line is already phrased for a reader and
+  // takes no verb.
+  const line = !activity
+    ? 'thinking'
+    : activity.kind === 'tool'
+      ? `Using ${activity.text}`
+      : activity.text
 
   return (
     <div

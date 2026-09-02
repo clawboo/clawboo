@@ -7,7 +7,13 @@
 // on every page load.
 
 export * from './types'
+export * from './brokeredApps'
 export * from './catalog'
 export * from './snippet'
 export * from './connectable'
+export * from './cost'
+export * from './ask'
+export * from './version'
+export * from './pastedSecret'
+export * from './connectFailure'
 export * from './launchArgs'

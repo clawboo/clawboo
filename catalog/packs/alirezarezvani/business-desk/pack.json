@@ -1,0 +1,570 @@
+{
+  "agents": [
+    {
+      "body": "agents/contract-risk-reviewer.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Reads a commercial agreement for the clauses that cost real money later, drafts counter-language, and names what a licensed attorney must decide.",
+      "emoji": "📜",
+      "id": "bizdesk-contract-risk-reviewer",
+      "name": "Contract Risk Reviewer",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Contract Risk Reviewer",
+      "skillIds": [
+        "file-reader",
+        "pdf-reader",
+        "summarizer",
+        "file-writer",
+        "markdown-renderer",
+        "note-taker"
+      ],
+      "slug": "contract-risk-reviewer",
+      "tags": ["contracts", "msa", "risk", "negotiation", "legal-ops"]
+    },
+    {
+      "body": "agents/privacy-programme-lead.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Runs the privacy programme end to end: lawful basis, records of processing, impact assessments, subject requests, and breach response on the clock.",
+      "emoji": "🔐",
+      "id": "bizdesk-privacy-programme-lead",
+      "name": "Privacy Programme Lead",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Privacy Programme Lead",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "summarizer",
+        "web-search",
+        "markdown-renderer",
+        "csv-analyzer",
+        "note-taker"
+      ],
+      "slug": "privacy-programme-lead",
+      "tags": ["gdpr", "privacy", "dpia", "data-protection", "compliance"]
+    },
+    {
+      "body": "agents/security-certification-lead.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Takes a company from no certification to an audit it can pass, sequencing scope, controls, evidence and the observation period in the right order.",
+      "emoji": "🛡️",
+      "id": "bizdesk-security-certification-lead",
+      "name": "Security Certification Lead",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Security Certification Lead",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "summarizer",
+        "csv-analyzer",
+        "markdown-renderer",
+        "plan-writing",
+        "note-taker"
+      ],
+      "slug": "security-certification-lead",
+      "tags": ["soc2", "iso-27001", "audit", "controls", "security-programme"]
+    },
+    {
+      "body": "agents/ai-governance-officer.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Classifies an AI system by risk, decides what documentation and human oversight it needs, and keeps the record current as the system changes.",
+      "emoji": "⚖️",
+      "id": "bizdesk-ai-governance-officer",
+      "name": "AI Governance Officer",
+      "packId": "alirezarezvani-business-desk",
+      "role": "AI Governance Officer",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "summarizer",
+        "web-search",
+        "markdown-renderer",
+        "note-taker"
+      ],
+      "slug": "ai-governance-officer",
+      "tags": [
+        "ai-governance",
+        "risk-classification",
+        "model-documentation",
+        "oversight",
+        "assurance"
+      ]
+    },
+    {
+      "body": "agents/enterprise-risk-manager.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Builds a risk register the leadership team actually uses, with owners, controls, residual risk and a review cadence that survives a busy quarter.",
+      "emoji": "🧯",
+      "id": "bizdesk-enterprise-risk-manager",
+      "name": "Enterprise Risk Manager",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Enterprise Risk Manager",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "csv-analyzer",
+        "summarizer",
+        "markdown-renderer",
+        "plan-writing"
+      ],
+      "slug": "enterprise-risk-manager",
+      "tags": ["risk-register", "fmea", "controls", "business-continuity", "governance"]
+    },
+    {
+      "body": "agents/quality-systems-lead.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Stands up a quality management system that people follow: controlled documents, real internal audits, and corrective actions that close on evidence.",
+      "emoji": "📐",
+      "id": "bizdesk-quality-systems-lead",
+      "name": "Quality Systems Lead",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Quality Systems Lead",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "csv-analyzer",
+        "plan-writing",
+        "note-taker"
+      ],
+      "slug": "quality-systems-lead",
+      "tags": ["qms", "capa", "internal-audit", "document-control", "iso-13485"]
+    },
+    {
+      "body": "agents/people-operations-advisor.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Designs the hiring plan, the compensation bands and the performance process for a company that is growing faster than its people systems.",
+      "emoji": "👥",
+      "id": "bizdesk-people-operations-advisor",
+      "name": "People Operations Advisor",
+      "packId": "alirezarezvani-business-desk",
+      "role": "People Operations Advisor",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "plan-writing",
+        "note-taker"
+      ],
+      "slug": "people-operations-advisor",
+      "tags": ["hiring", "compensation", "org-design", "performance", "retention"]
+    },
+    {
+      "body": "agents/change-management-lead.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Plans and lands an organisational change so it sticks: sequencing, the announcement, the resistance you should expect, and what to do when it arrives.",
+      "emoji": "🔄",
+      "id": "bizdesk-change-management-lead",
+      "name": "Change Management Lead",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Change Management Lead",
+      "skillIds": [
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "plan-writing",
+        "meeting-notes",
+        "email-draft",
+        "note-taker"
+      ],
+      "slug": "change-management-lead",
+      "tags": ["change-management", "communications", "adoption", "reorg", "rollout"]
+    },
+    {
+      "body": "agents/culture-architect.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Turns stated values into observable behaviour, decision rules and rituals, then measures whether the company actually operates the way it says it does.",
+      "emoji": "🧭",
+      "id": "bizdesk-culture-architect",
+      "name": "Culture Architect",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Culture Architect",
+      "skillIds": [
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "meeting-notes",
+        "csv-analyzer",
+        "note-taker"
+      ],
+      "slug": "culture-architect",
+      "tags": ["culture", "values", "rituals", "engagement", "behaviour"]
+    },
+    {
+      "body": "agents/deal-desk-reviewer.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Reviews one deal before signature: margin after discount, term shape, contract landmines, and the named human approvals the discount actually requires.",
+      "emoji": "🧾",
+      "id": "bizdesk-deal-desk-reviewer",
+      "name": "Deal Desk Reviewer",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Deal Desk Reviewer",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "file-reader",
+        "summarizer",
+        "markdown-renderer",
+        "file-writer"
+      ],
+      "slug": "deal-desk-reviewer",
+      "tags": ["deal-desk", "discount", "margin", "approvals", "revops"]
+    },
+    {
+      "body": "agents/commercial-policy-designer.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Designs the discount matrix, approval thresholds and exception rules that a deal desk applies, so pricing decisions stop being negotiated one at a time.",
+      "emoji": "📊",
+      "id": "bizdesk-commercial-policy-designer",
+      "name": "Commercial Policy Designer",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Commercial Policy Designer",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "data-visualizer"
+      ],
+      "slug": "commercial-policy-designer",
+      "tags": ["commercial-policy", "discount-matrix", "approvals", "governance", "pricing-rules"]
+    },
+    {
+      "body": "agents/partnership-deal-architect.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Decides whether to sign a partner, at what tier, with what joint commitment and revenue share, and what evidence would prove the partnership is working.",
+      "emoji": "🤝",
+      "id": "bizdesk-partnership-deal-architect",
+      "name": "Partnership Deal Architect",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Partnership Deal Architect",
+      "skillIds": [
+        "spreadsheet-reader",
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "web-search",
+        "plan-writing"
+      ],
+      "slug": "partnership-deal-architect",
+      "tags": ["partnerships", "channel", "revenue-share", "alliances", "gtm"]
+    },
+    {
+      "body": "agents/rfp-response-lead.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Runs a bid from arrival to submission: bid or no-bid, requirement matrix, win themes, proof points, and a compliant document that lands on time.",
+      "emoji": "📝",
+      "id": "bizdesk-rfp-response-lead",
+      "name": "RFP Response Lead",
+      "packId": "alirezarezvani-business-desk",
+      "role": "RFP Response Lead",
+      "skillIds": [
+        "file-reader",
+        "pdf-reader",
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "plan-writing",
+        "note-taker"
+      ],
+      "slug": "rfp-response-lead",
+      "tags": ["rfp", "bids", "proposals", "tenders", "win-themes"]
+    },
+    {
+      "body": "agents/renewal-and-expansion-manager.json",
+      "category": "support",
+      "color": "#14B8A6",
+      "description": "Scores account health, works the renewal calendar early, and separates real expansion signals from wishful pipeline in the installed base.",
+      "emoji": "🔁",
+      "id": "bizdesk-renewal-and-expansion-manager",
+      "name": "Renewal and Expansion Manager",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Renewal and Expansion Manager",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "sql-query",
+        "data-visualizer",
+        "summarizer",
+        "file-writer",
+        "trend-analyzer"
+      ],
+      "slug": "renewal-and-expansion-manager",
+      "tags": ["renewals", "churn", "account-health", "expansion", "customer-success"]
+    },
+    {
+      "body": "agents/fractional-cfo-advisor.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Builds the operating model, watches runway and unit economics, and prepares board and lender materials that survive a hostile reading.",
+      "emoji": "💰",
+      "id": "bizdesk-fractional-cfo-advisor",
+      "name": "Fractional CFO Advisor",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Fractional CFO Advisor",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "data-visualizer",
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "trend-analyzer"
+      ],
+      "slug": "fractional-cfo-advisor",
+      "tags": ["financial-model", "runway", "unit-economics", "board-reporting", "planning"]
+    },
+    {
+      "body": "agents/saas-metrics-analyst.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Defines the recurring-revenue metrics once, computes them consistently, and explains what each number is actually saying about the business.",
+      "emoji": "📈",
+      "id": "bizdesk-saas-metrics-analyst",
+      "name": "SaaS Metrics Analyst",
+      "packId": "alirezarezvani-business-desk",
+      "role": "SaaS Metrics Analyst",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "sql-query",
+        "data-visualizer",
+        "trend-analyzer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "saas-metrics-analyst",
+      "tags": ["arr", "churn", "retention", "cohorts", "metric-definitions"]
+    },
+    {
+      "body": "agents/vendor-portfolio-manager.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Keeps the third-party portfolio under control: what is bought, what it costs, what risk it carries, and which renewals are worth renegotiating.",
+      "emoji": "🗂️",
+      "id": "bizdesk-vendor-portfolio-manager",
+      "name": "Vendor Portfolio Manager",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Vendor Portfolio Manager",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "file-reader",
+        "file-writer",
+        "summarizer",
+        "data-visualizer",
+        "calendar-manager"
+      ],
+      "slug": "vendor-portfolio-manager",
+      "tags": ["vendor-management", "procurement", "third-party-risk", "renewals", "spend"]
+    },
+    {
+      "body": "agents/process-and-capacity-planner.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Maps an operational process end to end, finds where work waits rather than moves, and sizes the headcount the demand actually requires.",
+      "emoji": "⚙️",
+      "id": "bizdesk-process-and-capacity-planner",
+      "name": "Process and Capacity Planner",
+      "packId": "alirezarezvani-business-desk",
+      "role": "Process and Capacity Planner",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "data-visualizer",
+        "file-writer",
+        "summarizer",
+        "markdown-renderer",
+        "plan-writing"
+      ],
+      "slug": "process-and-capacity-planner",
+      "tags": ["process-mapping", "capacity-planning", "cycle-time", "staffing", "operations"]
+    }
+  ],
+  "counts": {
+    "agents": 18,
+    "skills": 0,
+    "teams": 4
+  },
+  "description": "Eighteen advisors covering legal and regulatory compliance, people operations, commercial deal work, finance and business operations, and four teams built from them. Adapted from an MIT-licensed upstream skill collection: the business slice only, hash-deduplicated first, with every body rewritten and no helper scripts carried over.",
+  "id": "alirezarezvani-business-desk",
+  "idPrefix": "bizdesk",
+  "name": "Business and Compliance Desk",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Alireza Rezvani"],
+    "color": "#0D9488",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Business and Compliance Desk",
+    "license": "MIT",
+    "ref": "19392f7a08264ed00486a251f5b2098321771f94",
+    "repo": "https://github.com/alirezarezvani/claude-skills",
+    "sourceId": "alirezarezvani-business-desk"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/compliance-readiness-desk.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Takes a company from scattered compliance obligations to one programme: privacy records, security controls, AI governance and a quality system that holds them.",
+      "emoji": "🛡️",
+      "id": "bizdesk-compliance-readiness-desk",
+      "members": [
+        {
+          "agentId": "bizdesk-privacy-programme-lead",
+          "name": "Privacy Programme Lead",
+          "role": "Privacy Programme Lead"
+        },
+        {
+          "agentId": "bizdesk-security-certification-lead",
+          "name": "Security Certification Lead",
+          "role": "Security Certification Lead"
+        },
+        {
+          "agentId": "bizdesk-ai-governance-officer",
+          "name": "AI Governance Officer",
+          "role": "AI Governance Officer"
+        },
+        {
+          "agentId": "bizdesk-quality-systems-lead",
+          "name": "Quality Systems Lead",
+          "role": "Quality Systems Lead"
+        }
+      ],
+      "name": "Compliance Readiness Desk",
+      "packId": "alirezarezvani-business-desk",
+      "slug": "compliance-readiness-desk",
+      "tags": ["compliance", "privacy", "security", "governance"]
+    },
+    {
+      "body": "teams/commercial-desk.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Everything that happens between a price being asked for and a signature: policy, per-deal review, contract risk, bids and partner terms.",
+      "emoji": "🧾",
+      "id": "bizdesk-commercial-desk",
+      "members": [
+        {
+          "agentId": "bizdesk-deal-desk-reviewer",
+          "name": "Deal Desk Reviewer",
+          "role": "Deal Desk Reviewer"
+        },
+        {
+          "agentId": "bizdesk-commercial-policy-designer",
+          "name": "Commercial Policy Designer",
+          "role": "Commercial Policy Designer"
+        },
+        {
+          "agentId": "bizdesk-contract-risk-reviewer",
+          "name": "Contract Risk Reviewer",
+          "role": "Contract Risk Reviewer"
+        },
+        {
+          "agentId": "bizdesk-rfp-response-lead",
+          "name": "RFP Response Lead",
+          "role": "RFP Response Lead"
+        },
+        {
+          "agentId": "bizdesk-partnership-deal-architect",
+          "name": "Partnership Deal Architect",
+          "role": "Partnership Deal Architect"
+        }
+      ],
+      "name": "Commercial Desk",
+      "packId": "alirezarezvani-business-desk",
+      "slug": "commercial-desk",
+      "tags": ["deal-desk", "pricing-policy", "contracts", "bids"]
+    },
+    {
+      "body": "teams/people-and-change-crew.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Hiring plans, pay structure and performance on one side, and the work of landing an organisational change on the other, run by the same team.",
+      "emoji": "👥",
+      "id": "bizdesk-people-and-change-crew",
+      "members": [
+        {
+          "agentId": "bizdesk-people-operations-advisor",
+          "name": "People Operations Advisor",
+          "role": "People Operations Advisor"
+        },
+        {
+          "agentId": "bizdesk-change-management-lead",
+          "name": "Change Management Lead",
+          "role": "Change Management Lead"
+        },
+        {
+          "agentId": "bizdesk-culture-architect",
+          "name": "Culture Architect",
+          "role": "Culture Architect"
+        }
+      ],
+      "name": "People and Change Crew",
+      "packId": "alirezarezvani-business-desk",
+      "slug": "people-and-change-crew",
+      "tags": ["people-ops", "change", "culture", "hiring"]
+    },
+    {
+      "body": "teams/operating-cadence-crew.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "The monthly operating rhythm: the model and the runway, the retention numbers underneath them, third-party spend, capacity, and the risks that could stop it.",
+      "emoji": "📈",
+      "id": "bizdesk-operating-cadence-crew",
+      "members": [
+        {
+          "agentId": "bizdesk-fractional-cfo-advisor",
+          "name": "Fractional CFO Advisor",
+          "role": "Fractional CFO Advisor"
+        },
+        {
+          "agentId": "bizdesk-saas-metrics-analyst",
+          "name": "SaaS Metrics Analyst",
+          "role": "SaaS Metrics Analyst"
+        },
+        {
+          "agentId": "bizdesk-renewal-and-expansion-manager",
+          "name": "Renewal and Expansion Manager",
+          "role": "Renewal and Expansion Manager"
+        },
+        {
+          "agentId": "bizdesk-vendor-portfolio-manager",
+          "name": "Vendor Portfolio Manager",
+          "role": "Vendor Portfolio Manager"
+        },
+        {
+          "agentId": "bizdesk-process-and-capacity-planner",
+          "name": "Process and Capacity Planner",
+          "role": "Process and Capacity Planner"
+        },
+        {
+          "agentId": "bizdesk-enterprise-risk-manager",
+          "name": "Enterprise Risk Manager",
+          "role": "Enterprise Risk Manager"
+        }
+      ],
+      "name": "Operating Cadence Crew",
+      "packId": "alirezarezvani-business-desk",
+      "slug": "operating-cadence-crew",
+      "tags": ["finance", "metrics", "retention", "capacity", "risk"]
+    }
+  ],
+  "version": "1.0.0"
+}

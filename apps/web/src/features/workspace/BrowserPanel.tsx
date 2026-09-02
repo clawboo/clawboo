@@ -12,9 +12,11 @@
 // (`useAgentScreenshot`), so they can never disagree about which frame is current.
 
 import { useAgentScreenshot } from './useAgentScreenshot'
+import { useBrowserGrant } from './useBrowserGrant'
 
 export function BrowserPanel({ agentId }: { agentId: string }) {
   const { meta, checked, src } = useAgentScreenshot(agentId)
+  const grant = useBrowserGrant(agentId)
 
   if (!checked) return null
 
@@ -22,8 +24,14 @@ export function BrowserPanel({ agentId }: { agentId: string }) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <p className="max-w-[42ch] text-center text-[12px] leading-relaxed text-muted-foreground">
-          Nothing captured yet. This shows the most recent screenshot this agent took, once it calls
-          a tool that returns one.
+          {grant === 'missing'
+            ? // Naming the real cause. Connecting a browser no longer hands it to
+              // the whole fleet, so an agent with no grant is never offered the
+              // tools and can never produce a frame. Reported, not offered to
+              // fix: granting is a deliberate act and belongs where capabilities
+              // are managed, not inside a viewer.
+              'No browser connector has been granted to this agent, so it has no way to open a page. Grant one from its capabilities to see what it is looking at.'
+            : 'Nothing captured yet. This shows the most recent screenshot this agent took, once it calls a tool that returns one.'}
         </p>
       </div>
     )

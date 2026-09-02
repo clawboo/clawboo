@@ -27,6 +27,19 @@ packages:
 
 The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **30 packages** (25 top-level under `packages/*` plus 5 nested adapters; `packages/adapters` itself is a glob container with no `package.json`), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
 
+### Two top-level folders that are deliberately NOT workspace members
+
+`website/` (the standalone Astro brand site, with its own lockfile) and
+`catalog/` (the marketplace content) are outside every glob above on purpose.
+
+For `catalog/` the reason is CI cost. It is JSON content: agent prose, team
+routing, and the generated artifacts built from it. Making it a workspace member
+would put every content pull request through `turbo lint`, `turbo typecheck` and
+`turbo test` for files that contain no code. It has no `package.json`, appears
+in no turbo task, and is reached only by `scripts/catalog/*` from the repo root.
+`.github/workflows/catalog-ci.yml` is its whole CI surface. See
+[the marketplace catalog reference](/reference/marketplace-catalog).
+
 `@clawboo/tsconfig` is the shared TypeScript-config root, `base.json`, `react.json`, `node.json`. It is a devDependency everywhere and has no runtime edge, so it doesn't appear in the dependency graph that drives the build order.
 
 ### Layer boundaries (lint-enforced)
@@ -158,22 +171,22 @@ A few runtime deps stay **external** in the server bundle and must be present in
 
 These run from the repo root. The Turbo-fronted ones fan out across the workspace honoring the build order.
 
-| Command                      | What it does                                                                                                                             |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm build`                 | `turbo build`, builds every package + app `dist/`, dependency-ordered, cached.                                                           |
-| `pnpm dev`                   | `turbo dev --concurrency=20`, runs each package/app dev task. For `apps/web` this is the dev orchestrator (below).                       |
-| `pnpm lint`                  | `turbo lint`, ESLint across the workspace, plus the docs frontmatter + heading checks (the `docs` package's `lint` script).              |
-| `pnpm typecheck`             | `turbo typecheck`, `tsc --noEmit` across the workspace.                                                                                  |
-| `pnpm test`                  | `turbo test`, per-package Vitest (the real path; each package has its own config).                                                       |
-| `pnpm e2e`                   | `playwright test`, the Playwright end-to-end suite (sandboxed; see [Testing](#testing-strategy-pointer)).                                |
-| `pnpm assemble`              | `pnpm build && bash scripts/assemble-cli.sh`, full build, then copy the server bundle + UI + MCP bins into `apps/cli/dist/`.             |
-| `pnpm verify:catalog`        | `tsx scripts/verify-catalog.ts`, fails if the committed marketplace catalog drifts from its integrity manifest. Offline.                 |
-| `pnpm verify:ingest`         | `tsx scripts/verify-ingest.ts`, fails if the committed marketplace catalog drifts from a fresh codegen. Needs network.                   |
-| `pnpm ingest:marketplace`    | `tsx scripts/ingest-marketplace-content.ts`, regenerates that catalog from the pinned upstream SHAs.                                     |
-| `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`, fails on invalid YAML frontmatter or a bare `%` in a heading (the 404 class of bug).               |
-| `pnpm test:clean-install`    | `node scripts/test-clean-install.mjs`, packs + installs the CLI tarball and asserts the install works (see below).                       |
-| `pnpm test:bundle-externals` | `node scripts/check-bundle-externals.mjs`, fails if a shipped bundle loads a module that isn't declared / builtin / documented-optional. |
-| `pnpm prepublish:check`      | `pnpm verify:catalog && pnpm assemble && pnpm test:clean-install`, the local catalog-and-artifact release check (not the full gate).     |
+| Command                      | What it does                                                                                                                                                   |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm build`                 | `turbo build`, builds every package + app `dist/`, dependency-ordered, cached.                                                                                 |
+| `pnpm dev`                   | `turbo dev --concurrency=20`, runs each package/app dev task. For `apps/web` this is the dev orchestrator (below).                                             |
+| `pnpm lint`                  | `turbo lint`, ESLint across the workspace, plus the docs frontmatter + heading checks (the `docs` package's `lint` script).                                    |
+| `pnpm typecheck`             | `turbo typecheck`, `tsc --noEmit` across the workspace.                                                                                                        |
+| `pnpm test`                  | `turbo test`, per-package Vitest (the real path; each package has its own config).                                                                             |
+| `pnpm e2e`                   | `playwright test`, the Playwright end-to-end suite (sandboxed; see [Testing](#testing-strategy-pointer)).                                                      |
+| `pnpm assemble`              | `pnpm build && bash scripts/assemble-cli.sh`, full build, then copy the server bundle + UI + MCP bins into `apps/cli/dist/`.                                   |
+| `pnpm catalog:build`         | `scripts/catalog/build-index.ts` + `build-seed.ts`, rebuilds `catalog/dist/**` and the compiled marketplace seed.                                              |
+| `pnpm catalog:verify`        | `scripts/catalog/validate.ts`, every marketplace content rule, then a `--check` that `catalog/dist` and the seed are current. Offline.                         |
+| `pnpm verify:connectors`     | `tsx scripts/verify-connectors.ts`, fails if the committed connector catalog is inconsistent. Offline.                                                         |
+| `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`, fails on invalid YAML frontmatter or a bare `%` in a heading (the 404 class of bug).                                     |
+| `pnpm test:clean-install`    | `node scripts/test-clean-install.mjs`, packs + installs the CLI tarball and asserts the install works (see below).                                             |
+| `pnpm test:bundle-externals` | `node scripts/check-bundle-externals.mjs`, fails if a shipped bundle loads a module that isn't declared / builtin / documented-optional.                       |
+| `pnpm prepublish:check`      | `pnpm catalog:verify && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install`, the local content-and-artifact release check (not the full gate). |
 
 `pnpm dev` for the web app does **not** start Vite and Express directly. It runs `scripts/dev-orchestrator.cjs`, which picks a free API port first (honoring `CLAWBOO_API_PORT`, else scanning from `CLAWBOO_API_PORT_START`), exports it into the child env, then `concurrently` runs `pnpm dev:api` (`tsx watch server/index.ts`) and `pnpm dev:ui` (`vite`) so both inherit the same port, no race over who binds first.
 
@@ -197,7 +210,7 @@ Do not reintroduce a migration ladder or a `db:migrate` script casually. The "DD
 
 The release path layers two gates on top of the normal build. `pnpm assemble` produces the CLI bundle; `pnpm test:clean-install` then simulates `npx clawboo` on a real machine. It does that against a **real install**, not the repo build: it `pnpm pack`s `apps/cli` and `npm install`s the tarball into a throwaway directory under the OS temp dir, so nothing can resolve through the workspace's `node_modules` and the published `files` whitelist plus the published dependency closure are what get tested. Against that install it asserts the packaged `bin` entries exist with their npm shims, that every module the bundles still load is declared / builtin / documented-optional, that the CLI's HTTP-signature port probe skips a fake non-Clawboo listener on a nearby port, that the SPA renders at `/` and a deep route falls through to `index.html`, that `/api/settings` returns Clawboo-shaped JSON, that the SPA actually boots in headless Chromium rather than merely being served, that an installed MCP stdio bin completes a real JSON-RPC `tools/list` handshake, that a real `POST /api/runtimes/clawboo-native/run` drives a board task to `done` against a local stub provider, and that a SECOND launch against an already-running dashboard reuses it instead of forking a second server. It exists because v0.1.1 (`Cannot GET /`) and v0.1.2 (port-collision `Unauthorized`) shipped broken; this catches that whole class.
 
-CI mirrors the gate. The `ci.yml` workflow runs `lint`, `typecheck`, `test`, `build`, `verify-catalog`, `smoke-test-bundle`, and `e2e` as parallel jobs; the bundle smoke test runs on a `[ubuntu-latest, windows-latest, macos-latest]` matrix (the Windows leg guards spawn/path regressions; macOS is a primary user OS), while `e2e` is Ubuntu-only because Playwright's `webServer` command is POSIX shell syntax. The `publish.yml` workflow re-runs `verify:catalog` → `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` before the Changesets publish step, so a broken bundle can't reach npm even if a PR race let it through. Every catalog check on the release path is offline by design; the live upstream re-derive lives in `verify-ingest.yml`. `typecheck` earns its place there specifically because `pnpm build` is bundler-only and never runs `tsc`.
+CI mirrors the gate. The `ci.yml` workflow runs `lint`, `typecheck`, `test`, `test-cross-platform`, `build`, `verify-connectors`, `smoke-test-bundle`, and `e2e` as parallel jobs; the bundle smoke test runs on a `[ubuntu-latest, windows-latest, macos-latest]` matrix (the Windows leg guards spawn/path regressions; macOS is a primary user OS), while `e2e` is Ubuntu-only because Playwright's `webServer` command is POSIX shell syntax. The `publish.yml` workflow re-runs `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` before the Changesets publish step, so a broken bundle can't reach npm even if a PR race let it through. Every check on the release path is offline by design: nothing fetches an upstream repository. `typecheck` earns its place there specifically because `pnpm build` is bundler-only and never runs `tsc`.
 
 ## Testing strategy pointer
 
@@ -208,6 +221,6 @@ The test layout follows the monorepo shape. Each library has its own `vitest.con
 - [Package overview](/reference/packages/index), per-package version, purity, deps, and the full dependency graph
 - [Testing](/internals/testing), unit / component / e2e / clean-install / evals strategy
 - [Release process](/internals/release-process), Changesets, `publish.yml`, and the clean-install gate
-- [Codegen and ingestion](/internals/codegen-and-ingestion), the marketplace ingest + `verify:ingest` gate
+- [Marketplace catalog](/reference/marketplace-catalog), the pack format and the `catalog:build` / `catalog:verify` steps
 - [Database schema](/reference/database-schema), the 28 tables created by `createDb`'s DDL
 - [Internals overview](/internals/index), the contributor map

@@ -1,0 +1,8 @@
+{
+  "id": "clawboo-dev",
+  "routing": {
+    "clawboo-dev-bug-fixer-boo": "# AGENTS\n\nWhen a fix is ready for review:\n  @Code Reviewer Boo, please review this fix thoroughly.\nWhen a fix changes behaviour that users rely on:\n  @Doc Writer Boo, please update the documentation to reflect this change.",
+    "clawboo-dev-code-reviewer-boo": "# AGENTS\n\nWhen a review uncovers a bug that needs investigation:\n  @Bug Fixer Boo, please investigate the root cause and fix it.\nWhen a review reveals undocumented behaviour:\n  @Doc Writer Boo, please update the docs to cover this behaviour.",
+    "clawboo-dev-doc-writer-boo": "# AGENTS\n\nWhen you need technical details about a code change:\n  @Code Reviewer Boo, please provide context on the recent reviews.\nWhen documenting a bug fix:\n  @Bug Fixer Boo, please share the root cause analysis and fix details."
+  }
+}

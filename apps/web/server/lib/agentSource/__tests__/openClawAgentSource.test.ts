@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, teams } from '@clawboo/db'
+import { agents, getSetting, setSetting, teams } from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -92,11 +92,16 @@ class FakeGateway implements OpenClawClientLike {
         tools?: { deny?: string[] }
       }
       if (u.mcp) {
-        this.configState.mcp = {
-          ...(this.configState.mcp ?? {}),
-          ...u.mcp,
-          servers: { ...(this.configState.mcp?.servers ?? {}), ...(u.mcp.servers ?? {}) },
+        // RFC 7386, which is what the Gateway's own applyMergePatch implements: a
+        // null value DELETES the key and an absent key is left alone. Modelled
+        // exactly, because a fake that merely spreads makes a prune that sends a
+        // smaller map look like it works while it prunes nothing on a real
+        // Gateway, which is how `clawboo-teamchat` survived every reconnect.
+        const merged = { ...(this.configState.mcp?.servers ?? {}), ...(u.mcp.servers ?? {}) }
+        for (const [name, value] of Object.entries(u.mcp.servers ?? {})) {
+          if (value === null) delete merged[name]
         }
+        this.configState.mcp = { ...(this.configState.mcp ?? {}), ...u.mcp, servers: merged }
       }
       // Mirror the real Gateway's tools.deny merge so the idempotency check can
       // observe a prior sub-agent-tool denial (arrays are replaced, not concatenated).
@@ -334,6 +339,14 @@ describe('OpenClawAgentSource', () => {
     expect(servers['clawboo-memory']?.url).toContain('/api/mcp/memory')
     expect(servers['clawboo-memory']?.transport).toBe('streamable-http')
     expect(servers['clawboo-tasks']?.url).toContain('/api/mcp/tasks')
+    // TOOLS TOO. Without it an OpenClaw agent reaches no connector at all, so an
+    // agent the operator had granted Gmail reported having no email tools while a
+    // native agent with the identical grant answered from the inbox.
+    expect(servers['clawboo-tools']?.url).toContain('/api/mcp/tools')
+    expect(servers['clawboo-tools']?.transport).toBe('streamable-http')
+    // UNBOUND, deliberately: one process-wide config serves every OpenClaw agent,
+    // so a signed agent scope would hand one agent another's identity.
+    expect(servers['clawboo-tools']?.url).not.toContain('scopeAgentId')
     // Anti-sub-agent enforcement: the sub-agent-spawning tools are denied at the
     // runtime level so a spawn-happy model can't bypass the team via sessions_spawn.
     expect(merged.tools?.deny).toEqual(expect.arrayContaining(['sessions_spawn', 'sessions_yield']))
@@ -386,6 +399,110 @@ describe('OpenClawAgentSource', () => {
     await flush()
     expect(fake.configPatches.length).toBe(0)
     await src.stop()
+  })
+
+  it('prunes a stale clawboo server by sending null, and it actually disappears', async () => {
+    // TeamChat must not be registered for OpenClaw: one process-wide config cannot
+    // carry a per-run author binding, so an unbound team_chat tool lets an agent
+    // post as any author. An older build registered it, and the prune that was
+    // supposed to remove it sent a smaller map, which an RFC 7386 merge ignores.
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    fake.configState.mcp = {
+      servers: {
+        'clawboo-teamchat': { url: 'http://old/api/mcp/teamchat', transport: 'streamable-http' },
+        'operator-server': { url: 'http://operator/mcp', transport: 'streamable-http' },
+      },
+    }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790')
+    await src.start()
+    await flush()
+
+    // Asserted on the RESULTING config, not on the patch payload: a payload-only
+    // assertion passes while the entry survives on the Gateway.
+    const servers = fake.configState.mcp?.servers ?? {}
+    expect(servers['clawboo-teamchat']).toBeUndefined()
+    // Only the clawboo namespace is pruned; the operator's server is untouched.
+    expect(servers['operator-server']).toBeDefined()
+    await src.stop()
+  })
+
+  it('denies NOTHING of its own: only the team invariant, never a capability call', async () => {
+    // clawboo is a general platform, so which capabilities are worth their prompt
+    // cost is the operator's decision on their install. An earlier version shipped
+    // a clawboo-authored list of expensive builtins and it was wrong in principle
+    // however cheap it made the prompt.
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790')
+    await src.start()
+    await flush()
+
+    const merged = fake.configPatches.at(-1) as { tools?: { deny?: string[] } }
+    // The invariant, and NOTHING else. Asserted as an exact set so a future
+    // "just this one expensive tool" cannot be added without failing here.
+    expect([...(merged.tools?.deny ?? [])].sort()).toEqual(['sessions_spawn', 'sessions_yield'])
+    await src.stop()
+  })
+
+  it('asserts what the OPERATOR chose, and records that it owns those ids', async () => {
+    setSetting(getDb(), 'agent-source:openclaw:operatorDeny', JSON.stringify(['image_generate']))
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790')
+    await src.start()
+    await flush()
+
+    const merged = fake.configPatches.at(-1) as { tools?: { deny?: string[] } }
+    expect(merged.tools?.deny).toEqual(expect.arrayContaining(['image_generate', 'sessions_spawn']))
+    // The record is what makes the choice reversible; without it an id clawboo
+    // wrote could never be taken away again.
+    const owned = JSON.parse(getSetting(getDb(), 'agent-source:openclaw:ownedDeny') ?? '[]')
+    expect(owned).toEqual(expect.arrayContaining(['image_generate', 'sessions_spawn']))
+    await src.stop()
+  })
+
+  it("carries the operator's own denials through untouched", async () => {
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    fake.configState.tools = { deny: ['operator_only_tool'] }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790')
+    await src.start()
+    await flush()
+
+    const merged = fake.configPatches.at(-1) as { tools?: { deny?: string[] } }
+    expect(merged.tools?.deny).toContain('operator_only_tool')
+    await src.stop()
+  })
+
+  it('retires only the ids it wrote when the set is switched off', async () => {
+    // The failure this prevents: a flat deny array has no provenance, so a naive
+    // union makes clawboo's additions permanent and a naive removal deletes the
+    // operator's identically-named denials along with clawboo's.
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    fake.configState.tools = { deny: ['operator_only_tool'] }
+    setSetting(getDb(), 'agent-source:openclaw:operatorDeny', JSON.stringify(['image_generate']))
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790')
+    await src.start()
+    await flush()
+    expect(fake.configPatches.at(-1)).toBeDefined()
+    await src.stop()
+
+    // The operator changes their mind and takes the capability back.
+    setSetting(getDb(), 'agent-source:openclaw:operatorDeny', JSON.stringify([]))
+    fake.configPatches.length = 0
+    const src2 = makeSourceWithMcp(fake, 'http://127.0.0.1:18790')
+    await src2.start()
+    await flush()
+
+    const merged = fake.configPatches.at(-1) as { tools?: { deny?: string[] } }
+    const deny = merged.tools?.deny ?? []
+    expect(deny).not.toContain('image_generate')
+    // The invariant clawboo still wants, and the operator's own entry, both stay.
+    expect(deny).toContain('sessions_spawn')
+    expect(deny).toContain('operator_only_tool')
+    await src2.stop()
   })
 
   it('reconnectAndWait returns true immediately when the operator is already connected', async () => {

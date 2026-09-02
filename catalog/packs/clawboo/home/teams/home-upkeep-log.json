@@ -1,0 +1,9 @@
+{
+  "id": "home-home-upkeep-log",
+  "routing": {
+    "home-upkeep-season-planner": "# AGENTS\n\nWhen the seasonal list is ready for the month:\n  @Upkeep Warden, please merge this with the recurring schedule and publish the due list.\nWhen a seasonal job might be covered by an existing policy:\n  @Warranty Watcher, please check the cover before this is booked.",
+    "home-upkeep-warden": "# AGENTS\n\nWhen the month's tasks need to fit the season and the property:\n  @Season Planner, please tell me what this month actually needs.\nWhen something may still be under cover:\n  @Warranty Watcher, please check the cover before anyone pays for this.",
+    "home-upkeep-warranty-watcher": "# AGENTS\n\nWhen cover applies to a job on the due list:\n  @Upkeep Warden, please hold this job until the claim route is checked.\nWhen an appliance is near the end of its life:\n  @Season Planner, please account for a possible replacement in the coming months."
+  },
+  "workflowNarrative": "The Upkeep Warden is the entry point and holds the schedule: every recurring task with its interval, the date it was last done, who did it, and what it cost. That record is half the value, because it makes the next job cheaper than the last one.\n\nThe Season Planner works against the schedule each month, naming what this specific property needs given the season, and placing work in the month before the weather makes it urgent rather than the month it becomes an emergency.\n\nThe Warranty Watcher runs on the slowest cadence of all, tracking cover that is about to lapse and appliances nearing the end of their service life, and checking cover before any paid work is arranged. Nothing is booked and nobody is hired: the household does that."
+}

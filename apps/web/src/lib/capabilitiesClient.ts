@@ -120,11 +120,17 @@ export function groupAgentCapabilities(
 ): Map<string, CapabilityRecord[]> {
   const agentScoped = new Map<string, CapabilityRecord[]>()
   const globalByRuntime = new Map<string, CapabilityRecord[]>()
+  // A GLOBAL CONNECTOR RECORD IS DROPPED HERE, deliberately. It says a connector
+  // exists and is running, which is a fact about the install rather than about
+  // any agent, and no agent may be drawn holding it on that basis alone. The
+  // agent-scoped record the grant projection emits is what puts one on a ring.
   for (const r of records) {
     if (r.scope === 'agent' && r.agentId) {
       const arr = agentScoped.get(r.agentId) ?? []
       arr.push(r)
       agentScoped.set(r.agentId, arr)
+    } else if (r.scope === 'global' && isConnectorSourced(r)) {
+      continue
     } else if (r.scope === 'global' && r.runtime) {
       const arr = globalByRuntime.get(r.runtime) ?? []
       arr.push(r)
@@ -134,28 +140,43 @@ export function groupAgentCapabilities(
   const out = new Map<string, CapabilityRecord[]>()
   for (const [agentId, runtime] of agentRuntimes) {
     const own = agentScoped.get(agentId) ?? []
-    // SYNTHETIC records are excluded from the "does this agent have its own
-    // capabilities" test. A grantee's twin tile is agent-scoped, so counting it
-    // would flip inheritance off wholesale and the agent would lose every skill
-    // and connector it was showing a second earlier. The twin is still
-    // rendered. It is just not evidence of a real per-agent inventory.
-    const ownReal = own.filter((r) => !r.synthetic)
     const inherited = (runtime ? globalByRuntime.get(runtime) : undefined) ?? []
-    if (ownReal.length > 0) {
-      // CONNECTORS ARE INHERITED EVEN THEN, and they are the one source that is.
-      // clawboo owns the process and every agent reaches it through the same
-      // broker, so a connector record is global by construction and there is no
-      // agent-scoped version of it to find. Excluding it with the rest of the
-      // globals meant a connected connector never appeared on the ring of any
-      // agent that had a skill of its own, which is most of them: the headline
-      // feature was invisible in the graph for exactly the fleets most likely to
-      // use it.
-      const connectors = inherited.filter((r) => isConnectorSourced(r))
-      const seen = new Set(own.map((r) => r.id))
-      out.set(agentId, [...own, ...connectors.filter((r) => !seen.has(r.id))])
-    } else {
-      const merged = [...inherited, ...own]
-      if (merged.length > 0) out.set(agentId, merged)
+    // A CONNECTOR IS NOT INHERITED. It used to be, on the reasoning that clawboo
+    // owns the process and every agent reaches it through the same broker, so a
+    // connector record is global by construction. That was true while connecting
+    // also minted a fleet-wide grant: every agent really could call it, and
+    // drawing it on every ring was honest.
+    //
+    // It is no longer true. Connecting makes a connector available and gives it
+    // to nobody; an agent reaches it only through a grant, and the grant
+    // projection emits an AGENT-SCOPED record for exactly those. So the
+    // agent-scoped records are now the whole answer, and fanning the global one
+    // across the fleet would draw an edge for access the agent does not have,
+    // which is the one thing this picture must never do.
+    //
+    // THAT RULE IS ENFORCED ABOVE, NOT HERE. A global connector record never
+    // reaches `globalByRuntime`: the `isConnectorSourced` arm skips it while the
+    // records are being bucketed, so `inherited` holds runtime builtins and
+    // extensions and nothing else. Inheriting it cannot draw access an agent
+    // does not have.
+    //
+    // WHICH IS WHY INHERITANCE IS ADDITIVE RATHER THAN A FALLBACK. This used to
+    // read "inherit only if the agent has none of its own", and the moment an
+    // agent gained its first agent-scoped record every inherited tile vanished
+    // from its ring. Installing one skill from the marketplace onto an OpenClaw
+    // Boo took its six runtime builtins off the graph in the same frame, leaving
+    // the new skill and the model node alone on an otherwise empty orbit. The
+    // agent had not lost anything: a runtime builtin belongs to every agent on
+    // that runtime, so the picture was simply under-reporting what it could do,
+    // which is the same class of lie as over-reporting.
+    //
+    // The synthetic carve-out that used to guard this test is gone with it. It
+    // existed because a grantee's twin tile is agent-scoped and would flip
+    // inheritance off wholesale; with nothing to flip, there is nothing to
+    // exclude, and a twin renders on its own merits.
+    const merged = [...inherited, ...own]
+    if (merged.length > 0) {
+      out.set(agentId, merged)
     }
   }
   return out

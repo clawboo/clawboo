@@ -10,7 +10,14 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { agents, chatMessages, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  chatMessages,
+  getSetting,
+  setSetting,
+  SqliteMemoryStore,
+  type ClawbooDb,
+} from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type {
   Capabilities,
@@ -54,6 +61,8 @@ class FakeAdapter implements RuntimeAdapter {
   readonly id = 'fake-native'
   startCalls = 0
   aborted = 0
+  /** Every StartOpts this adapter was handed, so a test can read what was injected. */
+  starts: StartOpts[] = []
   constructor(private readonly gen: (run: RunHandle) => AsyncIterable<RuntimeEvent>) {}
   capabilities(): Capabilities {
     return CAPS
@@ -63,6 +72,7 @@ class FakeAdapter implements RuntimeAdapter {
   }
   async start(_t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
     this.startCalls += 1
+    this.starts.push(opts)
     return { adapterId: this.id, sessionKey: opts.sessionKey, runId: null }
   }
   events(run: RunHandle): AsyncIterable<RuntimeEvent> {
@@ -322,7 +332,7 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('deleting a native chat history clears the resume pointer (/reset → fresh conversation)', async () => {
+  it('deleting a native chat history clears the resume pointer (a deleted agent remembers nothing)', async () => {
     const key = nativeChatSessionSettingKey('native-x')
     setSetting(db, key, 'native-abc123')
     expect(getSetting(db, key)).toBe('native-abc123')
@@ -349,5 +359,64 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     >[1]
     await chatHistoryDELETE(req, res)
     expect(getSetting(db, key)).toBe('native-keep')
+  })
+
+  it('hands a boo its own notes on the first turn after a reset, and only then', async () => {
+    // The turn right after a reset comes from a boo with its character intact and no
+    // idea who it is talking to. `context` rides turn ONE only, which is exactly the
+    // lifetime a reminder wants.
+    seedAgent('native-x', 'clawboo-native')
+    await new SqliteMemoryStore(db).saveFact({
+      title: 'The user',
+      content: 'Their name is Sanju.',
+      scope: { agentId: 'native-x' },
+    })
+
+    const fresh = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'native-x',
+      message: 'hello',
+      mcpBaseUrl: null,
+      makeAdapter: () => fresh,
+    })
+    expect(fresh.starts[0]?.context).toContain('Their name is Sanju')
+
+    // A CONTINUING turn already has the thread, so the reminder must not repeat.
+    setSetting(db, nativeChatSessionSettingKey('native-x'), 'native-abc123')
+    const continuing = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'native-x',
+      message: 'and again',
+      mcpBaseUrl: null,
+      makeAdapter: () => continuing,
+    })
+    expect(continuing.starts[0]?.context).toBeUndefined()
+  })
+
+  it('starts blank when the boo has saved nothing', async () => {
+    seedAgent('native-empty', 'clawboo-native')
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'native-empty',
+      message: 'hello',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
+    expect(adapter.starts[0]?.context).toBeUndefined()
   })
 })

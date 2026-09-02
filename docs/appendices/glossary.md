@@ -137,7 +137,7 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 **Atlas**: the global, all-teams view of the Ghost Graph: Boo Zero presides at the top over per-team rows. Reached via the dedicated Atlas nav button. See [the Ghost Graph](/using/ghost-graph).
 
-**marketplace**: the in-app catalog of 304 first-class agents and 82 workflow teams across three MIT-licensed sources. The catalog is codegen'd from pinned upstream commits, gated offline by a `verify:catalog` integrity check plus a weekly live `verify:ingest` re-derive, and code-split into its own on-demand bundle chunk; deploying an entry writes its full source verbatim to the agent's files. See [the marketplace](/using/marketplace) and [the marketplace catalog reference](/reference/marketplace-catalog).
+**marketplace**: the in-app catalog of 436 first-class agents and 85 workflow teams across nineteen packs, two of Clawboo's own and seventeen adapted from upstream repositories (sixteen MIT-licensed, one Apache-2.0). The content is hand-maintained JSON under the repository's `catalog/` folder, excluded from the npm tarball and fetched at runtime from `/api/catalog/*`; only the built-in pack is compiled in, so first-run onboarding works offline. Deploying an entry writes its markdown body to the agent's files. See [the marketplace](/using/marketplace) and [the marketplace catalog reference](/reference/marketplace-catalog).
 
 ## Security
 

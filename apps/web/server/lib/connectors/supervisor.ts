@@ -15,10 +15,11 @@ import {
   type DiscoveredTool,
 } from '@clawboo/mcp'
 import {
+  brokeredFailureMessage,
   appendEvent,
   buildConnectorDescriptor,
-  ensureOwnerGrant,
   getConnector,
+  listGrants,
   namespacedToolName,
   persistDescriptorMetadata,
   repinOwnerGrant,
@@ -108,9 +109,17 @@ function toDescriptor(
     executor: async (args) => {
       const session = live.get(connectorInstanceId(def.slug))?.session
       if (!session) return `connector ${def.slug} is not connected`
-      // A tool-reported error comes back as TEXT: the broker records it, and
-      // throwing here would lose the server's own message.
       const res = await session.callTool(tool.name, args)
+      // A REMOTE SERVER CAN FAIL WITH A 200. When it does, the failure is a
+      // sentence inside the payload, and returning it as an ordinary result
+      // records the call as a success: ten consecutive failed Gmail fetches were
+      // all audited `is_error = 0`, so nothing in the activity log said anything
+      // had gone wrong while an agent asked for the same permission five times.
+      // Throwing is how this seam reports a failure, and the broker catches it
+      // and keeps the message, so the server's own words still reach the model
+      // and the audit row.
+      const failure = brokeredFailureMessage(res.text)
+      if (failure) throw new Error(failure)
       // Images travel BESIDE the text rather than inside it. `text` still holds
       // the `[image: …, not rendered]` placeholder, which is what the audit row
       // stores and what a consumer with no way to render pixels falls back to.
@@ -135,6 +144,7 @@ export interface ConnectResult {
 export async function connectConnector(
   db: ClawbooDb,
   def: ConnectableDefinition,
+  opts: { restoring?: boolean } = {},
 ): Promise<ConnectResult> {
   const connectorId = connectorInstanceId(def.slug)
   const existing = live.get(connectorId)
@@ -148,7 +158,9 @@ export async function connectConnector(
   const pending = inFlight.get(connectorId)
   if (pending) return pending
 
-  const attempt = performConnect(db, def, connectorId).finally(() => inFlight.delete(connectorId))
+  const attempt = performConnect(db, def, connectorId, opts.restoring === true).finally(() =>
+    inFlight.delete(connectorId),
+  )
   inFlight.set(connectorId, attempt)
   return attempt
 }
@@ -157,6 +169,7 @@ async function performConnect(
   db: ClawbooDb,
   def: ConnectableDefinition,
   connectorId: string,
+  restoring: boolean,
 ): Promise<ConnectResult> {
   // Branched on the DISCRIMINANT rather than a boolean, so each side is narrowed
   // and neither can read a field the other shape does not have.
@@ -314,6 +327,9 @@ async function performConnect(
 
     upsertConnector(db, {
       id: connectorId,
+      // CONNECTED IS AN INTENT, not just a fact. The boot restore reads this to
+      // know which connectors the operator expects to find running.
+      desiredState: 'connected',
       slug: def.slug,
       catalogId: def.slug,
       displayName: def.displayName,
@@ -350,39 +366,47 @@ async function performConnect(
       }
     }
 
-    // Mint the owner grant HERE rather than leaving it to the capability
-    // projection. That projection runs on `GET /api/capabilities`, so a tool call
-    // landing before any inventory read would deny `grant:no-grant` for a
-    // connector the user had just connected -- a race whose symptom looks exactly
-    // like a governance bug.
+    // CONNECTING GRANTS NOBODY. This used to mint an owner grant whose subject
+    // was `global`, so that a tool call arriving before the first inventory read
+    // would not be denied. A global grant is returned to every caller whatever
+    // agent they named (grants/repository.ts:105), so the effect was that
+    // connecting one connector handed the whole fleet `mode: admin` and
+    // `toolAllow: ['*']` on it. The race it avoided is not a fault under the
+    // rule that replaced it: until the operator draws an edge, no agent has been
+    // given this connector, and `deny: no-grant` is the correct answer.
+    //
+    // The re-pin below still matters, and now runs against the grants that
+    // actually exist for this connector rather than a global one invented here.
     try {
-      const identity = {
-        subjectKind: 'global',
-        subjectId: null,
-        capabilityKind: 'connector',
-        connectorId,
-        capabilityId: null,
-      } as const
-      if (!ensureOwnerGrant(db, { ...identity, specHashPin: specHash, toolsHashPin: toolsHash })) {
-        // The grant already existed, and its pins describe a previous connect.
-        //
-        // THE SPEC PIN IS RE-PINNED, THE TOOLS PIN IS NOT, and the asymmetry is
-        // the whole point. The spec is what the operator is looking at when they
-        // press Connect: the command, the URL, the launch argument they just
-        // typed. Consenting to it again is exactly what the click means, and
-        // without this a changed argument denies every call as spec-drift forever,
-        // because the automatic path is insert-only.
-        //
-        // The tool inventory is not on screen and was not consented to. A server
-        // that rewrites a tool description to smuggle instructions changes nothing
-        // else, so re-pinning it on a reconnect would erase the one signal that
-        // catches a rug-pull. That drift stays, and clearing it takes a human
-        // revoking the grant and granting it again.
-        repinOwnerGrant(db, { ...identity, specHashPin: specHash })
+      // THE SPEC PIN IS RE-PINNED, THE TOOLS PIN IS NOT, and the asymmetry is the
+      // whole point. The spec is what the operator is looking at when they press
+      // Connect: the command, the URL, the launch argument they just typed.
+      // Consenting to it again is exactly what the click means, and without this
+      // a changed argument denies every call as spec-drift forever.
+      //
+      // The tool inventory is not on screen and was not consented to. A server
+      // that rewrites a tool description to smuggle instructions changes nothing
+      // else, so re-pinning it on a reconnect would erase the one signal that
+      // catches a rug-pull. That drift stays, and clearing it takes a human
+      // revoking the grant and granting it again.
+      // A RESTORE HAS NOBODY LOOKING, so it re-consents to nothing. Re-pinning
+      // on boot would silently accept a spec that changed while the server was
+      // down and erase the drift signal on every restart, which is the one
+      // thing this pin exists to catch. Left unpinned, a changed spec denies
+      // calls as drift until a human presses Connect and actually looks at it.
+      for (const grant of restoring ? [] : listGrants(db)) {
+        if (grant.connectorId !== connectorId) continue
+        repinOwnerGrant(db, {
+          subjectKind: grant.subjectKind,
+          subjectId: grant.subjectId,
+          capabilityKind: 'connector',
+          connectorId,
+          capabilityId: null,
+          specHashPin: specHash,
+        })
       }
     } catch {
-      // A grant write must not fail a connection that otherwise succeeded; the
-      // projection will mint it on the next inventory read.
+      // A re-pin must not fail a connection that otherwise succeeded.
     }
 
     live.set(connectorId, connector)
@@ -441,7 +465,21 @@ function markConnectorDown(db: ClawbooDb, connectorId: string, detail: string): 
 }
 
 /** Close a connector and stop tracking its process. */
-export async function disconnectConnector(connectorId: string): Promise<boolean> {
+export async function disconnectConnector(connectorId: string, db?: ClawbooDb): Promise<boolean> {
+  // INTENT FIRST, before the teardown can throw or the in-flight connect can
+  // resolve. A disconnect that tore down the session but failed to record why
+  // would come back on the next boot, which is the one outcome a Disconnect
+  // button must never have. `db` is optional so the existing callers that only
+  // have a connectorId keep working; they simply do not record intent.
+  if (db) {
+    try {
+      const row = getConnector(db, connectorId)
+      if (row) upsertConnector(db, { ...row, desiredState: 'disconnected' })
+    } catch {
+      // Recording intent must not fail a disconnect the operator asked for.
+    }
+  }
+
   // A CONNECT MAY BE IN FLIGHT, and it can be for the better part of a minute
   // while `npx` installs. `live` is empty during that whole window, so this used
   // to answer `false` for a connector whose child was actively being spawned;

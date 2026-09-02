@@ -22,6 +22,7 @@ import {
 import type { ClawbooDb } from '../db'
 import { callsInWindow, chargeCall, releaseCall } from '../grants/rateWindow'
 import { listCandidateGrants, listStandingRules } from '../grants/repository'
+import { brokeredMetaToolKind } from './brokeredApp'
 import { getConnector } from '../grants/connectors'
 import type { ToolCallContext, ToolDescriptor } from './types'
 
@@ -35,7 +36,7 @@ export interface GrantGateResult {
 }
 
 /** Everything `decideGrant` needs to know about the tool, from the descriptor. */
-function toolFacts(descriptor: ToolDescriptor): GrantToolFacts {
+export function toolFacts(descriptor: ToolDescriptor): GrantToolFacts {
   return {
     name: descriptor.name,
     readOnly: descriptor.readOnly,
@@ -60,15 +61,39 @@ function toolFacts(descriptor: ToolDescriptor): GrantToolFacts {
  * with an await in between, concurrent callers all observe zero and a ceiling
  * of N admits arbitrarily many calls.
  */
+/**
+ * Whether the grant gate governs this call at all.
+ *
+ * THE BOUNDARY, NAMED ONCE. A builtin is core and ungoverned by design, and a
+ * descriptor with no connector has no grant to find. The tool LISTER asks the
+ * same question, and two spellings of it would let the list and the gate
+ * disagree about which tools are even in scope.
+ */
+export function isGrantGoverned(descriptor: ToolDescriptor, connectorId: string | null): boolean {
+  if (descriptor.owner === 'core' || descriptor.owner === undefined) return false
+  if (connectorId === null) return false
+  // A BROKER'S TRANSPORT IS NOT ITSELF A CAPABILITY. Its app-facing meta-tools
+  // reach nothing until a per-app grant says so (see `brokeredAppGap` in
+  // broker.ts), so governing them here as well would mean an app grant did
+  // nothing without a session grant beside it, and the operator would have to
+  // authorize a layer that carries no authority. The broker's unscoped tools,
+  // a remote shell and a sandbox, are NOT excused: nothing per-app can bound
+  // them, so they stay here where they can be allowed or denied by name.
+  if (brokeredMetaToolKind(descriptor.name) === 'app-facing') return false
+  return true
+}
+
 export function evaluateGrant(
   db: ClawbooDb,
   descriptor: ToolDescriptor,
   ctx: ToolCallContext,
   now = Date.now(),
 ): GrantGateResult | null {
-  if (descriptor.owner === 'core' || descriptor.owner === undefined) return null
   const connectorId = ctx.connectorId ?? null
-  if (connectorId === null) return null
+  // The null test is repeated rather than left to `isGrantGoverned`, which
+  // shares the rule with the tool lister but whose boolean return narrows
+  // nothing here.
+  if (connectorId === null || !isGrantGoverned(descriptor, connectorId)) return null
 
   const grants = listCandidateGrants(db, {
     agentId: ctx.agentId ?? null,

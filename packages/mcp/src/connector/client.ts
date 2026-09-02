@@ -114,8 +114,12 @@ export interface ConnectorImage {
 /** A screenshot is large and rides the model's context window. Bound both how
  *  many come back from one call and how big each may be, so a tool that returns
  *  a gallery cannot blow up a turn. ~1.5 MB of base64 is a generous full-page
- *  PNG; beyond that the placeholder text is the honest answer. */
-export const MAX_IMAGES_PER_CALL = 4
+ *  PNG; beyond that the placeholder text is the honest answer. *
+ *  TWO, not four. Images skip the `ResultCeiling` that bounds text, so this is
+ *  the only cap they have, and two of them can already outweigh the entire
+ *  16 KiB text budget a whole tool result is allowed. Nothing shipped needs
+ *  more: a browser call returns one frame. */
+export const MAX_IMAGES_PER_CALL = 2
 export const MAX_IMAGE_B64_BYTES = 1_500_000
 
 /** Pull the image blocks out of a CallToolResult's content, bounded. */
@@ -209,8 +213,29 @@ export function flattenContent(content: unknown): string {
   return parts.join('\n')
 }
 
+/**
+ * An error's message, plus the cause chain that actually explains it.
+ *
+ * `fetch failed` IS THE WHOLE MESSAGE undici puts on a network error, and on its
+ * own it tells an operator nothing: refused, DNS, TLS, expired session and reset
+ * connection all arrive under that one sentence. The reason lives on `cause`,
+ * which is exactly what a report like "the connector broke" needs and exactly
+ * what was being thrown away here.
+ */
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  if (!(err instanceof Error)) return String(err)
+  const parts: string[] = [err.message]
+  const seen = new Set<unknown>([err])
+  let cause: unknown = (err as { cause?: unknown }).cause
+  // Bounded: a cause chain is normally two deep, and a cyclic one would
+  // otherwise spin here rather than surfacing anything.
+  while (cause && parts.length < 4 && !seen.has(cause)) {
+    seen.add(cause)
+    const text = cause instanceof Error ? cause.message : String(cause)
+    if (text && !parts.includes(text)) parts.push(text)
+    cause = cause instanceof Error ? (cause as { cause?: unknown }).cause : undefined
+  }
+  return parts.join(': ')
 }
 
 /**
@@ -280,13 +305,28 @@ export async function connectHttpConnector(spec: HttpConnectorSpec): Promise<Con
         }
       : {}),
   })
-  return finishConnect(transport, spec, {
-    // No child process, so nothing to reap and nothing to report.
-    pid: () => null,
-    // A remote server's failure explanation arrives in the HTTP response the SDK
-    // already surfaces, so there is no side channel to drain here.
-    diagnostic: () => '',
-  })
+  try {
+    return await finishConnect(transport, spec, {
+      // No child process, so nothing to reap and nothing to report.
+      pid: () => null,
+      // A remote server's failure explanation arrives in the HTTP response the SDK
+      // already surfaces, so there is no side channel to drain here.
+      diagnostic: () => '',
+    })
+  } catch (err) {
+    // NAME THE HOST WHEN NOTHING ELSE CAN BE SAID. `fetch failed` with an empty
+    // cause is what undici reports when the request never left: no route, DNS
+    // refused, a sandbox with no outbound network. It is indistinguishable on
+    // screen from an expired token or a rejected handshake, and it sent at least
+    // one reader looking for a bug in a connector that was working fine.
+    if (err instanceof ConnectorHandshakeError && /fetch failed/i.test(err.message)) {
+      throw new ConnectorHandshakeError(
+        `could not reach ${new URL(spec.url).host}. The request never left this machine, so check network access rather than the connector.`,
+        err.pid,
+      )
+    }
+    throw err
+  }
 }
 
 /** Connect to a stdio MCP server, completing the handshake before returning. */

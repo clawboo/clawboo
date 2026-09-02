@@ -6,9 +6,16 @@
 // and "Allow always" did not help (it binds to the grant, which the inspector
 // branch never reads). That is the shape of gate users learn to rubber-stamp.
 //
-// The blast radius is asserted here rather than reviewed by eye, because the
-// rule reads on TWO descriptor fields and a catalog entry that gains
-// `readOnlyHint` on a mutating tool would silently widen it.
+// The blast radius is asserted here rather than reviewed by eye, because a
+// catalog entry that gained `readOnlyHint` on a mutating tool would silently
+// widen the carve-out.
+//
+// The carve-out is deliberately wide: a read-only call NEVER prompts, including
+// on a connector holding the user's own records. Gating reads was measured
+// against the alternative and rejected as too much friction for the thing every
+// comparable tool lets through. Private data is not unguarded, it is guarded a
+// layer up: `packages/governance/src/grants/decide.ts` prompts on every call,
+// read or write, once a chain arms all three trifecta legs.
 
 import { describe, expect, it } from 'vitest'
 
@@ -47,12 +54,12 @@ describe('riskClassifierInspector — the carve-out', () => {
     )
   })
 
-  it('still prompts for a read that touches PRIVATE data', async () => {
-    // For a browser the read is a public page; for a connector holding the
-    // user's records the read itself is the sensitive act.
-    expect(await decide({ risk: 'external', readOnly: true, trifecta: PRIVATE })).toBe(
-      'require_approval',
-    )
+  it('lets a read through even on a connector holding PRIVATE records', async () => {
+    // The deliberate wide edge of the rule. A read-only call does not prompt
+    // wherever it points, because a gate that fires on every read is one people
+    // learn to rubber-stamp. The exfiltration shape this leaves open is caught
+    // by the lethal-trifecta gate in the grant layer, not here.
+    expect(await decide({ risk: 'external', readOnly: true, trifecta: PRIVATE })).toBe('allow')
   })
 
   it('never lets a destructive tool through, whatever else it claims', async () => {

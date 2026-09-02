@@ -138,16 +138,22 @@ export function collectHygieneOffenders(
   return offenders
 }
 
-const MARKETPLACE_STEEL_CODE_FILE = path.join(
-  'apps',
-  'web',
-  'src',
-  'features',
-  'marketplace',
-  'agents',
-  'agency',
-  'specialized.ts',
-)
+/**
+ * The generated catalog seed (`pnpm catalog:build`) is agent prose compiled into
+ * `apps/web`, so it sits inside a walk root even though it is not hand-written.
+ * The pack content it comes from lives in `catalog/`, which is outside
+ * WALK_ROOTS entirely; excluding these two generated FILES rather than the whole
+ * marketplace directory keeps the hand-written half of the feature in scope.
+ *
+ * The old exclusions here named `agents/agency/specialized.ts` (civil-engineering
+ * standard codes that read as S-codes) and an emitted catalog directory under
+ * `apps/web/public/`. Neither exists any more: both were replaced by `catalog/`.
+ */
+const GENERATED_SEED_FILES = [
+  path.join('apps', 'web', 'src', 'features', 'marketplace', 'seed'),
+  path.join('apps', 'web', 'server', 'lib', 'catalogSeed.ts'),
+]
+
 const GUARD_FILES = [
   path.join('apps', 'web', 'server', 'lib', '__tests__', 'repoHygiene.test.ts'),
   path.join('apps', 'web', 'server', 'lib', '__tests__', 'repoHygieneTracked.test.ts'),
@@ -156,7 +162,7 @@ const GUARD_FILES = [
 describe('repo hygiene: no build-session/phase markers leak into product source', () => {
   it('apps/ + packages/ + scripts/ are free of S-codes, session/phase markers, and build-aid paths', () => {
     const offenders = collectHygieneOffenders(repoRoot(), WALK_ROOTS, SOURCE_EXT, [
-      MARKETPLACE_STEEL_CODE_FILE,
+      ...GENERATED_SEED_FILES,
       ...GUARD_FILES,
     ])
     expect(offenders).toEqual([])

@@ -137,7 +137,11 @@ describe('scoped attach URL helpers', () => {
     expect(tasks).toBe('http://h:1/api/mcp/tasks?scopeTeamId=T&scopeAgentId=A')
     // No scope ⇒ bare (raw stdio / external attach stays board-wide).
     expect(mcpHttpUrl('http://h:1', 'tasks')).toBe('http://h:1/api/mcp/tasks')
-    expect(mcpHttpUrl('http://h:1', 'tools', { teamId: 'T' })).toBe('http://h:1/api/mcp/tools')
+    // Tools carries the agent now: a connector tool is governed per agent, and
+    // an unidentified attach can match no agent-scoped grant.
+    expect(mcpHttpUrl('http://h:1', 'tools', { teamId: 'T', agentId: 'a1' })).toContain(
+      'scopeAgentId=a1',
+    )
     const mem = mcpHttpUrl('http://h:1', 'memory', { teamId: 'T', agentId: 'A' })
     expect(mem.startsWith('http://h:1/api/mcp/memory?')).toBe(true)
     expect(mem).toContain('scopeTeamId=T')
@@ -172,6 +176,6 @@ describe('scoped attach URL helpers', () => {
       httpBaseUrl: 'http://h:1',
       scope: { teamId: 'T' },
     })
-    expect(JSON.stringify(tools.structured)).not.toContain('scopeTeamId')
+    expect(JSON.stringify(tools.structured)).toContain('scopeTeamId')
   })
 })

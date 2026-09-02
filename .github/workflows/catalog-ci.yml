@@ -1,0 +1,69 @@
+name: Catalog
+
+# The content gate. A pull request that only edits `catalog/` skips the full CI
+# matrix (see the `filter` job in ci.yml) and runs this instead: schema, licence,
+# referential integrity, quality rules, the injection scan, and the byte budgets.
+# Roughly two minutes, against roughly fifty for the matrix it replaces.
+#
+# THIS WORKFLOW MUST NEVER BE A BRANCH-PROTECTION REQUIRED CHECK.
+#
+# It is paths-filtered, so on a PR that touches no catalog file it does not run
+# and therefore never reports. GitHub treats a required check that never reports
+# as pending forever, so marking this one required would block every unrelated
+# pull request permanently. The same rule applied to the retired
+# `verify-ingest.yml`, and it is written here rather than in a wiki because the
+# person who marks it required will be looking at this file.
+#
+# `ci.yml` carries a `catalog-verify` job that runs the same command on every
+# code PR. THAT is the one to make required.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'catalog/**'
+      - 'scripts/catalog/**'
+      - 'packages/pack-format/**'
+      - '.github/workflows/catalog-ci.yml'
+
+concurrency:
+  group: catalog-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify catalog content
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # This job never pushes, so the job token has no business living on in
+          # .git/config for the rest of the run.
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # OFFLINE on purpose: every rule runs against the packs and the committed
+      # dist in the tree, so no remote host can redden a content PR. The second
+      # half of the command asserts that `catalog/dist` and the compiled seed are
+      # byte-for-byte what a rebuild would write, which is what keeps committed
+      # generated output honest.
+      - run: pnpm catalog:verify
+
+      - run: node scripts/catalog/budget.mjs
+
+      # Content is JSON, and JSON is Prettier-formatted here. `catalog/dist` is
+      # excluded (it is canonical bytes that every integrity value was computed
+      # over) by the existing `**/dist/` entry in .prettierignore.
+      - run: pnpm exec prettier --check "catalog/**/*.{json,md}"

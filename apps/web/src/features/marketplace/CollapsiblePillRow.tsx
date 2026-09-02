@@ -1,5 +1,5 @@
 // A filter-chip row that shows the popular options inline and tucks the rest
-// behind a "+N more" toggle, so a long taxonomy (15 agent domains / 18 team
+// behind a "+N more" toggle, so a long taxonomy (20 agent categories / 15 team
 // categories) reads as a clean single band instead of a wrapping wall of pills.
 //
 // The caller passes `options` already ordered popular-first (excluding "All");
@@ -28,6 +28,17 @@ export interface CollapsiblePillRowProps {
   /** How many options show inline before the "More" toggle. Default 7. */
   primaryCount?: number
   allLabel?: string
+  /**
+   * Visible name for the axis this row filters on, rendered before the chips.
+   *
+   * Two unlabelled rows sitting on top of each other read as one long list of
+   * interchangeable chips, so picking one from each looks like a contradiction
+   * rather than an intersection. Category and Pack are different questions and
+   * the row has to say which one it is asking.
+   */
+  label?: string
+  /** Render each option's `color` as a leading dot, not just as the active accent. */
+  dot?: boolean
   'aria-label'?: string
 }
 
@@ -37,6 +48,8 @@ export function CollapsiblePillRow({
   onSelect,
   primaryCount = 7,
   allLabel = 'All',
+  label,
+  dot = false,
   'aria-label': ariaLabel,
 }: CollapsiblePillRowProps) {
   const [expanded, setExpanded] = useState(false)
@@ -55,7 +68,13 @@ export function CollapsiblePillRow({
   const hiddenCount = options.length - visible.length
 
   return (
-    <div className="flex flex-wrap gap-1.5" role="group" aria-label={ariaLabel}>
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={ariaLabel}>
+      {label && (
+        <span className="mr-0.5 shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </span>
+      )}
+
       <Chip size="sm" active={activeKey === 'all'} onClick={() => onSelect('all')}>
         {allLabel}
       </Chip>
@@ -68,6 +87,9 @@ export function CollapsiblePillRow({
           accent={opt.color}
           onClick={() => onSelect(opt.key)}
         >
+          {dot && opt.color && (
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: opt.color }} />
+          )}
           {opt.label}
         </Chip>
       ))}

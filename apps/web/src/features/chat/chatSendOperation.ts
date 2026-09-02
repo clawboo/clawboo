@@ -3,6 +3,7 @@
 import type { GatewayClientLike } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { apiFetch } from '@clawboo/control-client'
+import { isResetCommand, resetConversationContext, RESET_FAILED_NOTICE } from './resetConversation'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
@@ -72,52 +73,42 @@ export async function sendChatMessage({
   const trimmed = message.trim()
   if (!trimmed) return
 
-  // ── Handle slash commands ──────────────────────────────────────────────────
-  if (trimmed === '/reset' || trimmed === '/new') {
+  // ── Start fresh ────────────────────────────────────────────────────────────
+  // The chat stays on the key it is already on and keeps every message. Two things
+  // have to happen for a reset to be real: our side stops resuming, and the RUNTIME
+  // stops carrying the conversation. Doing only the first leaves the model answering
+  // from a thread the divider says it has let go of.
+  // See resetConversation.ts for the two designs this replaced.
+  if (isResetCommand(trimmed)) {
+    const divider = await resetConversationContext([sessionKey])
+    useFleetStore.setState((state) => ({
+      agents: state.agents.map((a) =>
+        a.id === agentId ? { ...a, streamingText: null, runId: null } : a,
+      ),
+    }))
+
+    let text = divider ? divider.text : RESET_FAILED_NOTICE
     try {
-      const result = await client.call<{ key: string; agentId: string }>('sessions.create', {
-        agentId,
+      await client.call('chat.send', {
+        sessionKey,
+        message: trimmed,
+        deliver: false,
+        idempotencyKey: generateId(),
       })
-      const newSessionKey = result?.key
-
-      if (newSessionKey) {
-        useChatStore.getState().clearTranscript(sessionKey)
-
-        useFleetStore.setState((state) => ({
-          agents: state.agents.map((a) =>
-            a.id === agentId
-              ? { ...a, sessionKey: newSessionKey, streamingText: null, runId: null }
-              : a,
-          ),
-        }))
-
-        const resetEntry = makeEntry(
-          {
-            kind: 'meta',
-            role: 'system',
-            text: 'Session reset — starting fresh.',
-            sessionKey: newSessionKey,
-          },
-          crypto.randomUUID(),
-          Date.now(),
-        )
-        useChatStore.getState().appendTranscript(newSessionKey, [resetEntry])
-      }
     } catch {
-      // sessions.create may not exist on this Gateway version — clear locally
-      useChatStore.getState().clearTranscript(sessionKey)
-      const noteEntry = makeEntry(
-        {
-          kind: 'meta',
-          role: 'system',
-          text: 'Conversation cleared. (Note: Gateway session was not reset — your Gateway may not support sessions.create.)',
-          sessionKey,
-        },
-        crypto.randomUUID(),
-        Date.now(),
-      )
-      useChatStore.getState().appendTranscript(sessionKey, [noteEntry])
+      // Our side let go but the runtime did not, and the difference shows the moment
+      // it answers from something the divider says it is no longer holding.
+      text =
+        'The chat could not reach your agent, so it may still be carrying the conversation above.'
     }
+    const resetEntry = divider
+      ? { ...divider, text }
+      : makeEntry(
+          { kind: 'meta', role: 'system', text, sessionKey, confirmed: true },
+          generateId(),
+          now(),
+        )
+    useChatStore.getState().appendTranscript(sessionKey, [resetEntry])
     return
   }
 

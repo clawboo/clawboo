@@ -28,9 +28,42 @@ The graph reads your fleet from the agent registry and the capability inventory;
 | Team halos toggle                 | Visible (Atlas-only).                                                                                                   | Hidden, and halos are forced off regardless of the sticky toggle value.                      |
 | Atlas layout pill (Tree / Radial) | Visible.                                                                                                                | Not applicable.                                                                              |
 | Activity dock                     | A right-edge slide-in "all teams" live activity terminal.                                                               | Not present (group chat already narrates the team).                                          |
+| Browser dock                      | A right-edge slide-in view of the page an agent is looking at, with its team's Boos above it to switch between them.    | Present. What an agent is looking at is as much a team question as an Atlas one.             |
 | Toolbar chrome                    | Shown: Atlas is the view's only identity.                                                                               | The panel toolbar is suppressed (`embedded`); the team chat header owns identity and counts. |
 
 The selected team in the sidebar is **preserved** when you enter Atlas, so the two graphs keep independent saved layouts (Atlas positions are global and split by layout mode; team positions are keyed `team-<id>`). Switching scopes never overwrites the other's positions.
+
+## Building on the canvas
+
+Every Boo carries one port on its right edge. Pull a thread out of it and let go.
+
+| Where you let go             | What happens                                 |
+| ---------------------------- | -------------------------------------------- |
+| On another Boo               | Routes the first agent to the second         |
+| On a skill or connector tile | Gives that agent the capability              |
+| On empty canvas              | Opens a picker of what the thread can end in |
+
+The picker asks what kind of thing you want first: **Connectors**, **Skills**, or **New agent**. Pick one and it shows that list, ordered so the entries you can finish in a single click come first. The back arrow, Escape, or backspacing to an empty box all return to the choice.
+
+If you already know the name, just type. Searching from the first screen looks across every kind at once and skips the second step, and the last row offers to create an agent named after whatever you typed. A new Boo lands in the same team as the one you pulled from, already routed to it.
+
+A connector that needs a key or a folder is listed but greyed, with the reason. Those are set up in [Connectors](/using/connectors), because a credential is a form and not a canvas gesture.
+
+Each Boo shows what it carries under its name: `3 skills · 2 connectors · 1 route`. Clicking the Boo opens that ring.
+
+### Taking something back
+
+Click an edge to open its panel, then **Remove Connection**. Or select an edge and press Backspace or Delete, which works anywhere except while you are typing in a field. Routes, skills and shares all come off the same way, and a share carries an eight-second Undo.
+
+Backspace removes the selected **edge** only. It never deletes an agent: that stays on the right-click menu, which asks the server rather than only removing the node from your screen.
+
+Some edges refuse, and say why: a runtime built-in came with the agent, and the model tile is part of the Boo rather than something added to it.
+
+### What is not here
+
+Creating a team, adding a custom MCP server, entering a credential, choosing a folder, and editing a personality are not on the canvas. Each needs more than a name or a pick, and a canvas button that opens another window is worse than no button. They live in the Marketplace, Connectors, and the agent's own view.
+
+An agent's runtime cannot be changed after it is created, anywhere.
 
 ## The canvas
 
@@ -52,23 +85,47 @@ flowchart TD
   B -.->|resource| R1
 ```
 
-- **Boo nodes** (red dots / cards) are your agents. The leader-rooted spanning tree from `AGENTS.md` routing rules drives the org-chart hierarchy: ELK lays out Boos and the primary dependency edges; secondary routes are revealed only on hover.
-- **Dependency edges** (red, with arrowheads) are agent-to-agent routing: "this agent routes work to the target." Each one is a line in the source agent's `AGENTS.md`.
-- **Skill nodes** (mint circles) and **resource nodes** (amber cards) are each Boo's capabilities, drawn as orbitals around their parent. They are hidden by default and revealed by [expanding a Boo](#expand-a-boos-skills-peacock). An agent that has no per-agent capabilities of its own (Codex, OpenClaw, a not-yet-run Hermes agent) shows its runtime's shared capabilities instead, so every agent surfaces its attached MCP and built-ins.
-- **Grant edges** connect a Boo to a [connector](/using/connectors) somebody deliberately shared with it. Drag a connector tile onto a second Boo to share it, and use **Detach** on the edge to revoke, which leaves an 8-second Undo. Only a deliberate share draws an edge: a connector a Boo's own runtime already attaches is authorized too, but the tile itself is that statement, so drawing it again would be noise. The edge's state is not a second reading of a status column; it is the verdict the tool broker would return for that pair right now, so a grant that has expired or [drifted](/appendices/glossary) renders as expired or drifted because that is what a call would actually do.
+- **Boo nodes** (red dots) are your agents. The leader-rooted spanning tree from `AGENTS.md` routing rules drives the org-chart hierarchy: ELK lays out Boos and the primary dependency edges; secondary routes are revealed only on hover.
+- **Dependency edges** (red, with arrowheads) are agent-to-agent routing: "this agent routes work to the target." Each one is a line in the source agent's `AGENTS.md`, and the `N routes` count under a Boo's name counts exactly those: the routes a person authored, never the invisible backbone Atlas adds to lay teams out.
+- **Skill nodes** (mint circles) and **connector nodes** (violet circles) are each Boo's capabilities, drawn as orbitals around their parent. They are hidden by default and revealed by [expanding a Boo](#expand-a-boos-skills-peacock). A Boo draws its own per-agent capabilities AND its runtime's shared ones together, so an agent that has picked up a skill of its own keeps the built-ins it already had. An agent with none of its own (Codex, OpenClaw, a not-yet-run Hermes agent) therefore shows exactly its runtime's shared capabilities, so every agent surfaces its attached MCP and built-ins.
+- **Grant edges** connect a Boo to a [connector](/using/connectors) somebody deliberately shared with it. Drag a connector tile onto a second Boo to share it, and use **Stop sharing** on the edge to revoke, which leaves an 8-second Undo. That is distinct from **Turn off**, which stops the connector itself rather than one agent's access to it. Only a deliberate share draws an edge: a connector a Boo's own runtime already attaches is authorized too, but the tile itself is that statement, so drawing it again would be noise. The edge's state is not a second reading of a status column; it is the verdict the tool broker would return for that pair right now, so a grant that has expired or [drifted](/appendices/glossary) renders as expired or drifted because that is what a call would actually do.
 - **Runtime badge + model orbital.** Every Boo carries a small **runtime brand chip** on its avatar, so you can tell Native, OpenClaw, Claude Code, Codex, and Hermes apart at a glance. Expanding a Boo also pops out a **model orbital**, the provider logo plus the LLM it runs on. Every Boo has one: an account/SDK-default runtime (Codex, Claude Code) shows a neutral "default" chip rather than a specific model, and an OpenClaw agent shows its Gateway default model.
 
-### Dual-shape Boo nodes (idle circle / active card)
+### The Boo and its thought bubble
 
-A Boo renders in one of two shapes, and morphs between them with a CSS size-and-shape transition:
+A Boo is always a **circle**: a degree-aware disc (bigger if it has more edges) with the avatar
+filling it, and the name, a status dot and a "seen Xm ago" timestamp stacked below. It stays a
+circle while it works. It used to morph into a card, which cost the mascot its identity at the
+moment it was most interesting, shrinking the character to a corner icon to make room for a single
+line of text.
 
-- **Idle** (`status !== 'running'`): a degree-aware **circle** (bigger if it has more edges), avatar filling the disc, with the name, a status dot, and a "seen Xm ago" timestamp stacked below it. This is the relaxed org-chart reading: agents waiting in a room.
-- **Active** (`status === 'running'`): a **card** (280×170) in three bands: a header (avatar + name + status pill), a **live activity feed** in the middle, and a reserved footer. The card morphs in when the agent starts working, so the canvas reads as a live control room when things are happening.
+That line now lives in a **thought bubble** above the Boo's right shoulder, sized to its own
+contents, with two trailing puffs leading up from the mascot. The bubble appears while an agent is
+**running**, and stays up when it **errors**, so the reason a run failed remains on screen.
 
-The middle band of the active card is a real-time feed. It shows, in priority order, the agent's **in-flight streaming text**, then its **most recent assistant message**, then its **most recent tool call** (formatted `[[tool: <label>]]`). Thinking, meta, and user lines are skipped; the feed shows what the agent is _doing_, not its reasoning or your prompt. While running with no signal yet, it shows a typing indicator.
+What the bubble says, in priority order: the agent's **in-flight streaming text**, then its **most
+recent assistant message**, then its **reasoning**, then its **most recent tool call**, rendered as
+"Using `<tool>`". A task running on the board has no chat session, so its line comes from the event
+stream instead and is already phrased for a reader. With nothing to report yet it says _thinking_,
+because a reasoning model can think for a long time before its first tool call and a bubble that
+stayed hidden through the longest part of a run made the canvas look dead.
+
+Reasoning IS shown. It was previously withheld as private, which left the bubble empty for exactly
+the stretch where the honest answer to "what is it doing" is the thinking itself. It is
+model-written text, so it is displayed and never acted on, and clamped to two lines.
+
+Three dots pulse in the bubble for as long as the run lasts, and collapse to one solid dot on an
+error. That pulse is the only looping animation on the node: it carries the one claim that decays
+if it stops moving, which is that this agent is working right now. A frozen line cannot tell a busy
+agent from a hung one. Every other change in the bubble is a real event, and a new line tickers up
+as the old one leaves.
+
+Beneath the name, the status dot and its verb stand down while the bubble is up, because the bubble
+is already saying what the agent is doing in more detail than one word can. The **ring counts** stay
+put: they are the node's only advertisement that the orbital ring exists.
 
 <Tip>
-Status drives the glow: a running Boo pulses mint, an error Boo glows orange, a sleeping Boo dims. The status dot and label (`idle` / `active` / `error` / `sleeping`) appear under idle circles and in the active card's header pill.
+Status drives the glow, and the glow traces the mascot's own outline rather than sitting behind it: elevation and status are `drop-shadow` filters computed from the artwork's alpha, so they follow the wavy skirt and the arms instead of painting a disc around a character that is not round. A running Boo pulses mint and an error Boo glows red. A sleeping Boo does NOT glow, because a glow adds light and could only make a dormant agent more prominent than a working one; it desaturates instead. The status dot matches, and error and sleeping are deliberately different marks: an error is red because it wants you, a sleeping Boo is the same quiet neutral as idle because it does not.
 </Tip>
 
 ### Hover to focus a cluster
@@ -79,15 +136,19 @@ Hovering a node highlights its connected nodes and edges and dims everything els
 
 ### Expand a Boo's skills (peacock)
 
-By default the canvas shows only Boos and dependency edges; skill and resource orbitals are mounted but hidden, keeping the view focused on team topology.
+By default the canvas shows only Boos and dependency edges; skill and connector orbitals are mounted but hidden, keeping the view focused on team topology.
 
 1. **Single-click a Boo.** Its orbital children fan out from behind it with a staggered "peacock-feather" animation (`expandedBooNodeIds` gains the Boo's node id).
 2. **Single-click it again** to collapse them.
 
 Multiple Boos can be expanded at once; each toggles independently. The camera re-fits to frame only the Boos plus any currently-expanded orbitals, so expanding doesn't shrink your Boos to make room for invisible rings.
 
+**A focused view draws every capability.** In the per-team graph and the agent detail view, the ring grows its radius to fit however many a Boo has, so an agent on a large MCP server reporting forty shows forty. Nothing is rolled into a "+N more" tile.
+
+**Atlas keeps a ceiling.** The all-teams view pays for tiles in node count across every agent at once, which no amount of radius fixes, so it draws at most 24 per Boo and accounts for the rest in one overflow tile. Open the Boo's own view to see all of them.
+
 <Note>
-The MiniMap matches: collapsed skill/resource dots render transparent there, so at rest the MiniMap shows only the Boo dots; expand a Boo and its mint (skill) / amber (resource) dots appear in sync with the canvas.
+The MiniMap matches: collapsed skill/connector dots render transparent there, so at rest the MiniMap shows only the Boo dots; expand a Boo and its mint (skill) / violet (connector) dots appear in sync with the canvas. Boo dots carry their **status** colour, so the one view you use when zoomed too far out to read a node still tells you which agents are working and which have failed.
 </Note>
 
 ### Install a skill onto a Boo
@@ -162,6 +223,10 @@ Your choice persists in `localStorage` (`clawboo.atlas.layout`). Each mode keeps
 
 Click **Team halos** (Atlas-only, Pin icon) to draw a colored convex-hull background behind each team's Boos, a visual grouping for the Skills → Agents → Teams hierarchy. It is a pure overlay: it never touches the node tree, physics, or ELK layout. Single-agent teams render no halo (the Boo's team badge is enough); the toggle is off by default.
 
+### Team status pills
+
+Each team also carries small floating pills reading **"4 idle"**, **"2 working"** and so on. Each pill counts **one status**, not the team: a team of six with four resting and two running draws two pills, and adding them together is what gives you the team size. A dot that needs your attention pulses, so a team with three errors is as loud as a team with one agent working.
+
 ### Activity dock
 
 Click the **Activity** button (Atlas-only, Terminal icon; it is icon-only, so its tooltip reads **Activity feed (all teams)**, and **Hide activity feed** while open) to slide in a right-edge live-activity terminal scoped to all teams, the "what is every team doing right now" feed, sourced from the orchestration event log. The dock is always mounted (so it animates both ways) but only tails events while open.
@@ -197,5 +262,5 @@ The MiniMap (bottom-right overview) is **hidden by default** to give Boos more c
 - [Using agents](/using/agents), edit `SOUL` / `IDENTITY` / `TOOLS` / `AGENTS`, personality sliders
 - [Using group chat](/using/group-chat), where the per-team Ghost Graph is embedded
 - [The board](/concepts/the-board), the durable task board the orchestration runs on
-- [Capabilities dashboard](/using/capabilities-dashboard), the full capability inventory that drives skill/resource nodes
-- [Observability dashboard](/using/observability-dashboard), the event log behind the Atlas activity dock and live Boo cards
+- [Capabilities dashboard](/using/capabilities-dashboard), the full capability inventory that drives the skill and connector nodes
+- [Observability dashboard](/using/observability-dashboard), the event log behind the Atlas activity dock and the live Boo bubbles

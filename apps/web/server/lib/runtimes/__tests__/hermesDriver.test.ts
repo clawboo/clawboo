@@ -178,7 +178,10 @@ describe('hermes driver (preserved runtime)', () => {
     expect(json.mcpServers['clawboo-tasks']?.url).toContain('scopeTeamId=team-A')
     expect(json.mcpServers['clawboo-tasks']?.url).toContain('scopeAgentId=agent-1')
     // Tools stays bare.
-    expect(json.mcpServers['clawboo-tools']?.url).not.toContain('scopeTeamId')
+    // Tools carries the run scope now. A connector tool is governed per agent,
+    // so an attach with no identity could match no agent-scoped grant and every
+    // connector call from a spawned runtime would be denied.
+    expect(json.mcpServers['clawboo-tools']?.url).toContain('scopeTeamId=team-A')
     // TeamChat carries the room + AUTHOR binding (anti-spoof), not the scope params.
     expect(json.mcpServers['clawboo-teamchat']?.url).toContain('roomTeamId=team-A')
     expect(json.mcpServers['clawboo-teamchat']?.url).toContain('postAuthorAgentId=agent-1')

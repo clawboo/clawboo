@@ -1,0 +1,10 @@
+{
+  "id": "home-morning-brief",
+  "routing": {
+    "home-brief-day-shaper": "# AGENTS\n\nWhen the day's shape is ready:\n  @Brief Editor, please take the ordered list with the fixed points marked.\nWhen a commitment needs something that has not been done:\n  @Loose Ends Tracker, please tell me whether that preparation is still outstanding.",
+    "home-brief-editor": "# AGENTS\n\nWhen an overnight change needs its source checked:\n  @Signal Scout, please confirm the source and the time this changed.\nWhen the day's commitments are unclear:\n  @Day Shaper, please give me the ordered list with the fixed points marked.\nWhen something from an earlier brief has not moved:\n  @Loose Ends Tracker, please tell me whether this is still owed and by whom.",
+    "home-brief-loose-ends": "# AGENTS\n\nWhen an overdue item needs to be in front of the reader:\n  @Brief Editor, please include this one, with its age noted.\nWhen a commitment depends on something in today's calendar:\n  @Day Shaper, please tell me whether today makes this possible.",
+    "home-brief-signal-scout": "# AGENTS\n\nWhen a change is confirmed and dated:\n  @Brief Editor, please decide whether this belongs in today's brief.\nWhen a change affects something already promised:\n  @Loose Ends Tracker, please check whether this closes an outstanding item."
+  },
+  "workflowNarrative": "Three members gather in parallel and one decides. The Signal Scout sweeps the connected sources for what actually changed since the last brief. The Day Shaper reads the calendar and turns the day into an ordered list with the fixed points and the real gaps marked. The Loose Ends Tracker works against yesterday's brief, surfacing what was promised and has not moved.\n\nThe Brief Editor is the entry point and the merge step. Overlaps get resolved into one line, repeats from yesterday get cut unless something changed, and the page is ordered by what needs a decision today rather than by what is newest.\n\nThe team reports and stops. It sends nothing, replies to nobody, and moves nothing on the calendar. A quiet night produces a short brief, which is the point."
+}

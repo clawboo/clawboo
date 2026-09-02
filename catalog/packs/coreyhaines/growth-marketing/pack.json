@@ -1,0 +1,777 @@
+{
+  "agents": [
+    {
+      "body": "agents/conversion-optimizer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Audits a marketing page against value clarity, hierarchy, proof and friction, then returns ranked fixes and test ideas.",
+      "emoji": "🎯",
+      "id": "growth-conversion-optimizer",
+      "name": "Conversion Optimizer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Conversion Optimizer",
+      "skillIds": [
+        "landing-page-audit",
+        "funnel-analysis",
+        "web-scraper",
+        "web-search",
+        "file-writer"
+      ],
+      "slug": "conversion-optimizer",
+      "tags": ["cro", "landing-page", "conversion", "audit"]
+    },
+    {
+      "body": "agents/signup-designer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Rebuilds registration and trial signup flows to cut friction, raise completion, and hand users to onboarding ready to act.",
+      "emoji": "📝",
+      "id": "growth-signup-designer",
+      "name": "Signup Flow Designer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Signup Flow Designer",
+      "skillIds": [
+        "funnel-analysis",
+        "landing-page-audit",
+        "ab-test-design",
+        "file-writer",
+        "note-taker"
+      ],
+      "slug": "signup-designer",
+      "tags": ["signup", "registration", "friction", "trial"]
+    },
+    {
+      "body": "agents/activation-designer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Defines the activation moment and designs the first session, checklists and empty states that get new users to it fast.",
+      "emoji": "🌱",
+      "id": "growth-activation-designer",
+      "name": "Activation Designer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Activation Designer",
+      "skillIds": [
+        "funnel-analysis",
+        "cohort-retention",
+        "lifecycle-messaging",
+        "file-writer",
+        "note-taker"
+      ],
+      "slug": "activation-designer",
+      "tags": ["onboarding", "activation", "first-run", "time-to-value"]
+    },
+    {
+      "body": "agents/retention-strategist.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Builds cancel flows, save offers, health scoring and payment recovery so voluntary and involuntary churn both come down.",
+      "emoji": "🔁",
+      "id": "growth-retention-strategist",
+      "name": "Retention Strategist",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Retention Strategist",
+      "skillIds": [
+        "cohort-retention",
+        "funnel-analysis",
+        "lifecycle-messaging",
+        "csv-analyzer",
+        "file-writer"
+      ],
+      "slug": "retention-strategist",
+      "tags": ["churn", "retention", "cancel-flow", "dunning"]
+    },
+    {
+      "body": "agents/referral-designer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Designs referral and affiliate programmes: trigger moments, share mechanics, incentive structure, fraud rules and payout economics.",
+      "emoji": "🤝",
+      "id": "growth-referral-designer",
+      "name": "Referral Program Designer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Referral Program Designer",
+      "skillIds": [
+        "funnel-analysis",
+        "offer-framing",
+        "lifecycle-messaging",
+        "csv-analyzer",
+        "file-writer"
+      ],
+      "slug": "referral-designer",
+      "tags": ["referral", "affiliate", "word-of-mouth", "incentives"]
+    },
+    {
+      "body": "agents/offer-architect.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Rebuilds the thing being sold: deliverable, bonuses, guarantee, real scarcity, name and payment structure, before any copy is written.",
+      "emoji": "🎁",
+      "id": "growth-offer-architect",
+      "name": "Offer Architect",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Offer Architect",
+      "skillIds": ["offer-framing", "pricing-model", "brainstorming", "file-writer", "note-taker"],
+      "slug": "offer-architect",
+      "tags": ["offer", "guarantee", "value", "packaging"]
+    },
+    {
+      "body": "agents/pricing-strategist.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Sets the value metric, tier structure and price point, runs willingness-to-pay research, and sequences price increases safely.",
+      "emoji": "💰",
+      "id": "growth-pricing-strategist",
+      "name": "Pricing Strategist",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Pricing Strategist",
+      "skillIds": [
+        "pricing-model",
+        "ab-test-design",
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "file-writer"
+      ],
+      "slug": "pricing-strategist",
+      "tags": ["pricing", "packaging", "value-metric", "price-increase"]
+    },
+    {
+      "body": "agents/onsite-offer-designer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Designs in-product upgrade prompts, feature gates, popups and banners that convert at the right moment without eroding trust.",
+      "emoji": "🖥",
+      "id": "growth-onsite-offer-designer",
+      "name": "Onsite Offer Designer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Onsite Offer Designer",
+      "skillIds": [
+        "offer-framing",
+        "ab-test-design",
+        "landing-page-audit",
+        "file-writer",
+        "note-taker"
+      ],
+      "slug": "onsite-offer-designer",
+      "tags": ["paywall", "popup", "upgrade", "in-product"]
+    },
+    {
+      "body": "agents/lead-magnet-builder.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Picks, scopes and distributes the free asset or tool that earns an email address and leads naturally toward the product.",
+      "emoji": "🧲",
+      "id": "growth-lead-magnet-builder",
+      "name": "Lead Magnet Builder",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Lead Magnet Builder",
+      "skillIds": [
+        "brainstorming",
+        "landing-page-audit",
+        "file-writer",
+        "web-search",
+        "summarizer"
+      ],
+      "slug": "lead-magnet-builder",
+      "tags": ["lead-magnet", "gated-content", "free-tool", "lead-gen"]
+    },
+    {
+      "body": "agents/cold-email-writer.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Writes cold outreach that reads like a peer noticed something, plus the follow-up sequence and the breakup message that closes it.",
+      "emoji": "📧",
+      "id": "growth-cold-email-writer",
+      "name": "Cold Email Writer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Cold Email Writer",
+      "skillIds": [
+        "cold-email-sequencing",
+        "copy-editing",
+        "email-draft",
+        "file-writer",
+        "web-search"
+      ],
+      "slug": "cold-email-writer",
+      "tags": ["cold-email", "outbound", "sequences", "copy"]
+    },
+    {
+      "body": "agents/prospecting-lead.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Builds and qualifies target lists from public sources, scores them by fit and buying signal, and keeps the sourcing compliant.",
+      "emoji": "🔍",
+      "id": "growth-prospecting-lead",
+      "name": "Prospecting Lead",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Prospecting Lead",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "file-writer"
+      ],
+      "slug": "prospecting-lead",
+      "tags": ["prospecting", "icp", "lead-list", "qualification"]
+    },
+    {
+      "body": "agents/lifecycle-email-strategist.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Designs welcome, nurture, re-engagement and post-purchase sequences where each message has one job and one next step.",
+      "emoji": "✉️",
+      "id": "growth-lifecycle-email-strategist",
+      "name": "Lifecycle Email Strategist",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Lifecycle Email Strategist",
+      "skillIds": [
+        "lifecycle-messaging",
+        "copy-editing",
+        "email-draft",
+        "file-writer",
+        "funnel-analysis"
+      ],
+      "slug": "lifecycle-email-strategist",
+      "tags": ["email", "sequences", "lifecycle", "nurture"]
+    },
+    {
+      "body": "agents/sms-campaign-manager.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Plans compliant SMS programmes: consent capture, number type, cart and post-purchase flows, quiet hours and cost per send.",
+      "emoji": "📱",
+      "id": "growth-sms-campaign-manager",
+      "name": "SMS Campaign Manager",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "SMS Campaign Manager",
+      "skillIds": [
+        "lifecycle-messaging",
+        "copy-editing",
+        "notification-sender",
+        "file-writer",
+        "csv-analyzer"
+      ],
+      "slug": "sms-campaign-manager",
+      "tags": ["sms", "compliance", "messaging", "ecommerce"]
+    },
+    {
+      "body": "agents/launch-manager.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Runs a release from readiness check through internal, alpha, beta and public phases, sequencing channels so momentum compounds.",
+      "emoji": "🚀",
+      "id": "growth-launch-manager",
+      "name": "Launch Manager",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Launch Manager",
+      "skillIds": [
+        "plan-writing",
+        "plan-execution",
+        "calendar-manager",
+        "file-writer",
+        "brainstorming"
+      ],
+      "slug": "launch-manager",
+      "tags": ["launch", "go-to-market", "release", "waitlist"]
+    },
+    {
+      "body": "agents/pr-lead.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Finds the story worth telling, builds the media list, pitches journalists in under 150 words and runs the press page.",
+      "emoji": "📰",
+      "id": "growth-pr-lead",
+      "name": "Public Relations Lead",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Public Relations Lead",
+      "skillIds": ["web-search", "summarizer", "email-draft", "file-writer", "note-taker"],
+      "slug": "pr-lead",
+      "tags": ["pr", "earned-media", "press", "pitching"]
+    },
+    {
+      "body": "agents/community-builder.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Starts and grows a member community around a shared identity, with rituals, a new member path and an advocate programme.",
+      "emoji": "👥",
+      "id": "growth-community-builder",
+      "name": "Community Builder",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Community Builder",
+      "skillIds": ["brainstorming", "note-taker", "summarizer", "file-writer", "calendar-manager"],
+      "slug": "community-builder",
+      "tags": ["community", "advocates", "engagement", "retention"]
+    },
+    {
+      "body": "agents/partnerships-events-lead.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Finds partners with overlapping audiences, structures joint campaigns, and runs webinars, dinners and sponsorships for pipeline.",
+      "emoji": "🤝",
+      "id": "growth-partnerships-events-lead",
+      "name": "Partnerships and Events Lead",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Partnerships and Events Lead",
+      "skillIds": [
+        "web-search",
+        "calendar-manager",
+        "plan-writing",
+        "file-writer",
+        "meeting-notes"
+      ],
+      "slug": "partnerships-events-lead",
+      "tags": ["partnerships", "co-marketing", "events", "webinars"]
+    },
+    {
+      "body": "agents/influencer-program-manager.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Finds and vets creators by audience fit, structures deals with usage rights, briefs without scripting, and enforces disclosure.",
+      "emoji": "🌟",
+      "id": "growth-influencer-program-manager",
+      "name": "Influencer Program Manager",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Influencer Program Manager",
+      "skillIds": ["web-search", "trend-analyzer", "file-writer", "email-draft", "csv-analyzer"],
+      "slug": "influencer-program-manager",
+      "tags": ["influencer", "creators", "sponsorship", "disclosure"]
+    },
+    {
+      "body": "agents/customer-insight-researcher.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Mines transcripts, tickets, reviews and surveys for the pains, triggers and exact customer language that marketing copy needs.",
+      "emoji": "🔎",
+      "id": "growth-customer-insight-researcher",
+      "name": "Customer Insight Researcher",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Customer Insight Researcher",
+      "skillIds": ["summarizer", "note-taker", "csv-analyzer", "web-search", "file-writer"],
+      "slug": "customer-insight-researcher",
+      "tags": ["customer-research", "voice-of-customer", "interviews", "synthesis"]
+    },
+    {
+      "body": "agents/competitor-analyst.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Profiles competitors from public sources and turns the findings into honest comparison pages and sales battle cards.",
+      "emoji": "🗺",
+      "id": "growth-competitor-analyst",
+      "name": "Competitor Teardown Analyst",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Competitor Teardown Analyst",
+      "skillIds": ["web-search", "web-scraper", "summarizer", "file-writer", "markdown-renderer"],
+      "slug": "competitor-analyst",
+      "tags": ["competitors", "comparison", "battle-card", "positioning"]
+    },
+    {
+      "body": "agents/attribution-analyst.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Builds the tracking plan, chooses attribution models honestly and reconciles the conflicting numbers different tools report.",
+      "emoji": "📊",
+      "id": "growth-attribution-analyst",
+      "name": "Attribution Analyst",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Attribution Analyst",
+      "skillIds": [
+        "funnel-analysis",
+        "csv-analyzer",
+        "data-visualizer",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "attribution-analyst",
+      "tags": ["attribution", "analytics", "tracking", "measurement"]
+    },
+    {
+      "body": "agents/growth-experiment-designer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Turns ideas into testable hypotheses, sizes the sample honestly and runs an experiment backlog that produces decisions.",
+      "emoji": "🧪",
+      "id": "growth-growth-experiment-designer",
+      "name": "Growth Experiment Designer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Growth Experiment Designer",
+      "skillIds": [
+        "ab-test-design",
+        "funnel-analysis",
+        "data-visualizer",
+        "csv-analyzer",
+        "file-writer"
+      ],
+      "slug": "growth-experiment-designer",
+      "tags": ["experiments", "ab-testing", "hypothesis", "statistics"]
+    },
+    {
+      "body": "agents/growth-loop-designer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Turns recurring marketing work into scheduled loops with an action condition, a self-check, a memory and a stop rule.",
+      "emoji": "🔄",
+      "id": "growth-growth-loop-designer",
+      "name": "Growth Loop Designer",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Growth Loop Designer",
+      "skillIds": [
+        "plan-writing",
+        "plan-execution",
+        "playbook-routing",
+        "calendar-manager",
+        "file-writer"
+      ],
+      "slug": "growth-loop-designer",
+      "tags": ["automation", "recurring", "operations", "loops"]
+    },
+    {
+      "body": "agents/marketing-planner.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Audits current state, then writes a staged marketing plan across acquisition, activation, retention, referral and revenue.",
+      "emoji": "🗂",
+      "id": "growth-marketing-planner",
+      "name": "Marketing Planner",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Marketing Planner",
+      "skillIds": [
+        "plan-writing",
+        "brainstorming",
+        "summarizer",
+        "file-writer",
+        "spreadsheet-reader"
+      ],
+      "slug": "marketing-planner",
+      "tags": ["planning", "strategy", "roadmap", "prioritisation"]
+    },
+    {
+      "body": "agents/marketing-psychologist.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Applies decision science to messaging, pricing and funnels, and marks the line between an ethical nudge and a trick.",
+      "emoji": "🧠",
+      "id": "growth-marketing-psychologist",
+      "name": "Marketing Psychologist",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Marketing Psychologist",
+      "skillIds": [
+        "brainstorming",
+        "summarizer",
+        "note-taker",
+        "file-writer",
+        "landing-page-audit"
+      ],
+      "slug": "marketing-psychologist",
+      "tags": ["psychology", "behavioural", "persuasion", "framing"]
+    },
+    {
+      "body": "agents/revenue-operations-lead.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Defines lead lifecycle stages, scoring, routing and handoff service levels, and equips sellers with the collateral they trust.",
+      "emoji": "🔗",
+      "id": "growth-revenue-operations-lead",
+      "name": "Revenue Operations Lead",
+      "packId": "coreyhaines-growth-marketing",
+      "role": "Revenue Operations Lead",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "sql-query",
+        "file-writer",
+        "plan-writing"
+      ],
+      "slug": "revenue-operations-lead",
+      "tags": ["revops", "lead-scoring", "handoff", "enablement"]
+    }
+  ],
+  "counts": {
+    "agents": 26,
+    "skills": 9,
+    "teams": 5
+  },
+  "description": "Twenty-six demand and revenue specialists for small teams and solo founders, and five teams built from them, covering conversion, activation, retention, offers and pricing, outbound, launches, partnerships, research and measurement. Adapted from an MIT-licensed upstream collection of marketing skills: units were selected, merged, re-scoped and rewritten into the Clawboo document set, and the teams and routing are original.",
+  "id": "coreyhaines-growth-marketing",
+  "idPrefix": "growth",
+  "name": "Growth Marketing",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Corey Haines"],
+    "color": "#EC4899",
+    "importedAt": "2026-08-27T00:00:00.000Z",
+    "label": "Growth Marketing",
+    "license": "MIT",
+    "ref": "b1aaa3619e747f4a836c61e03084c4a531de1262",
+    "repo": "https://github.com/coreyhaines31/marketingskills",
+    "sourceId": "coreyhaines-growth-marketing"
+  },
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "id": "ab-test-design",
+      "name": "A/B Test Design",
+      "description": "Turns a proposal into a hypothesis, picks primary and guardrail metrics, and sizes the sample before the test starts.",
+      "category": "data",
+      "tags": ["experiment", "statistics", "growth"]
+    },
+    {
+      "id": "funnel-analysis",
+      "name": "Funnel Analysis",
+      "description": "Breaks a conversion path into steps and locates where people drop out, segmented by source, device and cohort.",
+      "category": "data",
+      "tags": ["conversion", "analytics", "drop-off"]
+    },
+    {
+      "id": "cohort-retention",
+      "name": "Cohort Retention",
+      "description": "Groups customers by join period and tracks how many stay, so retention changes are visible instead of averaged away.",
+      "category": "data",
+      "tags": ["retention", "churn", "cohort"]
+    },
+    {
+      "id": "copy-editing",
+      "name": "Copy Editing",
+      "description": "Runs focused passes over existing copy for clarity, voice, concision and accuracy without rewriting the message.",
+      "category": "comm",
+      "tags": ["editing", "clarity", "voice"]
+    },
+    {
+      "id": "cold-email-sequencing",
+      "name": "Cold Email Sequencing",
+      "description": "Structures a multi-touch outbound sequence with a distinct angle per message and a breakup that closes the thread.",
+      "category": "comm",
+      "tags": ["outbound", "sequence", "deliverability"]
+    },
+    {
+      "id": "offer-framing",
+      "name": "Offer Framing",
+      "description": "Frames a deliverable, guarantee and payment structure around the outcome the buyer wants and the risk they fear.",
+      "category": "comm",
+      "tags": ["offer", "guarantee", "value"]
+    },
+    {
+      "id": "landing-page-audit",
+      "name": "Landing Page Audit",
+      "description": "Scores a page on value clarity, hierarchy, proof, objections and friction, and ranks the fixes by expected impact.",
+      "category": "web",
+      "tags": ["cro", "audit", "page"]
+    },
+    {
+      "id": "pricing-model",
+      "name": "Pricing Model",
+      "description": "Builds a value metric, tier structure and price point from willingness to pay rather than from cost to serve.",
+      "category": "other",
+      "tags": ["pricing", "packaging", "tiers"]
+    },
+    {
+      "id": "lifecycle-messaging",
+      "name": "Lifecycle Messaging",
+      "description": "Maps triggered messages across the customer journey so each one has a single job and a single next step.",
+      "category": "comm",
+      "tags": ["onboarding", "email", "sms"]
+    }
+  ],
+  "teams": [
+    {
+      "body": "teams/conversion-sprint.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Takes one underperforming page or upgrade moment and works it end to end: diagnosis, framing, test design and honest measurement.",
+      "emoji": "🎯",
+      "id": "growth-conversion-sprint",
+      "members": [
+        {
+          "agentId": "growth-conversion-optimizer",
+          "name": "Conversion Optimizer",
+          "role": "Conversion Optimizer"
+        },
+        {
+          "agentId": "growth-onsite-offer-designer",
+          "name": "Onsite Offer Designer",
+          "role": "Onsite Offer Designer"
+        },
+        {
+          "agentId": "growth-marketing-psychologist",
+          "name": "Marketing Psychologist",
+          "role": "Marketing Psychologist"
+        },
+        {
+          "agentId": "growth-growth-experiment-designer",
+          "name": "Growth Experiment Designer",
+          "role": "Growth Experiment Designer"
+        },
+        {
+          "agentId": "growth-attribution-analyst",
+          "name": "Attribution Analyst",
+          "role": "Attribution Analyst"
+        }
+      ],
+      "name": "Conversion Sprint",
+      "packId": "coreyhaines-growth-marketing",
+      "slug": "conversion-sprint",
+      "tags": ["cro", "experiments", "conversion", "pages"]
+    },
+    {
+      "body": "teams/activation-retention-loop.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Owns the whole path from signup through first value to renewal, closing the leaks between registration, onboarding and lifecycle messaging.",
+      "emoji": "🔁",
+      "id": "growth-activation-retention-loop",
+      "members": [
+        {
+          "agentId": "growth-signup-designer",
+          "name": "Signup Flow Designer",
+          "role": "Signup Flow Designer"
+        },
+        {
+          "agentId": "growth-activation-designer",
+          "name": "Activation Designer",
+          "role": "Activation Designer"
+        },
+        {
+          "agentId": "growth-retention-strategist",
+          "name": "Retention Strategist",
+          "role": "Retention Strategist"
+        },
+        {
+          "agentId": "growth-lifecycle-email-strategist",
+          "name": "Lifecycle Email Strategist",
+          "role": "Lifecycle Email Strategist"
+        },
+        {
+          "agentId": "growth-sms-campaign-manager",
+          "name": "SMS Campaign Manager",
+          "role": "SMS Campaign Manager"
+        },
+        {
+          "agentId": "growth-referral-designer",
+          "name": "Referral Program Designer",
+          "role": "Referral Program Designer"
+        }
+      ],
+      "name": "Activation and Retention Loop",
+      "packId": "coreyhaines-growth-marketing",
+      "slug": "activation-retention-loop",
+      "tags": ["activation", "retention", "onboarding", "lifecycle"]
+    },
+    {
+      "body": "teams/outbound-pipeline-desk.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Builds the target list, writes the outreach against it, captures inbound interest and keeps the handoff to sales instrumented.",
+      "emoji": "📤",
+      "id": "growth-outbound-pipeline-desk",
+      "members": [
+        {
+          "agentId": "growth-prospecting-lead",
+          "name": "Prospecting Lead",
+          "role": "Prospecting Lead"
+        },
+        {
+          "agentId": "growth-cold-email-writer",
+          "name": "Cold Email Writer",
+          "role": "Cold Email Writer"
+        },
+        {
+          "agentId": "growth-lead-magnet-builder",
+          "name": "Lead Magnet Builder",
+          "role": "Lead Magnet Builder"
+        },
+        {
+          "agentId": "growth-revenue-operations-lead",
+          "name": "Revenue Operations Lead",
+          "role": "Revenue Operations Lead"
+        }
+      ],
+      "name": "Outbound Pipeline Desk",
+      "packId": "coreyhaines-growth-marketing",
+      "slug": "outbound-pipeline-desk",
+      "tags": ["outbound", "prospecting", "pipeline", "lead-gen"]
+    },
+    {
+      "body": "teams/launch-room.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Runs a public moment across owned, borrowed and earned surfaces, with one owner per channel and a follow-through plan.",
+      "emoji": "🚀",
+      "id": "growth-launch-room",
+      "members": [
+        {
+          "agentId": "growth-launch-manager",
+          "name": "Launch Manager",
+          "role": "Launch Manager"
+        },
+        {
+          "agentId": "growth-pr-lead",
+          "name": "Public Relations Lead",
+          "role": "Public Relations Lead"
+        },
+        {
+          "agentId": "growth-partnerships-events-lead",
+          "name": "Partnerships and Events Lead",
+          "role": "Partnerships and Events Lead"
+        },
+        {
+          "agentId": "growth-influencer-program-manager",
+          "name": "Influencer Program Manager",
+          "role": "Influencer Program Manager"
+        },
+        {
+          "agentId": "growth-community-builder",
+          "name": "Community Builder",
+          "role": "Community Builder"
+        }
+      ],
+      "name": "Launch Room",
+      "packId": "coreyhaines-growth-marketing",
+      "slug": "launch-room",
+      "tags": ["launch", "pr", "partnerships", "community"]
+    },
+    {
+      "body": "teams/marketing-plan-council.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Sets direction for a quarter: audits the current state, grounds it in customer and competitor evidence, then commits to a small number of bets.",
+      "emoji": "🗂",
+      "id": "growth-marketing-plan-council",
+      "members": [
+        {
+          "agentId": "growth-marketing-planner",
+          "name": "Marketing Planner",
+          "role": "Marketing Planner"
+        },
+        {
+          "agentId": "growth-customer-insight-researcher",
+          "name": "Customer Insight Researcher",
+          "role": "Customer Insight Researcher"
+        },
+        {
+          "agentId": "growth-competitor-analyst",
+          "name": "Competitor Teardown Analyst",
+          "role": "Competitor Teardown Analyst"
+        },
+        {
+          "agentId": "growth-offer-architect",
+          "name": "Offer Architect",
+          "role": "Offer Architect"
+        },
+        {
+          "agentId": "growth-pricing-strategist",
+          "name": "Pricing Strategist",
+          "role": "Pricing Strategist"
+        },
+        {
+          "agentId": "growth-growth-loop-designer",
+          "name": "Growth Loop Designer",
+          "role": "Growth Loop Designer"
+        }
+      ],
+      "name": "Marketing Plan Council",
+      "packId": "coreyhaines-growth-marketing",
+      "slug": "marketing-plan-council",
+      "tags": ["strategy", "planning", "research", "positioning"]
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -7,13 +7,14 @@
 pnpm-lock.yaml
 website/pnpm-lock.yaml
 
-# The marketplace catalog integrity manifest — emitted verbatim by
-# `pnpm ingest:marketplace` / `pnpm ingest:manifest`. Leaving it to Prettier would
-# let `pnpm format` and the generator fight over its formatting on every regen.
-scripts/ingest-manifest.json
-
 # Build output and caches
 dist/
 **/dist/
 .turbo/
 coverage/
+
+# The generated catalog artifacts (catalog/dist/**) need no entry: `dist/` and
+# `**/dist/` above already match them under Prettier's gitignore-style
+# semantics. That is load-bearing rather than incidental - those files are
+# CANONICAL bytes (sorted keys, no trailing newline) that every published
+# integrity value was computed over, so a Prettier pass would invalidate them.

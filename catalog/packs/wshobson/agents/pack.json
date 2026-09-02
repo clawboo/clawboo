@@ -1,0 +1,2634 @@
+{
+  "agents": [
+    {
+      "body": "agents/accessibility-expert.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Audits and fixes interfaces against WCAG, testing with real assistive technology rather than an automated score alone.",
+      "emoji": "♿",
+      "id": "wshobson-accessibility-expert",
+      "name": "Accessibility Specialist",
+      "packId": "wshobson-agents",
+      "role": "Accessibility Specialist",
+      "skillIds": ["code-search", "linter", "file-reader", "markdown-renderer", "web-search"],
+      "slug": "accessibility-expert",
+      "tags": ["accessibility", "wcag", "aria", "inclusive-design"]
+    },
+    {
+      "body": "agents/ai-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds LLM applications that hold up in production: retrieval that returns the right chunk, tool calls that fail safely, and cost control.",
+      "emoji": "🤖",
+      "id": "wshobson-ai-engineer",
+      "name": "AI Applications Engineer",
+      "packId": "wshobson-agents",
+      "role": "AI Applications Engineer",
+      "skillIds": [
+        "python-executor",
+        "api-tester",
+        "json-transformer",
+        "web-search",
+        "code-search",
+        "summarizer"
+      ],
+      "slug": "ai-engineer",
+      "tags": ["llm", "rag", "agents", "vector-search"]
+    },
+    {
+      "body": "agents/api-documenter.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Writes API documentation people can work from: an accurate specification, real examples, and error cases that are not hidden.",
+      "emoji": "📘",
+      "id": "wshobson-api-documenter",
+      "name": "API Documenter",
+      "packId": "wshobson-agents",
+      "role": "API Documenter",
+      "skillIds": ["markdown-renderer", "file-writer", "code-search", "api-tester", "summarizer"],
+      "slug": "api-documenter",
+      "tags": ["api-docs", "openapi", "developer-experience", "reference"]
+    },
+    {
+      "body": "agents/architect-review.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Reviews a change against the architecture it lands in: boundaries, coupling, and whether the pattern earns its complexity.",
+      "emoji": "🧭",
+      "id": "wshobson-architect-review",
+      "name": "Architecture Reviewer",
+      "packId": "wshobson-agents",
+      "role": "Architecture Reviewer",
+      "skillIds": ["code-search", "linter", "test-runner", "file-reader", "summarizer"],
+      "slug": "architect-review",
+      "tags": ["architecture", "review", "ddd", "patterns"]
+    },
+    {
+      "body": "agents/backend-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Designs backend services and APIs with clear boundaries, explicit contracts, and resilience built in before the first endpoint ships.",
+      "emoji": "🏗️",
+      "id": "wshobson-backend-architect",
+      "name": "Backend Architect",
+      "packId": "wshobson-agents",
+      "role": "Backend Architect",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "backend-architect",
+      "tags": ["backend", "api-design", "microservices", "architecture"]
+    },
+    {
+      "body": "agents/backend-security-coder.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Writes and reviews backend code for the failures that matter: input validation, authentication, authorisation, and secret handling.",
+      "emoji": "🔐",
+      "id": "wshobson-backend-security-coder",
+      "name": "Backend Security Engineer",
+      "packId": "wshobson-agents",
+      "role": "Backend Security Engineer",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "backend-security-coder",
+      "tags": ["security", "backend", "authentication", "input-validation"]
+    },
+    {
+      "body": "agents/bash-pro.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Writes defensive shell for automation that runs unattended: strict modes, safe quoting, traps, and scripts that are actually testable.",
+      "emoji": "🐚",
+      "id": "wshobson-bash-pro",
+      "name": "Shell Automation Engineer",
+      "packId": "wshobson-agents",
+      "role": "Shell Automation Engineer",
+      "skillIds": ["bash-executor", "code-search", "test-runner", "linter", "file-writer"],
+      "slug": "bash-pro",
+      "tags": ["bash", "shell", "automation", "ci"]
+    },
+    {
+      "body": "agents/business-analyst.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Turns raw business data into the handful of metrics a decision actually needs, with the definition of each one written down.",
+      "emoji": "📈",
+      "id": "wshobson-business-analyst",
+      "name": "Business Analyst",
+      "packId": "wshobson-agents",
+      "role": "Business Analyst",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "sql-query",
+        "data-visualizer",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "business-analyst",
+      "tags": ["analytics", "metrics", "reporting", "dashboards"]
+    },
+    {
+      "body": "agents/c4-code.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Documents the lowest C4 level by reading source directly: classes, modules, and the relationships the code actually has.",
+      "emoji": "🧩",
+      "id": "wshobson-c4-code",
+      "name": "C4 Code Documenter",
+      "packId": "wshobson-agents",
+      "role": "C4 Code Documenter",
+      "skillIds": ["markdown-renderer", "file-writer", "code-search", "file-reader", "summarizer"],
+      "slug": "c4-code",
+      "tags": ["c4-model", "documentation", "code-analysis", "diagrams"]
+    },
+    {
+      "body": "agents/c4-component.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Rolls code-level findings up into components, naming each responsibility and the interfaces between them.",
+      "emoji": "🔩",
+      "id": "wshobson-c4-component",
+      "name": "C4 Component Documenter",
+      "packId": "wshobson-agents",
+      "role": "C4 Component Documenter",
+      "skillIds": ["markdown-renderer", "file-writer", "code-search", "file-reader", "summarizer"],
+      "slug": "c4-component",
+      "tags": ["c4-model", "documentation", "components", "diagrams"]
+    },
+    {
+      "body": "agents/c4-container.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Maps components onto deployable containers: the applications, data stores, and the protocols connecting them.",
+      "emoji": "🗂️",
+      "id": "wshobson-c4-container",
+      "name": "C4 Container Documenter",
+      "packId": "wshobson-agents",
+      "role": "C4 Container Documenter",
+      "skillIds": ["markdown-renderer", "file-writer", "code-search", "file-reader", "summarizer"],
+      "slug": "c4-container",
+      "tags": ["c4-model", "documentation", "deployment", "diagrams"]
+    },
+    {
+      "body": "agents/c4-context.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Draws the outermost C4 view: the system, the people who use it, and every external system it depends on.",
+      "emoji": "🌍",
+      "id": "wshobson-c4-context",
+      "name": "C4 Context Documenter",
+      "packId": "wshobson-agents",
+      "role": "C4 Context Documenter",
+      "skillIds": ["markdown-renderer", "file-writer", "code-search", "file-reader", "summarizer"],
+      "slug": "c4-context",
+      "tags": ["c4-model", "documentation", "system-context", "diagrams"]
+    },
+    {
+      "body": "agents/cloud-architect.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Designs cloud infrastructure across major providers with infrastructure as code and a cost model that survives contact with the bill.",
+      "emoji": "☁️",
+      "id": "wshobson-cloud-architect",
+      "name": "Cloud Architect",
+      "packId": "wshobson-agents",
+      "role": "Cloud Architect",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "cloud-architect",
+      "tags": ["cloud", "architecture", "iac", "finops"]
+    },
+    {
+      "body": "agents/code-review-preshipment.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Sweeps everything changed since the last deploy and reports what is safe to ship, what needs a second look, and what must not go out.",
+      "emoji": "🚦",
+      "id": "wshobson-code-review-preshipment",
+      "name": "Pre-Ship Reviewer",
+      "packId": "wshobson-agents",
+      "role": "Pre-Ship Reviewer",
+      "skillIds": ["code-search", "linter", "test-runner", "file-reader", "summarizer"],
+      "slug": "code-review-preshipment",
+      "tags": ["review", "release", "risk", "checklist"]
+    },
+    {
+      "body": "agents/code-reviewer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Reviews a change for correctness, security, and the maintenance cost it creates, and says which findings actually block a merge.",
+      "emoji": "🔍",
+      "id": "wshobson-code-reviewer",
+      "name": "Code Reviewer",
+      "packId": "wshobson-agents",
+      "role": "Code Reviewer",
+      "skillIds": ["code-search", "linter", "test-runner", "file-reader", "summarizer"],
+      "slug": "code-reviewer",
+      "tags": ["code-review", "quality", "security", "maintainability"]
+    },
+    {
+      "body": "agents/content-marketer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Plans and writes content against a distribution plan, so every piece has a channel, an audience, and a way to be measured.",
+      "emoji": "📣",
+      "id": "wshobson-content-marketer",
+      "name": "Content Marketer",
+      "packId": "wshobson-agents",
+      "role": "Content Marketer",
+      "skillIds": [
+        "web-search",
+        "markdown-renderer",
+        "file-writer",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "content-marketer",
+      "tags": ["content-marketing", "distribution", "seo", "campaigns"]
+    },
+    {
+      "body": "agents/context-manager.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Manages what an AI system knows at each turn: what to retrieve, what to summarise, what to keep, and what to forget.",
+      "emoji": "🧵",
+      "id": "wshobson-context-manager",
+      "name": "Context Engineer",
+      "packId": "wshobson-agents",
+      "role": "Context Engineer",
+      "skillIds": [
+        "python-executor",
+        "api-tester",
+        "json-transformer",
+        "web-search",
+        "code-search",
+        "summarizer"
+      ],
+      "slug": "context-manager",
+      "tags": ["context", "memory", "retrieval", "knowledge-graphs"]
+    },
+    {
+      "body": "agents/csharp-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes modern C# with records, pattern matching, and async pipelines, and profiles .NET allocations before reaching for tricks.",
+      "emoji": "🎯",
+      "id": "wshobson-csharp-pro",
+      "name": "C# Specialist",
+      "packId": "wshobson-agents",
+      "role": "C# Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "csharp-pro",
+      "tags": ["csharp", "dotnet", "async", "records"]
+    },
+    {
+      "body": "agents/customer-support.json",
+      "category": "support",
+      "color": "#14B8A6",
+      "description": "Answers customers with the actual fix, routes what it cannot solve, and turns repeated questions into documentation.",
+      "emoji": "💬",
+      "id": "wshobson-customer-support",
+      "name": "Customer Support Specialist",
+      "packId": "wshobson-agents",
+      "role": "Customer Support Specialist",
+      "skillIds": [
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "note-taker",
+        "summarizer",
+        "meeting-notes"
+      ],
+      "slug": "customer-support",
+      "tags": ["support", "ticketing", "escalation", "customer-experience"]
+    },
+    {
+      "body": "agents/data-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds batch and streaming pipelines into a warehouse or lakehouse, with schema contracts and data quality checks in the path.",
+      "emoji": "🔀",
+      "id": "wshobson-data-engineer",
+      "name": "Data Engineer",
+      "packId": "wshobson-agents",
+      "role": "Data Engineer",
+      "skillIds": [
+        "sql-query",
+        "csv-analyzer",
+        "json-transformer",
+        "data-visualizer",
+        "python-executor",
+        "spreadsheet-reader"
+      ],
+      "slug": "data-engineer",
+      "tags": ["data-pipelines", "etl", "streaming", "warehouse"]
+    },
+    {
+      "body": "agents/data-scientist.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Turns a business question into an analysis: the right statistical method, an honest read of the result, and its limits stated.",
+      "emoji": "📊",
+      "id": "wshobson-data-scientist",
+      "name": "Data Scientist",
+      "packId": "wshobson-agents",
+      "role": "Data Scientist",
+      "skillIds": [
+        "python-executor",
+        "csv-analyzer",
+        "sql-query",
+        "data-visualizer",
+        "spreadsheet-reader",
+        "summarizer"
+      ],
+      "slug": "data-scientist",
+      "tags": ["analytics", "statistics", "modelling", "experiments"]
+    },
+    {
+      "body": "agents/database-admin.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Keeps databases available and recoverable: backup and restore drills, replication, failover, and the capacity plan behind them.",
+      "emoji": "🗄️",
+      "id": "wshobson-database-admin",
+      "name": "Database Administrator",
+      "packId": "wshobson-agents",
+      "role": "Database Administrator",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "database-admin",
+      "tags": ["database", "backups", "replication", "reliability"]
+    },
+    {
+      "body": "agents/database-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Chooses the data store and designs the schema before the first migration, weighing access patterns against operational cost.",
+      "emoji": "🏛️",
+      "id": "wshobson-database-architect",
+      "name": "Database Architect",
+      "packId": "wshobson-agents",
+      "role": "Database Architect",
+      "skillIds": [
+        "sql-query",
+        "csv-analyzer",
+        "json-transformer",
+        "data-visualizer",
+        "python-executor",
+        "spreadsheet-reader"
+      ],
+      "slug": "database-architect",
+      "tags": ["data-modelling", "schema-design", "databases", "architecture"]
+    },
+    {
+      "body": "agents/database-optimizer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Finds the slow query, reads the plan, fixes the index or the query, and proves the improvement with measurements.",
+      "emoji": "⚙️",
+      "id": "wshobson-database-optimizer",
+      "name": "Database Optimizer",
+      "packId": "wshobson-agents",
+      "role": "Database Optimizer",
+      "skillIds": [
+        "sql-query",
+        "csv-analyzer",
+        "json-transformer",
+        "data-visualizer",
+        "python-executor",
+        "spreadsheet-reader"
+      ],
+      "slug": "database-optimizer",
+      "tags": ["query-tuning", "indexing", "performance", "databases"]
+    },
+    {
+      "body": "agents/debugger.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Traces a production bug to the exact line and commit that caused it, testing hypotheses instead of guessing at fixes.",
+      "emoji": "🐛",
+      "id": "wshobson-debugger",
+      "name": "Root Cause Debugger",
+      "packId": "wshobson-agents",
+      "role": "Root Cause Debugger",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "file-reader",
+        "json-transformer"
+      ],
+      "slug": "debugger",
+      "tags": ["debugging", "root-cause", "bisect", "production"]
+    },
+    {
+      "body": "agents/deploy-with-verification.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Runs a deploy end to end and proves it landed: tests, build, release, live checks, and the record of what changed.",
+      "emoji": "✅",
+      "id": "wshobson-deploy-with-verification",
+      "name": "Deploy Verifier",
+      "packId": "wshobson-agents",
+      "role": "Deploy Verifier",
+      "skillIds": ["note-taker", "file-writer", "markdown-renderer", "summarizer", "bash-executor"],
+      "slug": "deploy-with-verification",
+      "tags": ["deployment", "verification", "release", "smoke-tests"]
+    },
+    {
+      "body": "agents/deployment-engineer.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Builds the pipeline from commit to production: progressive rollout, automated verification, and a rollback that has been rehearsed.",
+      "emoji": "🚀",
+      "id": "wshobson-deployment-engineer",
+      "name": "Deployment Engineer",
+      "packId": "wshobson-agents",
+      "role": "Deployment Engineer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "deployment-engineer",
+      "tags": ["cicd", "deployment", "gitops", "release"]
+    },
+    {
+      "body": "agents/design-system-architect.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Builds the token layer, component contracts, and theming infrastructure that let a design system survive more than one product.",
+      "emoji": "🧷",
+      "id": "wshobson-design-system-architect",
+      "name": "Design System Architect",
+      "packId": "wshobson-agents",
+      "role": "Design System Architect",
+      "skillIds": ["file-reader", "image-resizer", "markdown-renderer", "web-search", "note-taker"],
+      "slug": "design-system-architect",
+      "tags": ["design-system", "design-tokens", "theming", "components"]
+    },
+    {
+      "body": "agents/devops-troubleshooter.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Works a live production problem from symptom to cause using logs, metrics, and traces, and stabilises before it explains.",
+      "emoji": "🔧",
+      "id": "wshobson-devops-troubleshooter",
+      "name": "DevOps Troubleshooter",
+      "packId": "wshobson-agents",
+      "role": "DevOps Troubleshooter",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "devops-troubleshooter",
+      "tags": ["troubleshooting", "incidents", "observability", "linux"]
+    },
+    {
+      "body": "agents/django-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds Django applications with async views, a well-modelled ORM layer, background task queues, and real deployment settings.",
+      "emoji": "🎸",
+      "id": "wshobson-django-pro",
+      "name": "Django Specialist",
+      "packId": "wshobson-agents",
+      "role": "Django Specialist",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "django-pro",
+      "tags": ["django", "python", "web", "orm"]
+    },
+    {
+      "body": "agents/docs-architect.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Reads a codebase and produces the long-form document it never had: architecture, decisions, and the reasoning behind both.",
+      "emoji": "📚",
+      "id": "wshobson-docs-architect",
+      "name": "Documentation Architect",
+      "packId": "wshobson-agents",
+      "role": "Documentation Architect",
+      "skillIds": ["markdown-renderer", "file-writer", "code-search", "file-reader", "summarizer"],
+      "slug": "docs-architect",
+      "tags": ["documentation", "technical-writing", "architecture", "codebase"]
+    },
+    {
+      "body": "agents/dx-optimizer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Shortens the loop between an idea and a running change: setup scripts, fast feedback, and the friction nobody has filed a ticket for.",
+      "emoji": "🛠️",
+      "id": "wshobson-dx-optimizer",
+      "name": "Developer Experience Engineer",
+      "packId": "wshobson-agents",
+      "role": "Developer Experience Engineer",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "dx-optimizer",
+      "tags": ["developer-experience", "tooling", "onboarding", "automation"]
+    },
+    {
+      "body": "agents/error-detective.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Reads error traces and logs to reconstruct what happened: the signature, the blast radius, the timeline, and the reproduction.",
+      "emoji": "🕵️",
+      "id": "wshobson-error-detective",
+      "name": "Error Detective",
+      "packId": "wshobson-agents",
+      "role": "Error Detective",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "file-reader",
+        "json-transformer"
+      ],
+      "slug": "error-detective",
+      "tags": ["logs", "errors", "observability", "triage"]
+    },
+    {
+      "body": "agents/event-sourcing-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Designs event stores, projections, and CQRS read models so that state is rebuilt from an append-only history rather than mutated in place.",
+      "emoji": "📜",
+      "id": "wshobson-event-sourcing-architect",
+      "name": "Event Sourcing Architect",
+      "packId": "wshobson-agents",
+      "role": "Event Sourcing Architect",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "event-sourcing-architect",
+      "tags": ["event-sourcing", "cqrs", "event-driven", "architecture"]
+    },
+    {
+      "body": "agents/fastapi-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds high-throughput async APIs with typed request models, dependency injection, and connection pooling that holds under load.",
+      "emoji": "⚡",
+      "id": "wshobson-fastapi-pro",
+      "name": "FastAPI Specialist",
+      "packId": "wshobson-agents",
+      "role": "FastAPI Specialist",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "fastapi-pro",
+      "tags": ["fastapi", "python", "async", "api"]
+    },
+    {
+      "body": "agents/firmware-analyst.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Pulls apart embedded firmware to find the weaknesses in IoT and hardware products, from bootloader to update channel.",
+      "emoji": "🔌",
+      "id": "wshobson-firmware-analyst",
+      "name": "Firmware Analyst",
+      "packId": "wshobson-agents",
+      "role": "Firmware Analyst",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "firmware-analyst",
+      "tags": ["firmware", "embedded", "iot", "hardware"]
+    },
+    {
+      "body": "agents/flutter-expert.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds Flutter apps with a chosen state-management story, custom render work where it pays, and one codebase across platforms.",
+      "emoji": "🐦",
+      "id": "wshobson-flutter-expert",
+      "name": "Flutter Developer",
+      "packId": "wshobson-agents",
+      "role": "Flutter Developer",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "api-tester", "image-resizer"],
+      "slug": "flutter-expert",
+      "tags": ["flutter", "dart", "cross-platform", "mobile"]
+    },
+    {
+      "body": "agents/frontend-developer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds React interfaces with sane state boundaries, responsive layouts, and rendering costs measured rather than guessed.",
+      "emoji": "🖥️",
+      "id": "wshobson-frontend-developer",
+      "name": "Frontend Developer",
+      "packId": "wshobson-agents",
+      "role": "Frontend Developer",
+      "skillIds": ["code-search", "linter", "test-runner", "web-scraper", "markdown-renderer"],
+      "slug": "frontend-developer",
+      "tags": ["react", "frontend", "state-management", "responsive"]
+    },
+    {
+      "body": "agents/frontend-security-coder.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Closes client-side holes: output escaping, content security policy, safe DOM APIs, and the third-party script nobody reviewed.",
+      "emoji": "🔒",
+      "id": "wshobson-frontend-security-coder",
+      "name": "Frontend Security Engineer",
+      "packId": "wshobson-agents",
+      "role": "Frontend Security Engineer",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "frontend-security-coder",
+      "tags": ["security", "frontend", "xss", "csp"]
+    },
+    {
+      "body": "agents/golang-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes idiomatic Go with disciplined concurrency, explicit error handling, and services that are boring to operate.",
+      "emoji": "🐹",
+      "id": "wshobson-golang-pro",
+      "name": "Go Specialist",
+      "packId": "wshobson-agents",
+      "role": "Go Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "golang-pro",
+      "tags": ["go", "concurrency", "microservices", "performance"]
+    },
+    {
+      "body": "agents/graphql-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Designs federated GraphQL schemas, resolver layers, and query-cost controls that stay fast as the graph grows.",
+      "emoji": "🔗",
+      "id": "wshobson-graphql-architect",
+      "name": "GraphQL Architect",
+      "packId": "wshobson-agents",
+      "role": "GraphQL Architect",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "graphql-architect",
+      "tags": ["graphql", "api-design", "federation", "schema"]
+    },
+    {
+      "body": "agents/hr-pro.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Handles hiring, onboarding, leave, and performance conversations with process that is fair, documented, and legally careful.",
+      "emoji": "👥",
+      "id": "wshobson-hr-pro",
+      "name": "HR Partner",
+      "packId": "wshobson-agents",
+      "role": "HR Partner",
+      "skillIds": [
+        "email-draft",
+        "calendar-manager",
+        "meeting-notes",
+        "note-taker",
+        "file-writer",
+        "summarizer"
+      ],
+      "slug": "hr-pro",
+      "tags": ["hr", "hiring", "policy", "employee-relations"]
+    },
+    {
+      "body": "agents/hybrid-cloud-architect.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Designs estates that span public cloud and private data centres, with workload placement, connectivity, and migration paths mapped out.",
+      "emoji": "🌥️",
+      "id": "wshobson-hybrid-cloud-architect",
+      "name": "Hybrid Cloud Architect",
+      "packId": "wshobson-agents",
+      "role": "Hybrid Cloud Architect",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "hybrid-cloud-architect",
+      "tags": ["hybrid-cloud", "multi-cloud", "migration", "networking"]
+    },
+    {
+      "body": "agents/incident-responder.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Runs an incident: declares severity, restores service first, keeps the comms trail, and writes the blameless postmortem after.",
+      "emoji": "🚨",
+      "id": "wshobson-incident-responder",
+      "name": "Incident Responder",
+      "packId": "wshobson-agents",
+      "role": "Incident Responder",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "incident-responder",
+      "tags": ["incidents", "sre", "on-call", "postmortem"]
+    },
+    {
+      "body": "agents/ios-developer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds native iOS apps in Swift and SwiftUI, with Core Data persistence, background work, and App Store release discipline.",
+      "emoji": "🍎",
+      "id": "wshobson-ios-developer",
+      "name": "iOS Developer",
+      "packId": "wshobson-agents",
+      "role": "iOS Developer",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "api-tester", "image-resizer"],
+      "slug": "ios-developer",
+      "tags": ["ios", "swift", "swiftui", "mobile"]
+    },
+    {
+      "body": "agents/java-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes modern Java with virtual threads, records, and pattern matching, and tunes the JVM for the workload it actually runs.",
+      "emoji": "☕",
+      "id": "wshobson-java-pro",
+      "name": "Java Specialist",
+      "packId": "wshobson-agents",
+      "role": "Java Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "java-pro",
+      "tags": ["java", "spring", "jvm", "concurrency"]
+    },
+    {
+      "body": "agents/kubernetes-architect.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Designs Kubernetes platforms with GitOps delivery, sane multi-tenancy, and cluster policy that developers can work inside.",
+      "emoji": "☸️",
+      "id": "wshobson-kubernetes-architect",
+      "name": "Kubernetes Architect",
+      "packId": "wshobson-agents",
+      "role": "Kubernetes Architect",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "kubernetes-architect",
+      "tags": ["kubernetes", "gitops", "containers", "platform"]
+    },
+    {
+      "body": "agents/legal-advisor.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Drafts privacy policies, terms, and notices in plain language, and flags where a qualified lawyer has to take over.",
+      "emoji": "⚖️",
+      "id": "wshobson-legal-advisor",
+      "name": "Legal Writing Advisor",
+      "packId": "wshobson-agents",
+      "role": "Legal Writing Advisor",
+      "skillIds": ["file-writer", "markdown-renderer", "web-search", "summarizer", "note-taker"],
+      "slug": "legal-advisor",
+      "tags": ["legal-writing", "privacy-policy", "terms", "compliance"]
+    },
+    {
+      "body": "agents/llm-finetuning-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Decides whether to fine-tune at all, and if so which method and base model, refusing to start without a baseline and an eval gate.",
+      "emoji": "🧬",
+      "id": "wshobson-llm-finetuning-architect",
+      "name": "Fine-Tuning Architect",
+      "packId": "wshobson-agents",
+      "role": "Fine-Tuning Architect",
+      "skillIds": [
+        "python-executor",
+        "csv-analyzer",
+        "data-visualizer",
+        "json-transformer",
+        "code-search",
+        "file-writer"
+      ],
+      "slug": "llm-finetuning-architect",
+      "tags": ["fine-tuning", "llm", "evaluation", "strategy"]
+    },
+    {
+      "body": "agents/llm-finetuning-eval-engineer.json",
+      "category": "testing",
+      "color": "#10B981",
+      "description": "Builds the golden sets and graders that decide whether a checkpoint is better, and calibrates the judges before trusting them.",
+      "emoji": "📐",
+      "id": "wshobson-llm-finetuning-eval-engineer",
+      "name": "Fine-Tuning Eval Engineer",
+      "packId": "wshobson-agents",
+      "role": "Fine-Tuning Eval Engineer",
+      "skillIds": [
+        "python-executor",
+        "csv-analyzer",
+        "data-visualizer",
+        "json-transformer",
+        "code-search",
+        "file-writer"
+      ],
+      "slug": "llm-finetuning-eval-engineer",
+      "tags": ["evaluation", "llm", "benchmarks", "quality-gate"]
+    },
+    {
+      "body": "agents/llm-finetuning-training-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Prepares datasets, writes and launches the training run, watches the loss curves, and exports artifacts that can be served.",
+      "emoji": "🏋️",
+      "id": "wshobson-llm-finetuning-training-engineer",
+      "name": "Fine-Tuning Training Engineer",
+      "packId": "wshobson-agents",
+      "role": "Fine-Tuning Training Engineer",
+      "skillIds": [
+        "python-executor",
+        "csv-analyzer",
+        "data-visualizer",
+        "json-transformer",
+        "code-search",
+        "file-writer"
+      ],
+      "slug": "llm-finetuning-training-engineer",
+      "tags": ["fine-tuning", "training", "datasets", "gpu"]
+    },
+    {
+      "body": "agents/malware-analyst.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Analyses hostile samples for defence: behaviour, indicators of compromise, and the detection rules a team can deploy today.",
+      "emoji": "🦠",
+      "id": "wshobson-malware-analyst",
+      "name": "Malware Analyst",
+      "packId": "wshobson-agents",
+      "role": "Malware Analyst",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "malware-analyst",
+      "tags": ["malware", "threat-intelligence", "forensics", "defensive"]
+    },
+    {
+      "body": "agents/ml-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Takes a model from notebook to production service: serving, batching, versioning, and the monitoring that catches drift.",
+      "emoji": "🧠",
+      "id": "wshobson-ml-engineer",
+      "name": "Machine Learning Engineer",
+      "packId": "wshobson-agents",
+      "role": "Machine Learning Engineer",
+      "skillIds": [
+        "python-executor",
+        "csv-analyzer",
+        "data-visualizer",
+        "json-transformer",
+        "code-search",
+        "file-writer"
+      ],
+      "slug": "ml-engineer",
+      "tags": ["machine-learning", "model-serving", "pytorch", "inference"]
+    },
+    {
+      "body": "agents/mlops-engineer.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Builds the pipeline around the model: reproducible training runs, experiment tracking, a model registry, and automated promotion.",
+      "emoji": "🔁",
+      "id": "wshobson-mlops-engineer",
+      "name": "MLOps Engineer",
+      "packId": "wshobson-agents",
+      "role": "MLOps Engineer",
+      "skillIds": [
+        "python-executor",
+        "csv-analyzer",
+        "data-visualizer",
+        "json-transformer",
+        "code-search",
+        "file-writer"
+      ],
+      "slug": "mlops-engineer",
+      "tags": ["mlops", "pipelines", "experiment-tracking", "model-registry"]
+    },
+    {
+      "body": "agents/mobile-developer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds cross-platform mobile apps with offline-first data, native module bridges, and release pipelines for both stores.",
+      "emoji": "📱",
+      "id": "wshobson-mobile-developer",
+      "name": "Mobile Developer",
+      "packId": "wshobson-agents",
+      "role": "Mobile Developer",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "api-tester", "image-resizer"],
+      "slug": "mobile-developer",
+      "tags": ["mobile", "react-native", "cross-platform", "offline"]
+    },
+    {
+      "body": "agents/mobile-security-coder.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Secures mobile clients: local storage, WebView configuration, certificate handling, and the deep link that trusts its input.",
+      "emoji": "🔏",
+      "id": "wshobson-mobile-security-coder",
+      "name": "Mobile Security Engineer",
+      "packId": "wshobson-agents",
+      "role": "Mobile Security Engineer",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "mobile-security-coder",
+      "tags": ["security", "mobile", "webview", "storage"]
+    },
+    {
+      "body": "agents/monorepo-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Structures monorepos so builds stay incremental: task graphs, remote caching, dependency boundaries, and release orchestration.",
+      "emoji": "🧰",
+      "id": "wshobson-monorepo-architect",
+      "name": "Monorepo Architect",
+      "packId": "wshobson-agents",
+      "role": "Monorepo Architect",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "monorepo-architect",
+      "tags": ["monorepo", "build-systems", "dependencies", "tooling"]
+    },
+    {
+      "body": "agents/network-engineer.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Diagnoses and designs cloud networking: routing, DNS, load balancers, TLS termination, and the latency nobody can account for.",
+      "emoji": "🌐",
+      "id": "wshobson-network-engineer",
+      "name": "Network Engineer",
+      "packId": "wshobson-agents",
+      "role": "Network Engineer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "network-engineer",
+      "tags": ["networking", "dns", "load-balancing", "tls"]
+    },
+    {
+      "body": "agents/observability-engineer.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Builds metrics, logging, and tracing that answer real questions, with SLOs and alerts tied to what users actually feel.",
+      "emoji": "📡",
+      "id": "wshobson-observability-engineer",
+      "name": "Observability Engineer",
+      "packId": "wshobson-agents",
+      "role": "Observability Engineer",
+      "skillIds": [
+        "bash-executor",
+        "json-transformer",
+        "data-visualizer",
+        "notification-sender",
+        "api-tester"
+      ],
+      "slug": "observability-engineer",
+      "tags": ["observability", "metrics", "tracing", "slo"]
+    },
+    {
+      "body": "agents/payment-integration.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Wires checkout flows, subscription billing, and webhook handling with idempotency keys and reconciliation that survives retries.",
+      "emoji": "💳",
+      "id": "wshobson-payment-integration",
+      "name": "Payments Engineer",
+      "packId": "wshobson-agents",
+      "role": "Payments Engineer",
+      "skillIds": ["code-search", "api-tester", "test-runner", "json-transformer", "bash-executor"],
+      "slug": "payment-integration",
+      "tags": ["payments", "billing", "webhooks", "subscriptions"]
+    },
+    {
+      "body": "agents/performance-engineer.json",
+      "category": "testing",
+      "color": "#10B981",
+      "description": "Finds where the time actually goes with profiles and load tests, then fixes the one bottleneck that moves the number.",
+      "emoji": "🏎️",
+      "id": "wshobson-performance-engineer",
+      "name": "Performance Engineer",
+      "packId": "wshobson-agents",
+      "role": "Performance Engineer",
+      "skillIds": ["test-runner", "bash-executor", "code-search", "linter", "api-tester"],
+      "slug": "performance-engineer",
+      "tags": ["performance", "profiling", "load-testing", "latency"]
+    },
+    {
+      "body": "agents/php-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes modern PHP with strict types, generators, and SPL data structures instead of the array-for-everything habit.",
+      "emoji": "🐘",
+      "id": "wshobson-php-pro",
+      "name": "PHP Specialist",
+      "packId": "wshobson-agents",
+      "role": "PHP Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "php-pro",
+      "tags": ["php", "oop", "generators", "performance"]
+    },
+    {
+      "body": "agents/prod-logs-health-check.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Pulls recent production logs, separates the new noise from the known noise, and reports what changed since the last deploy.",
+      "emoji": "📋",
+      "id": "wshobson-prod-logs-health-check",
+      "name": "Production Log Checker",
+      "packId": "wshobson-agents",
+      "role": "Production Log Checker",
+      "skillIds": ["note-taker", "file-writer", "markdown-renderer", "summarizer", "bash-executor"],
+      "slug": "prod-logs-health-check",
+      "tags": ["logs", "monitoring", "health-check", "production"]
+    },
+    {
+      "body": "agents/prompt-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Designs and tests prompts against a measurable outcome, so a change to the wording is judged by a score rather than a vibe.",
+      "emoji": "✍️",
+      "id": "wshobson-prompt-engineer",
+      "name": "Prompt Engineer",
+      "packId": "wshobson-agents",
+      "role": "Prompt Engineer",
+      "skillIds": [
+        "python-executor",
+        "api-tester",
+        "json-transformer",
+        "web-search",
+        "code-search",
+        "summarizer"
+      ],
+      "slug": "prompt-engineer",
+      "tags": ["prompting", "llm", "evaluation", "optimisation"]
+    },
+    {
+      "body": "agents/python-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes modern Python with real type coverage, async where it pays, and profiling before optimisation.",
+      "emoji": "🐍",
+      "id": "wshobson-python-pro",
+      "name": "Python Specialist",
+      "packId": "wshobson-agents",
+      "role": "Python Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "python-pro",
+      "tags": ["python", "async", "typing", "performance"]
+    },
+    {
+      "body": "agents/reference-builder.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Builds exhaustive reference material: every parameter, every return, every constraint, arranged so a reader can scan for one fact.",
+      "emoji": "📑",
+      "id": "wshobson-reference-builder",
+      "name": "Reference Builder",
+      "packId": "wshobson-agents",
+      "role": "Reference Builder",
+      "skillIds": ["markdown-renderer", "file-writer", "code-search", "file-reader", "summarizer"],
+      "slug": "reference-builder",
+      "tags": ["reference", "documentation", "parameters", "completeness"]
+    },
+    {
+      "body": "agents/reverse-engineer.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Reads binaries without source: disassembly, decompilation, and dynamic analysis to work out what a program really does.",
+      "emoji": "🔬",
+      "id": "wshobson-reverse-engineer",
+      "name": "Reverse Engineer",
+      "packId": "wshobson-agents",
+      "role": "Reverse Engineer",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "reverse-engineer",
+      "tags": ["reverse-engineering", "binary-analysis", "disassembly", "research"]
+    },
+    {
+      "body": "agents/rust-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes Rust that satisfies the borrow checker by design rather than by fighting it, with async runtimes and zero-cost abstractions.",
+      "emoji": "🦀",
+      "id": "wshobson-rust-pro",
+      "name": "Rust Specialist",
+      "packId": "wshobson-agents",
+      "role": "Rust Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "rust-pro",
+      "tags": ["rust", "systems", "async", "memory-safety"]
+    },
+    {
+      "body": "agents/scala-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes functional Scala for distributed and big-data workloads, with effect systems, typed streams, and pragmatic purity.",
+      "emoji": "🌀",
+      "id": "wshobson-scala-pro",
+      "name": "Scala Specialist",
+      "packId": "wshobson-agents",
+      "role": "Scala Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "scala-pro",
+      "tags": ["scala", "functional", "streaming", "jvm"]
+    },
+    {
+      "body": "agents/search-specialist.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Runs a real search strategy rather than one query, then synthesises the findings and says how much each source can carry.",
+      "emoji": "🔭",
+      "id": "wshobson-search-specialist",
+      "name": "Research Specialist",
+      "packId": "wshobson-agents",
+      "role": "Research Specialist",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "pdf-reader",
+        "summarizer",
+        "note-taker",
+        "citation-formatter"
+      ],
+      "slug": "search-specialist",
+      "tags": ["research", "search", "synthesis", "sources"]
+    },
+    {
+      "body": "agents/security-auditor.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Audits a system for exploitable weaknesses and compliance gaps, and ranks findings by what an attacker would actually reach first.",
+      "emoji": "🛡️",
+      "id": "wshobson-security-auditor",
+      "name": "Security Auditor",
+      "packId": "wshobson-agents",
+      "role": "Security Auditor",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "security-auditor",
+      "tags": ["security", "audit", "devsecops", "compliance"]
+    },
+    {
+      "body": "agents/seo-content-auditor.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Scores existing content on quality and experience signals, then lists the specific edits that would move it.",
+      "emoji": "🔎",
+      "id": "wshobson-seo-content-auditor",
+      "name": "SEO Content Auditor",
+      "packId": "wshobson-agents",
+      "role": "SEO Content Auditor",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "markdown-renderer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "seo-content-auditor",
+      "tags": ["seo", "audit", "content-quality", "eeat"]
+    },
+    {
+      "body": "agents/seo-content-planner.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Turns a topic into a cluster plan: the pillar page, the supporting articles, the internal links, and the order to publish them.",
+      "emoji": "🗓️",
+      "id": "wshobson-seo-content-planner",
+      "name": "SEO Content Planner",
+      "packId": "wshobson-agents",
+      "role": "SEO Content Planner",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "markdown-renderer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "seo-content-planner",
+      "tags": ["seo", "content-strategy", "topic-clusters", "calendar"]
+    },
+    {
+      "body": "agents/seo-content-writer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Writes from a keyword brief without writing for a robot: the search intent is served and the piece still reads like prose.",
+      "emoji": "✒️",
+      "id": "wshobson-seo-content-writer",
+      "name": "SEO Content Writer",
+      "packId": "wshobson-agents",
+      "role": "SEO Content Writer",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "markdown-renderer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "seo-content-writer",
+      "tags": ["seo", "writing", "content", "keywords"]
+    },
+    {
+      "body": "agents/seo-keyword-strategist.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Analyses how a page uses its keywords, flags over-optimisation, and suggests the semantic variants the topic is missing.",
+      "emoji": "🔑",
+      "id": "wshobson-seo-keyword-strategist",
+      "name": "SEO Keyword Strategist",
+      "packId": "wshobson-agents",
+      "role": "SEO Keyword Strategist",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "markdown-renderer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "seo-keyword-strategist",
+      "tags": ["seo", "keywords", "semantics", "analysis"]
+    },
+    {
+      "body": "agents/seo-meta-optimizer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Writes titles, descriptions, and URL slugs that fit the character limits and still give a reader a reason to click.",
+      "emoji": "🏷️",
+      "id": "wshobson-seo-meta-optimizer",
+      "name": "SEO Meta Optimizer",
+      "packId": "wshobson-agents",
+      "role": "SEO Meta Optimizer",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "markdown-renderer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "seo-meta-optimizer",
+      "tags": ["seo", "metadata", "titles", "ctr"]
+    },
+    {
+      "body": "agents/seo-snippet-hunter.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Reformats content into the shapes search engines lift into featured snippets: direct answers, tables, and ordered steps.",
+      "emoji": "🎣",
+      "id": "wshobson-seo-snippet-hunter",
+      "name": "SEO Snippet Hunter",
+      "packId": "wshobson-agents",
+      "role": "SEO Snippet Hunter",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "markdown-renderer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "seo-snippet-hunter",
+      "tags": ["seo", "featured-snippets", "serp", "formatting"]
+    },
+    {
+      "body": "agents/seo-structure-architect.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Fixes the shape of a page and a site: heading hierarchy, schema markup, and the internal links that spread authority.",
+      "emoji": "🪜",
+      "id": "wshobson-seo-structure-architect",
+      "name": "SEO Structure Architect",
+      "packId": "wshobson-agents",
+      "role": "SEO Structure Architect",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "markdown-renderer",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "seo-structure-architect",
+      "tags": ["seo", "information-architecture", "schema", "internal-links"]
+    },
+    {
+      "body": "agents/service-mesh-expert.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Runs service-to-service traffic through a mesh: routing rules, mutual TLS, retries, and the observability that comes with them.",
+      "emoji": "🕸️",
+      "id": "wshobson-service-mesh-expert",
+      "name": "Service Mesh Engineer",
+      "packId": "wshobson-agents",
+      "role": "Service Mesh Engineer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "service-mesh-expert",
+      "tags": ["service-mesh", "istio", "traffic-management", "mtls"]
+    },
+    {
+      "body": "agents/session-end.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Closes a work session by recording what changed, what broke, what is still open, and what the next session should pick up.",
+      "emoji": "🌇",
+      "id": "wshobson-session-end",
+      "name": "Session Closer",
+      "packId": "wshobson-agents",
+      "role": "Session Closer",
+      "skillIds": ["note-taker", "file-writer", "markdown-renderer", "summarizer", "bash-executor"],
+      "slug": "session-end",
+      "tags": ["workflow", "handover", "documentation", "state"]
+    },
+    {
+      "body": "agents/session-start.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Opens a work session by reading the state document, checking it against live reality, and naming the one thing to do next.",
+      "emoji": "🌅",
+      "id": "wshobson-session-start",
+      "name": "Session Opener",
+      "packId": "wshobson-agents",
+      "role": "Session Opener",
+      "skillIds": ["note-taker", "file-writer", "markdown-renderer", "summarizer", "bash-executor"],
+      "slug": "session-start",
+      "tags": ["workflow", "context", "planning", "state"]
+    },
+    {
+      "body": "agents/sql-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Writes SQL that the planner likes: window functions, CTE discipline, index-aware predicates, and honest execution plans.",
+      "emoji": "🗃️",
+      "id": "wshobson-sql-pro",
+      "name": "SQL Specialist",
+      "packId": "wshobson-agents",
+      "role": "SQL Specialist",
+      "skillIds": [
+        "sql-query",
+        "csv-analyzer",
+        "data-visualizer",
+        "code-search",
+        "spreadsheet-reader"
+      ],
+      "slug": "sql-pro",
+      "tags": ["sql", "query-tuning", "olap", "data-modelling"]
+    },
+    {
+      "body": "agents/startup-analyst.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Sizes a market, builds the financial model, and maps the competition, showing the assumptions rather than hiding them in a cell.",
+      "emoji": "💡",
+      "id": "wshobson-startup-analyst",
+      "name": "Startup Analyst",
+      "packId": "wshobson-agents",
+      "role": "Startup Analyst",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "data-visualizer",
+        "web-search",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "startup-analyst",
+      "tags": ["market-sizing", "financial-modelling", "competition", "strategy"]
+    },
+    {
+      "body": "agents/tdd-orchestrator.json",
+      "category": "testing",
+      "color": "#10B981",
+      "description": "Keeps a change honest by holding the red-green-refactor loop, so the test that proves the behaviour is written before the behaviour.",
+      "emoji": "♻️",
+      "id": "wshobson-tdd-orchestrator",
+      "name": "TDD Orchestrator",
+      "packId": "wshobson-agents",
+      "role": "TDD Orchestrator",
+      "skillIds": ["test-runner", "bash-executor", "code-search", "linter", "api-tester"],
+      "slug": "tdd-orchestrator",
+      "tags": ["tdd", "testing", "red-green-refactor", "discipline"]
+    },
+    {
+      "body": "agents/team-debugger.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Takes one hypothesis about a bug and tries to falsify it, reporting the evidence with file and line citations and a confidence level.",
+      "emoji": "🔦",
+      "id": "wshobson-team-debugger",
+      "name": "Team Debugger",
+      "packId": "wshobson-agents",
+      "role": "Team Debugger",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "file-reader",
+        "json-transformer"
+      ],
+      "slug": "team-debugger",
+      "tags": ["debugging", "hypothesis", "evidence", "investigation"]
+    },
+    {
+      "body": "agents/team-implementer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds one assigned component inside strict file boundaries and coordinates only at the integration points it was given.",
+      "emoji": "🔨",
+      "id": "wshobson-team-implementer",
+      "name": "Team Implementer",
+      "packId": "wshobson-agents",
+      "role": "Team Implementer",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "team-implementer",
+      "tags": ["implementation", "parallel-work", "ownership", "integration"]
+    },
+    {
+      "body": "agents/team-lead.json",
+      "category": "project-management",
+      "color": "#0284C7",
+      "description": "Breaks work into parallel tasks with clear file ownership, runs the team through them, and synthesises the results into one answer.",
+      "emoji": "🧑‍✈️",
+      "id": "wshobson-team-lead",
+      "name": "Team Lead",
+      "packId": "wshobson-agents",
+      "role": "Team Lead",
+      "skillIds": ["note-taker", "summarizer", "notification-sender", "file-writer", "code-search"],
+      "slug": "team-lead",
+      "tags": ["orchestration", "planning", "delegation", "synthesis"]
+    },
+    {
+      "body": "agents/team-reviewer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Reviews a change along one assigned dimension and reports findings in a fixed format, so parallel reviews merge without arguing.",
+      "emoji": "🧾",
+      "id": "wshobson-team-reviewer",
+      "name": "Team Reviewer",
+      "packId": "wshobson-agents",
+      "role": "Team Reviewer",
+      "skillIds": ["code-search", "linter", "test-runner", "file-reader", "summarizer"],
+      "slug": "team-reviewer",
+      "tags": ["review", "security", "performance", "structured-findings"]
+    },
+    {
+      "body": "agents/temporal-python-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds durable workflows with deterministic replay, saga compensation, and activity retry policies that survive process restarts.",
+      "emoji": "⏱️",
+      "id": "wshobson-temporal-python-pro",
+      "name": "Workflow Orchestration Engineer",
+      "packId": "wshobson-agents",
+      "role": "Workflow Orchestration Engineer",
+      "skillIds": [
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "api-tester",
+        "sql-query",
+        "file-writer"
+      ],
+      "slug": "temporal-python-pro",
+      "tags": ["workflows", "durable-execution", "python", "saga"]
+    },
+    {
+      "body": "agents/terraform-specialist.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Writes reusable infrastructure modules and manages state, drift, and imports so plans stay readable and applies stay boring.",
+      "emoji": "🧱",
+      "id": "wshobson-terraform-specialist",
+      "name": "Terraform Specialist",
+      "packId": "wshobson-agents",
+      "role": "Terraform Specialist",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "api-tester",
+        "notification-sender",
+        "json-transformer",
+        "file-reader"
+      ],
+      "slug": "terraform-specialist",
+      "tags": ["terraform", "iac", "state-management", "modules"]
+    },
+    {
+      "body": "agents/test-automator.json",
+      "category": "testing",
+      "color": "#10B981",
+      "description": "Builds the test pyramid that a team can live with: fast unit coverage, meaningful integration tests, and end-to-end suites that stay green.",
+      "emoji": "🧪",
+      "id": "wshobson-test-automator",
+      "name": "Test Automation Engineer",
+      "packId": "wshobson-agents",
+      "role": "Test Automation Engineer",
+      "skillIds": ["test-runner", "bash-executor", "code-search", "linter", "api-tester"],
+      "slug": "test-automator",
+      "tags": ["test-automation", "e2e", "coverage", "ci"]
+    },
+    {
+      "body": "agents/threat-modeling-expert.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Runs a structured threat model over a design, naming the trust boundaries, the plausible attacks, and the mitigations worth building.",
+      "emoji": "🗺️",
+      "id": "wshobson-threat-modeling-expert",
+      "name": "Threat Modeller",
+      "packId": "wshobson-agents",
+      "role": "Threat Modeller",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "bash-executor",
+        "api-tester",
+        "web-search",
+        "file-reader"
+      ],
+      "slug": "threat-modeling-expert",
+      "tags": ["threat-modelling", "stride", "risk", "architecture"]
+    },
+    {
+      "body": "agents/tutorial-engineer.json",
+      "category": "education",
+      "color": "#FBBF24",
+      "description": "Turns a working system into a lesson: an ordered path, one new idea per step, and a reader who can run every example.",
+      "emoji": "🎓",
+      "id": "wshobson-tutorial-engineer",
+      "name": "Tutorial Author",
+      "packId": "wshobson-agents",
+      "role": "Tutorial Author",
+      "skillIds": [
+        "markdown-renderer",
+        "file-writer",
+        "code-search",
+        "quiz-generator",
+        "summarizer"
+      ],
+      "slug": "tutorial-engineer",
+      "tags": ["tutorials", "teaching", "onboarding", "examples"]
+    },
+    {
+      "body": "agents/typescript-pro.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Uses the TypeScript type system as a design tool: precise generics, inference that carries, and strict settings that stay on.",
+      "emoji": "🔷",
+      "id": "wshobson-typescript-pro",
+      "name": "TypeScript Specialist",
+      "packId": "wshobson-agents",
+      "role": "TypeScript Specialist",
+      "skillIds": ["code-search", "bash-executor", "test-runner", "linter", "file-reader"],
+      "slug": "typescript-pro",
+      "tags": ["typescript", "types", "generics", "strict-mode"]
+    },
+    {
+      "body": "agents/ui-designer.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Turns product intent into concrete interface work: component anatomy, layout systems, spacing scales, and states nobody remembered.",
+      "emoji": "🖌️",
+      "id": "wshobson-ui-designer",
+      "name": "UI Designer",
+      "packId": "wshobson-agents",
+      "role": "UI Designer",
+      "skillIds": ["file-reader", "image-resizer", "markdown-renderer", "web-search", "note-taker"],
+      "slug": "ui-designer",
+      "tags": ["ui", "components", "layout", "visual-design"]
+    },
+    {
+      "body": "agents/ui-ux-designer.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Moves from user research to wireframes to a documented design system, keeping the reasoning attached to every screen.",
+      "emoji": "🎨",
+      "id": "wshobson-ui-ux-designer",
+      "name": "Product Designer",
+      "packId": "wshobson-agents",
+      "role": "Product Designer",
+      "skillIds": ["file-reader", "image-resizer", "markdown-renderer", "web-search", "note-taker"],
+      "slug": "ui-ux-designer",
+      "tags": ["ux", "wireframes", "design-systems", "research"]
+    },
+    {
+      "body": "agents/vector-database-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Chooses the embedding model, the index type, and the chunking strategy, then tunes recall and latency against real queries.",
+      "emoji": "🧲",
+      "id": "wshobson-vector-database-engineer",
+      "name": "Vector Database Engineer",
+      "packId": "wshobson-agents",
+      "role": "Vector Database Engineer",
+      "skillIds": [
+        "python-executor",
+        "api-tester",
+        "json-transformer",
+        "web-search",
+        "code-search",
+        "summarizer"
+      ],
+      "slug": "vector-database-engineer",
+      "tags": ["vector-search", "embeddings", "retrieval", "indexing"]
+    }
+  ],
+  "counts": {
+    "agents": 97,
+    "skills": 0,
+    "teams": 24
+  },
+  "description": "Ninety-seven engineering, platform, security and go-to-market specialists, and twenty-four teams built from them. Adapted from an MIT-licensed upstream collection: entries were pruned, renamed, re-described, cut down from very long source files, and given the team routing the originals never had.",
+  "id": "wshobson-agents",
+  "idPrefix": "wshobson",
+  "name": "Engineering Agents",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Seth Hobson"],
+    "color": "#A855F7",
+    "importedAt": "2026-08-25T00:00:00.000Z",
+    "label": "Engineering Agents",
+    "license": "MIT",
+    "ref": "d82998e7df393c671ede2387a8435075f0b633f5",
+    "repo": "https://github.com/wshobson/agents",
+    "sourceId": "wshobson-agents"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/api-scaffolding.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Stands up a new API from nothing: the architecture first, then the framework work, then the graph layer over it.",
+      "emoji": "🏗️",
+      "id": "wshobson-api-scaffolding",
+      "members": [
+        {
+          "agentId": "wshobson-backend-architect",
+          "name": "Backend Architect",
+          "role": "Backend Architect"
+        },
+        {
+          "agentId": "wshobson-django-pro",
+          "name": "Django Specialist",
+          "role": "Django Specialist"
+        },
+        {
+          "agentId": "wshobson-fastapi-pro",
+          "name": "FastAPI Specialist",
+          "role": "FastAPI Specialist"
+        },
+        {
+          "agentId": "wshobson-graphql-architect",
+          "name": "GraphQL Architect",
+          "role": "GraphQL Architect"
+        }
+      ],
+      "name": "API Scaffolding Crew",
+      "packId": "wshobson-agents",
+      "slug": "api-scaffolding",
+      "tags": ["api", "backend", "graphql", "python"]
+    },
+    {
+      "body": "teams/backend-platform.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "The deep backend bench: architecture, GraphQL, event sourcing, durable workflows, test-first discipline, and someone watching the latency.",
+      "emoji": "⚙️",
+      "id": "wshobson-backend-platform",
+      "members": [
+        {
+          "agentId": "wshobson-backend-architect",
+          "name": "Backend Architect",
+          "role": "Backend Architect"
+        },
+        {
+          "agentId": "wshobson-graphql-architect",
+          "name": "GraphQL Architect",
+          "role": "GraphQL Architect"
+        },
+        {
+          "agentId": "wshobson-event-sourcing-architect",
+          "name": "Event Sourcing Architect",
+          "role": "Event Sourcing Architect"
+        },
+        {
+          "agentId": "wshobson-temporal-python-pro",
+          "name": "Workflow Orchestration Engineer",
+          "role": "Workflow Orchestration Engineer"
+        },
+        {
+          "agentId": "wshobson-tdd-orchestrator",
+          "name": "TDD Orchestrator",
+          "role": "TDD Orchestrator"
+        },
+        {
+          "agentId": "wshobson-performance-engineer",
+          "name": "Performance Engineer",
+          "role": "Performance Engineer"
+        }
+      ],
+      "name": "Backend Platform Team",
+      "packId": "wshobson-agents",
+      "slug": "backend-platform",
+      "tags": ["backend", "event-driven", "workflows", "tdd", "performance"]
+    },
+    {
+      "body": "teams/c4-documentation.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Four documenters that work the C4 levels in order, from reading the source up to the system context diagram.",
+      "emoji": "🌍",
+      "id": "wshobson-c4-documentation",
+      "members": [
+        {
+          "agentId": "wshobson-c4-code",
+          "name": "C4 Code Documenter",
+          "role": "C4 Code Documenter"
+        },
+        {
+          "agentId": "wshobson-c4-component",
+          "name": "C4 Component Documenter",
+          "role": "C4 Component Documenter"
+        },
+        {
+          "agentId": "wshobson-c4-container",
+          "name": "C4 Container Documenter",
+          "role": "C4 Container Documenter"
+        },
+        {
+          "agentId": "wshobson-c4-context",
+          "name": "C4 Context Documenter",
+          "role": "C4 Context Documenter"
+        }
+      ],
+      "name": "C4 Documentation Line",
+      "packId": "wshobson-agents",
+      "slug": "c4-documentation",
+      "tags": ["documentation", "c4-model", "architecture", "diagrams"]
+    },
+    {
+      "body": "teams/cloud-infrastructure.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Designs and runs the estate itself: cloud architecture, hybrid placement, clusters, networking, service mesh, and the code that describes it.",
+      "emoji": "☁️",
+      "id": "wshobson-cloud-infrastructure",
+      "members": [
+        {
+          "agentId": "wshobson-cloud-architect",
+          "name": "Cloud Architect",
+          "role": "Cloud Architect"
+        },
+        {
+          "agentId": "wshobson-hybrid-cloud-architect",
+          "name": "Hybrid Cloud Architect",
+          "role": "Hybrid Cloud Architect"
+        },
+        {
+          "agentId": "wshobson-kubernetes-architect",
+          "name": "Kubernetes Architect",
+          "role": "Kubernetes Architect"
+        },
+        {
+          "agentId": "wshobson-terraform-specialist",
+          "name": "Terraform Specialist",
+          "role": "Terraform Specialist"
+        },
+        {
+          "agentId": "wshobson-network-engineer",
+          "name": "Network Engineer",
+          "role": "Network Engineer"
+        },
+        {
+          "agentId": "wshobson-service-mesh-expert",
+          "name": "Service Mesh Engineer",
+          "role": "Service Mesh Engineer"
+        }
+      ],
+      "name": "Cloud Infrastructure Team",
+      "packId": "wshobson-agents",
+      "slug": "cloud-infrastructure",
+      "tags": ["cloud", "kubernetes", "networking", "terraform", "multi-cloud"]
+    },
+    {
+      "body": "teams/comprehensive-review.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Three readers on one change: one for the code, one for the architecture it lands in, and one for what an attacker would do with it.",
+      "emoji": "🔍",
+      "id": "wshobson-comprehensive-review",
+      "members": [
+        {
+          "agentId": "wshobson-code-reviewer",
+          "name": "Code Reviewer",
+          "role": "Code Reviewer"
+        },
+        {
+          "agentId": "wshobson-architect-review",
+          "name": "Architecture Reviewer",
+          "role": "Architecture Reviewer"
+        },
+        {
+          "agentId": "wshobson-security-auditor",
+          "name": "Security Auditor",
+          "role": "Security Auditor"
+        }
+      ],
+      "name": "Multi-Angle Review Panel",
+      "packId": "wshobson-agents",
+      "slug": "comprehensive-review",
+      "tags": ["code-review", "architecture", "security", "quality"]
+    },
+    {
+      "body": "teams/database-optimization.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Picks the right store, models the schema, tunes the queries, and checks what the whole thing costs to run.",
+      "emoji": "🏛️",
+      "id": "wshobson-database-optimization",
+      "members": [
+        {
+          "agentId": "wshobson-database-architect",
+          "name": "Database Architect",
+          "role": "Database Architect"
+        },
+        {
+          "agentId": "wshobson-database-optimizer",
+          "name": "Database Optimizer",
+          "role": "Database Optimizer"
+        },
+        {
+          "agentId": "wshobson-sql-pro",
+          "name": "SQL Specialist",
+          "role": "SQL Specialist"
+        },
+        {
+          "agentId": "wshobson-cloud-architect",
+          "name": "Cloud Architect",
+          "role": "Cloud Architect"
+        }
+      ],
+      "name": "Database Optimisation Team",
+      "packId": "wshobson-agents",
+      "slug": "database-optimization",
+      "tags": ["databases", "query-tuning", "schema-design", "cost"]
+    },
+    {
+      "body": "teams/delivery-pipeline.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Builds the path from commit to production: pipeline configuration, infrastructure code, cluster delivery, and someone who debugs it at 3am.",
+      "emoji": "🚀",
+      "id": "wshobson-delivery-pipeline",
+      "members": [
+        {
+          "agentId": "wshobson-deployment-engineer",
+          "name": "Deployment Engineer",
+          "role": "Deployment Engineer"
+        },
+        {
+          "agentId": "wshobson-cloud-architect",
+          "name": "Cloud Architect",
+          "role": "Cloud Architect"
+        },
+        {
+          "agentId": "wshobson-terraform-specialist",
+          "name": "Terraform Specialist",
+          "role": "Terraform Specialist"
+        },
+        {
+          "agentId": "wshobson-kubernetes-architect",
+          "name": "Kubernetes Architect",
+          "role": "Kubernetes Architect"
+        },
+        {
+          "agentId": "wshobson-devops-troubleshooter",
+          "name": "DevOps Troubleshooter",
+          "role": "DevOps Troubleshooter"
+        }
+      ],
+      "name": "Delivery Pipeline Crew",
+      "packId": "wshobson-agents",
+      "slug": "delivery-pipeline",
+      "tags": ["cicd", "deployment", "kubernetes", "terraform"]
+    },
+    {
+      "body": "teams/documentation-generation.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Turns a codebase into documentation people actually use: the long-form architecture piece, the API spec, the reference, and the tutorial.",
+      "emoji": "📚",
+      "id": "wshobson-documentation-generation",
+      "members": [
+        {
+          "agentId": "wshobson-docs-architect",
+          "name": "Documentation Architect",
+          "role": "Documentation Architect"
+        },
+        {
+          "agentId": "wshobson-api-documenter",
+          "name": "API Documenter",
+          "role": "API Documenter"
+        },
+        {
+          "agentId": "wshobson-reference-builder",
+          "name": "Reference Builder",
+          "role": "Reference Builder"
+        },
+        {
+          "agentId": "wshobson-tutorial-engineer",
+          "name": "Tutorial Author",
+          "role": "Tutorial Author"
+        }
+      ],
+      "name": "Documentation Team",
+      "packId": "wshobson-agents",
+      "slug": "documentation-generation",
+      "tags": ["documentation", "api-docs", "tutorials", "reference"]
+    },
+    {
+      "body": "teams/incident-response.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Runs a live production incident: someone commanding it, someone reading the logs, someone finding the cause, and someone stabilising the system.",
+      "emoji": "🚨",
+      "id": "wshobson-incident-response",
+      "members": [
+        {
+          "agentId": "wshobson-incident-responder",
+          "name": "Incident Responder",
+          "role": "Incident Responder"
+        },
+        {
+          "agentId": "wshobson-devops-troubleshooter",
+          "name": "DevOps Troubleshooter",
+          "role": "DevOps Troubleshooter"
+        },
+        {
+          "agentId": "wshobson-error-detective",
+          "name": "Error Detective",
+          "role": "Error Detective"
+        },
+        {
+          "agentId": "wshobson-debugger",
+          "name": "Root Cause Debugger",
+          "role": "Root Cause Debugger"
+        },
+        {
+          "agentId": "wshobson-observability-engineer",
+          "name": "Observability Engineer",
+          "role": "Observability Engineer"
+        }
+      ],
+      "name": "Incident Response Team",
+      "packId": "wshobson-agents",
+      "slug": "incident-response",
+      "tags": ["incidents", "on-call", "debugging", "observability"]
+    },
+    {
+      "body": "teams/interface-design.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Designs the interface and the system behind it: component anatomy, the token layer, and an accessibility pass that happens before handoff.",
+      "emoji": "🎨",
+      "id": "wshobson-interface-design",
+      "members": [
+        {
+          "agentId": "wshobson-ui-ux-designer",
+          "name": "Product Designer",
+          "role": "Product Designer"
+        },
+        {
+          "agentId": "wshobson-ui-designer",
+          "name": "UI Designer",
+          "role": "UI Designer"
+        },
+        {
+          "agentId": "wshobson-design-system-architect",
+          "name": "Design System Architect",
+          "role": "Design System Architect"
+        },
+        {
+          "agentId": "wshobson-accessibility-expert",
+          "name": "Accessibility Specialist",
+          "role": "Accessibility Specialist"
+        }
+      ],
+      "name": "Interface Design Team",
+      "packId": "wshobson-agents",
+      "slug": "interface-design",
+      "tags": ["design-system", "ui", "accessibility", "components"]
+    },
+    {
+      "body": "teams/jvm-and-dotnet.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Three managed-runtime specialists for enterprise codebases: Java, Scala, and C#, with the runtime tuning that goes with them.",
+      "emoji": "☕",
+      "id": "wshobson-jvm-and-dotnet",
+      "members": [
+        {
+          "agentId": "wshobson-java-pro",
+          "name": "Java Specialist",
+          "role": "Java Specialist"
+        },
+        {
+          "agentId": "wshobson-scala-pro",
+          "name": "Scala Specialist",
+          "role": "Scala Specialist"
+        },
+        {
+          "agentId": "wshobson-csharp-pro",
+          "name": "C# Specialist",
+          "role": "C# Specialist"
+        }
+      ],
+      "name": "JVM and .NET Bench",
+      "packId": "wshobson-agents",
+      "slug": "jvm-and-dotnet",
+      "tags": ["java", "scala", "csharp", "enterprise"]
+    },
+    {
+      "body": "teams/llm-application.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Builds an LLM feature that survives production: retrieval that returns the right chunk, prompts that are measured, and context that is managed.",
+      "emoji": "🤖",
+      "id": "wshobson-llm-application",
+      "members": [
+        {
+          "agentId": "wshobson-ai-engineer",
+          "name": "AI Applications Engineer",
+          "role": "AI Applications Engineer"
+        },
+        {
+          "agentId": "wshobson-vector-database-engineer",
+          "name": "Vector Database Engineer",
+          "role": "Vector Database Engineer"
+        },
+        {
+          "agentId": "wshobson-prompt-engineer",
+          "name": "Prompt Engineer",
+          "role": "Prompt Engineer"
+        },
+        {
+          "agentId": "wshobson-context-manager",
+          "name": "Context Engineer",
+          "role": "Context Engineer"
+        }
+      ],
+      "name": "LLM Application Team",
+      "packId": "wshobson-agents",
+      "slug": "llm-application",
+      "tags": ["llm", "rag", "prompting", "vector-search"]
+    },
+    {
+      "body": "teams/llm-finetuning.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "An eval-gated fine-tuning line: the strategist decides whether to train at all, the eval engineer holds the gate, the training engineer runs it.",
+      "emoji": "🧬",
+      "id": "wshobson-llm-finetuning",
+      "members": [
+        {
+          "agentId": "wshobson-llm-finetuning-architect",
+          "name": "Fine-Tuning Architect",
+          "role": "Fine-Tuning Architect"
+        },
+        {
+          "agentId": "wshobson-llm-finetuning-eval-engineer",
+          "name": "Fine-Tuning Eval Engineer",
+          "role": "Fine-Tuning Eval Engineer"
+        },
+        {
+          "agentId": "wshobson-llm-finetuning-training-engineer",
+          "name": "Fine-Tuning Training Engineer",
+          "role": "Fine-Tuning Training Engineer"
+        }
+      ],
+      "name": "Fine-Tuning Team",
+      "packId": "wshobson-agents",
+      "slug": "llm-finetuning",
+      "tags": ["fine-tuning", "evaluation", "training", "llm"]
+    },
+    {
+      "body": "teams/machine-learning-ops.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Takes a model from analysis to a served, monitored, reproducible system: the science, the serving, and the pipeline around both.",
+      "emoji": "🔁",
+      "id": "wshobson-machine-learning-ops",
+      "members": [
+        {
+          "agentId": "wshobson-data-scientist",
+          "name": "Data Scientist",
+          "role": "Data Scientist"
+        },
+        {
+          "agentId": "wshobson-ml-engineer",
+          "name": "Machine Learning Engineer",
+          "role": "Machine Learning Engineer"
+        },
+        {
+          "agentId": "wshobson-mlops-engineer",
+          "name": "MLOps Engineer",
+          "role": "MLOps Engineer"
+        },
+        {
+          "agentId": "wshobson-data-engineer",
+          "name": "Data Engineer",
+          "role": "Data Engineer"
+        }
+      ],
+      "name": "Machine Learning Ops Team",
+      "packId": "wshobson-agents",
+      "slug": "machine-learning-ops",
+      "tags": ["machine-learning", "mlops", "pipelines", "analytics"]
+    },
+    {
+      "body": "teams/multi-platform-product.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Ships one product across web, iOS and Android against a shared API contract, with a designer keeping the surfaces coherent.",
+      "emoji": "📱",
+      "id": "wshobson-multi-platform-product",
+      "members": [
+        {
+          "agentId": "wshobson-backend-architect",
+          "name": "Backend Architect",
+          "role": "Backend Architect"
+        },
+        {
+          "agentId": "wshobson-frontend-developer",
+          "name": "Frontend Developer",
+          "role": "Frontend Developer"
+        },
+        {
+          "agentId": "wshobson-ios-developer",
+          "name": "iOS Developer",
+          "role": "iOS Developer"
+        },
+        {
+          "agentId": "wshobson-mobile-developer",
+          "name": "Mobile Developer",
+          "role": "Mobile Developer"
+        },
+        {
+          "agentId": "wshobson-flutter-expert",
+          "name": "Flutter Developer",
+          "role": "Flutter Developer"
+        },
+        {
+          "agentId": "wshobson-ui-ux-designer",
+          "name": "Product Designer",
+          "role": "Product Designer"
+        }
+      ],
+      "name": "Multi-Platform Product Team",
+      "packId": "wshobson-agents",
+      "slug": "multi-platform-product",
+      "tags": ["mobile", "frontend", "ios", "cross-platform"]
+    },
+    {
+      "body": "teams/observability.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "Makes a running system legible: metrics, logs and traces that answer real questions, with alerts tied to what users feel.",
+      "emoji": "📡",
+      "id": "wshobson-observability",
+      "members": [
+        {
+          "agentId": "wshobson-observability-engineer",
+          "name": "Observability Engineer",
+          "role": "Observability Engineer"
+        },
+        {
+          "agentId": "wshobson-performance-engineer",
+          "name": "Performance Engineer",
+          "role": "Performance Engineer"
+        },
+        {
+          "agentId": "wshobson-network-engineer",
+          "name": "Network Engineer",
+          "role": "Network Engineer"
+        },
+        {
+          "agentId": "wshobson-database-optimizer",
+          "name": "Database Optimizer",
+          "role": "Database Optimizer"
+        }
+      ],
+      "name": "Observability Team",
+      "packId": "wshobson-agents",
+      "slug": "observability",
+      "tags": ["observability", "metrics", "tracing", "performance"]
+    },
+    {
+      "body": "teams/operating-kit.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "A portable working method: open the session with verified state, review before shipping, deploy with proof, and close with an honest handover.",
+      "emoji": "🌅",
+      "id": "wshobson-operating-kit",
+      "members": [
+        {
+          "agentId": "wshobson-session-start",
+          "name": "Session Opener",
+          "role": "Session Opener"
+        },
+        {
+          "agentId": "wshobson-code-review-preshipment",
+          "name": "Pre-Ship Reviewer",
+          "role": "Pre-Ship Reviewer"
+        },
+        {
+          "agentId": "wshobson-deploy-with-verification",
+          "name": "Deploy Verifier",
+          "role": "Deploy Verifier"
+        },
+        {
+          "agentId": "wshobson-prod-logs-health-check",
+          "name": "Production Log Checker",
+          "role": "Production Log Checker"
+        },
+        {
+          "agentId": "wshobson-session-end",
+          "name": "Session Closer",
+          "role": "Session Closer"
+        }
+      ],
+      "name": "Operating Kit",
+      "packId": "wshobson-agents",
+      "slug": "operating-kit",
+      "tags": ["workflow", "session", "release", "production"]
+    },
+    {
+      "body": "teams/parallel-delivery-squad.json",
+      "category": "project-management",
+      "color": "#0284C7",
+      "description": "A lead who splits the work, an implementer who builds inside strict file boundaries, a reviewer, and a debugger for when it goes wrong.",
+      "emoji": "🧭",
+      "id": "wshobson-parallel-delivery-squad",
+      "members": [
+        {
+          "agentId": "wshobson-team-lead",
+          "name": "Team Lead",
+          "role": "Team Lead"
+        },
+        {
+          "agentId": "wshobson-team-implementer",
+          "name": "Team Implementer",
+          "role": "Team Implementer"
+        },
+        {
+          "agentId": "wshobson-team-reviewer",
+          "name": "Team Reviewer",
+          "role": "Team Reviewer"
+        },
+        {
+          "agentId": "wshobson-team-debugger",
+          "name": "Team Debugger",
+          "role": "Team Debugger"
+        }
+      ],
+      "name": "Parallel Delivery Squad",
+      "packId": "wshobson-agents",
+      "slug": "parallel-delivery-squad",
+      "tags": ["orchestration", "parallel-work", "code-review", "debugging"]
+    },
+    {
+      "body": "teams/python-development.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Modern Python across the two dominant web stacks, with a language specialist for everything below the framework.",
+      "emoji": "🐍",
+      "id": "wshobson-python-development",
+      "members": [
+        {
+          "agentId": "wshobson-python-pro",
+          "name": "Python Specialist",
+          "role": "Python Specialist"
+        },
+        {
+          "agentId": "wshobson-django-pro",
+          "name": "Django Specialist",
+          "role": "Django Specialist"
+        },
+        {
+          "agentId": "wshobson-fastapi-pro",
+          "name": "FastAPI Specialist",
+          "role": "FastAPI Specialist"
+        }
+      ],
+      "name": "Python Development Team",
+      "packId": "wshobson-agents",
+      "slug": "python-development",
+      "tags": ["python", "django", "fastapi", "async"]
+    },
+    {
+      "body": "teams/security-research.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Defensive analysis of things without source: binaries, hostile samples, and shipped firmware, for authorised research only.",
+      "emoji": "🔬",
+      "id": "wshobson-security-research",
+      "members": [
+        {
+          "agentId": "wshobson-reverse-engineer",
+          "name": "Reverse Engineer",
+          "role": "Reverse Engineer"
+        },
+        {
+          "agentId": "wshobson-malware-analyst",
+          "name": "Malware Analyst",
+          "role": "Malware Analyst"
+        },
+        {
+          "agentId": "wshobson-firmware-analyst",
+          "name": "Firmware Analyst",
+          "role": "Firmware Analyst"
+        },
+        {
+          "agentId": "wshobson-threat-modeling-expert",
+          "name": "Threat Modeller",
+          "role": "Threat Modeller"
+        }
+      ],
+      "name": "Security Research Team",
+      "packId": "wshobson-agents",
+      "slug": "security-research",
+      "tags": ["reverse-engineering", "malware", "firmware", "defensive"]
+    },
+    {
+      "body": "teams/seo-content.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Plans the cluster, writes the pieces, and audits what already exists, so publishing follows a plan instead of a hunch.",
+      "emoji": "✒️",
+      "id": "wshobson-seo-content",
+      "members": [
+        {
+          "agentId": "wshobson-seo-content-planner",
+          "name": "SEO Content Planner",
+          "role": "SEO Content Planner"
+        },
+        {
+          "agentId": "wshobson-seo-content-writer",
+          "name": "SEO Content Writer",
+          "role": "SEO Content Writer"
+        },
+        {
+          "agentId": "wshobson-seo-content-auditor",
+          "name": "SEO Content Auditor",
+          "role": "SEO Content Auditor"
+        },
+        {
+          "agentId": "wshobson-content-marketer",
+          "name": "Content Marketer",
+          "role": "Content Marketer"
+        }
+      ],
+      "name": "SEO Content Studio",
+      "packId": "wshobson-agents",
+      "slug": "seo-content",
+      "tags": ["seo", "content", "writing", "audit"]
+    },
+    {
+      "body": "teams/seo-technical.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "The mechanical half of search: keyword use, metadata within its limits, page structure and schema, and formatting that wins result features.",
+      "emoji": "🔑",
+      "id": "wshobson-seo-technical",
+      "members": [
+        {
+          "agentId": "wshobson-seo-keyword-strategist",
+          "name": "SEO Keyword Strategist",
+          "role": "SEO Keyword Strategist"
+        },
+        {
+          "agentId": "wshobson-seo-meta-optimizer",
+          "name": "SEO Meta Optimizer",
+          "role": "SEO Meta Optimizer"
+        },
+        {
+          "agentId": "wshobson-seo-structure-architect",
+          "name": "SEO Structure Architect",
+          "role": "SEO Structure Architect"
+        },
+        {
+          "agentId": "wshobson-seo-snippet-hunter",
+          "name": "SEO Snippet Hunter",
+          "role": "SEO Snippet Hunter"
+        }
+      ],
+      "name": "Technical SEO Team",
+      "packId": "wshobson-agents",
+      "slug": "seo-technical",
+      "tags": ["seo", "metadata", "structure", "snippets"]
+    },
+    {
+      "body": "teams/ship-it.json",
+      "category": "devops",
+      "color": "#0EA5E9",
+      "description": "The gate before a release: automated tests, a security pass, a performance check, and a deploy that is verified rather than assumed.",
+      "emoji": "✅",
+      "id": "wshobson-ship-it",
+      "members": [
+        {
+          "agentId": "wshobson-test-automator",
+          "name": "Test Automation Engineer",
+          "role": "Test Automation Engineer"
+        },
+        {
+          "agentId": "wshobson-security-auditor",
+          "name": "Security Auditor",
+          "role": "Security Auditor"
+        },
+        {
+          "agentId": "wshobson-performance-engineer",
+          "name": "Performance Engineer",
+          "role": "Performance Engineer"
+        },
+        {
+          "agentId": "wshobson-deployment-engineer",
+          "name": "Deployment Engineer",
+          "role": "Deployment Engineer"
+        },
+        {
+          "agentId": "wshobson-deploy-with-verification",
+          "name": "Deploy Verifier",
+          "role": "Deploy Verifier"
+        }
+      ],
+      "name": "Ship It Crew",
+      "packId": "wshobson-agents",
+      "slug": "ship-it",
+      "tags": ["release", "testing", "security", "performance"]
+    },
+    {
+      "body": "teams/systems-programming.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Low-level and performance-critical work: Rust and Go for the services, and defensive shell for everything that automates around them.",
+      "emoji": "🦀",
+      "id": "wshobson-systems-programming",
+      "members": [
+        {
+          "agentId": "wshobson-rust-pro",
+          "name": "Rust Specialist",
+          "role": "Rust Specialist"
+        },
+        {
+          "agentId": "wshobson-golang-pro",
+          "name": "Go Specialist",
+          "role": "Go Specialist"
+        },
+        {
+          "agentId": "wshobson-bash-pro",
+          "name": "Shell Automation Engineer",
+          "role": "Shell Automation Engineer"
+        }
+      ],
+      "name": "Systems Programming Bench",
+      "packId": "wshobson-agents",
+      "slug": "systems-programming",
+      "tags": ["rust", "go", "shell", "performance"]
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -21,8 +21,10 @@ import { agents, getSetting, type ClawbooDb } from '@clawboo/db'
 import type { TurnFraming } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
+import { listLiveConnectors } from '../connectors/supervisor'
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
+import { buildConnectorAwareness } from './connectorAwareness'
 
 /** Durable team rules (settings key `team-rules:<teamId>`, JSON `{ content }`). */
 function readTeamRulesContent(db: ClawbooDb, teamId: string): string {
@@ -263,7 +265,22 @@ export function buildServerTeamContext(
   // which deliver SOUL.md through their own channel.
   const personaBlock = buildPersonaBlock(db, selfAgentId, runtime)
 
-  const composed = [personaBlock, rulesBlock, aboutUserBlock, rosterBlock, coordinationBlock]
+  // What this agent could reach and does not. Rides only a user-facing turn,
+  // because a suggestion on a background worker's turn is spent on a transcript
+  // nobody opens. See ./connectorAwareness for why the prohibitions are in it.
+  const connectorsBlock = buildConnectorAwareness({
+    connected: listLiveConnectors().map((c) => c.slug),
+    isUserFacing: framing.isUserFacing,
+  })
+
+  const composed = [
+    personaBlock,
+    rulesBlock,
+    aboutUserBlock,
+    rosterBlock,
+    coordinationBlock,
+    connectorsBlock,
+  ]
     .filter(Boolean)
     .join('\n\n')
   return composed.length > 0 ? composed : null

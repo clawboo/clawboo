@@ -1,0 +1,267 @@
+{
+  "agents": [
+    {
+      "body": "agents/flow-auditor.json",
+      "category": "marketing",
+      "color": "#E11D48",
+      "description": "Audits the automated email and SMS flows behind a store, finds the missing ones, and ranks the fixes by the revenue they leak.",
+      "emoji": "🔁",
+      "id": "lifecycle-flow-auditor",
+      "name": "Lifecycle Flow Auditor",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "role": "Lifecycle Flow Auditor",
+      "skillIds": [
+        "lifecycle-flow-audit",
+        "email-deliverability-check",
+        "commerce-benchmarking",
+        "web-search",
+        "file-writer"
+      ],
+      "slug": "flow-auditor",
+      "tags": ["lifecycle", "email", "sms", "automation", "audit"]
+    },
+    {
+      "body": "agents/event-schema-engineer.json",
+      "category": "ops",
+      "color": "#E11D48",
+      "description": "Designs and repairs the customer event and profile data a lifecycle platform runs on, so segments and flows have something to stand on.",
+      "emoji": "🧬",
+      "id": "lifecycle-event-schema-engineer",
+      "name": "Customer Event Schema Engineer",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "role": "Customer Event Schema Engineer",
+      "skillIds": [
+        "event-schema-design",
+        "json-transformer",
+        "api-tester",
+        "file-reader",
+        "file-writer"
+      ],
+      "slug": "event-schema-engineer",
+      "tags": ["events", "schema", "tracking", "integration", "data"]
+    },
+    {
+      "body": "agents/storefront-funnel-analyst.json",
+      "category": "marketing",
+      "color": "#E11D48",
+      "description": "Measures a storefront from session to purchase, locates the step that loses the most people, and says what the number can and cannot prove.",
+      "emoji": "📉",
+      "id": "lifecycle-storefront-funnel-analyst",
+      "name": "Storefront Funnel Analyst",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "role": "Storefront Funnel Analyst",
+      "skillIds": [
+        "checkout-funnel-audit",
+        "commerce-benchmarking",
+        "csv-analyzer",
+        "data-visualizer",
+        "web-search"
+      ],
+      "slug": "storefront-funnel-analyst",
+      "tags": ["ecommerce", "funnel", "analytics", "benchmarks"]
+    },
+    {
+      "body": "agents/churn-analyst.json",
+      "category": "marketing",
+      "color": "#E11D48",
+      "description": "Scores which customers are about to leave, explains why, and designs the save and win-back sequences worth sending to each group.",
+      "emoji": "🪃",
+      "id": "lifecycle-churn-analyst",
+      "name": "Churn and Win-Back Analyst",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "role": "Churn and Win-Back Analyst",
+      "skillIds": [
+        "churn-risk-scoring",
+        "commerce-benchmarking",
+        "csv-analyzer",
+        "trend-analyzer",
+        "file-writer"
+      ],
+      "slug": "churn-analyst",
+      "tags": ["churn", "retention", "win-back", "cohort", "lifetime-value"]
+    },
+    {
+      "body": "agents/checkout-auditor.json",
+      "category": "marketing",
+      "color": "#E11D48",
+      "description": "Walks the cart, forms and checkout as a buyer would, names the friction that costs orders, and scores the fixes before anyone builds them.",
+      "emoji": "🛒",
+      "id": "lifecycle-checkout-auditor",
+      "name": "Checkout Experience Auditor",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "role": "Checkout Experience Auditor",
+      "skillIds": [
+        "checkout-funnel-audit",
+        "web-scraper",
+        "web-search",
+        "file-writer",
+        "markdown-renderer"
+      ],
+      "slug": "checkout-auditor",
+      "tags": ["checkout", "forms", "friction", "cro", "ecommerce"]
+    },
+    {
+      "body": "agents/campaign-tagging-steward.json",
+      "category": "ops",
+      "color": "#E11D48",
+      "description": "Owns the campaign tagging vocabulary so every channel reports into one set of names, and repairs the tagging that broke the numbers.",
+      "emoji": "🏷️",
+      "id": "lifecycle-campaign-tagging-steward",
+      "name": "Campaign Tagging Steward",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "role": "Campaign Tagging Steward",
+      "skillIds": [
+        "utm-taxonomy",
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "file-writer",
+        "web-search"
+      ],
+      "slug": "campaign-tagging-steward",
+      "tags": ["utm", "tracking", "taxonomy", "measurement", "governance"]
+    }
+  ],
+  "counts": {
+    "agents": 6,
+    "skills": 7,
+    "teams": 2
+  },
+  "description": "Six specialists for a direct-to-consumer storefront and the lifecycle programme behind it, and two teams built from them, covering automated email and SMS flows, customer event data, funnel measurement, checkout friction, churn and win-back, and campaign tagging. Adapted from an MIT-licensed upstream collection of marketing skills: only the commerce and lifecycle slice was taken, and every body was re-scoped and rewritten into the Clawboo document set.",
+  "id": "thatrebeccarae-lifecycle-commerce",
+  "idPrefix": "lifecycle",
+  "name": "Lifecycle Commerce",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Rebecca Rae Barton"],
+    "color": "#E11D48",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Lifecycle Commerce",
+    "license": "MIT",
+    "ref": "a8a63ec1341f05ec9c1e9cb52b4edeb14e3bdcba",
+    "repo": "https://github.com/thatrebeccarae/claude-marketing",
+    "sourceId": "thatrebeccarae-lifecycle-commerce"
+  },
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "category": "comm",
+      "description": "Inventories the automated email and SMS flows a store runs, then scores each one on coverage, timing and revenue share.",
+      "id": "lifecycle-flow-audit",
+      "name": "Lifecycle Flow Audit",
+      "tags": ["lifecycle", "automation", "audit", "email"]
+    },
+    {
+      "category": "comm",
+      "description": "Diagnoses inbox placement from bounce, complaint and engagement signals, and checks sender authentication and list hygiene.",
+      "id": "email-deliverability-check",
+      "name": "Email Deliverability Check",
+      "tags": ["deliverability", "authentication", "list-hygiene"]
+    },
+    {
+      "category": "data",
+      "description": "Designs the customer event and profile property schema a lifecycle platform needs, and finds the gaps blocking segmentation.",
+      "id": "event-schema-design",
+      "name": "Event Schema Design",
+      "tags": ["events", "schema", "tracking", "profiles"]
+    },
+    {
+      "category": "data",
+      "description": "Measures a storefront funnel step by step, locates the largest drop-off and separates a traffic problem from a page problem.",
+      "id": "checkout-funnel-audit",
+      "name": "Checkout Funnel Audit",
+      "tags": ["funnel", "checkout", "conversion", "drop-off"]
+    },
+    {
+      "category": "data",
+      "description": "Builds a weighted health score from usage, billing, support and engagement signals so at-risk customers surface before they leave.",
+      "id": "churn-risk-scoring",
+      "name": "Churn Risk Scoring",
+      "tags": ["churn", "retention", "health-score"]
+    },
+    {
+      "category": "data",
+      "description": "Defines and enforces a campaign tagging vocabulary so every channel reports into one consistent set of source and medium values.",
+      "id": "utm-taxonomy",
+      "name": "UTM Taxonomy",
+      "tags": ["utm", "tracking", "taxonomy", "attribution"]
+    },
+    {
+      "category": "data",
+      "description": "Places a store metric against a realistic band for its business model, and says plainly when the comparison does not hold.",
+      "id": "commerce-benchmarking",
+      "name": "Commerce Benchmarking",
+      "tags": ["benchmarks", "metrics", "ecommerce"]
+    }
+  ],
+  "teams": [
+    {
+      "body": "teams/revenue-audit.json",
+      "category": "marketing",
+      "color": "#E11D48",
+      "description": "Takes an existing email and SMS programme apart: what it sends, what the data underneath supports, who is leaving, and whether the numbers can be trusted.",
+      "emoji": "🔁",
+      "id": "lifecycle-revenue-audit",
+      "members": [
+        {
+          "agentId": "lifecycle-flow-auditor",
+          "name": "Lifecycle Flow Auditor",
+          "role": "Lifecycle Flow Auditor"
+        },
+        {
+          "agentId": "lifecycle-event-schema-engineer",
+          "name": "Customer Event Schema Engineer",
+          "role": "Customer Event Schema Engineer"
+        },
+        {
+          "agentId": "lifecycle-churn-analyst",
+          "name": "Churn and Win-Back Analyst",
+          "role": "Churn and Win-Back Analyst"
+        },
+        {
+          "agentId": "lifecycle-campaign-tagging-steward",
+          "name": "Campaign Tagging Steward",
+          "role": "Campaign Tagging Steward"
+        }
+      ],
+      "name": "Lifecycle Revenue Audit",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "slug": "revenue-audit",
+      "tags": ["lifecycle", "retention", "audit", "email"]
+    },
+    {
+      "body": "teams/storefront-conversion-desk.json",
+      "category": "marketing",
+      "color": "#E11D48",
+      "description": "Finds where a storefront loses buyers, diagnoses the screen that loses them, and recovers the ones who left without finishing.",
+      "emoji": "🛒",
+      "id": "lifecycle-storefront-conversion-desk",
+      "members": [
+        {
+          "agentId": "lifecycle-storefront-funnel-analyst",
+          "name": "Storefront Funnel Analyst",
+          "role": "Storefront Funnel Analyst"
+        },
+        {
+          "agentId": "lifecycle-checkout-auditor",
+          "name": "Checkout Experience Auditor",
+          "role": "Checkout Experience Auditor"
+        },
+        {
+          "agentId": "lifecycle-flow-auditor",
+          "name": "Lifecycle Flow Auditor",
+          "role": "Lifecycle Flow Auditor"
+        },
+        {
+          "agentId": "lifecycle-campaign-tagging-steward",
+          "name": "Campaign Tagging Steward",
+          "role": "Campaign Tagging Steward"
+        }
+      ],
+      "name": "Storefront Conversion Desk",
+      "packId": "thatrebeccarae-lifecycle-commerce",
+      "slug": "storefront-conversion-desk",
+      "tags": ["ecommerce", "conversion", "checkout", "funnel"]
+    }
+  ],
+  "version": "1.0.0"
+}

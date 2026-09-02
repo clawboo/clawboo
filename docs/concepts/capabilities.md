@@ -13,7 +13,7 @@ This page explains the record shape, the six sources, the manageability tiers an
 
 The inventory is a **read-mostly observation layer with a tier-gated write path**. Clawboo's stance is: _observe every capability across all runtimes; manage only what the owning runtime cedes._ That stance is encoded in the data, not in branching logic. A record that says `observe-only` is a record Clawboo will never write; the panel renders no Enable/Disable button for it, and the REST layer refuses any write against it.
 
-It is **not** a marketplace and **not** a skill installer in itself. The [marketplace](/using/marketplace) is where you browse the 304 agents and 82 teams; installing a curated skill is one specific write the inventory routes (to the native source), but the inventory's primary job is to _surface what exists_ across heterogeneous runtimes in one consistent shape.
+It is **not** a marketplace and **not** a skill installer in itself. The [marketplace](/using/marketplace) is where you browse the 436 agents and 85 teams; installing a curated skill is one specific write the inventory routes (to the native source), but the inventory's primary job is to _surface what exists_ across heterogeneous runtimes in one consistent shape.
 
 It is also **not** a second copy of any runtime's own state. A capability source `read()` reflects the runtime's authoritative store: the Gateway config, the Hermes home on disk, the `tool_registry` table, into records each time. The persisted `capabilities` table is a cache of the last good read per source, not a parallel source of truth.
 
@@ -80,21 +80,21 @@ The `id` is deterministic: it encodes `sourceId + runtime + scope + agentId + ki
 
 Each source is a `CapabilitySource` adapter, a `read()` that projects records plus a `write()` that the multiplexer routes by id prefix. The adapters live server-side; the package holds only the neutral types, the trait, and the multiplexer.
 
-| Source        | Owns                          | Manageability of its records    | What it reads                                                                                                                                                                |
-| ------------- | ----------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `native`      | The clawboo-managed plane     | `managed`                       | The `tool_registry` brokered tools (global), each native agent's MCP toggles (`AgentConfig.tools`), and the per-agent `skills` table (curated installs).                     |
-| `hermes`      | Hermes's private self-model   | `observe-only`                  | `SKILL.md` files and `mcp.json` connectors under each Hermes per-identity home, plus a built-ins roll-up.                                                                    |
-| `claude-code` | Claude Code's own `~/.claude` | `observe-only`                  | The clawboo-attached MCP servers and Claude's built-ins. Clawboo has no persistent Claude store to manage.                                                                   |
-| `codex`       | An ephemeral per-run home     | `external-write` (auth-blocked) | The clawboo-attached MCP servers, surfaced `manageable-but-pending-auth` (real, but blocked behind `codex login`), plus built-ins.                                           |
-| `openclaw`    | The Gateway config domain     | `runtime-of-record`             | `tools.allow`/`tools.deny`, `mcp.servers`, and plugins read over the shared operator connection, plus built-ins.                                                             |
-| `connector`   | Clawboo's own MCP connections | `observe-only`                  | The live outbound connectors Clawboo spawned or dialled itself. Global scope, because every agent reaches them through the same broker. See [Connectors](/using/connectors). |
+| Source        | Owns                          | Manageability of its records    | What it reads                                                                                                                                                                                                                                      |
+| ------------- | ----------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `native`      | The clawboo-managed plane     | `managed`                       | The `tool_registry` brokered tools (global), each native agent's MCP toggles (`AgentConfig.tools`), and the per-agent `skills` table (curated installs).                                                                                           |
+| `hermes`      | Hermes's private self-model   | `observe-only`                  | `SKILL.md` files and `mcp.json` connectors under each Hermes per-identity home, plus a built-ins roll-up.                                                                                                                                          |
+| `claude-code` | Claude Code's own `~/.claude` | `observe-only`                  | The clawboo-attached MCP servers and Claude's built-ins. Clawboo has no persistent Claude store to manage.                                                                                                                                         |
+| `codex`       | An ephemeral per-run home     | `external-write` (auth-blocked) | The clawboo-attached MCP servers, surfaced `manageable-but-pending-auth` (real, but blocked behind `codex login`), plus built-ins.                                                                                                                 |
+| `openclaw`    | The Gateway config domain     | `runtime-of-record`             | `tools.allow`/`tools.deny`, `mcp.servers`, and plugins read over the shared operator connection, plus built-ins.                                                                                                                                   |
+| `connector`   | Clawboo's own MCP connections | `observe-only`                  | The live outbound connectors Clawboo spawned or dialled itself. Global INVENTORY scope: the record says the connector exists and is running. It reaches an agent only through a grant, never by being global. See [Connectors](/using/connectors). |
 
 The `connector` source is the one place Clawboo owns the process and still records `observe-only`. That is deliberate: `managed` makes the dashboard render Enable and Disable buttons, and this source's `write()` refuses every action, so those buttons could only ever fail. Connecting and disconnecting are a REST surface of their own, because one spawns a process and completes a handshake and the other reaps a process tree. Neither is a capability toggle.
 
 Two details about the `native` source are worth calling out, because they're where "manage what's ceded" gets concrete:
 
 - A **curated skill** installed onto _any_ agent is a clawboo-managed annotation, the same thing a `TOOLS.md` bullet always was. Its record carries the _agent's_ runtime (so it groups under that runtime in the dashboard) but `manageability: 'managed'`, because Clawboo owns the `skills` table row. A curated skill on an OpenClaw agent is still managed by Clawboo.
-- A **native install** reuses the existing tool-broker pipeline: `scanForInjection` on the whole supply-chain payload, then `appendAudit`, rather than forking a second install path. The injection scan covers a connector's command, args, and env, not just the name, so a malicious MCP-connector command can't slip the scan before a future caller wires it to a spawn.
+- A **native install** reuses the existing tool-broker pipeline: `evaluateInjection` on the supply-chain payload, then `appendAudit`, rather than forking a second install path. The payload is scanned as _two_ surfaces rather than one blob, because it is two different things. The skill's name and content are prose bound for an agent's context, so they evaluate on `prompt`, where instruction-override phrasing blocks and a machine-directed string is flagged for review. A connector's command, args, and env are spawn-bound, so they evaluate on `exec`, where everything that fires blocks, so a malicious MCP-connector command can't slip the scan before a future caller wires it to a spawn. Scanning both halves at the stricter setting is what used to refuse security-education prose for quoting the payload it teaches people to reject.
 
 The `openclaw` source reuses the _shared_ operator connection that the OpenClaw `AgentSource` already holds; it never opens a second Gateway connection. When the Gateway is down, its `read()` returns no records with a degraded status, and the service layer falls back to the last good rows (see [The durable projection](#the-durable-projection)).
 
@@ -148,6 +148,33 @@ The `writable: false` derivation for a degraded OpenClaw connector or plugin is 
 ## One stream, two surfaces
 
 The "one inventory" claim is structural, not aspirational: the Ghost Graph and the Capabilities dashboard both call the same browser client (`fetchCapabilities` → `GET /api/capabilities`) and never issue a divergent query. The Ghost Graph groups the `agent`-scoped records by `agentId` into its per-agent skill and connector nodes, and uses each record's `available` flag to grey unavailable nodes, the same greying the dashboard applies. This replaced an earlier per-agent `TOOLS.md` parse: the graph and the dashboard would have drifted if they read capabilities two different ways, so they were collapsed onto one stream.
+
+## What lands on one Boo's ring
+
+The Ghost Graph draws a tile per capability, and `groupAgentCapabilities` decides which
+records reach which agent. Two rules govern it, and they pull in opposite directions on
+purpose.
+
+**A runtime's global capabilities are inherited, additively.** An agent's ring shows its
+own `scope: 'agent'` records _plus_ every `scope: 'global'` record matching its runtime. A
+runtime builtin belongs to every agent on that runtime, so an OpenClaw Boo draws its
+built-in tools whether or not it also carries per-agent records. Inheritance does not cross
+runtimes: a Codex agent never picks up a native global.
+
+**A connector is never inherited.** Connecting one makes it available and gives it to
+nobody. An agent reaches a connector only through a grant, and the grant projection emits
+an agent-scoped record for exactly those, so a global connector record is dropped before
+the per-runtime bucket is built. That ordering is what keeps the first rule safe: what
+remains to inherit is builtins and extensions, and drawing those cannot claim access an
+agent does not have.
+
+<Note>
+  Inheritance used to be a fallback rather than a sum, applying only while an agent had
+  nothing of its own. Gaining a single agent-scoped record then dropped every inherited
+  tile at once, so installing one marketplace skill on an OpenClaw Boo took its runtime
+  builtins off the graph in the same frame. Nothing was lost in reality, which is the
+  point: the graph was under-reporting what the agent could do.
+</Note>
 
 ## Design rationale and trade-offs
 

@@ -53,7 +53,7 @@ The sidebar nav is deliberately short, four work surfaces plus the Settings gear
 | --------- | ----------------------- | ------------------------------------ |
 | Primary   | **Atlas** _(All Teams)_ | The global Ghost Graph               |
 | Primary   | **Board**               | The durable kanban board             |
-| Primary   | **Marketplace**         | Browse 304 agents and 82 teams       |
+| Primary   | **Marketplace**         | Browse 436 agents and 85 teams       |
 | Secondary | **Fleet** _(Overview)_  | Fleet-health summary                 |
 | Footer    | **Settings** (gear)     | Opens the Settings modal (see below) |
 

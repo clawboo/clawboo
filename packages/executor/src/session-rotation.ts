@@ -18,7 +18,16 @@ import type { RunHandle, RuntimeAdapter } from './types'
  *  its own token accumulation (the native runtime) checks mid-run; the executor
  *  also evaluates it at the run boundary against the last run's usage. */
 export interface RotationTrigger {
-  /** Tokens consumed by the current session (input + output). */
+  /**
+   * How much of the window the session currently OCCUPIES, in tokens.
+   *
+   * This is the prompt, and only the prompt. It is not a spend total. Output
+   * tokens do not belong here: whatever the model said last turn is already
+   * inside this turn's input, so adding them counts the same text twice and the
+   * error compounds with every turn. The contract used to read "input + output",
+   * and every caller duly summed the two, which is how a session could drift
+   * toward the watermark while its context was not growing at all.
+   */
   tokensUsed: number
   /** The runtime's context window in tokens (0/unknown disables the watermark). */
   contextWindow: number

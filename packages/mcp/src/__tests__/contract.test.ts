@@ -16,6 +16,7 @@ import {
   listTasks,
   resolveApproval,
   type ClawbooDb,
+  ensureOwnerGrant,
 } from '@clawboo/db'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -349,6 +350,48 @@ describe('Tools MCP', () => {
     expect(await listToolNames(revealed)).toContain('web_search')
   })
 
+  it('names the granted broker apps in the description the model reads', async () => {
+    // THE BUG THIS PINS. A broker's tools are named for the broker, so an agent
+    // granted Gmail saw seven `COMPOSIO_*` tools and no mention of email. Asked
+    // to check its inbox it said it had Composio connected but no email service,
+    // which was an accurate reading of its own tool list.
+    const connectorId = 'conn:connector:clawboo-native:mcp:composio'
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a3',
+      capabilityKind: 'connector',
+      connectorId: `${connectorId}:app:gmail`,
+      capabilityId: null,
+    })
+    const client = await connectInMemory(
+      createToolsServer(db, {
+        agentId: 'a3',
+        availability: defaultAvailabilityContext({ env: {} }),
+        broker: { brokeredToolkits: ['gmail', 'googlesheets'] },
+        connectorTools: [
+          {
+            descriptor: {
+              name: 'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL',
+              description: 'Execute tools.',
+              inputSchema: z.object({}),
+              owner: 'mcp',
+              executor: () => 'ok',
+            },
+            connectorId,
+          },
+        ],
+      }),
+    )
+    const listed = (await client.listTools()).tools.find(
+      (t) => t.name === 'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL',
+    )
+    expect(listed?.description).toContain('GMAIL')
+    // ...and only what was granted. GOOGLESHEETS is a known toolkit here and
+    // this agent has no grant for it, so naming it would be an invitation to a
+    // call that gets refused.
+    expect(listed?.description).not.toContain('GOOGLESHEETS')
+  })
+
   it('serves an injected connector tool alongside the builtins', async () => {
     // The registry used to be built unconditionally inside createToolsServer, so
     // a tool discovered over an outbound MCP connection could be registered but
@@ -371,7 +414,40 @@ describe('Tools MCP', () => {
         ],
       }),
     )
-    const names = await listToolNames(client)
+    // UNGRANTED, SO UNLISTED. Injecting a connector tool makes it reachable;
+    // it does not give it to an agent. Listing it anyway spent the model's
+    // context on a schema for a capability whose every call answers
+    // `grant:no-grant`.
+    expect(await listToolNames(client)).not.toContain('mcp__memory__ping')
+
+    // Granted to this agent, it appears, alongside the ungoverned builtins.
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: 'conn:connector:clawboo:memory',
+      capabilityId: null,
+    })
+    const granted = await connectInMemory(
+      createToolsServer(db, {
+        agentId: 'a1',
+        availability: defaultAvailabilityContext({ env: {} }),
+        connectorTools: [
+          {
+            descriptor: {
+              name: 'mcp__memory__ping',
+              description: 'a discovered connector tool',
+              inputSchema: z.object({}),
+              owner: 'mcp',
+              readOnly: true,
+              executor: () => 'pong',
+            },
+            connectorId: 'conn:connector:clawboo:memory',
+          },
+        ],
+      }),
+    )
+    const names = await listToolNames(granted)
     expect(names).toContain('mcp__memory__ping')
     expect(names).toContain('echo')
   })
@@ -389,8 +465,18 @@ describe('Tools MCP', () => {
       required: ['mode'],
       additionalProperties: false,
     }
+    // The schema question is about what is SERVED, so the tool has to be visible
+    // to ask it: grants decide that now.
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a2',
+      capabilityKind: 'connector',
+      connectorId: 'conn:connector:clawboo:memory',
+      capabilityId: null,
+    })
     const client = await connectInMemory(
       createToolsServer(db, {
+        agentId: 'a2',
         availability: defaultAvailabilityContext({ env: {} }),
         connectorTools: [
           {

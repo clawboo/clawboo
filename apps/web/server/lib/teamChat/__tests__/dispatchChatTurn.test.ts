@@ -32,6 +32,8 @@ const participant: ChatParticipant = { agentId: 'cc', runtime: 'clawboo-native',
 function adapterFactory(opts: {
   onEvents?: () => void
   costUsd?: number
+  /** The turn's terminal text. Defaults to ordinary prose. */
+  summary?: string
 }): (ctx: RuntimeRunContext) => RuntimeAdapter {
   const base = { runId: 'run', sessionId: 'sess', ts: 0, seq: 0 }
   return (): RuntimeAdapter => ({
@@ -58,7 +60,7 @@ function adapterFactory(opts: {
         ...base,
         kind: 'done',
         reason: 'success',
-        summary: 'partial answer',
+        summary: opts.summary ?? 'partial answer',
         ...(opts.costUsd != null ? { costUsd: opts.costUsd } : {}),
       } as RuntimeEvent
     },
@@ -134,5 +136,60 @@ describe('dispatchChatTurn — an aborted turn commits no durable state', () => 
     expect(readRoom(db, { roomId })).toHaveLength(1)
     expect(loadChatLeaderState(db, roomId, participant.agentId).turnIndex).toBe(1)
     expect(getBudget(db, 'team', teamId)?.spentUsdCents ?? 0).toBeGreaterThan(0)
+  })
+})
+
+describe('dispatchChatTurn: a connector ask never leaks its marker', () => {
+  it('a reply that is ONLY a marker posts no peer message, and the marker never becomes context', async () => {
+    // The failure this pins: `body: ask.body || terminal` fell back to the raw
+    // text, so a marker-only turn put `[[connect:linear]]` in the room as the
+    // agent's answer AND saved it as `lastSummary`, where the next turn reads a
+    // control token as prose to imitate.
+    const teamId = 'tMarker'
+    const roomId = resolveRoomForTeam(teamId)
+    setBudgetLimit(db, { scope: 'team', scopeId: teamId, limitUsdCents: 1000, mode: 'cap' })
+
+    await dispatchChatTurn(
+      {
+        db,
+        participant,
+        roomId,
+        teamId,
+        makeAdapter: adapterFactory({ summary: '[[connect:linear]]' }),
+      },
+      1,
+    )
+
+    expect(readRoom(db, { roomId })).toHaveLength(0)
+    const state = loadChatLeaderState(db, roomId, participant.agentId)
+    expect(state.lastSummary ?? '').not.toContain('[[connect:')
+    expect(state.lastSummary ?? '').toBe('')
+  })
+
+  it('a reply with prose AND a marker posts the prose alone, marker stripped', async () => {
+    const teamId = 'tMixed'
+    const roomId = resolveRoomForTeam(teamId)
+    setBudgetLimit(db, { scope: 'team', scopeId: teamId, limitUsdCents: 1000, mode: 'cap' })
+
+    await dispatchChatTurn(
+      {
+        db,
+        participant,
+        roomId,
+        teamId,
+        makeAdapter: adapterFactory({
+          summary: 'I need Linear to read that issue.\n[[connect:linear]]',
+        }),
+      },
+      1,
+    )
+
+    const posts = readRoom(db, { roomId })
+    expect(posts).toHaveLength(1)
+    expect(posts[0]!.body).toBe('I need Linear to read that issue.')
+    expect(posts[0]!.body).not.toContain('[[connect:')
+    expect(loadChatLeaderState(db, roomId, participant.agentId).lastSummary).not.toContain(
+      '[[connect:',
+    )
   })
 })

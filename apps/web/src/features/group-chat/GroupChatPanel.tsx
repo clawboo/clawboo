@@ -11,6 +11,11 @@ import { useBoardStore } from '@/stores/board'
 import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import { connectionStatusTone } from '@/features/connection/connectionStatusDisplay'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
+import {
+  isResetCommand,
+  resetConversationContext,
+  RESET_FAILED_NOTICE,
+} from '@/features/chat/resetConversation'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
 import { sendServerTeamMessage, stopServerTeam } from './serverTeamChatSend'
@@ -597,17 +602,59 @@ export function GroupChatPanel({
     async (message: string) => {
       // Dismiss the guided first-task hint once the user actually sends.
       setFirstTaskTip(false)
-      // `/reset` / `/new` — deliberately NOT a team-chat command: a team has no
-      // single session to reset (each teammate + Boo Zero has its own, all
-      // server-orchestrated). Intercept it here so it gives clear feedback rather
-      // than being sent to the leader as a literal "/reset" message. (1:1 agent
-      // chat keeps `/reset`, where it maps to a real `sessions.create`.)
-      const cmd = message.trim().toLowerCase()
-      if (cmd === '/reset' || cmd === '/new') {
-        useToastStore.getState().addToast({
-          message: 'Reset isn’t available in team chat.',
-          type: 'error',
-        })
+      // Start fresh in a team room. A team has no single session behind it: the
+      // room a person sees is every teammate's own conversation merged, so every
+      // one of them has to stop carrying the thread. The room keeps every message
+      // and shows ONE divider, because the person is looking at one timeline.
+      // Intercepted here rather than sent onward, which would deliver the leader a
+      // literal "/reset" to interpret.
+      if (isResetCommand(message)) {
+        const keys = [...teamSessionKeys.values()]
+        const firstSk = keys[0]
+        if (!firstSk) return
+        const divider = await resetConversationContext(keys, firstSk)
+        // A native teammate stops because the route dropped its resume pointer. An
+        // OpenClaw teammate keeps its conversation inside the Gateway, so the
+        // command has to reach the runtime too. Without this one boo in the room
+        // answers from a thread the divider says the room has let go of, which is
+        // worse than not resetting because it is invisible.
+        const client = useConnectionStore.getState().client
+        if (client) {
+          await Promise.all(
+            participants
+              .filter((a) => a.runtime === 'openclaw')
+              .map(async (a) => {
+                const sk = teamSessionKeys.get(a.id)
+                if (!sk) return
+                try {
+                  await client.call('chat.send', {
+                    sessionKey: sk,
+                    message: '/reset',
+                    deliver: false,
+                    idempotencyKey: crypto.randomUUID(),
+                  })
+                } catch {
+                  // Best-effort per teammate: one unreachable boo must not stop the
+                  // rest of the room from starting fresh.
+                }
+              }),
+          )
+        }
+        useChatStore.getState().appendTranscript(firstSk, [
+          divider ?? {
+            entryId: crypto.randomUUID(),
+            runId: null,
+            sessionKey: firstSk,
+            kind: 'meta',
+            role: 'system',
+            text: RESET_FAILED_NOTICE,
+            source: 'local-send',
+            timestampMs: Date.now(),
+            sequenceKey: nextSeq(),
+            confirmed: true,
+            fingerprint: crypto.randomUUID(),
+          },
+        ])
         return
       }
       // `/rule <text>` — intercept BEFORE routing to any agent. Appends the

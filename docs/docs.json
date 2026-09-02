@@ -247,7 +247,6 @@
               "internals/event-pipeline",
               "internals/testing",
               "internals/release-process",
-              "internals/codegen-and-ingestion",
               "internals/design-system"
             ]
           }

@@ -1,0 +1,437 @@
+{
+  "agents": [
+    {
+      "body": "agents/founder-partner.json",
+      "category": "product",
+      "color": "#0EA5E9",
+      "description": "Reframes a feature request into the problem behind it and tests the premises the plan would rest on before any work starts.",
+      "emoji": "🧭",
+      "id": "sprint-founder-partner",
+      "name": "Founder Partner",
+      "packId": "clawboo-founder-sprint",
+      "role": "Founder Partner",
+      "skillIds": ["brainstorming", "web-search", "note-taker", "summarizer", "plan-writing"],
+      "slug": "founder-partner",
+      "tags": ["discovery", "framing", "premises", "product-judgement"]
+    },
+    {
+      "body": "agents/product-visionary.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Decides the scope of a piece of work and offers each expansion or cut as a separate opt-in choice, never as one bundled recommendation.",
+      "emoji": "🔭",
+      "id": "sprint-product-visionary",
+      "name": "Product Visionary",
+      "packId": "clawboo-founder-sprint",
+      "role": "Product Visionary",
+      "skillIds": [
+        "brainstorming",
+        "plan-writing",
+        "playbook-routing",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "product-visionary",
+      "tags": ["scope", "prioritisation", "product", "decision"]
+    },
+    {
+      "body": "agents/spec-author.json",
+      "category": "product",
+      "color": "#6366F1",
+      "description": "Turns an agreed direction into a written specification: the reason, the boundary, the technical shape, and the checks that prove it is done.",
+      "emoji": "📄",
+      "id": "sprint-spec-author",
+      "name": "Spec Author",
+      "packId": "clawboo-founder-sprint",
+      "role": "Spec Author",
+      "skillIds": ["plan-writing", "code-search", "markdown-renderer", "file-writer", "note-taker"],
+      "slug": "spec-author",
+      "tags": ["specification", "requirements", "writing", "scope"]
+    },
+    {
+      "body": "agents/design-partner.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Builds a design direction from nothing: type, colour, spacing, layout and motion, grounded in how comparable products already solve it.",
+      "emoji": "🎨",
+      "id": "sprint-design-partner",
+      "name": "Design Partner",
+      "packId": "clawboo-founder-sprint",
+      "role": "Design Partner",
+      "skillIds": ["brainstorming", "web-search", "markdown-renderer", "file-writer", "note-taker"],
+      "slug": "design-partner",
+      "tags": ["design-system", "typography", "colour", "layout"]
+    },
+    {
+      "body": "agents/design-critic.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Scores a design against a fixed rubric, states what full marks would look like, and rewrites the weakest dimension instead of only naming it.",
+      "emoji": "🔍",
+      "id": "sprint-design-critic",
+      "name": "Design Critic",
+      "packId": "clawboo-founder-sprint",
+      "role": "Design Critic",
+      "skillIds": [
+        "code-search",
+        "markdown-renderer",
+        "verification-before-completion",
+        "note-taker",
+        "web-search"
+      ],
+      "slug": "design-critic",
+      "tags": ["critique", "rubric", "review", "quality"]
+    },
+    {
+      "body": "agents/eng-manager.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Locks the architecture before implementation: data flow, error paths, edge cases, the test matrix, and the assumptions nobody wrote down.",
+      "emoji": "🗺️",
+      "id": "sprint-eng-manager",
+      "name": "Engineering Manager",
+      "packId": "clawboo-founder-sprint",
+      "role": "Engineering Manager",
+      "skillIds": [
+        "plan-writing",
+        "plan-execution",
+        "code-search",
+        "test-runner",
+        "verification-before-completion"
+      ],
+      "slug": "eng-manager",
+      "tags": ["architecture", "planning", "test-plan", "risk"]
+    },
+    {
+      "body": "agents/staff-reviewer.json",
+      "category": "engineering",
+      "color": "#2563EB",
+      "description": "Reviews a change for the defects that pass the suite and fail in production, and fixes the unambiguous ones instead of filing them.",
+      "emoji": "🛠️",
+      "id": "sprint-staff-reviewer",
+      "name": "Staff Reviewer",
+      "packId": "clawboo-founder-sprint",
+      "role": "Staff Reviewer",
+      "skillIds": [
+        "code-review-response",
+        "code-search",
+        "linter",
+        "test-runner",
+        "verification-before-completion"
+      ],
+      "slug": "staff-reviewer",
+      "tags": ["code-review", "defects", "production", "quality"]
+    },
+    {
+      "body": "agents/investigation-lead.json",
+      "category": "engineering",
+      "color": "#1D4ED8",
+      "description": "Finds the cause before anyone proposes a fix, tests one hypothesis at a time, and stops to escalate after three failed attempts.",
+      "emoji": "🧪",
+      "id": "sprint-investigation-lead",
+      "name": "Investigation Lead",
+      "packId": "clawboo-founder-sprint",
+      "role": "Investigation Lead",
+      "skillIds": [
+        "systematic-debugging",
+        "code-search",
+        "bash-executor",
+        "test-runner",
+        "note-taker"
+      ],
+      "slug": "investigation-lead",
+      "tags": ["debugging", "root-cause", "hypothesis", "escalation"]
+    },
+    {
+      "body": "agents/second-opinion.json",
+      "category": "engineering",
+      "color": "#7C3AED",
+      "description": "Reviews work that another reviewer already passed, forming a judgement independently first so that agreement between the two means something.",
+      "emoji": "⚖️",
+      "id": "sprint-second-opinion",
+      "name": "Second Opinion Reviewer",
+      "packId": "clawboo-founder-sprint",
+      "role": "Second Opinion Reviewer",
+      "skillIds": [
+        "code-review-request",
+        "code-search",
+        "verification-before-completion",
+        "summarizer",
+        "note-taker"
+      ],
+      "slug": "second-opinion",
+      "tags": ["review", "adversarial", "independence", "gate"]
+    },
+    {
+      "body": "agents/qa-lead.json",
+      "category": "testing",
+      "color": "#10B981",
+      "description": "Walks the real flows, classifies what breaks by severity, fixes it, and leaves behind the regression test that would have caught it.",
+      "emoji": "🐞",
+      "id": "sprint-qa-lead",
+      "name": "QA Lead",
+      "packId": "clawboo-founder-sprint",
+      "role": "QA Lead",
+      "skillIds": [
+        "test-runner",
+        "test-driven-development",
+        "api-tester",
+        "verification-before-completion",
+        "note-taker"
+      ],
+      "slug": "qa-lead",
+      "tags": ["qa", "severity", "regression", "verification"]
+    },
+    {
+      "body": "agents/security-officer.json",
+      "category": "specialized",
+      "color": "#78716C",
+      "description": "Reviews a change for exploitable weaknesses and reports only findings that carry a concrete attack path and survive independent checking.",
+      "emoji": "🔐",
+      "id": "sprint-security-officer",
+      "name": "Security Officer",
+      "packId": "clawboo-founder-sprint",
+      "role": "Security Officer",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "api-tester",
+        "verification-before-completion",
+        "note-taker"
+      ],
+      "slug": "security-officer",
+      "tags": ["security", "threat-model", "exploit", "signal"]
+    },
+    {
+      "body": "agents/dx-lead.json",
+      "category": "product",
+      "color": "#14B8A6",
+      "description": "Measures the time from first contact to first working result, then removes the steps in between, one traced piece of friction at a time.",
+      "emoji": "🚪",
+      "id": "sprint-dx-lead",
+      "name": "Developer Experience Lead",
+      "packId": "clawboo-founder-sprint",
+      "role": "Developer Experience Lead",
+      "skillIds": [
+        "markdown-renderer",
+        "web-search",
+        "note-taker",
+        "verification-before-completion",
+        "summarizer"
+      ],
+      "slug": "dx-lead",
+      "tags": ["onboarding", "friction", "first-run", "adoption"]
+    },
+    {
+      "body": "agents/release-engineer.json",
+      "category": "engineering",
+      "color": "#0284C7",
+      "description": "Takes approved work to a clean release: a green suite, a readable history, and a change description that stands on its own.",
+      "emoji": "🚢",
+      "id": "sprint-release-engineer",
+      "name": "Release Engineer",
+      "packId": "clawboo-founder-sprint",
+      "role": "Release Engineer",
+      "skillIds": [
+        "branch-wrap-up",
+        "test-runner",
+        "verification-before-completion",
+        "bash-executor",
+        "plan-execution"
+      ],
+      "slug": "release-engineer",
+      "tags": ["release", "ci", "history", "gate"]
+    },
+    {
+      "body": "agents/doc-engineer.json",
+      "category": "content",
+      "color": "#F59E0B",
+      "description": "Keeps the docs honest after a change lands, mapping coverage across four document types and writing the quadrant that is missing.",
+      "emoji": "📚",
+      "id": "sprint-doc-engineer",
+      "name": "Documentation Engineer",
+      "packId": "clawboo-founder-sprint",
+      "role": "Documentation Engineer",
+      "skillIds": [
+        "markdown-renderer",
+        "file-writer",
+        "code-search",
+        "citation-formatter",
+        "summarizer"
+      ],
+      "slug": "doc-engineer",
+      "tags": ["documentation", "coverage", "reference", "tutorial"]
+    }
+  ],
+  "counts": {
+    "agents": 14,
+    "skills": 0,
+    "teams": 4
+  },
+  "description": "Fourteen roles and four teams covering one sprint from framing a problem to shipping and documenting it, sized for a solo founder or a two-person team. Written by Clawboo; the role chain and the handoff order are adapted from the MIT-licensed garrytan/gstack, and no upstream code or text was copied.",
+  "id": "clawboo-founder-sprint",
+  "idPrefix": "sprint",
+  "name": "Founder Sprint",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Garry Tan"],
+    "color": "#0EA5E9",
+    "importedAt": "2026-08-27T00:00:00.000Z",
+    "label": "Founder Sprint",
+    "license": "MIT",
+    "ref": "394db326f2d3aaccd4804fe846b82aaa7d189dee",
+    "repo": "https://github.com/garrytan/gstack",
+    "sourceId": "clawboo-founder-sprint"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/product-shaping.json",
+      "category": "product",
+      "color": "#0EA5E9",
+      "description": "Turns a raw request into a specification: the problem is reframed first, the scope is decided second, and only then is anything written down.",
+      "emoji": "🧩",
+      "id": "sprint-product-shaping",
+      "members": [
+        {
+          "agentId": "sprint-founder-partner",
+          "name": "Founder Partner",
+          "role": "Founder Partner"
+        },
+        {
+          "agentId": "sprint-product-visionary",
+          "name": "Product Visionary",
+          "role": "Product Visionary"
+        },
+        {
+          "agentId": "sprint-spec-author",
+          "name": "Spec Author",
+          "role": "Spec Author"
+        }
+      ],
+      "name": "Product Shaping",
+      "packId": "clawboo-founder-sprint",
+      "slug": "product-shaping",
+      "tags": ["discovery", "scope", "specification"]
+    },
+    {
+      "body": "teams/plan-review-board.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Runs a plan past product, design, engineering and developer experience in order, escalating only the choices that are a matter of taste.",
+      "emoji": "📋",
+      "id": "sprint-plan-review-board",
+      "members": [
+        {
+          "agentId": "sprint-product-visionary",
+          "name": "Product Visionary",
+          "role": "Product Visionary"
+        },
+        {
+          "agentId": "sprint-design-partner",
+          "name": "Design Partner",
+          "role": "Design Partner"
+        },
+        {
+          "agentId": "sprint-design-critic",
+          "name": "Design Critic",
+          "role": "Design Critic"
+        },
+        {
+          "agentId": "sprint-eng-manager",
+          "name": "Engineering Manager",
+          "role": "Engineering Manager"
+        },
+        {
+          "agentId": "sprint-dx-lead",
+          "name": "Developer Experience Lead",
+          "role": "Developer Experience Lead"
+        }
+      ],
+      "name": "Plan Review Board",
+      "packId": "clawboo-founder-sprint",
+      "slug": "plan-review-board",
+      "tags": ["review", "planning", "rubric", "architecture"]
+    },
+    {
+      "body": "teams/pre-merge-review.json",
+      "category": "engineering",
+      "color": "#2563EB",
+      "description": "Four independent passes over a finished change: a staff review, a contrary second read, a root-cause lane for failures, and a security gate.",
+      "emoji": "🔬",
+      "id": "sprint-pre-merge-review",
+      "members": [
+        {
+          "agentId": "sprint-staff-reviewer",
+          "name": "Staff Reviewer",
+          "role": "Staff Reviewer"
+        },
+        {
+          "agentId": "sprint-second-opinion",
+          "name": "Second Opinion Reviewer",
+          "role": "Second Opinion Reviewer"
+        },
+        {
+          "agentId": "sprint-investigation-lead",
+          "name": "Investigation Lead",
+          "role": "Investigation Lead"
+        },
+        {
+          "agentId": "sprint-security-officer",
+          "name": "Security Officer",
+          "role": "Security Officer"
+        }
+      ],
+      "name": "Pre-Merge Review Crew",
+      "packId": "clawboo-founder-sprint",
+      "slug": "pre-merge-review",
+      "tags": ["code-review", "security", "debugging", "gate"]
+    },
+    {
+      "body": "teams/solo-founder.json",
+      "category": "product",
+      "color": "#0EA5E9",
+      "description": "The whole sprint at the smallest workable headcount, for a founder or a two-person team who has to cover every role in one week.",
+      "emoji": "⛵",
+      "id": "sprint-solo-founder",
+      "members": [
+        {
+          "agentId": "sprint-founder-partner",
+          "name": "Founder Partner",
+          "role": "Founder Partner"
+        },
+        {
+          "agentId": "sprint-design-critic",
+          "name": "Design Critic",
+          "role": "Design Critic"
+        },
+        {
+          "agentId": "sprint-staff-reviewer",
+          "name": "Staff Reviewer",
+          "role": "Staff Reviewer"
+        },
+        {
+          "agentId": "sprint-qa-lead",
+          "name": "QA Lead",
+          "role": "QA Lead"
+        },
+        {
+          "agentId": "sprint-release-engineer",
+          "name": "Release Engineer",
+          "role": "Release Engineer"
+        },
+        {
+          "agentId": "sprint-doc-engineer",
+          "name": "Documentation Engineer",
+          "role": "Documentation Engineer"
+        }
+      ],
+      "name": "Solo Founder Sprint",
+      "packId": "clawboo-founder-sprint",
+      "slug": "solo-founder",
+      "tags": ["solo-founder", "small-team", "sprint", "end-to-end"]
+    }
+  ],
+  "version": "1.0.0"
+}

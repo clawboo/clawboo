@@ -11,6 +11,22 @@ const NODE_TYPE_COLOR: Record<string, string> = {
   resource: 'var(--violet)',
 }
 
+/**
+ * The colour the FINISHED edge will take, so the preview is a promise rather than
+ * a guess.
+ *
+ * A skill or connector tile carries its own accent (slate for the built-ins rollup,
+ * amber for leadership, a provider hue for the model), and the landed edge takes
+ * that accent. Colouring the preview by node TYPE meant dragging from a slate tile
+ * previewed mint and then settled grey, so the line changed colour the instant you
+ * let go.
+ */
+function previewColor(fromNode: ConnectionLineComponentProps['fromNode']): string {
+  const accent = (fromNode?.data as { accent?: unknown } | undefined)?.accent
+  if (typeof accent === 'string' && accent) return accent
+  return NODE_TYPE_COLOR[fromNode?.type ?? ''] ?? 'rgb(var(--foreground-rgb) / 0.5)'
+}
+
 export function ConnectionLine({
   fromX,
   fromY,
@@ -43,7 +59,7 @@ export function ConnectionLine({
         targetPosition: toPosition,
       })
 
-  const color = NODE_TYPE_COLOR[fromNode?.type ?? ''] ?? 'rgb(var(--foreground-rgb) / 0.5)'
+  const color = previewColor(fromNode)
 
   return (
     <g>

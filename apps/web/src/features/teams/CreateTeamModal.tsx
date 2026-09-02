@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useId, useMemo } from 'react'
+import { useState, useCallback, useEffect, useId, useMemo, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowLeft, CheckCircle2, X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
@@ -60,14 +60,17 @@ import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLead
 import { buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
 import { useGraphStore } from '@/features/graph/store'
 import type { TeamTemplate, ProfileLike, TemplateSource, TemplateCategory } from './types'
-import { resolveTeamAgents, getAgent } from '@/features/marketplace/teamCatalog'
+import { getAgent, resolveTeamAgents, resolveTeamRoster } from '@/features/marketplace/teamCatalog'
+import { loadTeamBody } from '@/features/marketplace/catalogClient'
+import { AGENT_FILE } from '@/features/marketplace/catalogTypes'
+import { useCatalogIndex } from '@/features/marketplace/useCatalog'
 import { TeamTemplateDetail } from '@/features/marketplace/TeamTemplateDetail'
 import { CollapsiblePillRow } from '@/features/marketplace/CollapsiblePillRow'
 import {
   TeamShowcaseGrid,
   teamCategoryOptions,
   filterTeams,
-  TEAM_SOURCE_ENTRIES,
+  packFilterEntries,
 } from '@/features/marketplace/TeamShowcaseGrid'
 import { TeamColorCollectionPicker } from './TeamColorCollectionPicker'
 import { TeamAccentPicker, TEAM_ACCENT_PRESETS } from './TeamAccentPicker'
@@ -203,6 +206,19 @@ export function CreateTeamModal({
   // One id shared by all four step headings — the dialog's accessible name
   // follows whichever step is rendered.
   const headingId = useId()
+  // The emitted catalog index. One fetch for the modal, threaded into the pick
+  // grid and used to resolve the selected team's roster.
+  const { index: catalog } = useCatalogIndex()
+  // The success step auto-closes on a timer. Held in a ref and cleared on unmount:
+  // without that, a modal unmounted inside the 800 ms window still runs `reset()`
+  // and `onClose()` against a torn-down tree.
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    },
+    [],
+  )
   const client = useConnectionStore((s) => s.client)
   const connStatus = useConnectionStore((s) => s.status)
   // OpenClaw's SERVER-side operator connection (registry health) — the thin-client
@@ -353,14 +369,18 @@ export function CreateTeamModal({
   const [detailTemplate, setDetailTemplate] = useState<TeamTemplate | null>(null)
 
   const filteredPickTeams = useMemo(
-    () => filterTeams(pickSearch, pickCategory, pickSource),
-    [pickSearch, pickCategory, pickSource],
+    () => (catalog ? filterTeams(catalog, pickSearch, pickCategory, pickSource) : []),
+    [catalog, pickSearch, pickCategory, pickSource],
   )
-  const pickCategoryOpts = useMemo(() => teamCategoryOptions(), [])
+  const pickCategoryOpts = useMemo(() => (catalog ? teamCategoryOptions(catalog) : []), [catalog])
+  const pickPackEntries = useMemo(() => (catalog ? packFilterEntries(catalog) : []), [catalog])
 
+  // The customize step's roster. SYNCHRONOUS on purpose: a `useMemo` cannot await,
+  // and every consumer here needs only id/name/role. The markdown bodies are
+  // fetched once, at deploy, by `handleConfirmCustomize`.
   const resolvedSelected = useMemo(
-    () => (selectedProfile ? resolveTeamAgents(selectedProfile) : []),
-    [selectedProfile],
+    () => (catalog && selectedProfile ? resolveTeamRoster(catalog, selectedProfile) : []),
+    [catalog, selectedProfile],
   )
 
   // Live preview of each teammate's avatar color for the chosen collection,
@@ -424,7 +444,7 @@ export function CreateTeamModal({
   const suggestedFor = useCallback(
     (agentCatalogId: string): SelectableSourceId =>
       suggestedRuntimeFor({
-        agentSuggested: getAgent(agentCatalogId)?.suggestedRuntime,
+        agentSuggested: catalog ? getAgent(catalog, agentCatalogId)?.suggestedRuntime : undefined,
         teamDefault: (selectedProfile as TeamTemplate | null)?.defaultRuntime,
         isMarketplaceTeam,
         prefer: preferRuntime,
@@ -514,7 +534,24 @@ export function CreateTeamModal({
 
     try {
       // Resolve the catalog agents up front — used for dedup, deploy, and counts.
-      const resolved = selectedProfile ? resolveTeamAgents(selectedProfile) : []
+      // Deploy is the one path that needs the markdown bodies, so this is where
+      // they are fetched. `routing` lives in the TEAM body, so it is read first
+      // and threaded in as the per-member AGENTS.md override.
+      //
+      // THIS IS THE PREFETCH, and it must stay ahead of `setStep('deploy')`.
+      // `resolveTeamAgents` fans the member bodies out through one `Promise.all`,
+      // so a 12-agent team costs one round of parallel requests. Moving any of it
+      // into the per-agent loop below would turn that into 12 serial fetches with
+      // a partial-failure mode halfway through creating a team.
+      const teamRouting = selectedProfile
+        ? await loadTeamBody(selectedProfile.id)
+            .then((b) => b.routing)
+            .catch(() => undefined)
+        : undefined
+      const resolved =
+        catalog && selectedProfile
+          ? await resolveTeamAgents(catalog, selectedProfile, teamRouting)
+          : []
 
       // Any agent EXPLICITLY on OpenClaw needs OpenClaw reachable — the server-side
       // operator connection (its AgentSource create 503s otherwise), NOT a browser
@@ -652,10 +689,12 @@ export function CreateTeamModal({
 
         const defaultPersonality: PersonalityValues = SHIPPED_DEFAULT_PERSONALITY
         const baseSoul =
-          rewriteTemplateName(agent.soulTemplate, agent.name, finalAgentName) || '# SOUL\n'
+          rewriteTemplateName(agent.files[AGENT_FILE.soul] ?? '', agent.name, finalAgentName) ||
+          '# SOUL\n'
         const soulWithPersonality = mergeSoulWithPersonality(baseSoul, defaultPersonality)
 
-        const rawRouting = rewriteAgentsMd(agent.agentsTemplate, dedupPlan.agentNameMap) ?? ''
+        const rawRouting =
+          rewriteAgentsMd(agent.files[AGENT_FILE.agents], dedupPlan.agentNameMap) ?? ''
         const teammatesForProtocol = resolved
           .filter((a) => a.name !== agent.name)
           .map((a) => ({
@@ -681,10 +720,20 @@ export function CreateTeamModal({
           universalLeaderName,
         })
 
+        // NOT a pass-through of `agent.files`. IDENTITY.md is rewritten with the
+        // final (deduped) agent name, SOUL.md carries the merged personality, and
+        // AGENTS.md + CLAWBOO.md are SYNTHESIZED from the team topology above —
+        // neither exists in the catalog. Handing the pack's map straight to
+        // `createAgent` would drop the team protocol docs the orchestration
+        // contract depends on.
         const files = {
           soul: soulWithPersonality,
-          identity: rewriteTemplateName(agent.identityTemplate, agent.name, finalAgentName),
-          tools: agent.toolsTemplate,
+          identity: rewriteTemplateName(
+            agent.files[AGENT_FILE.identity] ?? '',
+            agent.name,
+            finalAgentName,
+          ),
+          tools: agent.files[AGENT_FILE.tools] ?? '',
           agents: enhancedAgentsMd,
           clawboo: clawbooHelpDoc,
         }
@@ -868,7 +917,7 @@ export function CreateTeamModal({
       const briefMembers: TeamBriefMember[] = resolved.map((a) => ({
         name: dedupPlan.agentNameMap.get(a.name) ?? a.name,
         role: a.role,
-        tools: extractSkillsFromToolsMd(a.toolsTemplate),
+        tools: extractSkillsFromToolsMd(a.files[AGENT_FILE.tools] ?? ''),
       }))
       const internalLeadKeyword = genuineLeaderCatalogAgent
         ? matchedLeadershipKeyword({
@@ -906,7 +955,10 @@ export function CreateTeamModal({
       })
 
       // Auto-enable agent-to-agent coordination if any agent has routing
-      const hasRouting = resolved.some((a) => a.agentsTemplate && /@[\w"']/.test(a.agentsTemplate))
+      const hasRouting = resolved.some((a) => {
+        const routingMd = a.files[AGENT_FILE.agents]
+        return routingMd !== undefined && /@[\w"']/.test(routingMd)
+      })
       if (hasRouting) {
         try {
           await apiFetch('/api/system/openclaw-config', {
@@ -935,7 +987,7 @@ export function CreateTeamModal({
         type: 'success',
         message: `Team "${name}" deployed with ${createdCount} agents`,
       })
-      setTimeout(() => {
+      closeTimerRef.current = setTimeout(() => {
         reset()
         onClose()
         onCreated(team.id)
@@ -1030,7 +1082,7 @@ export function CreateTeamModal({
                 onSelect={(k) => setPickCategory(k as TemplateCategory | 'all')}
               />
               <div className="flex flex-wrap gap-1.5">
-                {TEAM_SOURCE_ENTRIES.map((src) => (
+                {pickPackEntries.map((src) => (
                   <Chip
                     key={src.key}
                     size="sm"
@@ -1053,6 +1105,7 @@ export function CreateTeamModal({
             {/* Grid (scrollable) — the shared Marketplace team showcase */}
             <div className="flex-1 overflow-y-auto p-6">
               <TeamShowcaseGrid
+                catalog={catalog}
                 teams={filteredPickTeams}
                 onSelectTeam={handlePickProfile}
                 onDetails={setDetailTemplate}
@@ -1371,8 +1424,9 @@ export function CreateTeamModal({
       {/* Template detail overlay — a sibling <Modal> at a higher layer. It
           registers its focus trap after this one, so it owns Escape and Tab
           until it closes. */}
-      {detailTemplate && (
+      {detailTemplate && catalog && (
         <TeamTemplateDetail
+          catalog={catalog}
           template={detailTemplate}
           onClose={() => setDetailTemplate(null)}
           onDeploy={(t) => {

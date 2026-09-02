@@ -197,3 +197,34 @@ describe('DEFAULT_ROTATION', () => {
     expect(DEFAULT_ROTATION.maxRotations).toBe(3)
   })
 })
+
+describe('the watermark measures occupancy, not spend', () => {
+  // The contract used to say "input + output" and every caller summed them. On
+  // the native runtime that meant a point-in-time input beside a total output
+  // accumulated across the whole run, so the ratio climbed with turn count while
+  // the context itself stayed flat. It was masked only by a generous declared
+  // window; a real, smaller one turns it into repeated rotation of a healthy
+  // session.
+  it('does not rotate a session whose PROMPT is well under the threshold', () => {
+    // 30k of prompt against a 200k window is 15%. A run that had also produced
+    // 150k of output across many turns would previously have summed to 90%.
+    expect(shouldRotate({ tokensUsed: 30_000, contextWindow: 200_000, thresholdPct: 0.85 })).toBe(
+      false,
+    )
+  })
+
+  it('still rotates when the prompt itself genuinely fills the window', () => {
+    expect(shouldRotate({ tokensUsed: 180_000, contextWindow: 200_000, thresholdPct: 0.85 })).toBe(
+      true,
+    )
+  })
+
+  it('is unaffected by how long the run has been going', () => {
+    // Same occupancy, any number of turns behind it: the same answer.
+    for (const _turn of [1, 10, 100]) {
+      expect(shouldRotate({ tokensUsed: 50_000, contextWindow: 200_000, thresholdPct: 0.85 })).toBe(
+        false,
+      )
+    }
+  })
+})

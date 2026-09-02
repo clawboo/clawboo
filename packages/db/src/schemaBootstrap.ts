@@ -414,6 +414,16 @@ const SCHEMA_DDL = `
       -- resolve path cannot mint a durable rule the prompt never offered.
       never_remember INTEGER NOT NULL DEFAULT 0,
       rule_reason    TEXT,
+      -- What the SERVER knows about this tool, carried to the approval card.
+      --
+      -- Without these the card can only guess from the tool's name, which works
+      -- for the handful of naming conventions someone has hard-coded and fails
+      -- for every other connector a user installs. The registry already holds a
+      -- risk classification and a human description for all of them; not
+      -- persisting it here is what forced the browser to re-derive a worse
+      -- version of an answer the server already had.
+      tool_class     TEXT,
+      tool_summary   TEXT,
       created_at   INTEGER NOT NULL,
       expires_at   INTEGER NOT NULL,
       resolved_at  INTEGER
@@ -421,6 +431,29 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_status  ON tool_call_approvals (status);
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_created ON tool_call_approvals (created_at);
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_grant   ON tool_call_approvals (grant_id, status);
+
+    -- Tool results too large to hand a model in one piece, kept whole.
+    --
+    -- A tool result is the one input to a prompt whose size nobody controls: a
+    -- remote server answers with whatever it answers, and a single inbox fetch
+    -- measured 16,822 bytes on a real install. Truncating it in place is a silent
+    -- lie, because the model reads the surviving prefix as the whole answer. So
+    -- the bytes are stored here FIRST and only then trimmed for the transcript,
+    -- which turns the trim into a bounded view over something still retrievable.
+    CREATE TABLE IF NOT EXISTS tool_result_blobs (
+      handle       TEXT    PRIMARY KEY,
+      tool_name    TEXT    NOT NULL,
+      agent_id     TEXT,
+      tenant_id    TEXT,
+      body         TEXT    NOT NULL,
+      -- What the tool actually produced, which is not always what was stored:
+      -- a result past the store ceiling is kept in part, and a retrieval that
+      -- cannot say so would report a partial copy as complete.
+      total_bytes  INTEGER NOT NULL,
+      stored_bytes INTEGER NOT NULL,
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tool_result_blobs_created ON tool_result_blobs (created_at);
 
     -- ── Governance — see src/governance/ ─────────────────
     CREATE TABLE IF NOT EXISTS budgets (
@@ -568,6 +601,7 @@ const SCHEMA_DDL = `
       egress_allow  TEXT    NOT NULL DEFAULT '[]',
       trifecta      TEXT    NOT NULL DEFAULT '{"readsPrivateData":false,"ingestsUntrustedContent":false,"canEgress":false}',
       health        TEXT    NOT NULL DEFAULT 'unknown',
+      desired_state TEXT    NOT NULL DEFAULT 'connected',
       health_detail TEXT,
       failures      INTEGER NOT NULL DEFAULT 0,
       tenant_id     TEXT,

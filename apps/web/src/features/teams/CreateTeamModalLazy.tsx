@@ -1,12 +1,14 @@
-// The lazy boundary that keeps the ~4.4 MB marketplace catalog off the SPA's entry
+// The lazy boundary that keeps the marketplace surfaces off the SPA's entry
 // chunk.
 //
-// `CreateTeamModal` statically imports `marketplace/teamCatalog` → `marketplace/agents`,
-// so any eager importer of the modal drags all 304 agent + 82 team literals into the
-// entry chunk — parsed on every dashboard load. That is exactly what happened after
-// the panel-level split in #94: `MarketplacePanel` became lazy, but `WelcomeState` and
-// the onboarding `SelectTeamStep` still imported the modal eagerly, so the catalog
-// never actually left the boot path (issue #83).
+// `CreateTeamModal` statically imports `marketplace/useCatalog` → `marketplace/seed`,
+// so any eager importer of the modal drags the compiled seed (the 5 builtin teams and
+// their 15 agents, ~59 KB) into the entry chunk — parsed on every dashboard load. The
+// other 300 agents and 50 teams are fetched at runtime and never bundled at all, but
+// the boundary still earns its keep: back when the whole corpus was compiled in, the
+// panel-level split in #94 made `MarketplacePanel` lazy while `WelcomeState` and the
+// onboarding `SelectTeamStep` still imported the modal eagerly, so the catalog never
+// actually left the boot path (issue #83).
 //
 // Two things make this work, and BOTH are required:
 //   1. `lazy()` + a dynamic `import()`, so Rollup emits a separate chunk. On its own a
@@ -34,12 +36,12 @@ import type { CreateTeamModalProps } from '@/features/teams/CreateTeamModal'
 // The specifier is the `@/` alias, not './CreateTeamModal', and that matters: the
 // suites that stub the deploy engine do `vi.mock('@/features/teams/CreateTeamModal')`,
 // and vitest keys mocks by the specifier as written. A relative import here silently
-// bypasses that mock and drags the real 4.4 MB catalog into jsdom, where evaluating it
-// blows past the test timeout — a hang, not a clean failure.
+// bypasses that mock and pulls the real modal into jsdom, where mounting it blows
+// past the test timeout: a hang, not a clean failure.
 //
 // `createRetryableLazy` rather than a bare `React.lazy`, matching every other lazy
 // surface in the app: React.lazy memoizes a REJECTION onto the lazy object, so once
-// this 4.1 MB chunk fails to download it re-throws forever and no error boundary can
+// this chunk fails to download it re-throws forever and no error boundary can
 // recover it. The wrapper lets the boundary mint a fresh lazy() so "Try again" really
 // re-runs import(). See lib/lazyRetry.ts for what that can and cannot recover.
 const CREATE_TEAM_MODAL = createRetryableLazy(() =>

@@ -52,6 +52,14 @@ echo "Copying ui/ → $CLI_DIST/ui/"
 rm -rf "$CLI_DIST/ui"
 cp -r "$WEB_DIST/ui" "$CLI_DIST/ui"
 
+# The marketplace catalog is fetched at runtime; only the small generated seed
+# ships. A `marketplace-catalog-*` chunk here means the corpus found its way back
+# into the bundle, which is the ~4 MB regression the split exists to prevent.
+if compgen -G "$CLI_DIST/ui/assets/marketplace-catalog-*" > /dev/null; then
+  echo "ERROR: the full marketplace catalog is back in the bundle; only the seed may ship."
+  exit 1
+fi
+
 # ── Copy MCP stdio bins ──────────────────────────────────────────────────
 # Self-contained bundles → an external runtime can spawn `clawboo-mcp-tasks`
 # (etc.) from a clean `npx clawboo` install.

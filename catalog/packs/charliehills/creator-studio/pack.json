@@ -1,0 +1,341 @@
+{
+  "agents": [
+    {
+      "body": "agents/voice-profiler.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Interviews a writer, reads their published samples, and produces the two profile documents every other writer on this team works from.",
+      "emoji": "🎙️",
+      "id": "creatorkit-voice-profiler",
+      "name": "Voice Profiler",
+      "packId": "charliehills-creator-studio",
+      "role": "Voice Profiler",
+      "skillIds": ["file-reader", "file-writer", "note-taker", "summarizer", "markdown-renderer"],
+      "slug": "voice-profiler",
+      "tags": ["voice", "brand-voice", "onboarding", "style-analysis"]
+    },
+    {
+      "body": "agents/newsletter-voice.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Builds the newsletter-specific writing instructions that sit on top of a general voice profile, from past issues or from a chosen archetype.",
+      "emoji": "📰",
+      "id": "creatorkit-newsletter-voice",
+      "name": "Newsletter Voice Architect",
+      "packId": "charliehills-creator-studio",
+      "role": "Newsletter Voice Architect",
+      "skillIds": ["file-reader", "file-writer", "markdown-renderer", "summarizer", "email-draft"],
+      "slug": "newsletter-voice",
+      "tags": ["newsletter", "voice", "editorial-format", "email"]
+    },
+    {
+      "body": "agents/hook-writer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Produces six two-line opening hooks for any topic, each on a different mechanism, each short enough to survive the feed truncation.",
+      "emoji": "🪝",
+      "id": "creatorkit-hook-writer",
+      "name": "Hook Writer",
+      "packId": "charliehills-creator-studio",
+      "role": "Hook Writer",
+      "skillIds": ["brainstorming", "file-writer", "markdown-renderer", "summarizer"],
+      "slug": "hook-writer",
+      "tags": ["hooks", "copywriting", "openers", "social-media"]
+    },
+    {
+      "body": "agents/post-drafter.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Writes finished feed posts in a documented voice, either freely or inside a named framework, and researches the angle before drafting.",
+      "emoji": "✍️",
+      "id": "creatorkit-post-drafter",
+      "name": "Post Drafter",
+      "packId": "charliehills-creator-studio",
+      "role": "Post Drafter",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "web-search",
+        "brainstorming"
+      ],
+      "slug": "post-drafter",
+      "tags": ["copywriting", "social-media", "frameworks", "drafting"]
+    },
+    {
+      "body": "agents/post-critic.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Scores a draft against the account's own historical performance rather than generic advice, and returns fixes tied to specific numbers.",
+      "emoji": "📊",
+      "id": "creatorkit-post-critic",
+      "name": "Post Scorer",
+      "packId": "charliehills-creator-studio",
+      "role": "Post Scorer",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "data-visualizer",
+        "file-reader",
+        "summarizer"
+      ],
+      "slug": "post-critic",
+      "tags": ["critique", "analytics", "scoring", "editing"]
+    },
+    {
+      "body": "agents/content-planner.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Pairs a writer's topic pillars with a fixed set of post formats to produce dozens of specific, non-interchangeable post ideas in one pass.",
+      "emoji": "🗂️",
+      "id": "creatorkit-content-planner",
+      "name": "Content Matrix Planner",
+      "packId": "charliehills-creator-studio",
+      "role": "Content Matrix Planner",
+      "skillIds": [
+        "brainstorming",
+        "plan-writing",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer"
+      ],
+      "slug": "content-planner",
+      "tags": ["ideation", "content-planning", "editorial-calendar", "pillars"]
+    },
+    {
+      "body": "agents/profile-optimizer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Rewrites a professional profile end to end: headline options, the about section, the experience entries and what the featured area should hold.",
+      "emoji": "🧑‍💼",
+      "id": "creatorkit-profile-optimizer",
+      "name": "Profile Optimiser",
+      "packId": "charliehills-creator-studio",
+      "role": "Profile Optimiser",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "brainstorming",
+        "summarizer"
+      ],
+      "slug": "profile-optimizer",
+      "tags": ["profile", "positioning", "conversion", "personal-brand"]
+    },
+    {
+      "body": "agents/graphic-director.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Decides whether a post needs a structured layout or a generated illustration, then produces the markup or the brief that makes it.",
+      "emoji": "🎨",
+      "id": "creatorkit-graphic-director",
+      "name": "Graphic Director",
+      "packId": "charliehills-creator-studio",
+      "role": "Graphic Director",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "brainstorming"
+      ],
+      "slug": "graphic-director",
+      "tags": ["graphic-design", "infographics", "art-direction", "visual-content"]
+    },
+    {
+      "body": "agents/thumbnail-designer.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Designs the video cover before the script exists, because the cover and the title are what decide whether the video is watched at all.",
+      "emoji": "🖼️",
+      "id": "creatorkit-thumbnail-designer",
+      "name": "Thumbnail Designer",
+      "packId": "charliehills-creator-studio",
+      "role": "Thumbnail Designer",
+      "skillIds": ["image-resizer", "file-writer", "brainstorming", "markdown-renderer"],
+      "slug": "thumbnail-designer",
+      "tags": ["thumbnails", "video", "click-through", "art-direction"]
+    },
+    {
+      "body": "agents/short-video-scripter.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Reverse-engineers a reference short-form video into its structural pattern, then writes a new script that applies the pattern to your own material.",
+      "emoji": "🎬",
+      "id": "creatorkit-short-video-scripter",
+      "name": "Short Video Scripter",
+      "packId": "charliehills-creator-studio",
+      "role": "Short Video Scripter",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "web-scraper",
+        "markdown-renderer",
+        "brainstorming"
+      ],
+      "slug": "short-video-scripter",
+      "tags": ["short-video", "scripting", "vertical-video", "retention"]
+    },
+    {
+      "body": "agents/social-analyst.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Turns a raw analytics export into a readable dashboard and a written analysis whose recommendations each point back to a specific chart.",
+      "emoji": "📈",
+      "id": "creatorkit-social-analyst",
+      "name": "Social Analytics Analyst",
+      "packId": "charliehills-creator-studio",
+      "role": "Social Analytics Analyst",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "data-visualizer",
+        "json-transformer",
+        "summarizer"
+      ],
+      "slug": "social-analyst",
+      "tags": ["analytics", "dashboards", "reporting", "performance"]
+    },
+    {
+      "body": "agents/niche-scout.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Sweeps a niche for the stories worth commenting on this week, verifies every publication date, and returns a usable angle for each one.",
+      "emoji": "🔭",
+      "id": "creatorkit-niche-scout",
+      "name": "Niche Scout",
+      "packId": "charliehills-creator-studio",
+      "role": "Niche Scout",
+      "skillIds": ["web-search", "web-scraper", "rss-reader", "summarizer", "note-taker"],
+      "slug": "niche-scout",
+      "tags": ["research", "trend-scanning", "sourcing", "news"]
+    }
+  ],
+  "counts": {
+    "agents": 12,
+    "skills": 0,
+    "teams": 3
+  },
+  "description": "Twelve specialists and three teams for a creator's whole loop: establishing a voice, planning a queue, drafting and scoring posts, and producing the visuals around them. Adapted from an MIT-licensed upstream skill collection: the short interactive scripts were rewritten into full Clawboo agent documents, vendor-bound and personal-brand material was removed, and the teams and routing were written by the Clawboo maintainers.",
+  "id": "charliehills-creator-studio",
+  "idPrefix": "creatorkit",
+  "name": "Creator Studio",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Charlie Hills"],
+    "color": "#F472B6",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Creator Studio",
+    "license": "MIT",
+    "ref": "d2e948719eafc8ed9e2436357ad18489bb371a81",
+    "repo": "https://github.com/charlie947/social-media-skills",
+    "sourceId": "charliehills-creator-studio"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/voice-foundation.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Establishes who the writer is and how they write before anything is drafted, then applies it to the newsletter and the public profile.",
+      "emoji": "🎙️",
+      "id": "creatorkit-voice-foundation",
+      "members": [
+        {
+          "agentId": "creatorkit-voice-profiler",
+          "name": "Voice Profiler",
+          "role": "Voice Profiler"
+        },
+        {
+          "agentId": "creatorkit-newsletter-voice",
+          "name": "Newsletter Voice Architect",
+          "role": "Newsletter Voice Architect"
+        },
+        {
+          "agentId": "creatorkit-profile-optimizer",
+          "name": "Profile Optimiser",
+          "role": "Profile Optimiser"
+        }
+      ],
+      "name": "Voice Foundation",
+      "packId": "charliehills-creator-studio",
+      "slug": "voice-foundation",
+      "tags": ["voice", "positioning", "onboarding", "personal-brand"]
+    },
+    {
+      "body": "teams/post-production.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Runs the whole loop from idea to scored draft: what to say this week, the opening, the post, and an honest score against real data.",
+      "emoji": "🏭",
+      "id": "creatorkit-post-production",
+      "members": [
+        {
+          "agentId": "creatorkit-content-planner",
+          "name": "Content Matrix Planner",
+          "role": "Content Matrix Planner"
+        },
+        {
+          "agentId": "creatorkit-niche-scout",
+          "name": "Niche Scout",
+          "role": "Niche Scout"
+        },
+        {
+          "agentId": "creatorkit-hook-writer",
+          "name": "Hook Writer",
+          "role": "Hook Writer"
+        },
+        {
+          "agentId": "creatorkit-post-drafter",
+          "name": "Post Drafter",
+          "role": "Post Drafter"
+        },
+        {
+          "agentId": "creatorkit-post-critic",
+          "name": "Post Scorer",
+          "role": "Post Scorer"
+        },
+        {
+          "agentId": "creatorkit-social-analyst",
+          "name": "Social Analytics Analyst",
+          "role": "Social Analytics Analyst"
+        }
+      ],
+      "name": "Post Production Line",
+      "packId": "charliehills-creator-studio",
+      "slug": "post-production",
+      "tags": ["content-production", "copywriting", "editorial", "analytics"]
+    },
+    {
+      "body": "teams/creative-studio.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Handles everything visual around a piece of content: the post graphic, the video cover, and the short-form script the cover was designed for.",
+      "emoji": "🎨",
+      "id": "creatorkit-creative-studio",
+      "members": [
+        {
+          "agentId": "creatorkit-graphic-director",
+          "name": "Graphic Director",
+          "role": "Graphic Director"
+        },
+        {
+          "agentId": "creatorkit-thumbnail-designer",
+          "name": "Thumbnail Designer",
+          "role": "Thumbnail Designer"
+        },
+        {
+          "agentId": "creatorkit-short-video-scripter",
+          "name": "Short Video Scripter",
+          "role": "Short Video Scripter"
+        }
+      ],
+      "name": "Creative Studio",
+      "packId": "charliehills-creator-studio",
+      "slug": "creative-studio",
+      "tags": ["visual-content", "graphics", "video", "art-direction"]
+    }
+  ],
+  "version": "1.0.0"
+}

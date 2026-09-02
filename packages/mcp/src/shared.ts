@@ -93,7 +93,46 @@ export interface ToolDef {
    * have accepted.
    */
   jsonSchema?: Record<string, unknown>
+  /**
+   * This tool's result is PARSED BY CODE, so it must never be trimmed.
+   *
+   * The size ceiling below cuts a head and a tail out of an oversized result and
+   * splices a notice between them, which is right for text a model reads and
+   * fatal for a payload something calls `JSON.parse` on. The native harness reads
+   * `team_chat_subscribe` exactly that way, inside a try/catch whose only job is
+   * to keep a subscribe failure from breaking the run: a trimmed result there
+   * throws, is swallowed, and the peer cursor silently stops advancing, so peer
+   * messages stop arriving with nothing anywhere reporting a fault.
+   *
+   * A tool that sets this owns its own size. It has to bound its result with its
+   * own paging arguments, because nothing downstream will do it.
+   */
+  structuredResult?: boolean
   handler: (args: Record<string, unknown>) => Promise<McpToolResult> | McpToolResult
+}
+
+/**
+ * Bound an oversized tool result before it reaches a model.
+ *
+ * Supplied by the composing server, which is what owns a database and can store
+ * the full bytes. Absent means no ceiling, so a server built without one behaves
+ * exactly as it did before this existed.
+ */
+export interface ResultCeiling {
+  /**
+   * TEXT bytes a single tool result may occupy in the model's context.
+   *
+   * Text only, and deliberately: `bound` is applied per content block and only
+   * where `type === 'text'`, so image blocks pass through untouched. Trimming
+   * base64 does not make a smaller image, it makes a corrupt one, so images
+   * carry their own caps at the connector client (`MAX_IMAGES_PER_CALL`,
+   * `MAX_IMAGE_B64_BYTES`) instead of sharing this budget. The two are not
+   * comparable anyway: a screenshot costs a vision model on the order of a
+   * thousand tokens, not the hundreds of thousands its byte count implies.
+   */
+  budgetBytes: number
+  /** Store the full text and return a bounded view of it. */
+  bound: (toolName: string, text: string, budgetBytes: number) => string
 }
 
 // ─── Minimal zod → JSON Schema (covers the primitives our tools use) ─────────
@@ -151,7 +190,11 @@ export function zodObjectToJsonSchema(obj: z.ZodObject<z.ZodRawShape>): {
  */
 export type ToolSource = ToolDef[] | (() => ToolDef[])
 
-export function buildServer(name: string, toolsOrSource: ToolSource): Server {
+export function buildServer(
+  name: string,
+  toolsOrSource: ToolSource,
+  ceiling?: ResultCeiling,
+): Server {
   const readTools = (): ToolDef[] =>
     typeof toolsOrSource === 'function' ? toolsOrSource() : toolsOrSource
   // `listChanged: true` is a CAPABILITY DECLARATION, not a promise that we push
@@ -202,6 +245,22 @@ export function buildServer(name: string, toolsOrSource: ToolSource): Server {
     if (!parsed.success)
       return textResult(`invalid args: ${parsed.error.message}`, true) as CallToolResult
     const result = await tool.handler(parsed.data as Record<string, unknown>)
+
+    // THE ONE PLACE EVERY RUNTIME CROSSES. Native reaches this over the in-memory
+    // transport and openclaw, claude-code, codex and hermes over Streamable HTTP,
+    // for every tool on every clawboo MCP server, so a ceiling here cannot be
+    // forgotten at a call site the way a per-tool or per-runtime one can.
+    //
+    // Applied per CONTENT BLOCK rather than to a joined string, so a multi-block
+    // result keeps its block structure, and skipped entirely for a tool whose
+    // result is machine-parsed (see `structuredResult`).
+    if (ceiling && !tool.structuredResult && !result.isError) {
+      for (const block of result.content) {
+        if (block.type === 'text') {
+          block.text = ceiling.bound(tool.name, block.text, ceiling.budgetBytes)
+        }
+      }
+    }
     return result as CallToolResult
   })
 

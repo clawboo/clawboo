@@ -119,6 +119,8 @@ curl 'http://localhost:18790/api/agents?teamId=<team-uuid>&includeArchived=true'
 
 Creates an agent through a source. The default source is OpenClaw (Gateway create + agent-file writes + SQLite mirror), which returns **503** when the server-side connection is down. An optional `sourceId` routes the create to a peer source; `clawboo-native` writes are pure SQLite and always succeed.
 
+`name` and every entry in `files` are injection-scanned **before** the source write, on the `prompt` surface: instruction-override phrasing and invisible-Unicode smuggling refuse the create with **422** and write a blocked audit row, while a machine-directed string (a `DROP TABLE` inside a code reviewer's worked example) passes and is reported as a review finding. The asymmetry is deliberate: this route is the one every marketplace deploy travels, and first-run onboarding hard-requires deploying a builtin team.
+
 - **Path/query params**: none.
 - **Request body**:
 
@@ -136,11 +138,21 @@ Creates an agent through a source. The default source is OpenClaw (Gateway creat
 
 ### Responses
 
-**`201 Created`**: the agent was created:
+**`201 Created`**: the agent was created. `findings` is present only when the scan produced review-level findings:
 
 ```ts
 {
-  agent: AgentRecord
+  agent: AgentRecord,
+  findings?: InjectionFinding[]
+}
+```
+
+**`422 Unprocessable Entity`**: `name` or a file carries a blocking prompt-injection finding. Nothing is written:
+
+```ts
+{
+  error: 'agent content blocked: prompt-injection finding',
+  findings: InjectionFinding[]   // pattern, severity, intent, message, line, excerpt, fingerprint
 }
 ```
 
@@ -479,6 +491,8 @@ curl http://localhost:18790/api/agents/<agent-id>/files/SOUL.md
 
 Writes one agent file through the owning source. Same `:name` allowlist as the read; the body must carry a string `content`.
 
+`content` is injection-scanned on the `prompt` surface before the write, exactly as `POST /api/agents` scans its `files`. A blocking finding refuses the write with **422** plus a blocked audit row, and review findings ride along on the 200.
+
 - **Path params**: `agentId`, `name` (same allowlist as the GET).
 - **Request body**:
 
@@ -490,10 +504,19 @@ Writes one agent file through the owning source. Same `:name` allowlist as the r
 
 ### Responses
 
-**`200 OK`**: the file was written (echoes what was stored):
+**`200 OK`**: the file was written (echoes what was stored). `findings` is present only when the scan produced review-level findings:
 
 ```ts
-{ name: string, content: string }
+{ name: string, content: string, findings?: InjectionFinding[] }
+```
+
+**`422 Unprocessable Entity`**: `content` carries a blocking prompt-injection finding. Nothing is written:
+
+```ts
+{
+  error: 'agent content blocked: prompt-injection finding',
+  findings: InjectionFinding[]
+}
 ```
 
 **`400 Bad Request`**: missing `agentId` segment:

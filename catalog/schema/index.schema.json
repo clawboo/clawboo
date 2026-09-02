@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawboo.dev/schema/index.schema.json",
+  "title": "Clawboo browse index, schema version 1",
+  "description": "The merged browse index served at /catalog/index.json. It is the projection of every installed pack down to what a CARD renders: no agent prose, ever. identityTemplate and soulTemplate are 82.5% of the catalog's bytes and no card reads either, so bodies are fetched one at a time from /catalog/{agents,teams}/<id>.json when a detail sheet opens or a team deploys.",
+  "type": "object",
+  "required": ["schemaVersion", "counts", "agents", "teams"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Bumped only when the shape changes in a way a stale client cannot read.",
+      "const": 1
+    },
+    "counts": {
+      "description": "Must agree with the lengths of the two arrays. Read by the tab badges, which must not wait for the arrays to be walked.",
+      "type": "object",
+      "required": ["agents", "teams"],
+      "properties": {
+        "agents": { "type": "integer", "minimum": 0 },
+        "teams": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "agents": { "type": "array", "items": { "$ref": "#/$defs/agentRow" } },
+    "teams": { "type": "array", "items": { "$ref": "#/$defs/teamRow" } }
+  },
+  "$defs": {
+    "kebab": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "hexColor": {
+      "description": "Six-digit hex. Cards concatenate alpha suffixes onto it.",
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "agentRow": {
+      "type": "object",
+      "required": [
+        "id",
+        "packId",
+        "source",
+        "name",
+        "role",
+        "emoji",
+        "color",
+        "description",
+        "category",
+        "tags",
+        "skillIds"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/kebab" },
+        "packId": {
+          "$ref": "#/$defs/kebab",
+          "description": "The pack that owns this entry. Display metadata resolves through a total function, never by indexing a map keyed on a closed union."
+        },
+        "source": {
+          "$ref": "#/$defs/kebab",
+          "description": "Upstream provenance label. Equal to packId today; the two separate when one pack carries entries from several upstreams."
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string", "minLength": 1 },
+        "color": { "$ref": "#/$defs/hexColor" },
+        "description": { "type": "string", "minLength": 1 },
+        "category": {
+          "$ref": "#/$defs/kebab",
+          "description": "OPEN taxonomy: an unknown value still resolves to a label and a colour."
+        },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "skillIds": { "type": "array", "items": { "$ref": "#/$defs/kebab" } },
+        "suggestedRuntime": { "type": "string", "minLength": 1 }
+      }
+    },
+    "teamRow": {
+      "type": "object",
+      "required": [
+        "id",
+        "packId",
+        "source",
+        "name",
+        "emoji",
+        "color",
+        "description",
+        "category",
+        "tags",
+        "agentIds"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/kebab" },
+        "packId": { "$ref": "#/$defs/kebab" },
+        "source": { "$ref": "#/$defs/kebab" },
+        "name": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string", "minLength": 1 },
+        "color": { "$ref": "#/$defs/hexColor" },
+        "description": { "type": "string", "minLength": 1 },
+        "category": { "$ref": "#/$defs/kebab" },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "agentIds": {
+          "description": "Every id must resolve to a row in `agents`.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/kebab" }
+        },
+        "defaultRuntime": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

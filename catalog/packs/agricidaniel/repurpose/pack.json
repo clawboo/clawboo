@@ -1,0 +1,233 @@
+{
+  "agents": [
+    {
+      "body": "agents/content-atomizer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Breaks one long piece of source material into labelled, self-contained atoms that every other repurposing agent can build from.",
+      "emoji": "🧩",
+      "id": "repurpose-content-atomizer",
+      "name": "Content Atomiser",
+      "packId": "agricidaniel-repurpose",
+      "role": "Content Atomiser",
+      "skillIds": ["file-reader", "web-scraper", "pdf-reader", "summarizer", "note-taker"],
+      "slug": "content-atomizer",
+      "tags": ["atomization", "content-strategy", "source-analysis", "repurposing"]
+    },
+    {
+      "body": "agents/social-repurposer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Turns an atom set into text-feed posts: threads, single posts, carousels outlines and polls, each written to the surface it will appear on.",
+      "emoji": "🧵",
+      "id": "repurpose-social-repurposer",
+      "name": "Social Post Repurposer",
+      "packId": "agricidaniel-repurpose",
+      "role": "Social Post Repurposer",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "summarizer",
+        "brainstorming"
+      ],
+      "slug": "social-repurposer",
+      "tags": ["social-media", "threads", "linkedin", "copywriting"]
+    },
+    {
+      "body": "agents/visual-repurposer.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Turns an atom set into visual-first output: carousel scripts, short-video scripts, pin copy and quote-card briefs with real dimensions.",
+      "emoji": "🎞️",
+      "id": "repurpose-visual-repurposer",
+      "name": "Visual Content Director",
+      "packId": "agricidaniel-repurpose",
+      "role": "Visual Content Director",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "brainstorming"
+      ],
+      "slug": "visual-repurposer",
+      "tags": ["visual-content", "carousel", "short-video", "art-direction"]
+    },
+    {
+      "body": "agents/longform-repurposer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Writes the long-form derivatives: newsletter excerpts, subject lines, short email sequences, and forum and answer-site posts that earn their place.",
+      "emoji": "✉️",
+      "id": "repurpose-longform-repurposer",
+      "name": "Newsletter and Forum Writer",
+      "packId": "agricidaniel-repurpose",
+      "role": "Newsletter and Forum Writer",
+      "skillIds": ["file-reader", "file-writer", "email-draft", "markdown-renderer", "summarizer"],
+      "slug": "longform-repurposer",
+      "tags": ["newsletter", "email-sequence", "forums", "long-form"]
+    },
+    {
+      "body": "agents/broadcast-repurposer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Writes for one-to-many broadcast channels and publication platforms, where the audience opted in and every send has to earn the next one.",
+      "emoji": "📡",
+      "id": "repurpose-broadcast-repurposer",
+      "name": "Broadcast Channel Editor",
+      "packId": "agricidaniel-repurpose",
+      "role": "Broadcast Channel Editor",
+      "skillIds": ["file-reader", "file-writer", "markdown-renderer", "summarizer", "note-taker"],
+      "slug": "broadcast-repurposer",
+      "tags": ["broadcast", "messaging-channels", "publishing", "editorial"]
+    },
+    {
+      "body": "agents/community-repurposer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Writes community-surface content built for participation: discussion prompts, polls, challenges and announcements that members actually answer.",
+      "emoji": "🫂",
+      "id": "repurpose-community-repurposer",
+      "name": "Community Post Builder",
+      "packId": "agricidaniel-repurpose",
+      "role": "Community Post Builder",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "brainstorming",
+        "note-taker"
+      ],
+      "slug": "community-repurposer",
+      "tags": ["community", "engagement", "polls", "moderation"]
+    },
+    {
+      "body": "agents/metadata-editor.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Writes the titles, descriptions, tags and alternative text for a whole run, keeping one keyword set consistent across every surface.",
+      "emoji": "🏷️",
+      "id": "repurpose-metadata-editor",
+      "name": "Cross-Platform Metadata Editor",
+      "packId": "agricidaniel-repurpose",
+      "role": "Cross-Platform Metadata Editor",
+      "skillIds": ["file-reader", "file-writer", "web-search", "markdown-renderer", "summarizer"],
+      "slug": "metadata-editor",
+      "tags": ["metadata", "seo", "alt-text", "taxonomy"]
+    },
+    {
+      "body": "agents/publishing-scheduler.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Turns a pile of finished drafts into a dated publishing plan with a sane cadence, per-surface timing and the dependencies made explicit.",
+      "emoji": "🗓️",
+      "id": "repurpose-publishing-scheduler",
+      "name": "Publishing Scheduler",
+      "packId": "agricidaniel-repurpose",
+      "role": "Publishing Scheduler",
+      "skillIds": [
+        "calendar-manager",
+        "plan-writing",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer"
+      ],
+      "slug": "publishing-scheduler",
+      "tags": ["scheduling", "editorial-calendar", "cadence", "distribution"]
+    }
+  ],
+  "counts": {
+    "agents": 8,
+    "skills": 0,
+    "teams": 2
+  },
+  "description": "Eight specialists and two teams for turning one long piece of source material into the posts, scripts, emails and schedules that carry it across every surface. Adapted from an MIT-licensed upstream skill collection: the platform playbooks were rewritten into Clawboo agent documents, the orchestration scripts were dropped, and the team rosters and routing were written by the Clawboo maintainers.",
+  "id": "agricidaniel-repurpose",
+  "idPrefix": "repurpose",
+  "name": "Content Repurposing",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["AgriciDaniel"],
+    "color": "#22D3EE",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Content Repurposing",
+    "license": "MIT",
+    "ref": "669187e2b69ef3c854d149657b7fb2483263dab4",
+    "repo": "https://github.com/AgriciDaniel/claude-repurpose",
+    "sourceId": "agricidaniel-repurpose"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/repurposing-studio.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Takes one piece of source material and produces the text, visual and long-form derivatives from a single shared set of atoms.",
+      "emoji": "🔁",
+      "id": "repurpose-repurposing-studio",
+      "members": [
+        {
+          "agentId": "repurpose-content-atomizer",
+          "name": "Content Atomiser",
+          "role": "Content Atomiser"
+        },
+        {
+          "agentId": "repurpose-social-repurposer",
+          "name": "Social Post Repurposer",
+          "role": "Social Post Repurposer"
+        },
+        {
+          "agentId": "repurpose-visual-repurposer",
+          "name": "Visual Content Director",
+          "role": "Visual Content Director"
+        },
+        {
+          "agentId": "repurpose-longform-repurposer",
+          "name": "Newsletter and Forum Writer",
+          "role": "Newsletter and Forum Writer"
+        }
+      ],
+      "name": "Repurposing Studio",
+      "packId": "agricidaniel-repurpose",
+      "slug": "repurposing-studio",
+      "tags": ["repurposing", "content-studio", "multi-format", "editorial"]
+    },
+    {
+      "body": "teams/distribution-desk.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Takes a finished set of drafts and gets them out: broadcast channels, community surfaces, metadata and a dated publishing plan.",
+      "emoji": "📣",
+      "id": "repurpose-distribution-desk",
+      "members": [
+        {
+          "agentId": "repurpose-publishing-scheduler",
+          "name": "Publishing Scheduler",
+          "role": "Publishing Scheduler"
+        },
+        {
+          "agentId": "repurpose-broadcast-repurposer",
+          "name": "Broadcast Channel Editor",
+          "role": "Broadcast Channel Editor"
+        },
+        {
+          "agentId": "repurpose-community-repurposer",
+          "name": "Community Post Builder",
+          "role": "Community Post Builder"
+        },
+        {
+          "agentId": "repurpose-metadata-editor",
+          "name": "Cross-Platform Metadata Editor",
+          "role": "Cross-Platform Metadata Editor"
+        }
+      ],
+      "name": "Distribution Desk",
+      "packId": "agricidaniel-repurpose",
+      "slug": "distribution-desk",
+      "tags": ["distribution", "scheduling", "community", "metadata"]
+    }
+  ],
+  "version": "1.0.0"
+}

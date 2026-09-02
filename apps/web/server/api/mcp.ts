@@ -40,6 +40,8 @@ import { createLogger } from '@clawboo/logger'
 
 const log = createLogger('mcp-attach')
 import { emitEvent } from '../lib/obs/emit'
+import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
+import { connectedAppsNow } from '../lib/connectors/composio'
 
 // The memory server wants an embedding provider; resolve once (a network probe)
 // and let the factory read the cached value. First HTTP session may be FTS-only.
@@ -162,6 +164,14 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     tools: createStreamableHttpHandlers((req) => {
       const scope = parseBoundScope(req)
       return createToolsServer(getDb(), {
+        // THE BROKER'S OWN VOCABULARY, so the per-app gate can read which
+        // upstream app a Composio meta-tool call is aimed at. The catalog
+        // owns this list; @clawboo/db must not depend on it.
+        broker: { brokeredToolkits: BROKERED_TOOLKITS },
+        // What an UNBOUND caller is told it can reach. An OpenClaw session
+        // carries no agent identity, so no grant is findable and the model
+        // would otherwise be told nothing at all about the apps it holds.
+        brokeredConnected: [...connectedAppsNow().connected],
         ...(scope?.agentId ? { agentId: scope.agentId } : {}),
         ...(scope?.teamId ? { teamId: scope.teamId } : {}),
         // A LIVE source plus a subscription, so a connector connected mid-session

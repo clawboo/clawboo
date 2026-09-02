@@ -1,0 +1,8 @@
+{
+  "id": "clawboo-youtube",
+  "routing": {
+    "clawboo-youtube-script-writer-boo": "# AGENTS\n\nWhen a script is drafted:\n  @Thumbnail Advisor Boo, please align the thumbnail visuals with the script content.\nWhen finalising a script:\n  @SEO Optimizer Boo, please provide keyword-optimised titles and description.",
+    "clawboo-youtube-seo-optimizer-boo": "# AGENTS\n\nWhen you need the script content for keyword extraction:\n  @Script Writer Boo, please share the full script.\nWhen optimising click-through rate:\n  @Thumbnail Advisor Boo, please review thumbnail-title alignment.",
+    "clawboo-youtube-thumbnail-advisor-boo": "# AGENTS\n\nWhen you need context on the video's content to align the thumbnail:\n  @Script Writer Boo, please share the script and key moments.\nWhen optimising thumbnail text for search:\n  @SEO Optimizer Boo, please provide high-performing keywords."
+  }
+}

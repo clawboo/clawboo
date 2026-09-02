@@ -1118,10 +1118,25 @@ async function runTaskInner(
     // Did the run exhaust its room before finishing? `max_turns` is the unambiguous
     // signal; otherwise a non-success done that crossed the token watermark. A clean
     // success needs no rotation. Bounded by `maxRotations`.
+    //
+    // THE NUMERATOR IS INPUT ALONE, because the prompt IS the occupancy. Output
+    // tokens are not resident in the context: whatever the model said last turn
+    // is already inside this turn's input, so adding them counts it twice, and
+    // the double-count grows with every turn. The native runtime makes that
+    // concrete by emitting a point-in-time `lastInputTokens` beside a
+    // `totalOutputTokens` accumulated across the whole run
+    // (runtimes/native/conversation.ts:249-250, :385), so on a long run this
+    // ratio drifts upward without the context growing at all.
+    //
+    // It has been harmless only because native declares a generous 200,000
+    // window, which keeps the inflated ratio under the threshold. Give the
+    // watermark a real, smaller window and the same expression rotates a healthy
+    // session repeatedly. Spend accounting is a different question and keeps
+    // using both numbers.
     const watermark =
       doneReason !== 'success' &&
       shouldRotate({
-        tokensUsed: inputTokens + outputTokens,
+        tokensUsed: inputTokens,
         contextWindow,
         thresholdPct: DEFAULT_ROTATION.thresholdPct,
       })

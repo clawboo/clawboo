@@ -1,16 +1,28 @@
+import {
+  composioAuthorizePOST,
+  composioKeyDELETE,
+  composioKeyPUT,
+  composioStatusGET,
+} from './composio'
 import { Router, type Router as RouterType } from 'express'
 
 import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
 
 import { settingsGET, settingsPOST } from './settings'
 import { approvalsGET, approvalsPOST } from './approvals'
-import { chatHistoryGET, chatHistoryPOST, chatHistoryDELETE } from './chatHistory'
+import {
+  chatHistoryGET,
+  chatHistoryPOST,
+  chatHistoryDELETE,
+  chatHistoryRESETCONTEXT,
+} from './chatHistory'
 import { costRecordsGET, costRecordsPOST } from './costRecords'
 import { costRecordsSummaryGET } from './costRecordsSummary'
 import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
 import { execSettingsGET, execSettingsAllGET, execSettingsPOST } from './execSettings'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
+import { catalogAgentGET, catalogIndexGET, catalogTeamGET } from './catalog'
 import {
   systemStatusGET,
   installOpenclawPOST,
@@ -98,6 +110,8 @@ import {
   connectorsCustomDELETE,
   connectorsCustomGET,
   connectorsCustomPOST,
+  connectorsConfiguredGET,
+  connectorsPathSuggestionsGET,
   connectorsConnectPOST,
   connectorsDisconnectPOST,
   connectorsListGET,
@@ -181,6 +195,9 @@ router.post('/api/approvals', approvalsPOST)
 router.get('/api/chat-history', chatHistoryGET)
 router.post('/api/chat-history', chatHistoryPOST)
 router.delete('/api/chat-history', chatHistoryDELETE)
+// Ends the model's conversation and drops a divider, leaving every message in place
+// (what `/reset` does).
+router.post('/api/chat-history/reset-context', chatHistoryRESETCONTEXT)
 
 // Cost records — summary must be before the shorter prefix
 router.get('/api/cost-records/summary', costRecordsSummaryGET)
@@ -199,6 +216,19 @@ router.post('/api/exec-settings', execSettingsPOST)
 // Personality
 router.get('/api/personality', personalityGET)
 router.post('/api/personality', personalityPOST)
+
+// Marketplace catalog: agent and team templates. Connectors are a separate
+// destination and do not come through here. The content lives in `catalog/` and
+// is excluded from the npm tarball; these serve the compiled seed merged with
+// every pack whose bytes verified. See lib/catalogIndex.ts.
+//
+// General tier rather than sensitive: lib/catalogIndex.ts holds a 6h snapshot
+// cache, an inFlight promise that collapses concurrent callers into one build,
+// and an integrity-keyed on-disk pack cache, so a flood costs at most one
+// outbound fetch per six hours.
+router.get('/api/catalog/index', catalogIndexGET)
+router.get('/api/catalog/agents/:id', catalogAgentGET)
+router.get('/api/catalog/teams/:id', catalogTeamGET)
 
 // Skills
 router.get('/api/skills', skillsGET)
@@ -356,6 +386,22 @@ router.get('/api/tools/audit', toolsAuditGET)
 // of them. Reads stay on the general tier: the panel polls them.
 router.get('/api/connectors', connectorsListGET)
 router.post('/api/connectors/connect', sensitiveLimiter, connectorsConnectPOST)
+// Which connectors already have what they asked for. ONE request for the whole
+// shelf, so a card's price tag is true rather than typical.
+router.get('/api/connectors/configured', connectorsConfiguredGET)
+router.get('/api/connectors/path-suggestions', connectorsPathSuggestionsGET)
+// The broker's own surface. Registered before the :slug connector routes so
+// `composio` is never read as a connector slug.
+router.get('/api/connectors/composio', composioStatusGET)
+router.put('/api/connectors/composio/key', sensitiveLimiter, composioKeyPUT)
+router.delete('/api/connectors/composio/key', sensitiveLimiter, composioKeyDELETE)
+// Ask a broker to connect one of its upstream apps. Rate-limited with the other
+// writes: it opens an authorization flow at a third party.
+router.post(
+  '/api/connectors/composio/apps/:slug/authorize',
+  sensitiveLimiter,
+  composioAuthorizePOST,
+)
 // Custom connectors: the operator points clawboo at a server of their own.
 // Registered BEFORE the :slug routes so `custom` is never read as a slug.
 router.get('/api/connectors/custom', connectorsCustomGET)

@@ -1,0 +1,12 @@
+{
+  // The test program: sources + tests together, WITHOUT the main config's
+  // `types: []` pin — vitest's type graph may resolve node ambients, which is
+  // exactly why tests are excluded from tsconfig.json (see the note there).
+  "extends": "@clawboo/tsconfig/base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
 import { useToastStore } from '@/stores/toast'
+import { useFleetStore, type AgentState } from '@/stores/fleet'
 
 import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
@@ -52,6 +53,53 @@ function runningTaskHandlers() {
 }
 
 describe('TaskDetailDrawer', () => {
+  it("names the boo who reported, so the task reads as a teammate's report", async () => {
+    // A boo's board work stays on the board (the native driver no longer writes it
+    // into the person's 1:1 chat), so this section is where they read it. Naming the
+    // reporter is what makes it a teammate reporting back rather than raw output.
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder' } as AgentState],
+      selectedAgentId: null,
+    })
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done', assigneeAgentId: 'agent-7' },
+          comments: [
+            { body: 'Shipped and verified.', authorType: 'agent', authorAgentId: 'agent-7' },
+          ],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    expect(await screen.findByText("Coder's report")).toBeInTheDocument()
+    // Once in the named report, once in the full comment log below it.
+    expect(screen.getAllByText('Shipped and verified.')).toHaveLength(2)
+  })
+
+  it('falls back to a plain heading when the boo is not in the fleet', async () => {
+    useFleetStore.setState({ agents: [], selectedAgentId: null })
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done', assigneeAgentId: 'gone' },
+          comments: [{ body: 'Shipped.', authorType: 'agent', authorAgentId: 'gone' }],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    expect(await screen.findByText('Report')).toBeInTheDocument()
+  })
+
   it('loads + renders task detail', async () => {
     server.use(...detailHandlers())
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)

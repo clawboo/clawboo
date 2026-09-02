@@ -26,7 +26,70 @@ permissions:
   contents: read
 
 jobs:
+  # Which jobs need to run at all.
+  #
+  # A pull request that only edits `catalog/` is CONTENT, not code: no product
+  # source changes, so the three-OS smoke matrix, the Playwright suite and the
+  # cross-platform tests have nothing new to prove. `catalog-ci.yml` runs the
+  # content gate for those PRs in about two minutes instead.
+  #
+  # ONE DELIBERATE CARVE-OUT: `catalog/packs/clawboo/**` is the SEED, and the
+  # seed is compiled into the tarball. Changing it changes shipped bytes, so it
+  # is a product change and gets the full matrix.
+  #
+  # THIS IS A JOB, NOT A `paths-ignore`, AND THAT IS THE WHOLE POINT. GitHub's
+  # `paths-ignore` has no exception syntax: a blanket `catalog/**` entry would
+  # also skip the carve-out above, so a merge that changed the shipped seed
+  # would run ZERO CI. The push trigger's paths-ignore is therefore left alone.
+  #
+  # Every job below carries `needs: [filter]` and the same `if:`. A job added
+  # without them runs the full matrix on content PRs, which is a wasted 20
+  # minutes rather than a wrong answer - the failure mode is deliberately the
+  # safe one.
+  filter:
+    name: Detect content-only change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      content_only: ${{ steps.detect.outputs.content_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The comparison needs both sides of the PR, and this job never pushes.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: detect
+        # Trusted `github.*` values go through `env:` rather than into the script
+        # body, so nothing from the event can be interpolated as shell.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Only a pull request has two sides to compare. A push to main always
+          # runs everything.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "content_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+          # false when: nothing resolved, anything outside catalog/ changed, or
+          # the seed pack changed.
+          if [ -z "$changed" ] \
+             || printf '%s\n' "$changed" | grep -qv '^catalog/' \
+             || printf '%s\n' "$changed" | grep -q '^catalog/packs/clawboo/'; then
+            echo "content_only=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "content_only=true" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: Lint
     runs-on: ubuntu-latest
     steps:
@@ -51,6 +114,8 @@ jobs:
       - run: pnpm lint
 
   typecheck:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +133,8 @@ jobs:
       - run: pnpm typecheck
 
   test:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: Test
     runs-on: ubuntu-latest
     steps:
@@ -114,6 +181,8 @@ jobs:
   # independently. macOS is otherwise only exercised by `smoke-test-bundle`'s boot
   # check; Windows adds the unit coverage its boot smoke lacks. Issue #75.
   test-cross-platform:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: Test (cross-platform)
     strategy:
       fail-fast: false
@@ -140,7 +209,14 @@ jobs:
       # install). The Linux `test` job gets this for free from `turbo test`, which
       # builds a package's dependencies first; here we invoke Vitest directly to
       # scope to the platform-sensitive suites, so the dependency build is explicit.
+      #
+      # Windows fails process CREATION under load: turbo forking a build for all 34
+      # packages at once has produced STATUS_DLL_INIT_FAILED (exit 0xC0000142) here,
+      # which reads as a build error but is the OS refusing to start another process.
+      # Bound the fan-out on that leg only; macOS builds at turbo's default width.
       - run: pnpm build
+        env:
+          TURBO_CONCURRENCY: ${{ matrix.os == 'windows-latest' && '4' || '10' }}
 
       # packages/worktrees: the real-git, per-task worktree lifecycle that underpins
       # every file-mutating task. Drives a real `git` binary via its gitHarness.
@@ -165,7 +241,46 @@ jobs:
       # file runs as part of the full suite here.
       - run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/
 
+  # website/ declares its own pnpm root so Cloudflare Pages can build the
+  # subdirectory alone, which also means the root workspace's Lint/Typecheck/Test/
+  # Build jobs never touch it. Without this job a website change ships to
+  # www.claw.boo on a green tick that only ever described the monorepo: the
+  # astro 5 -> 6 major landed exactly that way. These steps mirror the Pages build
+  # (same command, same Node), so green here means the deploy compiles.
+  #
+  # Gated by `filter` like every other job, and deliberately by a job-level `if:`
+  # rather than a `paths` trigger filter. The distinction matters for a required
+  # check: a path-filtered trigger emits no check run at all and leaves the
+  # requirement pending forever, while a skipped job still reports a conclusion
+  # that branch protection accepts. The only PRs that skip it are content-only
+  # ones, which by definition touch nothing under website/.
+  website:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
+    name: Website
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
   build:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: Build
     runs-on: ubuntu-latest
     steps:
@@ -182,18 +297,25 @@ jobs:
 
       - run: pnpm build
 
-      # Assert on the emitted bundle that the ~4.4 MB marketplace catalog is still a
-      # deferred chunk and not preloaded by the entry. The unit guard
+      # Assert on the emitted bundle that only the small builtin SEED is compiled
+      # in and no other pack's prose reached a chunk. The unit guard
       # (src/features/layout/__tests__/entryImportGraph.test.ts) checks the source
       # import graph; this checks what Rollup actually did, which is the half that
       # catches a named-but-still-eager chunk. Issue #83.
       - run: node scripts/check-entry-chunk.mjs
 
-  verify-catalog:
-    name: Verify marketplace catalog integrity
+  catalog-verify:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
+    name: Verify marketplace catalog
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # This job never pushes, so the job token has no business living on in
+          # .git/config for the rest of the run.
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6
 
@@ -204,14 +326,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # OFFLINE: checks the committed catalog against its committed integrity
-      # manifest (scripts/ingest-manifest.json). No token, no upstream fetch — so
-      # an upstream outage or rename can never redden a PR that didn't touch the
-      # catalog. The LIVE re-derive against the pinned upstream commits runs in
-      # `verify-ingest.yml` (weekly + on PRs that touch the ingest scripts).
-      - run: pnpm verify:catalog
+      # OFFLINE, like verify-connectors: every rule runs against the packs and
+      # the committed dist in the tree, so no remote can redden a PR. It also
+      # asserts that dist and the compiled seed are exactly what a rebuild would
+      # write, which is what keeps committed generated output honest.
+      - run: pnpm catalog:verify
+
+      - run: node scripts/catalog/budget.mjs
 
   verify-connectors:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: Verify connector catalog
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -231,15 +356,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # OFFLINE, and a SEPARATE job from verify-catalog on purpose: this one must
-      # run in a context with no token and no upstream dependency, so a yanked npm
-      # version or a connector vendor's outage can never redden a PR that did not
-      # touch the catalog. The LIVE half (re-resolving every pinned package and
-      # dialing every remote endpoint) runs in `verify-ingest.yml` (weekly + on
-      # PRs that touch the catalog).
+      # OFFLINE on purpose: this job runs in a context with no token and no
+      # upstream dependency, so a yanked npm version or a connector vendor's
+      # outage can never redden a PR that did not touch the catalog. The LIVE
+      # half (re-resolving every pinned package and dialing every remote
+      # endpoint) runs on demand via `pnpm verify:connectors --live`.
       - run: pnpm verify:connectors
 
   smoke-test-bundle:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: Smoke test bundled CLI (clean install simulation)
     strategy:
       fail-fast: false
@@ -289,6 +415,8 @@ jobs:
       - run: pnpm test:clean-install
 
   e2e:
+    needs: [filter]
+    if: needs.filter.outputs.content_only != 'true'
     name: E2E (Playwright)
     # ubuntu only, unlike smoke-test-bundle's three-OS matrix. The webServer
     # command in playwright.config.ts is POSIX shell syntax

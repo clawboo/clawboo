@@ -68,14 +68,44 @@ describe('fetchCapabilities', () => {
   })
 })
 
-describe('groupAgentCapabilities — inherit-if-empty', () => {
-  it('an agent with its OWN agent-scoped caps shows those, NOT the shared globals', () => {
+describe('groupAgentCapabilities — inheritance is additive', () => {
+  it('an agent with its OWN agent-scoped caps ALSO keeps the shared globals', () => {
     const records = [
       cap({ scope: 'agent', agentId: 'native-1', runtime: 'clawboo-native', name: 'memory MCP' }),
       cap({ scope: 'global', runtime: 'clawboo-native', name: 'echo' }), // shared broker tool
     ]
     const out = groupAgentCapabilities(records, new Map([['native-1', 'clawboo-native']]))
-    expect((out.get('native-1') ?? []).map((r) => r.name)).toEqual(['memory MCP'])
+    expect((out.get('native-1') ?? []).map((r) => r.name).sort()).toEqual(['echo', 'memory MCP'])
+  })
+
+  // The regression this rule replaced. Grouping used to inherit only when an
+  // agent had nothing of its own, so gaining one agent-scoped record dropped
+  // every inherited tile in the same frame: installing a marketplace skill on an
+  // OpenClaw Boo took its runtime builtins off the graph and left the new skill
+  // alone with the model node. A runtime builtin belongs to every agent on that
+  // runtime, so hiding it under-reports what the agent can do.
+  it('gaining one agent-scoped cap does not drop the inherited ones', () => {
+    const globals = [
+      cap({ scope: 'global', runtime: 'openclaw', name: 'Built-in tools' }),
+      cap({ scope: 'global', runtime: 'openclaw', name: 'echo' }),
+    ]
+    const runtimes = new Map([['oc-1', 'openclaw']])
+
+    const before = groupAgentCapabilities(globals, runtimes)
+    expect((before.get('oc-1') ?? []).length).toBe(2)
+
+    const after = groupAgentCapabilities(
+      [
+        ...globals,
+        cap({ scope: 'agent', agentId: 'oc-1', runtime: 'openclaw', name: 'Brainstorming' }),
+      ],
+      runtimes,
+    )
+    expect((after.get('oc-1') ?? []).map((r) => r.name).sort()).toEqual([
+      'Brainstorming',
+      'Built-in tools',
+      'echo',
+    ])
   })
 
   it("an agent with NO caps inherits its runtime's shared (global) caps", () => {
@@ -94,6 +124,73 @@ describe('groupAgentCapabilities — inherit-if-empty', () => {
     const records = [cap({ scope: 'global', runtime: 'clawboo-native', name: 'echo' })]
     const out = groupAgentCapabilities(records, new Map([['codex-1', 'codex']]))
     expect(out.has('codex-1')).toBe(false)
+  })
+
+  // clawboo's OWN outbound connections, which the operator turned on in the
+  // Connectors tab. Distinguished from a runtime's own MCP config by the
+  // `connector:` source id in the record id.
+  const connected = (name: string) =>
+    cap({
+      id: `connector:clawboo-native:global:global:connector:mcp:${name}`,
+      scope: 'global',
+      runtime: 'clawboo-native',
+      kind: 'connector',
+      source: 'mcp-connector',
+      name,
+    })
+
+  /** The agent-scoped twin the grant projection emits for a granted connector. */
+  const granted = (name: string, agentId: string) =>
+    cap({
+      id: `connector:clawboo-native:global:global:connector:mcp:${name}#grant:g-${agentId}`,
+      scope: 'agent',
+      agentId,
+      runtime: 'clawboo-native',
+      kind: 'connector',
+      source: 'mcp-connector',
+      name,
+      synthetic: true,
+    })
+
+  it('a connected connector reaches NO agent until one is granted it', () => {
+    // THE RULE THE PICTURE MUST TELL THE TRUTH ABOUT. Connecting makes a
+    // connector available and gives it to nobody. Drawing it on every ring said
+    // the opposite, and it said it about a permission the agent did not have.
+    const records = [connected('notion'), connected('linear')]
+    const out = groupAgentCapabilities(
+      records,
+      new Map([
+        ['a1', 'openclaw'],
+        ['a2', 'clawboo-native'],
+        ['a3', 'codex'],
+      ]),
+    )
+    for (const id of ['a1', 'a2', 'a3']) {
+      expect((out.get(id) ?? []).map((r) => r.name)).toEqual([])
+    }
+  })
+
+  it('reaches exactly the agent that was granted it, whatever its runtime', () => {
+    const records = [connected('notion'), granted('notion', 'openclaw-1')]
+    const out = groupAgentCapabilities(
+      records,
+      new Map([
+        ['openclaw-1', 'openclaw'],
+        ['other-1', 'openclaw'],
+      ]),
+    )
+    expect((out.get('openclaw-1') ?? []).map((r) => r.name)).toEqual(['notion'])
+    expect((out.get('other-1') ?? []).map((r) => r.name)).toEqual([])
+  })
+
+  it('sits alongside an agent that already has its own caps', () => {
+    const records = [
+      cap({ scope: 'agent', agentId: 'a1', runtime: 'openclaw', name: 'own skill' }),
+      connected('linear'),
+      granted('linear', 'a1'),
+    ]
+    const out = groupAgentCapabilities(records, new Map([['a1', 'openclaw']]))
+    expect((out.get('a1') ?? []).map((r) => r.name).sort()).toEqual(['linear', 'own skill'])
   })
 
   it('ignores agents absent from the runtime map + empty agents with no global to inherit', () => {

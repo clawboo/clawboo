@@ -10,6 +10,7 @@ import {
   KanbanSquare,
   Plus,
   Settings,
+  Plug,
   ShoppingCart,
   Trash2,
   type LucideIcon,
@@ -231,6 +232,10 @@ const PRIMARY_NAV: NavItem[] = [
   { id: 'graph', icon: Globe, subtitle: '(All Teams)' },
   { id: 'board', icon: KanbanSquare },
   { id: 'marketplace', icon: ShoppingCart },
+  // Its own destination rather than a Marketplace tab: connecting a tool the
+  // agents will use is not the same errand as shopping for a team template,
+  // and burying it three clicks deep is what made it hard to find.
+  { id: 'connectors', icon: Plug },
 ]
 
 // Second nav block: Fleet + the Settings gear (rendered after this list). Settings

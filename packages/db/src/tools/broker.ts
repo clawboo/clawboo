@@ -9,6 +9,7 @@ import type { GrantDecision } from '@clawboo/governance'
 
 import type { ClawbooDb } from '../db'
 import { appendEvent } from '../events/appendEvent'
+import { listCandidateGrants } from '../grants/repository'
 import { evaluateAvailability } from './availability'
 import { defaultInspectors, runInspectors } from './inspectors'
 import {
@@ -25,6 +26,8 @@ import {
   ruleIdOf,
   type GrantGateResult,
 } from './grantGate'
+import { brokeredAppConnectorId, brokeredAppScope } from './brokeredApp'
+import { toolClassOf, toolSummaryOf } from './toolClass'
 import { verifyProvenance, type ProvenanceVerifyOpts } from './provenance'
 import type { ToolRegistry } from './registry'
 import { toolOutputOf } from './types'
@@ -40,6 +43,15 @@ export interface BrokerOptions {
   approvalPollMs?: number
   /** Compact the tool result before returning (default true). */
   compact?: boolean
+  /**
+   * The broker's own toolkit vocabulary, for reading which upstream app a
+   * brokered call is aimed at.
+   *
+   * Supplied by the caller because the catalog owns that list and this package
+   * must not depend on it. Absent means no per-app checking, which is correct
+   * for every connector that is not a broker.
+   */
+  brokeredToolkits?: readonly string[]
 }
 
 export interface BrokeredResult {
@@ -167,6 +179,12 @@ export async function executeBrokeredCall(
     }
   }
 
+  // ── The per-app gate ──────────────────────────────────────────────────────
+  // A broker is one session carrying many apps, so the grant above authorised
+  // the SESSION and says nothing about which app this call is aimed at. Reading
+  // it off the arguments is the only place that distinction exists.
+  const appGap = brokeredAppGap(db, validatedCall, ctx, gate, opts.brokeredToolkits)
+
   // Inspector chain.
   const outcome = await runInspectors(
     validatedCall,
@@ -184,7 +202,7 @@ export async function executeBrokeredCall(
   // local so the reason below is a real string rather than a property access on
   // a union that may not have it.
   const grantApproval = gate && gate.decision.kind === 'require_approval' ? gate.decision : null
-  if (outcome.decision === 'require_approval' || grantApproval) {
+  if (outcome.decision === 'require_approval' || grantApproval || appGap) {
     // Observations survive on THIS path too: an observed-then-approved call is
     // exactly the false-positive datum the observe mode exists to count.
     const approvalObs = outcome.observations ?? []
@@ -192,7 +210,9 @@ export async function executeBrokeredCall(
     const approvalReason =
       outcome.decision === 'require_approval'
         ? outcome.message
-        : `grant:${grantApproval?.reason ?? 'policy'}`
+        : appGap !== null
+          ? appGap
+          : `grant:${grantApproval?.reason ?? 'policy'}`
     writeAuditBefore(db, {
       toolName: call.name,
       agentId: ctx.agentId,
@@ -215,6 +235,11 @@ export async function executeBrokeredCall(
       // rule the prompt did not offer.
       neverRemember: grantApproval?.neverRemember ?? false,
       ruleReason: grantApproval?.reason ?? null,
+      // The SERVER's own reading, carried to the card. Without it the browser
+      // has only the tool's name to go on, which generalises to whatever
+      // naming conventions someone hard-coded and to nothing else.
+      toolClass: toolClassOf(descriptor),
+      toolSummary: toolSummaryOf(descriptor.description),
     })
     const resolution = await waitForApproval(db, approval.id, {
       timeoutMs: opts.approvalTimeoutMs,
@@ -301,4 +326,50 @@ export async function executeBrokeredCall(
     connectorId: attribution.connectorId ?? null,
   })
   return { ok: !isError, output, isError, ...(images.length > 0 ? { images } : {}) }
+}
+
+/**
+ * Whether this call names an app the agent has not been granted.
+ *
+ * Returns the reason to ask a human, or null when nothing is missing.
+ *
+ * AN APPROVAL RATHER THAN A REFUSAL, which is a product decision: the graph edge
+ * is the durable "yes, always" and this prompt is the ad-hoc path, so an
+ * ungranted app is reachable when a person says so and never silently.
+ *
+ * THE UNSCOPED TOOLS ARE NOT HANDLED HERE. A remote shell and a Python sandbox
+ * that can call any app from inside code cannot be bounded by an app grant, so
+ * no app grant is consulted for them: they stand or fall on the session grant's
+ * own tool scope, which is where they can actually be allowed or denied by name.
+ */
+function brokeredAppGap(
+  db: ClawbooDb,
+  call: ToolCall,
+  ctx: ToolCallContext,
+  gate: GrantGateResult | null,
+  known: readonly string[] | undefined,
+): string | null {
+  const connectorId = gate?.connectorId ?? ctx.connectorId ?? null
+  if (!connectorId || !known || known.length === 0) return null
+
+  const scope = brokeredAppScope(call.name, call.args, known)
+  if (scope.kind === 'not-brokered' || scope.kind === 'unscoped') return null
+  if (scope.kind === 'unknown') return `app:unreadable:${scope.tool}`
+
+  const missing = scope.toolkits.filter((toolkit) => {
+    const grants = listCandidateGrants(db, {
+      agentId: ctx.agentId ?? null,
+      teamId: ctx.teamId ?? null,
+      connectorId: brokeredAppConnectorId(connectorId, toolkit),
+    })
+    // ACTIVE ONLY. `listCandidateGrants` is a pure subject-by-capability query
+    // with NO state filter, so it returns revoked and suspended rows too. The
+    // main gate is unaffected because `decideGrant` denies on state, but this
+    // check reads the rows directly: counting them would let a REVOKED grant
+    // authorise the app it was revoked from. On a real install that resurrected
+    // fleet-wide Gmail access through the very row the retirement had killed.
+    return !grants.some((g) => g.state === 'active')
+  })
+
+  return missing.length === 0 ? null : `app:no-grant:${missing.join(',')}`
 }

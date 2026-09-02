@@ -8,11 +8,22 @@ import type { NavView } from '@/stores/view'
 // Each panel is lazy-loaded so it stays off the initial entry chunk and only
 // downloads/parses when its nav view is first opened. Panels are named exports,
 // so we map each to `default`. The heavy features (Ghost Graph + ELK, CodeMirror,
-// recharts) load on demand rather than up front, as does the ~4.4 MB marketplace
-// catalog — that one needed a SECOND boundary at `features/teams/CreateTeamModalLazy`,
-// because the eagerly-imported create-team modal kept the catalog on the boot path
-// even with MarketplacePanel lazy here (issue #83). It now has its own
-// `marketplace-catalog` chunk.
+// recharts) load on demand rather than up front, as do the marketplace surfaces.
+// Those needed a SECOND boundary at `features/teams/CreateTeamModalLazy`, because
+// the eagerly-imported create-team modal kept the catalog on the boot path even
+// with MarketplacePanel lazy here (issue #83). The agent/team catalog DATA is no
+// longer bundled: it is emitted as static JSON and fetched on demand (see
+// `features/marketplace/catalogClient.ts`), so those two boundaries now defer only
+// the panel code.
+//
+// The connector catalog answers the same question differently, so do not read the
+// line above as a project-wide rule. `@clawboo/connector-catalog` is compiled into
+// the bundle, and chat + approvals import it eagerly, so it is already on the boot
+// path before the `connectors` destination below is ever opened; that entry defers
+// panel code only. The one piece held back is the generated community snapshot
+// (400 entries, ~68 KB gzipped), and it is held back by a second package entry point
+// (`@clawboo/connector-catalog/community`, imported from
+// `features/marketplace/useCommunityConnectors.ts`) rather than by a fetch.
 //
 // Every entry goes through `createRetryableLazy` rather than bare `React.lazy`: a
 // lazy() that has REJECTED (a dropped connection mid-chunk-load, a stale tab
@@ -38,6 +49,9 @@ const PANEL_SOURCES: Record<NavView, RetryableLazy<ComponentType>> = {
         return <m.GhostGraphPanel scope="atlas" />
       },
     })),
+  ),
+  connectors: createRetryableLazy(() =>
+    import('@/features/connectors/ConnectorsPanel').then((m) => ({ default: m.ConnectorsPanel })),
   ),
   fleet: createRetryableLazy(() =>
     import('@/features/fleet/FleetHealth').then((m) => ({ default: m.FleetHealth })),

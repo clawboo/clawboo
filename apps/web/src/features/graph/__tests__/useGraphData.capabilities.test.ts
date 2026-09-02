@@ -249,8 +249,17 @@ describe('buildGraphElements — orbital tile type-coding + install gating', () 
 
     // The built-ins rollup edge carries the slate accent; regular skill edges none (mint fallback).
     const builtinEdge = rawEdges.find((e) => e.id === 'skilledge-a1-builtins')
-    expect(builtinEdge?.data).toEqual({ accent: 'var(--secondary)' })
-    expect(rawEdges.find((e) => e.id === 'skilledge-a1-echo')?.data).toEqual({})
+    expect(builtinEdge?.data).toMatchObject({ accent: 'var(--secondary)' })
+    expect(rawEdges.find((e) => e.id === 'skilledge-a1-echo')?.data).not.toHaveProperty('accent')
+
+    // REMOVABILITY RIDES THE EDGE, because the edge is what gets selected to
+    // remove the thing. Narrower than "has a record": neither of these came
+    // from a curated install, so removing them on the canvas would be a delete
+    // that reappears on the next inventory read.
+    expect(builtinEdge?.data).toMatchObject({ removable: false })
+    expect(rawEdges.find((e) => e.id === 'skilledge-a1-echo')?.data).toMatchObject({
+      removable: false,
+    })
   })
 
   it("greys a policy-disabled capability (enabled:false) and cleans a connector's name", () => {
