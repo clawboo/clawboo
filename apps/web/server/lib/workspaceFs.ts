@@ -46,28 +46,21 @@ export const MAX_DIFF_BYTES = 1024 * 1024
 export const MAX_STATUS_ENTRIES = 2000
 
 /**
- * Confine an absolute path to `root`, or throw.
+ * The root, terminated so a prefix test cannot match a SIBLING: `/w/root-evil`
+ * does not start with `/w/root/`.
  *
- * Written as a PREFIX test on the resolved absolute path rather than as a
- * predicate over `path.relative(...)`, and deliberately inline at each
- * filesystem call rather than factored into a helper that returns a boolean.
- * Two reasons, and only one of them is CodeQL.
- *
- * The repo's own doctrine (see `verification/deterministicGate.ts`) is that a
- * helper which validates and then RETURNS a path hands the caller a value that
- * reads as unchecked, both to a reviewer skimming the call site and to static
- * analysis. `js/path-injection` agrees: it matches guard SHAPES at the sink, so
- * a boolean-returning predicate over a `path.relative` result barriers nothing,
- * and every `lstat`/`readdir`/`open` below was reported as unguarded.
- *
- * The `rootPrefix` ends in a separator so a SIBLING cannot pass: `/w/root-evil`
- * does not start with `/w/root/`. The equality case is separate because the root
- * itself must stay listable.
+ * The containment COMPARISON is deliberately written out at each filesystem
+ * call rather than wrapped in a helper that throws. This repo already states the
+ * rule (`verification/deterministicGate.ts`): a helper that validates and then
+ * returns hands the caller a value that reads as unchecked, "both to a reviewer
+ * skimming the call site and to static analysis". Taint tracking agrees --
+ * `js/path-injection` matches guard shapes at the sink, so a call to a
+ * throwing helper barriers nothing and every `lstat`/`readdir`/`open` below was
+ * reported as reached by user input. Each site therefore proves its own
+ * containment immediately before it acts.
  */
-export function assertInside(root: string, abs: string, message: string): void {
-  if (abs === root) return
-  const rootPrefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`
-  if (!abs.startsWith(rootPrefix)) throw new WorkspacePathError(message)
+function rootPrefixOf(realRoot: string): string {
+  return realRoot.endsWith(path.sep) ? realRoot : `${realRoot}${path.sep}`
 }
 
 /**
@@ -113,7 +106,14 @@ export async function resolveWorkspaceRelPath(
   // The root must exist and resolve; a reaped worktree surfaces here.
   const realRoot = await realpath(root)
   const abs = path.resolve(realRoot, wanted)
-  assertInside(realRoot, abs, 'The path escapes the workspace.')
+  const rootPrefix = rootPrefixOf(realRoot)
+  // Nested, not `&&`: a guard's outcome propagates through `&&` only when it is
+  // TRUE, and the branch that reaches the filesystem here is the FALSE one.
+  if (abs !== realRoot) {
+    if (!abs.startsWith(rootPrefix)) {
+      throw new WorkspacePathError('The path escapes the workspace.')
+    }
+  }
 
   let st
   try {
@@ -127,7 +127,11 @@ export async function resolveWorkspaceRelPath(
   }
   // Follow any symlinked ancestor directories and re-check containment.
   const real = await realpath(abs)
-  assertInside(realRoot, real, 'The path resolves outside the workspace.')
+  if (real !== realRoot) {
+    if (!real.startsWith(rootPrefix)) {
+      throw new WorkspacePathError('The path resolves outside the workspace.')
+    }
+  }
   return { abs: real, realRoot }
 }
 

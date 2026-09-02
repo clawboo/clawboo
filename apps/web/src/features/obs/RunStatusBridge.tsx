@@ -10,7 +10,7 @@
 // `deriveRunStatus` needs enough window to see the `execution_started` of a run
 // that began before this tab did.
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { useFleetStore } from '@/stores/fleet'
 import { useRunActivityStore } from '@/stores/runActivity'
@@ -44,17 +44,49 @@ export function RunStatusBridge(): null {
       .join(','),
   )
 
+  // How far this bridge has folded, and for whom.
+  //
+  // The tail is a WINDOW, not a history. A completed execution stays in it long
+  // after the run ended, so re-folding the whole window on every frame keeps
+  // re-asserting `idle` for that agent. Once a CHAT run has marked the same
+  // agent running, the next unrelated event resets it to idle underneath a live
+  // run, which is the exact clobber `deriveRunStatus` documents itself as
+  // avoiding (it only manages it for agents the window is SILENT about).
+  //
+  // So only NEW evidence may move an agent already folded. An agent never folded
+  // still gets the whole window once, because the fleet routinely hydrates after
+  // the backfill lands and that agent's `execution_started` may exist only back
+  // there. That is the race the `agentIdKey` dependency exists to fix, and it
+  // has to keep working.
+  const appliedSeq = useRef(0)
+  const folded = useRef<Set<string>>(new Set())
+
   useEffect(() => {
     if (events.length === 0 || agentIdKey === '') return
 
-    const derived = deriveRunStatus(events)
+    const { agents } = useFleetStore.getState()
+    const maxSeq = events[events.length - 1]?.seq ?? appliedSeq.current
+    const derived = deriveRunStatus(events.filter((e) => e.seq > appliedSeq.current))
+
+    const unseen = agents.filter((a) => !folded.current.has(a.id))
+    if (unseen.length > 0) {
+      const fromWindow = deriveRunStatus(events)
+      for (const a of unseen) {
+        const status = fromWindow.get(a.id)
+        // Fresh evidence outranks the backfill for the same agent.
+        if (status !== undefined && !derived.has(a.id)) derived.set(a.id, status)
+      }
+    }
+    for (const a of agents) folded.current.add(a.id)
+    appliedSeq.current = Math.max(appliedSeq.current, maxSeq)
+
     if (derived.size > 0) {
       // Read once, patch only what actually changed. `updateAgentStatus` replaces
       // the agents array, so patching unconditionally would re-render every
       // subscriber on each event frame.
-      const { agents, updateAgentStatus } = useFleetStore.getState()
+      const { agents: live, updateAgentStatus } = useFleetStore.getState()
       for (const [agentId, status] of derived) {
-        const current = agents.find((a) => a.id === agentId)
+        const current = live.find((a) => a.id === agentId)
         if (!current || current.status === status) continue
         updateAgentStatus(agentId, status)
       }
