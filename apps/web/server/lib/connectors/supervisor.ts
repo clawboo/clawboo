@@ -110,7 +110,11 @@ function toDescriptor(
       if (!session) return `connector ${def.slug} is not connected`
       // A tool-reported error comes back as TEXT: the broker records it, and
       // throwing here would lose the server's own message.
-      return (await session.callTool(tool.name, args)).text
+      const res = await session.callTool(tool.name, args)
+      // Images travel BESIDE the text rather than inside it. `text` still holds
+      // the `[image: …, not rendered]` placeholder, which is what the audit row
+      // stores and what a consumer with no way to render pixels falls back to.
+      return res.images && res.images.length > 0 ? { text: res.text, images: res.images } : res.text
     },
   })
 }

@@ -5,6 +5,8 @@
 
 import type { Request, Response } from 'express'
 
+import { existsSync } from 'node:fs'
+
 import {
   addComment,
   appendAudit,
@@ -32,6 +34,7 @@ import {
   updateTaskBody,
   updateTaskFields,
   workspaceActionBody,
+  getWorkspaceForTask,
   type TaskStatus,
 } from '@clawboo/db'
 import { agentHandoffSchema } from '@clawboo/worktrees'
@@ -46,6 +49,15 @@ import {
   readWorktreeDetail,
   writeTaskHandoff,
 } from '../lib/worktrees'
+import {
+  listWorkspaceDir,
+  readWorkspaceFile,
+  workspaceFileDiff,
+  workspaceGitStatus,
+  WorkspacePathError,
+  type WorkspaceMissReason,
+} from '../lib/workspaceFs'
+import { openPreviewStream, resolvePreviewFile } from '../lib/workspacePreview'
 
 // ─── GET /api/board ──────────────────────────────────────────────────────────
 // Query: teamId?, status?, ready?=true (deps satisfied), includeDropped?=true
@@ -521,6 +533,198 @@ export async function boardWorkspaceDetailGET(req: Request, res: Response): Prom
       return
     }
     res.json(detail)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── Workspace filesystem view (agent-detail Workspace tab) ──────────────────
+// Read-only. Paths resolve from the stored workspaces row and are confined to
+// the worktree root by lib/workspaceFs; a refused path answers 400 with the
+// refusal message, and a paused/reaped checkout answers 404 with reason 'gone'
+// so the client can say "paused, branch retained" instead of "missing".
+
+function sendWorkspaceMiss(res: Response, reason: WorkspaceMissReason): void {
+  // `unreadable` is a real, distinct state: the checkout is on disk but git
+  // refuses it. It answers 409 rather than 404 so a client cannot mistake it
+  // for "no workspace" and render a clean tree.
+  const status = reason === 'unreadable' ? 409 : 404
+  const error = reason === 'unreadable' ? 'workspace unreadable' : 'workspace not found'
+  res.status(status).json({ ok: false, error, reason })
+}
+
+function relParam(req: Request, name: string): string {
+  const v = req.query[name]
+  return typeof v === 'string' ? v : ''
+}
+
+// ─── GET /api/board/:taskId/workspace/tree?dir=<rel> ─────────────────────────
+// One directory level (lazy tree). `dir` omitted or '' lists the root.
+export async function boardWorkspaceTreeGET(req: Request, res: Response): Promise<void> {
+  try {
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const result = await listWorkspaceDir(taskId, relParam(req, 'dir'))
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    if (err instanceof WorkspacePathError) {
+      res.status(400).json({ ok: false, error: err.message })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/board/:taskId/workspace/file?path=<rel> ────────────────────────
+// Bounded read-only file content. Binary files answer { binary: true } with no
+// bytes; oversized text is truncated with a flag.
+export async function boardWorkspaceFileGET(req: Request, res: Response): Promise<void> {
+  try {
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const result = await readWorkspaceFile(taskId, relParam(req, 'path'))
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    if (err instanceof WorkspacePathError) {
+      res.status(400).json({ ok: false, error: err.message })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/board/:taskId/preview/* ────────────────────────────────────────
+// Serve the artifact the agent built, straight out of the task worktree, so the
+// task drawer can iframe the actual rendered page beside the diff that produced
+// it. Static files only — clawboo never runs an agent-authored build command.
+//
+// Mounted under /api on purpose: it inherits the origin guard and the access
+// gate, and stays same-origin with the dashboard, so the gate's host-only
+// SameSite=Lax cookie is actually sent. A `{port}.localhost` proxy origin would
+// receive no cookie at all and 401 on every asset.
+export async function boardWorkspacePreviewGET(req: Request, res: Response): Promise<void> {
+  try {
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    // Everything after `/preview/`. A `*splat` route gives the segments as an
+    // array (or a string when there is exactly one); the bare route gives none.
+    const splat = (req.params as Record<string, unknown>)['splat']
+    const rel = (Array.isArray(splat) ? splat.join('/') : String(splat ?? ''))
+      .split('/')
+      .map((seg) => {
+        try {
+          return decodeURIComponent(seg)
+        } catch {
+          // A malformed escape is a bad path, not a 500 — let the containment
+          // check reject the raw segment.
+          return seg
+        }
+      })
+      .join('/')
+    const found = await resolvePreviewFile(taskId, rel)
+    if (!found.ok) {
+      res.status(found.status).json({ ok: false, error: found.error })
+      return
+    }
+    // A directory index MUST be served from a URL ending in `/`. Without it the
+    // page's own relative hrefs resolve one level too high — `src/app.css` on
+    // `…/preview` becomes `…/<taskId>/src/app.css` — and the artifact renders
+    // unstyled, which reads as a broken preview rather than a broken URL.
+    if (found.isIndex && !req.path.endsWith('/')) {
+      const [path0, query] = req.originalUrl.split('?')
+      res.redirect(302, `${path0}/${query ? `?${query}` : ''}`)
+      return
+    }
+    res.setHeader('Content-Type', found.contentType)
+    res.setHeader('Content-Length', String(found.size))
+    // A worktree changes under a running agent, so a cached asset would show a
+    // stale build seconds after the fix landed.
+    res.setHeader('Cache-Control', 'no-store')
+    // Belt and braces on top of the content-type allowlist: never let a
+    // previewed file be re-sniffed into something executable.
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    const stream = openPreviewStream(found.absPath)
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).json({ error: 'preview read failed' })
+      else res.end()
+    })
+    stream.pipe(res)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/board/:taskId/workspace/status ─────────────────────────────────
+// `git status --porcelain` for the worktree, parsed to {path, x, y} entries.
+// Drives the tree's change badges and the diffstat chips.
+export async function boardWorkspaceStatusGET(req: Request, res: Response): Promise<void> {
+  try {
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const result = await workspaceGitStatus(taskId)
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/board/:taskId/workspace/file-diff?path=<rel> ───────────────────
+// Unified diff for ONE file against the task's baseline commit. Empty for an
+// untracked file; the client falls back to the content view.
+export async function boardWorkspaceFileDiffGET(req: Request, res: Response): Promise<void> {
+  try {
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const result = await workspaceFileDiff(taskId, relParam(req, 'path'))
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    if (err instanceof WorkspacePathError) {
+      res.status(400).json({ ok: false, error: err.message })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/agents/:agentId/workspaces ─────────────────────────────────────
+// The task workspaces belonging to one agent's assigned tasks, newest first.
+// `onDisk: false` marks a paused/reaped checkout (row + branch survive). The
+// Workspace tab uses this to pick what to show and to render an honest empty
+// state when the agent has no local workspace at all.
+export function agentWorkspacesGET(req: Request, res: Response): void {
+  try {
+    const agentId = (req.params['agentId'] as string | undefined) ?? ''
+    const db = getDb()
+    const tasks = listTasks(db).filter((t) => t.assigneeAgentId === agentId && t.worktreeRef)
+    const workspaces = tasks.flatMap((t) => {
+      const ws = getWorkspaceForTask(db, t.id)
+      if (!ws || !ws.worktreePath || ws.status === 'archived') return []
+      return [
+        {
+          taskId: t.id,
+          title: t.title,
+          taskStatus: t.status,
+          branch: ws.branch,
+          repoPath: ws.repoPath,
+          worktreePath: ws.worktreePath,
+          workspaceStatus: ws.status,
+          onDisk: existsSync(ws.worktreePath),
+          updatedAt: t.updatedAt,
+        },
+      ]
+    })
+    res.json({ ok: true, workspaces })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

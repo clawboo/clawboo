@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express'
+import { getScreenshot } from '../lib/screenshotBus'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 import { agents, costRecords, approvalHistory, settings, getSetting } from '@clawboo/db'
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
@@ -487,4 +488,38 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
+}
+
+// ─── GET /api/agents/:agentId/screenshot ─────────────────────────────────────
+// The newest frame this agent captured, for the Browser panel. `?meta=1` returns
+// just the descriptor so the panel can decide whether to render at all without
+// pulling megabytes it may not show.
+//
+// Serves out of an in-memory bus, never the event log: the frame's value expires
+// in seconds and the log is append-only with no delete writer.
+export function agentScreenshotGET(req: Request, res: Response): void {
+  const agentId = (req.params['agentId'] as string | undefined) ?? ''
+  const shot = getScreenshot(agentId)
+  if (!shot) {
+    res.status(404).json({ ok: false, error: 'no screenshot for this agent' })
+    return
+  }
+  if (req.query['meta'] !== undefined) {
+    res.json({ ok: true, mimeType: shot.mimeType, toolName: shot.toolName, ts: shot.ts })
+    return
+  }
+  let bytes: Buffer
+  try {
+    bytes = Buffer.from(shot.data, 'base64')
+  } catch {
+    res.status(500).json({ ok: false, error: 'frame is not decodable' })
+    return
+  }
+  res.setHeader('Content-Type', shot.mimeType)
+  res.setHeader('Content-Length', String(bytes.length))
+  // The newest frame replaces the last one under the same URL, so a cached copy
+  // would pin the panel to whatever the agent was looking at first.
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.end(bytes)
 }

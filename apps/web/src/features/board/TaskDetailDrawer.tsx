@@ -23,6 +23,8 @@ import { IconButton } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
+import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
+import { WorkspacePreview } from '@/features/workspace/WorkspacePreview'
 import { Modal } from '@/features/shared/Modal'
 
 import { StatusSelect } from './StatusSelect'
@@ -392,6 +394,20 @@ export function TaskDetailDrawer({
                       <div style={codeBox}>{workspace.diff}</div>
                     </div>
                   ) : null}
+                  {/* The live view of the same worktree: file tree, git status
+                      badges, per-file diff, and what the agent is touching right
+                      now. Pinned to THIS task so the panel's agent-wide picker
+                      cannot navigate the reader off the task they opened. Needs
+                      an assignee, because the tree is resolved from the agent's
+                      workspace list. */}
+                  {task.assigneeAgentId ? (
+                    <div style={{ marginTop: 12, height: 380 }}>
+                      <WorkspacePanel agentId={task.assigneeAgentId} pinnedTaskId={task.id} />
+                    </div>
+                  ) : null}
+                  {/* The rendered result, beside the diff that produced it. Needs
+                      no assignee: it reads the task's worktree directly. */}
+                  <WorkspacePreview taskId={task.id} />
                 </>
               ) : (
                 <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>

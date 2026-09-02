@@ -48,24 +48,30 @@ The MiniGraph header fuses the agent's **runtime icon** with a **model selector*
 
 ## Edit the agent files
 
-The inline editor's file tabs are a single CodeMirror 6 instance (Markdown highlighting, line wrapping). The four **core** tabs always show; the three extra OpenClaw files appear as tabs only when they already have content.
+The inline editor's file tabs are a single CodeMirror 6 instance (Markdown highlighting, line wrapping).
 
-| File           | Tab       | What it controls                                                                                 |
-| -------------- | --------- | ------------------------------------------------------------------------------------------------ |
-| `SOUL.md`      | SOUL      | Persona, tone, and boundaries. Also holds the merged personality block (see below).              |
-| `IDENTITY.md`  | IDENTITY  | Name, vibe, and emoji.                                                                           |
-| `TOOLS.md`     | TOOLS     | Local tool notes and conventions. Drives the skill nodes on the graph.                           |
-| `AGENTS.md`    | AGENTS    | Operating instructions, priorities, and routing rules. Drives the dependency edges on the graph. |
-| `USER.md`      | USER      | User profile and preferences (extra tab, shown when non-empty).                                  |
-| `HEARTBEAT.md` | HEARTBEAT | Checklist for heartbeat runs (extra tab).                                                        |
-| `MEMORY.md`    | MEMORY    | Durable per-agent memory (extra tab).                                                            |
+**These seven files are OpenClaw's agent-file set, and which tabs you see depends on the agent's runtime.** An OpenClaw agent shows the four clawboo creates for it: SOUL, IDENTITY, TOOLS and AGENTS. A `clawboo-native` agent shows SOUL and AGENTS; a `claude-code`, `codex` or `hermes` agent shows AGENTS only, because those drivers read none of these files (clawboo stores them for the editor alone).
+
+USER, HEARTBEAT and MEMORY get no tab by default on any runtime. They belong to OpenClaw's file set, but clawboo never creates one and never reads one back, so an always-on editor for them would be a control wired to nothing. Any file that already has content stays visible whatever the runtime, so nothing you previously wrote disappears and a file your Gateway wrote is never hidden.
+
+Two name collisions are worth knowing about. `hermes` keeps its own compounding `MEMORY.md` in its per-identity home, and clawboo never writes that file: the MEMORY tab here is a different file with different behavior. `codex` reads an `AGENTS.md` from the working tree, which is your repo's file, not this one.
+
+| File           | Tab       | What you can write there                                                                                                                                                                           |
+| -------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SOUL.md`      | SOUL      | Persona, tone, and boundaries. Also holds the merged personality block (see below). On `clawboo-native` this **is** the agent's system prompt: editing it re-derives the prompt the runtime reads. |
+| `IDENTITY.md`  | IDENTITY  | Name, vibe, and emoji.                                                                                                                                                                             |
+| `TOOLS.md`     | TOOLS     | Tool notes for the agent to read. Does not configure tools (the graph's skill nodes come from `/api/capabilities`).                                                                                |
+| `AGENTS.md`    | AGENTS    | Operating instructions, priorities, and routing rules. Drives the dependency edges on the graph.                                                                                                   |
+| `USER.md`      | USER      | Notes about you. Clawboo never writes or reads this; only your Gateway might. Tab appears once the file has content.                                                                               |
+| `HEARTBEAT.md` | HEARTBEAT | Checklist an OpenClaw heartbeat can be pointed at. Clawboo never reads it. Tab appears once the file has content.                                                                                  |
+| `MEMORY.md`    | MEMORY    | Notes for OpenClaw agents. Not the Hermes memory file, and not clawboo memory. Tab appears once the file has content.                                                                              |
 
 ### Steps
 
 1. **Pick a file tab.** The active tab gets an accent underline; the CodeMirror document swaps to that file's content. All seven files are loaded in parallel when the view opens.
 2. **Edit.** A modified tab shows an amber dot. The whole editor footer reads **Unsaved** while any file is dirty.
 3. **Save.** Click **Save**, or press `Cmd/Ctrl+S`. The write goes through a per-agent mutation queue (serialized so concurrent writes never race) to `PUT /api/agents/:agentId/files/:name`, and a toast confirms `Saved <file>`.
-4. **Saving TOOLS.md or AGENTS.md** also triggers a Ghost Graph refresh, so new skill nodes or routing edges appear without a manual reload.
+4. **Saving AGENTS.md** also triggers a Ghost Graph refresh, so new routing edges appear without a manual reload. No other file affects the graph.
 
 <Tip>
 You don't have to save before switching agents or leaving the view; the editor saves all dirty files automatically on unmount (best-effort). Saving explicitly is still safer when the connection is flaky.
@@ -100,7 +106,7 @@ Writes through the Gateway's agent-file API are best-effort and may not persist,
 
 Click **Use Custom Instructions** to switch to a free-text override. The textarea content saves on blur or `Cmd/Ctrl+S` (`POST /api/personality` with `customText`), and is merged into `SOUL.md` under a `` marker; it **overrides** the slider-generated block. **Switch to Sliders** clears the custom text and restores the slider personality.
 
-The footer's **Preview SOUL.md** toggle shows the merged result (role description plus the active personality block) so you can see exactly what the runtime will read.
+The footer's **Preview SOUL.md** toggle shows the merged result (role description plus the active personality block). On `clawboo-native` that merged text becomes the agent's system prompt; on OpenClaw the Gateway decides how it is used.
 
 ## The other editor tabs
 

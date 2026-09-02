@@ -14,8 +14,8 @@ A single flat barrel, no subpath exports. All consumers import from `@clawboo/bo
 
 ### Functions
 
-- `generateBooAvatar(params: BooAvatarParams): string`: render the ghost-lobster SVG string. Hashes `seed` (FNV-1a) to seed an xorshift32 PRNG, then derives per-seed claw scale, antenna tips, pupil offsets, body opacity, eye shape, accessory, and tint. Render order: body → claws → antennae (on top) → eyes → accessory. `src/index.ts:176`
-- `booAvatarToDataUrl(params: BooAvatarParams): string`: convenience wrapper returning `data:image/svg+xml;base64,<btoa(svg)>` (relies on the browser `btoa`). `src/index.ts:257`
+- `generateBooAvatar(params: BooAvatarParams): string`: render the ghost-lobster SVG string. Hashes `seed` (FNV-1a) to seed an xorshift32 PRNG, then derives per-seed claw scale, antenna tips, pupil offsets, body opacity, eye shape, accessory, and tint. Render order: body → claws → antennae (on top) → eyes → accessory. `src/index.ts:182`
+- `booAvatarToDataUrl(params: BooAvatarParams): string`: convenience wrapper returning `data:image/svg+xml;base64,<btoa(svg)>` (relies on the browser `btoa`). `src/index.ts:268`
 - `resolveBooTint(seed: string, isBooZero = false): string`: resolve an agent's tint deterministically. Boo Zero gets the reserved OpenClaw Red (`TINTS[0]`); other agents skip index 0 and map into `TINTS[1..9]` via `1 + (|FNV-1a(seed)| % 9)`. Exported so consumers (e.g. DelegationCard) can accent UI with the exact colour the avatar paints with. `src/index.ts:62`
 
 ### Types & interfaces

@@ -29,6 +29,7 @@ import {
 
 import { connectorToolsForServer, onConnectorsChanged } from '../../connectors/supervisor'
 import type { NativeToolOutcome } from './fileTools'
+import { putScreenshot } from '../../screenshotBus'
 
 export interface McpBridgeOptions {
   /** The connection the in-process servers read/write through. The caller owns
@@ -134,6 +135,13 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
           // rest of it.
           connectorTools: connectorToolsForServer,
           onConnectorsChanged,
+          // Same frame capture as the HTTP mount: a native run's screenshots
+          // reach the Browser panel even though its model may not see them.
+          onToolImages: ({ agentId, toolName, images }) => {
+            const first = images[0]
+            if (!agentId || !first) return
+            putScreenshot(agentId, { data: first.data, mimeType: first.mimeType, toolName })
+          },
         }),
         'clawboo-native',
       ),

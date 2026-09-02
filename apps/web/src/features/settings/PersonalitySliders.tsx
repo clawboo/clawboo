@@ -1,21 +1,24 @@
 import { apiFetch, readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Check, FileText, PenLine, SlidersHorizontal } from 'lucide-react'
-import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/features/shared/Button'
 import { Spinner } from '@/features/shared/Spinner'
+import { Switch } from '@/features/shared/Switch'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { useEditorStore } from '@/stores/editor'
 import {
   type PersonalityKey,
   type PersonalityValues,
+  DEFAULT_PERSONALITY as SHIPPED_DEFAULT_PERSONALITY,
+  PERSONALITY_KEYS,
+  PERSONALITY_PRESETS,
   getDimensions,
   getDimensionText,
   mergeSoulWithPersonality,
   mergeSoulWithCustomPersonality,
-  isPersonalityValues,
+  migratePersonalityValues,
   stripPersonalityBlock,
 } from '@/lib/soulPersonality'
 
@@ -23,30 +26,38 @@ import {
 
 const SOUL_FILE = 'SOUL.md'
 
-const DEFAULT_VALUES: PersonalityValues = {
-  verbosity: 50,
-  humor: 50,
-  caution: 50,
-  speed_cost: 50,
-  formality: 50,
-}
+/** View preference: reveal the exact text each stop injects. */
+const SHOW_PROMPTS_KEY = 'clawboo.personality.showPrompts'
+
+const DEFAULT_VALUES: PersonalityValues = SHIPPED_DEFAULT_PERSONALITY
 
 const DIMENSIONS = getDimensions()
-
-const SLIDER_LABELS: Record<PersonalityKey, { left: string; right: string }> = {
-  verbosity: { left: 'Terse', right: 'Verbose' },
-  humor: { left: 'Serious', right: 'Witty' },
-  caution: { left: 'Bold', right: 'Careful' },
-  speed_cost: { left: 'Fast', right: 'Economical' },
-  formality: { left: 'Casual', right: 'Formal' },
-}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string } = {}) {
-  const client = useConnectionStore((s) => s.client)
   const storeAgentId = useFleetStore((s) => s.selectedAgentId)
   const selectedAgentId = propAgentId ?? storeAgentId
+
+  // Off by default: the injected prompt text is what the agent reads, not what
+  // most people came here to tune. Six paragraphs under six sliders buries the
+  // controls. Persisted per user, not per agent, because it is a view
+  // preference rather than part of the personality.
+  const [showPrompts, setShowPrompts] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(SHOW_PROMPTS_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const toggleShowPrompts = useCallback((next: boolean) => {
+    setShowPrompts(next)
+    try {
+      window.localStorage.setItem(SHOW_PROMPTS_KEY, String(next))
+    } catch {
+      /* private mode / storage disabled: the toggle still works for this session */
+    }
+  }, [])
 
   const [values, setValues] = useState<PersonalityValues>({ ...DEFAULT_VALUES })
   const [customMode, setCustomMode] = useState(false)
@@ -78,9 +89,13 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       `/api/personality?agentId=${encodeURIComponent(selectedAgentId)}`,
     )
       .then((res) => res.json())
-      .then((data: { values: PersonalityValues | null; customText?: string | null }) => {
-        if (data.values && isPersonalityValues(data.values)) {
-          setValues(data.values)
+      .then((data: { values: unknown; customText?: string | null }) => {
+        // Migrate rather than validate: a pre-redesign row carries the old five
+        // keys, and a strict check would return null and silently reset the
+        // user's tuning to defaults with no error shown.
+        const migrated = migratePersonalityValues(data.values)
+        if (migrated) {
+          setValues(migrated)
         }
         if (data.customText && typeof data.customText === 'string') {
           setCustomMode(true)
@@ -89,7 +104,11 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       })
       .catch(() => {})
 
-    const soulPromise = client
+    // NOT gated on the gateway client: SOUL.md is a plain REST read, and for a
+    // native or coding-runtime agent it is a SQLite row with no gateway in the
+    // path at all. Gating this (and the saves below) on `client` meant every
+    // slider on a native-only install silently did nothing: no save, no error.
+    const soulPromise = selectedAgentId
       ? readAgentFile(selectedAgentId, SOUL_FILE)
           .then((content) => {
             // Cache the base content (without any existing personality block)
@@ -106,7 +125,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
         savedTimer.current = null
       }
       const dirty = dirtyRef.current
-      if (dirty && client) {
+      if (dirty) {
         dirtyRef.current = null
         // Best-effort save to both SQLite and SOUL.md on agent switch
         void apiFetch('/api/personality', {
@@ -121,7 +140,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
           .catch(() => {})
       }
     }
-  }, [client, selectedAgentId])
+  }, [selectedAgentId])
 
   // handleChange: updates local state + marks dirty (no save call).
   const handleChange = useCallback((key: PersonalityKey, value: number) => {
@@ -134,10 +153,9 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
   // handleCommit: fires on pointer-up / keyboard commit.
   // Saves to BOTH SQLite and SOUL.md (merged with existing role description).
-  const handleCommit = useCallback(
-    (key: PersonalityKey, value: number) => {
-      if (!client || !selectedAgentId) return
-      const next = { ...values, [key]: value }
+  const commitValues = useCallback(
+    (next: PersonalityValues) => {
+      if (!selectedAgentId) return
       setValues(next)
       dirtyRef.current = null
 
@@ -184,14 +202,25 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
         })
         .finally(() => setSaving(false))
     },
-    [client, selectedAgentId, values],
+    [selectedAgentId],
+  )
+
+  const handleCommit = useCallback(
+    (key: PersonalityKey, value: number) => commitValues({ ...values, [key]: value }),
+    [commitValues, values],
+  )
+
+  /** One click writes all six dials through the same path a drag would. */
+  const applyPreset = useCallback(
+    (presetValues: PersonalityValues) => commitValues({ ...presetValues }),
+    [commitValues],
   )
 
   // ─── Custom text save ────────────────────────────────────────────────────────
 
   const saveCustomText = useCallback(
     (text: string) => {
-      if (!client || !selectedAgentId) return
+      if (!selectedAgentId) return
       if (!text.trim()) return
 
       customTextDirtyRef.current = false
@@ -234,13 +263,13 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
         })
         .finally(() => setSaving(false))
     },
-    [client, selectedAgentId, values],
+    [selectedAgentId, values],
   )
 
   // ─── Mode toggle ──────────────────────────────────────────────────────────────
 
   const toggleMode = useCallback(() => {
-    if (!client || !selectedAgentId) return
+    if (!selectedAgentId) return
 
     if (customMode) {
       // Switching back to sliders — clear custom text and restore slider personality
@@ -272,7 +301,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
       // Switching to custom mode
       setCustomMode(true)
     }
-  }, [client, selectedAgentId, customMode, values])
+  }, [selectedAgentId, customMode, values])
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -303,12 +332,55 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
           transition: 'opacity 0.2s',
         }}
       >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Presets
+          </span>
+          <label className="flex cursor-pointer items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">Show prompts</span>
+            <Switch
+              checked={showPrompts}
+              onChange={toggleShowPrompts}
+              size="sm"
+              label="Show the prompt text each slider injects"
+            />
+          </label>
+        </div>
+
+        {/* One-click characters. The roster reads Ghost to Feral on purpose:
+            the range IS the pitch, and a preset is the fastest way to see that
+            the voice changes while the verdict does not. */}
+        <div className="mb-5 flex flex-wrap gap-1.5">
+          {PERSONALITY_PRESETS.map((preset) => {
+            const active = PERSONALITY_KEYS.every((k) => values[k] === preset.values[k])
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                title={preset.tagline}
+                onClick={() => applyPreset(preset.values)}
+                className={[
+                  'cursor-pointer rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                  active
+                    ? 'border-primary/40 bg-primary/10 text-foreground'
+                    : 'border-border text-muted-foreground hover:border-border-strong hover:text-foreground',
+                ].join(' ')}
+              >
+                {preset.name}
+              </button>
+            )
+          })}
+        </div>
+
         {DIMENSIONS.map((dim) => {
-          const labels = SLIDER_LABELS[dim.key]
+          const labels = { left: dim.low, right: dim.high }
           return (
             <div key={dim.key} className="mb-6 space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-baseline justify-between gap-3">
                 <span className="text-[13px] font-semibold text-foreground">{dim.label}</span>
+                <span className="flex-1 truncate text-[11px] text-foreground/45">
+                  {dim.oneLiner}
+                </span>
                 <span className="font-data min-w-[2.5rem] text-right text-[12px] text-foreground/55 tabular-nums">
                   {values[dim.key]}
                 </span>
@@ -328,9 +400,11 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
                 <span>{labels.right}</span>
               </div>
 
-              <p className="text-[11px] leading-relaxed text-foreground/60">
-                {getDimensionText(dim.key, values[dim.key])}
-              </p>
+              {showPrompts && (
+                <p className="text-[11px] leading-relaxed text-foreground/60">
+                  {getDimensionText(dim.key, values[dim.key])}
+                </p>
+              )}
             </div>
           )
         })}

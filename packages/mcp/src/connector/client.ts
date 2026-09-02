@@ -94,6 +94,46 @@ export interface ConnectorSession {
 export interface ConnectorCallResult {
   text: string
   isError: boolean
+  /**
+   * Image blocks the tool returned, kept rather than described.
+   *
+   * `flattenContent` still writes `[image: …, not rendered]` into `text`, and
+   * that stays correct: it is the fallback for every consumer that cannot carry
+   * pixels, and it is what the audit row records. These are the bytes for the
+   * ones that can.
+   */
+  images?: ConnectorImage[]
+}
+
+/** Mirrors an MCP `image` content block. Base64, no `data:` prefix. */
+export interface ConnectorImage {
+  data: string
+  mimeType: string
+}
+
+/** A screenshot is large and rides the model's context window. Bound both how
+ *  many come back from one call and how big each may be, so a tool that returns
+ *  a gallery cannot blow up a turn. ~1.5 MB of base64 is a generous full-page
+ *  PNG; beyond that the placeholder text is the honest answer. */
+export const MAX_IMAGES_PER_CALL = 4
+export const MAX_IMAGE_B64_BYTES = 1_500_000
+
+/** Pull the image blocks out of a CallToolResult's content, bounded. */
+export function extractImages(content: unknown): ConnectorImage[] {
+  if (!Array.isArray(content)) return []
+  const out: ConnectorImage[] = []
+  for (const block of content) {
+    if (out.length >= MAX_IMAGES_PER_CALL) break
+    if (!block || typeof block !== 'object') continue
+    const b = block as Record<string, unknown>
+    if (b['type'] !== 'image') continue
+    const data = b['data']
+    const mimeType = b['mimeType']
+    if (typeof data !== 'string' || typeof mimeType !== 'string') continue
+    if (data.length === 0 || data.length > MAX_IMAGE_B64_BYTES) continue
+    out.push({ data, mimeType })
+  }
+  return out
 }
 
 export interface ConnectorSpawnHook {
@@ -449,9 +489,12 @@ async function finishConnect(
         const res = await client.callTool({ name, arguments: args }, undefined, {
           timeout: callTimeout,
         })
+        const content = (res as { content?: unknown }).content
+        const images = extractImages(content)
         return {
-          text: flattenContent((res as { content?: unknown }).content),
+          text: flattenContent(content),
           isError: (res as { isError?: boolean }).isError === true,
+          ...(images.length > 0 ? { images } : {}),
         }
       } catch (err) {
         // callTool THROWS rather than returning isError for a timeout, a

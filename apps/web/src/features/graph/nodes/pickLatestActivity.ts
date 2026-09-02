@@ -3,17 +3,22 @@ import { parseToolMarkdown } from '@clawboo/protocol'
 
 // ─── pickLatestActivity ──────────────────────────────────────────────────────
 //
-// Selects what to show in a Boo's live activity band when the agent is running.
-// Priority: in-flight streaming text > most recent assistant message > most
-// recent tool call (formatted as `[[tool: <label>]]`). Skips thinking/meta/user
-// — we want to show what the agent is *doing*, not its private reasoning or
-// the user's own prompt.
+// Selects what to show in a Boo's thought bubble while the agent is running.
+// Newest wins: the scan walks backwards and returns the first entry it can say
+// something about.
+//
+// Reasoning IS included. It used to be skipped as "private", but the bubble is
+// the one surface that answers "what is it doing right now", and on a reasoning
+// model the honest answer between two tool calls is the thinking itself. Held
+// back, the bubble sat empty through the longest stretch of a run. `meta` and
+// `user` are still skipped: neither is the agent doing anything.
+//
+// The tool branch returns the LABEL, not the `[[tool]]` protocol line. The
+// caller renders text as-is, so the marker syntax has no business leaving here.
 
-export type PickedActivity =
-  | { kind: 'streaming'; text: string }
-  | { kind: 'assistant'; text: string }
-  | { kind: 'tool'; text: string }
-  | null
+export type PickedActivityKind = 'streaming' | 'assistant' | 'thinking' | 'tool'
+
+export type PickedActivity = { kind: PickedActivityKind; text: string } | null
 
 export function pickLatestActivity(
   streamingText: string | null,
@@ -30,12 +35,14 @@ export function pickLatestActivity(
     if (e.kind === 'assistant') {
       return { kind: 'assistant', text: e.text }
     }
+    if (e.kind === 'thinking') {
+      return { kind: 'thinking', text: e.text }
+    }
     if (e.kind === 'tool') {
       const parsed = parseToolMarkdown(e.text)
-      const label = parsed.label?.trim() || 'tool'
-      return { kind: 'tool', text: `[[tool: ${label}]]` }
+      return { kind: 'tool', text: parsed.label?.trim() || 'tool' }
     }
-    // skip 'thinking', 'meta', 'user'
+    // skip 'meta', 'user'
   }
   return null
 }

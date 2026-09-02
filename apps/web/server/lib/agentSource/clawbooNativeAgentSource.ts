@@ -38,6 +38,7 @@ import { and, eq, isNull, like, sql } from 'drizzle-orm'
 
 import {
   loadAgentConfig,
+  loadAgentConfigOrDefault,
   nativeConfigKey,
   nativeFileKey,
   readNativeAgentFile,
@@ -264,7 +265,11 @@ export class ClawbooNativeAgentSource implements AgentSource {
       .run()
 
     saveAgentConfig(db, config)
+    // Allowlist here too: the REST read path validates :name against
+    // AGENT_FILE_NAMES, so storing anything else (CLAWBOO.md is the live case)
+    // creates a row nothing can ever read back.
     for (const [name, content] of Object.entries(files)) {
+      if (!(AGENT_FILE_NAMES as readonly string[]).includes(name)) continue
       if (typeof content === 'string' && content) writeNativeAgentFile(db, id, name, content)
     }
     if (config.budgetUsd != null && config.budgetUsd > 0) {
@@ -352,14 +357,41 @@ export class ClawbooNativeAgentSource implements AgentSource {
 
   // ── Files (settings-KV; the registry's AGENT_FILE_NAMES namespace) ────────
 
+  /**
+   * SOUL.md IS the native persona surface, not a copy of it. The stored row is
+   * seeded from the live `AgentConfig.systemPrompt` when it is empty, so the
+   * tab opens showing what the agent is actually running rather than a blank
+   * box. Every server-seeded native agent is in exactly that state: the seed
+   * paths pass an explicit `systemPrompt` and write no files.
+   */
   async readFile(agentId: string, name: AgentFileName): Promise<string> {
-    return readNativeAgentFile(this.db(), agentId, name)
+    const db = this.db()
+    const stored = readNativeAgentFile(db, agentId, name)
+    if (name !== 'SOUL.md' || stored) return stored
+    return loadAgentConfigOrDefault(db, agentId).systemPrompt ?? ''
   }
 
+  /**
+   * Writing SOUL.md re-derives `AgentConfig.systemPrompt`, which is what the
+   * run path actually reads (nativeDriver → conversation.ts builds the system
+   * message from it). Without this the tab stored bytes nothing consumed: the
+   * SOUL→systemPrompt copy happened once at create, and an explicit seed
+   * prompt won that ternary anyway.
+   */
   async writeFile(agentId: string, name: AgentFileName, content: string): Promise<void> {
     if (!(AGENT_FILE_NAMES as readonly string[]).includes(name))
       throw new Error(`unknown agent file: ${name}`)
-    writeNativeAgentFile(this.db(), agentId, name, content)
+    const db = this.db()
+    writeNativeAgentFile(db, agentId, name, content)
+    if (name === 'SOUL.md') {
+      const config = loadAgentConfigOrDefault(db, agentId)
+      // An emptied SOUL.md falls back to the shipped default rather than
+      // leaving the agent with no system prompt at all.
+      saveAgentConfig(db, {
+        ...config,
+        systemPrompt: content.trim() ? content : DEFAULT_AGENT_CONFIG.systemPrompt,
+      })
+    }
   }
 
   // ── Lifecycle / observability ──────────────────────────────────────────────

@@ -42,19 +42,29 @@ describe('pickLatestActivity', () => {
     expect(result).toEqual({ kind: 'assistant', text: 'most recent reply' })
   })
 
-  it('formats latest tool entry as [[tool: <label>]]', () => {
+  it('returns the bare tool label, never the [[tool]] protocol line', () => {
     const entries = [
       entry('user', 'do the thing', 1),
       entry('tool', '[[tool]] run_shell\n```json\n{"cmd":"ls"}\n```', 2),
     ]
     const result = pickLatestActivity(null, entries)
-    expect(result).toEqual({ kind: 'tool', text: '[[tool: run_shell]]' })
+    expect(result).toEqual({ kind: 'tool', text: 'run_shell' })
   })
 
-  it('skips thinking and walks back to the prior assistant entry', () => {
+  it('surfaces reasoning: a thinking entry is the newest thing the agent did', () => {
     const entries = [
       entry('assistant', 'older response', 1),
-      entry('thinking', 'private reasoning the user should not see', 2),
+      entry('thinking', 'weighing the two approaches', 2),
+    ]
+    const result = pickLatestActivity(null, entries)
+    expect(result).toEqual({ kind: 'thinking', text: 'weighing the two approaches' })
+  })
+
+  it('still skips meta and user entries', () => {
+    const entries = [
+      entry('assistant', 'older response', 1),
+      entry('user', 'a follow-up prompt', 2),
+      entry('meta', 'run started', 3),
     ]
     const result = pickLatestActivity(null, entries)
     expect(result).toEqual({ kind: 'assistant', text: 'older response' })

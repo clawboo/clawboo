@@ -31,6 +31,17 @@ export default defineConfig({
           include: ['src/**/*.test.ts', 'server/**/*.test.ts'],
           environment: 'node',
           globals: true,
+          // A spy that outlives its test poisons the next one. Vitest abandons a
+          // timed-out test where it stands, so a `finally { spy.mockRestore() }`
+          // in the test body never runs in time. The widened timeout below exists
+          // because starvation timeouts are an expected failure mode here, which
+          // is exactly when that cleanup is skipped. Restoring before each test
+          // keeps one timeout to one failure instead of a cascade.
+          //
+          // This has to sit on the PROJECT, not the root `test` block: an inline
+          // project resolves to `{...options.test, ...cliOverrides}`, so nothing
+          // from the root block reaches it. That is also why `globals` repeats.
+          restoreMocks: true,
           // Makes `$HOME` authoritative for `os.homedir()` on every platform, so the
           // suites that sandbox `process.env.HOME` actually land in their temp dir on
           // Windows too (Node reads %USERPROFILE% there). A no-op on POSIX. See the
@@ -53,6 +64,8 @@ export default defineConfig({
           include: ['src/**/*.test.tsx'],
           environment: 'jsdom',
           globals: true,
+          // Same hazard as the node project above.
+          restoreMocks: true,
           setupFiles: ['./src/__vitest__/setup.ts'],
           // jest-axe sweeps are CPU-heavy; under concurrent load with the node
           // project they can be starved past the 5 s default (a multi-card panel

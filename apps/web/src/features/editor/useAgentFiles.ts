@@ -1,7 +1,6 @@
 import { apiFetch, readAgentFile, writeAgentFile } from '@clawboo/control-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AGENT_FILE_NAMES, type AgentFileName } from '@clawboo/protocol'
-import { useConnectionStore } from '@/stores/connection'
 import { useEditorStore } from '@/stores/editor'
 import { useToastStore } from '@/stores/toast'
 import { useGraphStore } from '@/features/graph/store'
@@ -43,7 +42,7 @@ export interface UseAgentFilesReturn {
   saving: boolean
   isDirty: (tab: AgentFileName) => boolean
   anyDirty: boolean
-  /** Returns true if the file has non-empty content (loaded from Gateway). */
+  /** Returns true if the file has non-empty content (loaded from the API). */
   fileExists: (tab: AgentFileName) => boolean
   handleSave: (tab: AgentFileName) => Promise<void>
   saveAllDirty: () => Promise<void>
@@ -51,8 +50,6 @@ export interface UseAgentFilesReturn {
 }
 
 export function useAgentFiles(agentId: string): UseAgentFilesReturn {
-  const client = useConnectionStore((s) => s.client)
-
   const [files, setFiles] = useState<FilesMap>(() => {
     const init: FilesMap = {}
     for (const name of ALL_FILE_TABS) {
@@ -69,9 +66,11 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
 
   // ─── File loading ──────────────────────────────────────────────────────────
 
+  // No Gateway gate here. readAgentFile / writeAgentFile are apiFetch calls to
+  // clawboo's own /api/agents/:id/files/:name, which every agent source serves.
+  // Gating them on a connected GatewayClient left every file tab blank and every
+  // save a silent no-op on any install without OpenClaw attached.
   useEffect(() => {
-    if (!client) return
-
     const loadId = ++loadIdRef.current
     setLoading(true)
 
@@ -103,7 +102,7 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
         setLoading(false)
       },
     )
-  }, [agentId, client])
+  }, [agentId])
 
   // ─── Refresh SOUL.md when personality sliders save ─────────────────────────
 
@@ -136,8 +135,6 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
 
   const handleSave = useCallback(
     async (tab: AgentFileName) => {
-      if (!client) return
-
       const fileState = filesRef.current[tab]
       if (!fileState || fileState.content === fileState.clean) return
 
@@ -153,7 +150,11 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
 
         useToastStore.getState().addToast({ message: `Saved ${tab}`, type: 'success' })
 
-        if (tab === 'TOOLS.md' || tab === 'AGENTS.md') {
+        // ONLY AGENTS.md. The graph refresh refetches capabilities + AGENTS.md
+        // (useGraphData parses it into `dep-` edges); it never reads TOOLS.md,
+        // so firing it there redrew a byte-identical graph and told the user
+        // their edit had landed somewhere it had not.
+        if (tab === 'AGENTS.md') {
           useGraphStore.getState().triggerRefresh()
         }
       } catch (err) {
@@ -165,14 +166,12 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
         setSaving(false)
       }
     },
-    [agentId, client],
+    [agentId],
   )
 
   // ─── Save all dirty files ─────────────────────────────────────────────────
 
   const saveAllDirty = useCallback(async () => {
-    if (!client) return
-
     const currentFiles = filesRef.current
     const dirtyTabs = ALL_FILE_TABS.filter(
       (name) => currentFiles[name] && currentFiles[name].content !== currentFiles[name].clean,
@@ -188,11 +187,10 @@ export function useAgentFiles(agentId: string): UseAgentFilesReturn {
       }
     }
 
-    const hasGraphFiles = dirtyTabs.includes('TOOLS.md') || dirtyTabs.includes('AGENTS.md')
-    if (hasGraphFiles) {
+    if (dirtyTabs.includes('AGENTS.md')) {
       useGraphStore.getState().triggerRefresh()
     }
-  }, [agentId, client])
+  }, [agentId])
 
   // ─── Update file content (called by CodeMirror updateListener) ────────────
 

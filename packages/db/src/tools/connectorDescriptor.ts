@@ -7,7 +7,7 @@
 
 import { z } from 'zod'
 
-import type { ToolDescriptor, ToolRisk } from './types'
+import type { ToolDescriptor, ToolExecutorResult, ToolRisk } from './types'
 
 /** The shape an MCP `tools/list` entry arrives in. */
 export interface RemoteToolFacts {
@@ -38,8 +38,10 @@ export interface ConnectorDescriptorOptions {
   trustAnnotations: boolean
   /** The connector's declared exfiltration legs, from the CATALOG. */
   trifecta: { readsPrivateData: boolean; ingestsUntrustedContent: boolean; canEgress: boolean }
-  /** Proxies the call to the live session. */
-  executor: (args: Record<string, unknown>) => Promise<string> | string
+  /** Proxies the call to the live session. May return the object form when the
+   *  tool produced images, so a screenshot reaches the model instead of being
+   *  described to it. */
+  executor: (args: Record<string, unknown>) => Promise<ToolExecutorResult> | ToolExecutorResult
 }
 
 export function buildConnectorDescriptor(

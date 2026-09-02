@@ -16,8 +16,13 @@ import { z, type ZodTypeAny } from 'zod'
 
 export const MCP_SERVER_VERSION = '0.1.0'
 
+/** One block of an MCP tool result. Text is the common case; `image` exists so a
+ *  tool whose whole job is to look at something can hand back what it saw. */
+export type McpContentBlock =
+  { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+
 export interface McpToolResult {
-  content: { type: 'text'; text: string }[]
+  content: McpContentBlock[]
   isError?: boolean
   /** MCP-spec metadata channel (survives the in-memory + HTTP transports). Used to
    *  carry a TYPED denial reason — a broker policy Deny — to the caller without
@@ -31,6 +36,32 @@ export interface McpToolResult {
  *  parsing prose. */
 export function textResult(text: string, isError = false, denied?: string): McpToolResult {
   const result: McpToolResult = { content: [{ type: 'text', text }], isError }
+  if (denied) result._meta = { denied }
+  return result
+}
+
+/**
+ * A tool result carrying images alongside its text.
+ *
+ * MCP content is an ARRAY of blocks, so an image needs no encoding tricks: the
+ * text block stays first (it is what a text-only client reads), and the image
+ * blocks follow for a client that can see them. Falls back to `textResult` when
+ * there are no images, so the wire shape is unchanged for every existing tool.
+ */
+export function mediaResult(
+  text: string,
+  images: readonly { data: string; mimeType: string }[],
+  isError = false,
+  denied?: string,
+): McpToolResult {
+  if (images.length === 0) return textResult(text, isError, denied)
+  const result: McpToolResult = {
+    content: [
+      { type: 'text', text },
+      ...images.map((img) => ({ type: 'image' as const, data: img.data, mimeType: img.mimeType })),
+    ],
+    isError,
+  }
   if (denied) result._meta = { denied }
   return result
 }

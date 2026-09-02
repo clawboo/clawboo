@@ -248,10 +248,8 @@ When you see it:
 - Do NOT greet teammates ("Welcome aboard!", "Hey Frontend Boo!", etc.).
 - Do NOT acknowledge the re-init in any other way.
 
-Your prior context — this AGENTS.md, your SOUL.md, your TOOLS.md, the team
-brief — is still loaded. The next message you receive (a \`[Team Update]\`
-from a teammate, or a fresh user message) is where you engage. Pick up the
-work as if there was no pause.
+The next message you receive (a \`[Team Update]\` from a teammate, or a fresh
+user message) is where you engage. Pick up the work as if there was no pause.
 
 ### When you have nothing substantive to add
 

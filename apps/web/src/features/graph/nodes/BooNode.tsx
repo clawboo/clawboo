@@ -9,32 +9,29 @@ import { useFloatingMotion } from '../useFloatingMotion'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import { useObsOverlayStore } from '@/stores/obsOverlay'
-import { BooLiveActivity } from './BooLiveActivity'
+import { BooThoughtBubble } from './BooThoughtBubble'
 import { RuntimeBadge } from './RuntimeBadge'
 import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
 import { useChatStore } from '@/stores/chat'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
 
-// ─── BooNode — dual-shape: idle = circle, active = card ──────────────────────
+// ─── BooNode — the mascot, always ────────────────────────────────────────────
 //
-// Two visual modes share one component:
-//
-//   Idle   (status !== 'running')
-//          ┌────┐
-//          │ ◯  │   ← degree-aware circle (60–78px), avatar fills the disc
+//                        ╭─────────────────────╮
+//                    ○ ○ │ editing pricing.css │  ← BooThoughtBubble, while running
+//          ┌────┐        ╰─────────────────────╯
+//          │ ◯  │   ← degree-aware circle (60–140px), avatar fills the disc
 //          └────┘
 //             Name           ← absolute below
 //             ● status       ← absolute below name
 //             seen 2m ago    ← absolute below status (only when not running)
 //
-//   Active (status === 'running')
-//          ┌──────────────────────────────────┐
-//          │ [avatar] Name        ● running   │  HEADER  (44px)
-//          ├──────────────────────────────────┤
-//          │  [live activity feed — 2 lines]  │  MIDDLE  (52px)
-//          ├──────────────────────────────────┤
-//          │                                  │  FOOTER  (24px, reserved)
-//          └──────────────────────────────────┘
+// It used to morph into a 280x170 CARD while running. That cost the mascot its
+// identity at exactly the moment it was most interesting — the character shrank
+// to a 30px corner icon — and spent most of its area on nothing, because the
+// only thing the card showed that the circle does not already render beneath
+// itself is ONE line of activity. That line now lives in a thought bubble sized
+// to its own contents, and the Boo stays a Boo.
 //
 // The wrapper's width / height / border-radius use a CSS transition for the
 // size-and-shape morph (~280ms cubic-bezier). Inside, the avatar / name /
@@ -56,7 +53,7 @@ import { getActivityVerb } from '@/lib/agentActivityVerb'
 // scoped per element / per BooNode instance and don't interact with parent
 // route transitions, so they're the safe morph mechanism here.
 //
-// The card's middle band renders <BooLiveActivity> — the latest assistant
+// The thought bubble renders <BooThoughtBubble> — the latest assistant
 // message, in-flight streaming text, or formatted tool call. The footer is
 // intentionally empty (team identity is conveyed by `TeamHaloLayer` and the
 // sidebar). Team badge has been removed from the BooNode entirely.
@@ -94,11 +91,16 @@ function formatLastSeen(lastSeenAt: number | null): string | null {
 
 type GlowConfig = { color: string; pulse: boolean }
 
+// Chromatic only. These are now `drop-shadow` colours on the mascot's
+// silhouette, and a theme-inverting token is a trap there: `--foreground-rgb`
+// is near-white in dark mode, so `sleeping` used to bloom a white halo around
+// the one agent that should be receding. Sleeping is handled by
+// `.boo-cast--sleeping` (desaturation) instead of by a glow.
 const STATUS_GLOW: Record<string, GlowConfig | null> = {
   idle: null,
   running: { color: 'rgb(var(--mint-rgb) / 0.55)', pulse: true },
   error: { color: 'rgb(var(--amber-rgb) / 0.55)', pulse: false },
-  sleeping: { color: 'rgb(var(--foreground-rgb) / 0.3)', pulse: false },
+  sleeping: null,
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -173,7 +175,15 @@ export const BooNode = memo(function BooNode({
   const floatRef = useFloatingMotion(agentId, 'boo', dragging)
   // Decorative hover lift — dropped under reduced motion (see SkillNode).
   const reduceMotion = useReducedMotion()
-  const showCard = status === 'running'
+  const isRunning = status === 'running'
+  // The Boo NEVER becomes a card any more. The card cost the mascot its
+  // identity exactly when it was most interesting, and the only thing it showed
+  // that the circle does not already render beneath itself is one line of
+  // activity — which now lives in `BooThoughtBubble` above its head, sized to
+  // its own contents. Kept as a named constant rather than deleting the card
+  // branches in one pass: every consumer of it collapses to the idle shape, so
+  // the FLIP morph, the name/status placement and the halo all keep working.
+  const showCard = false
   // Runtime brand badge — shown on every Boo (Atlas + team graph + agent-detail
   // MiniGraph) so the agent's runtime is legible at a glance.
   const runtime = data.runtime
@@ -198,7 +208,7 @@ export const BooNode = memo(function BooNode({
   // activity → no pip rendered (an idle agent looks the same as ever).
   const obsStatus = useObsOverlayStore((s) => s.statusByAgent.get(agentId))
   const lastSeenAt = agent?.lastSeenAt ?? null
-  const lastSeenLabel = !showCard ? formatLastSeen(lastSeenAt) : null
+  const lastSeenLabel = !isRunning ? formatLastSeen(lastSeenAt) : null
 
   // Fine-grained activity verb. Single-value subscriptions so we only
   // re-render when THIS agent's stream or transcript ticks — subscribing to
@@ -231,21 +241,21 @@ export const BooNode = memo(function BooNode({
   const booW = Math.min(baseSize + edgeCount * 3, data.isUniversalLeader ? 140 : 124)
   const booH = Math.round(booW * 0.92)
 
-  // Box-shadow animation driven by status (glow at the wrapper edge, works
-  // for both circular and rounded-rect shapes via border-radius inheritance).
-  const boxShadow = glow
-    ? glow.pulse
-      ? [
-          `0 0 0 0 ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`,
-          `0 0 0 6px rgba(52,211,153,0), 0 4px 16px rgba(0,0,0,0.5)`,
-          `0 0 0 0 ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`,
-        ]
-      : `0 0 0 1.5px ${glow.color}, 0 4px 12px rgba(0,0,0,0.4)`
-    : showCard
-      ? '0 4px 12px rgba(0,0,0,0.4)'
-      : '0 0 0 0 rgba(0,0,0,0)'
-
   const cardStatusColor = STATUS_DOT[status] ?? STATUS_DOT.idle
+
+  // ─── Elevation + status glow ───────────────────────────────────────────────
+  //
+  // Both live in CSS (`.boo-cast*` in globals.css) as chained `drop-shadow`
+  // filters on the mascot itself, so they trace its alpha instead of painting a
+  // shape behind it. Only the colour crosses the boundary, as a custom property.
+  //
+  // Framer Motion was tried first and silently wrote nothing: its complex-value
+  // parser declines a filter list whose colours are `rgb(var(--x) / a)` and
+  // which ends in a `var()` expanding to two more functions. CSS animates it
+  // natively and the global reduced-motion guard already neutralises it.
+  const glowInk = glow?.color ?? null
+  const glowPulse = glow?.pulse === true
+  const isSleeping = status === 'sleeping'
 
   // Hover detection for the cascade dimming effect. We can't rely on
   // ReactFlow's `onNodeMouseEnter` here because the React Flow node element
@@ -277,6 +287,11 @@ export const BooNode = memo(function BooNode({
         pointerEvents: 'none',
       }}
     >
+      {/* Thought bubble — what this Boo is doing, above its right shoulder.
+          A sibling of the floating layer rather than a child, so the words stay
+          still while the Boo bobs. */}
+      <BooThoughtBubble agentId={agentId} show={isRunning} booW={booW} booH={booH} />
+
       {/* Floating layer — centers the Boo inside the footprint and carries the
           idle bob transform. Fills the footprint so the centering matches what
           the static box used to do. */}
@@ -295,16 +310,8 @@ export const BooNode = memo(function BooNode({
           className="group"
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          animate={{ boxShadow }}
           whileHover={reduceMotion ? undefined : { scale: 1.03 }}
-          transition={{
-            // Per-value transitions: the glow pulse must never leak its
-            // Infinity-repeat config onto the hover scale spring.
-            boxShadow: glow?.pulse
-              ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' }
-              : { duration: 0.4 },
-            scale: { type: 'spring', stiffness: 380, damping: 26 },
-          }}
+          transition={{ scale: { type: 'spring', stiffness: 380, damping: 26 } }}
           style={{
             width: showCard ? BOO_CARD_WIDTH : booW,
             height: showCard ? BOO_CARD_HEIGHT : booH,
@@ -358,8 +365,25 @@ export const BooNode = memo(function BooNode({
               title={`live: ${obsStatus}`}
               style={{
                 position: 'absolute',
-                top: -3,
-                right: -3,
+                // Bottom LEFT, mirroring `RuntimeBadge`'s bottom-right inset.
+                // It used to sit top-right, which is where the thought bubble
+                // and its puffs come out — so the pip spent every run hidden
+                // under them, precisely when it has something to say. The two
+                // BOTTOM corners are the ones the mascot actually reaches (the
+                // ghost is widest at its skirt and narrowest at its hat), so a
+                // chip there reads as attached to the Boo instead of floating
+                // in the empty part of its bounding box.
+                // ON the mascot's lower-left flank, the way a presence dot
+                // sits on an avatar — not in a corner of the bounding box. The
+                // box is the square circumscribing a ghost that fills ~70% of
+                // it, so every corner is empty canvas: at the old top-right
+                // inset the pip read as a stray dot even before the thought
+                // bubble started covering it. `RuntimeBadge` gets away with the
+                // corner only by being 26px wide and overlapping back inward.
+                // Percentages so it tracks the 96–140px circle range.
+                top: '80%',
+                left: '17%',
+                transform: 'translate(-50%, -50%)',
                 width: 9,
                 height: 9,
                 borderRadius: '50%',
@@ -386,37 +410,25 @@ export const BooNode = memo(function BooNode({
             third visual cue layered on top, which read as decorative noise.
             See `boo-avatar/src/index.ts` for the tint reservation. */}
 
-          {showCard ? (
-            <CardContent
-              agentId={agentId}
-              name={name}
-              selected={selected}
-              status={status}
-              activityVerb={activityVerb}
-              cardStatusColor={cardStatusColor}
-              lastSeenLabel={lastSeenLabel}
-              runtime={runtime}
-              avatarFlip={avatarFlip}
-              nameFlip={nameFlip}
-              statusFlip={statusFlip}
-            />
-          ) : (
-            <CircleContent
-              agentId={agentId}
-              name={name}
-              selected={selected}
-              status={status}
-              activityVerb={activityVerb}
-              booW={booW}
-              booH={booH}
-              cardStatusColor={cardStatusColor}
-              lastSeenLabel={lastSeenLabel}
-              runtime={runtime}
-              avatarFlip={avatarFlip}
-              nameFlip={nameFlip}
-              statusFlip={statusFlip}
-            />
-          )}
+          <CircleContent
+            showStatusRow={!isRunning}
+            glowInk={glowInk}
+            glowPulse={glowPulse}
+            isSleeping={isSleeping}
+            agentId={agentId}
+            name={name}
+            selected={selected}
+            status={status}
+            activityVerb={activityVerb}
+            booW={booW}
+            booH={booH}
+            cardStatusColor={cardStatusColor}
+            lastSeenLabel={lastSeenLabel}
+            runtime={runtime}
+            avatarFlip={avatarFlip}
+            nameFlip={nameFlip}
+            statusFlip={statusFlip}
+          />
 
           {/* ── Interactive handles (visible on hover / connect) ────────────── */}
           <Handle
@@ -490,125 +502,22 @@ interface ContentProps {
   nameFlip: MutableRefObject<FlipState>
   statusFlip: MutableRefObject<FlipState>
 }
-
-function CardContent({
-  agentId,
-  name,
-  selected,
-  status,
-  activityVerb,
-  cardStatusColor,
-  lastSeenLabel,
-  runtime,
-  avatarFlip,
-  nameFlip,
-  statusFlip,
-}: ContentProps) {
-  const avatarRef = useFlipMorph<HTMLDivElement>(avatarFlip)
-  const nameRef = useFlipMorph<HTMLDivElement>(nameFlip)
-  const statusRef = useFlipMorph<HTMLDivElement>(statusFlip)
-
-  return (
-    <>
-      {/* HEADER */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '12px 14px',
-          borderBottom: '1px solid var(--border)',
-          flexShrink: 0,
-        }}
-      >
-        <div ref={avatarRef} style={{ flexShrink: 0, width: 44, height: 44, position: 'relative' }}>
-          <AgentBooAvatar agentId={agentId} size={44} />
-          <RuntimeBadge runtime={runtime} size={15} />
-        </div>
-        <div ref={nameRef} style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: selected ? 'var(--primary)' : 'var(--foreground)',
-              fontFamily: 'var(--font-display)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              letterSpacing: '0.01em',
-              lineHeight: 1.2,
-            }}
-            title={name}
-          >
-            {name}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--muted-foreground)',
-              marginTop: 3,
-              letterSpacing: '0.04em',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {activityVerb}
-            {lastSeenLabel ? ` · seen ${lastSeenLabel}` : ''}
-          </div>
-        </div>
-        <div ref={statusRef} style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-          {status === 'running' ? (
-            <motion.div
-              style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
-              animate={{ opacity: [1, 0.25, 1] }}
-              transition={{ duration: 1.1, repeat: Infinity }}
-            />
-          ) : (
-            <div
-              style={{ width: 10, height: 10, borderRadius: '50%', background: cardStatusColor }}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* MIDDLE — live activity feed */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'flex-start',
-          padding: '8px 14px',
-          position: 'relative',
-          background:
-            'radial-gradient(circle at center, rgb(var(--mint-rgb) / 0.06) 0%, transparent 60%)',
-          overflow: 'hidden',
-        }}
-      >
-        <BooLiveActivity agentId={agentId} />
-      </div>
-
-      {/* FOOTER — reserved real estate (per-Boo metric slot, future) */}
-      <div
-        style={{
-          padding: '6px 12px',
-          borderTop: '1px solid var(--border)',
-          fontSize: 10,
-          color: 'var(--muted-foreground)',
-          flexShrink: 0,
-          minHeight: 24,
-        }}
-      />
-    </>
-  )
-}
-
 // ─── CircleContent ───────────────────────────────────────────────────────────
 
 interface CircleProps extends ContentProps {
   booW: number
   booH: number
+  /**
+   * False while the agent is running, because the thought bubble above the Boo
+   * is already saying what it is doing — and saying it in more detail than a
+   * one-word verb can. Leaving both up printed "Thinking..." underneath a
+   * bubble that was showing the actual thought.
+   */
+  showStatusRow: boolean
+  /** Status colour for the glow, or null when the agent has no status glow. */
+  glowInk: string | null
+  glowPulse: boolean
+  isSleeping: boolean
 }
 
 function CircleContent({
@@ -617,6 +526,10 @@ function CircleContent({
   selected,
   status,
   activityVerb,
+  showStatusRow,
+  glowInk,
+  glowPulse,
+  isSleeping,
   booW,
   booH,
   cardStatusColor,
@@ -638,8 +551,33 @@ function CircleContent({
 
   return (
     <>
-      <div ref={avatarRef} style={{ width: booW, height: booH, position: 'relative' }}>
-        <AgentBooAvatar agentId={agentId} size={booW} />
+      <div
+        ref={avatarRef}
+        // `--boo-glow` rides here and INHERITS down to the avatar. It cannot go
+        // on the avatar itself: `BooAvatar` forwards `className` but not
+        // `style`, and this div is a `useFlipMorph` target where a custom
+        // property is inert (it changes no layout and casts no paint).
+        style={
+          {
+            width: booW,
+            height: booH,
+            position: 'relative',
+            ...(glowInk ? { '--boo-glow': glowInk } : null),
+          } as React.CSSProperties
+        }
+      >
+        {/* The filter lands on the mascot ALONE, via BooAvatar's className. On
+            THIS div it would also catch `RuntimeBadge` — a mint-glowing runtime
+            chip is immediately wrong — and a filter here would create a
+            containing block and a stacking context around the badge and the
+            approval ring. */}
+        <AgentBooAvatar
+          agentId={agentId}
+          size={booW}
+          className={`boo-cast${glowInk ? ' boo-cast--glow' : ''}${
+            glowPulse ? ' boo-cast--pulse' : ''
+          }${isSleeping ? ' boo-cast--sleeping' : ''}`}
+        />
         <RuntimeBadge runtime={runtime} size={badgeSize} />
       </div>
 
@@ -678,45 +616,47 @@ function CircleContent({
       </div>
 
       {/* Status pill — same flex-center pattern as name. */}
-      <div
-        style={{
-          position: 'absolute',
-          top: booH + 26,
-          left: 0,
-          right: 0,
-          display: 'flex',
-          justifyContent: 'center',
-          pointerEvents: 'none',
-        }}
-      >
+      {showStatusRow && (
         <div
-          ref={statusRef}
           style={{
+            position: 'absolute',
+            top: booH + 26,
+            left: 0,
+            right: 0,
             display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            pointerEvents: 'auto',
+            justifyContent: 'center',
+            pointerEvents: 'none',
           }}
         >
-          {status === 'running' ? (
-            <motion.div
-              style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
-              animate={{ opacity: [1, 0.2, 1] }}
-              transition={{ duration: 1.1, repeat: Infinity }}
-            />
-          ) : (
-            <div
-              style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
-            />
-          )}
-          <span
-            style={{ fontSize: 10, color: 'var(--muted-foreground)', letterSpacing: '0.05em' }}
-            title={activityVerb}
+          <div
+            ref={statusRef}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              pointerEvents: 'auto',
+            }}
           >
-            {activityVerb}
-          </span>
+            {status === 'running' ? (
+              <motion.div
+                style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
+                animate={{ opacity: [1, 0.2, 1] }}
+                transition={{ duration: 1.1, repeat: Infinity }}
+              />
+            ) : (
+              <div
+                style={{ width: 5, height: 5, borderRadius: '50%', background: cardStatusColor }}
+              />
+            )}
+            <span
+              style={{ fontSize: 10, color: 'var(--muted-foreground)', letterSpacing: '0.05em' }}
+              title={activityVerb}
+            >
+              {activityVerb}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Last-seen — not FLIP-tracked, position-bound to circle shape only.
           Outer wrapper handles centering, no transform conflict to worry about. */}

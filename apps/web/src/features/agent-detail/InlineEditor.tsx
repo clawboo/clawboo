@@ -12,11 +12,11 @@ import { markdown } from '@codemirror/lang-markdown'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { closeBrackets } from '@codemirror/autocomplete'
 import { highlightSelectionMatches } from '@codemirror/search'
-import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS } from '@clawboo/protocol'
+import { AGENT_FILE_META, AGENT_FILE_PLACEHOLDERS, agentFilesForRuntime } from '@clawboo/protocol'
 import type { AgentFileName } from '@clawboo/protocol'
 import { clawbooEditorThemeDark, clawbooEditorThemeLight } from '@/features/editor/editorTheme'
 import { useTheme } from '@/features/theme/useTheme'
-import { useAgentFiles, CORE_FILE_TABS, ALL_FILE_TABS } from '@/features/editor/useAgentFiles'
+import { useAgentFiles, ALL_FILE_TABS } from '@/features/editor/useAgentFiles'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
 import { ExecSettings } from '@/features/settings/ExecSettings'
 import { useBooZeroStore } from '@/stores/booZero'
@@ -24,14 +24,18 @@ import { useFleetStore } from '@/stores/fleet'
 import { DisplayNameEditor } from '@/features/boo-zero/DisplayNameEditor'
 import { GlobalBriefEditor } from '@/features/boo-zero/GlobalBriefEditor'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
+import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
+import { BrowserPanel } from '@/features/workspace/BrowserPanel'
 import { Button } from '@/features/shared/Button'
 import { Spinner } from '@/features/shared/Spinner'
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
 // `'brief'` is Boo-Zero-only — gated by `isBooZero` at the tab-list level.
-// `'activity'` is the live obs terminal for this agent.
-type EditorTab = 'personality' | 'permissions' | 'activity' | 'brief' | AgentFileName
+// `'activity'` is the live obs terminal for this agent. `'workspace'` is the
+// read-only view of the agent's task worktree (tree + now line + diff).
+type EditorTab =
+  'personality' | 'permissions' | 'activity' | 'browser' | 'workspace' | 'brief' | AgentFileName
 
 const FILE_TAB_LABELS: Record<AgentFileName, string> = {
   'SOUL.md': 'SOUL',
@@ -47,13 +51,22 @@ function getTabLabel(tab: EditorTab): string {
   if (tab === 'personality') return 'Personality'
   if (tab === 'permissions') return 'Permissions'
   if (tab === 'activity') return 'Activity'
+  if (tab === 'workspace') return 'Workspace'
+  if (tab === 'browser') return 'Browser'
   if (tab === 'brief') return 'Brief'
   return FILE_TAB_LABELS[tab] ?? tab.replace('.md', '')
 }
 
 /** Type guard: is this tab one of the file-backed CodeMirror tabs? */
 function isAgentFileTab(tab: EditorTab): tab is AgentFileName {
-  return tab !== 'personality' && tab !== 'permissions' && tab !== 'activity' && tab !== 'brief'
+  return (
+    tab !== 'personality' &&
+    tab !== 'permissions' &&
+    tab !== 'activity' &&
+    tab !== 'workspace' &&
+    tab !== 'browser' &&
+    tab !== 'brief'
+  )
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -73,14 +86,20 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
 
   const { resolvedTheme } = useTheme()
 
-  // Build dynamic tab list: core file tabs always shown + extras only when non-empty
+  const liveAgent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
+  // Which file tabs this agent's RUNTIME actually reads, plus any file that
+  // already has content so nobody loses text they wrote before this gating
+  // existed. Showing an editor whose bytes no driver will ever read is the
+  // thing this replaces: the coding runtimes store these rows for the editor
+  // alone (see runtimeAgentFileStore.ts).
+  const agentRuntime = liveAgent?.runtime ?? null
   const visibleFileTabs = useMemo(() => {
-    const coreTabs: AgentFileName[] = [...CORE_FILE_TABS]
+    const supported = agentFilesForRuntime(agentRuntime)
     const extras = ALL_FILE_TABS.filter(
-      (tab) => !(CORE_FILE_TABS as readonly string[]).includes(tab) && fileExists(tab),
+      (tab) => !(supported as readonly string[]).includes(tab) && fileExists(tab),
     )
-    return [...coreTabs, ...extras]
-  }, [fileExists])
+    return [...supported, ...extras]
+  }, [agentRuntime, fileExists])
 
   // The Brief tab is Boo-Zero-only — it holds the Display Name override + the
   // Global Brief (Boo Zero's load-bearing identity surface). Other agents
@@ -89,13 +108,14 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
   const isBooZero = booZeroAgentId !== null && booZeroAgentId === agentId
   // Pull the latest display name from the fleet store so the editor sees
   // whatever override is currently applied (rather than a stale prop).
-  const liveAgent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
   const liveAgentName = liveAgent?.name ?? agentName
 
   const allTabs: EditorTab[] = useMemo(
     () => [
       'personality',
       'activity',
+      'workspace',
+      'browser',
       'permissions',
       ...(isBooZero ? (['brief'] as const) : []),
       ...visibleFileTabs,
@@ -273,7 +293,13 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
 
       {/* Content area */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
-        {loading && (
+        {/* The agent-FILE loading overlay is opaque and covers the whole content
+            area, so it must only render over a file tab. `useAgentFiles` bails
+            out early while the Gateway client is null, which is the steady
+            state for a native-only install, leaving `loading` true forever and
+            painting this over Personality / Activity / Workspace / Permissions
+            permanently. */}
+        {loading && isFileTab && (
           <div
             className="absolute inset-0 z-[1] flex items-center justify-center gap-2 text-[12px] text-foreground/40"
             style={{ background: 'var(--background)' }}
@@ -301,6 +327,23 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
         {activeTab === 'activity' && (
           <div style={{ height: '100%', padding: '12px 16px', minHeight: 0 }}>
             <ActivityTerminal scope={{ agentId }} fill hideHeader />
+          </div>
+        )}
+
+        {/* Workspace tab: read-only view of the agent's task worktree. The
+            panel owns its own layout, so no padding wrapper here. */}
+        {activeTab === 'workspace' && (
+          <div style={{ height: '100%', minHeight: 0 }}>
+            <WorkspacePanel agentId={agentId} />
+          </div>
+        )}
+
+        {/* Browser tab — the newest frame this agent captured. Always present
+            rather than gated on having one, so the empty state can explain what
+            would fill it; a tab that appears mid-run would be worse. */}
+        {activeTab === 'browser' && (
+          <div style={{ height: '100%', minHeight: 0 }}>
+            <BrowserPanel agentId={agentId} />
           </div>
         )}
 
@@ -353,9 +396,13 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               ? `${agentName} · Permissions`
               : activeTab === 'activity'
                 ? `${agentName} · Activity — live tool calls, results, errors`
-                : activeTab === 'brief'
-                  ? `${agentName} · Brief — display name + global brief`
-                  : AGENT_FILE_META[activeTab].hint}
+                : activeTab === 'workspace'
+                  ? `${agentName} · Workspace · the task worktree, read-only`
+                  : activeTab === 'browser'
+                    ? `${agentName} · Browser — the last screenshot this agent captured`
+                    : activeTab === 'brief'
+                      ? `${agentName} · Brief — display name + global brief`
+                      : AGENT_FILE_META[activeTab].hint}
         </span>
         <span>
           <span className={anyDirty ? 'text-amber' : 'text-mint'}>

@@ -5,7 +5,7 @@
 // approval-gate (risk) LAST, so a denied call never reaches the approval prompt.
 
 import { scanForInjection } from './injection'
-import type { ChainOutcome, Inspector, InspectorDecision, ToolCall } from './types'
+import type { ChainOutcome, Inspector, InspectorDecision, ToolCall, ToolDescriptor } from './types'
 
 /**
  * SECURITY — deny calls whose args carry malicious content.
@@ -84,16 +84,40 @@ export const argClampInspector: Inspector = (call): InspectorDecision => {
   return rewrote ? { kind: 'rewrite', args: next } : { kind: 'allow' }
 }
 
+/**
+ * A read the catalog vouches for, on a connector that touches no private data.
+ *
+ * `risk` is a CONNECTOR-level floor: `canEgress` makes every tool on a browser
+ * connector `external`, including the ones that only look at the page. Left
+ * there, the gate fires on `browser_snapshot` exactly as hard as on
+ * `browser_click`, so a single page visit costs several modal clicks and users
+ * learn to rubber-stamp the prompts that actually matter.
+ *
+ * `readOnly` is safe to lean on precisely because it is not the server's own
+ * word: `buildConnectorDescriptor` only copies `readOnlyHint` through when the
+ * connector is CURATED, so the trust comes from the catalog vouching for the
+ * package. An unannotated or community tool never reaches this branch.
+ *
+ * `readsPrivateData` still prompts. For a browser the read is a public page and
+ * the risk is what it does next; for a connector holding the user's own records
+ * the read IS the sensitive act, so it keeps its gate.
+ */
+function isVouchedRead(descriptor: ToolDescriptor): boolean {
+  return descriptor.readOnly === true && descriptor.trifecta?.readsPrivateData !== true
+}
+
 /** RISK — destructive/external tools require human approval (risk-classified, so
  *  only these prompt — safe tools run unattended). */
 export const riskClassifierInspector: Inspector = (_call, descriptor): InspectorDecision => {
-  if (descriptor.risk === 'destructive') {
+  // An explicit destructive annotation prompts whatever the connector-level
+  // risk floor says, and outranks a contradictory `readOnly` on the same tool.
+  if (descriptor.risk === 'destructive' || descriptor.destructive === true) {
     return {
       kind: 'require_approval',
       message: `"${descriptor.name}" is destructive and needs approval.`,
     }
   }
-  if (descriptor.risk === 'external') {
+  if (descriptor.risk === 'external' && !isVouchedRead(descriptor)) {
     return {
       kind: 'require_approval',
       message: `"${descriptor.name}" has external side effects and needs approval.`,
