@@ -97,7 +97,7 @@ A Boo renders in one of two shapes, and morphs between them with a CSS size-and-
 - **Idle** (`status !== 'running'`): a degree-aware **circle** (bigger if it has more edges), avatar filling the disc, with the name, a status dot, and a "seen Xm ago" timestamp stacked below it. This is the relaxed org-chart reading: agents waiting in a room.
 - **Active** (`status === 'running'`): a **card** in two bands: a header (avatar + name + status dot) and a **live activity feed** below it. The card morphs in when the agent starts working, so the canvas reads as a live control room when things are happening. It also appears when a Boo **errors**, which is how the error line inside the feed becomes readable at all.
 
-The middle band of the active card is a real-time feed. It shows, in priority order, the agent's **in-flight streaming text**, then its **most recent assistant message**, then its **most recent tool call** (formatted `[[tool: <label>]]`). Thinking, meta, and user lines are skipped; the feed shows what the agent is _doing_, not its reasoning or your prompt. While running with no signal yet, it shows a typing indicator.
+The activity-feed band of the active card, the lower of its two, is a real-time feed. It shows, in priority order, the agent's **in-flight streaming text**, then its **most recent assistant message**, then its **most recent tool call** (formatted `[[tool: <label>]]`). Thinking, meta, and user lines are skipped; the feed shows what the agent is _doing_, not its reasoning or your prompt. While running with no signal yet, it shows a typing indicator.
 
 <Tip>
 Status drives the glow: a running Boo pulses mint, an error Boo glows red, a sleeping Boo dims. The status dot matches, and error and sleeping are deliberately different marks: an error is red because it wants you, a sleeping Boo is the same quiet neutral as idle because it does not.
@@ -111,7 +111,7 @@ Hovering a node highlights its connected nodes and edges and dims everything els
 
 ### Expand a Boo's skills (peacock)
 
-By default the canvas shows only Boos and dependency edges; skill and resource orbitals are mounted but hidden, keeping the view focused on team topology.
+By default the canvas shows only Boos and dependency edges; skill and connector orbitals are mounted but hidden, keeping the view focused on team topology.
 
 1. **Single-click a Boo.** Its orbital children fan out from behind it with a staggered "peacock-feather" animation (`expandedBooNodeIds` gains the Boo's node id).
 2. **Single-click it again** to collapse them.
@@ -237,5 +237,5 @@ The MiniMap (bottom-right overview) is **hidden by default** to give Boos more c
 - [Using agents](/using/agents), edit `SOUL` / `IDENTITY` / `TOOLS` / `AGENTS`, personality sliders
 - [Using group chat](/using/group-chat), where the per-team Ghost Graph is embedded
 - [The board](/concepts/the-board), the durable task board the orchestration runs on
-- [Capabilities dashboard](/using/capabilities-dashboard), the full capability inventory that drives skill/resource nodes
+- [Capabilities dashboard](/using/capabilities-dashboard), the full capability inventory that drives the skill and connector nodes
 - [Observability dashboard](/using/observability-dashboard), the event log behind the Atlas activity dock and live Boo cards

@@ -82,12 +82,12 @@ While a Boo has an exec approval pending, its node in the [Ghost Graph](/using/g
 
 ### Tool / delegation card
 
-| Field         | Source                        | Notes                                |
-| ------------- | ----------------------------- | ------------------------------------ |
-| `toolName`    | The `tool_call_approvals` row | Accent-red header                    |
-| `reason`      | The row                       | Optional human-readable rationale    |
-| `argsSummary` | The row (scrubbed JSON)       | Re-masked at display time; truncated |
-| `expires Ns`  | `expiresAt − now`             | The approval's own TTL               |
+| Field         | Source                        | Notes                                                                                                                         |
+| ------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `toolName`    | The `tool_call_approvals` row | Input to `humanizeApproval`, not rendered raw. The card shows the app or agent and a plain-language effect instead            |
+| `reason`      | The row                       | The agent's own words. Quoted, attributed, and marked unverified; never used as the headline                                  |
+| `argsSummary` | The row (scrubbed JSON)       | Re-masked at display time. Decisive fields are lifted inline; the rest sits behind one disclosure rather than being truncated |
+| `expires Ns`  | `expiresAt − now`             | The approval's own TTL                                                                                                        |
 
 <Info>
 The two surfaces write **different tables and have different decision strings.** Exec approvals use `allow-once` / `allow-always` / `deny` (with hyphens) into the `approval_history` log; tool/delegation approvals use `allow_once` / `allow_always` / `deny` (with underscores) into `tool_call_approvals`. The buttons read the same in the UI; the wire values differ.
