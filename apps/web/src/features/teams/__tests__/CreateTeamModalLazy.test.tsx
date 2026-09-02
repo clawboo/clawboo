@@ -1,4 +1,4 @@
-// CreateTeamModalLazy — the boundary that keeps the ~4.4 MB marketplace catalog off
+// CreateTeamModalLazy: the boundary that keeps the marketplace surfaces off
 // the SPA entry chunk (issue #83). Two behaviours carry that guarantee and are easy to
 // regress, so they're pinned here:
 //
@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // `evaluated` counts how many times the mocked module was actually pulled in. Vitest
 // runs a factory mock lazily — on first import of that specifier — so the counter is a
 // direct proxy for "did the lazy chunk get fetched?", which is the property that keeps
-// the ~4.4 MB catalog off the entry chunk. `vi.hoisted` because vi.mock is hoisted.
+// the marketplace surfaces off the entry chunk. `vi.hoisted` because vi.mock is hoisted.
 const evaluated = vi.hoisted(() => ({ count: 0 }))
 
 // Flipped by the failure test to make the stub throw during render, which is what

@@ -492,7 +492,7 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
   }, [client])
 
   // `SelectTeamStep` opens the team marketplace the instant it mounts, and that modal
-  // is lazy so the ~4.4 MB agent catalog stays off the SPA's entry chunk (issue #83).
+  // is lazy so its code stays off the SPA's entry chunk (issue #83).
   // Warm it here: the user spends several seconds on addRuntimes, so by the time they
   // continue the chunk is already in the module cache and the step renders instantly.
   useEffect(() => {

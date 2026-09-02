@@ -10,6 +10,9 @@ import { afterAll, afterEach, beforeAll, expect } from 'vitest'
 import { toHaveNoViolations } from 'jest-axe'
 
 import { server } from './mswServer'
+import { assertCatalogEmitted } from './catalogFixtures'
+
+assertCatalogEmitted()
 
 expect.extend(toHaveNoViolations)
 

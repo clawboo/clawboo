@@ -69,30 +69,14 @@ export default defineConfig({
           // windows-latest (the smoke-test-bundle matrix).
           const p = id.replace(/\\/g, '/')
 
-          if (!p.includes('node_modules')) {
-            // The ~4.4 MB agent + team catalogs are pure static data reachable ONLY
-            // from two dynamic entries — the lazy MarketplacePanel and the lazy
-            // CreateTeamModal (see features/teams/CreateTeamModalLazy.tsx). Naming
-            // the chunk keeps both sharing one copy and makes the split verifiable
-            // by name in dist/ui/assets (scripts/check-entry-chunk.mjs asserts the
-            // entry does not preload it).
-            //
-            // NOTE: this rule alone would NOT defer anything. A manual chunk that a
-            // static import still reaches becomes a modulepreload of the entry and
-            // is downloaded at boot regardless of its name — the lazy boundary is
-            // the load-bearing half. Issue #83.
-            //
-            // The 'marketplace/' segment is required: a bare 'features/teams/' would
-            // also swallow src/features/teams/* (the modal, RuntimeSelect, …) into
-            // the data chunk. The trailing slashes keep marketplace/teamCatalog.ts
-            // (glue, not data) with its consumers.
-            if (
-              p.includes('/src/features/marketplace/agents/') ||
-              p.includes('/src/features/marketplace/teams/')
-            )
-              return 'marketplace-catalog'
-            return
-          }
+          // App code takes the default chunking. The marketplace catalog used to be
+          // pulled out here as a named `marketplace-catalog` chunk (~4.4 MB); it is
+          // JSON packs under `catalog/` now, excluded from the tarball and fetched
+          // from `/api/catalog/*`, so there is no data module left to name. Only
+          // the small generated seed is compiled in, and it rides the lazy
+          // marketplace chunk. The early return is kept so an app path can never
+          // fall through into the vendor rules below.
+          if (!p.includes('node_modules')) return
 
           if (p.includes('@codemirror') || p.includes('/codemirror/') || p.includes('@lezer'))
             return 'codemirror'

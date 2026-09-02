@@ -2,32 +2,34 @@ import { motion } from 'framer-motion'
 import { useMemo } from 'react'
 import type { TeamTemplate, ProfileLike } from '@/features/teams/types'
 import { Button } from '@/features/shared/Button'
-import { SOURCE_META, TEMPLATE_CATEGORIES, resolveTeamAgents } from './teamCatalog'
+import { resolveTeamRoster } from './teamCatalog'
+import { metaFor, sourceMetaFor } from './registry'
+import { originOf, provenanceFor } from './provenance'
+import type { CatalogIndex } from './catalogTypes'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
 function isTeamTemplate(p: ProfileLike): p is TeamTemplate {
-  return 'source' in p && 'category' in p
-}
-
-function getCategoryLabel(category: string): string {
-  const entry = TEMPLATE_CATEGORIES.find((c) => c.key === category)
-  return entry?.label ?? category
+  return 'packId' in p && 'category' in p
 }
 
 // ─── TeamTemplateCard ───────────────────────────────────────────────────────────
 
 interface TeamTemplateCardProps {
+  /** The emitted index. Passed down rather than fetched per card: this renders
+   *  once per team in an 82-card grid, so it must never issue a request. */
+  catalog: CatalogIndex
   profile: ProfileLike
   onDeploy: (profile: ProfileLike) => void
   onDetails: (template: TeamTemplate) => void
 }
 
-export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateCardProps) {
+export function TeamTemplateCard({ catalog, profile, onDeploy, onDetails }: TeamTemplateCardProps) {
   const isTpl = isTeamTemplate(profile)
-  const sourceMeta = isTpl ? SOURCE_META[profile.source] : null
-  const resolved = useMemo(() => resolveTeamAgents(profile), [profile])
-  const isSynthetic = isTpl && profile.isSynthetic === true
+  const packMeta = isTpl ? sourceMetaFor(profile.packId) : null
+  // Adapted community work is labelled on the card, not only in the detail sheet.
+  const isCommunity = isTpl && originOf(provenanceFor(catalog, profile.packId)) === 'community'
+  const resolved = useMemo(() => resolveTeamRoster(catalog, profile), [catalog, profile])
 
   return (
     <motion.div
@@ -58,35 +60,32 @@ export function TeamTemplateCard({ profile, onDeploy, onDetails }: TeamTemplateC
         </div>
       </div>
 
-      {/* Source badge + category + synthetic pill */}
-      {isTpl && sourceMeta && (
+      {/* Source badge + category */}
+      {isTpl && packMeta && (
         <div className="flex flex-wrap items-center gap-1.5">
           <span
             className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
             style={{
-              color: sourceMeta.color,
-              background: `${sourceMeta.color}18`,
-              borderColor: `${sourceMeta.color}35`,
+              color: packMeta.color,
+              background: `${packMeta.color}18`,
+              borderColor: `${packMeta.color}35`,
               letterSpacing: '0.03em',
             }}
           >
-            {sourceMeta.label}
+            {packMeta.label}
           </span>
-          {isSynthetic && (
+          <span className="text-[10px] text-muted-foreground">
+            {metaFor(profile.category).label}
+          </span>
+          {isCommunity && (
             <span
-              className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase text-amber"
-              style={{
-                background: 'rgb(var(--amber-rgb) / 0.12)',
-                borderColor: 'rgb(var(--amber-rgb) / 0.35)',
-                letterSpacing: '0.03em',
-              }}
+              className="whitespace-nowrap rounded-md border border-border bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium uppercase text-muted-foreground"
+              style={{ letterSpacing: '0.03em' }}
+              title="Adapted from a community project. Open the details for the author, licence and pinned commit."
             >
-              Synthetic
+              Community
             </span>
           )}
-          <span className="text-[10px] text-muted-foreground">
-            {getCategoryLabel(profile.category)}
-          </span>
         </div>
       )}
 

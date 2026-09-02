@@ -42,6 +42,7 @@
     "@clawboo/mcp": "workspace:*",
     "@clawboo/model-catalog": "workspace:*",
     "@clawboo/obs": "workspace:^",
+    "@clawboo/pack-format": "workspace:*",
     "@clawboo/process-lookup": "workspace:*",
     "@clawboo/protocol": "workspace:*",
     "@clawboo/scheduler": "workspace:*",

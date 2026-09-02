@@ -1007,6 +1007,19 @@ export function ConnectorsBrowser() {
         config into a runtime you already use
       </div>
 
+      {/* Connectors get their OWN notice, not the catalog's. The risk is a
+          different shape: a pack is markdown that Clawboo scanned, pinned and
+          digest-verified, while a connector is a third-party server that runs and
+          holds a credential. The `ingestsUntrustedContent` signal on the cards
+          below is exactly the prompt-injection vector the incumbents warn about,
+          so this names it rather than repeating a generic "community content"
+          line that would understate it. */}
+      <div className="shrink-0 px-6 pt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+        Connectors are third-party servers that run with the credentials you give them. Clawboo does
+        not review what they do. Check the risk signals on a card before connecting: one that
+        ingests untrusted content can carry a prompt injection into your agents.
+      </div>
+
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {results.length === 0 ? (
           <EmptyState

@@ -19,49 +19,88 @@ import type {
 import type { PillOption } from './CollapsiblePillRow'
 import { HeroTile } from './HeroTile'
 import { TeamTemplateCard } from './TeamTemplateCard'
-import { SOURCE_META, TEAM_CATALOG, TEMPLATE_CATEGORIES, searchTeamCatalog } from './teamCatalog'
+import { metaFor, sourceMetaFor } from './registry'
+import { searchTeamCatalog } from './teamCatalog'
+import type { CatalogIndex, TeamIndexEntry } from './catalogTypes'
 
-// Source filter entries (All + the three catalog sources).
-export const TEAM_SOURCE_ENTRIES: { key: TemplateSource | 'all'; label: string; color: string }[] =
-  [
-    { key: 'all', label: 'All', color: '' },
-    { key: 'clawboo', label: SOURCE_META.clawboo.label, color: SOURCE_META.clawboo.color },
-    {
-      key: 'agency-agents',
-      label: SOURCE_META['agency-agents'].label,
-      color: SOURCE_META['agency-agents'].color,
-    },
-    {
-      key: 'awesome-openclaw',
-      label: SOURCE_META['awesome-openclaw'].label,
-      color: SOURCE_META['awesome-openclaw'].color,
-    },
-  ]
-
-// Team category options, ordered by team count (busiest first). Only categories
-// with >= 1 template are included. Fed to the collapsible category pill row.
-export function teamCategoryOptions(): PillOption[] {
-  const counts = new Map<string, number>()
-  for (const t of TEAM_CATALOG) counts.set(t.category, (counts.get(t.category) ?? 0) + 1)
-  return TEMPLATE_CATEGORIES.filter((c) => counts.has(c.key))
-    .slice()
-    .sort((a, b) => (counts.get(b.key) ?? 0) - (counts.get(a.key) ?? 0))
-    .map((c) => ({ key: c.key, label: c.label, color: c.color }))
+/** Filter entry for a pill row: 'all' plus one key per value present in the index. */
+export interface FilterEntry {
+  key: string
+  label: string
+  color: string
 }
 
-// Filter the team catalog by the (search, category, source) triple.
+/**
+ * The pack filter row: All, then every pack the index actually contains, in
+ * first-seen order.
+ *
+ * DERIVED, not declared. `TEAM_SOURCE_ENTRIES` used to be a hardcoded list built
+ * by indexing a `Record<TemplateSource, …>`, which only worked while the source
+ * union was closed. A third-party pack now shows up here on its own.
+ *
+ * This row is also what preserves the browse-by-provenance capability that the
+ * deleted 15-chip domain filter used to carry: two of that filter's buckets were
+ * provenance rather than subject matter.
+ */
+export function packFilterEntries(index: CatalogIndex): FilterEntry[] {
+  const seen = new Set<string>()
+  const entries: FilterEntry[] = [{ key: 'all', label: 'All', color: '' }]
+  for (const entry of [...index.teams, ...index.agents]) {
+    if (seen.has(entry.packId)) continue
+    seen.add(entry.packId)
+    const meta = sourceMetaFor(entry.packId)
+    entries.push({ key: entry.packId, label: meta.label, color: meta.color })
+  }
+  return entries
+}
+
+/**
+ * Category options for a pill row, ordered by count (busiest first) and limited
+ * to categories that are actually present.
+ *
+ * Derived from the rows rather than filtered out of a declared list: the
+ * category union is open, so a declared list could not name every value a pack
+ * might bring, and `metaFor` gives an unknown one a label and a colour anyway.
+ */
+function categoryOptions(rows: readonly { category: string }[]): PillOption[] {
+  const counts = new Map<string, number>()
+  for (const r of rows) counts.set(r.category, (counts.get(r.category) ?? 0) + 1)
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([key]) => {
+      const meta = metaFor(key)
+      return { key, label: meta.label, color: meta.color }
+    })
+}
+
+/** Team category options, busiest first. */
+export function teamCategoryOptions(index: CatalogIndex): PillOption[] {
+  return categoryOptions(index.teams)
+}
+
+/** Agent category options, busiest first. */
+export function agentCategoryOptions(index: CatalogIndex): PillOption[] {
+  return categoryOptions(index.agents)
+}
+
+// Filter the team catalog by the (search, category, pack) triple.
 export function filterTeams(
+  index: CatalogIndex,
   search: string,
   category: TemplateCategory | 'all',
-  source: TemplateSource | 'all',
-): TeamTemplate[] {
-  let results = search ? searchTeamCatalog(search) : [...TEAM_CATALOG]
+  packId: TemplateSource | 'all',
+): TeamIndexEntry[] {
+  let results = search ? searchTeamCatalog(index, search) : index.teams
   if (category !== 'all') results = results.filter((t) => t.category === category)
-  if (source !== 'all') results = results.filter((t) => t.source === source)
+  if (packId !== 'all') results = results.filter((t) => t.packId === packId)
   return results
 }
 
 export interface TeamShowcaseGridProps {
+  /** The emitted index, threaded through to each card. `null` while it loads:
+   *  the hero and "Start from scratch" still render, because neither needs the
+   *  catalog and the blank-team path must not wait on a fetch. */
+  catalog: CatalogIndex | null
   teams: TeamTemplate[]
   /** Deploy / pick a template. */
   onSelectTeam: (profile: ProfileLike) => void
@@ -77,6 +116,7 @@ export interface TeamShowcaseGridProps {
 }
 
 export function TeamShowcaseGrid({
+  catalog,
   teams,
   onSelectTeam,
   onDetails,
@@ -84,7 +124,9 @@ export function TeamShowcaseGrid({
   onClearFilters,
   showStartFromScratch = true,
 }: TeamShowcaseGridProps) {
-  if (teams.length === 0) {
+  // Only an EMPTY RESULT is an empty state. While the index is still loading
+  // there is nothing to say "no matches" about yet.
+  if (catalog && teams.length === 0) {
     return (
       <EmptyState
         icon={SearchX}
@@ -133,14 +175,21 @@ export function TeamShowcaseGrid({
           </div>
         </button>
       )}
-      {teams.map((profile) => (
-        <TeamTemplateCard
-          key={profile.id}
-          profile={profile}
-          onDeploy={onSelectTeam}
-          onDetails={onDetails}
-        />
-      ))}
+      {catalog ? (
+        teams.map((profile) => (
+          <TeamTemplateCard
+            key={profile.id}
+            catalog={catalog}
+            profile={profile}
+            onDeploy={onSelectTeam}
+            onDetails={onDetails}
+          />
+        ))
+      ) : (
+        <div className="col-span-full py-6 text-center text-[12px] text-muted-foreground">
+          Loading teams…
+        </div>
+      )}
     </div>
   )
 }

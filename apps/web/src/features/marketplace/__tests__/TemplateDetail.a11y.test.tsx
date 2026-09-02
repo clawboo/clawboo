@@ -8,33 +8,38 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
-import type { AgentCatalogEntry, TeamTemplate } from '@/features/teams/types'
+import type { TeamTemplate } from '@/features/teams/types'
+import type { AgentIndexEntry, CatalogIndex } from '../catalogTypes'
+import { CATALOG_SCHEMA_VERSION } from '../catalogTypes'
+import { resetCatalogClient } from '../catalogClient'
 
 import { AgentTemplateDetail } from '../AgentTemplateDetail'
 import { TeamTemplateDetail } from '../TeamTemplateDetail'
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  // The client memoizes by id, so a body fetched in one test must not leak
+  // into the next.
+  resetCatalogClient()
+})
 
-const AGENT: AgentCatalogEntry = {
+const AGENT: AgentIndexEntry = {
   id: 'clawboo-research-boo',
+  packId: 'clawboo',
   name: 'Research Boo',
   role: 'Researcher',
   emoji: '🔎',
   color: '#3b82f6',
   description: 'Digs through sources and reports back.',
   source: 'clawboo',
-  sourceUrl: 'https://github.com/clawboo/clawboo',
-  domain: 'clawboo',
   category: 'research',
   tags: ['research'],
   skillIds: [],
-  soulTemplate: '# SOUL',
-  identityTemplate: '# IDENTITY\n\nResearches things.',
-  toolsTemplate: '# TOOLS',
 }
 
 const TEAM: TeamTemplate = {
   id: 'clawboo-research-lab',
+  packId: 'clawboo',
   name: 'Research Lab',
   emoji: '🧪',
   color: '#3b82f6',
@@ -45,9 +50,18 @@ const TEAM: TeamTemplate = {
   agentIds: [],
 }
 
+const CATALOG: CatalogIndex = {
+  schemaVersion: CATALOG_SCHEMA_VERSION,
+  counts: { agents: 1, teams: 1 },
+  agents: [AGENT],
+  teams: [{ ...TEAM, agentIds: [] }],
+}
+
 describe('AgentTemplateDetail', () => {
   it('is a modal dialog named after the agent', () => {
-    render(<AgentTemplateDetail agent={AGENT} onClose={vi.fn()} onDeploy={vi.fn()} />)
+    render(
+      <AgentTemplateDetail catalog={CATALOG} agent={AGENT} onClose={vi.fn()} onDeploy={vi.fn()} />,
+    )
     const dialog = screen.getByRole('dialog', { name: 'Research Boo' })
     expect(dialog).toHaveAttribute('aria-modal', 'true')
   })
@@ -55,7 +69,9 @@ describe('AgentTemplateDetail', () => {
   it('closes on Escape', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
-    render(<AgentTemplateDetail agent={AGENT} onClose={onClose} onDeploy={vi.fn()} />)
+    render(
+      <AgentTemplateDetail catalog={CATALOG} agent={AGENT} onClose={onClose} onDeploy={vi.fn()} />,
+    )
     await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -64,7 +80,7 @@ describe('AgentTemplateDetail', () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
     const { container } = render(
-      <AgentTemplateDetail agent={AGENT} onClose={onClose} onDeploy={vi.fn()} />,
+      <AgentTemplateDetail catalog={CATALOG} agent={AGENT} onClose={onClose} onDeploy={vi.fn()} />,
     )
     await user.click(screen.getByRole('dialog'))
     expect(onClose).not.toHaveBeenCalled()
@@ -76,7 +92,7 @@ describe('AgentTemplateDetail', () => {
 
   it('has no level-A/AA a11y violations', async () => {
     const { container } = render(
-      <AgentTemplateDetail agent={AGENT} onClose={vi.fn()} onDeploy={vi.fn()} />,
+      <AgentTemplateDetail catalog={CATALOG} agent={AGENT} onClose={vi.fn()} onDeploy={vi.fn()} />,
     )
     expect(await axe(container)).toHaveNoViolations()
   })
@@ -84,7 +100,9 @@ describe('AgentTemplateDetail', () => {
 
 describe('TeamTemplateDetail', () => {
   it('is a modal dialog named after the team', () => {
-    render(<TeamTemplateDetail template={TEAM} onClose={vi.fn()} onDeploy={vi.fn()} />)
+    render(
+      <TeamTemplateDetail catalog={CATALOG} template={TEAM} onClose={vi.fn()} onDeploy={vi.fn()} />,
+    )
     const dialog = screen.getByRole('dialog', { name: 'Research Lab' })
     expect(dialog).toHaveAttribute('aria-modal', 'true')
   })
@@ -92,14 +110,16 @@ describe('TeamTemplateDetail', () => {
   it('closes on Escape', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
-    render(<TeamTemplateDetail template={TEAM} onClose={onClose} onDeploy={vi.fn()} />)
+    render(
+      <TeamTemplateDetail catalog={CATALOG} template={TEAM} onClose={onClose} onDeploy={vi.fn()} />,
+    )
     await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('has no level-A/AA a11y violations', async () => {
     const { container } = render(
-      <TeamTemplateDetail template={TEAM} onClose={vi.fn()} onDeploy={vi.fn()} />,
+      <TeamTemplateDetail catalog={CATALOG} template={TEAM} onClose={vi.fn()} onDeploy={vi.fn()} />,
     )
     expect(await axe(container)).toHaveNoViolations()
   })

@@ -3,55 +3,49 @@ import { ExternalLink, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { BooAvatar } from '@clawboo/ui'
-import type { AgentCatalogEntry, TeamTemplate } from '@/features/teams/types'
+import type { TeamTemplate } from '@/features/teams/types'
 import { Button, IconButton } from '@/features/shared/Button'
 import { Modal } from '@/features/shared/Modal'
 import { Chip } from '@/features/shared/Chip'
-import { SOURCE_META, TEMPLATE_CATEGORIES, teamsContainingAgent } from './teamCatalog'
+import { teamsContainingAgent } from './teamCatalog'
+import { metaFor, sourceMetaFor } from './registry'
+import { AGENT_FILE, type AgentIndexEntry, type CatalogIndex } from './catalogTypes'
+import { useAgentBody } from './useCatalog'
 import { getCatalogSkill } from './catalog'
 import { MD_COMPONENTS } from '@/features/chat/chatComponents'
+import { ProvenanceNote } from './ProvenanceNote'
+import { provenanceFor } from './provenance'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
-
-function getCategoryLabel(category: string): string {
-  const entry = TEMPLATE_CATEGORIES.find((c) => c.key === category)
-  return entry?.label ?? category
-}
-
-function formatDomain(domain: string): string {
-  const special: Record<string, string> = {
-    'game-development': 'Game Dev',
-    'project-management': 'Project Mgmt',
-    'spatial-computing': 'Spatial',
-    'paid-media': 'Paid Media',
-    openclaw: 'OpenClaw',
-    clawboo: 'Clawboo',
-  }
-  if (special[domain]) return special[domain]
-  return domain.charAt(0).toUpperCase() + domain.slice(1)
-}
 
 const SECTION_LABEL = 'font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground'
 
 // ─── AgentTemplateDetail ────────────────────────────────────────────────────────
 
 interface AgentTemplateDetailProps {
-  agent: AgentCatalogEntry
+  catalog: CatalogIndex
+  agent: AgentIndexEntry
   onClose: () => void
-  onDeploy: (agent: AgentCatalogEntry) => void
+  onDeploy: (agent: AgentIndexEntry) => void
   onSkillClick?: (skillId: string) => void
   onTeamClick?: (team: TeamTemplate) => void
 }
 
 export function AgentTemplateDetail({
+  catalog,
   agent,
   onClose,
   onDeploy,
   onSkillClick,
   onTeamClick,
 }: AgentTemplateDetailProps) {
-  const sourceMeta = SOURCE_META[agent.source]
-  const teams = useMemo(() => teamsContainingAgent(agent.id), [agent.id])
+  const packMeta = sourceMetaFor(agent.packId)
+  const categoryMeta = metaFor(agent.category)
+  const teams = useMemo(() => teamsContainingAgent(catalog, agent.id), [catalog, agent.id])
+  // The identity body and the attribution link are the only two fields this
+  // sheet needs beyond the index row, and it is the only surface that needs
+  // them, which is why they live in the body rather than in every index row.
+  const { body } = useAgentBody(agent.id)
   const resolvedSkills = useMemo(
     () =>
       agent.skillIds.map((id) => ({
@@ -100,50 +94,47 @@ export function AgentTemplateDetail({
           </h2>
           <div className="mt-0.5 text-[12.5px] text-foreground/55">{agent.role}</div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {sourceMeta && (
-              <span
-                className="rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
-                style={{
-                  color: sourceMeta.color,
-                  background: `${sourceMeta.color}18`,
-                  borderColor: `${sourceMeta.color}35`,
-                  letterSpacing: '0.03em',
-                }}
-              >
-                {sourceMeta.label}
-              </span>
-            )}
             <span
-              className="rounded-md border px-1.5 py-0.5 text-[9px] font-medium uppercase"
+              className="rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
               style={{
-                color: `${agent.color}cc`,
-                background: `${agent.color}14`,
-                borderColor: `${agent.color}30`,
+                color: packMeta.color,
+                background: `${packMeta.color}18`,
+                borderColor: `${packMeta.color}35`,
                 letterSpacing: '0.03em',
               }}
             >
-              {formatDomain(agent.domain)}
+              {packMeta.label}
             </span>
-            <span className="text-[11px] text-muted-foreground">
-              {getCategoryLabel(agent.category)}
+            <span
+              className="rounded-md border px-1.5 py-0.5 text-[9px] font-medium uppercase"
+              style={{
+                color: `${categoryMeta.color}cc`,
+                background: `${categoryMeta.color}14`,
+                borderColor: `${categoryMeta.color}30`,
+                letterSpacing: '0.03em',
+              }}
+            >
+              {categoryMeta.label}
             </span>
           </div>
         </div>
       </div>
 
+      <ProvenanceNote provenance={provenanceFor(catalog, agent.packId)} />
+
       {/* Description */}
       <div className="mb-4 text-[13px] leading-relaxed text-foreground/65">{agent.description}</div>
 
       {/* Source attribution */}
-      {agent.sourceUrl && (
+      {body?.sourceUrl && (
         <div className="mb-4">
           <a
-            href={agent.sourceUrl}
+            href={body.sourceUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-[11px] text-mint/80 no-underline transition-colors hover:text-mint"
           >
-            Source: {sourceMeta?.label ?? agent.source}
+            Source: {packMeta.label}
             <ExternalLink size={11} className="ml-0.5 inline" strokeWidth={2} />
           </a>
         </div>
@@ -203,15 +194,19 @@ export function AgentTemplateDetail({
       <div className="mb-4">
         <div className={`mb-1 ${SECTION_LABEL}`}>Identity</div>
         <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.04em] text-muted-foreground">
-          Full source from {sourceMeta?.label ?? agent.source} — preserved verbatim
+          Full identity written to IDENTITY.md on deploy · {packMeta.label}
         </div>
         <div
           className="markdown-body overflow-y-auto rounded-xl border border-border bg-foreground/[0.02] px-4 py-3 text-[12px] leading-relaxed text-foreground/75"
           style={{ maxHeight: '50vh' }}
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-            {agent.identityTemplate}
-          </ReactMarkdown>
+          {body ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+              {body.files[AGENT_FILE.identity] ?? ''}
+            </ReactMarkdown>
+          ) : (
+            <div className="text-[12px] text-muted-foreground">Loading the full source…</div>
+          )}
         </div>
       </div>
 

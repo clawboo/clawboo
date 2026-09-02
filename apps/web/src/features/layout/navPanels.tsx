@@ -8,11 +8,13 @@ import type { NavView } from '@/stores/view'
 // Each panel is lazy-loaded so it stays off the initial entry chunk and only
 // downloads/parses when its nav view is first opened. Panels are named exports,
 // so we map each to `default`. The heavy features (Ghost Graph + ELK, CodeMirror,
-// recharts) load on demand rather than up front, as does the ~4.4 MB marketplace
-// catalog — that one needed a SECOND boundary at `features/teams/CreateTeamModalLazy`,
-// because the eagerly-imported create-team modal kept the catalog on the boot path
-// even with MarketplacePanel lazy here (issue #83). It now has its own
-// `marketplace-catalog` chunk.
+// recharts) load on demand rather than up front, as do the marketplace surfaces.
+// Those needed a SECOND boundary at `features/teams/CreateTeamModalLazy`, because
+// the eagerly-imported create-team modal kept the catalog on the boot path even
+// with MarketplacePanel lazy here (issue #83). The catalog DATA is no longer
+// bundled at all: it is emitted as static JSON and fetched on demand (see
+// `features/marketplace/catalogClient.ts`), so these boundaries now defer only the
+// panel code.
 //
 // Every entry goes through `createRetryableLazy` rather than bare `React.lazy`: a
 // lazy() that has REJECTED (a dropped connection mid-chunk-load, a stale tab

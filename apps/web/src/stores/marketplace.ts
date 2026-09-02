@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SkillCategory } from '@/features/graph/types'
-import type { AgentDomain, TemplateCategory, TemplateSource } from '@/features/teams/types'
+import type { TemplateCategory, TemplateSource } from '@/features/teams/types'
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -57,13 +57,16 @@ interface MarketplaceStore {
   /** Search query for agent catalog filtering */
   agentSearchQuery: string
 
-  /** Domain filter for agent catalog */
-  agentDomainFilter: AgentDomain | 'all'
-
-  /** Source filter for agent catalog */
+  /** Pack filter for agent catalog */
   agentSourceFilter: TemplateSource | 'all'
 
-  /** Category filter for agent catalog (reserved — not wired to UI yet) */
+  /**
+   * Category filter for agent catalog.
+   *
+   * Replaces the old `agentDomainFilter`, which was keyed on the deleted
+   * `AgentDomain` union. Not persisted, so there is no zustand version/migrate
+   * step to write: a reload starts at 'all' either way.
+   */
   agentCategoryFilter: TemplateCategory | 'all'
 
   /** Search query for the connector directory */
@@ -94,7 +97,6 @@ interface MarketplaceStore {
   setTeamCategoryFilter: (c: TemplateCategory | 'all') => void
   setTeamSourceFilter: (s: TemplateSource | 'all') => void
   setAgentSearchQuery: (q: string) => void
-  setAgentDomainFilter: (d: AgentDomain | 'all') => void
   setAgentSourceFilter: (s: TemplateSource | 'all') => void
   setAgentCategoryFilter: (c: TemplateCategory | 'all') => void
   setConnectorSearchQuery: (q: string) => void
@@ -134,7 +136,6 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   teamCategoryFilter: 'all',
   teamSourceFilter: 'all',
   agentSearchQuery: '',
-  agentDomainFilter: 'all',
   agentSourceFilter: 'all',
   agentCategoryFilter: 'all',
   connectorSearchQuery: '',
@@ -193,7 +194,6 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   setTeamCategoryFilter: (teamCategoryFilter) => set({ teamCategoryFilter }),
   setTeamSourceFilter: (teamSourceFilter) => set({ teamSourceFilter }),
   setAgentSearchQuery: (agentSearchQuery) => set({ agentSearchQuery }),
-  setAgentDomainFilter: (agentDomainFilter) => set({ agentDomainFilter }),
   setAgentSourceFilter: (agentSourceFilter) => set({ agentSourceFilter }),
   setAgentCategoryFilter: (agentCategoryFilter) => set({ agentCategoryFilter }),
   setConnectorSearchQuery: (connectorSearchQuery) => set({ connectorSearchQuery }),

@@ -11,6 +11,8 @@
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
+import { catalogHandlers } from './catalogFixtures'
+
 // Default handlers persist across resetHandlers(). The GitHub star count is the
 // one cross-origin call the panels make on mount (GitHubStarButton lives in many
 // headers); handling it here means panel tests never hit the real network and
@@ -28,6 +30,10 @@ import { setupServer } from 'msw/node'
 // them would otherwise trip onUnhandledRequest. A benign empty default keeps it
 // silent (the components fall back to the small hardcoded list).
 export const server = setupServer(
+  // The marketplace catalog. Every browse surface fetches the index on
+  // mount, and detail sheets fetch bodies, so without these any test rendering
+  // MarketplacePanel or CreateTeamModal trips onUnhandledRequest.
+  ...catalogHandlers,
   http.get('https://api.github.com/repos/clawboo/clawboo', () =>
     HttpResponse.json({ stargazers_count: 0 }),
   ),
