@@ -9,6 +9,7 @@
 import { DATA_CONNECTORS } from './sources/data'
 import { DEV_CONNECTORS } from './sources/dev'
 import { PRODUCTIVITY_CONNECTORS } from './sources/productivity'
+import { COMMUNITY_COUNT } from './generated/communityCount'
 import type { ConnectorDefinition } from './types'
 
 /** Hand-written, first-party, each verified against its live package or endpoint. */
@@ -19,10 +20,11 @@ export const CURATED_CONNECTORS: readonly ConnectorDefinition[] = Object.freeze(
 ])
 
 /**
- * Ingested from the committed registry snapshot. Empty until the ingest script
- * lands: deliberately a real, empty array rather than a TODO, so every consumer
- * is already written against the two-array shape and nothing has to change when
- * it fills.
+ * DELIBERATELY NOT the snapshot. The 230 community entries live behind the
+ * separate './community' entry point so their 220 KB never rides first paint;
+ * merging them here would undo that. This array exists so every consumer is
+ * written against the two-array shape, and it stays empty by design. The
+ * snapshot's SIZE is importable as COMMUNITY_COUNT, which travels free.
  */
 export const COMMUNITY_CONNECTORS: readonly ConnectorDefinition[] = Object.freeze([])
 
@@ -68,5 +70,5 @@ export function searchConnectors(query: string): ConnectorDefinition[] {
 
 /** `{ curated, community }`: the only counts the UI should ever render. */
 export function connectorCounts(): { curated: number; community: number } {
-  return { curated: CURATED_CONNECTORS.length, community: COMMUNITY_CONNECTORS.length }
+  return { curated: CURATED_CONNECTORS.length, community: COMMUNITY_COUNT }
 }

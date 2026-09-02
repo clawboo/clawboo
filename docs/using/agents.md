@@ -110,6 +110,34 @@ The footer's **Preview SOUL.md** toggle shows the merged result (role descriptio
 | **Activity**    | The live observability terminal scoped to this agent: tool calls, results, and errors as they stream.                                                |
 | **Brief**       | Boo Zero only. Holds Boo Zero's display name override and Global Brief (its load-bearing identity surface). The tab is hidden for every other agent. |
 
+## Start a fresh conversation
+
+Type `/reset` (or `/new`) in the chat composer and send. In Clawboo the two words do the same thing. That is a deliberate simplification of OpenClaw underneath, where the reply engine treats them as one trigger (both archive the transcript, keep the session key, and mint a new session id behind it) but the Control UI routes them apart: `/reset` goes through as a message, while `/new` calls `sessions.create` and switches to a brand new `agent:<id>:dashboard:<uuid>` key.
+
+**Your conversation stays on screen.** Starting fresh ends what the boo is carrying, not what you can see. Every message stays exactly where it is, in the same chat, and a divider marks the point past which the boo is no longer holding the thread. Scroll up and it is all still there.
+
+What happens:
+
+1. the resume pointer is dropped (native) or the command is forwarded to the runtime (OpenClaw), so the next turn starts with no memory of what came before the divider;
+2. a divider is written into the transcript and kept there, so it is still in place after a reload;
+3. no message is moved, re-keyed, or deleted.
+
+In a team chat every teammate's own conversation is reset, and the room shows one divider, because you are looking at a single merged timeline.
+
+### What the boo still knows
+
+Its **character comes back in full**. The system prompt is rebuilt from the agent's own files on every single run, so personality, role and custom instructions are untouched by a reset.
+
+**Its notes come back too.** On the first turn after a reset the boo is handed its own saved memory: up to eight of the most recent facts it recorded, capped so the reminder never crowds out the conversation. That is what keeps a reset feeling like "let's start this topic fresh" rather than talking to someone with amnesia. The block rides the first turn only, so it never repeats.
+
+Two limits worth knowing. Only the boo's **own** notes and globally-scoped ones are included; facts belonging to a team room stay in that room. And the notes are delivered as background to consult, explicitly not as instructions to follow, because their content was written by whoever talked to the boo.
+
+If nothing was ever saved, nothing is injected and the boo genuinely starts blank. Memory is filled by the `memory_save` tool, so a boo that never chose to save anything has nothing to recall.
+
+<Note>
+Deleting the agent still deletes its conversation. That is the only thing that removes messages.
+</Note>
+
 ## Create a Boo
 
 Click **Create Boo** in the agent list (or the fleet sidebar) to open `CreateBooModal`.

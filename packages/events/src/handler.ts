@@ -7,13 +7,21 @@ const CLOSED_RUNS_MAX_SIZE = 500
 
 export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null
-  // runId → expiry timestamp; guards against stale terminal events
-  const closedRuns = new Map<string, number>()
+  // runId → why and when it closed; guards against stale terminal events.
+  //
+  // `byCommit` IS LOAD-BEARING. A run closed by its own commit has said
+  // everything it is going to say, so a second final for it is a replay and is
+  // dropped. A run closed by a LIFECYCLE terminal has not: OpenClaw emits its
+  // `agent` end frame BEFORE the `chat` final, so treating that close as
+  // "finished" discarded the reply itself. The whole commitChat branch was
+  // skipped, which is why a 1:1 OpenClaw reply rendered as a live card and then
+  // vanished with nothing appended and nothing persisted.
+  const closedRuns = new Map<string, { expiresAt: number; byCommit: boolean }>()
 
   function pruneClosedRuns(): void {
     const now = Date.now()
-    for (const [runId, expiry] of closedRuns) {
-      if (now > expiry) closedRuns.delete(runId)
+    for (const [runId, entry] of closedRuns) {
+      if (now > entry.expiresAt) closedRuns.delete(runId)
     }
     // Evict oldest entries if map exceeds max size
     if (closedRuns.size > CLOSED_RUNS_MAX_SIZE) {
@@ -57,7 +65,17 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
           //
           // A missing runId fails OPEN: losing a real message is worse than
           // showing a duplicate.
-          if (intent.runId && closedRuns.has(intent.runId)) {
+          // A run that already COMMITTED has said everything, so a second final
+          // for it is a replay and is dropped.
+          //
+          // A run closed only by its LIFECYCLE still owes its final: OpenClaw
+          // emits the `agent` end frame before the `chat` final, so treating
+          // that close as "finished" discarded the reply itself. Let it through,
+          // UNLESS a DIFFERENT run is already live, which means this frame is a
+          // stale replay whose terminal patch would flip that live run to idle.
+          const closed = intent.runId ? closedRuns.get(intent.runId) : undefined
+          const liveRunId = deps.getAgentRunId(intent.agentId)
+          if (closed && (closed.byCommit || (liveRunId !== null && liveRunId !== intent.runId))) {
             deps.log?.debug(
               { kind: intent.kind, agentId: intent.agentId, runId: intent.runId },
               'skipping stale commitChat for closed run',
@@ -68,17 +86,21 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
           if (intent.outputLines.length > 0) {
             deps.appendOutputLines(intent.agentId, intent.outputLines, intent.sessionKey)
           }
-          // Capture runId BEFORE dispatch — dispatchIntent may clear it
-          const preCommitRunId = deps.getAgentRunId(intent.agentId)
           deps.dispatchIntent(intent)
-          // Mark the run as closed ONLY if dispatchIntent actually cleared the runId.
-          // When an exec approval is pending, dispatchIntent skips the status patch,
-          // keeping the runId alive — we must NOT mark it as closed or we'll
-          // incorrectly drop subsequent events for the same run (lifecycle end,
-          // second chat final after the approval resolves).
-          const postCommitRunId = deps.getAgentRunId(intent.agentId)
-          if (preCommitRunId && !postCommitRunId) {
-            closedRuns.set(preCommitRunId, Date.now() + CLOSED_RUN_TTL_MS)
+          // KEYED ON THE INCOMING FRAME'S runId, not on a pre/post comparison.
+          // Under the real wire order the lifecycle end has ALREADY nulled the
+          // fleet runId before this frame arrives, so a pre/post check reads
+          // null-to-null, never marks the run, and duplicate-final protection
+          // lapses silently: a replayed final would append the reply twice.
+          //
+          // A runId still live AFTER dispatch means an exec approval deferred
+          // the terminal patch, so this commit did not close the run and must
+          // not be marked.
+          if (intent.runId && deps.getAgentRunId(intent.agentId) === null) {
+            closedRuns.set(intent.runId, {
+              expiresAt: Date.now() + CLOSED_RUN_TTL_MS,
+              byCommit: true,
+            })
           }
           break
         }
@@ -106,7 +128,12 @@ export function createEventHandler(deps: EventHandlerDeps): EventHandlerHandle {
           if (intent.patch.runId === null && intent.patch.status !== 'running') {
             const postStatusRunId = deps.getAgentRunId(intent.agentId)
             if (preStatusRunId && !postStatusRunId) {
-              closedRuns.set(preStatusRunId, Date.now() + CLOSED_RUN_TTL_MS)
+              // NOT `byCommit`: a lifecycle terminal says the run stopped, not
+              // that it delivered. Its chat final may still be in flight.
+              closedRuns.set(preStatusRunId, {
+                expiresAt: Date.now() + CLOSED_RUN_TTL_MS,
+                byCommit: false,
+              })
             }
           }
           break

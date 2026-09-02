@@ -1,22 +1,22 @@
 ---
 title: Browse and deploy from the Marketplace
-description: Search, inspect, and deploy single agents or whole teams from Clawboo's 436-agent / 85-team / 44-skill / 19-connector catalog.
+description: Search, inspect, and deploy single agents or whole teams from Clawboo's 436-agent / 85-team / 44-skill catalog.
 ---
 
-Use this page when you want to add agents to your fleet: either one specialist at a time or a pre-wired [team](/appendices/glossary). The **Marketplace** is a curated catalog of 436 agents, 85 teams, 44 skills, and 19 MCP connectors you can browse and deploy with two clicks.
+Use this page when you want to add agents to your fleet: either one specialist at a time or a pre-wired [team](/appendices/glossary). The **Marketplace** is a curated catalog of 436 agents, 85 teams, and 44 skills you can browse and deploy with two clicks.
 
-The catalog is hand-maintained JSON packs: **two written for Clawboo and seventeen adapted from permissively licensed upstream projects** (sixteen MIT, one Apache-2.0), each pinned to a commit. Most of what you browse is community work that Clawboo curated and adapted, not content Clawboo authored; every entry names its author, licence and pinned commit on its detail sheet (see [Marketplace catalog reference](/reference/marketplace-catalog)). What this page covers is the dashboard surface that browses it: the four tabs, the search and filter controls, the detail modals, and the two deploy paths. The UI is `MarketplacePanel`; deploying funnels into the same team-create + agent-create pipeline documented in [Teams](/using/teams).
+The catalog is hand-maintained JSON packs: **two written for Clawboo and seventeen adapted from permissively licensed upstream projects** (sixteen MIT, one Apache-2.0), each pinned to a commit. Most of what you browse is community work that Clawboo curated and adapted, not content Clawboo authored; every entry names its author, licence and pinned commit on its detail sheet (see [Marketplace catalog reference](/reference/marketplace-catalog)). What this page covers is the dashboard surface that browses it: the three tabs, the search and filter controls, the detail modals, and the two deploy paths. The UI is `MarketplacePanel`; deploying funnels into the same team-create + agent-create pipeline documented in [Teams](/using/teams).
 
 > **Community content.** Clawboo checks each pack's licence, pins every import to a commit, verifies a content digest, and scans for known prompt-injection patterns. It does not audit what an agent will do once deployed, and it does not vouch for third-party content. Review anything you deploy, the same as you would on any other marketplace.
 
 ## Prerequisites
 
 <Note>
-The Marketplace is browsable with no Gateway and no runtime connected. The agent and team content is served by the local dashboard itself, which merges a built-in pack that is compiled into the app with any pack it has fetched and verified, so the built-in teams are there even with no network at all. **Deploying** an agent or team requires a connected runtime (Clawboo Native or OpenClaw) so the new [Boo](/appendices/glossary) records can actually be created.
+The Marketplace is browsable with no Gateway and no runtime connected. The agent and team content is served by the local dashboard itself, which merges a built-in pack that is compiled into the app (15 agents and 5 teams) with any pack it has fetched and verified, so those built-ins are there even with no network at all. **Deploying** an agent or team requires a connected runtime (Clawboo Native or OpenClaw) so the new [Boo](/appendices/glossary) records can actually be created.
 </Note>
 
 - A connected runtime to deploy into: see [Connecting runtimes](/runtimes/connecting-runtimes) or the [Native quickstart](/getting-started/quickstart-native).
-- Nothing to install. The catalog ships with the dashboard as static JSON it loads on demand.
+- Nothing to install. The packs live under the repository's `catalog/` folder rather than inside the app bundle; the dashboard fetches and verifies them at runtime through its own API.
 
 ## Where it lives
 
@@ -24,34 +24,33 @@ Open the Marketplace from the **Marketplace** nav button (shopping-cart icon) in
 
 The panel opens on the **Teams** tab by default. The toolbar shows all three tab toggles with live counts: `Teams (85)`, `Agents (436)`, `Skills (44)`. Each tab keeps its own search query and filters, so switching tabs never loses your place.
 
-## The four tabs
+## The three tabs
 
-| Tab            | Count | What it lists                                                          | Default? |
-| -------------- | ----- | ---------------------------------------------------------------------- | -------- |
-| **Teams**      | 68    | Pre-wired `TeamTemplate`s (a roster of agents + routing)               | yes      |
-| **Agents**     | 436   | Individual `AgentCatalogEntry` records, one specialist each            | no       |
-| **Skills**     | 44    | `CatalogSkill` capability annotations you can add to an existing agent | no       |
-| **Connectors** | 19    | MCP servers Clawboo can connect and run for you                        | no       |
+| Tab        | Count | What it lists                                                          | Default? |
+| ---------- | ----- | ---------------------------------------------------------------------- | -------- |
+| **Teams**  | 85    | Pre-wired `TeamTemplate`s (a roster of agents + routing)               | yes      |
+| **Agents** | 436   | Individual `AgentIndexEntry` records, one specialist each              | no       |
+| **Skills** | 44    | `CatalogSkill` capability annotations you can add to an existing agent | no       |
 
 ### Teams tab
 
-The default view. Each team renders as a `TeamTemplateCard` showing its emoji, name, agent count, a source badge, a category label, the description, and the agent roles in the roster. Buttons: **Details** and **Deploy**. The grid leads with a **Curated teams** banner and a **Start from scratch** card (deploy a blank custom team); this tab is also where the sidebar's **+** create-team button lands.
+The default view. Each team renders as a `TeamTemplateCard` showing its emoji, name, agent count, a pack badge, a category label, a **Community** badge when that pack is adapted community work, the description, and the agent roles in the roster. Buttons: **Details** and **Deploy**. The grid leads with a **Curated teams** banner and a **Start from scratch** card (deploy a blank custom team); this tab is also where the sidebar's **+** create-team button lands.
 
 ### Agents tab
 
-Each agent renders as an `AgentCard` showing its mascot avatar, name, role, a source badge, a colored domain pill, a category label, a two-line description, and a stats line (`N skills • in N teams`). Two buttons: **Details** (opens the detail modal) and **Deploy** (creates the agent in a dedicated team).
+Each agent renders as an `AgentCard` showing its mascot avatar, name, role, a pack badge, a category label, a **Community** badge when that pack is adapted community work, a two-line description, and a stats line (`N skills • in N teams`). Two buttons: **Details** (opens the detail modal) and **Deploy** (creates the agent in a dedicated team).
 
 ### Skills tab
 
-Each skill renders as a `SkillCard` with a category dot, a neutral **Curated** tag (hand-maintained in this repo rather than fetched from an external skill registry; note that 45 of them are declared by adapted community packs, so curated does not mean first-party), a two-line description, and an **Add** button. When a skill is used by catalog agents, a `Used by N agents` link appears that cross-jumps to the Agents tab pre-searched on that skill name.
+Each skill renders as a `SkillCard` with a category dot, a neutral **Curated** tag (hand-maintained in this repo rather than fetched from an external skill registry), a two-line description, and an **Add** button. When a skill is used by catalog agents, a `Used by N agents` link appears that cross-jumps to the Agents tab pre-searched on that skill name.
 
 <Note>
 Adding a skill is different from deploying an agent. **Add** records a **capability annotation** on an *existing* agent in your fleet (you pick the target from a dropdown); it `POST`s to `/api/skills`, which injection-scans the entry before recording it. The annotation surfaces on the [Ghost Graph](/using/ghost-graph) and the [Capabilities dashboard](/using/capabilities-dashboard) — it labels intent, it does **not** provision a runtime tool (an agent's executable tools come from the MCP broker). Deploying an agent or team *creates new Boos*.
 </Note>
 
-### Connectors tab
-
-Verified MCP servers, and the one tab where the catalog is not only a catalog: Clawboo can start these itself. Each tile shows what the connector reaches, its risk signals, and what it still needs from you. See [Connectors](/using/connectors) for the connect flow, credentials, sign-in and governance.
+<Note>
+Connectors used to be a fourth tab here. It is now its own sidebar destination, directly under **Marketplace**. The three tabs above are a catalog you browse once; connecting the tools your agents use is a recurring errand, and it was three clicks deep. See [Connectors](/using/connectors).
+</Note>
 
 ## Search and filters
 
@@ -63,18 +62,19 @@ Each tab has its own search box and filter pills. Search is a case-insensitive s
 | Teams  | name · description · tags        | **Category** (only categories with ≥ 1 team, busiest first) + **Pack**                       |
 | Skills | name · description · tags        | **Category** (Code / File / Web / Comm / Data / Other) + sort dropdown (Name A–Z · Category) |
 
-The **Pack** filter (shared by Agents and Teams) is derived from the catalog rather than hardcoded, so a pack added later appears on its own:
+The **Pack** filter (shared by Agents and Teams) is derived from the catalog rather than hardcoded: it renders **All** plus one pill per pack the index carries, so a pack added later appears on its own. That is twenty pills today. Five of them, to show the shape:
 
 | Pack pill                  | Meaning                                              |
 | -------------------------- | ---------------------------------------------------- |
-| All                        | no pack filter                                       |
 | Clawboo                    | the hand-written first-party built-ins               |
 | Clawboo Life and Home      | the first-party life-and-home pack                   |
 | Agency Agents              | adapted from the `agency-agents` upstream (MIT)      |
 | Engineering Agents         | adapted from the `wshobson/agents` upstream (MIT)    |
 | Research and Orchestration | adapted from the VoltAgent subagent collection (MIT) |
 
-Filters compose with search: the result set is `search(query)` then narrowed by the active domain/category pill and the active source pill. When nothing matches, the grid shows an empty state with a **Clear filters** button that resets that tab's search and pills.
+The [Marketplace catalog reference](/reference/marketplace-catalog) lists all nineteen packs with their labels, licences and pinned commits.
+
+Filters compose with search: the result set is `search(query)` then narrowed by the active category pill and the active pack pill. When nothing matches, the grid shows an empty state with a **Clear filters** button that resets that tab's search and pills.
 
 ## The detail modals
 
@@ -82,7 +82,7 @@ Both **Details** buttons open a modal you can dismiss with **Escape** or the clo
 
 ### Agent detail (the full identity view)
 
-`AgentTemplateDetail` shows the agent's avatar, name, role, source/domain/category badges, the full description, a source-attribution link, **clickable skill chips**, **"Appears in N teams" chips**, and, the payoff, the agent's **full `IDENTITY.md` rendered as Markdown**.
+`AgentTemplateDetail` shows the agent's avatar, name, role, pack and category badges, a **Where this came from** provenance block (the author, the licence, and the pinned commit), the full description, a source-attribution link, **clickable skill chips**, **"Appears in N teams" chips**, and, the payoff, the agent's **full `IDENTITY.md` rendered as Markdown**.
 
 What you read is what deploys: the catalog stores each entry's whole instruction body, never a summary, and that exact text is what lands in the agent's `IDENTITY.md`. Entries adapted from an upstream repository are edited, not copied verbatim, and each links back to its source file.
 
@@ -95,7 +95,7 @@ A **Deploy** button at the bottom runs the same single-agent deploy as the card.
 
 ### Team detail
 
-`TeamTemplateDetail` shows the team's emoji, name, source badge, category, description, source-attribution link, an optional expandable **Workflow** narrative, and the **full roster**: each agent with its avatar, role, parsed skills, and parsed `@`-mention routing (so you can see who delegates to whom before deploying). It also has a **Deploy** button.
+`TeamTemplateDetail` shows the team's emoji, name, pack badge, category, the same **Where this came from** provenance block, description, source-attribution link, an optional expandable **Workflow** narrative, and the **full roster**: each agent with its avatar, role, parsed skills, and parsed `@`-mention routing (so you can see who delegates to whom before deploying). It also has a **Deploy** button.
 
 ## Deploy
 

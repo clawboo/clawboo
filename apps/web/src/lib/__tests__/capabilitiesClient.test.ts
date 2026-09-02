@@ -96,6 +96,73 @@ describe('groupAgentCapabilities — inherit-if-empty', () => {
     expect(out.has('codex-1')).toBe(false)
   })
 
+  // clawboo's OWN outbound connections, which the operator turned on in the
+  // Connectors tab. Distinguished from a runtime's own MCP config by the
+  // `connector:` source id in the record id.
+  const connected = (name: string) =>
+    cap({
+      id: `connector:clawboo-native:global:global:connector:mcp:${name}`,
+      scope: 'global',
+      runtime: 'clawboo-native',
+      kind: 'connector',
+      source: 'mcp-connector',
+      name,
+    })
+
+  /** The agent-scoped twin the grant projection emits for a granted connector. */
+  const granted = (name: string, agentId: string) =>
+    cap({
+      id: `connector:clawboo-native:global:global:connector:mcp:${name}#grant:g-${agentId}`,
+      scope: 'agent',
+      agentId,
+      runtime: 'clawboo-native',
+      kind: 'connector',
+      source: 'mcp-connector',
+      name,
+      synthetic: true,
+    })
+
+  it('a connected connector reaches NO agent until one is granted it', () => {
+    // THE RULE THE PICTURE MUST TELL THE TRUTH ABOUT. Connecting makes a
+    // connector available and gives it to nobody. Drawing it on every ring said
+    // the opposite, and it said it about a permission the agent did not have.
+    const records = [connected('notion'), connected('linear')]
+    const out = groupAgentCapabilities(
+      records,
+      new Map([
+        ['a1', 'openclaw'],
+        ['a2', 'clawboo-native'],
+        ['a3', 'codex'],
+      ]),
+    )
+    for (const id of ['a1', 'a2', 'a3']) {
+      expect((out.get(id) ?? []).map((r) => r.name)).toEqual([])
+    }
+  })
+
+  it('reaches exactly the agent that was granted it, whatever its runtime', () => {
+    const records = [connected('notion'), granted('notion', 'openclaw-1')]
+    const out = groupAgentCapabilities(
+      records,
+      new Map([
+        ['openclaw-1', 'openclaw'],
+        ['other-1', 'openclaw'],
+      ]),
+    )
+    expect((out.get('openclaw-1') ?? []).map((r) => r.name)).toEqual(['notion'])
+    expect((out.get('other-1') ?? []).map((r) => r.name)).toEqual([])
+  })
+
+  it('sits alongside an agent that already has its own caps', () => {
+    const records = [
+      cap({ scope: 'agent', agentId: 'a1', runtime: 'openclaw', name: 'own skill' }),
+      connected('linear'),
+      granted('linear', 'a1'),
+    ]
+    const out = groupAgentCapabilities(records, new Map([['a1', 'openclaw']]))
+    expect((out.get('a1') ?? []).map((r) => r.name).sort()).toEqual(['linear', 'own skill'])
+  })
+
   it('ignores agents absent from the runtime map + empty agents with no global to inherit', () => {
     const records = [cap({ scope: 'agent', agentId: 'ghost', runtime: 'hermes', name: 's' })]
     const out = groupAgentCapabilities(records, new Map([['live', 'hermes']]))

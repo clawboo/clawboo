@@ -80,6 +80,15 @@ export function connectRefusal(
   if (def.launch.transport !== 'stdio' && def.auth.needsPreregisteredApp) {
     return 'remote-needs-registered-app'
   }
+  // A REMOTE CONNECTOR THAT TAKES A TOKEN, not a sign-in. GitHub is the case:
+  // its authorization server publishes no registration endpoint, so the OAuth
+  // path cannot work, but its MCP server accepts a personal access token as a
+  // bearer. That makes it a credential question, and it has to be answered here
+  // rather than falling through to the sign-in check below, which would refuse
+  // an entry the server would happily accept.
+  if (def.launch.transport !== 'stdio' && def.auth.kind === 'bearer') {
+    return credentialsSatisfied ? null : 'needs-credential'
+  }
   // Remote connectors are solvable too, once the operator has signed in. Only
   // the server can know whether they have, which is why this is a parameter
   // rather than something read here.

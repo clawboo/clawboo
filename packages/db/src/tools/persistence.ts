@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 
 import { and, desc, eq, gt, lt } from 'drizzle-orm'
 
+import type { ToolClass } from './toolClass'
 import { withWriteRetry } from '../board/contention'
 import type { ClawbooDb } from '../db'
 import {
@@ -24,7 +25,13 @@ import { scrubArgsSummary, scrubResultSummary } from './scrub'
 import type { ToolDescriptor } from './types'
 
 const DEFAULT_TTL_MS = 5 * 60_000
-const DEFAULT_TIMEOUT_MS = 2 * 60_000
+// THE SAME CLOCK THE ROW LIVES ON, deliberately. These were 5 minutes and 2
+// minutes, so a card stayed on screen and answerable for three minutes after the
+// call it belonged to had already given up: the operator pressed Approve and
+// nothing happened, because nobody was still waiting. `expiresAt` is checked in
+// the loop and remains the real bound; this is a second clock that must not be
+// shorter than the first.
+const DEFAULT_TIMEOUT_MS = DEFAULT_TTL_MS
 const DEFAULT_POLL_MS = 250
 
 function sleep(ms: number): Promise<void> {
@@ -151,6 +158,17 @@ export interface CreateApprovalInput {
   neverRemember?: boolean
   /** The GrantApprovalReason behind the prompt, e.g. `lethal-trifecta`. */
   ruleReason?: string | null
+  /**
+   * The SERVER's reading of what this tool does, and its own description.
+   *
+   * Carried onto the row because the approval card cannot otherwise know. Left
+   * to itself the browser can only parse the tool's NAME, which works for the
+   * naming conventions someone happened to hard-code and degrades to "wants to
+   * use frobnicate" for every other connector a user installs. The registry has
+   * a real answer for all of them.
+   */
+  toolClass?: ToolClass | null
+  toolSummary?: string | null
 }
 
 export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToolCallApproval {
@@ -168,6 +186,8 @@ export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToo
     connectorId: input.connectorId ?? null,
     neverRemember: input.neverRemember ? 1 : 0,
     ruleReason: input.ruleReason ?? null,
+    toolClass: input.toolClass ?? null,
+    toolSummary: input.toolSummary ?? null,
     createdAt: now,
     expiresAt: now + (input.ttlMs ?? DEFAULT_TTL_MS),
     resolvedAt: null,

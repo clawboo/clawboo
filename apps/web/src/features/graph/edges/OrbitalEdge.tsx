@@ -101,7 +101,12 @@ export function OrbitalEdge({ edge, accent, dash, width, march }: OrbitalEdgePro
 
   const delay = animates ? orbitStaggerDelay(orbitIndex, orbitCount, isVisible) : 0
   const gradId = `orbital-edge-${id}`
-  const strokeWidth = width ?? (selected ? 2.5 : 1.75)
+  // A caller-supplied width is the edge's RESTING width, not a veto on selection.
+  // Grant edges always pass one (privilege is encoded as thickness), so taking the
+  // explicit value verbatim made them the only edges on the canvas that did not
+  // respond to being selected at all.
+  const baseWidth = width ?? 1.75
+  const strokeWidth = selected ? baseWidth + 0.75 : baseWidth
 
   // Two separate opacity channels, deliberately kept apart:
   //   • VISIBILITY (0 ↔ 1) is animated by framer alongside pathLength and

@@ -18,15 +18,23 @@ import {
   createCustomConnectorBody,
   setConnectorConfigBody,
   type ClawbooDb,
+  listConnectors,
 } from '@clawboo/db'
 import {
   CONNECT_REFUSAL_COPY,
+  CONNECTOR_DEFINITIONS,
+  cleanPastedSecret,
   connectRefusal,
+  explainConnectFailure,
   connectorBySlug,
   launchArgsSatisfied,
   resolveLaunchArgs,
   type ConnectorDefinition,
 } from '@clawboo/connector-catalog'
+import { readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
+
 import type { Request, Response } from 'express'
 
 import {
@@ -40,6 +48,7 @@ import {
   clearConnectorCredential,
   credentialsSatisfied,
   credentialStatus,
+  resolveConnectorCredentials,
   getConnectorArgument,
   setConnectorArgument,
   setConnectorCredential,
@@ -55,6 +64,7 @@ import { awaitAuthorization, beginAuthorization, getAccessToken } from '../lib/c
 import { clearOAuth, isAuthorized } from '../lib/connectors/oauthStore'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
+import { isTransient, retryTransient } from '../lib/connectors/transientRetry'
 
 /**
  * Resolve a slug to a definition, custom entries included.
@@ -64,6 +74,11 @@ import { redactValue } from '../lib/redact'
  */
 function findDefinition(slug: string): ConnectorDefinition | null {
   return connectorBySlug(slug) ?? customConnectorBySlug(getDb(), slug)
+}
+
+/** Everything browsable: the committed catalog plus the operator's own entries. */
+function allDefinitions(): ConnectorDefinition[] {
+  return [...CONNECTOR_DEFINITIONS, ...listCustomConnectors(getDb()).map(toDefinition)]
 }
 
 // POST /api/connectors/custom: point clawboo at a server of your own.
@@ -102,7 +117,7 @@ export async function connectorsCustomDELETE(req: Request, res: Response): Promi
     const slug = (req.params['slug'] as string | undefined) ?? ''
     // Disconnect FIRST: removing the definition of something still running would
     // orphan the process with nothing left that knows how to stop it.
-    await disconnectConnector(connectorInstanceId(slug))
+    await disconnectConnector(connectorInstanceId(slug), getDb())
     if (!deleteCustomConnector(getDb(), slug)) {
       res.status(404).json({ error: 'no such custom connector' })
       return
@@ -117,23 +132,42 @@ export async function connectorsCustomDELETE(req: Request, res: Response): Promi
 // connector. Returns a URL for the operator to open; the callback lands on an
 // ephemeral loopback listener, never on this server.
 export async function connectorAuthorizePOST(req: Request, res: Response): Promise<void> {
+  // Hoisted so the catch can NAME the connector. A failure sentence that cannot
+  // say which connector failed is barely better than the raw error it replaced.
+  let failedName = 'This connector'
   try {
     const def = findDefinition((req.params['slug'] as string | undefined) ?? '')
     if (!def) {
       res.status(404).json({ error: 'no such connector' })
       return
     }
-    if (def.launch.transport !== 'streamable-http') {
+    failedName = def.displayName
+    const launch = def.launch
+    if (launch.transport !== 'streamable-http') {
       res.status(400).json({ error: 'only remote connectors sign in' })
       return
     }
-    const { authorizeUrl } = await beginAuthorization(def.slug, def.launch.url, def.auth?.scopes)
+    // Read out here: the narrowing above does not survive into the closure below.
+    const launchUrl = launch.url
+    const scopes = def.auth?.scopes
+    // RETRIED, because this is three network round trips (discovery, dynamic
+    // registration, and the provider's own metadata) and any one of them
+    // dropping used to surface as a raw `TypeError: fetch failed` on a button
+    // that had just been pressed. Measured against a live provider, the fourth
+    // attempt is what succeeded.
+    const { authorizeUrl } = await retryTransient(() =>
+      beginAuthorization(def.slug, launchUrl, scopes),
+    )
     res.json({ ok: true, authorizeUrl })
   } catch (err) {
     // 502: the failure is almost always the provider's discovery or registration
     // endpoint, not a fault in this server, and "GitHub does not support dynamic
     // registration" is a sentence the operator can act on.
-    res.status(502).json({ error: redactValue(String(err)) })
+    res.status(502).json({
+      error: isTransient(err)
+        ? `Could not reach ${failedName}. The request did not leave this machine, so this is network rather than the connector.`
+        : `${failedName} could not start sign-in. ${String(redactValue(String(err))).slice(0, 200)}`,
+    })
   }
 }
 
@@ -155,7 +189,7 @@ export async function connectorAuthorizeDELETE(req: Request, res: Response): Pro
     // Disconnect first: a live session is holding a token we are about to
     // forget, and leaving it running would keep using a credential the operator
     // just asked us to drop.
-    await disconnectConnector(connectorInstanceId(slug))
+    await disconnectConnector(connectorInstanceId(slug), getDb())
     clearOAuth(slug)
     res.json({ ok: true })
   } catch (err) {
@@ -183,6 +217,40 @@ export function connectorConfigGET(req: Request, res: Response): void {
   }
 }
 
+/**
+ * Which connectors already have everything they asked for.
+ *
+ * ONE request for the whole shelf, because the alternative is one per card and
+ * the card is the surface that must not stall. It exists so the price on a tile
+ * is TRUE rather than merely typical: without it a connector whose key the
+ * operator entered last week still reads "Needs a key", which is the same class
+ * of lie as offering a Connect the server would refuse.
+ *
+ * Presence only. No value, no token, and no per-connector detail: that is what
+ * the per-slug route is for, and widening this one would turn a list the panel
+ * polls into a credential surface.
+ */
+export function connectorsConfiguredGET(_req: Request, res: Response): void {
+  try {
+    const slugs: string[] = []
+    const supplied: string[] = []
+    for (const def of allDefinitions()) {
+      const state = configState(def)
+      if (state.satisfied) slugs.push(def.slug)
+      // TWO DIFFERENT FACTS, and conflating them mislabelled the shelf. A
+      // zero-input connector is `satisfied` the moment it exists, having asked
+      // for nothing; it is not something the operator put anything into. The
+      // "Yours" filter needs the second question, so it gets its own answer:
+      // did a person actually hand this connector a credential or a path.
+      if (state.credentials.some((c) => c.present) || state.argument !== null)
+        supplied.push(def.slug)
+    }
+    res.json({ ok: true, slugs, supplied })
+  } catch (err) {
+    res.status(500).json({ error: redactValue(String(err)) })
+  }
+}
+
 /** The shape both config routes return. */
 function configState(def: ConnectorDefinition): {
   credentials: ReturnType<typeof credentialStatus>
@@ -193,7 +261,14 @@ function configState(def: ConnectorDefinition): {
 } {
   const argument = getConnectorArgument(getDb(), def.slug)
   const remote = def.launch.transport === 'streamable-http'
-  const authorized = remote ? isAuthorized(def.slug) : true
+  // A BEARER remote is answered by its credential, not by the OAuth store. The
+  // two slots are disjoint (`connector:<slug>:<KEY>` versus
+  // `connector-oauth-tokens:<slug>`), so asking `isAuthorized` about an entry
+  // that never runs the sign-in flow returns false forever. That made GitHub
+  // permanently unsatisfied here while `connectorsConnectPOST` would have
+  // accepted it: the card withheld an action the server allows, which is the
+  // forbidden half of this feature's one invariant.
+  const authorized = remote && def.auth.kind !== 'bearer' ? isAuthorized(def.slug) : true
   return {
     credentials: credentialStatus(def.slug, def.auth.inputs),
     argument,
@@ -240,12 +315,13 @@ export function connectorConfigPUT(req: Request, res: Response): void {
       setConnectorArgument(getDb(), def.slug, parsed.data.argument)
     }
     for (const [key, value] of entries) {
-      // Trimmed: a pasted token routinely carries a trailing newline, which the
-      // child would otherwise receive verbatim, and a whitespace-only value
-      // would report itself as present while being useless.
-      const trimmed = value.trim()
-      if (trimmed.length === 0) clearConnectorCredential(def.slug, key)
-      else setConnectorCredential(def.slug, key, trimmed)
+      // THE SAME CLEANER THE FIELD RUNS. A trailing newline, a `Bearer ` prefix
+      // copied out of a curl example, or the quotes off a shell export all look
+      // correct in a password field and all fail at the vendor. Applied here too
+      // rather than trusting the browser: this route is reachable without it.
+      const cleaned = cleanPastedSecret(value)
+      if (cleaned.length === 0) clearConnectorCredential(def.slug, key)
+      else setConnectorCredential(def.slug, key, cleaned)
     }
 
     // Credentials come back as presence only, so this route can never be used to
@@ -308,6 +384,9 @@ export function connectorsListGET(_req: Request, res: Response): void {
 
 // POST /api/connectors/connect { slug }
 export async function connectorsConnectPOST(req: Request, res: Response): Promise<void> {
+  // Hoisted so the catch below can NAME the connector. A failure sentence that
+  // cannot say which connector failed is barely better than the raw error.
+  let failedName = 'This connector'
   try {
     const parsed = connectConnectorBody.safeParse(req.body)
     if (!parsed.success) {
@@ -319,6 +398,7 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
       res.status(404).json({ error: `no catalog connector named ${parsed.data.slug}` })
       return
     }
+    failedName = def.displayName
     // The SAME predicate the browser renders. A client-side copy would drift,
     // and the first symptom would be a tile offering a button the server refuses.
     // Both solvable halves are evaluated HERE, because only the server can see
@@ -326,15 +406,22 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     const argument = getConnectorArgument(getDb(), def.slug)
     const launch = def.launch
     const remote = launch.transport === 'streamable-http'
+    // A remote connector authenticates one of two ways, and only one of them is
+    // OAuth. A BEARER entry takes a token the operator pasted, so the sign-in
+    // machinery is skipped entirely: discovery would fail against a provider
+    // that publishes no registration endpoint, which is the exact reason the
+    // entry is a bearer one.
+    const bearer = remote && def.auth.kind === 'bearer'
     // Resolved BEFORE the refusal check, because a refreshable-but-expired token
     // still counts as authorized and this is what refreshes it.
-    const accessToken =
-      launch.transport === 'streamable-http' ? await getAccessToken(def.slug, launch.url) : null
+    const accessToken = remote && !bearer ? await getAccessToken(def.slug, launch.url) : null
     const refusal = connectRefusal(
       def,
       credentialsSatisfied(def.slug, def.auth.inputs),
       launchArgsSatisfied(def, argument ?? undefined),
-      !remote || accessToken !== null,
+      // A bearer entry's readiness is a credential question, which the first
+      // argument already answered. Only an OAuth remote needs a token here.
+      !remote || bearer || accessToken !== null,
     )
     if (refusal) {
       res.status(422).json({ error: CONNECT_REFUSAL_COPY[refusal], reason: refusal })
@@ -342,16 +429,33 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     }
 
     const db: ClawbooDb = getDb()
-    const { connector, display } = await connectConnector(db, {
-      ...toConnectable(def, resolveLaunchArgs(def, argument ?? undefined)),
-      // The CALLBACK, not the string resolved above. `getAccessToken` refreshes
-      // an expired token, so consulting it per request is what keeps a
-      // long-lived connection working instead of turning every call into an
-      // opaque 401 once the first token expires.
-      ...(remote && accessToken
-        ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
-        : {}),
-    })
+    // RETRIED ON A DROPPED REQUEST, not on a refusal. A remote handshake that
+    // never left the machine is the single most common failure on this route,
+    // and making the operator press Connect again to paper over it is how a
+    // working connector came to look broken. A provider that ANSWERED with a
+    // rejection is not retried: that answer will not change.
+    const { connector, display } = await retryTransient(() =>
+      connectConnector(db, {
+        ...toConnectable(def, resolveLaunchArgs(def, argument ?? undefined)),
+        // The CALLBACK, not the string resolved above. `getAccessToken` refreshes
+        // an expired token, so consulting it per request is what keeps a
+        // long-lived connection working instead of turning every call into an
+        // opaque 401 once the first token expires.
+        // A CALLBACK in both cases, never a resolved string. For OAuth that is what
+        // makes a refresh reach the next call; for a bearer it is what makes a
+        // rotated token take effect without a reconnect.
+        ...(bearer
+          ? {
+              accessToken: (): string | null =>
+                resolveConnectorCredentials(def.slug, def.auth.inputs)[
+                  def.auth.inputs.find((i) => i.required)?.key ?? def.auth.inputs[0]?.key ?? ''
+                ] ?? null,
+            }
+          : remote && accessToken
+            ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
+            : {}),
+      }),
+    )
     res.json({
       ok: true,
       connectorId: connector.connectorId,
@@ -364,7 +468,13 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     // A spawn or handshake failure is an ordinary outcome here, not a server
     // fault: a 502 says "the connector did not come up", which is true and
     // actionable, where a 500 would read as a clawboo bug.
-    res.status(502).json({ error: redactValue(String(err)) })
+    //
+    // TRANSLATED, and redacted BEFORE translating: the raw text can carry a
+    // token through a child's stderr, and the sentence is built from the safe
+    // version. `detail` keeps the original for anyone debugging a real spawn
+    // problem, one line below rather than instead of the explanation.
+    const failure = explainConnectFailure(String(redactValue(String(err))), failedName)
+    res.status(502).json({ error: failure.message, detail: failure.detail })
   }
 }
 
@@ -372,7 +482,7 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
 export async function connectorsDisconnectPOST(req: Request, res: Response): Promise<void> {
   try {
     const slug = (req.params['slug'] as string | undefined) ?? ''
-    const closed = await disconnectConnector(connectorInstanceId(slug))
+    const closed = await disconnectConnector(connectorInstanceId(slug), getDb())
     if (!closed) {
       res.status(404).json({ error: 'connector is not connected' })
       return
@@ -381,4 +491,161 @@ export async function connectorsDisconnectPOST(req: Request, res: Response): Pro
   } catch (err) {
     res.status(500).json({ error: redactValue(String(err)) })
   }
+}
+
+// ─── Path suggestions ──────────────────────────────────────────────────────
+
+/**
+ * Real paths for the two connectors that ask for one.
+ *
+ * SERVER-COMPUTED so every chip is a path that exists on this machine right
+ * now. The browser cannot know that, and a suggestion that 404s on save is
+ * worse than a bare text field: it teaches the user the chips are decoration.
+ * For `filesystem` the offers are the folders people actually mean; for
+ * `sqlite` it is a shallow walk for database files, because the argument is a
+ * file that must already exist and typing its absolute path from memory is
+ * the single most error-prone input on the whole surface.
+ *
+ * Read-only by construction: nothing here opens, writes, or stats deeper than
+ * the walk below, and the walk never follows symlinks out of the tree.
+ */
+export function connectorsPathSuggestionsGET(req: Request, res: Response): void {
+  try {
+    const slug = String(req.query['slug'] ?? '')
+    const def = connectorBySlug(slug)
+    if (!def?.userArgument) {
+      res.status(404).json({ error: 'that connector does not take a path' })
+      return
+    }
+    const suggestions: { label: string; path: string }[] = []
+    const seen = new Set<string>()
+    const offer = (label: string, p: string, wantDir: boolean): void => {
+      try {
+        const st = statSync(p)
+        if (wantDir ? st.isDirectory() : st.isFile()) {
+          if (!seen.has(p)) {
+            seen.add(p)
+            suggestions.push({ label, path: p })
+          }
+        }
+      } catch {
+        /* not there: not offered */
+      }
+    }
+
+    if (slug === 'sqlite') {
+      // Depth-2 walk from where clawboo was launched, for files that look like
+      // databases. Capped, sorted for a stable order, symlinks not followed.
+      const root = process.cwd()
+      const found: string[] = []
+      const walk = (dir: string, depth: number): void => {
+        if (depth > 2 || found.length >= 25) return
+        let entries
+        try {
+          entries = readdirSync(dir, { withFileTypes: true })
+        } catch {
+          return
+        }
+        for (const e of entries) {
+          if (e.name.startsWith('.') || e.name === 'node_modules') continue
+          const full = path.join(dir, e.name)
+          if (e.isFile() && /\.(db|sqlite|sqlite3)$/i.test(e.name)) found.push(full)
+          else if (e.isDirectory()) walk(full, depth + 1)
+        }
+      }
+      walk(root, 0)
+      for (const f of found.sort().slice(0, 5)) offer(path.basename(f), f, false)
+    } else {
+      offer('Where clawboo runs', process.cwd(), true)
+      const home = homedir()
+      offer('Documents', path.join(home, 'Documents'), true)
+      offer('Desktop', path.join(home, 'Desktop'), true)
+      offer('Downloads', path.join(home, 'Downloads'), true)
+    }
+
+    res.json({ ok: true, suggestions: suggestions.slice(0, 5) })
+  } catch (err) {
+    res.status(500).json({ error: redactValue(String(err)) })
+  }
+}
+
+// ─── Boot restore ────────────────────────────────────────────────────────────
+
+/**
+ * Reconnect the connectors the operator left running.
+ *
+ * WHY IT LIVES HERE, in an api module rather than a lib one. Restoring is the
+ * connect recipe with no human present: the same definition lookup, the same
+ * launch argument, the same credential and token resolution, and above all the
+ * SAME refusal predicate. Somewhere else it would be a second copy of that
+ * recipe, and the first thing to drift would be the refusal, which is what stops
+ * a connector spawning with a credential it no longer has.
+ *
+ * NOT AWAITED BY BOOT. A cold `npx` can hold a handshake open for the better
+ * part of a minute; the server must be answering requests long before that.
+ * Every connector is attempted independently so one dead server cannot strand
+ * the rest, and a failure is left to the ordinary health path rather than
+ * retried in a loop nobody asked for.
+ */
+export async function restoreConnectorsAtBoot(db: ClawbooDb): Promise<number> {
+  let restored = 0
+  for (const row of listConnectors(db)) {
+    // ONLY WHAT THE OPERATOR LEFT ON. `desiredState` is the one field that can
+    // tell a graceful shutdown from a deliberate Disconnect; health cannot,
+    // because neither path writes it.
+    if (row.desiredState !== 'connected') continue
+
+    const def = findDefinition(row.slug)
+    if (!def) continue
+
+    try {
+      const launch = def.launch
+      const remote = launch.transport === 'streamable-http'
+      const bearer = remote && def.auth.kind === 'bearer'
+      const argument = getConnectorArgument(db, def.slug)
+      const accessToken = remote && !bearer ? await getAccessToken(def.slug, launch.url) : null
+
+      // The SAME predicate the Connect button answers to. A connector whose key
+      // was removed, or whose sign-in has lapsed, must stay down rather than
+      // spawn and fail: the shelf already knows how to say why.
+      if (
+        connectRefusal(
+          def,
+          credentialsSatisfied(def.slug, def.auth.inputs),
+          launchArgsSatisfied(def, argument ?? undefined),
+          !remote || bearer || accessToken !== null,
+        )
+      ) {
+        continue
+      }
+
+      // RETRIED LIKE THE BUTTON IS. A remote handshake that never left the
+      // machine is the most common failure on this path, and a boot is when it
+      // is most likely: the network is often still coming up. Without this the
+      // one connector most prone to a transient failure is exactly the one that
+      // does not come back, and the operator is told to reconnect it by hand
+      // again. Only transport failures retry; a refusal is an answer.
+      await retryTransient(() =>
+        connectConnector(
+          db,
+          {
+            ...toConnectable(def, resolveLaunchArgs(def, argument ?? undefined)),
+            ...(remote && accessToken
+              ? { accessToken: (): Promise<string | null> => getAccessToken(def.slug, launch.url) }
+              : {}),
+          },
+          // NOBODY IS LOOKING AT THIS ONE. A press of Connect re-consents to the
+          // spec on screen; a boot does not, so the grant pins are left alone
+          // and a spec that changed while we were down still reads as drift.
+          { restoring: true },
+        ),
+      )
+      restored += 1
+    } catch {
+      // One connector that will not come up must not stop the others, and a
+      // restore is not a place to surface an error nobody asked for. The shelf
+      // reports it as disconnected, which is the truth.
+    }
+  }
+  return restored
 }

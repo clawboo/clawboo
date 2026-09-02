@@ -38,6 +38,8 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button, IconButton } from '@/features/shared/Button'
+import { useBrokeredApps } from '@/features/connectors/useBrokeredApps'
+import { grantConnectorToAgent } from './operations/grantConnector'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -53,16 +55,27 @@ import { TeamHaloLayer } from './TeamHaloLayer'
 import { TeamStatusClusterLayer } from './TeamStatusClusterLayer'
 import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
-import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { GraphContextMenu } from './GraphContextMenu'
+import { connectionRefusal } from './connectionGrammar'
+import { judgeSavedPositions } from './savedPositionHealth'
 import { GrantComposer } from './GrantComposer'
 import { installSkillForAgent } from './operations/installSkill'
-import { removeRouting } from './operations/removeRouting'
+import { edgeRemovalRefusal, removeEdge } from './operations/removeEdge'
+import { hasRoutingTo, withRoutingAppended } from './operations/routingLine'
+import { spawnAgent } from './operations/spawnNode'
+import { ConnectorMarkStyles } from '@/features/connectors/ConnectorMark'
+import { ThreadPicker, type ThreadOption } from './ThreadPicker'
+import { threadOptionsFor } from './threadOptions'
+import { connectorSlugFromId } from './nodes/connectorTile'
+import { BUILTIN_SKILLS } from '@/features/marketplace/catalog'
+import { connectorBySlug } from '@clawboo/connector-catalog'
+import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
+import { connectConnector, signInConnector } from '@/features/marketplace/connectConnector'
 import { graphPhysics } from './graphPhysics'
-import { graphKeyAction } from './graphKeyAction'
+import { edgeKeyAction, graphKeyAction, isTypingTarget, readKeyEvent } from './graphKeyAction'
 import { EdgeMarkers } from './edges/EdgeMarkers'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import type {
@@ -73,6 +86,13 @@ import type {
   LayoutData,
   GhostGraphScope,
 } from './types'
+
+interface ThreadDropState {
+  screen: { x: number; y: number }
+  flow: { x: number; y: number }
+  fromNodeId: string
+  fromNodeType: string | null
+}
 
 interface ContextMenuState {
   x: number
@@ -359,6 +379,11 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   }, [obsOverlay])
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  // Where a thread was released on empty canvas, and what it came from. Held in
+  // SCREEN pixels for the picker's placement and in FLOW coordinates for the
+  // spawn, because the node has to land where the pointer was regardless of pan
+  // or zoom.
+  const [threadDrop, setThreadDrop] = useState<ThreadDropState | null>(null)
 
   // Hide the MiniMap (bottom-right overview) by default to give Boos more
   // visible canvas. A small floating toggle button takes its place; clicking
@@ -377,7 +402,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const [locked, setLocked] = useState(false)
 
   const nodesInitialized = useNodesInitialized()
-  const { fitView, zoomIn, zoomOut, getNode } = useReactFlow()
+  const { fitView, zoomIn, zoomOut, getNode, screenToFlowPosition } = useReactFlow()
 
   // Track the canvas wrapper size so we can (a) re-fit the graph when the
   // panel is resized (e.g. user drags the divider in the new vertical group
@@ -388,6 +413,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // Track layout state in refs to avoid stale closure issues
   const layoutRanRef = useRef(false)
   const prevNodeLengthRef = useRef(0)
+  /** Boos + team roots at the last layout, so an orbital cannot move the camera. */
+  const prevLayoutCountRef = useRef(0)
+  /** Whether the camera has ever framed this graph. The first pass must fit. */
+  const layoutFittedRef = useRef(false)
   const elkGenerationRef = useRef(0)
   const prevLayoutKeyRef = useRef(layoutKey)
   // Flipping atlasLayout requires a fresh layout dispatch even
@@ -526,6 +555,20 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       layoutRanRef.current = false
     }
 
+    // THE CAMERA FOLLOWS THE LAID-OUT SET, NOT EVERY NODE. Giving an agent a
+    // connector adds an ORBITAL, which ELK never positions and which hangs off a
+    // Boo that has not moved, so nothing needing a new frame has changed. The
+    // fit fired anyway, and because `pickFittableNodes` includes the orbitals of
+    // an expanded Boo (and the pick had just expanded one) the frame grew from
+    // "the Boos" to "the Boos plus a full ring", which reads as the canvas
+    // lurching backwards the moment you add something.
+    const layoutNodeCount = nodes.filter((n) => n.type === 'boo' || n.type === 'team-root').length
+    const cameraShouldMove =
+      reLayoutRequested ||
+      !layoutFittedRef.current ||
+      layoutNodeCount !== prevLayoutCountRef.current
+    prevLayoutCountRef.current = layoutNodeCount
+
     if (layoutRanRef.current) return
     layoutRanRef.current = true
 
@@ -559,32 +602,15 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     //       these by checking the bbox of saved boo positions; if either
     //       dimension exceeds 4000 px the positions are stale-blown-up and
     //       should be discarded.
-    const savedBooPositions = booNodes
-      .map((n) => savedPositions[n.id])
-      .filter((p): p is { x: number; y: number } => Boolean(p))
-    const savedBooIds = booNodes.filter((n) => savedPositions[n.id]).map((n) => n.id)
-    const partialSavedCoverage = savedBooIds.length > 0 && savedBooIds.length < booNodes.length
+    // See savedPositionHealth.ts. Extracted because the one case this gets
+    // wrong is invisible from here: a freshly spawned Boo has no saved position
+    // and looked identical to a stale blob, so every spawn threw away every
+    // hand-placed position on the canvas. Spawning now writes its own position
+    // first (operations/spawnNode.ts), so coverage stays complete.
+    const savedVerdict = judgeSavedPositions(booNodes, savedPositions, reLayoutRequested)
+    const partialSavedCoverage = savedVerdict.reason === 'partial-coverage'
 
-    let runawaySpan = false
-    if (savedBooPositions.length >= 2) {
-      let minX = Infinity,
-        maxX = -Infinity,
-        minY = Infinity,
-        maxY = -Infinity
-      for (const p of savedBooPositions) {
-        if (p.x < minX) minX = p.x
-        if (p.x > maxX) maxX = p.x
-        if (p.y < minY) minY = p.y
-        if (p.y > maxY) maxY = p.y
-      }
-      const SPAN_LIMIT = 4000
-      if (maxX - minX > SPAN_LIMIT || maxY - minY > SPAN_LIMIT) {
-        runawaySpan = true
-      }
-    }
-
-    const effectiveSavedPositions =
-      reLayoutRequested || partialSavedCoverage || runawaySpan ? {} : savedPositions
+    const effectiveSavedPositions = savedVerdict.usable ? savedPositions : {}
 
     // Pass the canvas aspect so ELK's hierarchy-driven output can be stretched
     // to claim the empty bands fitView would otherwise leave (see
@@ -673,6 +699,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       }
 
       requestAnimationFrame(() => {
+        if (!cameraShouldMove) return
+        layoutFittedRef.current = true
         // Tight padding gives Boos visual prominence; maxZoom caps the fit so
         // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
         // `nodes` filter excludes the invisible-by-default orbital children —
@@ -758,6 +786,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // stamps `data-id` on each node element, which is the bridge back to the store
   // node. Listening here (rather than replacing the node's own onKeyDown) leaves
   // React Flow's selection + arrow-key node movement intact.
+  // A REF rather than a dependency: `handleDeleteEdge` closes over `edges`, so
+  // depending on it would re-create this wrapper handler on every graph change.
+  const handleDeleteEdgeRef = useRef<((edgeId: string) => Promise<void>) | null>(null)
+
   const onWrapperKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     const action = graphKeyAction(event)
     if (!action) return
@@ -847,8 +879,11 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       const sourceAgentName = sourceNode.data.name as string
       const targetAgentName = targetNode.data.name as string
 
-      const client = useConnectionStore.getState().client
-      if (!client) return
+      // NO GATEWAY GATE. This used to early-return when there was no OpenClaw
+      // client, which is every native-mode install: the routing write goes
+      // through readAgentFile / writeAgentFile, both of which are REST against
+      // this server and work without a Gateway. The gate silently swallowed the
+      // gesture, so the edge snapped back with no explanation.
 
       // Check for existing edge before adding
       const existingEdge = useGraphStore
@@ -886,7 +921,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           () => '# AGENTS\n',
         )
 
-        if (currentAgentsMd.includes('@' + targetAgentName)) {
+        if (hasRoutingTo(currentAgentsMd, targetAgentName)) {
           // Already in file, edge is correct — just notify
           useToastStore.getState().addToast({
             message: `${targetAgentName} already in routing`,
@@ -895,8 +930,9 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           return
         }
 
-        const newAgentsMd =
-          currentAgentsMd.trimEnd() + '\n- Route to @' + targetAgentName + ' for delegated tasks.\n'
+        // The one spelling, shared with removeRouting: the graph reconstructs
+        // this edge by matching the target's name inside this exact line.
+        const newAgentsMd = withRoutingAppended(currentAgentsMd, targetAgentName) ?? currentAgentsMd
         await mutationQueue.enqueue(sourceAgentId, () =>
           writeAgentFile(sourceAgentId, 'AGENTS.md', newAgentsMd),
         )
@@ -935,18 +971,6 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
 
   // Why a connection is refused, so the rejection can be SAID rather than just
   // felt as a drag that snaps back. Returns null when the pair is allowed.
-  const connectionRefusal = useCallback(
-    (sourceType: string | undefined, targetType: string | undefined, same: boolean) => {
-      if (sourceType === 'skill' && targetType === 'boo') return null
-      if (sourceType === 'resource' && targetType === 'boo') return null
-      if (sourceType === 'boo' && targetType === 'boo') {
-        return same ? 'An agent cannot route to itself.' : null
-      }
-      if (targetType !== 'boo') return 'Drop this on an agent.'
-      return 'That connection is not supported.'
-    },
-    [],
-  )
 
   const isValidConnection: IsValidConnection = useCallback(
     (connection) => {
@@ -958,32 +982,281 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       const target = connection.target ? getNode(connection.target) : undefined
       return connectionRefusal(source?.type, target?.type, source?.id === target?.id) === null
     },
-    [getNode, connectionRefusal],
+    [getNode],
   )
 
   // A refused drop must be SAID, not just felt as a thread snapping back. React
   // Flow gives the attempted pair in connectionState; the reason comes from the
   // same connectionRefusal the validity check uses: one function, one dialect.
+  // Prices a connector exactly as the Connectors shelf does, so a row offered
+  // here and the same row two clicks away can never disagree.
+  const { costOf: connectorCostOf, refresh: refreshConnectorCosts } = useConnectorCostState()
+  const { apps: brokeredApps, refresh: refreshBrokeredApps } = useBrokeredApps()
+
+  /** Open a Boo's ring if it is closed. Idempotent, so callers need not check. */
+  const expandBoo = useCallback((booNodeId: string) => {
+    if (!useGraphStore.getState().expandedBooNodeIds.has(booNodeId)) {
+      useGraphStore.getState().toggleBooNodeExpanded(booNodeId)
+    }
+  }, [])
+
+  // ── The thread ────────────────────────────────────────────────────────────
+  //
+  // What the released thread could end in. Recomputed only while a drop is
+  // pending, so the catalogs are not walked on every render of an idle canvas.
+  const threadOptions = useMemo(() => {
+    if (!threadDrop) return []
+    const sourceAgentId = threadDrop.fromNodeId.startsWith('boo-')
+      ? threadDrop.fromNodeId.slice(4)
+      : null
+    const owned = new Set<string>()
+    const live = new Set<string>()
+    const held = new Set<string>()
+    for (const n of nodes) {
+      const d = n.data as { skillId?: string; name?: string; connectorId?: string }
+      if (!sourceAgentId) continue
+      if (n.type === 'skill' && n.id.startsWith(`skill-${sourceAgentId}-`) && d.name) {
+        owned.add(d.name)
+      }
+      if (n.type === 'resource' && n.id.startsWith(`resource-${sourceAgentId}-`)) {
+        const slug = connectorSlugFromId(d.connectorId ?? null)
+        if (slug) live.add(slug)
+        // An app tile's identity ends in `:app:<toolkit>`, which is what a
+        // brokered row is keyed on. Without this the picker keeps offering an
+        // app the agent already holds.
+        const app = /:app:([^:]+)$/.exec(d.connectorId ?? '')
+        if (app?.[1]) held.add(app[1])
+      }
+    }
+    const heldToolkits: ReadonlySet<string> = held
+    return threadOptionsFor({
+      fromNodeType: threadDrop.fromNodeType,
+      ownedSkillNames: owned,
+      liveConnectorSlugs: live,
+      costOf: (def) => connectorCostOf(def),
+      brokeredApps,
+      agentToolkits: heldToolkits,
+    })
+  }, [threadDrop, nodes, connectorCostOf, brokeredApps])
+
+  /** Commit a picked row: create the thing, wired to the source, where it fell. */
+  const handleThreadPick = useCallback(
+    async (option: ThreadOption) => {
+      const drop = threadDrop
+      setThreadDrop(null)
+      if (!drop) return
+      const agentId = drop.fromNodeId.startsWith('boo-') ? drop.fromNodeId.slice(4) : null
+      if (!agentId) return
+      const agentName =
+        (getNode(drop.fromNodeId)?.data as { name?: string } | undefined)?.name ?? 'this agent'
+
+      // AUTO-EXPAND FIRST. The tile is about to be born in the source's orbital
+      // ring, and that ring starts collapsed: without this the write succeeds
+      // and absolutely nothing changes on screen, which is the single most
+      // confusing outcome this surface can produce.
+      expandBoo(drop.fromNodeId)
+
+      if (option.id.startsWith('skill:')) {
+        const skill = BUILTIN_SKILLS.find((s) => `skill:${s.id}` === option.id)
+        if (skill) await installSkillForAgent(skill.name, agentId, agentName)
+        return
+      }
+      // An app reached THROUGH a broker. Nothing is connected here: the broker's
+      // session already carries it, and the only thing missing is this agent's
+      // permission to use that one app.
+      if (option.id.startsWith('brokered:')) {
+        const toolkit = option.id.slice('brokered:'.length)
+        // The base identity comes from the SERVER. It is the one string the
+        // browser must not spell for itself: a grant minted under a second
+        // spelling is a grant the broker never looks up.
+        const session = await connectConnector('composio', 'Composio', undefined, true)
+        if (!session) return
+        await grantConnectorToAgent(
+          {
+            targetAgentId: agentId,
+            connectorId: `${session.connectorId}:app:${toolkit}`,
+            capabilityId: null,
+            mode: 'write',
+            approvalPolicy: 'risk',
+          },
+          { connectorName: option.label, targetAgentName: agentName },
+        )
+        refreshBrokeredApps()
+        useGraphStore.getState().triggerRefresh()
+        return
+      }
+
+      if (option.id.startsWith('connector:')) {
+        const slug = option.id.slice('connector:'.length)
+        const def = connectorBySlug(slug)
+        if (!def) return
+        const cost = connectorCostOf(def)
+        let connected: Awaited<ReturnType<typeof connectConnector>> = null
+        if (cost === 'on') {
+          // ALREADY RUNNING, so this press is only about access. The route is
+          // idempotent and hands back the connectorId a grant is keyed on, which
+          // is the one thing the browser cannot spell for itself: the server owns
+          // that identity, and a second spelling here would mint grants under an
+          // id the broker never looks up. Quiet, because nothing connected.
+          connected = await connectConnector(def.slug, def.displayName, undefined, true)
+        } else if (cost === 'one-click') {
+          if (await signInConnector(def.slug, def.displayName)) {
+            connected = await connectConnector(def.slug, def.displayName)
+          }
+        } else {
+          connected = await connectConnector(def.slug, def.displayName)
+        }
+
+        // THE GESTURE NAMED AN AGENT, so it is consent for that agent and no
+        // other. Connecting from the Connectors panel grants nobody, because
+        // nothing there says who should have it; a thread pulled off this Boo
+        // does say, and finishing it with a second trip to the grant composer
+        // would ask a question the drag already answered.
+        if (connected) {
+          await grantConnectorToAgent(
+            {
+              targetAgentId: agentId,
+              connectorId: connected.connectorId,
+              capabilityId: null,
+              // WRITE, NOT READ, and the difference is between working and not.
+              // `requiredMode` (governance/grants/decide.ts:39) answers `read`
+              // only for a tool whose server sent `readOnlyHint` AND whose
+              // catalog entry is curated; everything else needs `write`. A read
+              // grant would therefore be a grant that denies almost every call,
+              // which looks exactly like the connector being broken. Still not
+              // `admin`: a gesture with no dialog cannot consent to destructive
+              // tools, and those keep asking.
+              mode: 'write',
+              approvalPolicy: 'risk',
+            },
+            { connectorName: def.displayName, targetAgentName: agentName },
+          )
+        }
+
+        // BOTH refreshes. `triggerRefresh` rebuilds the graph; this one re-reads
+        // live and configured state, which is what prices the picker. Without
+        // it, reopening the picker offered the connector that was just turned
+        // on, still labelled "Turn on".
+        refreshConnectorCosts()
+        useGraphStore.getState().triggerRefresh()
+      }
+    },
+    [threadDrop, getNode, expandBoo, connectorCostOf, refreshConnectorCosts, refreshBrokeredApps],
+  )
+
+  /** Create an agent at the drop point, already routed from the source. */
+  const handleThreadCreateAgent = useCallback(
+    async (name: string) => {
+      const drop = threadDrop
+      setThreadDrop(null)
+      if (!drop) return
+      // THE TEAM COMES FROM THE THREAD, not from the view. A teamless agent is
+      // not rendered on either canvas -- Atlas draws teams plus Boo Zero, and a
+      // team view draws its own members -- so creating one teamless produced a
+      // successful write and an invisible result, which is the worst outcome
+      // this gesture can have. The thread was pulled off a Boo that belongs
+      // somewhere, and inheriting that is also what the operator means.
+      const sourceTeamId = (
+        getNode(drop.fromNodeId)?.data as { teamId?: string | null } | undefined
+      )?.teamId
+      const teamId = sourceTeamId ?? (scope === 'team' ? (obsTeamId ?? null) : null)
+      const created = await spawnAgent(name, drop.flow, { teamId })
+      if (!created) return
+      // The routing line the thread implied. Best-effort: the agent exists
+      // either way, and a failed route is recoverable by drawing it again.
+      const sourceId = drop.fromNodeId.startsWith('boo-') ? drop.fromNodeId.slice(4) : null
+      if (sourceId) {
+        try {
+          const md = await readAgentFile(sourceId, 'AGENTS.md').catch(() => '# AGENTS\n')
+          const next = withRoutingAppended(md, created.name)
+          if (next) {
+            await mutationQueue.enqueue(sourceId, () => writeAgentFile(sourceId, 'AGENTS.md', next))
+            useGraphStore.getState().setAgentFiles(sourceId, { agentsMd: next })
+          }
+        } catch {
+          // The agent exists either way. A route that did not save is drawable
+          // again by hand, so this must not read as a failed creation.
+        }
+      }
+    },
+    [threadDrop, scope, obsTeamId, getNode],
+  )
+
   const onConnectEnd = useCallback(
     (
-      _event: MouseEvent | TouchEvent,
+      event: MouseEvent | TouchEvent,
       connectionState: {
         isValid: boolean | null
         fromNode: Node | null
         toNode: Node | null
       },
     ) => {
-      if (connectionState.isValid !== false) return
       const { fromNode, toNode } = connectionState
-      // Dropped on empty canvas: no target to refuse; the gesture just ends.
+
+      // DROPPED ON EMPTY CANVAS: offer what this thread can legally end in.
+      //
+      // This branch used to read `if (!fromNode || !toNode) return` with the
+      // comment "the gesture just ends" -- and that early return was the one
+      // interaction every node editor has taught people. Drag out, let go, pick
+      // from what appears. The canvas had the event and threw it away.
+      if (fromNode && !toNode) {
+        const point =
+          'clientX' in event
+            ? { x: event.clientX, y: event.clientY }
+            : { x: event.changedTouches[0]?.clientX ?? 0, y: event.changedTouches[0]?.clientY ?? 0 }
+        // RE-PRICE ON OPEN. The rows come from the live graph, but what each one
+        // COSTS came from a snapshot taken when this canvas mounted, and nothing
+        // revalidated it. Connect something in the Connectors tab, come back
+        // here, and the picker still described the world as it was on mount:
+        // the connector read as "Turn on" long after it was on. The read is
+        // cheap and its result lands before anyone can pick a row.
+        refreshConnectorCosts()
+        setThreadDrop({
+          screen: point,
+          flow: screenToFlowPosition(point),
+          fromNodeId: fromNode.id,
+          fromNodeType: fromNode.type ?? null,
+        })
+        return
+      }
+
+      if (connectionState.isValid !== false) return
       if (!fromNode || !toNode) return
       const reason = connectionRefusal(fromNode.type, toNode.type, fromNode.id === toNode.id)
       if (reason) {
         useToastStore.getState().addToast({ message: reason, type: 'info' })
       }
     },
-    [connectionRefusal],
+    [screenToFlowPosition, refreshConnectorCosts],
   )
+
+  // EDGE REMOVAL FROM THE KEYBOARD, and edge-only.
+  //
+  // ON THE DOCUMENT, not the canvas wrapper. Clicking an SVG edge path leaves
+  // focus on <body>, so a React onKeyDown on the wrapper never fires for the one
+  // gesture this exists for; that is why React Flow's own key handling is
+  // document-level too. Registered only while an edge is actually selected, so
+  // an idle canvas carries no ambient listener.
+  //
+  // BUBBLE PHASE, per the house rule: a capture-phase key listener runs before
+  // the dismissable-layer stack and before every React onKeyDown, so two
+  // overlays would act on one keystroke.
+  //
+  // React Flow's own `deleteKeyCode` stays null and must: its Backspace path
+  // splices an AGENT out of the local store with no confirmation and no server
+  // call, so the agent is untouched and silently returns on reload. This path
+  // can only ever reach the selected edge.
+  useEffect(() => {
+    if (!selectedEdgeId) return
+    const onKey = (e: KeyboardEvent) => {
+      const action = edgeKeyAction({ ...readKeyEvent(e), typing: isTypingTarget(e.target) })
+      if (action !== 'remove') return
+      e.preventDefault()
+      void handleDeleteEdgeRef.current?.(selectedEdgeId)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selectedEdgeId])
 
   const onPaneClick = useCallback(() => {
     setSelectedEdgeId(null)
@@ -991,20 +1264,29 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     setHoveredNodeId(null)
   }, [setSelectedEdgeId, setHoveredNodeId])
 
+  // ONE REMOVAL PATH for every edge type. This used to accept only routing
+  // edges, which meant a skill installed by dragging and a connector shared by
+  // dragging had no way off the canvas at all: the operator had to leave for a
+  // settings panel to undo something they had just done here with a gesture.
   const handleDeleteEdge = useCallback(
     async (edgeId: string) => {
       const edge = edges.find((e) => e.id === edgeId)
-      if (!edge || edge.type !== 'dependency') return
-
-      const sourceAgentId = edge.source.startsWith('boo-') ? edge.source.slice(4) : null
-      const targetAgentId = edge.target.startsWith('boo-') ? edge.target.slice(4) : null
-      if (!sourceAgentId || !targetAgentId) return
-
-      setSelectedEdgeId(null)
-      await removeRouting(edgeId, sourceAgentId, targetAgentId)
+      if (!edge) return
+      const nameOf = (nodeId: string) =>
+        (getNode(nodeId)?.data as { name?: string } | undefined)?.name ?? 'it'
+      const removed = await removeEdge(edge, {
+        sourceName: nameOf(edge.source),
+        targetName: nameOf(edge.target),
+      })
+      // Selection survives a refusal, so the reader can see which edge was
+      // refused and read the reason against it.
+      if (removed) setSelectedEdgeId(null)
     },
-    [edges, setSelectedEdgeId],
+    [edges, getNode, setSelectedEdgeId],
   )
+  // Published for the wrapper key handler, which is declared earlier and must
+  // not close over `edges`.
+  handleDeleteEdgeRef.current = handleDeleteEdge
 
   // ── Derive selected edge for explain panel ───────────────────────────────────
   const selectedEdge = selectedEdgeId ? (edges.find((e) => e.id === selectedEdgeId) ?? null) : null
@@ -1098,6 +1380,11 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           DependencyEdge's `markerEnd="url(#dependency-arrow)"`).
           Mounted once — marker IDs are global to the document. */}
       <EdgeMarkers />
+
+      {/* Brand colours for connector orbitals. Mounted at the canvas rather
+          than per tile: the declarations are identical, and forty of them would
+          be forty style nodes fighting over the same custom properties. */}
+      <ConnectorMarkStyles />
 
       {/* Team halos layer — behind ReactFlow, matches pane pan/zoom.
           Only renders in the global Atlas scope; team-scoped instances
@@ -1371,6 +1658,11 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
         // default <Controls> lock, which is why <Controls> is no longer rendered.
         nodesDraggable={!locked}
         elementsSelectable={!locked}
+        // THE LOCK NOW MEANS WHAT IT SAYS. `nodesConnectable` was never passed,
+        // so it defaulted to true: a locked canvas froze dragging and selection
+        // and left edge DRAWING fully live, which meant an operator could
+        // rewrite an agent's routing on a canvas the padlock said was locked.
+        nodesConnectable={!locked}
         // React Flow's default `deleteKeyCode` is 'Backspace', and its keyboard
         // a11y binds Enter/Space to select a focused node — so Tab, Enter,
         // Backspace removes an agent from the canvas. That path runs through
@@ -1426,7 +1718,16 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
               margin: 0,
             }}
             nodeColor={(node) => {
-              if (node.type === 'boo') return 'var(--primary)'
+              // A Boo carries its STATUS here, matching `STATUS_DOT` on the node
+              // itself. Painting every Boo brand-red threw status away in the one
+              // place you look when zoomed too far out to read the nodes, which is
+              // the only reason to look at a minimap at all.
+              if (node.type === 'boo') {
+                const status = (node.data as { status?: string }).status
+                if (status === 'running') return 'var(--mint)'
+                if (status === 'error') return 'var(--destructive)'
+                return 'var(--category-other)'
+              }
               // Atlas team-root junctions are invisible — hide them in the
               // MiniMap too.
               if (node.type === 'team-root') return 'transparent'
@@ -1436,7 +1737,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
               if (node.type === 'skill') return isVisible ? 'var(--mint)' : 'transparent'
               // Violet = the MCP-connector type accent (matches ResourceNode).
               if (node.type === 'resource') return isVisible ? 'var(--violet)' : 'transparent'
-              return 'var(--amber)'
+              // Unreachable: `nodeTypes` registers exactly the four handled above.
+              return 'transparent'
             }}
             nodeComponent={GhostGraphMiniMapNode}
             maskColor="var(--canvas-mask)"
@@ -1448,6 +1750,20 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           the canvas on the dialog layer; state lives in the graph store, set by
           the onConnect resource→boo branch. */}
       <GrantComposer />
+
+      {/* The thread picker: what a drop on empty canvas can become. Mounted
+          beside the canvas rather than inside it so it is never clipped by the
+          viewport transform, and positioned in screen pixels. */}
+      {threadDrop && threadOptions.length > 0 && (
+        <ThreadPicker
+          at={threadDrop.screen}
+          options={threadOptions}
+          allowNewAgent={threadDrop.fromNodeType === 'boo'}
+          onPick={(option) => void handleThreadPick(option)}
+          onCreateAgent={(name) => void handleThreadCreateAgent(name)}
+          onClose={() => setThreadDrop(null)}
+        />
+      )}
 
       {/* Context menu */}
       {contextMenu && (
@@ -1461,16 +1777,6 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
             useViewStore.getState().openAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
-          onEditPersonality={() => {
-            useFleetStore.getState().selectAgent(contextMenu.agentId)
-            useViewStore.getState().openAgent(contextMenu.agentId)
-            setContextMenu(null)
-          }}
-          onEditFiles={() => {
-            useFleetStore.getState().selectAgent(contextMenu.agentId)
-            useViewStore.getState().openAgent(contextMenu.agentId)
-            setContextMenu(null)
-          }}
           onSelectInSidebar={() => {
             // Highlight in fleet sidebar without opening the detail view
             // (preserved from the previous left-click behaviour, which
@@ -1479,8 +1785,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
             setContextMenu(null)
           }}
           onDelete={() => {
-            const client = useConnectionStore.getState().client
-            if (!client) return
+            // Likewise no Gateway gate: deletion is a REST route on this server,
+            // and gating it left Delete inert in native mode.
             const agent = useFleetStore.getState().agents.find((a) => a.id === contextMenu.agentId)
             try {
               void deleteAgentOperation(contextMenu.agentId, agent?.sessionKey ?? null)
@@ -1498,7 +1804,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           <EdgeExplainPanel
             edge={selectedEdge}
             onClose={() => setSelectedEdgeId(null)}
-            onDelete={selectedEdge.type === 'dependency' ? handleDeleteEdge : null}
+            onDelete={edgeRemovalRefusal(selectedEdge) === null ? handleDeleteEdge : null}
           />
         )}
       </AnimatePresence>

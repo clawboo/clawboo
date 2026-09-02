@@ -73,11 +73,20 @@ const PATTERNS = [
 // gone, the content lives in `catalog/` now, and it is clean. Scanning it is the
 // point: a leak planted in a persona file is exactly what this catches.
 //
-// Only the two hygiene-guard files are excluded, because they assemble the
-// patterns from fragments and would otherwise match themselves.
+// The two hygiene-guard files are excluded because they assemble the patterns
+// from fragments and would otherwise match themselves; the lockfile entries
+// below carry their own note.
 const EXCLUDES = [
   ':!apps/web/server/lib/__tests__/repoHygiene.test.ts',
   ':!apps/web/server/lib/__tests__/repoHygieneTracked.test.ts',
+  // The two pnpm lockfiles are machine-generated from the registry, so they can
+  // carry no internal shorthand to leak, and their base64 integrity hashes will
+  // randomly satisfy the S-code shape: `/` and `+` are non-word characters, so a
+  // hash containing `/S45+` reads as a word-bounded `S45`. That is a coin flip on
+  // every regeneration (typescript-eslint@8.68.0 lost it), which would fail this
+  // guard on an unrelated dependency bump and teach the next reader to ignore it.
+  ':!pnpm-lock.yaml',
+  ':!website/pnpm-lock.yaml',
 ]
 
 describe('repo hygiene (tracked surface): a git grep over committed files leaks nothing', () => {

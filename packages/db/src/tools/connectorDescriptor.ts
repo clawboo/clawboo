@@ -7,6 +7,7 @@
 
 import { z } from 'zod'
 
+import { isBrokeredReadOnlyMetaTool } from './brokeredApp'
 import type { ToolDescriptor, ToolRisk } from './types'
 
 /** The shape an MCP `tools/list` entry arrives in. */
@@ -46,7 +47,13 @@ export function buildConnectorDescriptor(
   tool: RemoteToolFacts,
   opts: ConnectorDescriptorOptions,
 ): ToolDescriptor {
-  const readOnly = opts.trustAnnotations && tool.annotations?.['readOnlyHint'] === true
+  // A BROKER'S OWN LOOKUP TOOLS ARE READ-ONLY WHATEVER IT SAYS. Composio sends no
+  // annotations, so its catalogue search and schema read inherited the connector's
+  // `external` risk and prompted for approval like a send. They execute nothing;
+  // treating them as writes made discovery unusable.
+  const readOnly =
+    isBrokeredReadOnlyMetaTool(opts.name) ||
+    (opts.trustAnnotations && tool.annotations?.['readOnlyHint'] === true)
   const destructive = opts.trustAnnotations && tool.annotations?.['destructiveHint'] === true
   // A connector that can send bytes off the machine is `external` at minimum:
   // the risk floor comes from what the CATALOG says the connector can do, never

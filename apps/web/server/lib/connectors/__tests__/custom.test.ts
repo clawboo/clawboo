@@ -92,3 +92,77 @@ describe('custom connectors', () => {
     expect(listCustomConnectors(db)).toEqual([])
   })
 })
+
+describe('a community entry keeps what it declared', () => {
+  it('asks for the env vars it declared, as secrets', () => {
+    // The defect: toDefinition hardcoded `auth: { kind: 'none', inputs: [] }`,
+    // so the consent panel said "It will ask for CLICKUP_API_KEY" and then
+    // nothing ever asked. The connector showed a Turn on button and failed at
+    // spawn with the vendor's own unauthenticated error.
+    const def = toDefinition({
+      slug: 'clickup',
+      displayName: 'ClickUp',
+      command: 'npx',
+      args: ['-y', 'clickup-mcp@1.0.0'],
+      authInputs: [{ key: 'CLICKUP_API_KEY', description: 'Your key.', required: true }],
+    })
+    expect(def.auth.kind).toBe('api-key')
+    expect(def.auth.inputs).toHaveLength(1)
+    expect(def.auth.inputs[0]).toMatchObject({
+      key: 'CLICKUP_API_KEY',
+      required: true,
+      // clawboo has not read this server, so anything it asks for is a
+      // credential rather than configuration.
+      secret: true,
+    })
+  })
+
+  it('keeps the registry identity so provenance survives the add', () => {
+    const def = toDefinition({
+      slug: 'clickup',
+      displayName: 'ClickUp',
+      command: 'npx',
+      args: ['-y', 'clickup-mcp@1.0.0'],
+      catalogId: 'io.github.taazkareem/clickup-mcp',
+    })
+    expect(def.catalogId).toBe('io.github.taazkareem/clickup-mcp')
+    // Still the operator's own entry: clawboo vouches for nothing here.
+    expect(def.provenance).toBe('custom')
+  })
+
+  it('records the version the operator was shown, and says so honestly when there was none', () => {
+    const fromRegistry = toDefinition({
+      slug: 'webhound',
+      displayName: 'Webhound',
+      command: 'npx',
+      args: ['-y', 'webhound-mcp@0.5.2'],
+      pinnedVersion: '0.5.2',
+    })
+    // A custom connector is stdio by construction; narrow so the union's
+    // remote arm does not hide the field.
+    expect(fromRegistry.launch.transport).toBe('stdio')
+    if (fromRegistry.launch.transport === 'stdio')
+      expect(fromRegistry.launch.pinnedVersion).toBe('0.5.2')
+
+    const handTyped = toDefinition({
+      slug: 'mine',
+      displayName: 'Mine',
+      command: 'node',
+      args: ['server.js'],
+    })
+    if (handTyped.launch.transport === 'stdio')
+      expect(handTyped.launch.pinnedVersion).toBe('user-supplied')
+  })
+
+  it('an entry that declared nothing still needs nothing', () => {
+    const def = toDefinition({
+      slug: 'plain',
+      displayName: 'Plain',
+      command: 'npx',
+      args: ['-y', 'plain@1.0.0'],
+    })
+    expect(def.auth.kind).toBe('none')
+    expect(def.auth.inputs).toEqual([])
+    expect(def.catalogId).toBeUndefined()
+  })
+})

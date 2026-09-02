@@ -33,18 +33,33 @@ interface BucketDefinition {
   word: string
 }
 
+// `pulse` is "this is moving or wants you", not "this is good news". Only the
+// running bucket used to animate, so a team with three errors sat perfectly still
+// while a team with one healthy agent throbbed for attention.
 const BUCKETS: readonly BucketDefinition[] = [
   { key: 'running', color: 'var(--mint)', pulse: true, word: 'running' },
-  { key: 'error', color: 'var(--destructive)', pulse: false, word: 'error' },
+  { key: 'error', color: 'var(--destructive)', pulse: true, word: 'error' },
   { key: 'sleeping', color: 'var(--secondary)', pulse: false, word: 'sleeping' },
   { key: 'idle', color: 'rgb(var(--foreground-rgb) / 0.45)', pulse: false, word: 'idle' },
 ] as const
 
-const CLUSTER_Y_OFFSET = 36 // pixels above the team-root anchor
+// SCREEN pixels above the anchor, not graph units. The pill's SIZE is screen-fixed
+// (see the note below), so an offset measured in graph units drifted away from the
+// team at every zoom except 1: far out the pill sat on top of the boos, zoomed in it
+// floated off into empty canvas. Both halves are screen space now, so the pill keeps
+// its distance whatever the zoom.
+const CLUSTER_Y_OFFSET = 36
 const PILL_HEIGHT = 22
-const PILL_PADDING_X = 8
+const PILL_PADDING_X = 9
 const DOT_RADIUS = 3.5
-const DOT_SPACING = 18 // horizontal stride per shown bucket
+const DOT_GAP = 7 // dot to its text
+const SEGMENT_GAP = 12 // one bucket to the next
+const CHAR_W = 6.2 // 11px mono, close enough to lay out without measuring
+
+/** Width of one "● 4 running" segment. */
+function segmentWidth(count: number, word: string): number {
+  return DOT_RADIUS * 2 + DOT_GAP + (String(count).length + 1 + word.length) * CHAR_W
+}
 
 export function TeamStatusClusterLayer({ nodes }: TeamStatusClusterLayerProps) {
   const vp = useViewport()
@@ -110,10 +125,14 @@ export function TeamStatusClusterLayer({ nodes }: TeamStatusClusterLayerProps) {
     >
       <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
         {clusters.map(({ teamRoot, team, breakdown, shown }) => {
-          const pillWidth = PILL_PADDING_X * 2 + DOT_SPACING * shown.length
+          const widths = shown.map((b) => segmentWidth(breakdown[b.key], b.word))
+          const pillWidth =
+            PILL_PADDING_X * 2 +
+            widths.reduce((a, w) => a + w, 0) +
+            SEGMENT_GAP * Math.max(0, shown.length - 1)
           // Graph-coords → screen-coords via the viewport transform.
           const screenX = vp.x + (teamRoot.x + 0.5) * vp.zoom
-          const screenY = vp.y + (teamRoot.y - CLUSTER_Y_OFFSET) * vp.zoom
+          const screenY = vp.y + teamRoot.y * vp.zoom - CLUSTER_Y_OFFSET
           const left = -pillWidth / 2
           const top = -PILL_HEIGHT / 2
           return (
@@ -138,8 +157,9 @@ export function TeamStatusClusterLayer({ nodes }: TeamStatusClusterLayerProps) {
               />
               {/* Per-bucket dots + counts */}
               {shown.map((bucket, i) => {
-                const dotX = left + PILL_PADDING_X + DOT_SPACING * i + DOT_SPACING / 2 - 6
-                const textX = dotX + 6
+                const offset = widths.slice(0, i).reduce((a, w) => a + w + SEGMENT_GAP, 0)
+                const dotX = left + PILL_PADDING_X + offset + DOT_RADIUS
+                const textX = dotX + DOT_RADIUS + DOT_GAP
                 return (
                   <g key={bucket.key}>
                     <circle
@@ -166,7 +186,7 @@ export function TeamStatusClusterLayer({ nodes }: TeamStatusClusterLayerProps) {
                         fontVariantNumeric: 'tabular-nums',
                       }}
                     >
-                      {breakdown[bucket.key]}
+                      {breakdown[bucket.key]} {bucket.word}
                     </text>
                   </g>
                 )

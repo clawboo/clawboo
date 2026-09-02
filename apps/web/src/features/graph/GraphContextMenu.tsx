@@ -1,13 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import {
-  Eye,
-  FileText,
-  MessageSquare,
-  SlidersHorizontal,
-  Trash2,
-  type LucideIcon,
-} from 'lucide-react'
+import { Eye, MessageSquare, Trash2, type LucideIcon } from 'lucide-react'
 
 import { useMenuKeyboard } from '@/features/shared/useMenuKeyboard'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
@@ -19,8 +12,6 @@ interface GraphContextMenuProps {
   agentName: string
   onClose: () => void
   onChat: () => void
-  onEditPersonality: () => void
-  onEditFiles: () => void
   // Highlight the agent in the sidebar without opening the agent detail
   // view. Replaces the previous left-click behaviour, which now toggles
   // the boo's orbital children visibility (peacock-feather expand).
@@ -31,16 +22,22 @@ interface GraphContextMenuProps {
 interface MenuItemConfig {
   label: string
   icon: LucideIcon
-  action: 'chat' | 'editPersonality' | 'editFiles' | 'selectInSidebar' | 'delete'
+  action: 'chat' | 'selectInSidebar' | 'delete'
 }
 
 // Emoji glyphs replaced with Lucide icons to
 // match TeamContextMenu / sidebar nav. The pattern is now consistent
 // across every menu surface in the app.
+// ONE VERB WHERE THERE WERE THREE LABELS. 'Chat', 'Edit personality' and 'Edit
+// files' were byte-identical implementations of the same call: select the agent
+// and open its detail view. Three rows promising three destinations, all
+// arriving at one, is worse than a single honest row -- and the two reclaimed
+// rows are what let the canvas offer verbs that actually act here.
+//
+// Personality and long-form file editing stay in the detail view on purpose.
+// Five sliders and a markdown body are a panel, not a node chip.
 const items: MenuItemConfig[] = [
-  { label: 'Chat', icon: MessageSquare, action: 'chat' },
-  { label: 'Edit personality', icon: SlidersHorizontal, action: 'editPersonality' },
-  { label: 'Edit files', icon: FileText, action: 'editFiles' },
+  { label: 'Open agent', icon: MessageSquare, action: 'chat' },
   { label: 'Select in sidebar', icon: Eye, action: 'selectInSidebar' },
   { label: 'Delete', icon: Trash2, action: 'delete' },
 ]
@@ -51,8 +48,6 @@ export function GraphContextMenu({
   agentName,
   onClose,
   onChat,
-  onEditPersonality,
-  onEditFiles,
   onSelectInSidebar,
   onDelete,
 }: GraphContextMenuProps) {
@@ -77,8 +72,6 @@ export function GraphContextMenu({
 
   const handlers: Record<MenuItemConfig['action'], () => void> = {
     chat: onChat,
-    editPersonality: onEditPersonality,
-    editFiles: onEditFiles,
     selectInSidebar: onSelectInSidebar,
     delete: onDelete,
   }

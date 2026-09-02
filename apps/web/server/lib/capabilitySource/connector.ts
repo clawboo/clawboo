@@ -19,7 +19,12 @@ import {
 import { connectorBySlug } from '@clawboo/connector-catalog'
 
 import { listLiveConnectors } from '../connectors/supervisor'
+import { connectedAppsNow } from '../connectors/composio'
+import { appForToolkit } from '@clawboo/connector-catalog'
 import { buildRecord, okStatus } from './helpers'
+
+/** The broker whose session carries the apps below. */
+const COMPOSIO_SLUG = 'composio'
 
 export class ConnectorCapabilitySource implements CapabilitySource {
   readonly id = 'connector' as const
@@ -61,6 +66,51 @@ export class ConnectorCapabilitySource implements CapabilitySource {
             : {}),
         }),
       )
+    }
+
+    // ONE NODE PER APP THE AGENT CAN ACTUALLY REACH.
+    //
+    // A broker is one MCP session carrying many upstream apps, and reporting
+    // only the session hides what that session reaches: a reader looking at a
+    // node marked "Composio" has no way to know their agent can read email.
+    // Naming each connected app is not decoration, it is the honest inventory,
+    // and it is the only form in which a person can revoke or reason about it.
+    //
+    // READ FROM CACHE, NEVER FETCHED HERE. This runs on every graph rebuild, so
+    // a network call would put the broker's latency inside a render. An empty
+    // cache simply yields no app records, and the shelf's own refresh is what
+    // fills it.
+    if (records.some((r) => r.sourceKey === `mcp:${COMPOSIO_SLUG}`)) {
+      const { connected } = connectedAppsNow()
+      for (const toolkit of connected) {
+        const app = appForToolkit(toolkit)
+        if (!app) continue
+        records.push(
+          buildRecord({
+            sourceId: 'connector',
+            runtime: 'clawboo-native',
+            scope: 'global',
+            kind: 'connector',
+            // DISTINCT FROM THE BROKER'S OWN KEY, so each app is its own node
+            // rather than collapsing onto the session they share.
+            // KEYED ON THE BROKER'S OWN TOOLKIT NAME, not clawboo's slug. The
+            // grant this node stands for is checked against the toolkit read off
+            // a call's arguments, and `google-sheets` is not what the wire
+            // carries: a grant minted under our spelling would match nothing.
+            sourceKey: `mcp:${COMPOSIO_SLUG}:app:${app.toolkit}`,
+            origin: 'mcp-connector',
+            // OBSERVE-ONLY is accurate: clawboo cannot reconfigure Gmail. It
+            // does not stop the node being granted, because the drag handle is
+            // gated on having a connectorId, not on manageability.
+            manageability: 'observe-only',
+            writable: false,
+            name: app.name,
+            description: app.description,
+            available: true,
+            status: 'ready',
+          }),
+        )
+      }
     }
 
     return { records, status: okStatus('connector') }

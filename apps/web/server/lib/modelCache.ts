@@ -31,6 +31,21 @@ interface CliOutput {
 }
 
 let cachedGroups: ModelGroup[] | null = null
+/**
+ * Context window per model key, from the same CLI call that builds the groups.
+ *
+ * WHY THIS IS KEPT. `CliModel.contextWindow` was declared above and then dropped
+ * by `transformCliModels`, which builds `{ id, label }` and discards the rest.
+ * That number is the one a runtime needs to decide when it is running out of
+ * room, and losing it is how an agent ended up compacting against a budget of
+ * 32,768 (its model's max OUTPUT tokens) while the model's real window was
+ * 204,800. The CLI had the right answer for all 1,069 models the whole time.
+ *
+ * Kept as a separate map rather than a field on `ModelOption` because there are
+ * two structurally identical `ModelOption` declarations in this repo, and adding
+ * a field to one of them lands it somewhere nothing reads.
+ */
+let cachedWindows: Map<string, number> | null = null
 let cacheTime = 0
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
@@ -78,9 +93,33 @@ export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
     const models = Array.isArray(parsed) ? parsed : parsed.models
     if (!Array.isArray(models) || models.length === 0) return cachedGroups
     cachedGroups = transformCliModels(models)
+    cachedWindows = new Map(
+      models
+        .filter((m) => typeof m.contextWindow === 'number' && m.contextWindow > 0)
+        .map((m) => [m.key, m.contextWindow] as const),
+    )
     cacheTime = now
     return cachedGroups
   } catch {
     return cachedGroups
   }
+}
+
+/**
+ * The context window the runtime's own catalog reports for a model, or null.
+ *
+ * NULL IS A REAL ANSWER, not a reason to substitute a default. A number invented
+ * here would be written into a runtime's budget and believed, and a wrong budget
+ * is what this exists to prevent: too low makes a runtime compact when it does
+ * not need to, too high makes it discover the limit as a provider rejection.
+ * Nothing downstream may turn a null into a guess.
+ *
+ * This is the CONTEXT WINDOW, never the max output tokens. Every registry in
+ * this space names those two differently and several conflate them, so the
+ * distinction is worth stating at every boundary that carries one.
+ */
+export async function getContextWindowFromCli(modelKey: string): Promise<number | null> {
+  // Populates the cache when cold, and is a no-op when warm.
+  await getModelsFromCli()
+  return cachedWindows?.get(modelKey) ?? null
 }

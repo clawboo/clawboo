@@ -37,58 +37,55 @@ describe('GraphContextMenu', () => {
     renderMenu()
     expect(screen.getByRole('menu', { name: 'Actions for Scout' })).toBeInTheDocument()
     const items = screen.getAllByRole('menuitem')
-    expect(items.map((i) => i.textContent)).toEqual([
-      'Chat',
-      'Edit personality',
-      'Edit files',
-      'Select in sidebar',
-      'Delete',
-    ])
+    // THREE ROWS, not five. 'Chat', 'Edit personality' and 'Edit files' were
+    // byte-identical calls to the same handler, so the menu promised three
+    // destinations and delivered one.
+    expect(items.map((i) => i.textContent)).toEqual(['Open agent', 'Select in sidebar', 'Delete'])
   })
 
   it('focuses the first item on open and rovers the tabindex', async () => {
     renderMenu()
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     const items = screen.getAllByRole('menuitem')
     // Exactly one tab stop, so Tab LEAVES the menu instead of walking five buttons.
-    expect(items.map((i) => i.getAttribute('tabindex'))).toEqual(['0', '-1', '-1', '-1', '-1'])
+    expect(items.map((i) => i.getAttribute('tabindex'))).toEqual(['0', '-1', '-1'])
   })
 
   it('moves with the arrow keys and wraps at both ends', async () => {
     const user = userEvent.setup()
     renderMenu()
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     await user.keyboard('{ArrowDown}')
-    expect(screen.getByRole('menuitem', { name: 'Edit personality' })).toHaveFocus()
+    expect(screen.getByRole('menuitem', { name: 'Select in sidebar' })).toHaveFocus()
 
     await user.keyboard('{ArrowUp}{ArrowUp}')
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
 
     await user.keyboard('{ArrowDown}')
-    expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus()
+    expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus()
   })
 
   it('jumps to the ends with Home and End', async () => {
     const user = userEvent.setup()
     renderMenu()
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     await user.keyboard('{End}')
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
 
     await user.keyboard('{Home}')
-    expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus()
+    expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus()
   })
 
   it('activates the focused item with Enter', async () => {
     const user = userEvent.setup()
     const { props } = renderMenu()
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     await user.keyboard('{ArrowDown}{Enter}')
-    expect(props.onEditPersonality).toHaveBeenCalledTimes(1)
+    expect(props.onSelectInSidebar).toHaveBeenCalledTimes(1)
     expect(props.onChat).not.toHaveBeenCalled()
   })
 
@@ -100,7 +97,7 @@ describe('GraphContextMenu', () => {
 
     cleanup()
     const second = renderMenu()
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
     await user.tab()
     expect(second.props.onClose).toHaveBeenCalled()
   })
@@ -128,14 +125,12 @@ describe('GraphContextMenu', () => {
           agentName="Scout"
           onClose={vi.fn()}
           onChat={vi.fn()}
-          onEditPersonality={vi.fn()}
-          onEditFiles={vi.fn()}
           onSelectInSidebar={vi.fn()}
           onDelete={vi.fn()}
         />
       </>,
     )
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Chat' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     rerender(<Harness />)
     expect(screen.getByTestId('opener')).toHaveFocus()

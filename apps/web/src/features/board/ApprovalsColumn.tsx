@@ -114,13 +114,7 @@ export function ApprovalsColumn({ teamFilter }: { teamFilter: string }) {
             it.kind === 'exec' ? (
               <InlineApprovalCard key={it.key} approval={it.exec} showAgentName />
             ) : (
-              <ToolApprovalCard
-                key={it.key}
-                approval={it.tool}
-                onResolve={resolveTool}
-                showAgentName
-                compact
-              />
+              <ToolApprovalCard key={it.key} approval={it.tool} onResolve={resolveTool} compact />
             ),
           )}
         </AnimatePresence>

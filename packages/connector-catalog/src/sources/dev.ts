@@ -15,32 +15,47 @@ import type { ConnectorDefinition } from '../types'
 export const DEV_CONNECTORS: ConnectorDefinition[] = [
   {
     slug: 'github',
+    popular: true,
     displayName: 'GitHub',
     description: 'Read and write issues, pull requests, and repository contents.',
     category: 'dev',
     provenance: 'curated',
     launch: { transport: 'streamable-http', url: 'https://api.githubcopilot.com/mcp/' },
+    // BEARER, NOT OAUTH, and that single word is what turns this entry from a
+    // dead end into a one-field connect. GitHub's authorization server publishes
+    // no dynamic registration endpoint and clawboo ships no client secret, so
+    // the sign-in path could only ever fail three requests in. Its remote MCP
+    // server does accept a personal access token as `Authorization: Bearer`, and
+    // clawboo already carries a static bearer end to end.
+    //
+    // The OAuth door is deliberately left open rather than deleted: if GitHub
+    // ever publishes a registration endpoint, the discovery path already handles
+    // it and this becomes a one-line change back.
     auth: {
-      kind: 'oauth',
-      inputs: [],
+      kind: 'bearer',
+      inputs: [
+        {
+          key: 'GITHUB_TOKEN',
+          label: 'GitHub token',
+          description: 'A fine-grained token, scoped to the repos you want your agents to see.',
+          docsUrl: 'https://github.com/settings/personal-access-tokens/new',
+          required: true,
+          secret: true,
+        },
+      ],
       scopes: ['repo', 'read:org'],
       scopesRationale:
         'Repository access to read and file issues and pull requests; org read to resolve team mentions.',
-      // GitHub's authorization server publishes no registration endpoint, so
-      // clawboo cannot register itself and has no app to fall back on. The tile
-      // says so instead of offering a sign-in that fails every time.
-      needsPreregisteredApp: true,
-      // The steps describe what the OPERATOR must do in their own client, not a
-      // sign-in clawboo performs. Telling them to approve a request in "the tab
-      // that opens" contradicted the tile directly above, which says clawboo
-      // cannot open one here.
       setupGuide: {
         console: 'GitHub',
-        url: 'https://github.com/settings/installations',
+        url: 'https://github.com/settings/personal-access-tokens/new',
         steps: [
-          'Copy the config block below into a runtime that can sign in to GitHub itself.',
-          'Approve the authorization there, choosing specific organizations and repositories rather than "all repositories".',
-          'Nothing to return to clawboo for: this connector runs in that runtime, not here.',
+          'Create a fine-grained personal access token.',
+          'Pick the specific repositories your agents should work in, not "all repositories".',
+          // READ AND WRITE, because the entry's own description promises writes.
+          // Asking for read-only produced a token that connects, lists its tools,
+          // and then fails on the first thing the connector says it can do.
+          'Give it Read and write on Contents, Issues and Pull requests, then copy it back here.',
         ],
       },
     },
@@ -51,6 +66,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'linear',
+    popular: true,
     displayName: 'Linear',
     description: 'Read and update Linear issues, projects, and cycles.',
     category: 'issues',
@@ -77,6 +93,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'sentry',
+    popular: true,
     displayName: 'Sentry',
     description: 'Inspect errors, issues, and stack traces from Sentry.',
     category: 'observability',
@@ -118,6 +135,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'SENTRY_AUTH_TOKEN',
+          label: 'Sentry auth token',
           description: 'A Sentry user auth token with project read scope.',
           docsUrl: 'https://sentry.io/settings/account/api/auth-tokens/',
           required: true,
@@ -132,6 +150,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'playwright',
+    popular: true,
     displayName: 'Playwright',
     description: 'Drive a real browser: navigate, click, fill forms, and read the page.',
     category: 'browser',
@@ -153,6 +172,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'chrome-devtools',
+    popular: true,
     displayName: 'Chrome DevTools',
     description: 'Inspect a running page: console, network, performance traces.',
     category: 'browser',
@@ -221,6 +241,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
   },
   {
     slug: 'cloudflare',
+    popular: true,
     displayName: 'Cloudflare',
     description: 'Inspect and manage Workers, KV, R2, and DNS on your Cloudflare account.',
     category: 'dev',
@@ -236,6 +257,7 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       inputs: [
         {
           key: 'CLOUDFLARE_API_TOKEN',
+          label: 'Cloudflare API token',
           description: 'A scoped Cloudflare API token, not your global API key.',
           docsUrl: 'https://dash.cloudflare.com/profile/api-tokens',
           required: true,

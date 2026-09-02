@@ -4,6 +4,17 @@ import { defineConfig } from 'vitest/config'
 
 const alias = { '@': path.resolve(__dirname, 'src') }
 
+// The node project's server suites drive a real `git` binary, real SQLite, and real
+// child processes, so their wall-clock is dominated by the host's I/O and process
+// spawn cost rather than by our code. GitHub's windows-latest runners are about
+// twice as slow as macOS for this same suite (measured 6m57s against 3m45s on a
+// green run), and some of that work shells out to PowerShell, where a single
+// Get-CimInstance probe can cost seconds. A 30s budget tuned on Linux therefore
+// reads as a timeout on Windows for tests that are merely slow, not broken. Widen
+// the tolerance on that platform only. This is a tolerance, not a fix: a test that
+// fails here for a genuine race should be fixed rather than given more seconds.
+const SERVER_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 30_000
+
 // Two projects (vitest 3.x): the existing node-env suites (the React/SPA logic in
 // src/ + the Express-server tests in server/, all `.test.ts`) and a jsdom project
 // for React component tests (`.test.tsx`). Splitting by project keeps component
@@ -41,8 +52,8 @@ export default defineConfig({
           // component transforms run concurrently in the same `vitest run`, those
           // tests can be starved past the 5 s default — give them headroom (they
           // pass on their own merits; this only widens the tolerance, not results).
-          testTimeout: 30_000,
-          hookTimeout: 30_000,
+          testTimeout: SERVER_TIMEOUT_MS,
+          hookTimeout: SERVER_TIMEOUT_MS,
         },
       },
       {

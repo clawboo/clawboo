@@ -71,7 +71,7 @@ Because the libraries don't publish, a changeset is in practice always *about th
 
 ## The CI gate
 
-Every push to `main` and every pull request runs `.github/workflows/ci.yml`. A `filter` job runs first and decides whether the rest run at all (see below); the nine jobs it gates are parallel, all on Node 22 with `pnpm install --frozen-lockfile` (so the lockfile is authoritative; an out-of-sync lockfile fails the install):
+Every push to `main` and every pull request runs `.github/workflows/ci.yml`. A `filter` job runs first and decides whether the rest run at all (see below); the ten jobs it gates are parallel, all on Node 22 with `pnpm install --frozen-lockfile` (so the lockfile is authoritative; an out-of-sync lockfile fails the install):
 
 | Job                 | Command                                     | What it guards                                                                           |
 | ------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -171,7 +171,7 @@ The workflow used to carry a separate `check` job that computed exactly that cou
 The normal path to npm is:
 
 1. **Author a changeset.** `pnpm changeset` → commit the generated `.changeset/*.md` alongside your change on a feature branch; open a PR.
-2. **Pass CI.** The nine gated jobs (`lint`, `typecheck`, `test`, `test-cross-platform`, `build`, `catalog-verify`, `verify-connectors`, `smoke-test-bundle`, `e2e`) must all be green, as must CodeQL. The bundle smoke test runs on Ubuntu, Windows, and macOS.
+2. **Pass CI.** The ten gated jobs (`lint`, `typecheck`, `test`, `test-cross-platform`, `build`, `catalog-verify`, `verify-connectors`, `smoke-test-bundle`, `e2e`, `website`) must all be green, as must CodeQL. The bundle smoke test runs on Ubuntu, Windows, and macOS.
 3. **Merge the feature PR.** `publish.yml` runs and `changesets/action` opens a `chore: version packages` Version PR.
 4. **Merge the Version PR.** `publish.yml` runs again: `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` → `pnpm changeset publish`. The CLI publishes, the tag and changelog land.
 5. **Verify.** `npm view clawboo version` should reflect the new version within roughly half a minute.

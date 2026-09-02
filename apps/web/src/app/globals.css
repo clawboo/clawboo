@@ -168,6 +168,8 @@
   --grad-slate: linear-gradient(145deg, #334155 0%, #0f172a 100%);
 
   --destructive: #dc2626;
+  /* The channel form, for the alpha-composited glows the graph draws. */
+  --destructive-rgb: 220 38 38;
   --destructive-foreground: #ffffff;
   --destructive-solid: var(--destructive);
 
@@ -294,6 +296,7 @@
   --ring: var(--primary);
 
   --destructive: #ef4444;
+  --destructive-rgb: 239 68 68;
   --destructive-foreground: #ffffff;
   /* Same split as --primary-solid: white on #ef4444 is 3.76:1, on this deeper
      fill it is 4.89:1. --destructive stays the lighter error TEXT colour. */

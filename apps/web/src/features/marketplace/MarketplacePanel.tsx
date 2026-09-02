@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Blocks, Bot, Plug, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
+import { Blocks, Bot, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { Select } from '@/features/shared/Select'
 import { Button } from '@/features/shared/Button'
@@ -38,8 +38,6 @@ import { TeamTemplateDetail } from './TeamTemplateDetail'
 import { AgentCard } from './AgentCard'
 import { AgentTemplateDetail } from './AgentTemplateDetail'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
-import { ConnectorsBrowser } from './ConnectorsBrowser'
-import { CONNECTOR_DEFINITIONS } from '@clawboo/connector-catalog'
 
 // ─── Skill category colours ─────────────────────────────────────────────────
 // Token-driven palette shared with SkillNode.tsx via `--category-*`.
@@ -217,9 +215,10 @@ function SkillCard({
 // ─── MarketplacePanel ────────────────────────────────────────────────────────
 
 export function MarketplacePanel() {
-  // One fetch for the whole panel. The connectors tab does not depend on it,
-  // so the shell and the tab row render immediately and only the catalog grids
-  // wait. `counts` comes from the index so the tab badges stay synchronous.
+  // One fetch for the whole panel. The index starts as the compiled seed, so the
+  // shell, the tab row and the grids all render on the first frame and only the
+  // fresher content lands late. `counts` comes from the index so the tab badges
+  // stay synchronous.
   const { index: catalog, error: catalogError, retry: retryCatalog } = useCatalogIndex()
   // Skill filter state
   const searchQuery = useMarketplaceStore((s) => s.searchQuery)
@@ -334,7 +333,6 @@ export function MarketplacePanel() {
   const isAgentsTab = marketplaceTab === 'agents'
   const isTeamsTab = marketplaceTab === 'teams'
   const isSkillsTab = marketplaceTab === 'skills'
-  const isConnectorsTab = marketplaceTab === 'connectors'
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -368,6 +366,9 @@ export function MarketplacePanel() {
       />
 
       {/* Tabs — Teams lead (the headline surface), then Agents, then Skills.
+          Connectors left this row and became its own sidebar destination: the
+          other three are a shop you visit once, and connecting the tools your
+          agents use is a recurring errand that was three clicks deep here.
           `pt-3` gives the tab row breathing room below the header hairline so the
           space above the labels matches the space below them. */}
       <div className="shrink-0 px-6 pt-3">
@@ -378,164 +379,135 @@ export function MarketplacePanel() {
             { id: 'teams', label: 'Teams', icon: Users, count: catalog?.counts.teams ?? 0 },
             { id: 'agents', label: 'Agents', icon: Bot, count: catalog?.counts.agents ?? 0 },
             { id: 'skills', label: 'Skills', icon: Wrench, count: BUILTIN_SKILLS.length },
-            {
-              id: 'connectors',
-              label: 'Connectors',
-              icon: Plug,
-              // The merged count, because ConnectorsBrowser lists the merged
-              // catalog. The curated/community SPLIT is the browser's own header
-              // line; a tab badge that silently omitted community entries would
-              // disagree with the list one click away.
-              count: CONNECTOR_DEFINITIONS.length,
-            },
           ]}
         />
       </div>
 
-      {/* Connectors owns its own filter bar + body, so the shared one is skipped.
-          `min-h-0 flex-1` is load-bearing: the browser is a flex COLUMN child, so
-          without the flex slot its `h-full` resolves against a container that has
-          already given the remaining height to the grid below, and its internal
-          scroll region never gets a box to scroll inside. */}
-      {isConnectorsTab && (
-        <div className="min-h-0 flex-1">
-          <ConnectorsBrowser />
-        </div>
-      )}
-
       {/* Filter bar */}
-      {!isConnectorsTab && (
-        <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
-          {isTeamsTab && (
-            <>
-              {/* Team search */}
-              <SearchInput
-                size="sm"
-                placeholder="Search teams…"
-                value={teamSearchQuery}
-                onChange={setTeamSearchQuery}
-              />
+      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
+        {isTeamsTab && (
+          <>
+            {/* Team search */}
+            <SearchInput
+              size="sm"
+              placeholder="Search teams…"
+              value={teamSearchQuery}
+              onChange={setTeamSearchQuery}
+            />
 
-              {/* Team category pills: busiest inline, the rest under "+N more" */}
-              <CollapsiblePillRow
-                aria-label="Filter teams by category"
-                options={teamCategoryOpts}
-                activeKey={teamCategoryFilter}
-                onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
-              />
+            {/* Team category pills: busiest inline, the rest under "+N more" */}
+            <CollapsiblePillRow
+              aria-label="Filter teams by category"
+              options={teamCategoryOpts}
+              activeKey={teamCategoryFilter}
+              onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
+            />
 
-              {/* Pack pills, derived from the packs the index actually contains */}
-              <div className="flex flex-wrap gap-1.5">
-                {packEntries.map((src) => (
+            {/* Pack pills, derived from the packs the index actually contains */}
+            <div className="flex flex-wrap gap-1.5">
+              {packEntries.map((src) => (
+                <Chip
+                  key={src.key}
+                  size="sm"
+                  active={teamSourceFilter === src.key}
+                  accent={src.key === 'all' ? undefined : src.color}
+                  onClick={() => setTeamSourceFilter(src.key)}
+                >
+                  {src.key !== 'all' && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: src.color }}
+                    />
+                  )}
+                  {src.label}
+                </Chip>
+              ))}
+            </div>
+          </>
+        )}
+
+        {isAgentsTab && (
+          <>
+            {/* Agent search */}
+            <SearchInput
+              size="sm"
+              placeholder="Search agents…"
+              value={agentSearchQuery}
+              onChange={setAgentSearchQuery}
+            />
+
+            {/* Agent category pills: busiest inline, the rest under "+N more" */}
+            <CollapsiblePillRow
+              aria-label="Filter agents by category"
+              options={agentCategoryOpts}
+              activeKey={agentCategoryFilter}
+              onSelect={(k) => setAgentCategoryFilter(k as TemplateCategory | 'all')}
+            />
+
+            {/* Pack pills, derived from the packs the index actually contains */}
+            <div className="flex flex-wrap gap-1.5">
+              {packEntries.map((src) => (
+                <Chip
+                  key={src.key}
+                  size="sm"
+                  active={agentSourceFilter === src.key}
+                  accent={src.key === 'all' ? undefined : src.color}
+                  onClick={() => setAgentSourceFilter(src.key)}
+                >
+                  {src.key !== 'all' && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: src.color }}
+                    />
+                  )}
+                  {src.label}
+                </Chip>
+              ))}
+            </div>
+          </>
+        )}
+
+        {isSkillsTab && (
+          <>
+            {/* Skill search */}
+            <SearchInput
+              size="sm"
+              placeholder="Search skills…"
+              value={searchQuery}
+              onChange={setSearchQuery}
+            />
+
+            {/* Skill category pills */}
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
+                const { color, label } = CATEGORY_META[key]
+                return (
                   <Chip
-                    key={src.key}
+                    key={key}
                     size="sm"
-                    active={teamSourceFilter === src.key}
-                    accent={src.key === 'all' ? undefined : src.color}
-                    onClick={() => setTeamSourceFilter(src.key)}
+                    active={categoryFilter === key}
+                    accent={key === 'all' ? undefined : color}
+                    onClick={() => setCategoryFilter(key)}
                   >
-                    {src.key !== 'all' && (
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ background: src.color }}
-                      />
-                    )}
-                    {src.label}
+                    {label}
                   </Chip>
-                ))}
-              </div>
-            </>
-          )}
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
 
-          {isAgentsTab && (
-            <>
-              {/* Agent search */}
-              <SearchInput
-                size="sm"
-                placeholder="Search agents…"
-                value={agentSearchQuery}
-                onChange={setAgentSearchQuery}
-              />
-
-              {/* Agent category pills: busiest inline, the rest under "+N more" */}
-              <CollapsiblePillRow
-                aria-label="Filter agents by category"
-                options={agentCategoryOpts}
-                activeKey={agentCategoryFilter}
-                onSelect={(k) => setAgentCategoryFilter(k as TemplateCategory | 'all')}
-              />
-
-              {/* Pack pills, derived from the packs the index actually contains */}
-              <div className="flex flex-wrap gap-1.5">
-                {packEntries.map((src) => (
-                  <Chip
-                    key={src.key}
-                    size="sm"
-                    active={agentSourceFilter === src.key}
-                    accent={src.key === 'all' ? undefined : src.color}
-                    onClick={() => setAgentSourceFilter(src.key)}
-                  >
-                    {src.key !== 'all' && (
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ background: src.color }}
-                      />
-                    )}
-                    {src.label}
-                  </Chip>
-                ))}
-              </div>
-            </>
-          )}
-
-          {isSkillsTab && (
-            <>
-              {/* Skill search */}
-              <SearchInput
-                size="sm"
-                placeholder="Search skills…"
-                value={searchQuery}
-                onChange={setSearchQuery}
-              />
-
-              {/* Skill category pills */}
-              <div className="flex flex-wrap gap-1.5">
-                {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
-                  const { color, label } = CATEGORY_META[key]
-                  return (
-                    <Chip
-                      key={key}
-                      size="sm"
-                      active={categoryFilter === key}
-                      accent={key === 'all' ? undefined : color}
-                      onClick={() => setCategoryFilter(key)}
-                    >
-                      {label}
-                    </Chip>
-                  )
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Grid. Every child is gated on teams/agents/skills, so on the connectors
-          tab this container is empty, but `flex-1` would still make it eat the
-          remaining height and starve the browser above it. Dropped OUT of the
-          flex layout rather than unmounted, to keep the ~100 lines below at their
-          current indentation. */}
-      <div className={isConnectorsTab ? 'hidden' : 'flex-1 overflow-y-auto p-6'}>
+      {/* Grid */}
+      <div className="flex-1 overflow-y-auto p-6">
         {/* Said once, plainly, on every catalog tab. Most of what is below is
             other people's work that Clawboo curated and adapted, not wrote, and
             the checks it ran are narrower than a reader might assume. Not
             dismissible: it is a standing fact about the catalog, not a notice to
             acknowledge and hide. */}
-        {!isConnectorsTab && (
-          <p className="mb-4 text-[11.5px] leading-relaxed text-muted-foreground">
-            {COMMUNITY_DISCLOSURE}
-          </p>
-        )}
+        <p className="mb-4 text-[11.5px] leading-relaxed text-muted-foreground">
+          {COMMUNITY_DISCLOSURE}
+        </p>
         {/* A dropped catalog fetch must say so, but it must NOT empty the grids.
             The builtin pack is compiled into this bundle, so what renders below
             is the seed rather than nothing, and this line is the difference

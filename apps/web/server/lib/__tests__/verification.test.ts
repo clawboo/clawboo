@@ -114,6 +114,17 @@ async function provisionForTask(
   return { taskId: task.id, worktree: prov.worktree }
 }
 
+// REAL GIT, REAL WORKTREES, and that is the point of the file: the gate is
+// exercised against an actual repository rather than a mock. It is also why the
+// 30 s project default is not enough on the Windows runner, where every `git`
+// invocation pays for process spawn and NTFS. The suite failed there on
+// `skips the critic on a small, low-risk diff` at ~40 s while the same test
+// passes comfortably on Linux and macOS.
+//
+// WIDENED, NOT SKIPPED. A genuine hang still fails, just later; what this stops
+// is a slow runner being reported as a broken gate.
+const WORKTREE_TIMEOUT_MS = 90_000
+
 describe('verification gate (real board + real git worktree)', () => {
   let repo: string
   let home: string
@@ -136,128 +147,154 @@ describe('verification gate (real board + real git worktree)', () => {
     await rm(repo, { recursive: true, force: true }).catch(() => {})
   })
 
-  it('a green deterministic gate promotes in_review → done', async () => {
-    const { taskId } = await provisionForTask(repo, 'exit 0')
-    const r = await actOnTaskWorkspace(taskId, 'complete')
-    expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('pass')
-    expect(getTask(getDb(), taskId)?.status).toBe('done')
-    expect(getTaskVerification(getDb(), taskId)?.status).toBe('pass')
-  })
+  it(
+    'a green deterministic gate promotes in_review → done',
+    async () => {
+      const { taskId } = await provisionForTask(repo, 'exit 0')
+      const r = await actOnTaskWorkspace(taskId, 'complete')
+      expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('pass')
+      expect(getTask(getDb(), taskId)?.status).toBe('done')
+      expect(getTaskVerification(getDb(), taskId)?.status).toBe('pass')
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
 
-  it('a failing gate blocks done and reverts to in_progress with a structured error', async () => {
-    const { taskId } = await provisionForTask(repo, 'exit 1')
-    const r = await actOnTaskWorkspace(taskId, 'complete')
-    expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('fail')
-    const db = getDb()
-    expect(getTask(db, taskId)?.status).toBe('in_progress')
-    const comments = getComments(db, taskId)
-    expect(
-      comments.some((c) => c.body.includes('Verification failed') && c.body.includes('How to fix')),
-    ).toBe(true)
-  })
+  it(
+    'a failing gate blocks done and reverts to in_progress with a structured error',
+    async () => {
+      const { taskId } = await provisionForTask(repo, 'exit 1')
+      const r = await actOnTaskWorkspace(taskId, 'complete')
+      expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('fail')
+      const db = getDb()
+      expect(getTask(db, taskId)?.status).toBe('in_progress')
+      const comments = getComments(db, taskId)
+      expect(
+        comments.some(
+          (c) => c.body.includes('Verification failed') && c.body.includes('How to fix'),
+        ),
+      ).toBe(true)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
 
-  it('marks completed_with_debt at cycle exhaustion (never deadlocks)', async () => {
-    const { taskId, worktree } = await provisionForTask(repo, 'exit 1')
-    const db = getDb()
-    const verdict = await verifyTask({
-      db,
-      taskId,
-      repoPath: repo,
-      worktree,
-      diffStat: DIRTY_SMALL,
-      reviewRootDir: path.join(home, 'reviews'),
-      maxFixCycles: 1, // exhaust immediately
-    })
-    expect(verdict.status).toBe('completed_with_debt')
-    expect(verdict.debtNotes.length).toBeGreaterThan(0)
-  })
+  it(
+    'marks completed_with_debt at cycle exhaustion (never deadlocks)',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 1')
+      const db = getDb()
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        maxFixCycles: 1, // exhaust immediately
+      })
+      expect(verdict.status).toBe('completed_with_debt')
+      expect(verdict.debtNotes.length).toBeGreaterThan(0)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
 
-  it('a completed_with_debt verdict over a RED gate routes to BLOCKED (never silently done)', async () => {
-    const { taskId } = await provisionForTask(repo, 'exit 1') // gate always red
-    const db = getDb()
-    // Pre-seed 2 prior failing attempts so the next cycle (default max 3) exhausts
-    // the fix loop → completed_with_debt with a still-failing deterministic gate.
-    const failAttempt = (n: number) => ({
-      attempt: n,
-      at: 0,
-      deterministic: {
-        command: 'exit 1',
-        exitCode: 1,
-        passed: false,
-        stdoutTail: '',
-        stderrTail: '',
-        durationMs: 1,
-        timedOut: false,
-      },
-      critic: {
-        ran: false,
-        findings: [],
-        reviewerRuntime: null,
-        reviewerModel: null,
-        reviewedSha: null,
-      },
-      status: 'fail' as const,
-      structuredError: null,
-    })
-    setTaskVerification(db, taskId, {
-      status: 'fail',
-      attempts: [failAttempt(1), failAttempt(2)],
-      debtNotes: [],
-      updatedAt: 0,
-    })
+  it(
+    'a completed_with_debt verdict over a RED gate routes to BLOCKED (never silently done)',
+    async () => {
+      const { taskId } = await provisionForTask(repo, 'exit 1') // gate always red
+      const db = getDb()
+      // Pre-seed 2 prior failing attempts so the next cycle (default max 3) exhausts
+      // the fix loop → completed_with_debt with a still-failing deterministic gate.
+      const failAttempt = (n: number) => ({
+        attempt: n,
+        at: 0,
+        deterministic: {
+          command: 'exit 1',
+          exitCode: 1,
+          passed: false,
+          stdoutTail: '',
+          stderrTail: '',
+          durationMs: 1,
+          timedOut: false,
+        },
+        critic: {
+          ran: false,
+          findings: [],
+          reviewerRuntime: null,
+          reviewerModel: null,
+          reviewedSha: null,
+        },
+        status: 'fail' as const,
+        structuredError: null,
+      })
+      setTaskVerification(db, taskId, {
+        status: 'fail',
+        attempts: [failAttempt(1), failAttempt(2)],
+        debtNotes: [],
+        updatedAt: 0,
+      })
 
-    const r = await actOnTaskWorkspace(taskId, 'complete')
-    expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('completed_with_debt')
-    // A red build/test gate is NOT auto-promotable — routed to a human, not done.
-    expect(getTask(db, taskId)?.status).toBe('blocked')
-    expect(
-      getComments(db, taskId).some((c) =>
-        c.body.toLowerCase().includes('blocked for human review'),
-      ),
-    ).toBe(true)
-  })
+      const r = await actOnTaskWorkspace(taskId, 'complete')
+      expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('completed_with_debt')
+      // A red build/test gate is NOT auto-promotable — routed to a human, not done.
+      expect(getTask(db, taskId)?.status).toBe('blocked')
+      expect(
+        getComments(db, taskId).some((c) =>
+          c.body.toLowerCase().includes('blocked for human review'),
+        ),
+      ).toBe(true)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
 
-  it('the read-only critic runs on a risky diff and a blocking finding fails the verdict', async () => {
-    const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
-    const db = getDb()
-    const reviewRoot = path.join(home, 'reviews')
-    const blocking = JSON.stringify({
-      findings: [{ severity: 'security', title: 'hardcoded token', confidence: 0.9 }],
-    })
-    const verdict = await verifyTask({
-      db,
-      taskId,
-      repoPath: repo,
-      worktree,
-      diffStat: DIRTY_SMALL,
-      reviewRootDir: reviewRoot,
-      riskFlag: true, // force the critic regardless of diff size
-      reviewerModel: 'reviewer-model-x',
-      makeReviewerAdapter: () => new FakeReviewerAdapter(blocking),
-    })
-    expect(verdict.status).toBe('fail')
-    expect(verdict.attempts[0]?.critic.ran).toBe(true)
-    expect(verdict.attempts[0]?.critic.reviewedSha).toBeTruthy()
-    // The reviewer model is recorded on the verdict so a same-model review's bias
-    // caveat is visible (builder ≠ judge is context-level + optionally model-level).
-    expect(verdict.attempts[0]?.critic.reviewerModel).toBe('reviewer-model-x')
-    // the detached review worktree was torn down (read-only, push-less, ephemeral)
-    expect(!existsSync(reviewRoot) || readdirSync(reviewRoot).length === 0).toBe(true)
-  })
+  it(
+    'the read-only critic runs on a risky diff and a blocking finding fails the verdict',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      const db = getDb()
+      const reviewRoot = path.join(home, 'reviews')
+      const blocking = JSON.stringify({
+        findings: [{ severity: 'security', title: 'hardcoded token', confidence: 0.9 }],
+      })
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: reviewRoot,
+        riskFlag: true, // force the critic regardless of diff size
+        reviewerModel: 'reviewer-model-x',
+        makeReviewerAdapter: () => new FakeReviewerAdapter(blocking),
+      })
+      expect(verdict.status).toBe('fail')
+      expect(verdict.attempts[0]?.critic.ran).toBe(true)
+      expect(verdict.attempts[0]?.critic.reviewedSha).toBeTruthy()
+      // The reviewer model is recorded on the verdict so a same-model review's bias
+      // caveat is visible (builder ≠ judge is context-level + optionally model-level).
+      expect(verdict.attempts[0]?.critic.reviewerModel).toBe('reviewer-model-x')
+      // the detached review worktree was torn down (read-only, push-less, ephemeral)
+      expect(!existsSync(reviewRoot) || readdirSync(reviewRoot).length === 0).toBe(true)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
 
-  it('skips the critic on a small, low-risk diff (passes on the gate alone)', async () => {
-    const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
-    const db = getDb()
-    const verdict = await verifyTask({
-      db,
-      taskId,
-      repoPath: repo,
-      worktree,
-      diffStat: DIRTY_SMALL,
-      reviewRootDir: path.join(home, 'reviews'),
-      makeReviewerAdapter: () => new FakeReviewerAdapter('{"findings":[]}'),
-    })
-    expect(verdict.status).toBe('pass')
-    expect(verdict.attempts[0]?.critic.ran).toBe(false)
-  })
+  it(
+    'skips the critic on a small, low-risk diff (passes on the gate alone)',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      const db = getDb()
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        makeReviewerAdapter: () => new FakeReviewerAdapter('{"findings":[]}'),
+      })
+      expect(verdict.status).toBe('pass')
+      expect(verdict.attempts[0]?.critic.ran).toBe(false)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
 })

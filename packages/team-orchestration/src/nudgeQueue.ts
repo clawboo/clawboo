@@ -76,8 +76,12 @@ export function createNudgeQueue(opts?: {
       void Promise.resolve(opts?.onWedge?.(sessionKey)).catch(() => undefined)
       markIdle(sessionKey)
     }, wedgeMs)
-    if (typeof (t as { unref?: () => void }).unref === 'function')
-      (t as { unref: () => void }).unref()
+    // `setTimeout` is typed as the DOM's (returning `number`) because this
+    // package is browser-safe, but under Node the handle is a Timeout carrying
+    // `unref`. TS 6 rejects the direct assertion as non-overlapping, so widen
+    // through `unknown`; the runtime probe below is what actually guards it.
+    const handle = t as unknown as { unref?: () => void }
+    if (typeof handle.unref === 'function') handle.unref()
     wedgeTimers.set(sessionKey, t)
   }
 

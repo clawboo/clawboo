@@ -585,6 +585,10 @@ export const toolCallApprovals = sqliteTable(
     neverRemember: integer('never_remember').notNull().default(0),
     // The GrantApprovalReason behind the prompt, e.g. lethal-trifecta.
     ruleReason: text('rule_reason'),
+    /** The server's own reading of the tool: read | write | destructive. */
+    toolClass: text('tool_class'),
+    /** The tool's own one-line description, for a card that cannot name the verb. */
+    toolSummary: text('tool_summary'),
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     resolvedAt: integer('resolved_at'),
@@ -598,6 +602,26 @@ export const toolCallApprovals = sqliteTable(
 
 export type DbToolCallApproval = typeof toolCallApprovals.$inferSelect
 export type DbToolCallApprovalInsert = typeof toolCallApprovals.$inferInsert
+
+// Tool results too large to hand a model in one piece, kept whole. See the DDL in
+// schemaBootstrap for why storing precedes trimming.
+export const toolResultBlobs = sqliteTable(
+  'tool_result_blobs',
+  {
+    handle: text('handle').primaryKey(),
+    toolName: text('tool_name').notNull(),
+    agentId: text('agent_id'),
+    tenantId: text('tenant_id'),
+    body: text('body').notNull(),
+    /** What the tool produced, which exceeds `storedBytes` when the store capped it. */
+    totalBytes: integer('total_bytes').notNull(),
+    storedBytes: integer('stored_bytes').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('idx_tool_result_blobs_created').on(t.createdAt)],
+)
+
+export type DbToolResultBlob = typeof toolResultBlobs.$inferSelect
 
 // ─── Governance ────────────────────────────────────────────
 // Hard USD budget kill-switch + append-only forensic audit. Budgets are scoped
@@ -777,6 +801,14 @@ export const connectors = sqliteTable(
     // A LIVENESS measurement, never an authorization. Nothing writes it in this
     // release; an outbound MCP client is what produces it.
     health: text('health').notNull().default('unknown'),
+    // OPERATOR INTENT, not liveness. `health` cannot answer "should this be
+    // running": a deliberate disconnect leaves it untouched, and so does a
+    // graceful shutdown, so a boot restore reading health would either
+    // resurrect a connector the operator switched off or never restore
+    // anything. Only an explicit field separates "was on when we stopped" from
+    // "turned off on purpose". `connected` is the safe default because a row
+    // exists only after a connect succeeded.
+    desiredState: text('desired_state').notNull().default('connected'),
     healthDetail: text('health_detail'),
     failures: integer('failures').notNull().default(0),
     tenantId: text('tenant_id'),

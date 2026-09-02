@@ -11,6 +11,7 @@
 import {
   appendAudit,
   expireStaleApprovals,
+  reapToolResults,
   sweepExpiredGrants,
   getTask,
   getTaskVerification,
@@ -23,6 +24,9 @@ import { getDb } from './db'
 import { emitEvent } from './obs'
 
 const DEFAULT_TTL_MS = 24 * 60 * 60_000 // 24h
+// Stored tool results outlive their run on purpose: an operator reading an audit
+// row days later should still be able to see what a tool actually returned.
+const RESULT_TTL_MS = 7 * 24 * 60 * 60_000 // 7d
 const DEFAULT_INTERVAL_MS = 60 * 60_000 // 1h
 
 interface ReaperLog {
@@ -42,6 +46,8 @@ export interface ReapResult {
   /** Grants moved to `expired`, and standing rules dropped, by this pass. */
   grantsExpired: number
   rulesExpired: number
+  /** Stored tool results dropped by this pass. */
+  toolResultsReaped: number
 }
 
 /** One reaper pass: expire stale pending approvals, unblock any linked blocked
@@ -58,6 +64,13 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
   // that body is guarded by a module-level `started` flag, so a test could never
   // run one pass over it.
   const swept = sweepExpiredGrants(db)
+
+  // Stored tool results ride the same tick, for the same reason grants do: they
+  // are written by a path with no natural point to clean up after itself. Nothing
+  // in this repo prunes `tool_call_audit` or `orchestration_events` either, and a
+  // spill store is the one of the three that holds whole third-party payloads, so
+  // it ships WITH its retention rather than growing until someone notices.
+  const reapedResults = reapToolResults(db, envMs('CLAWBOO_TOOL_RESULT_TTL_MS', RESULT_TTL_MS))
 
   const expiredRows = expireStaleApprovals(db, { olderThanMs: ttlMs })
   const unblocked: string[] = []
@@ -95,6 +108,7 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
     unblocked,
     grantsExpired: swept.grants,
     rulesExpired: swept.rules,
+    toolResultsReaped: reapedResults,
   }
 }
 

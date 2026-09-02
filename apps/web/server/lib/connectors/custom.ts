@@ -28,6 +28,20 @@ export interface CustomConnectorInput {
   description?: string
   command: string
   args: string[]
+  /**
+   * Environment variables this server needs.
+   *
+   * Present so the operator is ASKED. A community entry that declared
+   * `CLICKUP_API_KEY` used to lose that on the way in, so the consent panel
+   * promised a key would be requested and then nothing ever requested it: the
+   * connector showed a Turn on button and failed at spawn with the vendor's own
+   * unauthenticated error.
+   */
+  authInputs?: { key: string; description: string; required: boolean }[]
+  /** Registry identity, when this came from the community snapshot. */
+  catalogId?: string
+  /** The exact version the operator was shown before approving, when there was one. */
+  pinnedVersion?: string
 }
 
 function parse(raw: string | null): CustomConnectorInput[] {
@@ -74,14 +88,32 @@ export function toDefinition(entry: CustomConnectorInput): ConnectorDefinition {
       transport: 'stdio',
       command: entry.command,
       args: entry.args,
-      // Nothing to pin: the operator chose this command, and inventing a version
-      // for it would be a claim we cannot support.
-      pinnedVersion: 'user-supplied',
+      // The version the operator was actually shown, when there was one. A
+      // hand-typed connector has none and says so; inventing one would be a
+      // claim we cannot support, and recording "user-supplied" for an entry
+      // whose consent step named `@0.5.2` contradicts the screen they agreed to.
+      pinnedVersion: entry.pinnedVersion ?? 'user-supplied',
     },
-    auth: { kind: 'none', inputs: [] },
+    auth:
+      entry.authInputs && entry.authInputs.length > 0
+        ? {
+            kind: 'api-key',
+            // SECRET, always. clawboo has not read this server, so a value it
+            // asks for is treated as a credential rather than as configuration:
+            // masked in the field, stored in the vault, never returned by any
+            // route and never logged.
+            inputs: entry.authInputs.map((i) => ({
+              key: i.key,
+              description: i.description || 'Required by this server.',
+              required: i.required,
+              secret: true,
+            })),
+          }
+        : { kind: 'none', inputs: [] },
     egressAllow: ['*'],
     trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: true },
     tags: ['custom'],
+    ...(entry.catalogId ? { catalogId: entry.catalogId } : {}),
   }
 }
 

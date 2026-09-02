@@ -33,7 +33,10 @@ function settingsKey(teamId: string): string {
  *  session key — i.e. it has been used. Such a team should NOT be re-gated behind the
  *  "Know Your Team" onboarding flow. (Post-S08b there is no agent-intro parade, so a
  *  genuinely new team has no chat until the user sends its first message, which happens
- *  only after the gate — so this cleanly distinguishes "used" from "brand-new".) */
+ *  only after the gate — so this cleanly distinguishes "used" from "brand-new".)
+ *
+ *  Starting fresh leaves the room's messages exactly where they are, so a team that
+ *  reset still matches here and keeps the gate it already passed. */
 function hasTeamChatActivity(db: ClawbooDb, teamId: string): boolean {
   const row = db
     .select({ id: chatMessages.id })

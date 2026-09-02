@@ -5,10 +5,23 @@ import type { TranscriptEntry } from '@clawboo/protocol'
  * How far back layer-2 dedup (see `appendTranscript`) looks. A duplicate frame
  * always lands adjacent to its twin — only the other lines of the same commit
  * batch can separate them — so a bounded tail is enough. It also keeps the cost
- * flat: the signature carries the entry's FULL text, and re-hashing all 500
- * capped entries on every streamed commit would scale with transcript bytes.
+ * flat: the signature carries the entry's FULL text, and re-hashing every capped
+ * entry on every streamed commit would scale with transcript bytes.
  */
 const DEDUP_SCAN_WINDOW = 50
+
+/**
+ * How many entries one conversation keeps in memory.
+ *
+ * This is an ARRAY bound, not a rendering one: `useRenderWindow` already limits the
+ * DOM to a couple of hundred nodes regardless of how long the transcript is. It used
+ * to be 500, which was ample while starting fresh emptied the chat. Now that a
+ * conversation is never cleared and can be scrolled backwards a page at a time, a
+ * tight cap actively fights the person: they pull in older history, then the next
+ * live message trims it straight back off the front. Generous enough that several
+ * pages of scrollback survive a reply landing, and still bounded.
+ */
+const TRANSCRIPT_CAP = 2000
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 // Keyed by sessionKey so multiple agent conversations are held simultaneously.
@@ -36,6 +49,15 @@ interface ChatStore {
 
   /** Append one or more entries to a session's transcript. */
   appendTranscript: (sessionKey: string, entries: TranscriptEntry[]) => void
+
+  /**
+   * Put OLDER entries at the front, for scrolling further back.
+   *
+   * Separate from `appendTranscript` because that one appends and then trims the
+   * FRONT, which is precisely the end a page of history arrives at: routing history
+   * through it would place old messages after new ones and then drop them.
+   */
+  prependTranscript: (sessionKey: string, entries: TranscriptEntry[]) => void
 
   /** Set (or clear) the live streaming text for a session. */
   setStreamingText: (sessionKey: string, text: string | null) => void
@@ -164,7 +186,22 @@ export const useChatStore = create<ChatStore>((set) => ({
 
       if (fresh.length === 0) return state
       const merged = [...existing, ...fresh]
-      next.set(sessionKey, merged.length > 500 ? merged.slice(-500) : merged)
+      next.set(sessionKey, merged.length > TRANSCRIPT_CAP ? merged.slice(-TRANSCRIPT_CAP) : merged)
+      return { transcripts: next }
+    }),
+
+  prependTranscript: (sessionKey, entries) =>
+    set((state) => {
+      if (entries.length === 0) return state
+      const next = new Map(state.transcripts)
+      const existing = next.get(sessionKey) ?? []
+      // Only entryId dedup here. Layer-2 content dedup exists to collapse a commit
+      // batch appended twice in one tick; a page of history is neither, and two
+      // genuinely identical old messages must both survive.
+      const seen = new Set(existing.map((e) => e.entryId))
+      const older = entries.filter((e) => !seen.has(e.entryId))
+      if (older.length === 0) return state
+      next.set(sessionKey, [...older, ...existing])
       return { transcripts: next }
     }),
 

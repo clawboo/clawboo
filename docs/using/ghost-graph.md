@@ -32,6 +32,38 @@ The graph reads your fleet from the agent registry and the capability inventory;
 
 The selected team in the sidebar is **preserved** when you enter Atlas, so the two graphs keep independent saved layouts (Atlas positions are global and split by layout mode; team positions are keyed `team-<id>`). Switching scopes never overwrites the other's positions.
 
+## Building on the canvas
+
+Every Boo carries one port on its right edge. Pull a thread out of it and let go.
+
+| Where you let go             | What happens                                 |
+| ---------------------------- | -------------------------------------------- |
+| On another Boo               | Routes the first agent to the second         |
+| On a skill or connector tile | Gives that agent the capability              |
+| On empty canvas              | Opens a picker of what the thread can end in |
+
+The picker asks what kind of thing you want first: **Connectors**, **Skills**, or **New agent**. Pick one and it shows that list, ordered so the entries you can finish in a single click come first. The back arrow, Escape, or backspacing to an empty box all return to the choice.
+
+If you already know the name, just type. Searching from the first screen looks across every kind at once and skips the second step, and the last row offers to create an agent named after whatever you typed. A new Boo lands in the same team as the one you pulled from, already routed to it.
+
+A connector that needs a key or a folder is listed but greyed, with the reason. Those are set up in [Connectors](/using/connectors), because a credential is a form and not a canvas gesture.
+
+Each Boo shows what it carries under its name: `3 skills · 2 connectors · 1 route`. Clicking the Boo opens that ring.
+
+### Taking something back
+
+Click an edge to open its panel, then **Remove Connection**. Or select an edge and press Backspace or Delete, which works anywhere except while you are typing in a field. Routes, skills and shares all come off the same way, and a share carries an eight-second Undo.
+
+Backspace removes the selected **edge** only. It never deletes an agent: that stays on the right-click menu, which asks the server rather than only removing the node from your screen.
+
+Some edges refuse, and say why: a runtime built-in came with the agent, and the model tile is part of the Boo rather than something added to it.
+
+### What is not here
+
+Creating a team, adding a custom MCP server, entering a credential, choosing a folder, and editing a personality are not on the canvas. Each needs more than a name or a pick, and a canvas button that opens another window is worse than no button. They live in the Marketplace, Connectors, and the agent's own view.
+
+An agent's runtime cannot be changed after it is created, anywhere.
+
 ## The canvas
 
 ```mermaid
@@ -55,7 +87,7 @@ flowchart TD
 - **Boo nodes** (red dots / cards) are your agents. The leader-rooted spanning tree from `AGENTS.md` routing rules drives the org-chart hierarchy: ELK lays out Boos and the primary dependency edges; secondary routes are revealed only on hover.
 - **Dependency edges** (red, with arrowheads) are agent-to-agent routing: "this agent routes work to the target." Each one is a line in the source agent's `AGENTS.md`.
 - **Skill nodes** (mint circles) and **resource nodes** (amber cards) are each Boo's capabilities, drawn as orbitals around their parent. They are hidden by default and revealed by [expanding a Boo](#expand-a-boos-skills-peacock). An agent that has no per-agent capabilities of its own (Codex, OpenClaw, a not-yet-run Hermes agent) shows its runtime's shared capabilities instead, so every agent surfaces its attached MCP and built-ins.
-- **Grant edges** connect a Boo to a [connector](/using/connectors) somebody deliberately shared with it. Drag a connector tile onto a second Boo to share it, and use **Detach** on the edge to revoke, which leaves an 8-second Undo. Only a deliberate share draws an edge: a connector a Boo's own runtime already attaches is authorized too, but the tile itself is that statement, so drawing it again would be noise. The edge's state is not a second reading of a status column; it is the verdict the tool broker would return for that pair right now, so a grant that has expired or [drifted](/appendices/glossary) renders as expired or drifted because that is what a call would actually do.
+- **Grant edges** connect a Boo to a [connector](/using/connectors) somebody deliberately shared with it. Drag a connector tile onto a second Boo to share it, and use **Stop sharing** on the edge to revoke, which leaves an 8-second Undo. That is distinct from **Turn off**, which stops the connector itself rather than one agent's access to it. Only a deliberate share draws an edge: a connector a Boo's own runtime already attaches is authorized too, but the tile itself is that statement, so drawing it again would be noise. The edge's state is not a second reading of a status column; it is the verdict the tool broker would return for that pair right now, so a grant that has expired or [drifted](/appendices/glossary) renders as expired or drifted because that is what a call would actually do.
 - **Runtime badge + model orbital.** Every Boo carries a small **runtime brand chip** on its avatar, so you can tell Native, OpenClaw, Claude Code, Codex, and Hermes apart at a glance. Expanding a Boo also pops out a **model orbital**, the provider logo plus the LLM it runs on. Every Boo has one: an account/SDK-default runtime (Codex, Claude Code) shows a neutral "default" chip rather than a specific model, and an OpenClaw agent shows its Gateway default model.
 
 ### Dual-shape Boo nodes (idle circle / active card)

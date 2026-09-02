@@ -28,6 +28,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./community": {
+      "types": "./dist/community.d.ts",
+      "import": "./dist/community.mjs",
+      "require": "./dist/community.js"
     }
   },
   "scripts": {
@@ -39,7 +44,7 @@
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
     "tsup": "^8.4.0",
-    "typescript": "^5.7.0",
+    "typescript": "^6.0.3",
     "vitest": "^3.2.7",
     "zod": "^3.25.0"
   }

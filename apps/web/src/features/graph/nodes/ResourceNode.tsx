@@ -11,7 +11,7 @@ import {
 import { Handle, NodeToolbar, Position, useStore } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { useGraphStore } from '../store'
-import { useViewStore } from '@/stores/view'
+import { disconnectConnector, signInConnector } from '@/features/marketplace/connectConnector'
 import { useToastStore } from '@/stores/toast'
 import { disableCapability, enableCapability } from '@/lib/capabilitiesClient'
 import { detachGrant } from '../operations/revokeGrant'
@@ -19,6 +19,8 @@ import { useFloatingMotion } from '../useFloatingMotion'
 import { usePeacockTransition } from '../usePeacockTransition'
 import type { ResourceNodeData, ConnectorServiceKind } from '../types'
 import { capabilityBadge, capabilityReason } from './capabilityBadge'
+import { connectorBrandSlug, connectorSlugFromId, isRemoteConnector } from './connectorTile'
+import { brandColorVar, ConnectorGlyph, hasBrandMark } from '@/features/connectors/ConnectorMark'
 
 // ─── ResourceNode — the MCP-connector tile ────────────────────────────────────
 //
@@ -31,9 +33,8 @@ import { capabilityBadge, capabilityReason } from './capabilityBadge'
 
 const VIOLET = 'var(--violet)'
 const CIRCLE = 46 // matches the regular SkillNode tile
-/** Below this zoom, orbital tiles collapse to flat dots (see the LOD note). */
+/** Below this zoom, orbital tiles drop their label, badge and motion. */
 const LOD_ZOOM = 0.4
-const LOD_DOT = 10
 
 // Each clawboo MCP server gets a MEANINGFUL glyph (lucide, never emoji):
 // memory → Database, tasks → Kanban, tools → Wrench, team chat → Messages.
@@ -96,6 +97,16 @@ export const ResourceNode = memo(function ResourceNode({
   const off = enabled === false
   const greyed = unavailable || off
   const Icon = SERVICE_ICON[serviceKind ?? 'generic'] ?? Cable
+  // THE REAL LOGO WHEN THERE IS ONE. A tile reading "Gmail" under a generic
+  // cable is a tile the eye has to read; the same tile under Gmail's own mark
+  // is one it recognises, which is the whole job of an orbital at this size.
+  //
+  // TYPE COLOUR SURVIVES THE SWAP. Violet still says "this is a connector",
+  // exactly as mint says skill and slate says built-in, so the accent is not
+  // handed over to the brand. Only the glyph changes, and only where a
+  // committed mark exists: everything else keeps its service glyph rather than
+  // falling back to a monogram, which would be a downgrade.
+  const brandSlug = connectorBrandSlug(connectorId, hasBrandMark, fullName ?? name)
   // Float with the SKILL motion profile: connector tiles are visual peers of
   // skill tiles in the same orbital fan, so a static tile next to gently
   // bobbing siblings would read as frozen/broken, not calm.
@@ -141,21 +152,36 @@ export const ResourceNode = memo(function ResourceNode({
         style={{ width: CIRCLE, height: CIRCLE, position: 'relative' }}
         title={reason ? `${tooltipBase}: ${reason}` : tooltipBase}
       >
+        {/* THE WHOLE DISC, NOT A PIP. This drew a 10px dot inside a 46px tile,
+            which at fleet zoom is a few screen pixels: adding a connector looked
+            like nothing had been added, and the tile only "came back" on zooming
+            in. The label, the badge, the toolbar and the per-frame float are
+            still dropped here, which is what the threshold was actually for. */}
         <div
           aria-hidden
           style={{
             position: 'absolute',
-            top: (CIRCLE - LOD_DOT) / 2,
-            left: (CIRCLE - LOD_DOT) / 2,
-            width: LOD_DOT,
-            height: LOD_DOT,
+            inset: 0,
             borderRadius: '50%',
-            // Badge color wins at this zoom: at fleet scale the only thing worth
-            // a pixel is "something here needs you".
-            background: badge ? badge.color : VIOLET,
-            opacity: greyed ? 0.4 : 0.9,
+            background: `color-mix(in srgb, ${VIOLET} 15%, var(--surface))`,
+            // Badge colour still wins at this zoom. It rides the ring rather
+            // than replacing the tile, so "something needs you" reads without
+            // the connector itself disappearing to say it.
+            border: `1.5px solid ${badge ? badge.color : `color-mix(in srgb, ${VIOLET} 65%, transparent)`}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: greyed ? 0.4 : 1,
           }}
-        />
+        >
+          {brandSlug ? (
+            <span style={{ display: 'flex', color: brandColorVar(brandSlug) }}>
+              <ConnectorGlyph slug={brandSlug} title={name} size={20} />
+            </span>
+          ) : (
+            <Icon size={20} strokeWidth={2} style={{ color: VIOLET }} />
+          )}
+        </div>
         <Handle type="target" position={Position.Left} style={centerHandleStyle} />
         <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
         {/* The grant SOURCE handle survives fleet zoom too. Dropping it here
@@ -237,7 +263,19 @@ export const ResourceNode = memo(function ResourceNode({
                 boxShadow: `0 2px 8px color-mix(in srgb, ${VIOLET} 20%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.07)`,
               }}
             >
-              <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
+              {brandSlug ? (
+                // THE GLYPH TAKES THE BRAND, THE DISC KEEPS THE TYPE. The model
+                // orbital already sets this precedent: it is tinted by whoever
+                // makes the model while staying an orbital. Colouring a logo
+                // violet would make Gmail and Jira and Slack indistinguishable
+                // at the size this renders, which is the opposite of the reason
+                // to draw a logo at all.
+                <span style={{ display: 'flex', color: brandColorVar(brandSlug) }}>
+                  <ConnectorGlyph slug={brandSlug} title={name} size={20} />
+                </span>
+              ) : (
+                <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
+              )}
             </motion.div>
 
             {/* ONE badge, top-right of the disc. Suppressed while collapsed: a
@@ -361,18 +399,31 @@ export const ResourceNode = memo(function ResourceNode({
 // ─── ResourceToolbar ─────────────────────────────────────────────────────────
 //
 // Pure function of the record. Buttons render only when their action is real:
-//   Configure       always (opens the Capabilities panel, the detail surface)
+//   Configure       always. For a connector clawboo owns it deep-links to that
+//                   connector's card; otherwise the Capabilities panel.
 //   Disable/Enable  writable rows only (the existing REST write)
-//   Sign in         health 'needs-auth' only: the hint IS the action today
+//   Sign in         health 'needs-auth' only. Runs the real sign-in for a
+//                   clawboo connector; for another runtime's capability the
+//                   source-supplied hint is still all there is to offer.
+//   Turn off        a clawboo-owned connector only: stops the connection.
+//                   Deliberately distinct in label AND position from Stop
+//                   sharing, which revokes somebody else's access instead.
 //   Retry           health 'error' | 'degraded' only (re-reads the inventory)
-//   Detach          grant-backed rows only (revoke + the undo toast)
+//   Stop sharing    grant-backed rows only (revoke + the undo toast). Named for
+//                   what it does: it was `Detach`, which reads as "remove this
+//                   connector" and actually revokes another agent's share.
 
 const TOOLBAR_BTN =
   'rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-medium ' +
   'text-foreground transition-colors hover:border-border-strong hover:bg-surface-raised'
 
 function ResourceToolbar({ data }: { data: ResourceNodeData }) {
-  const { capabilityId, writable, enabled, health, hint, grantIds, name } = data
+  const { capabilityId, writable, enabled, health, hint, grantIds, name, connectorId } = data
+
+  // Only a connection clawboo itself owns, never another runtime's attached
+  // server. See ./connectorTile, where the gating is tested.
+  const connectorSlug = connectorSlugFromId(connectorId)
+  const remote = isRemoteConnector(connectorSlug)
   // A real ref, not a per-render object: the guard must survive re-renders or a
   // double-click races two toggle writes.
   const busyRef = useRef(false)
@@ -402,13 +453,13 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
 
   return (
     <div className="flex items-center gap-1.5" role="toolbar" aria-label={`${name} actions`}>
-      <button
-        type="button"
-        className={TOOLBAR_BTN}
-        onClick={() => useViewStore.getState().navigateTo('capabilities')}
-      >
-        Configure
-      </button>
+      {/* CONFIGURE IS GONE, and deliberately not replaced by a link. It was the
+          only button on this toolbar that navigated; the other five act in
+          place, so it was the one that broke the rule the toolbar otherwise
+          keeps. Deep connector configuration is a credential or a folder, which
+          is a form and not a canvas action, and it lives in the Connectors
+          destination in the sidebar. A graph that advertises a door it should
+          not open is worse than one that stays quiet about it. */}
       {writable === true && capabilityId && (
         <button type="button" className={TOOLBAR_BTN} onClick={() => void toggleEnabled()}>
           {enabled === false ? 'Enable' : 'Disable'}
@@ -419,17 +470,43 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
           type="button"
           className={TOOLBAR_BTN}
           title={hint}
-          onClick={() =>
+          onClick={() => {
+            // A BUTTON THAT DOES THE THING. It used to render the hint as a toast
+            // and stop, which is a control that reports rather than acts. For a
+            // connector clawboo owns, the sign-in flow already exists.
+            if (connectorSlug) {
+              void signInConnector(connectorSlug, name).then((ok) => {
+                if (ok) useGraphStore.getState().triggerRefresh()
+              })
+              return
+            }
             useToastStore.getState().addToast({
-              // The source-supplied hint verbatim: the graph never paraphrases
-              // a per-runtime remedy into a string of its own.
+              // For a capability another RUNTIME owns, the source-supplied hint
+              // verbatim: the graph never paraphrases a per-runtime remedy.
               message: hint ?? `${name} needs sign-in.`,
               type: 'info',
               ttlMs: 8000,
             })
-          }
+          }}
         >
           Sign in
+        </button>
+      )}
+      {/* A REAL OFF SWITCH, distinct from Stop sharing below. Until now the only
+          way to stop a connector was to find it again in the marketplace panel,
+          and the one destructive-looking button on this toolbar revoked somebody
+          else's share instead. They must never share a label or a position. */}
+      {connectorSlug && (
+        <button
+          type="button"
+          className={TOOLBAR_BTN}
+          onClick={() => {
+            void disconnectConnector(connectorSlug, name, remote).then(() =>
+              useGraphStore.getState().triggerRefresh(),
+            )
+          }}
+        >
+          Turn off
         </button>
       )}
       {(health === 'error' || health === 'degraded') && (
@@ -451,7 +528,7 @@ function ResourceToolbar({ data }: { data: ResourceNodeData }) {
             void detachGrant({ grantId: grantIds![0]!, connectorName: name })
           }
         >
-          Detach
+          Stop sharing
         </button>
       )}
     </div>

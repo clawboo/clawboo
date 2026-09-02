@@ -22,6 +22,8 @@ import { deleteRuntimeSecret, getRuntimeSecret, setRuntimeSecret } from '../secr
 /** One credential a connector declared, and whether it is satisfied. */
 export interface CredentialStatus {
   key: string
+  /** What the vendor calls this. The field label; `key` is the env var name. */
+  label?: string
   description: string
   required: boolean
   secret: boolean
@@ -32,6 +34,7 @@ export interface CredentialStatus {
 
 export interface DeclaredInput {
   key: string
+  label?: string
   description: string
   required: boolean
   secret: boolean
@@ -58,6 +61,7 @@ export function credentialStatus(
 ): CredentialStatus[] {
   return inputs.map((input) => ({
     key: input.key,
+    ...(input.label ? { label: input.label } : {}),
     description: input.description,
     required: input.required,
     secret: input.secret,
