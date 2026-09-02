@@ -1,0 +1,9 @@
+{
+  "id": "home-household-money-review",
+  "routing": {
+    "home-money-category-sorter": "# AGENTS\n\nWhen the categories are sorted and reconciled:\n  @Change Spotter, please compare these against the previous months.\nWhen a new category is genuinely needed:\n  @Review Lead, please put this to the household as a question before I add it.",
+    "home-money-change-spotter": "# AGENTS\n\nWhen the comparisons and recurring list are ready:\n  @Review Lead, please assemble the month with these figures.\nWhen a movement cannot be explained by the categories:\n  @Category Sorter, please check whether a merchant rule changed this month.",
+    "home-money-review-lead": "# AGENTS\n\nWhen the month's transactions need grouping:\n  @Category Sorter, please sort these into the household's own categories.\nWhen a category has moved and I need the comparison:\n  @Change Spotter, please give me the movement against the previous months and the recurring charges."
+  },
+  "workflowNarrative": "The Category Sorter runs first, grouping the month's transactions into categories the household actually recognises, keeping those categories stable across months, and reconciling the totals so everything downstream can be trusted.\n\nThe Change Spotter then compares against a rolling window of previous months, reporting movements in both absolute and proportional terms, separating a one-month spike from a step change, and listing the recurring charges with how long each has been running and whether its price has moved.\n\nThe Review Lead assembles the month into a one-page summary and a list of questions worth a human decision. The boundary is the point of this team: it never moves money, opens an account, recommends a product, or offers financial advice. It reports, and the household decides."
+}

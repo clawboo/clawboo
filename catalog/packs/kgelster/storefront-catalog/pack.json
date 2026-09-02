@@ -1,0 +1,211 @@
+{
+  "agents": [
+    {
+      "body": "agents/catalog-auditor.json",
+      "category": "ops",
+      "color": "#F97316",
+      "description": "Finds the broken listings in a catalog too large to read: missing photos, empty descriptions, price anomalies and taxonomy gaps.",
+      "emoji": "🔍",
+      "id": "shopcat-catalog-auditor",
+      "name": "Product Catalog Auditor",
+      "packId": "kgelster-storefront-catalog",
+      "role": "Product Catalog Auditor",
+      "skillIds": [
+        "catalog-triage-index",
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "file-writer",
+        "json-transformer"
+      ],
+      "slug": "catalog-auditor",
+      "tags": ["catalog", "audit", "product-data", "ecommerce"]
+    },
+    {
+      "body": "agents/cleanup-operator.json",
+      "category": "ops",
+      "color": "#F97316",
+      "description": "Clears the debris an audit found, in bulk and reversibly: dead products archived, orphaned fields removed, mangled descriptions repaired.",
+      "emoji": "🧹",
+      "id": "shopcat-cleanup-operator",
+      "name": "Catalog Cleanup Operator",
+      "packId": "kgelster-storefront-catalog",
+      "role": "Catalog Cleanup Operator",
+      "skillIds": [
+        "bulk-mutation-safety",
+        "catalog-triage-index",
+        "csv-analyzer",
+        "file-reader",
+        "file-writer"
+      ],
+      "slug": "cleanup-operator",
+      "tags": ["catalog", "cleanup", "bulk-edit", "ecommerce"]
+    },
+    {
+      "body": "agents/metadata-writer.json",
+      "category": "content",
+      "color": "#F97316",
+      "description": "Fills the missing page titles, meta descriptions and image alt text across a product catalog without inventing facts the source does not support.",
+      "emoji": "✍️",
+      "id": "shopcat-metadata-writer",
+      "name": "Catalog Metadata Writer",
+      "packId": "kgelster-storefront-catalog",
+      "role": "Catalog Metadata Writer",
+      "skillIds": [
+        "product-metadata-writing",
+        "bulk-mutation-safety",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer"
+      ],
+      "slug": "metadata-writer",
+      "tags": ["metadata", "alt-text", "accessibility", "catalog", "copy"]
+    },
+    {
+      "body": "agents/structured-data-engineer.json",
+      "category": "engineering",
+      "color": "#F97316",
+      "description": "Keeps machine-readable product markup honest and maps dead URLs onto live pages, favouring coverage over a flawless match.",
+      "emoji": "🔗",
+      "id": "shopcat-structured-data-engineer",
+      "name": "Structured Data and Redirects Engineer",
+      "packId": "kgelster-storefront-catalog",
+      "role": "Structured Data and Redirects Engineer",
+      "skillIds": [
+        "structured-data-markup",
+        "redirect-mapping",
+        "web-scraper",
+        "csv-analyzer",
+        "file-writer"
+      ],
+      "slug": "structured-data-engineer",
+      "tags": ["json-ld", "structured-data", "redirects", "migration"]
+    },
+    {
+      "body": "agents/taxonomy-curator.json",
+      "category": "ops",
+      "color": "#F97316",
+      "description": "Assigns products to a standard category tree and fills the attributes that filtering, faceted search and shopping feeds actually read.",
+      "emoji": "🗂️",
+      "id": "shopcat-taxonomy-curator",
+      "name": "Category Taxonomy Curator",
+      "packId": "kgelster-storefront-catalog",
+      "role": "Category Taxonomy Curator",
+      "skillIds": [
+        "product-taxonomy-mapping",
+        "bulk-mutation-safety",
+        "csv-analyzer",
+        "json-transformer",
+        "file-writer"
+      ],
+      "slug": "taxonomy-curator",
+      "tags": ["taxonomy", "categories", "attributes", "merchandising"]
+    }
+  ],
+  "counts": {
+    "agents": 5,
+    "skills": 6,
+    "teams": 1
+  },
+  "description": "Five catalog operations specialists and the team they form, covering product-data auditing, reversible bulk cleanup, metadata and alt text at catalog scale, category and attribute classification, structured data, and redirect mapping across a URL change. Adapted from an MIT-licensed upstream collection of commerce skills: the method was kept, the platform plumbing and the paid third-party tooling were left behind.",
+  "id": "kgelster-storefront-catalog",
+  "idPrefix": "shopcat",
+  "name": "Storefront Catalog Ops",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Kurt Elster"],
+    "color": "#F97316",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Storefront Catalog Ops",
+    "license": "MIT",
+    "ref": "0b6f9e51b4a14b030ab52a2f1ff8a320bdc50070",
+    "repo": "https://github.com/kgelster/awesome-ecom-skills",
+    "sourceId": "kgelster-storefront-catalog"
+  },
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "category": "data",
+      "description": "Builds a cheap flag table over a whole product catalog so problems can be found by pattern instead of by reading every listing.",
+      "id": "catalog-triage-index",
+      "name": "Catalog Triage Index",
+      "tags": ["catalog", "triage", "audit", "indexing"]
+    },
+    {
+      "category": "other",
+      "description": "Runs a preview count before every bulk write, prefers the reversible operation, and verifies the result against the source of truth.",
+      "id": "bulk-mutation-safety",
+      "name": "Bulk Mutation Safety",
+      "tags": ["safety", "bulk-edit", "reversible", "verification"]
+    },
+    {
+      "category": "comm",
+      "description": "Writes page titles, meta descriptions and image alt text at catalog scale without inventing product facts that are not in the source.",
+      "id": "product-metadata-writing",
+      "name": "Product Metadata Writing",
+      "tags": ["metadata", "alt-text", "seo", "accessibility"]
+    },
+    {
+      "category": "code",
+      "description": "Adds product and organisation structured data that matches what the page actually shows, and audits for duplicate or conflicting blocks.",
+      "id": "structured-data-markup",
+      "name": "Structured Data Markup",
+      "tags": ["json-ld", "schema", "structured-data"]
+    },
+    {
+      "category": "web",
+      "description": "Maps dead URLs to the closest live page with per-type thresholds, and routes the uncertain ones to a review queue instead of the homepage.",
+      "id": "redirect-mapping",
+      "name": "Redirect Mapping",
+      "tags": ["redirects", "migration", "404", "seo"]
+    },
+    {
+      "category": "data",
+      "description": "Assigns products to a standard category tree and fills the attributes that filtering, faceted search and shopping feeds depend on.",
+      "id": "product-taxonomy-mapping",
+      "name": "Product Taxonomy Mapping",
+      "tags": ["taxonomy", "categories", "attributes", "merchandising"]
+    }
+  ],
+  "teams": [
+    {
+      "body": "teams/catalog-health-desk.json",
+      "category": "ops",
+      "color": "#F97316",
+      "description": "Takes a neglected product catalog from unknown to shippable: find the defects, clear the debris, fill the metadata, classify, and survive the URL change.",
+      "emoji": "🗃️",
+      "id": "shopcat-catalog-health-desk",
+      "members": [
+        {
+          "agentId": "shopcat-catalog-auditor",
+          "name": "Product Catalog Auditor",
+          "role": "Product Catalog Auditor"
+        },
+        {
+          "agentId": "shopcat-cleanup-operator",
+          "name": "Catalog Cleanup Operator",
+          "role": "Catalog Cleanup Operator"
+        },
+        {
+          "agentId": "shopcat-metadata-writer",
+          "name": "Catalog Metadata Writer",
+          "role": "Catalog Metadata Writer"
+        },
+        {
+          "agentId": "shopcat-taxonomy-curator",
+          "name": "Category Taxonomy Curator",
+          "role": "Category Taxonomy Curator"
+        },
+        {
+          "agentId": "shopcat-structured-data-engineer",
+          "name": "Structured Data and Redirects Engineer",
+          "role": "Structured Data and Redirects Engineer"
+        }
+      ],
+      "name": "Catalog Health Desk",
+      "packId": "kgelster-storefront-catalog",
+      "slug": "catalog-health-desk",
+      "tags": ["catalog", "ecommerce", "cleanup", "migration"]
+    }
+  ],
+  "version": "1.0.0"
+}

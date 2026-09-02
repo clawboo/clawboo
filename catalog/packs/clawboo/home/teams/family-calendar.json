@@ -1,0 +1,9 @@
+{
+  "id": "home-family-calendar",
+  "routing": {
+    "home-calendar-clash-spotter": "# AGENTS\n\nWhen a conflict needs a decision and a change:\n  @Schedule Keeper, please decide what moves, and I will recheck the week afterwards.\nWhen an event is unattended because preparation was missed:\n  @Prep Lister, please tell me what this event actually requires.",
+    "home-calendar-prep-lister": "# AGENTS\n\nWhen preparation cannot fit before the event:\n  @Schedule Keeper, please decide whether this event moves or changes shape.\nWhen a preparation task lands on an already full day:\n  @Clash Spotter, please confirm whether that day has room for it.",
+    "home-calendar-schedule-keeper": "# AGENTS\n\nWhen the week has been updated:\n  @Clash Spotter, please check this version for collisions and unattended events.\nWhen an event needs things done before it:\n  @Prep Lister, please turn this into a preparation list with dates."
+  },
+  "workflowNarrative": "The Schedule Keeper is the entry point and holds the canonical week. Every change is applied there rather than mentioned beside it, so two people asking what happens on Thursday get the same answer.\n\nThe Clash Spotter then argues with that week. Its whole job is to disagree with the leader: two commitments needing one person, a transfer that cannot be made in the gap available, an event with no adult attached. It reports collisions and never rewrites the week to hide them.\n\nThe Prep Lister turns each event into the things that must happen before it, dated backwards from the event and assigned to a person. The Schedule Keeper publishes the week-ahead summary with the open decisions listed, and the household decides."
+}

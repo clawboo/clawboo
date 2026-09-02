@@ -1,0 +1,377 @@
+{
+  "agents": [
+    {
+      "body": "agents/dev-bug-fixer-boo.json",
+      "category": "engineering",
+      "color": "#34D399",
+      "description": "Bug Fixer on the Dev Team — Code review, bug hunting, and documentation — a tight engineering trio that keeps the codebase clean.",
+      "emoji": "👾",
+      "id": "clawboo-dev-bug-fixer-boo",
+      "name": "Bug Fixer Boo",
+      "packId": "clawboo",
+      "role": "Bug Fixer",
+      "skillIds": ["code-search", "test-runner"],
+      "slug": "dev-bug-fixer-boo",
+      "tags": ["clawboo", "dev", "code review", "debugging", "documentation", "engineering"]
+    },
+    {
+      "body": "agents/dev-code-reviewer-boo.json",
+      "category": "engineering",
+      "color": "#34D399",
+      "description": "Code Reviewer on the Dev Team — Code review, bug hunting, and documentation — a tight engineering trio that keeps the codebase clean.",
+      "emoji": "👾",
+      "id": "clawboo-dev-code-reviewer-boo",
+      "name": "Code Reviewer Boo",
+      "packId": "clawboo",
+      "role": "Code Reviewer",
+      "skillIds": ["code-search"],
+      "slug": "dev-code-reviewer-boo",
+      "tags": ["clawboo", "dev", "code review", "debugging", "documentation", "engineering"]
+    },
+    {
+      "body": "agents/dev-doc-writer-boo.json",
+      "category": "engineering",
+      "color": "#34D399",
+      "description": "Doc Writer on the Dev Team — Code review, bug hunting, and documentation — a tight engineering trio that keeps the codebase clean.",
+      "emoji": "👾",
+      "id": "clawboo-dev-doc-writer-boo",
+      "name": "Doc Writer Boo",
+      "packId": "clawboo",
+      "role": "Doc Writer",
+      "skillIds": [],
+      "slug": "dev-doc-writer-boo",
+      "tags": ["clawboo", "dev", "code review", "debugging", "documentation", "engineering"]
+    },
+    {
+      "body": "agents/marketing-content-writer-boo.json",
+      "category": "marketing",
+      "color": "#E94560",
+      "description": "Content Writer on the Marketing Squad — Content, SEO, and social — a full-stack marketing team that ships campaigns from idea to publish.",
+      "emoji": "📣",
+      "id": "clawboo-marketing-content-writer-boo",
+      "name": "Content Writer Boo",
+      "packId": "clawboo",
+      "role": "Content Writer",
+      "skillIds": ["web-search", "email-draft"],
+      "slug": "marketing-content-writer-boo",
+      "tags": ["clawboo", "marketing", "content", "seo", "social media", "copywriting"]
+    },
+    {
+      "body": "agents/marketing-seo-analyst-boo.json",
+      "category": "marketing",
+      "color": "#E94560",
+      "description": "SEO Analyst on the Marketing Squad — Content, SEO, and social — a full-stack marketing team that ships campaigns from idea to publish.",
+      "emoji": "📣",
+      "id": "clawboo-marketing-seo-analyst-boo",
+      "name": "SEO Analyst Boo",
+      "packId": "clawboo",
+      "role": "SEO Analyst",
+      "skillIds": ["web-search"],
+      "slug": "marketing-seo-analyst-boo",
+      "tags": ["clawboo", "marketing", "content", "seo", "social media", "copywriting"]
+    },
+    {
+      "body": "agents/marketing-social-media-manager-boo.json",
+      "category": "marketing",
+      "color": "#E94560",
+      "description": "Social Media Manager on the Marketing Squad — Content, SEO, and social — a full-stack marketing team that ships campaigns from idea to publish.",
+      "emoji": "📣",
+      "id": "clawboo-marketing-social-media-manager-boo",
+      "name": "Social Media Manager Boo",
+      "packId": "clawboo",
+      "role": "Social Media Manager",
+      "skillIds": ["web-search"],
+      "slug": "marketing-social-media-manager-boo",
+      "tags": ["clawboo", "marketing", "content", "seo", "social media", "copywriting"]
+    },
+    {
+      "body": "agents/research-data-analyst-boo.json",
+      "category": "research",
+      "color": "#A78BFA",
+      "description": "Data Analyst on the Research Lab — Reading, analysing, and distilling — a research powerhouse that turns raw sources into clear insights.",
+      "emoji": "🔬",
+      "id": "clawboo-research-data-analyst-boo",
+      "name": "Data Analyst Boo",
+      "packId": "clawboo",
+      "role": "Data Analyst",
+      "skillIds": ["web-search", "note-taker"],
+      "slug": "research-data-analyst-boo",
+      "tags": ["clawboo", "research", "analysis", "papers", "data"]
+    },
+    {
+      "body": "agents/research-paper-reader-boo.json",
+      "category": "research",
+      "color": "#A78BFA",
+      "description": "Paper Reader on the Research Lab — Reading, analysing, and distilling — a research powerhouse that turns raw sources into clear insights.",
+      "emoji": "🔬",
+      "id": "clawboo-research-paper-reader-boo",
+      "name": "Paper Reader Boo",
+      "packId": "clawboo",
+      "role": "Paper Reader",
+      "skillIds": ["web-search", "pdf-reader"],
+      "slug": "research-paper-reader-boo",
+      "tags": ["clawboo", "research", "analysis", "papers", "data"]
+    },
+    {
+      "body": "agents/research-summarizer-boo.json",
+      "category": "research",
+      "color": "#A78BFA",
+      "description": "Summarizer on the Research Lab — Reading, analysing, and distilling — a research powerhouse that turns raw sources into clear insights.",
+      "emoji": "🔬",
+      "id": "clawboo-research-summarizer-boo",
+      "name": "Summarizer Boo",
+      "packId": "clawboo",
+      "role": "Summarizer",
+      "skillIds": ["note-taker", "citation-formatter"],
+      "slug": "research-summarizer-boo",
+      "tags": ["clawboo", "research", "analysis", "papers", "data"]
+    },
+    {
+      "body": "agents/student-essay-helper-boo.json",
+      "category": "education",
+      "color": "#38BDF8",
+      "description": "Essay Helper on the Student Pack — Study, write, and remember — a personal academic team that makes learning faster and less stressful.",
+      "emoji": "📚",
+      "id": "clawboo-student-essay-helper-boo",
+      "name": "Essay Helper Boo",
+      "packId": "clawboo",
+      "role": "Essay Helper",
+      "skillIds": ["web-search", "note-taker"],
+      "slug": "student-essay-helper-boo",
+      "tags": ["clawboo", "student", "study", "essays", "flashcards", "learning"]
+    },
+    {
+      "body": "agents/student-flashcard-maker-boo.json",
+      "category": "education",
+      "color": "#38BDF8",
+      "description": "Flashcard Maker on the Student Pack — Study, write, and remember — a personal academic team that makes learning faster and less stressful.",
+      "emoji": "📚",
+      "id": "clawboo-student-flashcard-maker-boo",
+      "name": "Flashcard Maker Boo",
+      "packId": "clawboo",
+      "role": "Flashcard Maker",
+      "skillIds": ["note-taker"],
+      "slug": "student-flashcard-maker-boo",
+      "tags": ["clawboo", "student", "study", "essays", "flashcards", "learning"]
+    },
+    {
+      "body": "agents/student-study-buddy-boo.json",
+      "category": "education",
+      "color": "#38BDF8",
+      "description": "Study Buddy on the Student Pack — Study, write, and remember — a personal academic team that makes learning faster and less stressful.",
+      "emoji": "📚",
+      "id": "clawboo-student-study-buddy-boo",
+      "name": "Study Buddy Boo",
+      "packId": "clawboo",
+      "role": "Study Buddy",
+      "skillIds": ["web-search", "quiz-generator"],
+      "slug": "student-study-buddy-boo",
+      "tags": ["clawboo", "student", "study", "essays", "flashcards", "learning"]
+    },
+    {
+      "body": "agents/youtube-script-writer-boo.json",
+      "category": "content",
+      "color": "#FBBF24",
+      "description": "Script Writer on the YouTube Crew — Scripts, thumbnails, and discoverability — a creator crew that optimises every step of the YouTube pipeline.",
+      "emoji": "🎬",
+      "id": "clawboo-youtube-script-writer-boo",
+      "name": "Script Writer Boo",
+      "packId": "clawboo",
+      "role": "Script Writer",
+      "skillIds": ["web-search", "trend-analyzer"],
+      "slug": "youtube-script-writer-boo",
+      "tags": ["clawboo", "youtube", "video", "scripts", "thumbnails"]
+    },
+    {
+      "body": "agents/youtube-seo-optimizer-boo.json",
+      "category": "content",
+      "color": "#FBBF24",
+      "description": "SEO Optimizer on the YouTube Crew — Scripts, thumbnails, and discoverability — a creator crew that optimises every step of the YouTube pipeline.",
+      "emoji": "🎬",
+      "id": "clawboo-youtube-seo-optimizer-boo",
+      "name": "SEO Optimizer Boo",
+      "packId": "clawboo",
+      "role": "SEO Optimizer",
+      "skillIds": ["web-search", "trend-analyzer"],
+      "slug": "youtube-seo-optimizer-boo",
+      "tags": ["clawboo", "youtube", "video", "scripts", "thumbnails"]
+    },
+    {
+      "body": "agents/youtube-thumbnail-advisor-boo.json",
+      "category": "content",
+      "color": "#FBBF24",
+      "description": "Thumbnail Advisor on the YouTube Crew — Scripts, thumbnails, and discoverability — a creator crew that optimises every step of the YouTube pipeline.",
+      "emoji": "🎬",
+      "id": "clawboo-youtube-thumbnail-advisor-boo",
+      "name": "Thumbnail Advisor Boo",
+      "packId": "clawboo",
+      "role": "Thumbnail Advisor",
+      "skillIds": ["web-search"],
+      "slug": "youtube-thumbnail-advisor-boo",
+      "tags": ["clawboo", "youtube", "video", "scripts", "thumbnails"]
+    }
+  ],
+  "counts": { "agents": 15, "skills": 0, "teams": 5 },
+  "description": "The five built-in teams and the fifteen agents behind them. This is the pack compiled into the app as the offline seed, so first-run onboarding works with no network at all.",
+  "id": "clawboo",
+  "name": "Clawboo Builtins",
+  "provenance": {
+    "adaptation": "original",
+    "authors": ["Clawboo maintainers"],
+    "color": "#34D399",
+    "importedAt": "2026-08-25T00:00:00.000Z",
+    "label": "Clawboo",
+    "license": "MIT",
+    "repo": "https://github.com/clawboo/clawboo",
+    "sourceId": "clawboo"
+  },
+  "renames": {
+    "dev": "clawboo-dev",
+    "marketing": "clawboo-marketing",
+    "research": "clawboo-research",
+    "student": "clawboo-student",
+    "youtube": "clawboo-youtube"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/dev.json",
+      "category": "engineering",
+      "color": "#34D399",
+      "description": "Code review, bug hunting, and documentation — a tight engineering trio that keeps the codebase clean.",
+      "emoji": "👾",
+      "id": "clawboo-dev",
+      "members": [
+        {
+          "agentId": "clawboo-dev-code-reviewer-boo",
+          "name": "Code Reviewer Boo",
+          "role": "Code Reviewer"
+        },
+        { "agentId": "clawboo-dev-bug-fixer-boo", "name": "Bug Fixer Boo", "role": "Bug Fixer" },
+        { "agentId": "clawboo-dev-doc-writer-boo", "name": "Doc Writer Boo", "role": "Doc Writer" }
+      ],
+      "name": "Dev Team",
+      "packId": "clawboo",
+      "slug": "dev",
+      "tags": ["code review", "debugging", "documentation", "engineering", "testing", "development"]
+    },
+    {
+      "body": "teams/marketing.json",
+      "category": "marketing",
+      "color": "#E94560",
+      "description": "Content creation, SEO, and social media — a coordinated marketing team ready to amplify your message.",
+      "emoji": "📣",
+      "id": "clawboo-marketing",
+      "members": [
+        {
+          "agentId": "clawboo-marketing-content-writer-boo",
+          "name": "Content Writer Boo",
+          "role": "Content Writer"
+        },
+        {
+          "agentId": "clawboo-marketing-seo-analyst-boo",
+          "name": "SEO Analyst Boo",
+          "role": "SEO Analyst"
+        },
+        {
+          "agentId": "clawboo-marketing-social-media-manager-boo",
+          "name": "Social Media Manager Boo",
+          "role": "Social Media Manager"
+        }
+      ],
+      "name": "Marketing Squad",
+      "packId": "clawboo",
+      "slug": "marketing",
+      "tags": ["content", "seo", "social media", "copywriting", "campaigns", "marketing"]
+    },
+    {
+      "body": "teams/research.json",
+      "category": "research",
+      "color": "#A78BFA",
+      "description": "Paper analysis, data synthesis, and summarization — a focused research team for academic and technical deep dives.",
+      "emoji": "🔬",
+      "id": "clawboo-research",
+      "members": [
+        {
+          "agentId": "clawboo-research-paper-reader-boo",
+          "name": "Paper Reader Boo",
+          "role": "Paper Reader"
+        },
+        {
+          "agentId": "clawboo-research-data-analyst-boo",
+          "name": "Data Analyst Boo",
+          "role": "Data Analyst"
+        },
+        {
+          "agentId": "clawboo-research-summarizer-boo",
+          "name": "Summarizer Boo",
+          "role": "Summarizer"
+        }
+      ],
+      "name": "Research Lab",
+      "packId": "clawboo",
+      "slug": "research",
+      "tags": ["research", "analysis", "papers", "data", "synthesis", "academic"]
+    },
+    {
+      "body": "teams/student.json",
+      "category": "education",
+      "color": "#38BDF8",
+      "description": "Study help, essay feedback, and flashcards — a friendly learning crew that makes studying less painful.",
+      "emoji": "📚",
+      "id": "clawboo-student",
+      "members": [
+        {
+          "agentId": "clawboo-student-study-buddy-boo",
+          "name": "Study Buddy Boo",
+          "role": "Study Buddy"
+        },
+        {
+          "agentId": "clawboo-student-essay-helper-boo",
+          "name": "Essay Helper Boo",
+          "role": "Essay Helper"
+        },
+        {
+          "agentId": "clawboo-student-flashcard-maker-boo",
+          "name": "Flashcard Maker Boo",
+          "role": "Flashcard Maker"
+        }
+      ],
+      "name": "Student Pack",
+      "packId": "clawboo",
+      "slug": "student",
+      "tags": ["study", "essays", "flashcards", "learning", "academic", "education"]
+    },
+    {
+      "body": "teams/youtube.json",
+      "category": "content",
+      "color": "#FBBF24",
+      "description": "Script writing, thumbnail direction, and SEO — a content creator crew ready to help you ship videos that perform.",
+      "emoji": "🎬",
+      "id": "clawboo-youtube",
+      "members": [
+        {
+          "agentId": "clawboo-youtube-script-writer-boo",
+          "name": "Script Writer Boo",
+          "role": "Script Writer"
+        },
+        {
+          "agentId": "clawboo-youtube-thumbnail-advisor-boo",
+          "name": "Thumbnail Advisor Boo",
+          "role": "Thumbnail Advisor"
+        },
+        {
+          "agentId": "clawboo-youtube-seo-optimizer-boo",
+          "name": "SEO Optimizer Boo",
+          "role": "SEO Optimizer"
+        }
+      ],
+      "name": "YouTube Crew",
+      "packId": "clawboo",
+      "slug": "youtube",
+      "tags": ["youtube", "video", "scripts", "thumbnails", "seo", "creator"]
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "clawboo-student",
+  "routing": {
+    "clawboo-student-essay-helper-boo": "# AGENTS\n\nWhen the student needs to understand a concept before writing about it:\n  @Study Buddy Boo, please explain this concept and provide context.\nWhen the essay requires memorisation of key terms or dates:\n  @Flashcard Maker Boo, please create review cards for these terms.",
+    "clawboo-student-flashcard-maker-boo": "# AGENTS\n\nWhen you need a concept explained before creating cards for it:\n  @Study Buddy Boo, please provide a clear breakdown of this concept.\nWhen flashcards relate to essay topics:\n  @Essay Helper Boo, please share the key arguments and evidence to include.",
+    "clawboo-student-study-buddy-boo": "# AGENTS\n\nWhen a student needs help structuring an essay based on what they've studied:\n  @Essay Helper Boo, please help them outline and structure the essay.\nWhen study material needs to be converted into review cards:\n  @Flashcard Maker Boo, please create review cards from this material."
+  }
+}

@@ -1,0 +1,819 @@
+{
+  "agents": [
+    {
+      "body": "agents/research-analyst.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Runs multi-source research end to end and turns the findings into a sourced brief a decision maker can act on.",
+      "emoji": "🔍",
+      "id": "voltagent-research-analyst",
+      "name": "Research Analyst Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/research-analyst.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Research Analyst",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "pdf-reader",
+        "summarizer",
+        "citation-formatter",
+        "note-taker"
+      ],
+      "slug": "research-analyst",
+      "tags": ["research", "synthesis", "sources", "briefing"]
+    },
+    {
+      "body": "agents/data-researcher.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Finds, collects and quality-checks the data sets an analysis depends on, and documents exactly what each field means.",
+      "emoji": "🧪",
+      "id": "voltagent-data-researcher",
+      "name": "Data Researcher Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/data-researcher.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Data Researcher",
+      "skillIds": [
+        "web-search",
+        "csv-analyzer",
+        "sql-query",
+        "spreadsheet-reader",
+        "json-transformer",
+        "data-visualizer"
+      ],
+      "slug": "data-researcher",
+      "tags": ["data", "sourcing", "quality", "datasets"]
+    },
+    {
+      "body": "agents/competitive-analyst.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Tears down direct and indirect competitors, benchmarks the gaps honestly, and turns the result into positioning a team can defend.",
+      "emoji": "♟️",
+      "id": "voltagent-competitive-analyst",
+      "name": "Competitive Analyst Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/competitive-analyst.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Competitive Analyst",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "summarizer",
+        "spreadsheet-reader",
+        "markdown-renderer"
+      ],
+      "slug": "competitive-analyst",
+      "tags": ["competitive", "benchmarking", "positioning", "strategy"]
+    },
+    {
+      "body": "agents/market-researcher.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Sizes markets from the bottom up, segments demand by real buying behaviour, and states the assumptions the number rests on.",
+      "emoji": "📊",
+      "id": "voltagent-market-researcher",
+      "name": "Market Researcher Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/market-researcher.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Market Researcher",
+      "skillIds": [
+        "web-search",
+        "csv-analyzer",
+        "data-visualizer",
+        "trend-analyzer",
+        "summarizer",
+        "spreadsheet-reader"
+      ],
+      "slug": "market-researcher",
+      "tags": ["market", "sizing", "segmentation", "demand"]
+    },
+    {
+      "body": "agents/trend-analyst.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Separates durable shifts from noise, dates the inflection, and writes scenarios a planning team can actually use.",
+      "emoji": "📈",
+      "id": "voltagent-trend-analyst",
+      "name": "Trend Analyst Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/trend-analyst.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Trend Analyst",
+      "skillIds": [
+        "rss-reader",
+        "web-search",
+        "trend-analyzer",
+        "data-visualizer",
+        "summarizer",
+        "note-taker"
+      ],
+      "slug": "trend-analyst",
+      "tags": ["trends", "forecasting", "scenarios", "signals"]
+    },
+    {
+      "body": "agents/literature-researcher.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Searches the scientific literature and extracts structured evidence: methods, sample sizes, effect sizes and study quality.",
+      "emoji": "📚",
+      "id": "voltagent-literature-researcher",
+      "name": "Literature Researcher Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/scientific-literature-researcher.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Literature Researcher",
+      "skillIds": [
+        "pdf-reader",
+        "web-search",
+        "citation-formatter",
+        "summarizer",
+        "note-taker",
+        "markdown-renderer"
+      ],
+      "slug": "literature-researcher",
+      "tags": ["literature", "evidence", "papers", "methodology"]
+    },
+    {
+      "body": "agents/first-principles-thinker.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Strips a problem back to what is actually true, tests every inherited assumption, and rebuilds the solution from the ground up.",
+      "emoji": "🧱",
+      "id": "voltagent-first-principles-thinker",
+      "name": "First Principles Thinker Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/first-principles-thinking.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "First Principles Thinker",
+      "skillIds": ["note-taker", "summarizer", "markdown-renderer", "web-search", "file-writer"],
+      "slug": "first-principles-thinker",
+      "tags": ["reasoning", "assumptions", "problem-solving", "strategy"]
+    },
+    {
+      "body": "agents/idea-validator.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "Pressure-tests a product idea against real demand, existing alternatives and unit economics, then gives a clear go or no-go.",
+      "emoji": "🧭",
+      "id": "voltagent-idea-validator",
+      "name": "Idea Validator Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/10-research-analysis/project-idea-validator.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Idea Validator",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "trend-analyzer",
+        "spreadsheet-reader",
+        "summarizer",
+        "markdown-renderer"
+      ],
+      "slug": "idea-validator",
+      "tags": ["validation", "product", "go-no-go", "evidence"]
+    },
+    {
+      "body": "agents/agent-organizer.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Breaks a large request into subtasks, matches each one to the right specialist, and writes the team plan down before work starts.",
+      "emoji": "🗂️",
+      "id": "voltagent-agent-organizer",
+      "name": "Agent Organizer Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/agent-organizer.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Agent Organizer",
+      "skillIds": ["file-reader", "file-writer", "markdown-renderer", "note-taker", "summarizer"],
+      "slug": "agent-organizer",
+      "tags": ["planning", "delegation", "teams", "decomposition"]
+    },
+    {
+      "body": "agents/multi-agent-coordinator.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Designs how concurrent agents talk, share state and recover from failure, and writes the coordination convention down.",
+      "emoji": "🕸️",
+      "id": "voltagent-multi-agent-coordinator",
+      "name": "Multi-Agent Coordinator Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/multi-agent-coordinator.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Multi-Agent Coordinator",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "notification-sender",
+        "markdown-renderer",
+        "note-taker"
+      ],
+      "slug": "multi-agent-coordinator",
+      "tags": ["coordination", "concurrency", "handoff", "state"]
+    },
+    {
+      "body": "agents/workflow-orchestrator.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Turns a fuzzy process into an explicit state machine with transitions, error paths and compensating actions for every step.",
+      "emoji": "🔁",
+      "id": "voltagent-workflow-orchestrator",
+      "name": "Workflow Orchestrator Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/workflow-orchestrator.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Workflow Orchestrator",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "json-transformer",
+        "markdown-renderer",
+        "code-search"
+      ],
+      "slug": "workflow-orchestrator",
+      "tags": ["workflow", "state-machine", "process", "rollback"]
+    },
+    {
+      "body": "agents/task-distributor.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Designs how work is split, queued and balanced across workers so priorities and deadlines are honoured under load.",
+      "emoji": "📬",
+      "id": "voltagent-task-distributor",
+      "name": "Task Distributor Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/task-distributor.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Task Distributor",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "json-transformer",
+        "notification-sender",
+        "spreadsheet-reader"
+      ],
+      "slug": "task-distributor",
+      "tags": ["queueing", "load-balancing", "priorities", "throughput"]
+    },
+    {
+      "body": "agents/error-coordinator.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Mines logs and agent output for recurring failures and cascades, then writes grounded recovery and prevention playbooks.",
+      "emoji": "🚨",
+      "id": "voltagent-error-coordinator",
+      "name": "Error Coordinator Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/error-coordinator.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Error Coordinator",
+      "skillIds": [
+        "code-search",
+        "file-reader",
+        "json-transformer",
+        "notification-sender",
+        "summarizer"
+      ],
+      "slug": "error-coordinator",
+      "tags": ["failures", "recovery", "cascades", "playbooks"]
+    },
+    {
+      "body": "agents/knowledge-synthesizer.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Mines transcripts, logs and past work for repeating patterns and writes them up as cited, reusable lessons.",
+      "emoji": "🧠",
+      "id": "voltagent-knowledge-synthesizer",
+      "name": "Knowledge Synthesizer Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/knowledge-synthesizer.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Knowledge Synthesizer",
+      "skillIds": [
+        "file-reader",
+        "code-search",
+        "summarizer",
+        "note-taker",
+        "markdown-renderer",
+        "citation-formatter"
+      ],
+      "slug": "knowledge-synthesizer",
+      "tags": ["patterns", "lessons", "knowledge", "evidence"]
+    },
+    {
+      "body": "agents/performance-monitor.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Reads metric and log history to find real anomalies, then writes an observability plan with thresholds that will not cry wolf.",
+      "emoji": "📟",
+      "id": "voltagent-performance-monitor",
+      "name": "Performance Monitor Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/performance-monitor.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Performance Monitor",
+      "skillIds": [
+        "csv-analyzer",
+        "data-visualizer",
+        "json-transformer",
+        "file-reader",
+        "notification-sender"
+      ],
+      "slug": "performance-monitor",
+      "tags": ["observability", "metrics", "anomalies", "thresholds"]
+    },
+    {
+      "body": "agents/refactor-governor.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Governs repository-wide refactors: maps the code, ranks risk, previews diffs and waits for approval before anything changes.",
+      "emoji": "🏗️",
+      "id": "voltagent-refactor-governor",
+      "name": "Refactor Governor Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/09-meta-orchestration/codebase-orchestrator.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Refactor Governor",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "test-runner",
+        "file-reader",
+        "file-writer",
+        "bash-executor"
+      ],
+      "slug": "refactor-governor",
+      "tags": ["refactoring", "governance", "risk", "codebase"]
+    },
+    {
+      "body": "agents/roadmap-strategist.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Decides what to build next and what to drop, tying every roadmap item to a user problem and a measurable outcome.",
+      "emoji": "🗺️",
+      "id": "voltagent-roadmap-strategist",
+      "name": "Roadmap Strategist Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/product-manager.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Roadmap Strategist",
+      "skillIds": [
+        "spreadsheet-reader",
+        "csv-analyzer",
+        "data-visualizer",
+        "summarizer",
+        "note-taker",
+        "markdown-renderer"
+      ],
+      "slug": "roadmap-strategist",
+      "tags": ["product", "roadmap", "prioritisation", "outcomes"]
+    },
+    {
+      "body": "agents/project-manager.json",
+      "category": "project-management",
+      "color": "#0284C7",
+      "description": "Builds the plan, tracks progress against it honestly, manages risk early and keeps every stakeholder on the same set of facts.",
+      "emoji": "📋",
+      "id": "voltagent-project-manager",
+      "name": "Project Manager Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/project-manager.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Project Manager",
+      "skillIds": [
+        "calendar-manager",
+        "meeting-notes",
+        "spreadsheet-reader",
+        "notification-sender",
+        "markdown-renderer",
+        "email-draft"
+      ],
+      "slug": "project-manager",
+      "tags": ["delivery", "planning", "risk", "stakeholders"]
+    },
+    {
+      "body": "agents/scrum-master.json",
+      "category": "project-management",
+      "color": "#0284C7",
+      "description": "Facilitates the team's cadence, removes impediments quickly, and improves flow using the team's own measured data.",
+      "emoji": "🏃",
+      "id": "voltagent-scrum-master",
+      "name": "Scrum Master Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/scrum-master.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Scrum Master",
+      "skillIds": [
+        "meeting-notes",
+        "calendar-manager",
+        "notification-sender",
+        "data-visualizer",
+        "note-taker"
+      ],
+      "slug": "scrum-master",
+      "tags": ["agile", "facilitation", "flow", "retrospectives"]
+    },
+    {
+      "body": "agents/reference-docs-writer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Writes reference documentation, guides and getting-started material that is accurate, tested and organised by what readers need.",
+      "emoji": "📝",
+      "id": "voltagent-reference-docs-writer",
+      "name": "Reference Docs Writer Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/technical-writer.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Reference Docs Writer",
+      "skillIds": [
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "code-search",
+        "api-tester",
+        "summarizer"
+      ],
+      "slug": "reference-docs-writer",
+      "tags": ["documentation", "reference", "guides", "developer-experience"]
+    },
+    {
+      "body": "agents/usability-researcher.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Plans and runs user research that produces evidence rather than opinion, then turns behaviour into decisions a team can act on.",
+      "emoji": "🔬",
+      "id": "voltagent-usability-researcher",
+      "name": "Usability Researcher Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/ux-researcher.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Usability Researcher",
+      "skillIds": [
+        "meeting-notes",
+        "note-taker",
+        "csv-analyzer",
+        "summarizer",
+        "quiz-generator",
+        "data-visualizer"
+      ],
+      "slug": "usability-researcher",
+      "tags": ["user-research", "usability", "interviews", "insights"]
+    },
+    {
+      "body": "agents/customer-success-manager.json",
+      "category": "support",
+      "color": "#14B8A6",
+      "description": "Reads account health honestly, intervenes on churn risk before renewal season, and grows accounts that are genuinely succeeding.",
+      "emoji": "🤝",
+      "id": "voltagent-customer-success-manager",
+      "name": "Customer Success Manager Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/customer-success-manager.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Customer Success Manager",
+      "skillIds": [
+        "email-draft",
+        "calendar-manager",
+        "csv-analyzer",
+        "notification-sender",
+        "spreadsheet-reader",
+        "meeting-notes"
+      ],
+      "slug": "customer-success-manager",
+      "tags": ["customer-success", "retention", "churn", "adoption"]
+    },
+    {
+      "body": "agents/solutions-engineer.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Handles the technical side of a deal: architecture fit, proof of concept, honest answers to hard questions and a clean handover.",
+      "emoji": "🛠️",
+      "id": "voltagent-solutions-engineer",
+      "name": "Solutions Engineer Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/sales-engineer.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Solutions Engineer",
+      "skillIds": [
+        "api-tester",
+        "bash-executor",
+        "code-search",
+        "email-draft",
+        "meeting-notes",
+        "markdown-renderer"
+      ],
+      "slug": "solutions-engineer",
+      "tags": ["pre-sales", "architecture", "proof-of-concept", "demos"]
+    },
+    {
+      "body": "agents/landing-page-copywriter.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Writes landing page copy that names the reader's problem in their own words and earns the click without overclaiming.",
+      "emoji": "✍️",
+      "id": "voltagent-landing-page-copywriter",
+      "name": "Landing Page Copywriter Boo",
+      "origin": {
+        "adaptation": "adapted",
+        "url": "https://github.com/VoltAgent/awesome-claude-code-subagents/blob/c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1/categories/08-business-product/landing-page-copywriter.md"
+      },
+      "packId": "voltagent-subagents",
+      "role": "Landing Page Copywriter",
+      "skillIds": [
+        "web-search",
+        "web-scraper",
+        "markdown-renderer",
+        "file-writer",
+        "summarizer",
+        "trend-analyzer"
+      ],
+      "slug": "landing-page-copywriter",
+      "tags": ["copywriting", "conversion", "landing-page", "messaging"]
+    }
+  ],
+  "counts": {
+    "agents": 24,
+    "skills": 0,
+    "teams": 5
+  },
+  "description": "Research, strategy and orchestration specialists adapted from the MIT-licensed VoltAgent subagent collection. Entries were reselected, renamed and rewritten; the bodies are adapted, not verbatim, and the teams are original.",
+  "id": "voltagent-subagents",
+  "idPrefix": "voltagent",
+  "name": "Research and Orchestration",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["VoltAgent"],
+    "color": "#F59E0B",
+    "importedAt": "2026-08-25T00:00:00.000Z",
+    "label": "VoltAgent",
+    "license": "MIT",
+    "ref": "c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1",
+    "repo": "https://github.com/VoltAgent/awesome-claude-code-subagents",
+    "sourceId": "voltagent-subagents"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/market-intelligence.json",
+      "category": "research",
+      "color": "#A855F7",
+      "description": "A six-agent research desk that sizes a market, reads the competition, tracks the trend line and hands back one sourced brief.",
+      "emoji": "🔭",
+      "id": "voltagent-market-intelligence",
+      "members": [
+        {
+          "agentId": "voltagent-research-analyst",
+          "name": "Research Analyst Boo",
+          "role": "Research Analyst"
+        },
+        {
+          "agentId": "voltagent-market-researcher",
+          "name": "Market Researcher Boo",
+          "role": "Market Researcher"
+        },
+        {
+          "agentId": "voltagent-competitive-analyst",
+          "name": "Competitive Analyst Boo",
+          "role": "Competitive Analyst"
+        },
+        {
+          "agentId": "voltagent-trend-analyst",
+          "name": "Trend Analyst Boo",
+          "role": "Trend Analyst"
+        },
+        {
+          "agentId": "voltagent-data-researcher",
+          "name": "Data Researcher Boo",
+          "role": "Data Researcher"
+        },
+        {
+          "agentId": "voltagent-literature-researcher",
+          "name": "Literature Researcher Boo",
+          "role": "Literature Researcher"
+        }
+      ],
+      "name": "Market Intelligence Unit",
+      "origin": {
+        "adaptation": "original"
+      },
+      "packId": "voltagent-subagents",
+      "slug": "market-intelligence",
+      "tags": ["research", "market", "competitive", "evidence", "briefing"]
+    },
+    {
+      "body": "teams/idea-pressure-test.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "A five-agent panel that takes a product idea apart, tests the assumptions it rests on, and returns a defensible go or no-go.",
+      "emoji": "⚖️",
+      "id": "voltagent-idea-pressure-test",
+      "members": [
+        {
+          "agentId": "voltagent-idea-validator",
+          "name": "Idea Validator Boo",
+          "role": "Idea Validator"
+        },
+        {
+          "agentId": "voltagent-first-principles-thinker",
+          "name": "First Principles Thinker Boo",
+          "role": "First Principles Thinker"
+        },
+        {
+          "agentId": "voltagent-competitive-analyst",
+          "name": "Competitive Analyst Boo",
+          "role": "Competitive Analyst"
+        },
+        {
+          "agentId": "voltagent-roadmap-strategist",
+          "name": "Roadmap Strategist Boo",
+          "role": "Roadmap Strategist"
+        },
+        {
+          "agentId": "voltagent-usability-researcher",
+          "name": "Usability Researcher Boo",
+          "role": "Usability Researcher"
+        }
+      ],
+      "name": "Idea Pressure Test",
+      "origin": {
+        "adaptation": "original"
+      },
+      "packId": "voltagent-subagents",
+      "slug": "idea-pressure-test",
+      "tags": ["validation", "product", "assumptions", "go-no-go"]
+    },
+    {
+      "body": "teams/agent-fleet-control.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Six agents that plan, route, run and watch multi-agent work, from decomposition through queueing to failure recovery.",
+      "emoji": "🛰️",
+      "id": "voltagent-agent-fleet-control",
+      "members": [
+        {
+          "agentId": "voltagent-multi-agent-coordinator",
+          "name": "Multi-Agent Coordinator Boo",
+          "role": "Multi-Agent Coordinator"
+        },
+        {
+          "agentId": "voltagent-agent-organizer",
+          "name": "Agent Organizer Boo",
+          "role": "Agent Organizer"
+        },
+        {
+          "agentId": "voltagent-task-distributor",
+          "name": "Task Distributor Boo",
+          "role": "Task Distributor"
+        },
+        {
+          "agentId": "voltagent-workflow-orchestrator",
+          "name": "Workflow Orchestrator Boo",
+          "role": "Workflow Orchestrator"
+        },
+        {
+          "agentId": "voltagent-error-coordinator",
+          "name": "Error Coordinator Boo",
+          "role": "Error Coordinator"
+        },
+        {
+          "agentId": "voltagent-performance-monitor",
+          "name": "Performance Monitor Boo",
+          "role": "Performance Monitor"
+        }
+      ],
+      "name": "Agent Fleet Control",
+      "origin": {
+        "adaptation": "original"
+      },
+      "packId": "voltagent-subagents",
+      "slug": "agent-fleet-control",
+      "tags": ["orchestration", "coordination", "workflow", "observability"]
+    },
+    {
+      "body": "teams/delivery-cadence.json",
+      "category": "project-management",
+      "color": "#0284C7",
+      "description": "Four agents that turn an agreed roadmap into delivered work, with honest status, low work in progress and documentation that lands on time.",
+      "emoji": "🗓️",
+      "id": "voltagent-delivery-cadence",
+      "members": [
+        {
+          "agentId": "voltagent-project-manager",
+          "name": "Project Manager Boo",
+          "role": "Project Manager"
+        },
+        {
+          "agentId": "voltagent-scrum-master",
+          "name": "Scrum Master Boo",
+          "role": "Scrum Master"
+        },
+        {
+          "agentId": "voltagent-roadmap-strategist",
+          "name": "Roadmap Strategist Boo",
+          "role": "Roadmap Strategist"
+        },
+        {
+          "agentId": "voltagent-reference-docs-writer",
+          "name": "Reference Docs Writer Boo",
+          "role": "Reference Docs Writer"
+        }
+      ],
+      "name": "Delivery Cadence Crew",
+      "origin": {
+        "adaptation": "original"
+      },
+      "packId": "voltagent-subagents",
+      "slug": "delivery-cadence",
+      "tags": ["delivery", "agile", "planning", "documentation"]
+    },
+    {
+      "body": "teams/revenue-loop.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Four agents covering the loop from landing page to technical proof to renewal, with the same claims held true at every step.",
+      "emoji": "💠",
+      "id": "voltagent-revenue-loop",
+      "members": [
+        {
+          "agentId": "voltagent-customer-success-manager",
+          "name": "Customer Success Manager Boo",
+          "role": "Customer Success Manager"
+        },
+        {
+          "agentId": "voltagent-solutions-engineer",
+          "name": "Solutions Engineer Boo",
+          "role": "Solutions Engineer"
+        },
+        {
+          "agentId": "voltagent-landing-page-copywriter",
+          "name": "Landing Page Copywriter Boo",
+          "role": "Landing Page Copywriter"
+        },
+        {
+          "agentId": "voltagent-usability-researcher",
+          "name": "Usability Researcher Boo",
+          "role": "Usability Researcher"
+        }
+      ],
+      "name": "Customer Revenue Loop",
+      "origin": {
+        "adaptation": "original"
+      },
+      "packId": "voltagent-subagents",
+      "slug": "revenue-loop",
+      "tags": ["sales", "customer-success", "messaging", "retention"]
+    }
+  ],
+  "version": "1.0.0"
+}

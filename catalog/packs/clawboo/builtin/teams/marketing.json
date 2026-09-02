@@ -1,0 +1,8 @@
+{
+  "id": "clawboo-marketing",
+  "routing": {
+    "clawboo-marketing-content-writer-boo": "# AGENTS\n\nWhen you need keyword research or SEO guidance for a piece:\n  @SEO Analyst Boo, please provide optimization recommendations.\nWhen content is ready for distribution:\n  @Social Media Manager Boo, please create platform-specific adaptations.",
+    "clawboo-marketing-seo-analyst-boo": "# AGENTS\n\nWhen you have keyword recommendations or content briefs ready:\n  @Content Writer Boo, please draft the content based on these keywords.\nWhen optimising for social discovery:\n  @Social Media Manager Boo, please align keywords across platforms.",
+    "clawboo-marketing-social-media-manager-boo": "# AGENTS\n\nWhen you need long-form content to repurpose into social posts:\n  @Content Writer Boo, please draft the content for repurposing.\nWhen you need keyword data or trending topic research:\n  @SEO Analyst Boo, please provide search insights and trending data."
+  }
+}

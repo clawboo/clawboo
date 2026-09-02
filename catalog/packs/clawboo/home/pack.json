@@ -1,0 +1,948 @@
+{
+  "agents": [
+    {
+      "body": "agents/brief-editor.json",
+      "category": "personal",
+      "color": "#F59E0B",
+      "description": "Decides what makes the morning brief, drops anything that repeats yesterday, and writes the short readout the day actually starts from.",
+      "emoji": "📰",
+      "id": "home-brief-editor",
+      "name": "Brief Editor",
+      "packId": "clawboo-home",
+      "role": "Brief Editor",
+      "skillIds": [
+        "summarizer",
+        "note-taker",
+        "markdown-renderer",
+        "verification-before-completion",
+        "playbook-routing"
+      ],
+      "slug": "brief-editor",
+      "tags": ["daily brief", "editing", "prioritisation", "personal", "leader"]
+    },
+    {
+      "body": "agents/brief-signal-scout.json",
+      "category": "personal",
+      "color": "#F59E0B",
+      "description": "Sweeps the connected sources for what changed since the last brief and hands over dated items with their origin attached.",
+      "emoji": "🛰️",
+      "id": "home-brief-signal-scout",
+      "name": "Signal Scout",
+      "packId": "clawboo-home",
+      "role": "Signal Scout",
+      "skillIds": ["rss-reader", "web-search", "summarizer", "note-taker", "trend-analyzer"],
+      "slug": "brief-signal-scout",
+      "tags": ["monitoring", "sources", "overnight", "personal"]
+    },
+    {
+      "body": "agents/brief-day-shaper.json",
+      "category": "personal",
+      "color": "#F59E0B",
+      "description": "Reads the calendar and turns the day into a small ordered list of commitments, with the fixed points and the real gaps marked.",
+      "emoji": "🕰️",
+      "id": "home-brief-day-shaper",
+      "name": "Day Shaper",
+      "packId": "clawboo-home",
+      "role": "Day Shaper",
+      "skillIds": ["calendar-manager", "note-taker", "summarizer", "meeting-notes", "plan-writing"],
+      "slug": "brief-day-shaper",
+      "tags": ["calendar", "planning", "commitments", "personal"]
+    },
+    {
+      "body": "agents/brief-loose-ends.json",
+      "category": "personal",
+      "color": "#F59E0B",
+      "description": "Surfaces the things that were promised earlier and have not moved, with the date they were promised and who owes the next step.",
+      "emoji": "🧶",
+      "id": "home-brief-loose-ends",
+      "name": "Loose Ends Tracker",
+      "packId": "clawboo-home",
+      "role": "Loose Ends Tracker",
+      "skillIds": [
+        "note-taker",
+        "summarizer",
+        "email-draft",
+        "file-reader",
+        "verification-before-completion"
+      ],
+      "slug": "brief-loose-ends",
+      "tags": ["follow-through", "promises", "tracking", "personal"]
+    },
+    {
+      "body": "agents/calendar-schedule-keeper.json",
+      "category": "home",
+      "color": "#0EA5E9",
+      "description": "Holds the canonical household week, applies changes to it, answers what is happening when, and writes the Sunday look-ahead.",
+      "emoji": "📅",
+      "id": "home-calendar-schedule-keeper",
+      "name": "Schedule Keeper",
+      "packId": "clawboo-home",
+      "role": "Schedule Keeper",
+      "skillIds": [
+        "calendar-manager",
+        "note-taker",
+        "summarizer",
+        "markdown-renderer",
+        "playbook-routing"
+      ],
+      "slug": "calendar-schedule-keeper",
+      "tags": ["household", "calendar", "coordination", "home", "leader"]
+    },
+    {
+      "body": "agents/calendar-clash-spotter.json",
+      "category": "home",
+      "color": "#0EA5E9",
+      "description": "Finds double bookings, impossible travel gaps, and events with nobody attached, and reports them before the week starts.",
+      "emoji": "⚠️",
+      "id": "home-calendar-clash-spotter",
+      "name": "Clash Spotter",
+      "packId": "clawboo-home",
+      "role": "Clash Spotter",
+      "skillIds": [
+        "calendar-manager",
+        "trend-analyzer",
+        "note-taker",
+        "summarizer",
+        "systematic-debugging"
+      ],
+      "slug": "calendar-clash-spotter",
+      "tags": ["conflicts", "logistics", "household", "home"]
+    },
+    {
+      "body": "agents/calendar-prep-lister.json",
+      "category": "home",
+      "color": "#0EA5E9",
+      "description": "Turns each household event into the things that must happen before it, with the day each one is due rather than a vague reminder.",
+      "emoji": "🎒",
+      "id": "home-calendar-prep-lister",
+      "name": "Prep Lister",
+      "packId": "clawboo-home",
+      "role": "Prep Lister",
+      "skillIds": [
+        "note-taker",
+        "summarizer",
+        "markdown-renderer",
+        "calendar-manager",
+        "file-writer"
+      ],
+      "slug": "calendar-prep-lister",
+      "tags": ["preparation", "checklists", "household", "home"]
+    },
+    {
+      "body": "agents/inbox-triage-lead.json",
+      "category": "personal",
+      "color": "#6366F1",
+      "description": "Sorts a mail backlog into reply, read later, archive, and unsubscribe, and owns the short list of things that truly need a human.",
+      "emoji": "📥",
+      "id": "home-inbox-triage-lead",
+      "name": "Triage Lead",
+      "packId": "clawboo-home",
+      "role": "Triage Lead",
+      "skillIds": ["email-draft", "summarizer", "note-taker", "trend-analyzer", "playbook-routing"],
+      "slug": "inbox-triage-lead",
+      "tags": ["inbox", "triage", "email", "personal", "leader"]
+    },
+    {
+      "body": "agents/inbox-thread-reader.json",
+      "category": "personal",
+      "color": "#6366F1",
+      "description": "Summarises long mail threads so a decision can be made without opening them, and names exactly what is being asked of the reader.",
+      "emoji": "🧵",
+      "id": "home-inbox-thread-reader",
+      "name": "Thread Reader",
+      "packId": "clawboo-home",
+      "role": "Thread Reader",
+      "skillIds": ["summarizer", "pdf-reader", "note-taker", "markdown-renderer", "file-reader"],
+      "slug": "inbox-thread-reader",
+      "tags": ["summarising", "threads", "email", "personal"]
+    },
+    {
+      "body": "agents/inbox-reply-drafter.json",
+      "category": "personal",
+      "color": "#6366F1",
+      "description": "Drafts the short replies, leaves the difficult ones for the human, and never sends anything under any framing of the request.",
+      "emoji": "🖊️",
+      "id": "home-inbox-reply-drafter",
+      "name": "Reply Drafter",
+      "packId": "clawboo-home",
+      "role": "Reply Drafter",
+      "skillIds": ["email-draft", "summarizer", "markdown-renderer", "note-taker", "brainstorming"],
+      "slug": "inbox-reply-drafter",
+      "tags": ["drafting", "email", "replies", "personal"]
+    },
+    {
+      "body": "agents/inbox-subscription-auditor.json",
+      "category": "personal",
+      "color": "#6366F1",
+      "description": "Finds the recurring senders that have not been opened in months and proposes an unsubscribe list for the reader to approve.",
+      "emoji": "🧹",
+      "id": "home-inbox-subscription-auditor",
+      "name": "Subscription Auditor",
+      "packId": "clawboo-home",
+      "role": "Subscription Auditor",
+      "skillIds": ["csv-analyzer", "trend-analyzer", "summarizer", "note-taker", "rss-reader"],
+      "slug": "inbox-subscription-auditor",
+      "tags": ["subscriptions", "unsubscribe", "email hygiene", "personal"]
+    },
+    {
+      "body": "agents/crm-relationship-keeper.json",
+      "category": "personal",
+      "color": "#EC4899",
+      "description": "Owns the people list, the notes behind each name, and the cadence each person is on, and keeps the whole record tidy enough to trust.",
+      "emoji": "🤝",
+      "id": "home-crm-relationship-keeper",
+      "name": "Relationship Keeper",
+      "packId": "clawboo-home",
+      "role": "Relationship Keeper",
+      "skillIds": ["note-taker", "summarizer", "csv-analyzer", "file-writer", "playbook-routing"],
+      "slug": "crm-relationship-keeper",
+      "tags": ["relationships", "contacts", "notes", "personal", "leader"]
+    },
+    {
+      "body": "agents/crm-reconnect-prompter.json",
+      "category": "personal",
+      "color": "#EC4899",
+      "description": "Names the few people who are overdue and suggests a genuine reason to get in touch rather than a reminder with no content.",
+      "emoji": "🔔",
+      "id": "home-crm-reconnect-prompter",
+      "name": "Reconnect Prompter",
+      "packId": "clawboo-home",
+      "role": "Reconnect Prompter",
+      "skillIds": [
+        "note-taker",
+        "summarizer",
+        "calendar-manager",
+        "trend-analyzer",
+        "brainstorming"
+      ],
+      "slug": "crm-reconnect-prompter",
+      "tags": ["reconnect", "cadence", "reminders", "personal"]
+    },
+    {
+      "body": "agents/crm-context-recaller.json",
+      "category": "personal",
+      "color": "#EC4899",
+      "description": "Pulls the last few exchanges with a person so a message does not start from nothing, and marks what is remembered against what is recorded.",
+      "emoji": "🗒️",
+      "id": "home-crm-context-recaller",
+      "name": "Context Recaller",
+      "packId": "clawboo-home",
+      "role": "Context Recaller",
+      "skillIds": ["summarizer", "note-taker", "file-reader", "email-draft", "markdown-renderer"],
+      "slug": "crm-context-recaller",
+      "tags": ["context", "history", "recall", "personal"]
+    },
+    {
+      "body": "agents/brain-note-librarian.json",
+      "category": "personal",
+      "color": "#8B5CF6",
+      "description": "Decides where a new note belongs and keeps the shape of the collection stable so it stays searchable as it grows.",
+      "emoji": "📚",
+      "id": "home-brain-note-librarian",
+      "name": "Note Librarian",
+      "packId": "clawboo-home",
+      "role": "Note Librarian",
+      "skillIds": [
+        "note-taker",
+        "file-writer",
+        "markdown-renderer",
+        "summarizer",
+        "playbook-routing"
+      ],
+      "slug": "brain-note-librarian",
+      "tags": ["notes", "organisation", "knowledge", "personal", "leader"]
+    },
+    {
+      "body": "agents/brain-distiller.json",
+      "category": "personal",
+      "color": "#8B5CF6",
+      "description": "Reduces a long capture to the few sentences worth keeping, in the reader's own terms, with the source kept intact.",
+      "emoji": "⚗️",
+      "id": "home-brain-distiller",
+      "name": "Distiller",
+      "packId": "clawboo-home",
+      "role": "Distiller",
+      "skillIds": [
+        "summarizer",
+        "pdf-reader",
+        "web-scraper",
+        "markdown-renderer",
+        "citation-formatter"
+      ],
+      "slug": "brain-distiller",
+      "tags": ["summarising", "captures", "notes", "personal"]
+    },
+    {
+      "body": "agents/brain-link-connector.json",
+      "category": "personal",
+      "color": "#8B5CF6",
+      "description": "Finds the older notes a new one should link to, and says what the connection is rather than leaving a bare link behind.",
+      "emoji": "🔗",
+      "id": "home-brain-link-connector",
+      "name": "Link Connector",
+      "packId": "clawboo-home",
+      "role": "Link Connector",
+      "skillIds": ["code-search", "summarizer", "note-taker", "trend-analyzer", "web-search"],
+      "slug": "brain-link-connector",
+      "tags": ["linking", "connections", "knowledge", "personal"]
+    },
+    {
+      "body": "agents/brain-note-gardener.json",
+      "category": "personal",
+      "color": "#8B5CF6",
+      "description": "Revisits stale notes on a slow schedule, marks the ones that are now wrong, and proposes pruning the rest.",
+      "emoji": "🌱",
+      "id": "home-brain-note-gardener",
+      "name": "Note Gardener",
+      "packId": "clawboo-home",
+      "role": "Note Gardener",
+      "skillIds": [
+        "summarizer",
+        "note-taker",
+        "trend-analyzer",
+        "file-reader",
+        "verification-before-completion"
+      ],
+      "slug": "brain-note-gardener",
+      "tags": ["maintenance", "pruning", "review", "personal"]
+    },
+    {
+      "body": "agents/meals-menu-planner.json",
+      "category": "home",
+      "color": "#22C55E",
+      "description": "Builds the week's meals around effort, variety, and who is actually home each night, starting from what the house already has.",
+      "emoji": "🍲",
+      "id": "home-meals-menu-planner",
+      "name": "Menu Planner",
+      "packId": "clawboo-home",
+      "role": "Menu Planner",
+      "skillIds": [
+        "note-taker",
+        "calendar-manager",
+        "summarizer",
+        "markdown-renderer",
+        "playbook-routing"
+      ],
+      "slug": "meals-menu-planner",
+      "tags": ["meals", "planning", "household", "home", "leader"]
+    },
+    {
+      "body": "agents/meals-pantry-checker.json",
+      "category": "home",
+      "color": "#22C55E",
+      "description": "Tracks what is on hand and what is about to go off, and runs first because it constrains everything the rest of the team does.",
+      "emoji": "🥫",
+      "id": "home-meals-pantry-checker",
+      "name": "Pantry Checker",
+      "packId": "clawboo-home",
+      "role": "Pantry Checker",
+      "skillIds": [
+        "csv-analyzer",
+        "note-taker",
+        "spreadsheet-reader",
+        "file-reader",
+        "trend-analyzer"
+      ],
+      "slug": "meals-pantry-checker",
+      "tags": ["pantry", "inventory", "waste", "home"]
+    },
+    {
+      "body": "agents/meals-list-builder.json",
+      "category": "home",
+      "color": "#22C55E",
+      "description": "Turns the gap between the plan and the pantry into one ordered shopping list, and offers a substitute when something is missing or costly.",
+      "emoji": "🛒",
+      "id": "home-meals-list-builder",
+      "name": "Shopping List Builder",
+      "packId": "clawboo-home",
+      "role": "Shopping List Builder",
+      "skillIds": [
+        "csv-analyzer",
+        "note-taker",
+        "markdown-renderer",
+        "summarizer",
+        "brainstorming"
+      ],
+      "slug": "meals-list-builder",
+      "tags": ["shopping", "lists", "substitutions", "home"]
+    },
+    {
+      "body": "agents/upkeep-warden.json",
+      "category": "home",
+      "color": "#78716C",
+      "description": "Holds the schedule of recurring home maintenance, what was last done when, and the record of who did each job and what it cost.",
+      "emoji": "🏠",
+      "id": "home-upkeep-warden",
+      "name": "Upkeep Warden",
+      "packId": "clawboo-home",
+      "role": "Upkeep Warden",
+      "skillIds": [
+        "note-taker",
+        "calendar-manager",
+        "file-writer",
+        "summarizer",
+        "playbook-routing"
+      ],
+      "slug": "upkeep-warden",
+      "tags": ["maintenance", "schedule", "records", "home", "leader"]
+    },
+    {
+      "body": "agents/upkeep-season-planner.json",
+      "category": "home",
+      "color": "#78716C",
+      "description": "Names what this month needs given the season and the property, so seasonal work happens before the weather makes it urgent.",
+      "emoji": "🍂",
+      "id": "home-upkeep-season-planner",
+      "name": "Season Planner",
+      "packId": "clawboo-home",
+      "role": "Season Planner",
+      "skillIds": ["note-taker", "web-search", "summarizer", "calendar-manager", "trend-analyzer"],
+      "slug": "upkeep-season-planner",
+      "tags": ["seasonal", "maintenance", "planning", "home"]
+    },
+    {
+      "body": "agents/upkeep-warranty-watcher.json",
+      "category": "home",
+      "color": "#78716C",
+      "description": "Flags cover that is about to lapse and appliances nearing the end of their life, on a slower cadence than the rest of the team.",
+      "emoji": "📜",
+      "id": "home-upkeep-warranty-watcher",
+      "name": "Warranty Watcher",
+      "packId": "clawboo-home",
+      "role": "Warranty Watcher",
+      "skillIds": ["pdf-reader", "note-taker", "calendar-manager", "summarizer", "file-reader"],
+      "slug": "upkeep-warranty-watcher",
+      "tags": ["warranty", "cover", "appliances", "home"]
+    },
+    {
+      "body": "agents/trip-lead.json",
+      "category": "personal",
+      "color": "#06B6D4",
+      "description": "Owns the shape of a trip, the budget, and the list of decisions still open, from vague idea through to a plan that can be booked.",
+      "emoji": "🧳",
+      "id": "home-trip-lead",
+      "name": "Trip Lead",
+      "packId": "clawboo-home",
+      "role": "Trip Lead",
+      "skillIds": [
+        "note-taker",
+        "summarizer",
+        "calendar-manager",
+        "plan-writing",
+        "playbook-routing"
+      ],
+      "slug": "trip-lead",
+      "tags": ["travel", "planning", "budget", "personal", "leader"]
+    },
+    {
+      "body": "agents/trip-route-planner.json",
+      "category": "personal",
+      "color": "#06B6D4",
+      "description": "Works out getting there and getting around, including the boring transfers that decide whether a travel day works.",
+      "emoji": "🗺️",
+      "id": "home-trip-route-planner",
+      "name": "Route Planner",
+      "packId": "clawboo-home",
+      "role": "Route Planner",
+      "skillIds": ["web-search", "note-taker", "calendar-manager", "summarizer", "data-visualizer"],
+      "slug": "trip-route-planner",
+      "tags": ["travel", "routes", "transfers", "personal"]
+    },
+    {
+      "body": "agents/trip-local-scout.json",
+      "category": "personal",
+      "color": "#06B6D4",
+      "description": "Gathers options for each day of a trip and marks which ones must be booked ahead and which can wait until the morning.",
+      "emoji": "📍",
+      "id": "home-trip-local-scout",
+      "name": "Local Scout",
+      "packId": "clawboo-home",
+      "role": "Local Scout",
+      "skillIds": ["web-search", "web-scraper", "summarizer", "note-taker", "markdown-renderer"],
+      "slug": "trip-local-scout",
+      "tags": ["travel", "itinerary", "options", "personal"]
+    },
+    {
+      "body": "agents/trip-packing-steward.json",
+      "category": "personal",
+      "color": "#06B6D4",
+      "description": "Builds the packing list and the document list for a trip, and checks that nothing expires between departure and return.",
+      "emoji": "🎫",
+      "id": "home-trip-packing-steward",
+      "name": "Packing Steward",
+      "packId": "clawboo-home",
+      "role": "Packing Steward",
+      "skillIds": [
+        "note-taker",
+        "markdown-renderer",
+        "file-reader",
+        "calendar-manager",
+        "verification-before-completion"
+      ],
+      "slug": "trip-packing-steward",
+      "tags": ["packing", "documents", "checklists", "personal"]
+    },
+    {
+      "body": "agents/money-review-lead.json",
+      "category": "home",
+      "color": "#14B8A6",
+      "description": "Assembles the month, writes the plain summary of where household money went, and lists the questions worth a human decision.",
+      "emoji": "🧾",
+      "id": "home-money-review-lead",
+      "name": "Review Lead",
+      "packId": "clawboo-home",
+      "role": "Review Lead",
+      "skillIds": [
+        "csv-analyzer",
+        "summarizer",
+        "data-visualizer",
+        "markdown-renderer",
+        "playbook-routing"
+      ],
+      "slug": "money-review-lead",
+      "tags": ["household", "review", "summary", "home", "leader"]
+    },
+    {
+      "body": "agents/money-category-sorter.json",
+      "category": "home",
+      "color": "#14B8A6",
+      "description": "Groups spending into categories the household actually recognises, and keeps those categories stable from month to month.",
+      "emoji": "🗃️",
+      "id": "home-money-category-sorter",
+      "name": "Category Sorter",
+      "packId": "clawboo-home",
+      "role": "Category Sorter",
+      "skillIds": [
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "json-transformer",
+        "note-taker",
+        "file-reader"
+      ],
+      "slug": "money-category-sorter",
+      "tags": ["categories", "transactions", "household", "home"]
+    },
+    {
+      "body": "agents/money-change-spotter.json",
+      "category": "home",
+      "color": "#14B8A6",
+      "description": "Highlights what moved against the previous months and by how much, and lists the recurring charges with how long each has been running.",
+      "emoji": "📈",
+      "id": "home-money-change-spotter",
+      "name": "Change Spotter",
+      "packId": "clawboo-home",
+      "role": "Change Spotter",
+      "skillIds": ["trend-analyzer", "csv-analyzer", "data-visualizer", "sql-query", "summarizer"],
+      "slug": "money-change-spotter",
+      "tags": ["trends", "comparison", "subscriptions", "home"]
+    },
+    {
+      "body": "agents/gifts-occasion-keeper.json",
+      "category": "home",
+      "color": "#F43F5E",
+      "description": "Holds the dates, the people, and how much lead time each occasion needs, so the thinking happens weeks before the day.",
+      "emoji": "🎂",
+      "id": "home-gifts-occasion-keeper",
+      "name": "Occasion Keeper",
+      "packId": "clawboo-home",
+      "role": "Occasion Keeper",
+      "skillIds": [
+        "calendar-manager",
+        "note-taker",
+        "summarizer",
+        "csv-analyzer",
+        "playbook-routing"
+      ],
+      "slug": "gifts-occasion-keeper",
+      "tags": ["occasions", "dates", "lead time", "home", "leader"]
+    },
+    {
+      "body": "agents/gifts-idea-collector.json",
+      "category": "home",
+      "color": "#F43F5E",
+      "description": "Keeps a running list, all year, of things a person has mentioned wanting, with the date and the context each was mentioned in.",
+      "emoji": "💡",
+      "id": "home-gifts-idea-collector",
+      "name": "Idea Collector",
+      "packId": "clawboo-home",
+      "role": "Idea Collector",
+      "skillIds": ["note-taker", "summarizer", "web-search", "file-writer", "trend-analyzer"],
+      "slug": "gifts-idea-collector",
+      "tags": ["gifts", "ideas", "notes", "home"]
+    },
+    {
+      "body": "agents/gifts-budget-balancer.json",
+      "category": "home",
+      "color": "#F43F5E",
+      "description": "Keeps the total across the year sane rather than judging each occasion on its own, and says what is left before a shortlist is built.",
+      "emoji": "⚖️",
+      "id": "home-gifts-budget-balancer",
+      "name": "Budget Balancer",
+      "packId": "clawboo-home",
+      "role": "Budget Balancer",
+      "skillIds": [
+        "csv-analyzer",
+        "trend-analyzer",
+        "spreadsheet-reader",
+        "note-taker",
+        "data-visualizer"
+      ],
+      "slug": "gifts-budget-balancer",
+      "tags": ["budget", "gifts", "planning", "home"]
+    },
+    {
+      "body": "agents/gifts-shortlist-builder.json",
+      "category": "home",
+      "color": "#F43F5E",
+      "description": "Assembles the shortlist, drafts the card wording, and states the delivery deadline, then stops before anything is ordered.",
+      "emoji": "🎁",
+      "id": "home-gifts-shortlist-builder",
+      "name": "Shortlist Builder",
+      "packId": "clawboo-home",
+      "role": "Shortlist Builder",
+      "skillIds": ["summarizer", "web-search", "note-taker", "markdown-renderer", "email-draft"],
+      "slug": "gifts-shortlist-builder",
+      "tags": ["gifts", "shortlist", "deadlines", "home"]
+    }
+  ],
+  "counts": {
+    "agents": 35,
+    "skills": 0,
+    "teams": 10
+  },
+  "description": "Ten first-party teams for the non-work half of a life: a morning brief, a household calendar, an inbox, a personal CRM, a note collection, meals, home upkeep, travel, money review, and occasions.",
+  "id": "clawboo-home",
+  "idPrefix": "home",
+  "name": "Clawboo Life and Home",
+  "newCategories": ["home", "personal"],
+  "provenance": {
+    "adaptation": "original",
+    "authors": ["Clawboo maintainers"],
+    "color": "#34D399",
+    "importedAt": "2026-08-25T00:00:00.000Z",
+    "label": "Clawboo Life and Home",
+    "license": "MIT",
+    "repo": "https://github.com/clawboo/clawboo",
+    "sourceId": "clawboo-home"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/morning-brief.json",
+      "category": "personal",
+      "color": "#F59E0B",
+      "description": "One short readout at the start of the day covering what changed overnight and what needs a decision before lunch.",
+      "emoji": "📰",
+      "id": "home-morning-brief",
+      "members": [
+        {
+          "agentId": "home-brief-editor",
+          "name": "Brief Editor",
+          "role": "Brief Editor"
+        },
+        {
+          "agentId": "home-brief-signal-scout",
+          "name": "Signal Scout",
+          "role": "Signal Scout"
+        },
+        {
+          "agentId": "home-brief-day-shaper",
+          "name": "Day Shaper",
+          "role": "Day Shaper"
+        },
+        {
+          "agentId": "home-brief-loose-ends",
+          "name": "Loose Ends Tracker",
+          "role": "Loose Ends Tracker"
+        }
+      ],
+      "name": "Morning Brief",
+      "packId": "clawboo-home",
+      "slug": "morning-brief",
+      "tags": ["daily", "briefing", "calendar", "follow-through", "recurring"]
+    },
+    {
+      "body": "teams/family-calendar.json",
+      "category": "home",
+      "color": "#0EA5E9",
+      "description": "Keeps a shared household schedule honest: catches clashes, flags what nobody has volunteered for, and gives one week-ahead view.",
+      "emoji": "📅",
+      "id": "home-family-calendar",
+      "members": [
+        {
+          "agentId": "home-calendar-schedule-keeper",
+          "name": "Schedule Keeper",
+          "role": "Schedule Keeper"
+        },
+        {
+          "agentId": "home-calendar-clash-spotter",
+          "name": "Clash Spotter",
+          "role": "Clash Spotter"
+        },
+        {
+          "agentId": "home-calendar-prep-lister",
+          "name": "Prep Lister",
+          "role": "Prep Lister"
+        }
+      ],
+      "name": "Family Calendar",
+      "packId": "clawboo-home",
+      "slug": "family-calendar",
+      "tags": ["household", "calendar", "conflicts", "preparation", "recurring"]
+    },
+    {
+      "body": "teams/inbox-declutter.json",
+      "category": "personal",
+      "color": "#6366F1",
+      "description": "Works a backlog of mail down to a short list of things that actually need a human reply, and prepares the easy ones.",
+      "emoji": "📥",
+      "id": "home-inbox-declutter",
+      "members": [
+        {
+          "agentId": "home-inbox-triage-lead",
+          "name": "Triage Lead",
+          "role": "Triage Lead"
+        },
+        {
+          "agentId": "home-inbox-thread-reader",
+          "name": "Thread Reader",
+          "role": "Thread Reader"
+        },
+        {
+          "agentId": "home-inbox-reply-drafter",
+          "name": "Reply Drafter",
+          "role": "Reply Drafter"
+        },
+        {
+          "agentId": "home-inbox-subscription-auditor",
+          "name": "Subscription Auditor",
+          "role": "Subscription Auditor"
+        }
+      ],
+      "name": "Inbox Declutter",
+      "packId": "clawboo-home",
+      "slug": "inbox-declutter",
+      "tags": ["email", "triage", "drafting", "subscriptions", "recurring"]
+    },
+    {
+      "body": "teams/personal-crm.json",
+      "category": "personal",
+      "color": "#EC4899",
+      "description": "Remembers the people you meant to stay in touch with, and why, with a cadence per person rather than a rule for everyone.",
+      "emoji": "🤝",
+      "id": "home-personal-crm",
+      "members": [
+        {
+          "agentId": "home-crm-relationship-keeper",
+          "name": "Relationship Keeper",
+          "role": "Relationship Keeper"
+        },
+        {
+          "agentId": "home-crm-reconnect-prompter",
+          "name": "Reconnect Prompter",
+          "role": "Reconnect Prompter"
+        },
+        {
+          "agentId": "home-crm-context-recaller",
+          "name": "Context Recaller",
+          "role": "Context Recaller"
+        }
+      ],
+      "name": "Personal CRM",
+      "packId": "clawboo-home",
+      "slug": "personal-crm",
+      "tags": ["relationships", "contacts", "cadence", "recall", "recurring"]
+    },
+    {
+      "body": "teams/second-brain.json",
+      "category": "personal",
+      "color": "#8B5CF6",
+      "description": "Turns saved links, half-written notes, and scattered highlights into a collection you can actually search and reuse.",
+      "emoji": "📚",
+      "id": "home-second-brain",
+      "members": [
+        {
+          "agentId": "home-brain-note-librarian",
+          "name": "Note Librarian",
+          "role": "Note Librarian"
+        },
+        {
+          "agentId": "home-brain-distiller",
+          "name": "Distiller",
+          "role": "Distiller"
+        },
+        {
+          "agentId": "home-brain-link-connector",
+          "name": "Link Connector",
+          "role": "Link Connector"
+        },
+        {
+          "agentId": "home-brain-note-gardener",
+          "name": "Note Gardener",
+          "role": "Note Gardener"
+        }
+      ],
+      "name": "Second Brain",
+      "packId": "clawboo-home",
+      "slug": "second-brain",
+      "tags": ["notes", "knowledge", "linking", "pruning", "recurring"]
+    },
+    {
+      "body": "teams/meal-plan-pantry.json",
+      "category": "home",
+      "color": "#22C55E",
+      "description": "Plans the week's meals around what is already in the house and produces one ordered shopping list for a single trip.",
+      "emoji": "🍲",
+      "id": "home-meal-plan-pantry",
+      "members": [
+        {
+          "agentId": "home-meals-menu-planner",
+          "name": "Menu Planner",
+          "role": "Menu Planner"
+        },
+        {
+          "agentId": "home-meals-pantry-checker",
+          "name": "Pantry Checker",
+          "role": "Pantry Checker"
+        },
+        {
+          "agentId": "home-meals-list-builder",
+          "name": "Shopping List Builder",
+          "role": "Shopping List Builder"
+        }
+      ],
+      "name": "Meal Plan and Pantry",
+      "packId": "clawboo-home",
+      "slug": "meal-plan-pantry",
+      "tags": ["meals", "pantry", "shopping", "waste", "recurring"]
+    },
+    {
+      "body": "teams/home-upkeep-log.json",
+      "category": "home",
+      "color": "#78716C",
+      "description": "Keeps home maintenance on a yearly rhythm so none of it is remembered only at the point of failure.",
+      "emoji": "🏠",
+      "id": "home-home-upkeep-log",
+      "members": [
+        {
+          "agentId": "home-upkeep-warden",
+          "name": "Upkeep Warden",
+          "role": "Upkeep Warden"
+        },
+        {
+          "agentId": "home-upkeep-season-planner",
+          "name": "Season Planner",
+          "role": "Season Planner"
+        },
+        {
+          "agentId": "home-upkeep-warranty-watcher",
+          "name": "Warranty Watcher",
+          "role": "Warranty Watcher"
+        }
+      ],
+      "name": "Home Upkeep Log",
+      "packId": "clawboo-home",
+      "slug": "home-upkeep-log",
+      "tags": ["maintenance", "seasonal", "warranty", "records", "recurring"]
+    },
+    {
+      "body": "teams/trip-desk.json",
+      "category": "personal",
+      "color": "#06B6D4",
+      "description": "Takes a trip from vague idea to a bookable plan, then to a packed bag and a day-by-day outline with real deadlines.",
+      "emoji": "🧳",
+      "id": "home-trip-desk",
+      "members": [
+        {
+          "agentId": "home-trip-lead",
+          "name": "Trip Lead",
+          "role": "Trip Lead"
+        },
+        {
+          "agentId": "home-trip-route-planner",
+          "name": "Route Planner",
+          "role": "Route Planner"
+        },
+        {
+          "agentId": "home-trip-local-scout",
+          "name": "Local Scout",
+          "role": "Local Scout"
+        },
+        {
+          "agentId": "home-trip-packing-steward",
+          "name": "Packing Steward",
+          "role": "Packing Steward"
+        }
+      ],
+      "name": "Trip Desk",
+      "packId": "clawboo-home",
+      "slug": "trip-desk",
+      "tags": ["travel", "planning", "itinerary", "packing", "project"]
+    },
+    {
+      "body": "teams/household-money-review.json",
+      "category": "home",
+      "color": "#14B8A6",
+      "description": "A monthly look at where the household money actually went, with no advice given and no action taken.",
+      "emoji": "🧾",
+      "id": "home-household-money-review",
+      "members": [
+        {
+          "agentId": "home-money-review-lead",
+          "name": "Review Lead",
+          "role": "Review Lead"
+        },
+        {
+          "agentId": "home-money-category-sorter",
+          "name": "Category Sorter",
+          "role": "Category Sorter"
+        },
+        {
+          "agentId": "home-money-change-spotter",
+          "name": "Change Spotter",
+          "role": "Change Spotter"
+        }
+      ],
+      "name": "Household Money Review",
+      "packId": "clawboo-home",
+      "slug": "household-money-review",
+      "tags": ["household", "spending", "review", "subscriptions", "recurring"]
+    },
+    {
+      "body": "teams/gift-occasion-desk.json",
+      "category": "home",
+      "color": "#F43F5E",
+      "description": "Never miss a birthday, and never arrive with nothing, because the thinking happened weeks before the date.",
+      "emoji": "🎁",
+      "id": "home-gift-occasion-desk",
+      "members": [
+        {
+          "agentId": "home-gifts-occasion-keeper",
+          "name": "Occasion Keeper",
+          "role": "Occasion Keeper"
+        },
+        {
+          "agentId": "home-gifts-idea-collector",
+          "name": "Idea Collector",
+          "role": "Idea Collector"
+        },
+        {
+          "agentId": "home-gifts-budget-balancer",
+          "name": "Budget Balancer",
+          "role": "Budget Balancer"
+        },
+        {
+          "agentId": "home-gifts-shortlist-builder",
+          "name": "Shortlist Builder",
+          "role": "Shortlist Builder"
+        }
+      ],
+      "name": "Gift and Occasion Desk",
+      "packId": "clawboo-home",
+      "slug": "gift-occasion-desk",
+      "tags": ["occasions", "gifts", "budget", "deadlines", "recurring"]
+    }
+  ],
+  "version": "1.0.0"
+}
