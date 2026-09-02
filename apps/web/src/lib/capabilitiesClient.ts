@@ -140,12 +140,6 @@ export function groupAgentCapabilities(
   const out = new Map<string, CapabilityRecord[]>()
   for (const [agentId, runtime] of agentRuntimes) {
     const own = agentScoped.get(agentId) ?? []
-    // SYNTHETIC records are excluded from the "does this agent have its own
-    // capabilities" test. A grantee's twin tile is agent-scoped, so counting it
-    // would flip inheritance off wholesale and the agent would lose every skill
-    // and connector it was showing a second earlier. The twin is still
-    // rendered. It is just not evidence of a real per-agent inventory.
-    const ownReal = own.filter((r) => !r.synthetic)
     const inherited = (runtime ? globalByRuntime.get(runtime) : undefined) ?? []
     // A CONNECTOR IS NOT INHERITED. It used to be, on the reasoning that clawboo
     // owns the process and every agent reaches it through the same broker, so a
@@ -159,10 +153,30 @@ export function groupAgentCapabilities(
     // agent-scoped records are now the whole answer, and fanning the global one
     // across the fleet would draw an edge for access the agent does not have,
     // which is the one thing this picture must never do.
-    if (ownReal.length > 0) {
-      out.set(agentId, own)
-    } else if (inherited.length > 0 || own.length > 0) {
-      out.set(agentId, [...inherited, ...own])
+    //
+    // THAT RULE IS ENFORCED ABOVE, NOT HERE. A global connector record never
+    // reaches `globalByRuntime`: the `isConnectorSourced` arm skips it while the
+    // records are being bucketed, so `inherited` holds runtime builtins and
+    // extensions and nothing else. Inheriting it cannot draw access an agent
+    // does not have.
+    //
+    // WHICH IS WHY INHERITANCE IS ADDITIVE RATHER THAN A FALLBACK. This used to
+    // read "inherit only if the agent has none of its own", and the moment an
+    // agent gained its first agent-scoped record every inherited tile vanished
+    // from its ring. Installing one skill from the marketplace onto an OpenClaw
+    // Boo took its six runtime builtins off the graph in the same frame, leaving
+    // the new skill and the model node alone on an otherwise empty orbit. The
+    // agent had not lost anything: a runtime builtin belongs to every agent on
+    // that runtime, so the picture was simply under-reporting what it could do,
+    // which is the same class of lie as over-reporting.
+    //
+    // The synthetic carve-out that used to guard this test is gone with it. It
+    // existed because a grantee's twin tile is agent-scoped and would flip
+    // inheritance off wholesale; with nothing to flip, there is nothing to
+    // exclude, and a twin renders on its own merits.
+    const merged = [...inherited, ...own]
+    if (merged.length > 0) {
+      out.set(agentId, merged)
     }
   }
   return out

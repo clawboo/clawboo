@@ -60,7 +60,12 @@ import {
   saveCustomConnector,
   toDefinition,
 } from '../lib/connectors/custom'
-import { awaitAuthorization, beginAuthorization, getAccessToken } from '../lib/connectors/oauthFlow'
+import {
+  awaitAuthorization,
+  beginAuthorization,
+  cancelPendingAuth,
+  getAccessToken,
+} from '../lib/connectors/oauthFlow'
 import { clearOAuth, isAuthorized } from '../lib/connectors/oauthStore'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
@@ -186,9 +191,15 @@ export async function connectorAuthorizeAwaitPOST(req: Request, res: Response): 
 export async function connectorAuthorizeDELETE(req: Request, res: Response): Promise<void> {
   try {
     const slug = (req.params['slug'] as string | undefined) ?? ''
-    // Disconnect first: a live session is holding a token we are about to
-    // forget, and leaving it running would keep using a credential the operator
-    // just asked us to drop.
+    // Cancel an in-flight sign-in FIRST, before anything is awaited. A sign-in
+    // started moments ago would otherwise complete against a provider that still
+    // considers the grant live and write its tokens straight back, re-authorizing
+    // the connector the operator just revoked. Doing it before the `await` also
+    // means no callback can land in the gap while the disconnect runs.
+    cancelPendingAuth(slug)
+    // Then disconnect: a live session is holding a token we are about to forget,
+    // and leaving it running would keep using a credential the operator just
+    // asked us to drop.
     await disconnectConnector(connectorInstanceId(slug), getDb())
     clearOAuth(slug)
     res.json({ ok: true })

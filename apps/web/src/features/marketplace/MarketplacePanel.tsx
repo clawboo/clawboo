@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Blocks, Bot, SearchX, ShoppingBag, Users, Wrench } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
@@ -21,7 +21,12 @@ import { AgentPickerDropdown } from './AgentPickerDropdown'
 import { CollapsiblePillRow } from './CollapsiblePillRow'
 import type { SkillCategory } from '@/features/graph/types'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
-import type { TeamTemplate, ProfileLike, TemplateCategory } from '@/features/teams/types'
+import type {
+  TeamTemplate,
+  ProfileLike,
+  TemplateCategory,
+  TemplateSource,
+} from '@/features/teams/types'
 import { buildTeamCountByAgent, getAgentsForSkill, searchAgentCatalog } from './teamCatalog'
 import type { AgentIndexEntry, CatalogIndex } from './catalogTypes'
 import { useCatalogIndex } from './useCatalog'
@@ -124,6 +129,7 @@ function SkillCard({
   catalog: CatalogIndex | null
 }) {
   const [showPicker, setShowPicker] = useState(false)
+  const addRef = useRef<HTMLSpanElement>(null)
   const cat = CATEGORY_META[skill.category] ?? CATEGORY_META.other
   const agentCount = useMemo(
     () => (catalog ? getAgentsForSkill(catalog, skill.id).length : 0),
@@ -186,16 +192,18 @@ function SkillCard({
         ) : (
           <span className="min-w-0 flex-1" />
         )}
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation()
-            setShowPicker((v) => !v)
-          }}
-        >
-          Add
-        </Button>
+        <span ref={addRef} className="shrink-0">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowPicker((v) => !v)
+            }}
+          >
+            Add
+          </Button>
+        </span>
       </div>
 
       {/* Agent picker */}
@@ -205,7 +213,7 @@ function SkillCard({
             void installSkillFromMarketplace(skill, agentId, agentName)
           }}
           onClose={() => setShowPicker(false)}
-          style={{ top: '100%', right: 0, marginTop: 4 }}
+          anchorRef={addRef}
         />
       )}
     </motion.div>
@@ -397,32 +405,27 @@ export function MarketplacePanel() {
 
             {/* Team category pills: busiest inline, the rest under "+N more" */}
             <CollapsiblePillRow
+              label="Category"
               aria-label="Filter teams by category"
               options={teamCategoryOpts}
               activeKey={teamCategoryFilter}
               onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
             />
 
-            {/* Pack pills, derived from the packs the index actually contains */}
-            <div className="flex flex-wrap gap-1.5">
-              {packEntries.map((src) => (
-                <Chip
-                  key={src.key}
-                  size="sm"
-                  active={teamSourceFilter === src.key}
-                  accent={src.key === 'all' ? undefined : src.color}
-                  onClick={() => setTeamSourceFilter(src.key)}
-                >
-                  {src.key !== 'all' && (
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{ background: src.color }}
-                    />
-                  )}
-                  {src.label}
-                </Chip>
-              ))}
-            </div>
+            {/* Pack pills. Same collapsing treatment as the category row above, and
+                LABELLED. Two unlabelled rows read as one list of interchangeable
+                chips, so choosing a category and a pack looked like a contradiction
+                rather than an intersection. 19 packs also wrapped to three lines. */}
+            <CollapsiblePillRow
+              label="Pack"
+              dot
+              aria-label="Filter teams by pack"
+              options={packEntries
+                .filter((src) => src.key !== 'all')
+                .map((src) => ({ key: src.key, label: src.label, color: src.color }))}
+              activeKey={teamSourceFilter}
+              onSelect={(k) => setTeamSourceFilter(k as TemplateSource | 'all')}
+            />
           </>
         )}
 
@@ -438,32 +441,27 @@ export function MarketplacePanel() {
 
             {/* Agent category pills: busiest inline, the rest under "+N more" */}
             <CollapsiblePillRow
+              label="Category"
               aria-label="Filter agents by category"
               options={agentCategoryOpts}
               activeKey={agentCategoryFilter}
               onSelect={(k) => setAgentCategoryFilter(k as TemplateCategory | 'all')}
             />
 
-            {/* Pack pills, derived from the packs the index actually contains */}
-            <div className="flex flex-wrap gap-1.5">
-              {packEntries.map((src) => (
-                <Chip
-                  key={src.key}
-                  size="sm"
-                  active={agentSourceFilter === src.key}
-                  accent={src.key === 'all' ? undefined : src.color}
-                  onClick={() => setAgentSourceFilter(src.key)}
-                >
-                  {src.key !== 'all' && (
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{ background: src.color }}
-                    />
-                  )}
-                  {src.label}
-                </Chip>
-              ))}
-            </div>
+            {/* Pack pills. Same collapsing treatment as the category row above, and
+                LABELLED. Two unlabelled rows read as one list of interchangeable
+                chips, so choosing a category and a pack looked like a contradiction
+                rather than an intersection. 19 packs also wrapped to three lines. */}
+            <CollapsiblePillRow
+              label="Pack"
+              dot
+              aria-label="Filter agents by pack"
+              options={packEntries
+                .filter((src) => src.key !== 'all')
+                .map((src) => ({ key: src.key, label: src.label, color: src.color }))}
+              activeKey={agentSourceFilter}
+              onSelect={(k) => setAgentSourceFilter(k as TemplateSource | 'all')}
+            />
           </>
         )}
 
@@ -519,7 +517,9 @@ export function MarketplacePanel() {
             role="status"
           >
             <span className="text-xs text-muted-foreground">
-              <span style={{ color: 'var(--amber)' }}>Showing the built-in teams only.</span>{' '}
+              <span style={{ color: 'var(--amber)' }}>
+                Showing the built-in {isTeamsTab ? 'teams' : 'agents'} only.
+              </span>{' '}
               {catalogError.message}
             </span>
             <Button variant="secondary" size="sm" onClick={retryCatalog}>

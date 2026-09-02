@@ -160,6 +160,15 @@ export async function beginAuthorization(
         code: cb.code,
         pkce,
       })
+      // THE SIGN-OUT RACE. `cancelPendingAuth` drops this entry from the map, but
+      // a code exchange already in flight cannot be recalled: it resolves a moment
+      // later and would write a token the operator has just revoked, silently
+      // re-authorizing the connector behind their back. This identity check is the
+      // last point where that can still be refused. It has to happen HERE and not
+      // only in the `finally` below, which runs after the write has landed.
+      if (pending.get(slug) !== entry) {
+        throw new Error('this sign-in was cancelled before it completed')
+      }
       saveStoredTokens(slug, toStored(tokens))
       listener.settle({ ok: true, detail: 'clawboo has the credentials it needs.' })
     })
@@ -232,6 +241,29 @@ function portOf(redirectUri: string | undefined): number | null {
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Drop any in-flight sign-in for `slug`, so a callback that lands afterwards
+ * cannot publish its tokens.
+ *
+ * Signing out used to clear the vault and leave the pending listener running.
+ * A sign-in started a moment earlier would then complete against a provider
+ * that still considered the grant live, write its tokens, and re-authorize a
+ * connector the operator had just revoked, with nothing on screen to say so.
+ *
+ * The map entry is removed BEFORE the listener is closed, and in that order:
+ * the completion path identifies itself by `pending.get(slug) === entry`, so
+ * removing it first is what makes an exchange already in flight refuse to
+ * publish. Closing first would leave a window where a resolved exchange still
+ * looked current.
+ */
+export function cancelPendingAuth(slug: string): boolean {
+  const entry = pending.get(slug)
+  if (!entry) return false
+  pending.delete(slug)
+  entry.cancel()
+  return true
 }
 
 /** Wait for an in-flight authorization to finish. */

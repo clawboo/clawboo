@@ -36,10 +36,14 @@ Each **exec approval** card shows:
 - The owning agent's name and a live `expires Ns` countdown (the Gateway times an unresolved request out after roughly 120 seconds).
 - The command in a code block, plus any of `cwd`, `host`, `path`, and `security` as detail rows, and an error line if the request carried one.
 
-Each **tool / delegation approval** card (in the queue below) shows:
+Each **tool / delegation approval** card (in the queue below) is written for the person deciding, not for the system asking. It shows:
 
-- The tool name in accent red and a live `expires Ns` countdown.
-- An optional reason line and an optional args summary (credential-shaped fields are masked before display).
+- The **app's logo and name** when the call goes through a connector, otherwise the agent's name, and a live `expires Ns` countdown.
+- A **one-sentence headline** in the second person naming the actor and the effect, plus a short factual chip. The chip states what the call does and never reassures: an action is classified from its verb as **reads**, **sends**, **changes** or **destroys**, and an unrecognised verb falls to `changes` rather than to `reads`, so a call can never resolve downward into looking safer than it is.
+- The **decisive fields inline** (who it is addressed to, what it is about, which file or record), with the rest behind one disclosure. Credential-shaped values are masked before display.
+- The **agent's own words**, quoted and attributed, when it supplied a reason. They are never used as the headline.
+
+When a request cannot be read confidently, the card says so and shows the raw detail rather than inventing a friendly summary.
 
 ### 2. Resolve each item
 
@@ -78,12 +82,12 @@ While a Boo has an exec approval pending, its node in the [Ghost Graph](/using/g
 
 ### Tool / delegation card
 
-| Field         | Source                        | Notes                                |
-| ------------- | ----------------------------- | ------------------------------------ |
-| `toolName`    | The `tool_call_approvals` row | Accent-red header                    |
-| `reason`      | The row                       | Optional human-readable rationale    |
-| `argsSummary` | The row (scrubbed JSON)       | Re-masked at display time; truncated |
-| `expires Ns`  | `expiresAt − now`             | The approval's own TTL               |
+| Field         | Source                        | Notes                                                                                                                         |
+| ------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `toolName`    | The `tool_call_approvals` row | Input to `humanizeApproval`, not rendered raw. The card shows the app or agent and a plain-language effect instead            |
+| `reason`      | The row                       | The agent's own words. Quoted, attributed, and marked unverified; never used as the headline                                  |
+| `argsSummary` | The row (scrubbed JSON)       | Re-masked at display time. Decisive fields are lifted inline; the rest sits behind one disclosure rather than being truncated |
+| `expires Ns`  | `expiresAt − now`             | The approval's own TTL                                                                                                        |
 
 <Info>
 The two surfaces write **different tables and have different decision strings.** Exec approvals use `allow-once` / `allow-always` / `deny` (with hyphens) into the `approval_history` log; tool/delegation approvals use `allow_once` / `allow_always` / `deny` (with underscores) into `tool_call_approvals`. The buttons read the same in the UI; the wire values differ.
