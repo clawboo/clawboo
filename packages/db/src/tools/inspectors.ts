@@ -4,18 +4,23 @@
 // and continues. Order: deny-gates (security, scope) → rewrite (clamp) →
 // approval-gate (risk) LAST, so a denied call never reaches the approval prompt.
 
-import { scanForInjection } from './injection'
+import { evaluateInjection } from './injection'
 import type { ChainOutcome, Inspector, InspectorDecision, ToolCall } from './types'
 
 /**
  * SECURITY — deny calls whose args carry malicious content.
  *
- * `scanForInjection` was written for a different job: its own header says it
- * scans "a user-installed skill's text … before it can register or run", where
- * every byte is about to be EXECUTED. Reusing it verbatim on arbitrary tool args
- * imported an assumption that does not hold — a tool argument is not a program,
- * and whether a destructive string in one matters depends entirely on what the
- * tool does with it.
+ * Tool args are evaluated on the `exec` surface: they are spawn/args-bound, so
+ * every rule that fires is a blocking finding by the policy matrix, including
+ * `supply-chain` (an `npm install https://…` in a tool argument is the attack,
+ * not documentation; the original scan skipped that severity entirely).
+ *
+ * The scanner was written for a different job: it scans "a user-installed
+ * skill's text … before it can register or run", where every byte is about to be
+ * EXECUTED. Reusing it verbatim on arbitrary tool args imported an assumption
+ * that does not hold: a tool argument is not a program, and whether a
+ * destructive string in one matters depends entirely on what the tool does with
+ * it.
  *
  * The consequence was live and reachable: `echo { message: 'reminder: never run
  * rm -rf / on the server' }` came back
@@ -25,8 +30,9 @@ import type { ChainOutcome, Inspector, InspectorDecision, ToolCall } from './typ
  * circuit breaker counts, so talking about the work moved the agent toward a
  * tripped breaker.
  *
- * The split:
- *   • `destructive` / `exfil` attack the MACHINE, and need something to run them.
+ * The split (the policy's `intent` axis, applied here as the mention carve-out):
+ *   • `destructive` / `exfil` / `supply-chain` attack the MACHINE, and need
+ *     something to run them.
  *     On a tool that declares `risk: 'safe'` — no side effects, by the descriptor's
  *     own assertion — nothing can. Those are MENTIONS, so they are observed rather
  *     than denied.
@@ -48,13 +54,11 @@ export const securityInspector: Inspector = (call, descriptor): InspectorDecisio
   } catch {
     blob = String(call.args)
   }
-  const findings = scanForInjection(blob)
-  const blocking = findings.find(
-    (f) => f.severity === 'destructive' || f.severity === 'exfil' || f.severity === 'injection',
-  )
+  const blocking = evaluateInjection(blob, { surface: 'exec', scope: `tool:${call.name}` }).block[0]
   if (!blocking) return { kind: 'allow' }
+  // Unchanged wire format: tests assert `security:destructive:drop-table`.
   const reason = `security:${blocking.severity}:${blocking.pattern}`
-  const isMention = descriptor?.risk === 'safe' && blocking.severity !== 'injection'
+  const isMention = descriptor?.risk === 'safe' && blocking.intent !== 'language'
   return isMention ? { kind: 'observe', reason: `mention:${reason}` } : { kind: 'deny', reason }
 }
 
