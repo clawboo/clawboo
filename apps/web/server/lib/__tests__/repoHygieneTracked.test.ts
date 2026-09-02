@@ -66,12 +66,16 @@ const PATTERNS = [
   'clawboo-orchestrator-' + 'SESSION',
 ]
 
-// Only the single marketplace file that carries a real engineering-standard token
-// (a Canadian steel-design code) is excluded — not the whole agents tree, so a
-// real leak planted in any other persona file is still caught. The two
-// hygiene-guard files assemble the patterns from fragments (no literal names).
+// The marketplace content is NOT excluded, and no longer needs to be. The one
+// file that used to carry a real engineering-standard token (a Canadian
+// steel-design code, which reads as an S-code) was
+// `apps/web/src/features/marketplace/agents/agency/specialized.ts`; that tree is
+// gone, the content lives in `catalog/` now, and it is clean. Scanning it is the
+// point: a leak planted in a persona file is exactly what this catches.
+//
+// Only the two hygiene-guard files are excluded, because they assemble the
+// patterns from fragments and would otherwise match themselves.
 const EXCLUDES = [
-  ':!apps/web/src/features/marketplace/agents/agency/specialized.ts',
   ':!apps/web/server/lib/__tests__/repoHygiene.test.ts',
   ':!apps/web/server/lib/__tests__/repoHygieneTracked.test.ts',
 ]

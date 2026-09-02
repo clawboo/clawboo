@@ -36,7 +36,13 @@ test.describe('Teams', () => {
     // Click Marketplace nav button — use testid because button text alone
     // collides with surfaces like the theme-toggle title ("Theme: System ...").
     await agentList.locator('[data-testid="nav-marketplace"]').click()
-    await expect(page.getByRole('main').getByText('Marketplace')).toBeVisible({ timeout: 5_000 })
+    // The panel HEADING, not any text: catalog content legitimately contains the
+    // word (an e-commerce team called "Marketplace Storefront Team", an agent
+    // called "Marketplace Listing Optimizer", a `marketplace` tag), so a bare
+    // getByText matches six nodes and trips strict mode.
+    await expect(page.getByRole('main').getByRole('heading', { name: 'Marketplace' })).toBeVisible({
+      timeout: 5_000,
+    })
 
     // Tokens Used moved into the Settings modal (opened from the sidebar gear).
     await agentList.locator('[data-testid="nav-settings"]').click()

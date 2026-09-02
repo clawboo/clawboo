@@ -1,6 +1,16 @@
 import type { Request, Response } from 'express'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
-import { agents, costRecords, approvalHistory, settings, getSetting } from '@clawboo/db'
+import {
+  agents,
+  appendAudit,
+  costRecords,
+  approvalHistory,
+  evaluateInjection,
+  injectionAuditSummary,
+  settings,
+  getSetting,
+  type InjectionFinding,
+} from '@clawboo/db'
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { getDb } from '../lib/db'
@@ -79,6 +89,58 @@ export async function agentsRegistryHealthGET(_req: Request, res: Response): Pro
   }
 }
 
+// ─── Injection gate on the agent-authoring path ──────────────────────────────
+// `POST /api/agents` and `PUT /api/agents/:agentId/files/:name` are the two
+// routes EVERY marketplace deploy travels, and neither scanned anything before.
+// Agent files are prose bound for the model's own context, so they evaluate on
+// the `prompt` surface: instruction-override phrasing and invisible-unicode
+// smuggling block, while machine-directed strings pass with a review flag. That
+// asymmetry is load-bearing, not a softening: first-run onboarding hard-requires
+// deploying a builtin team, so a false positive here is an unrecoverable
+// first-run failure rather than a degraded experience, and a `DROP TABLE` in a
+// code reviewer's worked example is security-education prose, not an attack. The
+// `exec` seam (tool args, skill installs, connector spawn config) still denies
+// the real thing.
+interface AgentContentScan {
+  block: InjectionFinding[]
+  review: InjectionFinding[]
+}
+
+/** Evaluate every named chunk of agent-authored prose on the `prompt` surface. */
+function scanAgentContent(parts: Array<[string, string]>, scopePrefix: string): AgentContentScan {
+  const block: InjectionFinding[] = []
+  const review: InjectionFinding[] = []
+  for (const [label, text] of parts) {
+    if (!text) continue
+    const evaluation = evaluateInjection(text, {
+      surface: 'prompt',
+      scope: `${scopePrefix}#${label}`,
+    })
+    block.push(...evaluation.block)
+    review.push(...evaluation.review)
+  }
+  return { block, review }
+}
+
+/** Audit + 422 for a blocked authoring attempt. Only `{pattern, line,
+ *  fingerprint}` reaches the audit row, because `appendAudit` stringifies into one TEXT
+ *  column, so full excerpts stay in the HTTP response. */
+function rejectBlockedContent(
+  res: Response,
+  scan: AgentContentScan,
+  audit: { agentId: string | null; teamId?: string | null },
+): void {
+  appendAudit(getDb(), {
+    eventType: 'install',
+    agentId: audit.agentId,
+    teamId: audit.teamId ?? null,
+    summary: { blocked: true, gate: 'agent-content', findings: injectionAuditSummary(scan.block) },
+  })
+  res
+    .status(422)
+    .json({ error: 'agent content blocked: prompt-injection finding', findings: scan.block })
+}
+
 // ─── POST /api/agents ────────────────────────────────────────────────────────
 // Create an agent. Default source = OpenClaw (Gateway create + file writes +
 // SQLite mirror; 503 when the server-side connection is down). An optional
@@ -105,9 +167,25 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
     res.status(400).json({ error: `unknown sourceId '${String(body.sourceId)}'` })
     return
   }
+  // Gate BEFORE the source write, so a blocked payload never reaches the Gateway
+  // or SQLite, and so the 422 is returned even when the Gateway is disconnected.
+  const name = body.name.trim()
+  const scan = scanAgentContent(
+    [
+      ['name', name],
+      ...Object.entries(body.files ?? {}).filter(
+        (e): e is [string, string] => typeof e[1] === 'string',
+      ),
+    ],
+    name,
+  )
+  if (scan.block.length > 0) {
+    rejectBlockedContent(res, scan, { agentId: null, teamId: body.teamId ?? null })
+    return
+  }
   try {
     const agent = await source.createAgent({
-      name: body.name.trim(),
+      name,
       teamId: body.teamId ?? null,
       personalityConfig: body.personalityConfig,
       execConfig: body.execConfig,
@@ -123,7 +201,9 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
     if (agent.runtime === 'clawboo-native' && agent.teamId) {
       void ensureNativeBooZero(getDb(), getRegistry().nativeSource).catch(() => undefined)
     }
-    res.status(201).json({ agent })
+    // Review findings do not block, but they must be visible: a finding that
+    // only ever reached a local variable is indistinguishable from not looking.
+    res.status(201).json(scan.review.length > 0 ? { agent, findings: scan.review } : { agent })
   } catch (err) {
     if (isDisconnected(err)) {
       res.status(503).json({ error: 'gateway_disconnected' })
@@ -312,9 +392,15 @@ export async function agentFilePUT(req: Request, res: Response): Promise<void> {
     res.status(400).json({ error: 'content (string) required' })
     return
   }
+  const content = body.content
+  const scan = scanAgentContent([[name, content]], agentId)
+  if (scan.block.length > 0) {
+    rejectBlockedContent(res, scan, { agentId })
+    return
+  }
   try {
-    await sourceForAgent(agentId).writeFile(agentId, name, body.content)
-    res.json({ name, content: body.content })
+    await sourceForAgent(agentId).writeFile(agentId, name, content)
+    res.json(scan.review.length > 0 ? { name, content, findings: scan.review } : { name, content })
   } catch (err) {
     if (isDisconnected(err)) {
       res.status(503).json({ error: 'gateway_disconnected' })

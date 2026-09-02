@@ -13,15 +13,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
-    "ingest:marketplace": "tsx scripts/ingest-marketplace-content.ts",
-    "ingest:manifest": "tsx scripts/write-ingest-manifest.ts",
-    "verify:ingest": "tsx scripts/verify-ingest.ts",
-    "verify:catalog": "tsx scripts/verify-catalog.ts",
+    "catalog:build": "tsx scripts/catalog/build-index.ts && tsx scripts/catalog/build-seed.ts",
+    "catalog:verify": "tsx scripts/catalog/validate.ts && tsx scripts/catalog/build-index.ts --check && tsx scripts/catalog/build-seed.ts --check",
     "verify:connectors": "tsx scripts/verify-connectors.ts",
     "check:docs": "pnpm --filter @clawboo/docs check-frontmatter",
     "test:clean-install": "node scripts/test-clean-install.mjs",
     "test:bundle-externals": "node scripts/check-bundle-externals.mjs",
-    "prepublish:check": "pnpm verify:catalog && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install"
+    "prepublish:check": "pnpm catalog:verify && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
