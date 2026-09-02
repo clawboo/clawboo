@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawboo.dev/schema/pack.schema.json",
+  "title": "Clawboo marketplace pack, schema version 1",
+  "description": "The PUBLIC specification for a Clawboo marketplace pack. packages/pack-format is the TypeScript mirror of this file, used inside the Clawboo repo; a third party authors a pack against this schema and installs nothing. schemaVersion is the dispatch key: a reader validates at the declared version, upgrades, and validates again. It is never assumed.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "description",
+    "version",
+    "provenance",
+    "counts",
+    "agents",
+    "teams",
+    "skills"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "The pack format version. An INTEGER, not a semver, and not optional: a pack with no schemaVersion is a pack of unknown shape.",
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/$defs/kebab",
+      "description": "The pack id. Equals provenance.sourceId."
+    },
+    "idPrefix": {
+      "$ref": "#/$defs/kebab",
+      "description": "Entry-id prefix. Defaults to `id`. Lets the pack 'agency-agents' emit ids prefixed 'agency-'."
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "version": {
+      "description": "An EXACT semver of the CONTENT. Ranges ('^1.2.3', '1.x') are rejected: this names the one build of the content in this file.",
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "counts": {
+      "description": "Must agree with the lengths of the three arrays below.",
+      "type": "object",
+      "required": ["agents", "teams", "skills"],
+      "properties": {
+        "agents": { "type": "integer", "minimum": 0 },
+        "teams": { "type": "integer", "minimum": 0 },
+        "skills": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "newCategories": {
+      "description": "Taxonomy values this pack introduces that the host does not already know. Declaring one is what turns a new category into a reviewable line in the content PR instead of a silent new filter chip.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/kebab" }
+    },
+    "renames": {
+      "description": "Former entry id -> current id, or null when the entry was removed. Entry bookkeeping, NOT schema migration.",
+      "type": "object",
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "agents": { "type": "array", "items": { "$ref": "#/$defs/agentListing" } },
+    "teams": { "type": "array", "items": { "$ref": "#/$defs/teamListing" } },
+    "skills": { "type": "array", "items": { "$ref": "#/$defs/packSkill" } }
+  },
+  "$defs": {
+    "kebab": {
+      "description": "Flat kebab-case. Entry ids become filenames and URL segments.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "hexColor": {
+      "description": "Six-digit hex. Cards concatenate alpha suffixes onto it (`${color}18`), so an hsl() value would render transparent.",
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "adaptation": { "enum": ["verbatim", "adapted", "original"] },
+    "skillCategory": {
+      "description": "CLOSED, deliberately: shared with the Ghost Graph capability model.",
+      "enum": ["code", "web", "data", "comm", "file", "other"]
+    },
+    "entryOrigin": {
+      "description": "Per-entry attribution, for a pack whose entries do not all share one upstream. Omitted entries inherit the pack-level provenance.",
+      "type": "object",
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "adaptation": { "$ref": "#/$defs/adaptation" },
+        "authors": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "provenance": {
+      "description": "Lives ONCE per pack. Replaces a per-entry source + sourceUrl pair.",
+      "type": "object",
+      "required": ["sourceId", "label", "color", "license", "adaptation", "importedAt"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/kebab" },
+        "label": { "type": "string", "minLength": 1 },
+        "color": { "$ref": "#/$defs/hexColor" },
+        "repo": { "type": "string", "format": "uri" },
+        "ref": {
+          "description": "Commit sha or tag the import was taken at.",
+          "type": "string",
+          "minLength": 1
+        },
+        "license": {
+          "description": "SPDX identifier.",
+          "type": "string",
+          "minLength": 1
+        },
+        "authors": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "adaptation": { "$ref": "#/$defs/adaptation" },
+        "importedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "agentListing": {
+      "description": "What a CARD renders. The prose lives in the body document this points at.",
+      "type": "object",
+      "required": [
+        "id",
+        "packId",
+        "slug",
+        "name",
+        "role",
+        "emoji",
+        "color",
+        "description",
+        "category",
+        "tags",
+        "skillIds",
+        "body"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/kebab",
+          "description": "Must equal `${idPrefix ?? id}-${slug}` and be unique across the pack's agents AND teams."
+        },
+        "packId": { "$ref": "#/$defs/kebab" },
+        "slug": { "$ref": "#/$defs/kebab" },
+        "name": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string", "minLength": 1 },
+        "color": { "$ref": "#/$defs/hexColor" },
+        "description": { "type": "string", "minLength": 1 },
+        "category": {
+          "$ref": "#/$defs/kebab",
+          "description": "OPEN taxonomy. A value the host does not know must be declared in newCategories."
+        },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "skillIds": {
+          "description": "Resolved against the MERGED registry: the host's builtin skills plus this pack's own `skills` additions. A pack may reference a builtin without redeclaring it, and must not redeclare one.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/kebab" }
+        },
+        "body": {
+          "description": "Relative path to this entry's AgentBody document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "origin": { "$ref": "#/$defs/entryOrigin" },
+        "suggestedRuntime": { "type": "string", "minLength": 1 }
+      }
+    },
+    "teamMemberRef": {
+      "description": "Denormalised so cards render count + roles with no body fetch.",
+      "type": "object",
+      "required": ["agentId", "name", "role"],
+      "properties": {
+        "agentId": {
+          "$ref": "#/$defs/kebab",
+          "description": "Must name an agent in this pack."
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      }
+    },
+    "teamListing": {
+      "type": "object",
+      "required": [
+        "id",
+        "packId",
+        "slug",
+        "name",
+        "emoji",
+        "color",
+        "description",
+        "category",
+        "tags",
+        "members",
+        "body"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/kebab" },
+        "packId": { "$ref": "#/$defs/kebab" },
+        "slug": { "$ref": "#/$defs/kebab" },
+        "name": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string", "minLength": 1 },
+        "color": { "$ref": "#/$defs/hexColor" },
+        "description": { "type": "string", "minLength": 1 },
+        "category": { "$ref": "#/$defs/kebab" },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "members": { "type": "array", "items": { "$ref": "#/$defs/teamMemberRef" } },
+        "body": { "type": "string", "minLength": 1 },
+        "origin": { "$ref": "#/$defs/entryOrigin" },
+        "defaultRuntime": { "type": "string", "minLength": 1 }
+      }
+    },
+    "packSkill": {
+      "type": "object",
+      "required": ["id", "name", "description", "category", "tags"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/kebab",
+          "description": "Must not collide with a host builtin skill id: the builtin wins the merge, so a colliding pack skill would be silently discarded."
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "category": { "$ref": "#/$defs/skillCategory" },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "agentBody": {
+      "description": "One agent's document set, at the relative path its listing names. SOUL.md and IDENTITY.md are required: they are the two files the deploy path cannot synthesize. AGENTS.md and CLAWBOO.md are built per-deploy from the team topology and never appear in a pack.",
+      "type": "object",
+      "required": ["id", "files"],
+      "properties": {
+        "id": { "$ref": "#/$defs/kebab" },
+        "files": {
+          "type": "object",
+          "required": ["SOUL.md", "IDENTITY.md"],
+          "additionalProperties": { "type": "string" },
+          "properties": {
+            "SOUL.md": { "type": "string", "minLength": 1 },
+            "IDENTITY.md": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "teamBody": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/kebab" },
+        "workflowNarrative": { "type": "string" },
+        "routing": {
+          "description": "Per-member AGENTS.md routing content, keyed by agent id.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}

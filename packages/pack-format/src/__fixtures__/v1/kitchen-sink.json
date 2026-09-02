@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "id": "agency-agents",
+  "idPrefix": "agency",
+  "name": "Agency Agents",
+  "description": "Every optional field in the v1 pack schema, set to a legal value.",
+  "version": "2.3.4-rc.1+build.7",
+  "provenance": {
+    "sourceId": "agency-agents",
+    "label": "Agency Agents",
+    "color": "#3B82F6",
+    "repo": "https://github.com/msitarzewski/agency-agents",
+    "ref": "64eee9f8e04f69b04e78e150d771a443c64720be",
+    "license": "MIT",
+    "authors": ["Michael Sitarzewski"],
+    "adaptation": "adapted",
+    "importedAt": "2026-08-25T00:00:00.000Z"
+  },
+  "counts": { "agents": 2, "teams": 1, "skills": 2 },
+  "newCategories": ["localization"],
+  "renames": {
+    "agency-frontend-dev": "agency-frontend-developer",
+    "agency-retired-bot": null
+  },
+  "agents": [
+    {
+      "id": "agency-frontend-developer",
+      "packId": "agency-agents",
+      "slug": "frontend-developer",
+      "name": "Frontend Developer Boo",
+      "role": "Frontend Developer",
+      "emoji": "💻",
+      "color": "#3B82F6",
+      "description": "Builds interfaces and keeps the design system honest.",
+      "category": "engineering",
+      "tags": ["engineering", "frontend"],
+      "skillIds": ["agency-story-mapper", "agency-token-auditor"],
+      "body": "agents/agency-frontend-developer.json",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8/engineering/frontend-developer.md",
+        "adaptation": "adapted",
+        "authors": ["Michael Sitarzewski"]
+      },
+      "suggestedRuntime": "clawboo-native"
+    },
+    {
+      "id": "agency-qa-engineer",
+      "packId": "agency-agents",
+      "slug": "qa-engineer",
+      "name": "QA Engineer Boo",
+      "role": "QA Engineer",
+      "emoji": "🧪",
+      "color": "#10B981",
+      "description": "Writes the test that would have caught it.",
+      "category": "testing",
+      "tags": ["testing", "qa"],
+      "skillIds": ["agency-token-auditor"],
+      "body": "agents/agency-qa-engineer.json"
+    }
+  ],
+  "teams": [
+    {
+      "id": "agency-ship-it",
+      "packId": "agency-agents",
+      "slug": "ship-it",
+      "name": "Ship It",
+      "emoji": "🚀",
+      "color": "#F97316",
+      "description": "Builds it, tests it, ships it.",
+      "category": "engineering",
+      "tags": ["engineering", "delivery"],
+      "members": [
+        {
+          "agentId": "agency-frontend-developer",
+          "name": "Frontend Developer Boo",
+          "role": "Frontend Developer"
+        },
+        { "agentId": "agency-qa-engineer", "name": "QA Engineer Boo", "role": "QA Engineer" }
+      ],
+      "body": "teams/agency-ship-it.json",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8/teams/ship-it.md",
+        "adaptation": "original"
+      },
+      "defaultRuntime": "openclaw"
+    }
+  ],
+  "skills": [
+    {
+      "id": "agency-story-mapper",
+      "name": "Story Mapper",
+      "description": "Turns a brief into a mapped set of user stories.",
+      "category": "data",
+      "tags": ["stories", "planning"]
+    },
+    {
+      "id": "agency-token-auditor",
+      "name": "Token Auditor",
+      "description": "Audits a design system for unused and duplicated tokens.",
+      "category": "file",
+      "tags": ["design", "tokens"]
+    }
+  ]
+}
