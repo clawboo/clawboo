@@ -16,6 +16,7 @@
 //      passes the lexical check and then points anywhere on disk; this layer
 //      is what stops it.
 
+import { constants as fsConstants } from 'node:fs'
 import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
@@ -228,7 +229,13 @@ export async function readFileAt(
   const st = await lstat(abs)
   if (!st.isFile()) throw new WorkspacePathError('Not a file.')
 
-  const handle = await open(abs, 'r')
+  // O_NOFOLLOW, because `open` is the ONE sink here that follows a symlink.
+  // Every check above is an `lstat`, which does not, so the leaf was proven a
+  // regular file at check time and could still be swapped for a symlink before
+  // this line runs. The agent owns this worktree and writes it concurrently, so
+  // that window is real rather than theoretical. Undefined on Windows, where
+  // the flag does not exist; `?? 0` degrades to the previous behaviour there.
+  const handle = await open(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
   try {
     // The agent is writing this worktree concurrently, so the file can shrink
     // between lstat and read. Every buffer is sliced to the bytes ACTUALLY
