@@ -7,5 +7,9 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@clawboo/docs", "@clawboo/web"]
+  "ignore": ["@clawboo/docs", "@clawboo/web"],
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  }
 }
