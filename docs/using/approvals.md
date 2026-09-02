@@ -36,10 +36,14 @@ Each **exec approval** card shows:
 - The owning agent's name and a live `expires Ns` countdown (the Gateway times an unresolved request out after roughly 120 seconds).
 - The command in a code block, plus any of `cwd`, `host`, `path`, and `security` as detail rows, and an error line if the request carried one.
 
-Each **tool / delegation approval** card (in the queue below) shows:
+Each **tool / delegation approval** card (in the queue below) is written for the person deciding, not for the system asking. It shows:
 
-- The tool name in accent red and a live `expires Ns` countdown.
-- An optional reason line and an optional args summary (credential-shaped fields are masked before display).
+- The **app's logo and name** when the call goes through a connector, otherwise the agent's name, and a live `expires Ns` countdown.
+- A **one-sentence headline** in the second person naming the actor and the effect, plus a short factual chip. The chip states what the call does and never reassures: an action is classified from its verb as **reads**, **sends**, **changes** or **destroys**, and an unrecognised verb falls to `changes` rather than to `reads`, so a call can never resolve downward into looking safer than it is.
+- The **decisive fields inline** (who it is addressed to, what it is about, which file or record), with the rest behind one disclosure. Credential-shaped values are masked before display.
+- The **agent's own words**, quoted and attributed, when it supplied a reason. They are never used as the headline.
+
+When a request cannot be read confidently, the card says so and shows the raw detail rather than inventing a friendly summary.
 
 ### 2. Resolve each item
 
