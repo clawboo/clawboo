@@ -1,5 +1,5 @@
 // A filter-chip row that shows the popular options inline and tucks the rest
-// behind a "+N more" toggle, so a long taxonomy (15 agent domains / 18 team
+// behind a "+N more" toggle, so a long taxonomy (20 agent categories / 15 team
 // categories) reads as a clean single band instead of a wrapping wall of pills.
 //
 // The caller passes `options` already ordered popular-first (excluding "All");

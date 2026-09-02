@@ -76,8 +76,9 @@ pnpm format:check                       # prettier --check .; CI runs this befor
 pnpm lint                               # ESLint across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright e2e (incl. board round-trip + eval smoke)
-pnpm verify:catalog                     # marketplace catalog integrity gate (offline)
-pnpm verify:ingest                      # marketplace codegen drift gate (live, needs network)
+pnpm verify:connectors                  # connector catalog consistency gate (offline)
+pnpm catalog:build                      # rebuild catalog/dist and the compiled marketplace seed
+pnpm catalog:verify                     # marketplace content gate (offline)
 pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, smoke-test it
 pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
@@ -86,8 +87,8 @@ What each one guards:
 
 - **`pnpm test`** runs two Vitest projects: a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
 - **`pnpm e2e`** runs Playwright end-to-end, including the durable-board round-trip and the eval smoke suite.
-- **`pnpm verify:catalog`** checks the committed marketplace catalog (304 agents, 82 teams) against its committed integrity manifest. It is offline, and it is the gate CI and the release path run.
-- **`pnpm verify:ingest`** re-derives the codegen'd catalog from the pinned upstream commits and fails on any drift. It needs network, and runs weekly plus on PRs touching ingestion. If you touched ingestion, regenerate with `pnpm ingest:marketplace` first. See [Codegen and ingestion](/internals/codegen-and-ingestion).
+- **`pnpm verify:connectors`** checks the committed connector catalog for internal consistency. It is offline, and it is the gate CI and the release path run.
+- **`pnpm catalog:build`** rebuilds `catalog/dist/**` and the compiled marketplace seed from the packs in `catalog/packs/**` (436 agents, 85 teams across nineteen packs). **`pnpm catalog:verify`** is the gate: every content rule, then a check that the committed artifacts are byte-for-byte what a rebuild would write. Both are offline. A pull request touching only `catalog/` skips the full CI matrix and runs `catalog-ci.yml` instead; see [the marketplace catalog reference](/reference/marketplace-catalog).
 - **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI, packs it, installs the tarball into a throwaway temp dir, and boots _that_ install to catch first-run regressions — through a headless-Chromium pass that fails on any uncaught exception or first-party console error, right up to one real agent run and a second-launch check that the CLI reuses a dashboard already running instead of forking another. It needs network access for the `npm install` and the same `pnpm exec playwright install chromium` download as `pnpm e2e`, and it refuses to run while another Clawboo dashboard holds `18790`–`18809` (stop your `pnpm dev` server first). This is the same gate the release workflow runs: see [Release process](/internals/release-process).
 
 <Tip>
@@ -167,7 +168,7 @@ A change must not break the [seven architecture invariants](/concepts/architectu
 
 ## Release process
 
-Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The workflow re-runs the whole PR gate before publishing (`verify:catalog`, `build`, `lint`, `typecheck`, `test`, then `assemble` and the `pnpm test:clean-install` gate), so a release cannot skip a check a pull request had to pass. The catalog gate on that path is the offline one; the live re-derive (`verify:ingest`) runs in its own workflow so an upstream outage cannot block a release. See [Release process](/internals/release-process) for the full pipeline.
+Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The workflow re-runs the whole PR gate before publishing (`build`, `lint`, `typecheck`, `test`, then `assemble` and the `pnpm test:clean-install` gate), so a release cannot skip a check a pull request had to pass. Every check on that path is offline, so an upstream outage cannot block a release. See [Release process](/internals/release-process) for the full pipeline.
 
 ## License
 

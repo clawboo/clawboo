@@ -6,7 +6,7 @@
 // (3) is runtime-AGNOSTIC: a curated skill installed onto an OpenClaw agent is an
 // honest clawboo-managed annotation (what the TOOLS.md bullet always was), so its
 // record carries the AGENT's runtime but `manageability:'managed'`. Writes reuse
-// the existing tool-broker pipeline (scanForInjection + appendAudit + setToolEnabled) — never forked.
+// the existing tool-broker pipeline (evaluateInjection + appendAudit + setToolEnabled), never forked.
 
 import {
   unsupported,
@@ -20,9 +20,10 @@ import {
   appendAudit,
   createBuiltinRegistry,
   defaultAvailabilityContext,
+  evaluateInjection,
   getCapability,
+  injectionAuditSummary,
   isToolEnabled,
-  scanForInjection,
   setToolEnabled,
   skills,
   type ClawbooDb,
@@ -218,23 +219,35 @@ export class NativeCapabilitySource implements CapabilitySource {
     db: ClawbooDb,
     spec: Extract<CapabilityWriteAction, { kind: 'install' }>['spec'],
   ): CapabilityRecord {
-    // Scan the WHOLE supply-chain payload — including a connector's command/args/
-    // env, not just name + skillContent — so a malicious MCP-connector command can
-    // never slip the scan before a future caller wires it to a spawn.
-    const findings = scanForInjection(
+    // The payload is TWO surfaces, not one blob. `name` + `skillContent` are
+    // prose that lands in an agent's context, so they evaluate on `prompt`:
+    // instruction-override phrasing blocks, while security-education prose about
+    // a destructive command is flagged for review rather than refused. A
+    // connector's command/args/env is spawn-bound, so it evaluates on `exec`
+    // where every rule blocks, so a malicious MCP-connector command can never slip
+    // the scan before a future caller wires it to a spawn.
+    const scope = `capability:${spec.name}`
+    const prose = evaluateInjection([spec.name, spec.skillContent ?? ''].join('\n'), {
+      surface: 'prompt',
+      scope: `${scope}#content`,
+    })
+    const spawn = evaluateInjection(
       [
-        spec.name,
-        spec.skillContent ?? '',
         spec.mcpServer?.command ?? '',
         ...(spec.mcpServer?.args ?? []),
         ...Object.entries(spec.mcpServer?.env ?? {}).flat(),
       ].join('\n'),
+      { surface: 'exec', scope: `${scope}#mcpServer` },
     )
-    if (findings.length > 0) {
+    if (prose.blocked || spawn.blocked) {
       appendAudit(db, {
         agentId: spec.agentId,
         eventType: 'install',
-        summary: { blocked: true, name: spec.name, findings },
+        summary: {
+          blocked: true,
+          name: spec.name,
+          findings: injectionAuditSummary([...prose.block, ...spawn.block]),
+        },
       })
       throw new Error('capability blocked: injection / supply-chain finding')
     }

@@ -30,10 +30,18 @@ export {
 } from './inspectors'
 
 export {
+  actionFor,
+  evaluateInjection,
+  injectionAuditSummary,
   isSkillSafe,
   scanForInjection,
+  type EvaluateInjectionOptions,
+  type InjectionAction,
+  type InjectionEvaluation,
   type InjectionFinding,
+  type InjectionIntent,
   type InjectionSeverity,
+  type InjectionSurface,
 } from './injection'
 
 export {

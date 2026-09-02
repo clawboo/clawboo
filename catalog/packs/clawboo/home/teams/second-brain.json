@@ -1,0 +1,10 @@
+{
+  "id": "home-second-brain",
+  "routing": {
+    "home-brain-distiller": "# AGENTS\n\nWhen a distillation is ready to be filed:\n  @Note Librarian, please place this where it will be found again.\nWhen a capture repeats something already in the collection:\n  @Link Connector, please tell me which existing note this duplicates.",
+    "home-brain-link-connector": "# AGENTS\n\nWhen a new note duplicates an existing one:\n  @Note Librarian, please decide which of these is the note we keep.\nWhen a linked note now looks wrong:\n  @Note Gardener, please review this older note against the newer evidence.",
+    "home-brain-note-gardener": "# AGENTS\n\nWhen a note is superseded and should point elsewhere:\n  @Link Connector, please connect this to the note that replaced it.\nWhen a batch is reviewed and pruning is proposed:\n  @Note Librarian, please take the decisions to the reader as one set.",
+    "home-brain-note-librarian": "# AGENTS\n\nWhen a capture is too long to file as it stands:\n  @Distiller, please reduce this to the few sentences worth keeping.\nWhen a new note clearly belongs beside older ones:\n  @Link Connector, please link it to the notes it continues.\nWhen a note is filed but looks out of date:\n  @Note Gardener, please check whether this is still true."
+  },
+  "workflowNarrative": "Every capture passes through the Distiller first, which reduces it to the few sentences worth keeping, in plain terms, with the claim, the evidence, and the caveat intact and the source attached.\n\nThe Note Librarian is the entry point for the collection itself, deciding where each note belongs and defending a shallow, stable structure against the constant temptation to add another category. The Link Connector then finds the older notes a new one extends, contradicts, or answers, and names the relationship rather than leaving a bare link.\n\nThe Note Gardener runs on a slow recurring pass, reviewing the oldest and least visited notes, marking what is outdated or superseded, and proposing pruning. It is a workload that only makes sense as a scheduled member, not as a prompt, and nothing is ever deleted without the reader's approval."
+}

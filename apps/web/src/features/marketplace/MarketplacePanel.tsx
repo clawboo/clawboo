@@ -15,27 +15,24 @@ import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import type { InstalledSkillRecord } from '@/stores/marketplace'
 import { useGraphStore } from '@/features/graph/store'
-import { SKILL_CATALOG, searchCatalog } from './catalog'
+import { BUILTIN_SKILLS, searchCatalog } from './catalog'
 import type { CatalogSkill } from './catalog'
 import { AgentPickerDropdown } from './AgentPickerDropdown'
-import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
+import { CollapsiblePillRow } from './CollapsiblePillRow'
 import type { SkillCategory } from '@/features/graph/types'
 import { CreateTeamModal } from '@/features/teams/CreateTeamModal'
-import type {
-  TeamTemplate,
-  ProfileLike,
-  AgentCatalogEntry,
-  AgentDomain,
-  TemplateCategory,
-} from '@/features/teams/types'
-import { TEAM_CATALOG, getAgentsForSkill } from './teamCatalog'
-import { AGENT_CATALOG, searchAgentCatalog } from './agents'
+import type { TeamTemplate, ProfileLike, TemplateCategory } from '@/features/teams/types'
+import { buildTeamCountByAgent, getAgentsForSkill, searchAgentCatalog } from './teamCatalog'
+import type { AgentIndexEntry, CatalogIndex } from './catalogTypes'
+import { useCatalogIndex } from './useCatalog'
+import { COMMUNITY_DISCLOSURE } from './provenance'
 import { HeroTile } from './HeroTile'
 import {
   TeamShowcaseGrid,
   teamCategoryOptions,
+  agentCategoryOptions,
   filterTeams,
-  TEAM_SOURCE_ENTRIES,
+  packFilterEntries,
 } from './TeamShowcaseGrid'
 import { TeamTemplateDetail } from './TeamTemplateDetail'
 import { AgentCard } from './AgentCard'
@@ -117,10 +114,21 @@ async function installSkillFromMarketplace(
 
 // ─── SkillCard ───────────────────────────────────────────────────────────────
 
-function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
+function SkillCard({
+  skill,
+  index,
+  catalog,
+}: {
+  skill: CatalogSkill
+  index: number
+  catalog: CatalogIndex | null
+}) {
   const [showPicker, setShowPicker] = useState(false)
   const cat = CATEGORY_META[skill.category] ?? CATEGORY_META.other
-  const agentCount = useMemo(() => getAgentsForSkill(skill.id).length, [skill.id])
+  const agentCount = useMemo(
+    () => (catalog ? getAgentsForSkill(catalog, skill.id).length : 0),
+    [catalog, skill.id],
+  )
 
   const onAgentCountClick = () => {
     const store = useMarketplaceStore.getState()
@@ -204,44 +212,14 @@ function SkillCard({ skill, index }: { skill: CatalogSkill; index: number }) {
   )
 }
 
-// ─── Agent domain metadata ───────────────────────────────────────────────────
-
-const AGENT_DOMAIN_META: Record<AgentDomain, { label: string; color: string }> = {
-  academic: { label: 'Academic', color: '#A855F7' },
-  design: { label: 'Design', color: '#EC4899' },
-  engineering: { label: 'Engineering', color: '#3B82F6' },
-  'game-development': { label: 'Game Dev', color: '#8B5CF6' },
-  marketing: { label: 'Marketing', color: '#F59E0B' },
-  'paid-media': { label: 'Paid Media', color: '#F97316' },
-  product: { label: 'Product', color: '#06B6D4' },
-  'project-management': { label: 'Project Mgmt', color: '#0EA5E9' },
-  sales: { label: 'Sales', color: '#10B981' },
-  'spatial-computing': { label: 'Spatial', color: '#6366F1' },
-  specialized: { label: 'Specialized', color: '#64748B' },
-  support: { label: 'Support', color: '#14B8A6' },
-  testing: { label: 'Testing', color: '#EAB308' },
-  openclaw: { label: 'OpenClaw', color: 'var(--primary)' },
-  clawboo: { label: 'Clawboo', color: 'var(--mint)' },
-}
-
-// The mainstream professional domains people filter by most — shown inline in
-// the domain bar; every other (nicher / source-specific) domain folds under the
-// "+N more" toggle. Deliberately curated rather than sorted by agent count:
-// the source-domains (OpenClaw has 110 agents) would otherwise dominate "top by
-// count" and bury the domains users actually browse by.
-const POPULAR_DOMAIN_ORDER: AgentDomain[] = [
-  'engineering',
-  'marketing',
-  'design',
-  'product',
-  'sales',
-  'support',
-  'specialized',
-]
-
 // ─── MarketplacePanel ────────────────────────────────────────────────────────
 
 export function MarketplacePanel() {
+  // One fetch for the whole panel. The index starts as the compiled seed, so the
+  // shell, the tab row and the grids all render on the first frame and only the
+  // fresher content lands late. `counts` comes from the index so the tab badges
+  // stay synchronous.
+  const { index: catalog, error: catalogError, retry: retryCatalog } = useCatalogIndex()
   // Skill filter state
   const searchQuery = useMarketplaceStore((s) => s.searchQuery)
   const setSearchQuery = useMarketplaceStore((s) => s.setSearchQuery)
@@ -263,8 +241,8 @@ export function MarketplacePanel() {
   // Agent filter state
   const agentSearchQuery = useMarketplaceStore((s) => s.agentSearchQuery)
   const setAgentSearchQuery = useMarketplaceStore((s) => s.setAgentSearchQuery)
-  const agentDomainFilter = useMarketplaceStore((s) => s.agentDomainFilter)
-  const setAgentDomainFilter = useMarketplaceStore((s) => s.setAgentDomainFilter)
+  const agentCategoryFilter = useMarketplaceStore((s) => s.agentCategoryFilter)
+  const setAgentCategoryFilter = useMarketplaceStore((s) => s.setAgentCategoryFilter)
   const agentSourceFilter = useMarketplaceStore((s) => s.agentSourceFilter)
   const setAgentSourceFilter = useMarketplaceStore((s) => s.setAgentSourceFilter)
 
@@ -274,60 +252,47 @@ export function MarketplacePanel() {
   // "Start from scratch" opens CreateTeamModal directly on a blank customize step.
   const [startBlankTeam, setStartBlankTeam] = useState(false)
   const [detailTemplate, setDetailTemplate] = useState<TeamTemplate | null>(null)
-  const [detailAgent, setDetailAgent] = useState<AgentCatalogEntry | null>(null)
+  const [detailAgent, setDetailAgent] = useState<AgentIndexEntry | null>(null)
 
   // Filtered teams + category options — the shared helpers, so the Marketplace
   // and the first-run team modal filter identically.
   const filteredTeams = useMemo(
-    () => filterTeams(teamSearchQuery, teamCategoryFilter, teamSourceFilter),
-    [teamSearchQuery, teamCategoryFilter, teamSourceFilter],
+    () =>
+      catalog ? filterTeams(catalog, teamSearchQuery, teamCategoryFilter, teamSourceFilter) : [],
+    [catalog, teamSearchQuery, teamCategoryFilter, teamSourceFilter],
   )
-  const teamCategoryOpts = useMemo(() => teamCategoryOptions(), [])
+  const teamCategoryOpts = useMemo(() => (catalog ? teamCategoryOptions(catalog) : []), [catalog])
+  // Built once per index load. `AgentCard` renders this 304 times, and deriving it
+  // inside the card would be an O(agents x teams) scan per render.
+  const teamCountByAgent = useMemo(
+    () => (catalog ? buildTeamCountByAgent(catalog) : new Map<string, number>()),
+    [catalog],
+  )
 
-  // Distinct agent domains present in the catalog, ordered by first-seen
-  const distinctDomains = useMemo(() => {
-    const seen = new Set<AgentDomain>()
-    const ordered: AgentDomain[] = []
-    for (const a of AGENT_CATALOG) {
-      if (!seen.has(a.domain)) {
-        seen.add(a.domain)
-        ordered.push(a.domain)
-      }
-    }
-    return ordered
-  }, [])
+  // Agent category options, busiest first, derived from the loaded index.
+  const agentCategoryOpts = useMemo(() => (catalog ? agentCategoryOptions(catalog) : []), [catalog])
 
-  // Domain filter options, popular-first: the curated mainstream domains lead,
-  // then every remaining present domain in catalog order. Fed to the collapsible
-  // pill row (popular inline, the rest under "+N more").
-  const domainOptions = useMemo<PillOption[]>(() => {
-    const present = new Set(distinctDomains)
-    const popular = POPULAR_DOMAIN_ORDER.filter((d) => present.has(d))
-    const rest = distinctDomains.filter((d) => !POPULAR_DOMAIN_ORDER.includes(d))
-    return [...popular, ...rest].map((d) => ({
-      key: d,
-      label: AGENT_DOMAIN_META[d].label,
-      color: AGENT_DOMAIN_META[d].color,
-    }))
-  }, [distinctDomains])
+  // Pack filter entries, derived the same way. Shared by both browse tabs.
+  const packEntries = useMemo(() => (catalog ? packFilterEntries(catalog) : []), [catalog])
 
   // Filtered agents
   const filteredAgents = useMemo(() => {
-    let results: AgentCatalogEntry[] = agentSearchQuery
-      ? searchAgentCatalog(agentSearchQuery)
-      : [...AGENT_CATALOG]
-    if (agentDomainFilter !== 'all') {
-      results = results.filter((a) => a.domain === agentDomainFilter)
+    if (!catalog) return []
+    let results: AgentIndexEntry[] = agentSearchQuery
+      ? searchAgentCatalog(catalog, agentSearchQuery)
+      : catalog.agents
+    if (agentCategoryFilter !== 'all') {
+      results = results.filter((a) => a.category === agentCategoryFilter)
     }
     if (agentSourceFilter !== 'all') {
-      results = results.filter((a) => a.source === agentSourceFilter)
+      results = results.filter((a) => a.packId === agentSourceFilter)
     }
     return results
-  }, [agentSearchQuery, agentDomainFilter, agentSourceFilter])
+  }, [catalog, agentSearchQuery, agentCategoryFilter, agentSourceFilter])
 
   // Single-agent deploy — wrap the agent in an adhoc TeamTemplate so CreateTeamModal
   // can drive the existing deploy pipeline (skip pick step, prefill customize step).
-  const handleAgentDeploy = (agent: AgentCatalogEntry) => {
+  const handleAgentDeploy = (agent: AgentIndexEntry) => {
     const profile: TeamTemplate = {
       id: `adhoc-${agent.id}`,
       name: agent.role,
@@ -335,6 +300,7 @@ export function MarketplacePanel() {
       color: agent.color,
       description: agent.description,
       category: agent.category,
+      packId: agent.packId,
       source: agent.source,
       tags: agent.tags,
       agentIds: [agent.id],
@@ -345,7 +311,7 @@ export function MarketplacePanel() {
 
   // Filtered skills
   const filteredSkills = useMemo(() => {
-    let results: CatalogSkill[] = searchQuery ? searchCatalog(searchQuery) : [...SKILL_CATALOG]
+    let results: CatalogSkill[] = searchQuery ? searchCatalog(searchQuery) : [...BUILTIN_SKILLS]
 
     if (categoryFilter !== 'all') {
       results = results.filter((s) => s.category === categoryFilter)
@@ -410,143 +376,160 @@ export function MarketplacePanel() {
           value={marketplaceTab}
           onChange={(id) => setMarketplaceTab(id)}
           tabs={[
-            { id: 'teams', label: 'Teams', icon: Users, count: TEAM_CATALOG.length },
-            { id: 'agents', label: 'Agents', icon: Bot, count: AGENT_CATALOG.length },
-            { id: 'skills', label: 'Skills', icon: Wrench, count: SKILL_CATALOG.length },
+            { id: 'teams', label: 'Teams', icon: Users, count: catalog?.counts.teams ?? 0 },
+            { id: 'agents', label: 'Agents', icon: Bot, count: catalog?.counts.agents ?? 0 },
+            { id: 'skills', label: 'Skills', icon: Wrench, count: BUILTIN_SKILLS.length },
           ]}
         />
       </div>
 
-      {/* Connectors owns its own filter bar + body, so the shared one is skipped.
-          `min-h-0 flex-1` is load-bearing: the browser is a flex COLUMN child, so
-          without the flex slot its `h-full` resolves against a container that has
-          already given the remaining height to the grid below, and its internal
-          scroll region never gets a box to scroll inside. */}
       {/* Filter bar */}
-      {
-        <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
-          {isTeamsTab && (
-            <>
-              {/* Team search */}
-              <SearchInput
-                size="sm"
-                placeholder="Search teams…"
-                value={teamSearchQuery}
-                onChange={setTeamSearchQuery}
-              />
+      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-6 py-3.5">
+        {isTeamsTab && (
+          <>
+            {/* Team search */}
+            <SearchInput
+              size="sm"
+              placeholder="Search teams…"
+              value={teamSearchQuery}
+              onChange={setTeamSearchQuery}
+            />
 
-              {/* Team category pills: popular inline, the rest under "+N more" */}
-              <CollapsiblePillRow
-                aria-label="Filter teams by category"
-                options={teamCategoryOpts}
-                activeKey={teamCategoryFilter}
-                onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
-              />
+            {/* Team category pills: busiest inline, the rest under "+N more" */}
+            <CollapsiblePillRow
+              aria-label="Filter teams by category"
+              options={teamCategoryOpts}
+              activeKey={teamCategoryFilter}
+              onSelect={(k) => setTeamCategoryFilter(k as TemplateCategory | 'all')}
+            />
 
-              {/* Team source pills */}
-              <div className="flex flex-wrap gap-1.5">
-                {TEAM_SOURCE_ENTRIES.map((src) => (
+            {/* Pack pills, derived from the packs the index actually contains */}
+            <div className="flex flex-wrap gap-1.5">
+              {packEntries.map((src) => (
+                <Chip
+                  key={src.key}
+                  size="sm"
+                  active={teamSourceFilter === src.key}
+                  accent={src.key === 'all' ? undefined : src.color}
+                  onClick={() => setTeamSourceFilter(src.key)}
+                >
+                  {src.key !== 'all' && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: src.color }}
+                    />
+                  )}
+                  {src.label}
+                </Chip>
+              ))}
+            </div>
+          </>
+        )}
+
+        {isAgentsTab && (
+          <>
+            {/* Agent search */}
+            <SearchInput
+              size="sm"
+              placeholder="Search agents…"
+              value={agentSearchQuery}
+              onChange={setAgentSearchQuery}
+            />
+
+            {/* Agent category pills: busiest inline, the rest under "+N more" */}
+            <CollapsiblePillRow
+              aria-label="Filter agents by category"
+              options={agentCategoryOpts}
+              activeKey={agentCategoryFilter}
+              onSelect={(k) => setAgentCategoryFilter(k as TemplateCategory | 'all')}
+            />
+
+            {/* Pack pills, derived from the packs the index actually contains */}
+            <div className="flex flex-wrap gap-1.5">
+              {packEntries.map((src) => (
+                <Chip
+                  key={src.key}
+                  size="sm"
+                  active={agentSourceFilter === src.key}
+                  accent={src.key === 'all' ? undefined : src.color}
+                  onClick={() => setAgentSourceFilter(src.key)}
+                >
+                  {src.key !== 'all' && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: src.color }}
+                    />
+                  )}
+                  {src.label}
+                </Chip>
+              ))}
+            </div>
+          </>
+        )}
+
+        {isSkillsTab && (
+          <>
+            {/* Skill search */}
+            <SearchInput
+              size="sm"
+              placeholder="Search skills…"
+              value={searchQuery}
+              onChange={setSearchQuery}
+            />
+
+            {/* Skill category pills */}
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
+                const { color, label } = CATEGORY_META[key]
+                return (
                   <Chip
-                    key={src.key}
+                    key={key}
                     size="sm"
-                    active={teamSourceFilter === src.key}
-                    accent={src.key === 'all' ? undefined : src.color}
-                    onClick={() => setTeamSourceFilter(src.key)}
+                    active={categoryFilter === key}
+                    accent={key === 'all' ? undefined : color}
+                    onClick={() => setCategoryFilter(key)}
                   >
-                    {src.key !== 'all' && (
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ background: src.color }}
-                      />
-                    )}
-                    {src.label}
+                    {label}
                   </Chip>
-                ))}
-              </div>
-            </>
-          )}
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
 
-          {isAgentsTab && (
-            <>
-              {/* Agent search */}
-              <SearchInput
-                size="sm"
-                placeholder="Search agents…"
-                value={agentSearchQuery}
-                onChange={setAgentSearchQuery}
-              />
-
-              {/* Agent domain pills: popular inline, the rest under "+N more" */}
-              <CollapsiblePillRow
-                aria-label="Filter agents by domain"
-                options={domainOptions}
-                activeKey={agentDomainFilter}
-                onSelect={(k) => setAgentDomainFilter(k as AgentDomain | 'all')}
-              />
-
-              {/* Agent source pills */}
-              <div className="flex flex-wrap gap-1.5">
-                {TEAM_SOURCE_ENTRIES.map((src) => (
-                  <Chip
-                    key={src.key}
-                    size="sm"
-                    active={agentSourceFilter === src.key}
-                    accent={src.key === 'all' ? undefined : src.color}
-                    onClick={() => setAgentSourceFilter(src.key)}
-                  >
-                    {src.key !== 'all' && (
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ background: src.color }}
-                      />
-                    )}
-                    {src.label}
-                  </Chip>
-                ))}
-              </div>
-            </>
-          )}
-
-          {isSkillsTab && (
-            <>
-              {/* Skill search */}
-              <SearchInput
-                size="sm"
-                placeholder="Search skills…"
-                value={searchQuery}
-                onChange={setSearchQuery}
-              />
-
-              {/* Skill category pills */}
-              <div className="flex flex-wrap gap-1.5">
-                {(Object.keys(CATEGORY_META) as (SkillCategory | 'all')[]).map((key) => {
-                  const { color, label } = CATEGORY_META[key]
-                  return (
-                    <Chip
-                      key={key}
-                      size="sm"
-                      active={categoryFilter === key}
-                      accent={key === 'all' ? undefined : color}
-                      onClick={() => setCategoryFilter(key)}
-                    >
-                      {label}
-                    </Chip>
-                  )
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      }
-
-      {/* Grid. Every child is gated on teams/agents/skills, so on the connectors
-          tab this container is empty, but `flex-1` would still make it eat the
-          remaining height and starve the browser above it. Dropped OUT of the
-          flex layout rather than unmounted, to keep the ~100 lines below at their
-          current indentation. */}
+      {/* Grid */}
       <div className="flex-1 overflow-y-auto p-6">
+        {/* Said once, plainly, on every catalog tab. Most of what is below is
+            other people's work that Clawboo curated and adapted, not wrote, and
+            the checks it ran are narrower than a reader might assume. Not
+            dismissible: it is a standing fact about the catalog, not a notice to
+            acknowledge and hide. */}
+        <p className="mb-4 text-[11.5px] leading-relaxed text-muted-foreground">
+          {COMMUNITY_DISCLOSURE}
+        </p>
+        {/* A dropped catalog fetch must say so, but it must NOT empty the grids.
+            The builtin pack is compiled into this bundle, so what renders below
+            is the seed rather than nothing, and this line is the difference
+            between "these are all the teams" and "these are the ones that
+            survived". Skills are unaffected: they are a direct import. */}
+        {catalogError && (isTeamsTab || isAgentsTab) && (
+          <div
+            className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-2.5"
+            role="status"
+          >
+            <span className="text-xs text-muted-foreground">
+              <span style={{ color: 'var(--amber)' }}>Showing the built-in teams only.</span>{' '}
+              {catalogError.message}
+            </span>
+            <Button variant="secondary" size="sm" onClick={retryCatalog}>
+              Try again
+            </Button>
+          </div>
+        )}
         {isTeamsTab && (
           <TeamShowcaseGrid
+            catalog={catalog}
             teams={filteredTeams}
             onSelectTeam={(p) => {
               setPrefilledProfile(p)
@@ -578,7 +561,7 @@ export function MarketplacePanel() {
                   size="sm"
                   onClick={() => {
                     setAgentSearchQuery('')
-                    setAgentDomainFilter('all')
+                    setAgentCategoryFilter('all')
                     setAgentSourceFilter('all')
                   }}
                 >
@@ -601,8 +584,10 @@ export function MarketplacePanel() {
               {filteredAgents.map((agent, i) => (
                 <AgentCard
                   key={agent.id}
+                  catalog={catalog}
                   agent={agent}
                   index={i}
+                  teamCount={teamCountByAgent.get(agent.id) ?? 0}
                   onDetails={(a) => setDetailAgent(a)}
                   onDeploy={handleAgentDeploy}
                 />
@@ -642,15 +627,16 @@ export function MarketplacePanel() {
                 subtitle="Curated skills you can add to any Boo's tool profile."
               />
               {filteredSkills.map((skill, i) => (
-                <SkillCard key={skill.id} skill={skill} index={i} />
+                <SkillCard key={skill.id} skill={skill} index={i} catalog={catalog} />
               ))}
             </div>
           ))}
       </div>
 
       {/* Detail modals */}
-      {detailTemplate && (
+      {detailTemplate && catalog && (
         <TeamTemplateDetail
+          catalog={catalog}
           template={detailTemplate}
           onClose={() => setDetailTemplate(null)}
           onDeploy={(t) => {
@@ -661,8 +647,9 @@ export function MarketplacePanel() {
         />
       )}
 
-      {detailAgent && (
+      {detailAgent && catalog && (
         <AgentTemplateDetail
+          catalog={catalog}
           agent={detailAgent}
           onClose={() => setDetailAgent(null)}
           onDeploy={(a) => {
@@ -670,7 +657,7 @@ export function MarketplacePanel() {
             setDetailAgent(null)
           }}
           onSkillClick={(skillId) => {
-            const skill = SKILL_CATALOG.find((s) => s.id === skillId)
+            const skill = BUILTIN_SKILLS.find((s) => s.id === skillId)
             setMarketplaceTab('skills')
             if (skill) setSearchQuery(skill.name)
             setDetailAgent(null)

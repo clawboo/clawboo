@@ -24,6 +24,17 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
+/**
+ * The team grid renders from the emitted catalog index, which is fetched, so the
+ * cards land one tick after mount rather than synchronously. Every test that
+ * reaches for a card waits on this first.
+ */
+async function waitForTeamCards() {
+  await waitFor(() =>
+    expect(screen.getAllByRole('button', { name: 'Deploy' }).length).toBeGreaterThan(0),
+  )
+}
+
 function renderPick(onClose = vi.fn()) {
   const utils = render(
     <ThemeProvider>
@@ -34,8 +45,9 @@ function renderPick(onClose = vi.fn()) {
 }
 
 describe('CreateTeamModal pick step (shared team showcase)', () => {
-  it('renders the marketplace team showcase — header, filters, cards, and Start from scratch', () => {
+  it('renders the marketplace team showcase — header, filters, cards, and Start from scratch', async () => {
     renderPick()
+    await waitForTeamCards()
     expect(screen.getByText('Create a team')).toBeInTheDocument()
     // The shared collapsible category filter row.
     expect(screen.getByRole('group', { name: 'Filter teams by category' })).toBeInTheDocument()
@@ -58,6 +70,7 @@ describe('CreateTeamModal pick step (shared team showcase)', () => {
   it('picking a template advances to its customize step (prefilled)', async () => {
     const user = userEvent.setup()
     renderPick()
+    await waitForTeamCards()
     const firstDeploy = screen.getAllByRole('button', { name: 'Deploy' })[0]
     await user.click(firstDeploy)
     // Advanced to the customize step (its "Customize team" heading), leaving the
@@ -79,6 +92,7 @@ describe('CreateTeamModal dialog semantics', () => {
     const dialog = screen.getByRole('dialog', { name: 'Create a team' })
     expect(dialog).toHaveAttribute('aria-modal', 'true')
 
+    await waitForTeamCards()
     await user.click(screen.getAllByRole('button', { name: 'Deploy' })[0] as HTMLElement)
     await waitFor(() =>
       expect(screen.getByRole('dialog', { name: 'Customize team' })).toBeInTheDocument(),
@@ -96,6 +110,7 @@ describe('CreateTeamModal dialog semantics', () => {
     const user = userEvent.setup()
     const { onClose } = renderPick()
 
+    await waitForTeamCards()
     await user.click(screen.getAllByRole('button', { name: 'Details' })[0] as HTMLElement)
     await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(2))
 

@@ -219,6 +219,9 @@ importers:
       '@clawboo/obs':
         specifier: workspace:^
         version: link:../../packages/obs
+      '@clawboo/pack-format':
+        specifier: workspace:*
+        version: link:../../packages/pack-format
       '@clawboo/process-lookup':
         specifier: workspace:*
         version: link:../../packages/process-lookup
@@ -912,6 +915,25 @@ importers:
         version: 3.2.7(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@22.19.11)(typescript@6.0.3))(tsx@4.23.13)(yaml@2.9.0)
 
   packages/obs:
+    dependencies:
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
+    devDependencies:
+      '@clawboo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      tsup:
+        specifier: ^8.4.0
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.26)(tsx@4.23.13)(typescript@6.0.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.12)(@types/node@22.19.11)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@22.19.11)(typescript@6.0.3))(tsx@4.23.13)(yaml@2.9.0)
+
+  packages/pack-format:
     dependencies:
       zod:
         specifier: ^3.25.0

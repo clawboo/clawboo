@@ -1,0 +1,8 @@
+{
+  "id": "clawboo-research",
+  "routing": {
+    "clawboo-research-data-analyst-boo": "# AGENTS\n\nWhen you need context on the source or methodology behind a dataset:\n  @Paper Reader Boo, please provide the original study details.\nWhen analysis is complete and ready for the final report:\n  @Summarizer Boo, please write the executive summary.",
+    "clawboo-research-paper-reader-boo": "# AGENTS\n\nWhen you have extracted data or statistics that need deeper analysis:\n  @Data Analyst Boo, please review these numbers quantitatively.\nWhen reading notes are complete and ready for distillation:\n  @Summarizer Boo, please synthesize these notes into a summary.",
+    "clawboo-research-summarizer-boo": "# AGENTS\n\nWhen you need deeper reading notes or source verification:\n  @Paper Reader Boo, please extract the details from the source.\nWhen you need data-backed claims or statistical validation:\n  @Data Analyst Boo, please provide quantitative support for these claims."
+  }
+}

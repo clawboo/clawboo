@@ -1,0 +1,97 @@
+{
+  "agents": [
+    {
+      "body": "agents/image-prompt-director.json",
+      "category": "design",
+      "color": "#8B5CF6",
+      "description": "Turns a visual brief into a generated-image prompt with deliberate composition, lighting and colour, and iterates one change at a time.",
+      "emoji": "🎨",
+      "id": "visdir-image-prompt-director",
+      "name": "Image Prompt Director",
+      "packId": "blackforestlabs-visual-direction",
+      "role": "Image Prompt Director",
+      "skillIds": [
+        "image-prompt-construction",
+        "web-search",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer"
+      ],
+      "slug": "image-prompt-director",
+      "tags": ["image-generation", "prompting", "art-direction", "lighting"]
+    },
+    {
+      "body": "agents/shot-director.json",
+      "category": "content",
+      "color": "#8B5CF6",
+      "description": "Turns a video brief into a shot that can actually be generated, catching the contradictions first and routing exactness to post.",
+      "emoji": "🎬",
+      "id": "visdir-shot-director",
+      "name": "Generative Shot Director",
+      "packId": "blackforestlabs-visual-direction",
+      "role": "Generative Shot Director",
+      "skillIds": [
+        "shot-brief-triage",
+        "keyframe-continuity-planning",
+        "generative-audio-direction",
+        "file-writer",
+        "web-search"
+      ],
+      "slug": "shot-director",
+      "tags": ["video-generation", "shot-design", "continuity", "audio"]
+    }
+  ],
+  "counts": {
+    "agents": 2,
+    "skills": 4,
+    "teams": 0
+  },
+  "description": "Two directors for generated visuals: one for still images, covering prompt construction, lighting, colour and reference handling, and one for short video, covering brief triage, shot design, keyframe continuity and audio layering. Adapted from an MIT-licensed upstream collection of image and video generation skills, with the vendor API, model names and pricing left behind and only the craft kept.",
+  "id": "blackforestlabs-visual-direction",
+  "idPrefix": "visdir",
+  "name": "Image and Shot Direction",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Black Forest Labs Inc."],
+    "color": "#8B5CF6",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Image and Shot Direction",
+    "license": "MIT",
+    "ref": "8907d515b0ac270a988ec7a239add81ee13d6cba",
+    "repo": "https://github.com/black-forest-labs/skills",
+    "sourceId": "blackforestlabs-visual-direction"
+  },
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "category": "other",
+      "description": "Builds a generated-image prompt in a fixed order of subject, action, style, setting, light and camera, so each element is controllable.",
+      "id": "image-prompt-construction",
+      "name": "Image Prompt Construction",
+      "tags": ["image", "prompting", "composition", "lighting"]
+    },
+    {
+      "category": "other",
+      "description": "Reads a video brief for the conflicts and impossibilities that generation cannot resolve, and returns ready, needs information, or revise.",
+      "id": "shot-brief-triage",
+      "name": "Shot Brief Triage",
+      "tags": ["video", "brief", "triage", "feasibility"]
+    },
+    {
+      "category": "other",
+      "description": "Plans which supplied frames anchor a generated clip and which invariants must survive a continuation, so a chain of shots holds together.",
+      "id": "keyframe-continuity-planning",
+      "name": "Keyframe Continuity Planning",
+      "tags": ["video", "keyframes", "continuity", "storyboard"]
+    },
+    {
+      "category": "comm",
+      "description": "Directs generated speech, ambience, effects and music as separate named layers, and reserves exact timing and mixing for post.",
+      "id": "generative-audio-direction",
+      "name": "Generative Audio Direction",
+      "tags": ["audio", "voiceover", "sound-design", "mix"]
+    }
+  ],
+  "teams": [],
+  "version": "1.0.0"
+}

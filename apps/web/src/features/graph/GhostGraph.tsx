@@ -70,7 +70,7 @@ import { ConnectorMarkStyles } from '@/features/connectors/ConnectorMark'
 import { ThreadPicker, type ThreadOption } from './ThreadPicker'
 import { threadOptionsFor } from './threadOptions'
 import { connectorSlugFromId } from './nodes/connectorTile'
-import { SKILL_CATALOG } from '@/features/marketplace/catalog'
+import { BUILTIN_SKILLS } from '@/features/marketplace/catalog'
 import { connectorBySlug } from '@clawboo/connector-catalog'
 import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
 import { connectConnector, signInConnector } from '@/features/marketplace/connectConnector'
@@ -1057,7 +1057,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       expandBoo(drop.fromNodeId)
 
       if (option.id.startsWith('skill:')) {
-        const skill = SKILL_CATALOG.find((s) => `skill:${s.id}` === option.id)
+        const skill = BUILTIN_SKILLS.find((s) => `skill:${s.id}` === option.id)
         if (skill) await installSkillForAgent(skill.name, agentId, agentName)
         return
       }

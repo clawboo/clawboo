@@ -22,7 +22,7 @@ The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `h
 - **One board, one memory, one capability dashboard.** A durable kanban (the canonical task state) fused with live chat (the narration), a shared memory every runtime reads and writes, and one unified inventory of skills, tools, and connectors.
 - **Connect any runtime from the Runtimes panel.** Install and connect Claude Code, Codex, or Hermes, or point at a local OpenClaw Gateway. Each runtime keeps its own native powers.
 - **Verified and governed.** Builder-is-not-the-judge verification for autonomous completions, spend tracking and warnings with depth and fan-out caps and approvals, plus traces, structured logs, and an error taxonomy. Hard caps that auto-pause a run are opt-in.
-- **A 300+ agent catalog.** Browse 304 first-class agents across 82 prebuilt teams, one click to deploy.
+- **A 430+ agent catalog.** Browse 436 first-class agents across 85 prebuilt teams, one click to deploy.
 
 ## Requirements
 

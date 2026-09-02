@@ -1,0 +1,70 @@
+{
+  "agents": [
+    {
+      "body": "agents/video-producer.json",
+      "category": "content",
+      "color": "#06B6D4",
+      "description": "Produces short presenter-led videos end to end: one idea, a script written for the ear, correct framing per destination, and a localized cut.",
+      "emoji": "🎥",
+      "id": "presenter-video-producer",
+      "name": "Presenter Video Producer",
+      "packId": "heygen-presenter-video",
+      "role": "Presenter Video Producer",
+      "skillIds": [
+        "spoken-script-writing",
+        "video-localization",
+        "aspect-and-framing-check",
+        "file-writer",
+        "summarizer"
+      ],
+      "slug": "video-producer",
+      "tags": ["video", "presenter", "script", "localization"]
+    }
+  ],
+  "counts": {
+    "agents": 1,
+    "skills": 3,
+    "teams": 0
+  },
+  "description": "One producer for short presenter-led video, covering conversational discovery, scripts written for the ear, the exact-text list, aspect ratio and caption safe areas per destination, and a reviewed localization pass. Adapted from an MIT-licensed upstream collection of video skills, with the vendor product, API and command-line plumbing left behind and only the production craft kept.",
+  "id": "heygen-presenter-video",
+  "idPrefix": "presenter",
+  "name": "Presenter Video Studio",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["HeyGen"],
+    "color": "#06B6D4",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Presenter Video Studio",
+    "license": "MIT",
+    "ref": "1bd5e4d33a028dfed3abf504c5e3dd644fb9ea8a",
+    "repo": "https://github.com/heygen-com/skills",
+    "sourceId": "heygen-presenter-video"
+  },
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "category": "comm",
+      "description": "Writes a short script for the ear rather than the page, structured by video type and sized to the duration it has to fit.",
+      "id": "spoken-script-writing",
+      "name": "Spoken Script Writing",
+      "tags": ["script", "voiceover", "video", "hook"]
+    },
+    {
+      "category": "comm",
+      "description": "Plans a dubbed or subtitled version of an existing video, with a review pass on the translated text before the final render.",
+      "id": "video-localization",
+      "name": "Video Localization",
+      "tags": ["localization", "dubbing", "subtitles", "translation"]
+    },
+    {
+      "category": "other",
+      "description": "Checks that a presenter, caption and safe area survive the aspect ratio each destination needs before anything is rendered.",
+      "id": "aspect-and-framing-check",
+      "name": "Aspect and Framing Check",
+      "tags": ["framing", "aspect-ratio", "captions", "distribution"]
+    }
+  ],
+  "teams": [],
+  "version": "1.0.0"
+}

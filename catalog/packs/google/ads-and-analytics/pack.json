@@ -1,0 +1,190 @@
+{
+  "agents": [
+    {
+      "body": "agents/ads-api-onboarding.json",
+      "category": "paid-media",
+      "color": "#F59E0B",
+      "description": "Gets a team from no access to a first working advertising API call: credentials, developer access, account hierarchy and the errors that stop everyone.",
+      "emoji": "🔑",
+      "id": "adsapi-ads-api-onboarding",
+      "name": "Ads API Onboarding Engineer",
+      "packId": "google-ads-analytics",
+      "role": "Ads API Onboarding Engineer",
+      "skillIds": ["web-search", "api-tester", "code-search", "file-writer", "markdown-renderer"],
+      "slug": "ads-api-onboarding",
+      "tags": ["ads-api", "authentication", "onboarding", "credentials"]
+    },
+    {
+      "body": "agents/ads-account-diagnostics.json",
+      "category": "paid-media",
+      "color": "#F59E0B",
+      "description": "Investigates a drop in conversions, leads or impression share by querying the account systematically instead of guessing at a cause.",
+      "emoji": "🩺",
+      "id": "adsapi-ads-account-diagnostics",
+      "name": "Ad Account Diagnostician",
+      "packId": "google-ads-analytics",
+      "role": "Ad Account Diagnostician",
+      "skillIds": ["sql-query", "csv-analyzer", "data-visualizer", "summarizer", "api-tester"],
+      "slug": "ads-account-diagnostics",
+      "tags": ["diagnostics", "impression-share", "conversions", "reporting"]
+    },
+    {
+      "body": "agents/audience-data-pipeline.json",
+      "category": "paid-media",
+      "color": "#F59E0B",
+      "description": "Builds and operates first-party audience uploads, with the consent, hashing and destination questions settled before any data moves.",
+      "emoji": "👥",
+      "id": "adsapi-audience-data-pipeline",
+      "name": "Audience Data Engineer",
+      "packId": "google-ads-analytics",
+      "role": "Audience Data Engineer",
+      "skillIds": [
+        "json-transformer",
+        "python-executor",
+        "csv-analyzer",
+        "api-tester",
+        "file-reader"
+      ],
+      "slug": "audience-data-pipeline",
+      "tags": ["audience", "first-party-data", "consent", "data-pipeline"]
+    },
+    {
+      "body": "agents/conversion-event-pipeline.json",
+      "category": "paid-media",
+      "color": "#F59E0B",
+      "description": "Sends offline and enhanced conversion events into advertising destinations so that reported performance matches what the business actually recorded.",
+      "emoji": "🎯",
+      "id": "adsapi-conversion-event-pipeline",
+      "name": "Conversion Event Engineer",
+      "packId": "google-ads-analytics",
+      "role": "Conversion Event Engineer",
+      "skillIds": ["json-transformer", "python-executor", "sql-query", "api-tester", "file-reader"],
+      "slug": "conversion-event-pipeline",
+      "tags": ["conversions", "offline-events", "attribution", "data-pipeline"]
+    },
+    {
+      "body": "agents/analytics-reporting.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Builds programmatic analytics reports that hold up: compatible dimensions and metrics, honest sampling caveats, and figures that reconcile with the interface.",
+      "emoji": "📉",
+      "id": "adsapi-analytics-reporting",
+      "name": "Analytics Reporting Engineer",
+      "packId": "google-ads-analytics",
+      "role": "Analytics Reporting Engineer",
+      "skillIds": [
+        "api-tester",
+        "json-transformer",
+        "csv-analyzer",
+        "data-visualizer",
+        "summarizer"
+      ],
+      "slug": "analytics-reporting",
+      "tags": ["analytics", "reporting", "api", "dashboards"]
+    },
+    {
+      "body": "agents/analytics-admin.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Provisions and governs analytics properties: data streams, custom definitions, retention, product links and the access that goes with them.",
+      "emoji": "🗄️",
+      "id": "adsapi-analytics-admin",
+      "name": "Analytics Property Administrator",
+      "packId": "google-ads-analytics",
+      "role": "Analytics Property Administrator",
+      "skillIds": [
+        "api-tester",
+        "json-transformer",
+        "file-writer",
+        "markdown-renderer",
+        "summarizer"
+      ],
+      "slug": "analytics-admin",
+      "tags": ["analytics", "administration", "governance", "data-retention"]
+    },
+    {
+      "body": "agents/ad-monetisation-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Integrates advertising into applications and video players: format choice, lifecycle and cleanup, test configuration, and migrations that actually finish.",
+      "emoji": "📱",
+      "id": "adsapi-ad-monetisation-engineer",
+      "name": "Ad Monetisation Engineer",
+      "packId": "google-ads-analytics",
+      "role": "Ad Monetisation Engineer",
+      "skillIds": [
+        "code-search",
+        "file-reader",
+        "test-runner",
+        "web-search",
+        "systematic-debugging"
+      ],
+      "slug": "ad-monetisation-engineer",
+      "tags": ["mobile-ads", "sdk-integration", "video-ads", "monetization"]
+    }
+  ],
+  "counts": {
+    "agents": 7,
+    "skills": 0,
+    "teams": 1
+  },
+  "description": "Seven specialists and one team for the engineering side of paid media and analytics: API access, account diagnostics, first-party audience and conversion pipelines, reporting, property administration and in-product ad integration. Adapted from the advertising and analytics slice of an Apache-2.0 licensed upstream collection; the much larger cloud-infrastructure slice was not imported.",
+  "id": "google-ads-analytics",
+  "idPrefix": "adsapi",
+  "name": "Ads and Analytics",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["Google LLC"],
+    "color": "#EA580C",
+    "importedAt": "2026-09-01T00:00:00.000Z",
+    "label": "Ads and Analytics",
+    "license": "Apache-2.0",
+    "ref": "0dad3f947e45a736060e524bbefa3eab692809f9",
+    "repo": "https://github.com/google/skills",
+    "sourceId": "google-ads-analytics"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/paid-media-data-desk.json",
+      "category": "paid-media",
+      "color": "#F59E0B",
+      "description": "Owns the loop between an advertising account and the data feeding it: access, diagnostics, audience uploads, conversion events and reporting.",
+      "emoji": "🛰️",
+      "id": "adsapi-paid-media-data-desk",
+      "members": [
+        {
+          "agentId": "adsapi-ads-api-onboarding",
+          "name": "Ads API Onboarding Engineer",
+          "role": "Ads API Onboarding Engineer"
+        },
+        {
+          "agentId": "adsapi-ads-account-diagnostics",
+          "name": "Ad Account Diagnostician",
+          "role": "Ad Account Diagnostician"
+        },
+        {
+          "agentId": "adsapi-audience-data-pipeline",
+          "name": "Audience Data Engineer",
+          "role": "Audience Data Engineer"
+        },
+        {
+          "agentId": "adsapi-conversion-event-pipeline",
+          "name": "Conversion Event Engineer",
+          "role": "Conversion Event Engineer"
+        },
+        {
+          "agentId": "adsapi-analytics-reporting",
+          "name": "Analytics Reporting Engineer",
+          "role": "Analytics Reporting Engineer"
+        }
+      ],
+      "name": "Paid Media Data Desk",
+      "packId": "google-ads-analytics",
+      "slug": "paid-media-data-desk",
+      "tags": ["paid-media", "measurement", "data-pipeline", "diagnostics"]
+    }
+  ],
+  "version": "1.0.0"
+}

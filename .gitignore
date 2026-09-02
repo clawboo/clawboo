@@ -1,6 +1,15 @@
 node_modules
 dist
 
+# ...EXCEPT the marketplace catalog's, which is generated AND committed. That is
+# what makes the zero-infrastructure fallback URL work: a raw githubusercontent
+# URL against main serves the same bytes a CDN would, with no deploy step in
+# between. `pnpm catalog:verify` fails if it is not what a rebuild would write.
+# The `dist` pattern above matches at any depth, so both lines are needed - the
+# directory has to be re-included before anything inside it can be.
+!catalog/dist/
+!catalog/dist/**
+
 # node-gyp / better-sqlite3 native build output (not a vendored artifact).
 packages/db/build/
 
@@ -28,3 +37,4 @@ website/.astro/
 # publish` at release time) writes one into the package directory; it is a build
 # artifact, never a source file.
 *.tgz
+

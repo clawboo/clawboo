@@ -1,0 +1,48 @@
+{
+  "name": "@clawboo/pack-format",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The versioned marketplace pack schema: types, the version ladder, and the parser every reader shares",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawboo/clawboo.git",
+    "directory": "packages/pack-format"
+  },
+  "homepage": "https://github.com/clawboo/clawboo/tree/main/packages/pack-format",
+  "bugs": "https://github.com/clawboo/clawboo/issues",
+  "keywords": [
+    "clawboo",
+    "marketplace",
+    "pack",
+    "schema"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@clawboo/tsconfig": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  }
+}

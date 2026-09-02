@@ -1,43 +1,37 @@
 import { motion } from 'framer-motion'
-import { useMemo } from 'react'
 import { BooAvatar } from '@clawboo/ui'
-import type { AgentCatalogEntry } from '@/features/teams/types'
+import type { AgentIndexEntry, CatalogIndex } from './catalogTypes'
+import { originOf, provenanceFor } from './provenance'
 import { Button } from '@/features/shared/Button'
-import { SOURCE_META, TEMPLATE_CATEGORIES, teamsContainingAgent } from './teamCatalog'
-
-// ─── Helpers ────────────────────────────────────────────────────────────────────
-
-function getCategoryLabel(category: string): string {
-  const entry = TEMPLATE_CATEGORIES.find((c) => c.key === category)
-  return entry?.label ?? category
-}
-
-function formatDomain(domain: string): string {
-  // 'game-development' → 'Game Dev', 'project-management' → 'Project Mgmt'
-  const special: Record<string, string> = {
-    'game-development': 'Game Dev',
-    'project-management': 'Project Mgmt',
-    'spatial-computing': 'Spatial',
-    'paid-media': 'Paid Media',
-    openclaw: 'OpenClaw',
-    clawboo: 'Clawboo',
-  }
-  if (special[domain]) return special[domain]
-  return domain.charAt(0).toUpperCase() + domain.slice(1)
-}
+import { metaFor, sourceMetaFor } from './registry'
 
 // ─── AgentCard ──────────────────────────────────────────────────────────────────
 
 interface AgentCardProps {
-  agent: AgentCatalogEntry
+  /** The emitted index, read only for this pack's provenance. */
+  catalog: CatalogIndex | null
+  agent: AgentIndexEntry
   index: number
-  onDetails: (agent: AgentCatalogEntry) => void
-  onDeploy: (agent: AgentCatalogEntry) => void
+  /** How many teams include this agent. Precomputed once per index load by
+   *  `buildTeamCountByAgent`, because this card renders 304 times. */
+  teamCount: number
+  onDetails: (agent: AgentIndexEntry) => void
+  onDeploy: (agent: AgentIndexEntry) => void
 }
 
-export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps) {
-  const sourceMeta = SOURCE_META[agent.source]
-  const teamCount = useMemo(() => teamsContainingAgent(agent.id).length, [agent.id])
+export function AgentCard({
+  catalog,
+  agent,
+  index,
+  onDetails,
+  onDeploy,
+  teamCount,
+}: AgentCardProps) {
+  const packMeta = sourceMetaFor(agent.packId)
+  // Most of the catalog is adapted community work. Saying so on the card is the
+  // difference between curating it and claiming authorship of it.
+  const isCommunity = originOf(provenanceFor(catalog, agent.packId)) === 'community'
+  const categoryMeta = metaFor(agent.category)
   const skillCount = agent.skillIds.length
 
   return (
@@ -64,35 +58,41 @@ export function AgentCard({ agent, index, onDetails, onDeploy }: AgentCardProps)
         </div>
       </div>
 
-      {/* Badge row: source + domain + category */}
+      {/* Badge row: pack + category. The domain badge is gone with the domain
+          taxonomy; category was always the more useful of the two and is the one
+          the filter row now works on. */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {sourceMeta && (
-          <span
-            className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
-            style={{
-              color: sourceMeta.color,
-              background: `${sourceMeta.color}18`,
-              borderColor: `${sourceMeta.color}35`,
-              letterSpacing: '0.03em',
-            }}
-          >
-            {sourceMeta.label}
-          </span>
-        )}
         <span
-          className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-medium uppercase"
+          className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
           style={{
-            color: `${agent.color}cc`,
-            background: `${agent.color}14`,
-            borderColor: `${agent.color}30`,
+            color: packMeta.color,
+            background: `${packMeta.color}18`,
+            borderColor: `${packMeta.color}35`,
             letterSpacing: '0.03em',
           }}
         >
-          {formatDomain(agent.domain)}
+          {packMeta.label}
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          {getCategoryLabel(agent.category)}
+        <span
+          className="whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[9px] font-medium uppercase"
+          style={{
+            color: `${categoryMeta.color}cc`,
+            background: `${categoryMeta.color}14`,
+            borderColor: `${categoryMeta.color}30`,
+            letterSpacing: '0.03em',
+          }}
+        >
+          {categoryMeta.label}
         </span>
+        {isCommunity && (
+          <span
+            className="whitespace-nowrap rounded-md border border-border bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium uppercase text-muted-foreground"
+            style={{ letterSpacing: '0.03em' }}
+            title="Adapted from a community project. The detail sheet names the author, the licence and the pinned commit."
+          >
+            Community
+          </span>
+        )}
       </div>
 
       {/* Description */}

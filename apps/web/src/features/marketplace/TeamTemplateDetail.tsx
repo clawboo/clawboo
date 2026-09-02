@@ -1,10 +1,16 @@
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { BooAvatar } from '@clawboo/ui'
 import type { TeamTemplate } from '@/features/teams/types'
 import { Button, IconButton } from '@/features/shared/Button'
 import { Modal } from '@/features/shared/Modal'
-import { SOURCE_META, TEMPLATE_CATEGORIES, resolveTeamAgents } from './teamCatalog'
+import { resolveTeamAgents, resolveTeamRoster } from './teamCatalog'
+import { metaFor, sourceMetaFor } from './registry'
+import { AGENT_FILE, type CatalogIndex, type TeamBody } from './catalogTypes'
+import type { ResolvedAgent } from './teamCatalog'
+import { loadTeamBody } from './catalogClient'
+import { ProvenanceNote } from './ProvenanceNote'
+import { provenanceFor } from './provenance'
 
 // ─── Parsing helpers ────────────────────────────────────────────────────────────
 
@@ -26,26 +32,56 @@ function parseMentionsFromAgentsMd(agentsMd: string): string[] {
   return [...new Set(mentions)]
 }
 
-function getCategoryLabel(category: string): string {
-  const entry = TEMPLATE_CATEGORIES.find((c) => c.key === category)
-  return entry?.label ?? category
-}
-
 const SECTION_LABEL = 'font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground'
 
 // ─── TeamTemplateDetail ─────────────────────────────────────────────────────────
 
 interface TeamTemplateDetailProps {
+  catalog: CatalogIndex
   template: TeamTemplate
   onClose: () => void
   onDeploy: (template: TeamTemplate) => void
 }
 
-export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplateDetailProps) {
-  const sourceMeta = SOURCE_META[template.source]
-  const resolved = useMemo(() => resolveTeamAgents(template), [template])
+export function TeamTemplateDetail({
+  catalog,
+  template,
+  onClose,
+  onDeploy,
+}: TeamTemplateDetailProps) {
+  const packMeta = sourceMetaFor(template.packId)
+  // The roster is synchronous, so the heading, the count, and every name/role
+  // row paint on the first frame. Skills and @mentions come from the bodies and
+  // fill in a tick later, which is the only part that needs the network.
+  const roster = useMemo(() => resolveTeamRoster(catalog, template), [catalog, template])
+  const [full, setFull] = useState<ResolvedAgent[] | null>(null)
+  const [body, setBody] = useState<TeamBody | null>(null)
+
+  useEffect(() => {
+    let live = true
+    setFull(null)
+    setBody(null)
+    void loadTeamBody(template.id).then(
+      (b) => {
+        if (!live) return
+        setBody(b)
+        void resolveTeamAgents(catalog, template, b.routing).then((agents) => {
+          if (live) setFull(agents)
+        })
+      },
+      () => {
+        // A missing team body is not fatal: the roster still renders.
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [catalog, template])
+
+  const bodyByAgent = useMemo(() => new Map((full ?? []).map((a) => [a.id, a] as const)), [full])
+
   const [narrativeExpanded, setNarrativeExpanded] = useState(false)
-  const workflowNarrative = template.workflowNarrative ?? ''
+  const workflowNarrative = body?.workflowNarrative ?? ''
   const narrativePreview = workflowNarrative.slice(0, 300)
   const hasMoreNarrative = workflowNarrative.length > 300
 
@@ -91,20 +127,22 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
             <span
               className="rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase"
               style={{
-                color: sourceMeta.color,
-                background: `${sourceMeta.color}18`,
-                borderColor: `${sourceMeta.color}35`,
+                color: packMeta.color,
+                background: `${packMeta.color}18`,
+                borderColor: `${packMeta.color}35`,
                 letterSpacing: '0.03em',
               }}
             >
-              {sourceMeta.label}
+              {packMeta.label}
             </span>
             <span className="text-[11px] text-muted-foreground">
-              {getCategoryLabel(template.category)}
+              {metaFor(template.category).label}
             </span>
           </div>
         </div>
       </div>
+
+      <ProvenanceNote provenance={provenanceFor(catalog, template.packId)} />
 
       {/* Description */}
       <div className="mb-4 text-[13px] leading-relaxed text-foreground/65">
@@ -112,15 +150,15 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
       </div>
 
       {/* Source attribution */}
-      {template.sourceUrl && (
+      {body?.sourceUrl && (
         <div className="mb-4">
           <a
-            href={template.sourceUrl}
+            href={body.sourceUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-[11px] text-mint/80 no-underline transition-colors hover:text-mint"
           >
-            Source: {sourceMeta.label}
+            Source: {packMeta.label}
             <ExternalLink size={11} className="ml-0.5 inline" strokeWidth={2} />
           </a>
         </div>
@@ -146,13 +184,14 @@ export function TeamTemplateDetail({ template, onClose, onDeploy }: TeamTemplate
 
       {/* Agents section */}
       <div className="mb-4">
-        <div className={`mb-2.5 ${SECTION_LABEL}`}>Agents ({resolved.length})</div>
+        <div className={`mb-2.5 ${SECTION_LABEL}`}>Agents ({roster.length})</div>
         <div className="flex flex-col gap-2.5">
-          {resolved.map((agent) => {
-            const skills = parseSkillsFromToolsMd(agent.toolsTemplate)
-            const mentions = agent.agentsTemplate
-              ? parseMentionsFromAgentsMd(agent.agentsTemplate)
-              : []
+          {roster.map((agent) => {
+            const detail = bodyByAgent.get(agent.id)
+            const toolsMd = detail?.files[AGENT_FILE.tools]
+            const agentsMd = detail?.files[AGENT_FILE.agents]
+            const skills = toolsMd ? parseSkillsFromToolsMd(toolsMd) : []
+            const mentions = agentsMd ? parseMentionsFromAgentsMd(agentsMd) : []
 
             return (
               <div

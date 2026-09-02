@@ -22,6 +22,7 @@ import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
 import { execSettingsGET, execSettingsAllGET, execSettingsPOST } from './execSettings'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
+import { catalogAgentGET, catalogIndexGET, catalogTeamGET } from './catalog'
 import {
   systemStatusGET,
   installOpenclawPOST,
@@ -209,6 +210,19 @@ router.post('/api/exec-settings', execSettingsPOST)
 router.get('/api/personality', personalityGET)
 router.post('/api/personality', personalityPOST)
 
+// Marketplace catalog: agent and team templates. Connectors are a separate
+// destination and do not come through here. The content lives in `catalog/` and
+// is excluded from the npm tarball; these serve the compiled seed merged with
+// every pack whose bytes verified. See lib/catalogIndex.ts.
+//
+// General tier rather than sensitive: lib/catalogIndex.ts holds a 6h snapshot
+// cache, an inFlight promise that collapses concurrent callers into one build,
+// and an integrity-keyed on-disk pack cache, so a flood costs at most one
+// outbound fetch per six hours.
+router.get('/api/catalog/index', catalogIndexGET)
+router.get('/api/catalog/agents/:id', catalogAgentGET)
+router.get('/api/catalog/teams/:id', catalogTeamGET)
+
 // Skills
 router.get('/api/skills', skillsGET)
 router.post('/api/skills', skillsPOST)
@@ -351,30 +365,28 @@ router.get('/api/tools/audit', toolsAuditGET)
 // of them. Reads stay on the general tier: the panel polls them.
 router.get('/api/connectors', connectorsListGET)
 router.post('/api/connectors/connect', sensitiveLimiter, connectorsConnectPOST)
-// Custom connectors: the operator points clawboo at a server of their own.
-// Registered BEFORE the :slug routes so `custom` is never read as a slug.
 // Which connectors already have what they asked for. ONE request for the whole
 // shelf, so a card's price tag is true rather than typical.
 router.get('/api/connectors/configured', connectorsConfiguredGET)
 router.get('/api/connectors/path-suggestions', connectorsPathSuggestionsGET)
-// Which brokered apps are already connected. Registered before the :slug
-// routes so `brokered` is never read as a connector slug.
 // The broker's own surface. Registered before the :slug connector routes so
 // `composio` is never read as a connector slug.
 router.get('/api/connectors/composio', composioStatusGET)
 router.put('/api/connectors/composio/key', sensitiveLimiter, composioKeyPUT)
 router.delete('/api/connectors/composio/key', sensitiveLimiter, composioKeyDELETE)
+// Ask a broker to connect one of its upstream apps. Rate-limited with the other
+// writes: it opens an authorization flow at a third party.
 router.post(
   '/api/connectors/composio/apps/:slug/authorize',
   sensitiveLimiter,
   composioAuthorizePOST,
 )
+// Custom connectors: the operator points clawboo at a server of their own.
+// Registered BEFORE the :slug routes so `custom` is never read as a slug.
 router.get('/api/connectors/custom', connectorsCustomGET)
 router.post('/api/connectors/custom', sensitiveLimiter, connectorsCustomPOST)
 router.delete('/api/connectors/custom/:slug', sensitiveLimiter, connectorsCustomDELETE)
 router.post('/api/connectors/:slug/disconnect', sensitiveLimiter, connectorsDisconnectPOST)
-// Ask a broker to connect one of its upstream apps. Rate-limited with the other
-// writes: it opens an authorization flow at a third party.
 // Config: what an operator must supply before a connector can run. A credential
 // goes IN and comes back only as a boolean; a launch argument comes back in full,
 // because checking which folder a connector was handed is the point of asking.

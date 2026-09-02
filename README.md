@@ -200,7 +200,10 @@ pnpm dev          # Express API on :18790 (auto-fallback) + Vite SPA on :5173
 | `pnpm lint`                                | ESLint across all packages + docs frontmatter |
 | `pnpm test`                                | Vitest unit tests (node + jsdom projects)     |
 | `pnpm e2e`                                 | Playwright end-to-end tests                   |
+| `pnpm catalog:verify`                      | Check the marketplace content in `catalog/`   |
 | `pnpm assemble && pnpm test:clean-install` | Bundle the CLI and smoke-test a clean install |
+
+The marketplace agent and team content lives in `catalog/`, a plain content folder outside the pnpm workspace. It is not compiled into the app and not in the npm tarball: only the small built-in pack ships, so first-run works offline, and everything else is fetched at runtime. See [catalog/README.md](./catalog/README.md).
 
 Tech stack: Node.js 22+ and TypeScript 5 strict, TurboRepo + pnpm, Vite SPA + React 19 + Express, Tailwind CSS 4, Zustand, React Flow + ELK.js for the graph, CodeMirror 6, SQLite via better-sqlite3 + Drizzle ORM, the Model Context Protocol SDK, and Vitest + Playwright + MSW for tests. macOS, Linux, and Windows are all first-class.
 

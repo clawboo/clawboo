@@ -22,7 +22,7 @@ import {
   type ConnectorDefinition,
 } from '@clawboo/connector-catalog'
 
-import { SKILL_CATALOG } from '@/features/marketplace/catalog'
+import { BUILTIN_SKILLS } from '@/features/marketplace/catalog'
 import type { ThreadOption } from './threadPickerRows'
 
 /** One app reachable through a broker, as the picker needs it. */
@@ -116,7 +116,7 @@ export function threadOptionsFor(input: ThreadOptionsInput): ThreadOption[] {
     })
   }
 
-  for (const skill of SKILL_CATALOG) {
+  for (const skill of BUILTIN_SKILLS) {
     if (input.ownedSkillNames.has(skill.name)) continue
     options.push({
       id: `skill:${skill.id}`,

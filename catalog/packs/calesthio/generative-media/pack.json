@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 1,
+  "id": "calesthio-generative-media",
+  "idPrefix": "genmedia",
+  "name": "Generative Media Production",
+  "description": "Twelve production specialists for video, podcast and live media, and four teams built from them, covering podcast and clip work, short-form and creator ads, explainers, product and launch films, shot design, post and motion, audio post, and the rights and delivery gate. Adapted from an MIT-licensed upstream collection of media production skills: the vendor-neutral production units were selected, merged and rewritten into the Clawboo document set, and the teams and routing are original.",
+  "version": "1.0.0",
+  "provenance": {
+    "sourceId": "calesthio-generative-media",
+    "label": "Generative Media Production",
+    "color": "#D946EF",
+    "repo": "https://github.com/calesthio/generative-media-skills",
+    "ref": "8c85352d5d75d4dcbe58480bd138e37b9742bab1",
+    "license": "MIT",
+    "authors": ["generative-media-skills contributors"],
+    "adaptation": "adapted",
+    "importedAt": "2026-09-01T00:00:00.000Z"
+  },
+  "agents": [
+    {
+      "body": "agents/podcast-producer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Designs a show and produces publishable episodes: format, script, voice direction, structure, rights, loudness and a final listen-through.",
+      "emoji": "🎙️",
+      "id": "genmedia-podcast-producer",
+      "name": "Podcast Producer",
+      "packId": "calesthio-generative-media",
+      "role": "Podcast Producer",
+      "skillIds": [
+        "show-format-design",
+        "script-for-the-ear",
+        "voice-direction",
+        "loudness-mastering",
+        "caption-authoring",
+        "file-writer"
+      ],
+      "slug": "podcast-producer",
+      "tags": ["podcast", "audio", "show-design", "production"]
+    },
+    {
+      "body": "agents/podcast-clip-editor.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Cuts recorded conversation into short clips that keep the speaker's meaning intact, with captions, framing and a variant per destination.",
+      "emoji": "✂️",
+      "id": "genmedia-podcast-clip-editor",
+      "name": "Podcast Clip Editor",
+      "packId": "calesthio-generative-media",
+      "role": "Podcast Clip Editor",
+      "skillIds": [
+        "edit-pacing",
+        "caption-authoring",
+        "script-for-the-ear",
+        "summarizer",
+        "file-writer"
+      ],
+      "slug": "podcast-clip-editor",
+      "tags": ["clips", "podcast", "captions", "short-form"]
+    },
+    {
+      "body": "agents/short-form-producer.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Plans and produces vertical short video: an opening that earns attention honestly, a beat and shot ledger, safe areas, captions and renditions.",
+      "emoji": "📱",
+      "id": "genmedia-short-form-producer",
+      "name": "Short-Form Video Producer",
+      "packId": "calesthio-generative-media",
+      "role": "Short-Form Video Producer",
+      "skillIds": [
+        "edit-pacing",
+        "shot-listing",
+        "caption-authoring",
+        "script-for-the-ear",
+        "file-writer"
+      ],
+      "slug": "short-form-producer",
+      "tags": ["short-form", "vertical-video", "captions", "retention"]
+    },
+    {
+      "body": "agents/ugc-ad-producer.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Produces creator-style ad content with a working variant matrix, claims the product can support, and the consent and disclosure the format demands.",
+      "emoji": "🤳",
+      "id": "genmedia-ugc-ad-producer",
+      "name": "UGC Ad Producer",
+      "packId": "calesthio-generative-media",
+      "role": "UGC Ad Producer",
+      "skillIds": [
+        "shot-listing",
+        "edit-pacing",
+        "media-rights-clearance",
+        "caption-authoring",
+        "file-writer"
+      ],
+      "slug": "ugc-ad-producer",
+      "tags": ["ugc", "ads", "creators", "variants"]
+    },
+    {
+      "body": "agents/explainer-director.json",
+      "category": "education",
+      "color": "#FBBF24",
+      "description": "Turns a difficult idea into a video that teaches it: a learning contract, a decomposition, honest analogies and visuals that carry the argument.",
+      "emoji": "🧩",
+      "id": "genmedia-explainer-director",
+      "name": "Explainer Video Director",
+      "packId": "calesthio-generative-media",
+      "role": "Explainer Video Director",
+      "skillIds": [
+        "script-for-the-ear",
+        "shot-listing",
+        "caption-authoring",
+        "media-qa-review",
+        "summarizer",
+        "web-search"
+      ],
+      "slug": "explainer-director",
+      "tags": ["explainer", "education", "storyboard", "narration"]
+    },
+    {
+      "body": "agents/product-film-director.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Directs product advertising built on demonstrable evidence: a claim system first, then the concept, the demonstrations, the variants and the placement cuts.",
+      "emoji": "📦",
+      "id": "genmedia-product-film-director",
+      "name": "Product Film Director",
+      "packId": "calesthio-generative-media",
+      "role": "Product Film Director",
+      "skillIds": [
+        "shot-listing",
+        "edit-pacing",
+        "media-rights-clearance",
+        "media-qa-review",
+        "file-writer"
+      ],
+      "slug": "product-film-director",
+      "tags": ["product-ad", "claims", "demonstration", "variants"]
+    },
+    {
+      "body": "agents/brand-film-director.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Runs a launch or brand film from strategy spine to delivery: story route, messaging hierarchy, visual system, review cycles and the cutdown set.",
+      "emoji": "🎬",
+      "id": "genmedia-brand-film-director",
+      "name": "Brand Film Director",
+      "packId": "calesthio-generative-media",
+      "role": "Brand Film Director",
+      "skillIds": [
+        "shot-listing",
+        "edit-pacing",
+        "script-for-the-ear",
+        "media-rights-clearance",
+        "file-writer"
+      ],
+      "slug": "brand-film-director",
+      "tags": ["brand-film", "launch", "story", "cutdowns"]
+    },
+    {
+      "body": "agents/livestream-show-runner.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "Plans and runs a live show: run of show, crew calls, encoding and redundancy, rehearsal gates, moderation and an incident plan that survives contact.",
+      "emoji": "🛰️",
+      "id": "genmedia-livestream-show-runner",
+      "name": "Livestream Show Runner",
+      "packId": "calesthio-generative-media",
+      "role": "Livestream Show Runner",
+      "skillIds": [
+        "caption-authoring",
+        "loudness-mastering",
+        "plan-writing",
+        "note-taker",
+        "file-writer"
+      ],
+      "slug": "livestream-show-runner",
+      "tags": ["livestream", "run-of-show", "redundancy", "moderation"]
+    },
+    {
+      "body": "agents/shot-and-previs-director.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Turns a script into frames: shot design, lens and blocking, lighting intent, continuity rules and a board a crew or a generator can work from.",
+      "emoji": "🎥",
+      "id": "genmedia-shot-and-previs-director",
+      "name": "Shot and Previs Director",
+      "packId": "calesthio-generative-media",
+      "role": "Shot and Previs Director",
+      "skillIds": ["shot-listing", "edit-pacing", "file-writer", "brainstorming"],
+      "slug": "shot-and-previs-director",
+      "tags": ["shot-design", "storyboard", "lighting", "continuity"]
+    },
+    {
+      "body": "agents/post-and-motion-director.json",
+      "category": "design",
+      "color": "#F43F5E",
+      "description": "Owns the cut and everything on top of it: story spine, pacing, shot matching and grade, plus titles, lower thirds and data callouts that stay readable.",
+      "emoji": "🎞️",
+      "id": "genmedia-post-and-motion-director",
+      "name": "Post and Motion Director",
+      "packId": "calesthio-generative-media",
+      "role": "Post and Motion Director",
+      "skillIds": ["edit-pacing", "caption-authoring", "media-qa-review", "file-writer"],
+      "slug": "post-and-motion-director",
+      "tags": ["editing", "color", "motion-graphics", "typography"]
+    },
+    {
+      "body": "agents/audio-post-supervisor.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Takes a cut to a finished mix: dialogue repair, sound design, music spotting, balance, loudness targets and the stems each destination expects.",
+      "emoji": "🎚️",
+      "id": "genmedia-audio-post-supervisor",
+      "name": "Audio Post Supervisor",
+      "packId": "calesthio-generative-media",
+      "role": "Audio Post Supervisor",
+      "skillIds": [
+        "loudness-mastering",
+        "voice-direction",
+        "caption-authoring",
+        "media-rights-clearance",
+        "file-writer"
+      ],
+      "slug": "audio-post-supervisor",
+      "tags": ["audio-post", "mixing", "loudness", "music"]
+    },
+    {
+      "body": "agents/media-delivery-steward.json",
+      "category": "ops",
+      "color": "#64748B",
+      "description": "The gate before publish: rights and consent, provenance and disclosure, accessibility, file specs, and a QA report that names what actually blocks.",
+      "emoji": "📋",
+      "id": "genmedia-media-delivery-steward",
+      "name": "Media Delivery Steward",
+      "packId": "calesthio-generative-media",
+      "role": "Media Delivery Steward",
+      "skillIds": [
+        "media-rights-clearance",
+        "media-qa-review",
+        "caption-authoring",
+        "note-taker",
+        "file-writer"
+      ],
+      "slug": "media-delivery-steward",
+      "tags": ["delivery", "rights", "qa", "accessibility"]
+    }
+  ],
+  "teams": [
+    {
+      "body": "teams/podcast-studio.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Runs a talk-led show end to end: format and script, the live or recorded capture, the mix, the clips and the publish gate.",
+      "emoji": "🎙️",
+      "id": "genmedia-podcast-studio",
+      "members": [
+        {
+          "agentId": "genmedia-podcast-producer",
+          "name": "Podcast Producer",
+          "role": "Podcast Producer"
+        },
+        {
+          "agentId": "genmedia-livestream-show-runner",
+          "name": "Livestream Show Runner",
+          "role": "Livestream Show Runner"
+        },
+        {
+          "agentId": "genmedia-audio-post-supervisor",
+          "name": "Audio Post Supervisor",
+          "role": "Audio Post Supervisor"
+        },
+        {
+          "agentId": "genmedia-podcast-clip-editor",
+          "name": "Podcast Clip Editor",
+          "role": "Podcast Clip Editor"
+        },
+        {
+          "agentId": "genmedia-media-delivery-steward",
+          "name": "Media Delivery Steward",
+          "role": "Media Delivery Steward"
+        }
+      ],
+      "name": "Podcast Studio",
+      "packId": "calesthio-generative-media",
+      "slug": "podcast-studio",
+      "tags": ["podcast", "audio", "clips", "live"]
+    },
+    {
+      "body": "teams/short-form-video-room.json",
+      "category": "content",
+      "color": "#6366F1",
+      "description": "Produces vertical short video at pace: original pieces, creator-style ads, lifted clips, finished graphics and a publish gate.",
+      "emoji": "📱",
+      "id": "genmedia-short-form-video-room",
+      "members": [
+        {
+          "agentId": "genmedia-short-form-producer",
+          "name": "Short-Form Video Producer",
+          "role": "Short-Form Video Producer"
+        },
+        {
+          "agentId": "genmedia-ugc-ad-producer",
+          "name": "UGC Ad Producer",
+          "role": "UGC Ad Producer"
+        },
+        {
+          "agentId": "genmedia-post-and-motion-director",
+          "name": "Post and Motion Director",
+          "role": "Post and Motion Director"
+        },
+        {
+          "agentId": "genmedia-podcast-clip-editor",
+          "name": "Podcast Clip Editor",
+          "role": "Podcast Clip Editor"
+        },
+        {
+          "agentId": "genmedia-media-delivery-steward",
+          "name": "Media Delivery Steward",
+          "role": "Media Delivery Steward"
+        }
+      ],
+      "name": "Short-Form Video Room",
+      "packId": "calesthio-generative-media",
+      "slug": "short-form-video-room",
+      "tags": ["short-form", "vertical-video", "ads", "clips"]
+    },
+    {
+      "body": "teams/launch-film-unit.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Makes the film a launch depends on and the cutdowns that follow: spine, claims, shot design, finishing, mix and delivery.",
+      "emoji": "🎬",
+      "id": "genmedia-launch-film-unit",
+      "members": [
+        {
+          "agentId": "genmedia-brand-film-director",
+          "name": "Brand Film Director",
+          "role": "Brand Film Director"
+        },
+        {
+          "agentId": "genmedia-product-film-director",
+          "name": "Product Film Director",
+          "role": "Product Film Director"
+        },
+        {
+          "agentId": "genmedia-shot-and-previs-director",
+          "name": "Shot and Previs Director",
+          "role": "Shot and Previs Director"
+        },
+        {
+          "agentId": "genmedia-post-and-motion-director",
+          "name": "Post and Motion Director",
+          "role": "Post and Motion Director"
+        },
+        {
+          "agentId": "genmedia-audio-post-supervisor",
+          "name": "Audio Post Supervisor",
+          "role": "Audio Post Supervisor"
+        },
+        {
+          "agentId": "genmedia-media-delivery-steward",
+          "name": "Media Delivery Steward",
+          "role": "Media Delivery Steward"
+        }
+      ],
+      "name": "Launch Film Unit",
+      "packId": "calesthio-generative-media",
+      "slug": "launch-film-unit",
+      "tags": ["brand-film", "product-ad", "launch", "post-production"]
+    },
+    {
+      "body": "teams/explainer-studio.json",
+      "category": "education",
+      "color": "#FBBF24",
+      "description": "Builds video that leaves the viewer understanding something: a learning contract, a visual argument, a clear mix and a claim check.",
+      "emoji": "🧩",
+      "id": "genmedia-explainer-studio",
+      "members": [
+        {
+          "agentId": "genmedia-explainer-director",
+          "name": "Explainer Video Director",
+          "role": "Explainer Video Director"
+        },
+        {
+          "agentId": "genmedia-post-and-motion-director",
+          "name": "Post and Motion Director",
+          "role": "Post and Motion Director"
+        },
+        {
+          "agentId": "genmedia-audio-post-supervisor",
+          "name": "Audio Post Supervisor",
+          "role": "Audio Post Supervisor"
+        },
+        {
+          "agentId": "genmedia-media-delivery-steward",
+          "name": "Media Delivery Steward",
+          "role": "Media Delivery Steward"
+        }
+      ],
+      "name": "Explainer Studio",
+      "packId": "calesthio-generative-media",
+      "slug": "explainer-studio",
+      "tags": ["explainer", "education", "motion-graphics", "accessibility"]
+    }
+  ],
+  "skills": [
+    {
+      "id": "show-format-design",
+      "name": "Show Format Design",
+      "description": "Settles format, cadence, length band, voice identity and signature elements for a show before any episode is written.",
+      "category": "other",
+      "tags": ["podcast", "format", "show-bible"]
+    },
+    {
+      "id": "script-for-the-ear",
+      "name": "Script for the Ear",
+      "description": "Rewrites prose into speech a listener can follow once, with short sentences, the point in front and spoken signposts.",
+      "category": "comm",
+      "tags": ["audio", "script", "narration"]
+    },
+    {
+      "id": "voice-direction",
+      "name": "Voice Direction",
+      "description": "Casts and directs voices for contrast and consistency, locking pronunciation and delivery so a later episode still matches the first.",
+      "category": "comm",
+      "tags": ["voice", "casting", "performance"]
+    },
+    {
+      "id": "loudness-mastering",
+      "name": "Loudness and Mastering",
+      "description": "Sets loudness targets, true-peak ceilings and stem deliverables for each destination a piece of audio will play on.",
+      "category": "other",
+      "tags": ["audio", "loudness", "delivery"]
+    },
+    {
+      "id": "caption-authoring",
+      "name": "Caption Authoring",
+      "description": "Writes captions, subtitles and descriptive transcripts that stay readable, correctly timed and accurate to what was said.",
+      "category": "comm",
+      "tags": ["captions", "accessibility", "transcripts"]
+    },
+    {
+      "id": "shot-listing",
+      "name": "Shot Listing",
+      "description": "Turns a script into a numbered shot list with framing, movement, lighting intent, continuity notes and a coverage plan.",
+      "category": "other",
+      "tags": ["storyboard", "shots", "previs"]
+    },
+    {
+      "id": "edit-pacing",
+      "name": "Edit Pacing",
+      "description": "Builds a story spine, assigns each shot a function, and sets cut rhythm against the attention curve the format actually has.",
+      "category": "other",
+      "tags": ["editing", "montage", "rhythm"]
+    },
+    {
+      "id": "media-rights-clearance",
+      "name": "Media Rights Clearance",
+      "description": "Maps every asset in a release to a right, a consent and a disclosure obligation, and marks each one cleared, conditional or blocked.",
+      "category": "other",
+      "tags": ["rights", "consent", "provenance"]
+    },
+    {
+      "id": "media-qa-review",
+      "name": "Media QA Review",
+      "description": "Runs a deliverable through an acceptance matrix covering picture, sound, captions, safety, claims and file specification.",
+      "category": "other",
+      "tags": ["qa", "delivery", "review"]
+    }
+  ],
+  "counts": {
+    "agents": 12,
+    "teams": 4,
+    "skills": 9
+  }
+}

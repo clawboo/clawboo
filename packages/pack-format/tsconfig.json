@@ -1,0 +1,16 @@
+{
+  "extends": "@clawboo/tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    // Deliberately empty, and tests are excluded, so nothing can pull node
+    // ambients into this program: a pack is parsed in the browser, in the
+    // emitter, and in CI, so a `process` or `Buffer` reference in the source
+    // would be a bug that only shows up in one of the three. Tests typecheck
+    // via tsconfig.test.json (second half of the `typecheck` script).
+    "types": [],
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/__tests__"]
+}

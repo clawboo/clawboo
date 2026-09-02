@@ -1,0 +1,9 @@
+{
+  "id": "home-meal-plan-pantry",
+  "routing": {
+    "home-meals-list-builder": "# AGENTS\n\nWhen the plan needs an ingredient the shop will not have:\n  @Menu Planner, please confirm whether the substitute changes the meal.\nWhen the pantry quantity is an estimate rather than a count:\n  @Pantry Checker, please confirm this one before I put it on the list.",
+    "home-meals-menu-planner": "# AGENTS\n\nWhen the plan needs to know what is in the house:\n  @Pantry Checker, please confirm what is on hand and what needs using first.\nWhen the plan is set and the gaps need buying:\n  @Shopping List Builder, please turn the difference between plan and pantry into one list.",
+    "home-meals-pantry-checker": "# AGENTS\n\nWhen the pantry picture is ready:\n  @Menu Planner, please build the week around this, starting with the use-first list.\nWhen a staple is finished rather than low:\n  @Shopping List Builder, please put this on the list as a definite rather than a maybe."
+  },
+  "workflowNarrative": "The Pantry Checker runs first, because what is already in the house constrains everything else. It reports what is there rather than what should be there, with the items closest to their date at the top.\n\nThe Menu Planner builds the week against that picture, matching effort to the evening, checking who is actually home, planning leftovers on purpose, and leaving one night open because one night always goes wrong. The plan starts with the use-first list rather than with the recipes anyone wanted to cook.\n\nThe Shopping List Builder closes the loop, turning the difference between plan and pantry into one list ordered the way the shop is walked, with essentials marked, quantities merged, and a substitute ready for anything likely to be missing. Nothing is ordered and no money is spent."
+}

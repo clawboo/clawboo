@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express'
-import { appendAudit, scanForInjection, skills } from '@clawboo/db'
+import { appendAudit, evaluateInjection, injectionAuditSummary, skills } from '@clawboo/db'
 import { eq, desc } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 
@@ -72,16 +72,19 @@ export function skillsPOST(req: Request, res: Response): void {
     const db = getDb()
 
     // Supply-chain posture: injection-scan a user-installed skill BEFORE it's
-    // recorded / can run. A destructive/exfil/injection finding blocks the
-    // install (422) + audits it; a clean install is audited too (the forensic
-    // trail).
+    // recorded / can run. A skill install is spawn-bound, so it evaluates on the
+    // `exec` surface where every finding blocks, byte-for-byte the gate this
+    // route has always applied. A blocking finding returns 422 + audits it; a
+    // clean install is audited too (the forensic trail).
     const blob = [name, source, category ?? '', JSON.stringify(req.body)].join('\n')
-    const findings = scanForInjection(blob)
-    if (findings.length > 0) {
+    const { blocked, findings } = evaluateInjection(blob, { surface: 'exec', scope: `skill:${id}` })
+    if (blocked) {
       appendAudit(db, {
         eventType: 'install',
         agentId,
-        summary: { blocked: true, name, source, findings },
+        // Only {pattern, line, fingerprint}. Full excerpts stay in the response,
+        // so a large body at the match caps cannot balloon the TEXT column.
+        summary: { blocked: true, name, source, findings: injectionAuditSummary(findings) },
       })
       res
         .status(422)

@@ -16,7 +16,7 @@ A team is a Clawboo-native record. Deploying a populated template creates each a
 </Note>
 
 - The dashboard is open and connected (see [Connecting runtimes](/runtimes/connecting-runtimes) or the OpenClaw quickstart).
-- Optional: a [marketplace](/using/marketplace) template in mind. The catalog ships 82 teams across four sources (`clawboo`, `agency-agents`, `awesome-openclaw`, plus synthetic excellence teams).
+- Optional: a [marketplace](/using/marketplace) template in mind. The catalog ships 85 teams across nineteen packs, two first-party and seventeen adapted from upstream repositories.
 
 ## Steps
 
@@ -33,7 +33,7 @@ The modal is a four-step flow (**pick → customize → deploy → complete**), 
 The Teams tab, and the first-run pick step, list the team catalog with a search box and two filter rows:
 
 - **Category pills**: the popular categories inline, the rest folded under a **+N more** toggle; only categories that actually have templates render.
-- **Source pills**: `All`, `Clawboo`, `Agency Agents`, `Awesome OpenClaw`, each with a colored dot.
+- **Source pills**: `All`, `Clawboo`, `Agency Agents`, each with a colored dot.
 
 Press **Deploy** on a team card to advance to **customize** pre-filled with that template's name, icon, and color. Press the **Start from scratch** card to advance with a blank `New Team` / `👻` placeholder and no agents.
 
@@ -184,5 +184,5 @@ Both delete actions prompt with a `window.confirm` first. **Delete team only** k
 - [Group chat](/using/group-chat), the team chat surface and the Know-Your-Team gate
 - [Boo Zero](/using/boo-zero), the universal leader, briefs, and display name
 - [The Ghost Graph](/using/ghost-graph), the per-team graph scope and halos
-- [Marketplace](/using/marketplace), browse and deploy the 304 agents / 82 teams
+- [Marketplace](/using/marketplace), browse and deploy the 436 agents / 85 teams
 - [`/api/teams` reference](/reference/rest-api/teams), full request/response shapes

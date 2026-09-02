@@ -3,7 +3,7 @@ title: Reference
 description: "Index of Clawboo's factual reference: REST API, CLI, configuration, env vars, database schema, MCP tools, marketplace catalog, events, and packages."
 ---
 
-Factual, code-grounded reference for every public surface of Clawboo: the **148-route** REST API, the `clawboo` CLI, configuration and environment variables, the **28-table** SQLite schema, the **4** MCP servers and their tools, the marketplace catalog of **304 agents** and **82 teams**, the orchestration event and error vocabulary, and one page per workspace package (**30** in total). These pages describe what the code does, verified against source; they do not teach a workflow. For learning-oriented walkthroughs see [Getting Started](/getting-started/index); for the _why_ see [Concepts](/concepts/index).
+Factual, code-grounded reference for every public surface of Clawboo: the **148-route** REST API, the `clawboo` CLI, configuration and environment variables, the **28-table** SQLite schema, the **4** MCP servers and their tools, the marketplace catalog of **436 agents** and **85 teams**, the orchestration event and error vocabulary, and one page per workspace package (**30** in total). These pages describe what the code does, verified against source; they do not teach a workflow. For learning-oriented walkthroughs see [Getting Started](/getting-started/index); for the _why_ see [Concepts](/concepts/index).
 
 <Note>
 These docs describe Clawboo **v0.3.1**, the current release.
@@ -19,7 +19,7 @@ These docs describe Clawboo **v0.3.1**, the current release.
 | Environment   | [Environment variables](/reference/environment-variables) | `CLAWBOO_*` / `OPENCLAW_*` / provider keys                 |
 | Database      | [Database schema](/reference/database-schema)             | 28 tables + ERD                                            |
 | MCP           | [MCP tools](/reference/mcp-tools)                         | 4 servers, tool list, zod input shapes                     |
-| Marketplace   | [Marketplace catalog](/reference/marketplace-catalog)     | Agent/team schemas, sources, ingestion                     |
+| Marketplace   | [Marketplace catalog](/reference/marketplace-catalog)     | Pack format, sources, fetch and verification path          |
 | Events        | [Events & errors](/reference/events-and-errors)           | Orchestration event kinds + error taxonomy                 |
 | Packages      | [Packages overview](/reference/packages/index)            | Dependency graph + build order + 30 package pages          |
 
@@ -51,7 +51,7 @@ Base URL, loopback posture, the shared `{ error: string }` envelope, and the rou
 
 - [Database schema](/reference/database-schema), the 28 SQLite tables with column-level detail and an ERD.
 - [MCP tools](/reference/mcp-tools), the Tasks / Memory / Tools / TeamChat servers, each tool's name, and its zod input shape.
-- [Marketplace catalog](/reference/marketplace-catalog), the `AgentCatalogEntry` and `TeamTemplate` schemas, the three sources (two pinned to upstream SHAs, one first-party local), and the codegen ingestion pipeline.
+- [Marketplace catalog](/reference/marketplace-catalog), the pack format, the nineteen packs (seventeen pinned to upstream SHAs, two first-party local), and the runtime fetch-and-verify path.
 - [Events & errors](/reference/events-and-errors), the orchestration event kinds and the runtime-error taxonomy (unknown class = harness bug).
 
 ## Packages

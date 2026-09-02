@@ -56,20 +56,12 @@ jobs:
       # step in ci.yml's e2e and smoke-test-bundle jobs.
       - run: pnpm exec playwright install --with-deps chromium
 
-      # OFFLINE catalog gate. Checks the committed marketplace catalog against its
-      # committed integrity manifest — no upstream fetch, deliberately. The live
-      # re-derive used to run here, which meant an upstream repo being renamed or
-      # force-pushed (a non-retryable 404 by design) could hold up a release,
-      # including an urgent fix. The live check now runs in `verify-ingest.yml`
-      # (weekly cron + PRs touching the ingest scripts), off the release path.
-      - run: pnpm verify:catalog
-
       - run: pnpm build
 
       # Re-run the rest of the PR gate before publishing, so the release path is
       # a strict superset of the pull-request path. `typecheck` is the one that
       # earns its place loudest: `pnpm build` is bundler-only (Vite + tsup, no
-      # `tsc`), so a type error sails straight through the build — this is the
+      # `tsc`), so a type error sails straight through the build - this is the
       # only step that would stop one reaching npm. Same belt-and-suspenders
       # reasoning as the smoke below: the PR ran these, but a merge race or an
       # upstream-changed lockfile can diverge PR-green from this commit.
@@ -82,6 +74,12 @@ jobs:
 
       - run: pnpm test
 
+      # The catalog content gate, reinstated on the release path. `pnpm test`
+      # does not cover it: a content-only change skips the test matrix by design
+      # (see ci.yml's `filter` job), so without this step the only thing standing
+      # between a bad pack and npm would be a PR check that did not run.
+      - run: pnpm catalog:verify
+
       - run: bash scripts/assemble-cli.sh
 
       # Smoke-test the artifact before publishing. This packs apps/cli and
@@ -91,7 +89,7 @@ jobs:
       # bins, the SPA, a stdio MCP handshake, and one real runtime dispatch.
       # Catches the class of bug that v0.1.1 (Cannot GET /) and v0.1.2
       # (Unauthorized via port collision) shipped broken on. Belt-and-suspenders
-      # even if the same test ran on the PR — race conditions or
+      # even if the same test ran on the PR - race conditions or
       # upstream-changed lockfiles could cause divergence.
       - run: pnpm test:clean-install
 

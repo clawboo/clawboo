@@ -2,11 +2,32 @@
 //
 // The curated 19 are statically imported so the shelf renders with no fetch and
 // no loading state, which is what an offline `npx clawboo` promises. The registry
-// snapshot is roughly 220 KB and is worth nothing until a user scrolls past the
-// divider or a curated search misses, so it arrives through `await import()` at
-// that moment and never on first paint.
+// snapshot is 400 entries, roughly 68 KB gzipped, and is worth nothing until a
+// user scrolls past the divider or a curated search misses, so it arrives through
+// `await import()` at that moment and never on first paint.
 //
-// Loaded ONCE per session and held. A second search must not re-parse 229 entries.
+// Loaded ONCE per session and held. A second search must not re-parse 400 entries.
+//
+// WHY THIS IS A CHUNK AND NOT A FETCH, when the agent and team catalog next door
+// is the opposite. The two are verified at the only point where verification can
+// mean anything for each, and that point differs because the bytes come from
+// different places.
+//
+// A catalog pack LEAVES the tarball. It arrives at runtime from a remote that can
+// change after release, so the server digest-checks it before parsing and the
+// browser talks only to that same-origin API. Runtime integrity is the only check
+// available there.
+//
+// This snapshot IS the shipped artifact. It is generated, committed, and compiled
+// in, so it is content-addressed before publish instead: `verify:connectors`
+// recomputes the digest in `scripts/lib/connector-snapshot.ts` over the file's
+// canonical form and fails CI on a hand edit that preserves shape, which is
+// exactly what an edited argv would preserve. Checking it again in the browser
+// would verify the bundle against itself.
+//
+// Moving it behind the catalog's fetched seam would therefore buy no integrity
+// and would cost the offline guarantee above. If it ever moves, it should be for
+// tarball size, and the long tail becomes network-dependent when it does.
 
 import { useCallback, useEffect, useState, useRef } from 'react'
 import type { ConnectorDefinition } from '@clawboo/connector-catalog'

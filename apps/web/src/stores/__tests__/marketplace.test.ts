@@ -31,7 +31,6 @@ describe('useMarketplaceStore', () => {
       teamCategoryFilter: 'all',
       teamSourceFilter: 'all',
       agentSearchQuery: '',
-      agentDomainFilter: 'all',
       agentSourceFilter: 'all',
       agentCategoryFilter: 'all',
     })
@@ -50,7 +49,6 @@ describe('useMarketplaceStore', () => {
     expect(state.teamCategoryFilter).toBe('all')
     expect(state.teamSourceFilter).toBe('all')
     expect(state.agentSearchQuery).toBe('')
-    expect(state.agentDomainFilter).toBe('all')
     expect(state.agentSourceFilter).toBe('all')
     expect(state.agentCategoryFilter).toBe('all')
   })
@@ -128,19 +126,6 @@ describe('useMarketplaceStore', () => {
       useMarketplaceStore.getState().setAgentSearchQuery('foo')
       useMarketplaceStore.getState().setAgentSearchQuery('')
       expect(useMarketplaceStore.getState().agentSearchQuery).toBe('')
-    })
-  })
-
-  describe('setAgentDomainFilter', () => {
-    it('sets a domain filter', () => {
-      useMarketplaceStore.getState().setAgentDomainFilter('engineering')
-      expect(useMarketplaceStore.getState().agentDomainFilter).toBe('engineering')
-    })
-
-    it('resets to all', () => {
-      useMarketplaceStore.getState().setAgentDomainFilter('marketing')
-      useMarketplaceStore.getState().setAgentDomainFilter('all')
-      expect(useMarketplaceStore.getState().agentDomainFilter).toBe('all')
     })
   })
 

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "dist": "v1",
+  "seed": {
+    "publisher": "clawboo",
+    "slug": "builtin"
+  },
+  "packs": [
+    {
+      "publisher": "clawboo",
+      "slug": "builtin"
+    },
+    {
+      "publisher": "agency",
+      "slug": "agents"
+    },
+    {
+      "publisher": "voltagent",
+      "slug": "subagents"
+    },
+    {
+      "publisher": "wshobson",
+      "slug": "agents"
+    },
+    {
+      "publisher": "clawboo",
+      "slug": "home"
+    },
+    {
+      "publisher": "mattpocock",
+      "slug": "engineering-craft"
+    },
+    {
+      "publisher": "clawboo",
+      "slug": "founder-sprint"
+    },
+    {
+      "publisher": "coreyhaines",
+      "slug": "growth-marketing"
+    },
+    {
+      "publisher": "agricidaniel",
+      "slug": "repurpose"
+    },
+    {
+      "publisher": "calesthio",
+      "slug": "generative-media"
+    },
+    {
+      "publisher": "craighewitt",
+      "slug": "creator-founder-ops"
+    },
+    {
+      "publisher": "thatrebeccarae",
+      "slug": "lifecycle-commerce"
+    },
+    {
+      "publisher": "kgelster",
+      "slug": "storefront-catalog"
+    },
+    {
+      "publisher": "heygen",
+      "slug": "presenter-video"
+    },
+    {
+      "publisher": "alirezarezvani",
+      "slug": "business-desk"
+    },
+    {
+      "publisher": "blackforestlabs",
+      "slug": "visual-direction"
+    },
+    {
+      "publisher": "charliehills",
+      "slug": "creator-studio"
+    },
+    {
+      "publisher": "google",
+      "slug": "ads-and-analytics"
+    },
+    {
+      "publisher": "phuryn",
+      "slug": "product-craft"
+    }
+  ],
+  "index": {
+    "url": "https://catalog.claw.boo/v1/index.json",
+    "fallbackUrl": "https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json"
+  }
+}

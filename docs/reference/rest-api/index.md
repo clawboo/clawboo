@@ -1,6 +1,6 @@
 ---
 title: REST API overview
-description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 170 routes.
+description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 173 routes.
 ---
 
 The Clawboo dashboard server (`apps/web/server/index.ts`) is an Express app wrapped in a raw `http.Server` so it can also handle the WebSocket upgrade for the Gateway proxy. Every JSON route lives under `/api/`, is registered in one router (`apps/web/server/api/index.ts`), and returns the standard `{ error: string }` envelope on failure. This page covers the cross-cutting facts: base URL, the proxy, auth, body limits, the error shape, and the streaming endpoints, then links to the per-resource reference pages.
@@ -120,26 +120,26 @@ event catalog; see [Tools & MCP](/reference/rest-api/tools-and-mcp).) They set `
 
 ## Route index
 
-170 routes across 13 resource groups: **71 GET · 70 POST · 14 DELETE · 8 PATCH · 7 PUT**. Each group has a dedicated reference page.
+173 routes across 13 resource groups: **74 GET · 70 POST · 14 DELETE · 8 PATCH · 7 PUT**. Each group has a dedicated reference page.
 
-| Resource page                                      | Routes | What it covers                                                                                                          |
-| -------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
-| [Settings & health](/reference/rest-api/settings)  | 4      | `/api/settings`, `/api/health`, `/api/health/recheck`                                                                   |
-| [Agents](/reference/rest-api/agents)               | 14     | `/api/agents*`: the registry of record, files, sessions, sync, model, 1:1 chat                                          |
-| [Teams](/reference/rest-api/teams)                 | 16     | `/api/teams*` (incl. chat + activity), `/api/team-rules/:teamId`, `/api/team-chat*`                                     |
-| [Board](/reference/rest-api/board)                 | 16     | `/api/board*`: tasks, claim, comments, executions, deps, worktree workspace                                             |
-| [Runtimes](/reference/rest-api/runtimes)           | 18     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                   |
-| [Memory](/reference/rest-api/memory)               | 4      | `/api/memory*`: search, save, browse, provider                                                                          |
-| [Tools & MCP](/reference/rest-api/tools-and-mcp)   | 17     | `/api/tools*`, `/api/mcp/*` (the four MCP transports + attach config)                                                   |
-| [Governance](/reference/rest-api/governance)       | 7      | `/api/governance/*`, `/api/approvals`                                                                                   |
-| [Capabilities](/reference/rest-api/capabilities)   | 2      | `/api/capabilities`, `/api/capabilities/:action`                                                                        |
-| [Observability](/reference/rest-api/observability) | 8      | `/api/obs/*` (incl. SSE), `/api/eval/smoke`                                                                             |
-| [Schedules](/reference/rest-api/schedules)         | 5      | `/api/schedules*`: the unified Routines + Gateway-cron surface                                                          |
-| [System](/reference/rest-api/system)               | 11     | `/api/system/*`: status, install, configure, auto-configure, gateway, models, device pairing, self-version, self-update |
-| [Misc](/reference/rest-api/misc)                   | 48     | connectors, grants, cost-records, chat-history, graph-layout, personality, skills, exec-settings, fleet, boo-zero       |
+| Resource page                                      | Routes | What it covers                                                                                                             |
+| -------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| [Settings & health](/reference/rest-api/settings)  | 4      | `/api/settings`, `/api/health`, `/api/health/recheck`                                                                      |
+| [Agents](/reference/rest-api/agents)               | 14     | `/api/agents*`: the registry of record, files, sessions, sync, model, 1:1 chat                                             |
+| [Teams](/reference/rest-api/teams)                 | 16     | `/api/teams*` (incl. chat + activity), `/api/team-rules/:teamId`, `/api/team-chat*`                                        |
+| [Board](/reference/rest-api/board)                 | 16     | `/api/board*`: tasks, claim, comments, executions, deps, worktree workspace                                                |
+| [Runtimes](/reference/rest-api/runtimes)           | 18     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                      |
+| [Memory](/reference/rest-api/memory)               | 4      | `/api/memory*`: search, save, browse, provider                                                                             |
+| [Tools & MCP](/reference/rest-api/tools-and-mcp)   | 17     | `/api/tools*`, `/api/mcp/*` (the four MCP transports + attach config)                                                      |
+| [Governance](/reference/rest-api/governance)       | 7      | `/api/governance/*`, `/api/approvals`                                                                                      |
+| [Capabilities](/reference/rest-api/capabilities)   | 2      | `/api/capabilities`, `/api/capabilities/:action`                                                                           |
+| [Observability](/reference/rest-api/observability) | 8      | `/api/obs/*` (incl. SSE), `/api/eval/smoke`                                                                                |
+| [Schedules](/reference/rest-api/schedules)         | 5      | `/api/schedules*`: the unified Routines + Gateway-cron surface                                                             |
+| [System](/reference/rest-api/system)               | 11     | `/api/system/*`: status, install, configure, auto-configure, gateway, models, device pairing, self-version, self-update    |
+| [Misc](/reference/rest-api/misc)                   | 51     | connectors, grants, cost-records, chat-history, graph-layout, personality, skills, catalog, exec-settings, fleet, boo-zero |
 
 <Note>
-The route counts above sum to 170, matching the router exactly; every registered route belongs to one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
+The route counts above sum to 173, matching the router exactly; every registered route belongs to one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
 </Note>
 
 ## See also

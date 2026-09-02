@@ -6,7 +6,7 @@ description: 'Every environment variable Clawboo reads: state paths, ports, secr
 A complete, code-grounded list of every environment variable Clawboo actually reads. Each entry names the variable, what reads it, its purpose, and its default. Variables not listed here are not consulted by Clawboo.
 
 <Info>
-This page documents only Clawboo's own configuration variables, sourced from `@clawboo/config`, the runtime descriptor, the secrets vault, server boot, port resolution, the logger, and the runtime drivers. Environment variables that appear inside the codegen'd marketplace agent templates (`FEISHU_*`, `SUPABASE_*`, `DATABASE_URL`, `BETTER_AUTH_SECRET`, and similar) are third-party *agent content*, not Clawboo config; they are never read by Clawboo and are not documented here.
+This page documents only Clawboo's own configuration variables, sourced from `@clawboo/config`, the runtime descriptor, the secrets vault, server boot, port resolution, the logger, and the runtime drivers. Environment variables that appear inside marketplace agent bodies (`FEISHU_*`, `SUPABASE_*`, `DATABASE_URL`, `BETTER_AUTH_SECRET`, and similar) are third-party *agent content*, not Clawboo config; they are never read by Clawboo and are not documented here.
 </Info>
 
 <Note>
@@ -25,6 +25,7 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, 
 | `CLAWBOO_UI_DIR`                       | State & paths      | `<server>/ui`                    | server boot (production static serving) |
 | `CLAWBOO_SERVER_PATH`                  | State & paths      | (auto-discovered)                | CLI dev-fallback launch                 |
 | `CLAWBOO_MCP_BIN_DIR`                  | State & paths      | (set by CLI)                     | `GET /api/mcp/config` stdio snippet     |
+| `CLAWBOO_CATALOG_INDEX_URL`            | State & paths      | (a raw githubusercontent URL)    | marketplace catalog resolution          |
 | `CLAWBOO_API_PORT`                     | Ports & binding    | `18790` (auto-scan)              | `resolveApiPort()`                      |
 | `CLAWBOO_API_PORT_START`               | Ports & binding    | `18790`                          | `resolveApiPort()` scan start           |
 | `CLAWBOO_AWAIT_PORT`                   | Ports & binding    | (none)                           | server boot (restart handoff)           |
@@ -126,6 +127,23 @@ The in-process Express server resolves its DB path through `getDbPath()` → `~/
 - **Read by**: `GET /api/mcp/config` in `apps/web/server/api/mcp.ts`. Set by the CLI on the forked server to `<bundle dir>/bin`.
 - **Purpose**: tells the server where the bundled MCP stdio bins live so `/api/mcp/config?transport=stdio` can emit a correct `node <bin>` attach snippet. When unset, only the HTTP transport attach config is emitted.
 - **Default**: set by the CLI; otherwise unset (HTTP attach still works).
+
+### `CLAWBOO_CATALOG_INDEX_URL`
+
+- **Read by**: `apps/web/server/lib/catalogIndex.ts`.
+- **Purpose**: where to fetch the marketplace catalog index from. Resolution is
+  three tiers: a local `catalog/dist/<channel>/` directory above the server
+  module wins (so a repo checkout works with no network), then this variable,
+  then a default raw `githubusercontent.com` URL. Bundle URLs are resolved
+  relative to it, and every bundle's digest is verified against the index before
+  its bytes are parsed.
+- **This is not a feature flag.** Clawboo has none, and that stays true. It is an
+  ENDPOINT OVERRIDE in the same class as `CLAWBOO_ALLOWED_ORIGINS`: both tiers
+  serve the identical generated file, so there is no behavioural fork, only a
+  different host. Point it at a CDN, a mirror, or an internal host.
+- **Default**: the raw `githubusercontent.com` URL against `main`. Unreachable
+  is not fatal: the built-in pack is compiled into the server and merged
+  unconditionally, so the catalog degrades rather than emptying.
 
 ## Ports & binding
 

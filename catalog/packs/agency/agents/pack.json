@@ -1,0 +1,3670 @@
+{
+  "agents": [
+    {
+      "body": "agents/academic-anthropologist.json",
+      "category": "academic",
+      "color": "#8B5CF6",
+      "description": "Expert in cultural systems, rituals, kinship, belief systems, and ethnographic method.",
+      "emoji": "🎓",
+      "id": "agency-academic-anthropologist",
+      "name": "Academic Anthropologist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/academic/academic-anthropologist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Academic Anthropologist",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "api-tester",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "file-writer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "academic-anthropologist",
+      "tags": ["academic", "anthropologist"]
+    },
+    {
+      "body": "agents/academic-geographer.json",
+      "category": "academic",
+      "color": "#8B5CF6",
+      "description": "Expert in physical and human geography, climate systems, cartography, and spatial analysis.",
+      "emoji": "🎓",
+      "id": "agency-academic-geographer",
+      "name": "Academic Geographer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/academic/academic-geographer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Academic Geographer",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "academic-geographer",
+      "tags": ["academic", "geographer"]
+    },
+    {
+      "body": "agents/academic-historian.json",
+      "category": "academic",
+      "color": "#8B5CF6",
+      "description": "Expert in historical analysis, periodization, material culture, and historiography.",
+      "emoji": "🎓",
+      "id": "agency-academic-historian",
+      "name": "Academic Historian Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/academic/academic-historian.md"
+      },
+      "packId": "agency-agents",
+      "role": "Academic Historian",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "calendar-manager",
+        "meeting-notes",
+        "quiz-generator",
+        "note-taker"
+      ],
+      "slug": "academic-historian",
+      "tags": ["academic", "historian"]
+    },
+    {
+      "body": "agents/academic-narratologist.json",
+      "category": "academic",
+      "color": "#8B5CF6",
+      "description": "Expert in narrative theory, story structure, character arcs, and literary analysis.",
+      "emoji": "🎓",
+      "id": "agency-academic-narratologist",
+      "name": "Academic Narratologist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/academic/academic-narratologist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Academic Narratologist",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "academic-narratologist",
+      "tags": ["academic", "narratologist"]
+    },
+    {
+      "body": "agents/academic-psychologist.json",
+      "category": "academic",
+      "color": "#8B5CF6",
+      "description": "Expert in human behavior, personality theory, motivation, and cognitive patterns.",
+      "emoji": "🎓",
+      "id": "agency-academic-psychologist",
+      "name": "Academic Psychologist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/academic/academic-psychologist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Academic Psychologist",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "meeting-notes",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "academic-psychologist",
+      "tags": ["academic", "psychologist"]
+    },
+    {
+      "body": "agents/design-brand-guardian.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Expert brand strategist and guardian specializing in brand identity development, consistency maintenance, and strategic brand positioning.",
+      "emoji": "🎨",
+      "id": "agency-design-brand-guardian",
+      "name": "Brand Guardian Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-brand-guardian.md"
+      },
+      "packId": "agency-agents",
+      "role": "Brand Guardian",
+      "skillIds": [
+        "linter",
+        "web-search",
+        "rss-reader",
+        "email-draft",
+        "slack-poster",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator"
+      ],
+      "slug": "design-brand-guardian",
+      "tags": ["design", "brand", "guardian"]
+    },
+    {
+      "body": "agents/design-image-prompt-engineer.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Expert photography prompt engineer specializing in crafting detailed, evocative prompts for AI image generation.",
+      "emoji": "🎨",
+      "id": "agency-design-image-prompt-engineer",
+      "name": "Image Prompt Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-image-prompt-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Image Prompt Engineer",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "json-transformer",
+        "email-draft",
+        "file-writer",
+        "image-resizer",
+        "zip-handler",
+        "markdown-renderer",
+        "trend-analyzer"
+      ],
+      "slug": "design-image-prompt-engineer",
+      "tags": ["design", "image", "prompt", "engineer"]
+    },
+    {
+      "body": "agents/design-inclusive-visuals-specialist.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Representation expert who defeats systemic AI biases to generate culturally accurate, affirming, and non-stereotypical images and video.",
+      "emoji": "🎨",
+      "id": "agency-design-inclusive-visuals-specialist",
+      "name": "Inclusive Visuals Specialist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-inclusive-visuals-specialist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Inclusive Visuals Specialist",
+      "skillIds": [
+        "linter",
+        "calendar-manager",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator"
+      ],
+      "slug": "design-inclusive-visuals-specialist",
+      "tags": ["design", "inclusive", "visuals", "specialist"]
+    },
+    {
+      "body": "agents/design-ui-designer.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Expert UI designer specializing in visual design systems, component libraries, and pixel-perfect interface creation.",
+      "emoji": "🎨",
+      "id": "agency-design-ui-designer",
+      "name": "UI Designer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-ui-designer.md"
+      },
+      "packId": "agency-agents",
+      "role": "UI Designer",
+      "skillIds": [
+        "linter",
+        "web-search",
+        "web-scraper",
+        "api-tester",
+        "json-transformer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "design-ui-designer",
+      "tags": ["design", "designer"]
+    },
+    {
+      "body": "agents/design-ux-architect.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Technical architecture and UX specialist who provides developers with solid foundations, CSS systems, and clear implementation guidance.",
+      "emoji": "🎨",
+      "id": "agency-design-ux-architect",
+      "name": "UX Architect Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-ux-architect.md"
+      },
+      "packId": "agency-agents",
+      "role": "UX Architect",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-scraper",
+        "api-tester",
+        "email-draft",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "design-ux-architect",
+      "tags": ["design", "architect"]
+    },
+    {
+      "body": "agents/design-ux-researcher.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Expert user experience researcher specializing in user behavior analysis, usability testing, and data-driven design insights.",
+      "emoji": "🎨",
+      "id": "agency-design-ux-researcher",
+      "name": "UX Researcher Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-ux-researcher.md"
+      },
+      "packId": "agency-agents",
+      "role": "UX Researcher",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "csv-analyzer",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "design-ux-researcher",
+      "tags": ["design", "researcher"]
+    },
+    {
+      "body": "agents/design-visual-storyteller.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Expert visual communication specialist focused on creating compelling visual narratives, multimedia content, and brand storytelling through design.",
+      "emoji": "🎨",
+      "id": "agency-design-visual-storyteller",
+      "name": "Visual Storyteller Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-visual-storyteller.md"
+      },
+      "packId": "agency-agents",
+      "role": "Visual Storyteller",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "json-transformer",
+        "data-visualizer",
+        "file-writer",
+        "trend-analyzer"
+      ],
+      "slug": "design-visual-storyteller",
+      "tags": ["design", "visual", "storyteller"]
+    },
+    {
+      "body": "agents/design-whimsy-injector.json",
+      "category": "design",
+      "color": "#EC4899",
+      "description": "Expert creative specialist focused on adding personality, delight, and playful elements to brand experiences.",
+      "emoji": "🎨",
+      "id": "agency-design-whimsy-injector",
+      "name": "Whimsy Injector Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/design/design-whimsy-injector.md"
+      },
+      "packId": "agency-agents",
+      "role": "Whimsy Injector",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "csv-analyzer",
+        "json-transformer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "design-whimsy-injector",
+      "tags": ["design", "whimsy", "injector"]
+    },
+    {
+      "body": "agents/engineering-ai-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert AI/ML engineer specializing in machine learning model development, deployment, and integration into production systems.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-ai-engineer",
+      "name": "AI Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-ai-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "AI Engineer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "web-scraper",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "calendar-manager",
+        "file-writer",
+        "image-resizer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-ai-engineer",
+      "tags": ["engineering", "engineer"]
+    },
+    {
+      "body": "agents/engineering-backend-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Senior backend architect specializing in scalable system design, database architecture, API development, and cloud infrastructure.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-backend-architect",
+      "name": "Backend Architect Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-backend-architect.md"
+      },
+      "packId": "agency-agents",
+      "role": "Backend Architect",
+      "skillIds": [
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "sql-query",
+        "email-draft",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-backend-architect",
+      "tags": ["engineering", "backend", "architect"]
+    },
+    {
+      "body": "agents/engineering-code-reviewer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert code reviewer who provides constructive, actionable feedback focused on correctness, maintainability, security, and performance — not style preferences.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-code-reviewer",
+      "name": "Engineering Code Reviewer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-code-reviewer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Engineering Code Reviewer",
+      "skillIds": [
+        "test-runner",
+        "linter",
+        "api-tester",
+        "sql-query",
+        "meeting-notes",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "engineering-code-reviewer",
+      "tags": ["engineering", "code", "reviewer"]
+    },
+    {
+      "body": "agents/engineering-codebase-onboarding-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert developer onboarding specialist who helps new engineers understand unfamiliar codebases fast by reading source code, tracing code paths.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-codebase-onboarding-engineer",
+      "name": "Codebase Onboarding Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-codebase-onboarding-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Codebase Onboarding Engineer",
+      "skillIds": [
+        "code-search",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "engineering-codebase-onboarding-engineer",
+      "tags": ["engineering", "codebase", "onboarding", "engineer"]
+    },
+    {
+      "body": "agents/engineering-data-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert data engineer specializing in building reliable data pipelines, lakehouse architectures, and scalable data infrastructure.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-data-engineer",
+      "name": "Data Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-data-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Data Engineer",
+      "skillIds": [
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "sql-query",
+        "slack-poster",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-data-engineer",
+      "tags": ["engineering", "data", "engineer"]
+    },
+    {
+      "body": "agents/engineering-database-optimizer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert database specialist focused on schema design, query optimization, indexing strategies, and performance tuning for modern databases.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-database-optimizer",
+      "name": "Database Optimizer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-database-optimizer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Database Optimizer",
+      "skillIds": ["linter", "sql-query", "email-draft", "file-writer", "trend-analyzer"],
+      "slug": "engineering-database-optimizer",
+      "tags": ["engineering", "database", "optimizer"]
+    },
+    {
+      "body": "agents/engineering-devops-automator.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert DevOps engineer specializing in infrastructure automation, CI/CD pipeline development, and cloud operations.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-devops-automator",
+      "name": "DevOps Automator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-devops-automator.md"
+      },
+      "packId": "agency-agents",
+      "role": "DevOps Automator",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "meeting-notes",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "engineering-devops-automator",
+      "tags": ["engineering", "devops", "automator"]
+    },
+    {
+      "body": "agents/engineering-embedded-firmware-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Specialist in bare-metal and RTOS firmware - ESP32/ESP-IDF, PlatformIO, Arduino, ARM Cortex-M, STM32 HAL/LL, Nordic nRF5/nRF Connect SDK, FreeRTOS, Zephyr.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-embedded-firmware-engineer",
+      "name": "Embedded Firmware Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-embedded-firmware-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Embedded Firmware Engineer",
+      "skillIds": [
+        "code-search",
+        "python-executor",
+        "linter",
+        "file-reader",
+        "file-writer",
+        "quiz-generator"
+      ],
+      "slug": "engineering-embedded-firmware-engineer",
+      "tags": ["engineering", "embedded", "firmware", "engineer"]
+    },
+    {
+      "body": "agents/engineering-frontend-developer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert frontend developer specializing in modern web technologies, React/Vue/Angular frameworks, UI implementation, and performance optimization.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-frontend-developer",
+      "name": "Frontend Developer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-frontend-developer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Frontend Developer",
+      "skillIds": [
+        "test-runner",
+        "linter",
+        "web-scraper",
+        "api-tester",
+        "rss-reader",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-frontend-developer",
+      "tags": ["engineering", "frontend", "developer"]
+    },
+    {
+      "body": "agents/engineering-git-workflow-master.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert in Git workflows, branching strategies, and version control best practices including conventional commits, rebasing, worktrees.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-git-workflow-master",
+      "name": "Git Workflow Master Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-git-workflow-master.md"
+      },
+      "packId": "agency-agents",
+      "role": "Git Workflow Master",
+      "skillIds": ["bash-executor", "test-runner", "linter", "notification-sender", "file-writer"],
+      "slug": "engineering-git-workflow-master",
+      "tags": ["engineering", "git", "workflow", "master"]
+    },
+    {
+      "body": "agents/engineering-incident-response-commander.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert incident commander specializing in production incident management, structured response coordination, post-mortem facilitation, SLO/SLI tracking.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-incident-response-commander",
+      "name": "Incident Response Commander Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-incident-response-commander.md"
+      },
+      "packId": "agency-agents",
+      "role": "Incident Response Commander",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "sql-query",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "engineering-incident-response-commander",
+      "tags": ["engineering", "incident", "response", "commander"]
+    },
+    {
+      "body": "agents/engineering-minimal-change-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Engineering specialist focused on minimum-viable diffs — fixes only what was asked, refuses scope creep.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-minimal-change-engineer",
+      "name": "Minimal Change Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-minimal-change-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Minimal Change Engineer",
+      "skillIds": [
+        "linter",
+        "api-tester",
+        "file-reader",
+        "file-writer",
+        "zip-handler",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-minimal-change-engineer",
+      "tags": ["engineering", "minimal", "change", "engineer"]
+    },
+    {
+      "body": "agents/engineering-mobile-app-builder.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Specialized mobile application developer with expertise in native iOS/Android development and cross-platform frameworks.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-mobile-app-builder",
+      "name": "Mobile App Builder Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-mobile-app-builder.md"
+      },
+      "packId": "agency-agents",
+      "role": "Mobile App Builder",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-mobile-app-builder",
+      "tags": ["engineering", "mobile", "app", "builder"]
+    },
+    {
+      "body": "agents/engineering-rapid-prototyper.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Specialized in ultra-fast proof-of-concept development and MVP creation using efficient tools and frameworks.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-rapid-prototyper",
+      "name": "Rapid Prototyper Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-rapid-prototyper.md"
+      },
+      "packId": "agency-agents",
+      "role": "Rapid Prototyper",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "sql-query",
+        "spreadsheet-reader",
+        "email-draft",
+        "notification-sender",
+        "calendar-manager",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-rapid-prototyper",
+      "tags": ["engineering", "rapid", "prototyper"]
+    },
+    {
+      "body": "agents/engineering-security-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert application security engineer specializing in threat modeling, vulnerability assessment, secure code review, security architecture design.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-security-engineer",
+      "name": "Security Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-security-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Security Engineer",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "web-scraper",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "sql-query",
+        "email-draft",
+        "notification-sender",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "zip-handler",
+        "markdown-renderer"
+      ],
+      "slug": "engineering-security-engineer",
+      "tags": ["engineering", "security", "engineer"]
+    },
+    {
+      "body": "agents/engineering-software-architect.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert software architect specializing in system design, domain-driven design, architectural patterns, and technical decision-making.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-software-architect",
+      "name": "Software Architect Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-software-architect.md"
+      },
+      "packId": "agency-agents",
+      "role": "Software Architect",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-software-architect",
+      "tags": ["engineering", "software", "architect"]
+    },
+    {
+      "body": "agents/engineering-solidity-smart-contract-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert Solidity developer specializing in EVM smart contract architecture, gas optimization, upgradeable proxy patterns, DeFi protocol development.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-solidity-smart-contract-engineer",
+      "name": "Solidity Smart Contract Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-solidity-smart-contract-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Solidity Smart Contract Engineer",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "notification-sender",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-solidity-smart-contract-engineer",
+      "tags": ["engineering", "solidity", "smart", "contract", "engineer"]
+    },
+    {
+      "body": "agents/engineering-sre.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert site reliability engineer specializing in SLOs, error budgets, observability, chaos engineering, and toil reduction for production systems at scale.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-sre",
+      "name": "Engineering SRE Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-sre.md"
+      },
+      "packId": "agency-agents",
+      "role": "Engineering SRE",
+      "skillIds": ["bash-executor", "linter", "api-tester", "trend-analyzer"],
+      "slug": "engineering-sre",
+      "tags": ["engineering", "sre"]
+    },
+    {
+      "body": "agents/engineering-technical-writer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert technical writer specializing in developer documentation, API references, README files, and tutorials.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-technical-writer",
+      "name": "Technical Writer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-technical-writer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Technical Writer",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "csv-analyzer",
+        "json-transformer",
+        "spreadsheet-reader",
+        "data-visualizer",
+        "email-draft",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "engineering-technical-writer",
+      "tags": ["engineering", "technical", "writer"]
+    },
+    {
+      "body": "agents/engineering-threat-detection-engineer.json",
+      "category": "engineering",
+      "color": "#3B82F6",
+      "description": "Expert detection engineer specializing in SIEM rule development, MITRE ATT&CK coverage mapping, threat hunting, alert tuning.",
+      "emoji": "⚙️",
+      "id": "agency-engineering-threat-detection-engineer",
+      "name": "Threat Detection Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/engineering/engineering-threat-detection-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Threat Detection Engineer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "notification-sender",
+        "calendar-manager",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "engineering-threat-detection-engineer",
+      "tags": ["engineering", "threat", "detection", "engineer"]
+    },
+    {
+      "body": "agents/game-audio-engineer.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Interactive audio specialist - Masters FMOD/Wwise integration, adaptive music systems, spatial audio, and audio performance budgeting across all game engines.",
+      "emoji": "🎮",
+      "id": "agency-game-audio-engineer",
+      "name": "Game Audio Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/game-audio-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Game Audio Engineer",
+      "skillIds": [
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "calendar-manager",
+        "file-reader",
+        "markdown-renderer"
+      ],
+      "slug": "game-audio-engineer",
+      "tags": ["game-development", "game", "audio", "engineer"]
+    },
+    {
+      "body": "agents/game-designer.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Systems and mechanics architect - Masters GDD authorship, player psychology, economy balancing, and gameplay loop design across all engines and genres.",
+      "emoji": "🎮",
+      "id": "agency-game-designer",
+      "name": "Game Designer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/game-designer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Game Designer",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "pdf-reader",
+        "spreadsheet-reader",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "note-taker"
+      ],
+      "slug": "game-designer",
+      "tags": ["game-development", "game", "designer"]
+    },
+    {
+      "body": "agents/godot-godot-gameplay-scripter.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Composition and signal integrity specialist - Masters GDScript 2.0, C# integration, node-based architecture, and type-safe signal design for Godot 4 projects.",
+      "emoji": "🎮",
+      "id": "agency-godot-godot-gameplay-scripter",
+      "name": "Godot Gameplay Scripter Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/godot/godot-gameplay-scripter.md"
+      },
+      "packId": "agency-agents",
+      "role": "Godot Gameplay Scripter",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "godot-godot-gameplay-scripter",
+      "tags": ["game-development", "godot", "gameplay", "scripter"]
+    },
+    {
+      "body": "agents/level-designer.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Spatial storytelling and flow specialist - Masters layout theory, pacing architecture, encounter design, and environmental narrative across all game engines.",
+      "emoji": "🎮",
+      "id": "agency-level-designer",
+      "name": "Level Designer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/level-designer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Level Designer",
+      "skillIds": [
+        "test-runner",
+        "linter",
+        "api-tester",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "level-designer",
+      "tags": ["game-development", "level", "designer"]
+    },
+    {
+      "body": "agents/narrative-designer.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Story systems and dialogue architect - Masters GDD-aligned narrative design, branching dialogue, lore architecture.",
+      "emoji": "🎮",
+      "id": "agency-narrative-designer",
+      "name": "Narrative Designer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/narrative-designer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Narrative Designer",
+      "skillIds": [
+        "test-runner",
+        "linter",
+        "pdf-reader",
+        "api-tester",
+        "data-visualizer",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "narrative-designer",
+      "tags": ["game-development", "narrative", "designer"]
+    },
+    {
+      "body": "agents/technical-artist.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Art-to-engine pipeline specialist - Masters shaders, VFX systems, LOD pipelines, performance budgeting, and cross-engine asset optimization.",
+      "emoji": "🎮",
+      "id": "agency-technical-artist",
+      "name": "Technical Artist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/technical-artist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Technical Artist",
+      "skillIds": [
+        "python-executor",
+        "linter",
+        "json-transformer",
+        "file-writer",
+        "image-resizer",
+        "zip-handler",
+        "markdown-renderer",
+        "quiz-generator"
+      ],
+      "slug": "technical-artist",
+      "tags": ["game-development", "technical", "artist"]
+    },
+    {
+      "body": "agents/unity-unity-architect.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Data-driven modularity specialist - Masters ScriptableObjects, decoupled systems, and single-responsibility component design for scalable Unity projects.",
+      "emoji": "🎮",
+      "id": "agency-unity-unity-architect",
+      "name": "Unity Architect Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/unity/unity-architect.md"
+      },
+      "packId": "agency-agents",
+      "role": "Unity Architect",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "json-transformer",
+        "sql-query",
+        "data-visualizer",
+        "email-draft",
+        "slack-poster",
+        "calendar-manager",
+        "file-writer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "unity-unity-architect",
+      "tags": ["game-development", "unity", "architect"]
+    },
+    {
+      "body": "agents/unreal-engine-unreal-systems-engineer.json",
+      "category": "game-dev",
+      "color": "#10B981",
+      "description": "Performance and hybrid architecture specialist - Masters C++/Blueprint continuum, Nanite geometry, Lumen GI.",
+      "emoji": "🎮",
+      "id": "agency-unreal-engine-unreal-systems-engineer",
+      "name": "Unreal Systems Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/game-development/unreal-engine/unreal-systems-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Unreal Systems Engineer",
+      "skillIds": [
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "spreadsheet-reader",
+        "data-visualizer",
+        "slack-poster",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "unreal-engine-unreal-systems-engineer",
+      "tags": ["game-development", "unreal", "systems", "engineer"]
+    },
+    {
+      "body": "agents/marketing-agentic-search-optimizer.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert in WebMCP readiness and agentic task completion — audits whether AI agents can actually accomplish tasks on your site (book, buy, register, subscribe).",
+      "emoji": "📢",
+      "id": "agency-marketing-agentic-search-optimizer",
+      "name": "Agentic Search Optimizer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-agentic-search-optimizer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Agentic Search Optimizer",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "web-scraper",
+        "api-tester",
+        "json-transformer",
+        "email-draft",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-agentic-search-optimizer",
+      "tags": ["marketing", "agentic", "search", "optimizer"]
+    },
+    {
+      "body": "agents/marketing-ai-citation-strategist.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert in AI recommendation engine optimization (AEO/GEO) — audits brand visibility across ChatGPT, Claude, Gemini, and Perplexity.",
+      "emoji": "📢",
+      "id": "agency-marketing-ai-citation-strategist",
+      "name": "AI Citation Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-ai-citation-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "AI Citation Strategist",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "rss-reader",
+        "calendar-manager",
+        "file-writer",
+        "markdown-renderer",
+        "citation-formatter",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-ai-citation-strategist",
+      "tags": ["marketing", "citation", "strategist"]
+    },
+    {
+      "body": "agents/marketing-app-store-optimizer.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert app store marketing specialist focused on App Store Optimization (ASO), conversion rate optimization, and app discoverability.",
+      "emoji": "📢",
+      "id": "agency-marketing-app-store-optimizer",
+      "name": "App Store Optimizer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-app-store-optimizer.md"
+      },
+      "packId": "agency-agents",
+      "role": "App Store Optimizer",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-app-store-optimizer",
+      "tags": ["marketing", "app", "store", "optimizer"]
+    },
+    {
+      "body": "agents/marketing-book-co-author.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Strategic thought-leadership book collaborator who turns voice notes and fragments into structured first-person chapters.",
+      "emoji": "📢",
+      "id": "agency-marketing-book-co-author",
+      "name": "Book Co-Author Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-book-co-author.md"
+      },
+      "packId": "agency-agents",
+      "role": "Book Co-Author",
+      "skillIds": [
+        "linter",
+        "api-tester",
+        "json-transformer",
+        "meeting-notes",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "note-taker"
+      ],
+      "slug": "marketing-book-co-author",
+      "tags": ["marketing", "book", "author"]
+    },
+    {
+      "body": "agents/marketing-china-market-localization-strategist.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Full-stack China market localization expert who turns real-time trend signals into executable go-to-market strategies.",
+      "emoji": "📢",
+      "id": "agency-marketing-china-market-localization-strategist",
+      "name": "China Market Localization Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-china-market-localization-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "China Market Localization Strategist",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "web-scraper",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "data-visualizer",
+        "email-draft",
+        "calendar-manager",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-china-market-localization-strategist",
+      "tags": ["marketing", "china", "market", "localization", "strategist"]
+    },
+    {
+      "body": "agents/marketing-content-creator.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert content strategist and creator for multi-platform campaigns.",
+      "emoji": "📢",
+      "id": "agency-marketing-content-creator",
+      "name": "Content Creator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-content-creator.md"
+      },
+      "packId": "agency-agents",
+      "role": "Content Creator",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "file-reader",
+        "file-writer"
+      ],
+      "slug": "marketing-content-creator",
+      "tags": ["marketing", "content", "creator"]
+    },
+    {
+      "body": "agents/marketing-growth-hacker.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert growth strategist specializing in rapid user acquisition through data-driven experimentation.",
+      "emoji": "📢",
+      "id": "agency-marketing-growth-hacker",
+      "name": "Growth Hacker Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-growth-hacker.md"
+      },
+      "packId": "agency-agents",
+      "role": "Growth Hacker",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "api-tester",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "file-reader",
+        "file-writer"
+      ],
+      "slug": "marketing-growth-hacker",
+      "tags": ["marketing", "growth", "hacker"]
+    },
+    {
+      "body": "agents/marketing-instagram-curator.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert Instagram marketing specialist focused on visual storytelling, community building, and multi-format content optimization.",
+      "emoji": "📢",
+      "id": "agency-marketing-instagram-curator",
+      "name": "Instagram Curator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-instagram-curator.md"
+      },
+      "packId": "agency-agents",
+      "role": "Instagram Curator",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "pdf-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "calendar-manager",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-instagram-curator",
+      "tags": ["marketing", "instagram", "curator"]
+    },
+    {
+      "body": "agents/marketing-linkedin-content-creator.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert LinkedIn content strategist focused on thought leadership, personal brand building, and high-engagement professional content.",
+      "emoji": "📢",
+      "id": "agency-marketing-linkedin-content-creator",
+      "name": "LinkedIn Content Creator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-linkedin-content-creator.md"
+      },
+      "packId": "agency-agents",
+      "role": "LinkedIn Content Creator",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "pdf-reader",
+        "api-tester",
+        "email-draft",
+        "calendar-manager",
+        "file-writer",
+        "image-resizer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-linkedin-content-creator",
+      "tags": ["marketing", "linkedin", "content", "creator"]
+    },
+    {
+      "body": "agents/marketing-reddit-community-builder.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert Reddit marketing specialist focused on authentic community engagement, value-driven content creation, and long-term relationship building.",
+      "emoji": "📢",
+      "id": "agency-marketing-reddit-community-builder",
+      "name": "Reddit Community Builder Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-reddit-community-builder.md"
+      },
+      "packId": "agency-agents",
+      "role": "Reddit Community Builder",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "pdf-reader",
+        "rss-reader",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-reddit-community-builder",
+      "tags": ["marketing", "reddit", "community", "builder"]
+    },
+    {
+      "body": "agents/marketing-seo-specialist.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert search engine optimization strategist specializing in technical SEO, content optimization, link authority building, and organic search growth.",
+      "emoji": "📢",
+      "id": "agency-marketing-seo-specialist",
+      "name": "SEO Specialist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-seo-specialist.md"
+      },
+      "packId": "agency-agents",
+      "role": "SEO Specialist",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "slack-poster",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "citation-formatter",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-seo-specialist",
+      "tags": ["marketing", "seo", "specialist"]
+    },
+    {
+      "body": "agents/marketing-tiktok-strategist.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert TikTok marketing specialist focused on viral content creation, algorithm optimization, and community building.",
+      "emoji": "📢",
+      "id": "agency-marketing-tiktok-strategist",
+      "name": "TikTok Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-tiktok-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "TikTok Strategist",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "file-writer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-tiktok-strategist",
+      "tags": ["marketing", "tiktok", "strategist"]
+    },
+    {
+      "body": "agents/marketing-twitter-engager.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Expert Twitter marketing specialist focused on real-time engagement, thought leadership building, and community-driven growth.",
+      "emoji": "📢",
+      "id": "agency-marketing-twitter-engager",
+      "name": "Twitter Engager Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-twitter-engager.md"
+      },
+      "packId": "agency-agents",
+      "role": "Twitter Engager",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "calendar-manager",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-twitter-engager",
+      "tags": ["marketing", "twitter", "engager"]
+    },
+    {
+      "body": "agents/marketing-video-optimization-specialist.json",
+      "category": "marketing",
+      "color": "#F59E0B",
+      "description": "Video marketing strategist specializing in YouTube algorithm optimization, audience retention, chaptering, thumbnail concepts.",
+      "emoji": "📢",
+      "id": "agency-marketing-video-optimization-specialist",
+      "name": "Video Optimization Specialist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/marketing/marketing-video-optimization-specialist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Video Optimization Specialist",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "csv-analyzer",
+        "slack-poster",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "marketing-video-optimization-specialist",
+      "tags": ["marketing", "video", "optimization", "specialist"]
+    },
+    {
+      "body": "agents/paid-media-auditor.json",
+      "category": "paid-media",
+      "color": "#EF4444",
+      "description": "Comprehensive paid media auditor who evaluates Google Ads, Microsoft Ads, and Meta accounts across 200+ checkpoints.",
+      "emoji": "💰",
+      "id": "agency-paid-media-auditor",
+      "name": "Paid Media Auditor Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/paid-media/paid-media-auditor.md"
+      },
+      "packId": "agency-agents",
+      "role": "Paid Media Auditor",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "web-scraper",
+        "pdf-reader",
+        "api-tester",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "summarizer"
+      ],
+      "slug": "paid-media-auditor",
+      "tags": ["paid-media", "paid", "media", "auditor"]
+    },
+    {
+      "body": "agents/paid-media-creative-strategist.json",
+      "category": "paid-media",
+      "color": "#EF4444",
+      "description": "Paid media creative specialist focused on ad copywriting, RSA optimization, asset group design, and creative testing across ad platforms.",
+      "emoji": "💰",
+      "id": "agency-paid-media-creative-strategist",
+      "name": "Creative Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/paid-media/paid-media-creative-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Creative Strategist",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "email-draft",
+        "slack-poster",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "paid-media-creative-strategist",
+      "tags": ["paid-media", "paid", "media", "creative", "strategist"]
+    },
+    {
+      "body": "agents/paid-media-paid-social-strategist.json",
+      "category": "paid-media",
+      "color": "#EF4444",
+      "description": "Cross-platform paid social advertising specialist covering Meta (Facebook/Instagram), LinkedIn, TikTok, Pinterest, X, and Snapchat.",
+      "emoji": "💰",
+      "id": "agency-paid-media-paid-social-strategist",
+      "name": "Paid Social Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/paid-media/paid-media-paid-social-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Paid Social Strategist",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "slack-poster",
+        "calendar-manager",
+        "file-reader",
+        "file-writer"
+      ],
+      "slug": "paid-media-paid-social-strategist",
+      "tags": ["paid-media", "paid", "media", "social", "strategist"]
+    },
+    {
+      "body": "agents/paid-media-ppc-strategist.json",
+      "category": "paid-media",
+      "color": "#EF4444",
+      "description": "Senior paid media strategist specializing in large-scale search, shopping, and performance max campaign architecture across ad platforms.",
+      "emoji": "💰",
+      "id": "agency-paid-media-ppc-strategist",
+      "name": "PPC Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/paid-media/paid-media-ppc-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "PPC Strategist",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "calendar-manager",
+        "file-reader",
+        "file-writer"
+      ],
+      "slug": "paid-media-ppc-strategist",
+      "tags": ["paid-media", "paid", "media", "ppc", "strategist"]
+    },
+    {
+      "body": "agents/paid-media-programmatic-buyer.json",
+      "category": "paid-media",
+      "color": "#EF4444",
+      "description": "Display advertising and programmatic media buying specialist covering managed placements, Google Display Network, DV360, trade desk platforms.",
+      "emoji": "💰",
+      "id": "agency-paid-media-programmatic-buyer",
+      "name": "Programmatic Buyer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/paid-media/paid-media-programmatic-buyer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Programmatic Buyer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "spreadsheet-reader",
+        "slack-poster",
+        "calendar-manager",
+        "file-reader",
+        "file-writer"
+      ],
+      "slug": "paid-media-programmatic-buyer",
+      "tags": ["paid-media", "paid", "media", "programmatic", "buyer"]
+    },
+    {
+      "body": "agents/paid-media-search-query-analyst.json",
+      "category": "paid-media",
+      "color": "#EF4444",
+      "description": "Specialist in search term analysis, negative keyword architecture, and query-to-intent mapping.",
+      "emoji": "💰",
+      "id": "agency-paid-media-search-query-analyst",
+      "name": "Search Query Analyst Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/paid-media/paid-media-search-query-analyst.md"
+      },
+      "packId": "agency-agents",
+      "role": "Search Query Analyst",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "web-search",
+        "api-tester",
+        "data-visualizer",
+        "notification-sender",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "trend-analyzer"
+      ],
+      "slug": "paid-media-search-query-analyst",
+      "tags": ["paid-media", "paid", "media", "search", "query", "analyst"]
+    },
+    {
+      "body": "agents/paid-media-tracking-specialist.json",
+      "category": "paid-media",
+      "color": "#EF4444",
+      "description": "Expert in conversion tracking architecture, tag management, and attribution modeling across Google Tag Manager, GA4, and Meta CAPI.",
+      "emoji": "💰",
+      "id": "agency-paid-media-tracking-specialist",
+      "name": "Tracking Specialist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/paid-media/paid-media-tracking-specialist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Tracking Specialist",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "web-search",
+        "web-scraper",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker"
+      ],
+      "slug": "paid-media-tracking-specialist",
+      "tags": ["paid-media", "paid", "media", "tracking", "specialist"]
+    },
+    {
+      "body": "agents/product-behavioral-nudge-engine.json",
+      "category": "product",
+      "color": "#6366F1",
+      "description": "Behavioral psychology specialist that adapts software interaction cadences and styles to maximize user motivation and success.",
+      "emoji": "🚀",
+      "id": "agency-product-behavioral-nudge-engine",
+      "name": "Behavioral Nudge Engine Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/product/product-behavioral-nudge-engine.md"
+      },
+      "packId": "agency-agents",
+      "role": "Behavioral Nudge Engine",
+      "skillIds": [
+        "linter",
+        "json-transformer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "meeting-notes",
+        "quiz-generator",
+        "summarizer"
+      ],
+      "slug": "product-behavioral-nudge-engine",
+      "tags": ["product", "behavioral", "nudge", "engine"]
+    },
+    {
+      "body": "agents/product-feedback-synthesizer.json",
+      "category": "product",
+      "color": "#6366F1",
+      "description": "Expert in collecting, analyzing, and synthesizing user feedback from multiple channels to extract actionable product insights.",
+      "emoji": "🚀",
+      "id": "agency-product-feedback-synthesizer",
+      "name": "Feedback Synthesizer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/product/product-feedback-synthesizer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Feedback Synthesizer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "web-scraper",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "data-visualizer",
+        "email-draft",
+        "slack-poster",
+        "file-reader",
+        "file-writer",
+        "zip-handler",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "product-feedback-synthesizer",
+      "tags": ["product", "feedback", "synthesizer"]
+    },
+    {
+      "body": "agents/product-manager.json",
+      "category": "product",
+      "color": "#6366F1",
+      "description": "Holistic product leader who owns the full product lifecycle — from discovery and strategy through roadmap, stakeholder alignment, go-to-market.",
+      "emoji": "🚀",
+      "id": "agency-product-manager",
+      "name": "Product Manager Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/product/product-manager.md"
+      },
+      "packId": "agency-agents",
+      "role": "Product Manager",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "product-manager",
+      "tags": ["product", "manager"]
+    },
+    {
+      "body": "agents/product-sprint-prioritizer.json",
+      "category": "product",
+      "color": "#6366F1",
+      "description": "Expert product manager specializing in agile sprint planning, feature prioritization, and resource allocation.",
+      "emoji": "🚀",
+      "id": "agency-product-sprint-prioritizer",
+      "name": "Sprint Prioritizer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/product/product-sprint-prioritizer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Sprint Prioritizer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "data-visualizer",
+        "notification-sender",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "product-sprint-prioritizer",
+      "tags": ["product", "sprint", "prioritizer"]
+    },
+    {
+      "body": "agents/product-trend-researcher.json",
+      "category": "product",
+      "color": "#6366F1",
+      "description": "Expert market intelligence analyst specializing in identifying emerging trends, competitive analysis, and opportunity assessment.",
+      "emoji": "🚀",
+      "id": "agency-product-trend-researcher",
+      "name": "Trend Researcher Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/product/product-trend-researcher.md"
+      },
+      "packId": "agency-agents",
+      "role": "Trend Researcher",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "quiz-generator",
+        "citation-formatter",
+        "trend-analyzer"
+      ],
+      "slug": "product-trend-researcher",
+      "tags": ["product", "trend", "researcher"]
+    },
+    {
+      "body": "agents/project-management-experiment-tracker.json",
+      "category": "ops",
+      "color": "#14B8A6",
+      "description": "Expert project manager specializing in experiment design, execution tracking, and data-driven decision making.",
+      "emoji": "📋",
+      "id": "agency-project-management-experiment-tracker",
+      "name": "Experiment Tracker Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/project-management/project-management-experiment-tracker.md"
+      },
+      "packId": "agency-agents",
+      "role": "Experiment Tracker",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "project-management-experiment-tracker",
+      "tags": ["project-management", "project", "management", "experiment", "tracker"]
+    },
+    {
+      "body": "agents/project-management-jira-workflow-steward.json",
+      "category": "ops",
+      "color": "#14B8A6",
+      "description": "Expert delivery operations specialist who enforces Jira-linked Git workflows, traceable commits, structured pull requests.",
+      "emoji": "📋",
+      "id": "agency-project-management-jira-workflow-steward",
+      "name": "Jira Workflow Steward Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/project-management/project-management-jira-workflow-steward.md"
+      },
+      "packId": "agency-agents",
+      "role": "Jira Workflow Steward",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "email-draft",
+        "meeting-notes",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "summarizer"
+      ],
+      "slug": "project-management-jira-workflow-steward",
+      "tags": ["project-management", "project", "management", "jira", "workflow", "steward"]
+    },
+    {
+      "body": "agents/project-management-project-shepherd.json",
+      "category": "ops",
+      "color": "#14B8A6",
+      "description": "Expert project manager specializing in cross-functional project coordination, timeline management, and stakeholder alignment.",
+      "emoji": "📋",
+      "id": "agency-project-management-project-shepherd",
+      "name": "Project Shepherd Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/project-management/project-management-project-shepherd.md"
+      },
+      "packId": "agency-agents",
+      "role": "Project Shepherd",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "project-management-project-shepherd",
+      "tags": ["project-management", "project", "management", "shepherd"]
+    },
+    {
+      "body": "agents/project-management-studio-operations.json",
+      "category": "ops",
+      "color": "#14B8A6",
+      "description": "Expert operations manager specializing in day-to-day studio efficiency, process optimization, and resource coordination.",
+      "emoji": "📋",
+      "id": "agency-project-management-studio-operations",
+      "name": "Studio Operations Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/project-management/project-management-studio-operations.md"
+      },
+      "packId": "agency-agents",
+      "role": "Studio Operations",
+      "skillIds": [
+        "bash-executor",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "calendar-manager",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "project-management-studio-operations",
+      "tags": ["project-management", "project", "management", "studio", "operations"]
+    },
+    {
+      "body": "agents/project-management-studio-producer.json",
+      "category": "ops",
+      "color": "#14B8A6",
+      "description": "Senior strategic leader specializing in high-level creative and technical project orchestration, resource allocation, and multi-project portfolio management.",
+      "emoji": "📋",
+      "id": "agency-project-management-studio-producer",
+      "name": "Studio Producer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/project-management/project-management-studio-producer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Studio Producer",
+      "skillIds": [
+        "linter",
+        "calendar-manager",
+        "meeting-notes",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "project-management-studio-producer",
+      "tags": ["project-management", "project", "management", "studio", "producer"]
+    },
+    {
+      "body": "agents/project-manager-senior.json",
+      "category": "ops",
+      "color": "#14B8A6",
+      "description": "Converts specs to tasks and remembers previous projects. Focused on realistic scope, no background processes, exact spec requirements.",
+      "emoji": "📋",
+      "id": "agency-project-manager-senior",
+      "name": "Senior Project Manager Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/project-management/project-manager-senior.md"
+      },
+      "packId": "agency-agents",
+      "role": "Senior Project Manager",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "email-draft",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "zip-handler",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "summarizer"
+      ],
+      "slug": "project-manager-senior",
+      "tags": ["project-management", "project", "manager", "senior"]
+    },
+    {
+      "body": "agents/sales-account-strategist.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Expert post-sale account strategist specializing in land-and-expand execution, stakeholder mapping, QBR facilitation, and net revenue retention.",
+      "emoji": "💼",
+      "id": "agency-sales-account-strategist",
+      "name": "Account Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-account-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Account Strategist",
+      "skillIds": [
+        "linter",
+        "web-search",
+        "rss-reader",
+        "csv-analyzer",
+        "notification-sender",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "sales-account-strategist",
+      "tags": ["sales", "account", "strategist"]
+    },
+    {
+      "body": "agents/sales-coach.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Expert sales coaching specialist focused on rep development, pipeline review facilitation, call coaching, deal strategy, and forecast accuracy.",
+      "emoji": "💼",
+      "id": "agency-sales-coach",
+      "name": "Sales Coach Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-coach.md"
+      },
+      "packId": "agency-agents",
+      "role": "Sales Coach",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "json-transformer",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "sales-coach",
+      "tags": ["sales", "coach"]
+    },
+    {
+      "body": "agents/sales-deal-strategist.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Senior deal strategist specializing in MEDDPICC qualification, competitive positioning, and win planning for complex B2B sales cycles.",
+      "emoji": "💼",
+      "id": "agency-sales-deal-strategist",
+      "name": "Deal Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-deal-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Deal Strategist",
+      "skillIds": [
+        "code-search",
+        "python-executor",
+        "linter",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "file-writer",
+        "markdown-renderer"
+      ],
+      "slug": "sales-deal-strategist",
+      "tags": ["sales", "deal", "strategist"]
+    },
+    {
+      "body": "agents/sales-discovery-coach.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Coaches sales teams on elite discovery methodology — question design, current-state mapping, gap quantification.",
+      "emoji": "💼",
+      "id": "agency-sales-discovery-coach",
+      "name": "Discovery Coach Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-discovery-coach.md"
+      },
+      "packId": "agency-agents",
+      "role": "Discovery Coach",
+      "skillIds": ["linter", "web-search", "file-writer"],
+      "slug": "sales-discovery-coach",
+      "tags": ["sales", "discovery", "coach"]
+    },
+    {
+      "body": "agents/sales-engineer.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Senior pre-sales engineer specializing in technical discovery, demo engineering, POC scoping, competitive battlecards.",
+      "emoji": "💼",
+      "id": "agency-sales-engineer",
+      "name": "Sales Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Sales Engineer",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "meeting-notes",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "sales-engineer",
+      "tags": ["sales", "engineer"]
+    },
+    {
+      "body": "agents/sales-outbound-strategist.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Signal-based outbound specialist who designs multi-channel prospecting sequences, defines ICPs, and builds pipeline through research-driven personalization.",
+      "emoji": "💼",
+      "id": "agency-sales-outbound-strategist",
+      "name": "Outbound Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-outbound-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Outbound Strategist",
+      "skillIds": [
+        "linter",
+        "web-search",
+        "rss-reader",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "calendar-manager",
+        "meeting-notes",
+        "image-resizer"
+      ],
+      "slug": "sales-outbound-strategist",
+      "tags": ["sales", "outbound", "strategist"]
+    },
+    {
+      "body": "agents/sales-pipeline-analyst.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Revenue operations analyst specializing in pipeline health diagnostics, deal velocity analysis, forecast accuracy, and data-driven sales coaching.",
+      "emoji": "💼",
+      "id": "agency-sales-pipeline-analyst",
+      "name": "Pipeline Analyst Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-pipeline-analyst.md"
+      },
+      "packId": "agency-agents",
+      "role": "Pipeline Analyst",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "csv-analyzer",
+        "spreadsheet-reader",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "sales-pipeline-analyst",
+      "tags": ["sales", "pipeline", "analyst"]
+    },
+    {
+      "body": "agents/sales-proposal-strategist.json",
+      "category": "sales",
+      "color": "#F97316",
+      "description": "Strategic proposal architect who transforms RFPs and sales opportunities into compelling win narratives.",
+      "emoji": "💼",
+      "id": "agency-sales-proposal-strategist",
+      "name": "Proposal Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/sales/sales-proposal-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Proposal Strategist",
+      "skillIds": [
+        "code-search",
+        "python-executor",
+        "linter",
+        "web-search",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "sales-proposal-strategist",
+      "tags": ["sales", "proposal", "strategist"]
+    },
+    {
+      "body": "agents/macos-spatial-metal-engineer.json",
+      "category": "spatial",
+      "color": "#7C3AED",
+      "description": "Native Swift and Metal specialist building high-performance 3D rendering systems and spatial computing experiences for macOS and Vision Pro.",
+      "emoji": "🥽",
+      "id": "agency-macos-spatial-metal-engineer",
+      "name": "macOS Spatial Metal Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/spatial-computing/macos-spatial-metal-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "macOS Spatial Metal Engineer",
+      "skillIds": [
+        "test-runner",
+        "linter",
+        "api-tester",
+        "csv-analyzer",
+        "data-visualizer",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "macos-spatial-metal-engineer",
+      "tags": ["spatial-computing", "macos", "spatial", "metal", "engineer"]
+    },
+    {
+      "body": "agents/terminal-integration-specialist.json",
+      "category": "spatial",
+      "color": "#7C3AED",
+      "description": "Terminal emulation, text rendering optimization, and SwiftTerm integration for modern Swift applications.",
+      "emoji": "🥽",
+      "id": "agency-terminal-integration-specialist",
+      "name": "Terminal Integration Specialist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/spatial-computing/terminal-integration-specialist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Terminal Integration Specialist",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "trend-analyzer"
+      ],
+      "slug": "terminal-integration-specialist",
+      "tags": ["spatial-computing", "terminal", "integration", "specialist"]
+    },
+    {
+      "body": "agents/visionos-spatial-engineer.json",
+      "category": "spatial",
+      "color": "#7C3AED",
+      "description": "Native visionOS spatial computing, SwiftUI volumetric interfaces, and Liquid Glass design implementation.",
+      "emoji": "🥽",
+      "id": "agency-visionos-spatial-engineer",
+      "name": "visionOS Spatial Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/spatial-computing/visionos-spatial-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "visionOS Spatial Engineer",
+      "skillIds": ["meeting-notes", "file-writer", "note-taker", "trend-analyzer"],
+      "slug": "visionos-spatial-engineer",
+      "tags": ["spatial-computing", "visionos", "spatial", "engineer"]
+    },
+    {
+      "body": "agents/xr-cockpit-interaction-specialist.json",
+      "category": "spatial",
+      "color": "#7C3AED",
+      "description": "Specialist in designing and developing immersive cockpit-based control systems for XR environments.",
+      "emoji": "🥽",
+      "id": "agency-xr-cockpit-interaction-specialist",
+      "name": "XR Cockpit Interaction Specialist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/spatial-computing/xr-cockpit-interaction-specialist.md"
+      },
+      "packId": "agency-agents",
+      "role": "XR Cockpit Interaction Specialist",
+      "skillIds": ["file-writer", "trend-analyzer"],
+      "slug": "xr-cockpit-interaction-specialist",
+      "tags": ["spatial-computing", "cockpit", "interaction", "specialist"]
+    },
+    {
+      "body": "agents/xr-immersive-developer.json",
+      "category": "spatial",
+      "color": "#7C3AED",
+      "description": "Expert WebXR and immersive technology developer with specialization in browser-based AR/VR/XR applications.",
+      "emoji": "🥽",
+      "id": "agency-xr-immersive-developer",
+      "name": "XR Immersive Developer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/spatial-computing/xr-immersive-developer.md"
+      },
+      "packId": "agency-agents",
+      "role": "XR Immersive Developer",
+      "skillIds": ["test-runner", "python-executor", "api-tester", "notification-sender"],
+      "slug": "xr-immersive-developer",
+      "tags": ["spatial-computing", "immersive", "developer"]
+    },
+    {
+      "body": "agents/xr-interface-architect.json",
+      "category": "spatial",
+      "color": "#7C3AED",
+      "description": "Spatial interaction designer and interface strategist for immersive AR/VR/XR environments.",
+      "emoji": "🥽",
+      "id": "agency-xr-interface-architect",
+      "name": "XR Interface Architect Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/spatial-computing/xr-interface-architect.md"
+      },
+      "packId": "agency-agents",
+      "role": "XR Interface Architect",
+      "skillIds": ["code-search", "web-search", "email-draft", "file-writer"],
+      "slug": "xr-interface-architect",
+      "tags": ["spatial-computing", "interface", "architect"]
+    },
+    {
+      "body": "agents/agentic-identity-trust.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Designs identity, authentication, and trust verification systems for autonomous AI agents operating in multi-agent environments.",
+      "emoji": "🔬",
+      "id": "agency-agentic-identity-trust",
+      "name": "Agentic Identity Trust Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/agentic-identity-trust.md"
+      },
+      "packId": "agency-agents",
+      "role": "Agentic Identity Trust",
+      "skillIds": [
+        "python-executor",
+        "linter",
+        "api-tester",
+        "json-transformer",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "agentic-identity-trust",
+      "tags": ["specialized", "agentic", "identity", "trust"]
+    },
+    {
+      "body": "agents/agents-orchestrator.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Autonomous pipeline manager that orchestrates an entire development workflow from intake to delivery.",
+      "emoji": "🔬",
+      "id": "agency-agents-orchestrator",
+      "name": "Agents Orchestrator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/agents-orchestrator.md"
+      },
+      "packId": "agency-agents",
+      "role": "Agents Orchestrator",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "csv-analyzer",
+        "sql-query",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "agents-orchestrator",
+      "tags": ["specialized", "agents", "orchestrator"]
+    },
+    {
+      "body": "agents/blockchain-security-auditor.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Expert smart contract security auditor specializing in vulnerability detection, formal verification, exploit analysis.",
+      "emoji": "🔬",
+      "id": "agency-blockchain-security-auditor",
+      "name": "Blockchain Security Auditor Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/blockchain-security-auditor.md"
+      },
+      "packId": "agency-agents",
+      "role": "Blockchain Security Auditor",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-scraper",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "json-transformer",
+        "sql-query",
+        "slack-poster",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "blockchain-security-auditor",
+      "tags": ["specialized", "blockchain", "security", "auditor"]
+    },
+    {
+      "body": "agents/compliance-auditor.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Expert technical compliance auditor specializing in SOC 2, ISO 27001, HIPAA, and PCI-DSS audits.",
+      "emoji": "🔬",
+      "id": "agency-compliance-auditor",
+      "name": "Compliance Auditor Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/compliance-auditor.md"
+      },
+      "packId": "agency-agents",
+      "role": "Compliance Auditor",
+      "skillIds": [
+        "test-runner",
+        "api-tester",
+        "rss-reader",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "note-taker",
+        "summarizer"
+      ],
+      "slug": "compliance-auditor",
+      "tags": ["specialized", "compliance", "auditor"]
+    },
+    {
+      "body": "agents/customer-service.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Friendly, professional customer service specialist for any industry.",
+      "emoji": "🔬",
+      "id": "agency-customer-service",
+      "name": "Customer Service Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/customer-service.md"
+      },
+      "packId": "agency-agents",
+      "role": "Customer Service",
+      "skillIds": [
+        "linter",
+        "api-tester",
+        "email-draft",
+        "slack-poster",
+        "calendar-manager",
+        "file-reader",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "customer-service",
+      "tags": ["specialized", "customer", "service"]
+    },
+    {
+      "body": "agents/identity-graph-operator.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Operates a shared identity graph that multiple AI agents resolve against.",
+      "emoji": "🔬",
+      "id": "agency-identity-graph-operator",
+      "name": "Identity Graph Operator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/identity-graph-operator.md"
+      },
+      "packId": "agency-agents",
+      "role": "Identity Graph Operator",
+      "skillIds": [
+        "code-search",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "json-transformer",
+        "data-visualizer",
+        "email-draft",
+        "calendar-manager",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "identity-graph-operator",
+      "tags": ["specialized", "identity", "graph", "operator"]
+    },
+    {
+      "body": "agents/lsp-index-engineer.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Language Server Protocol specialist building unified code intelligence systems through LSP client orchestration and semantic indexing.",
+      "emoji": "🔬",
+      "id": "agency-lsp-index-engineer",
+      "name": "LSP Index Engineer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/lsp-index-engineer.md"
+      },
+      "packId": "agency-agents",
+      "role": "LSP Index Engineer",
+      "skillIds": [
+        "python-executor",
+        "linter",
+        "api-tester",
+        "csv-analyzer",
+        "json-transformer",
+        "sql-query",
+        "data-visualizer",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "zip-handler",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "lsp-index-engineer",
+      "tags": ["specialized", "lsp", "index", "engineer"]
+    },
+    {
+      "body": "agents/specialized-chief-of-staff.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Master coordinator for founders and executives — filters noise, owns processes, enforces consistency, routes decisions.",
+      "emoji": "🔬",
+      "id": "agency-specialized-chief-of-staff",
+      "name": "Chief of Staff Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/specialized-chief-of-staff.md"
+      },
+      "packId": "agency-agents",
+      "role": "Chief of Staff",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "pdf-reader",
+        "rss-reader",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "image-resizer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "specialized-chief-of-staff",
+      "tags": ["specialized", "chief", "staff"]
+    },
+    {
+      "body": "agents/specialized-developer-advocate.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Expert developer advocate specializing in building developer communities, creating compelling technical content, optimizing developer experience (DX).",
+      "emoji": "🔬",
+      "id": "agency-specialized-developer-advocate",
+      "name": "Developer Advocate Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/specialized-developer-advocate.md"
+      },
+      "packId": "agency-agents",
+      "role": "Developer Advocate",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "api-tester",
+        "csv-analyzer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "specialized-developer-advocate",
+      "tags": ["specialized", "developer", "advocate"]
+    },
+    {
+      "body": "agents/specialized-mcp-builder.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Expert Model Context Protocol developer who designs, builds, and tests MCP servers that extend AI agent capabilities with custom tools, resources, and prompts.",
+      "emoji": "🔬",
+      "id": "agency-specialized-mcp-builder",
+      "name": "MCP Builder Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/specialized-mcp-builder.md"
+      },
+      "packId": "agency-agents",
+      "role": "MCP Builder",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "json-transformer",
+        "sql-query",
+        "email-draft",
+        "calendar-manager",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "specialized-mcp-builder",
+      "tags": ["specialized", "mcp", "builder"]
+    },
+    {
+      "body": "agents/specialized-model-qa.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Independent model QA expert who audits ML and statistical models end-to-end.",
+      "emoji": "🔬",
+      "id": "agency-specialized-model-qa",
+      "name": "Model QA Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/specialized-model-qa.md"
+      },
+      "packId": "agency-agents",
+      "role": "Model QA",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-scraper",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "data-visualizer",
+        "calendar-manager",
+        "meeting-notes",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "specialized-model-qa",
+      "tags": ["specialized", "model"]
+    },
+    {
+      "body": "agents/specialized-salesforce-architect.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Solution architecture for Salesforce platform — multi-cloud design, integration patterns, governor limits, deployment strategy.",
+      "emoji": "🔬",
+      "id": "agency-specialized-salesforce-architect",
+      "name": "Salesforce Architect Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/specialized-salesforce-architect.md"
+      },
+      "packId": "agency-agents",
+      "role": "Salesforce Architect",
+      "skillIds": [
+        "bash-executor",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "json-transformer",
+        "email-draft",
+        "notification-sender",
+        "calendar-manager",
+        "file-writer",
+        "zip-handler",
+        "markdown-renderer",
+        "trend-analyzer"
+      ],
+      "slug": "specialized-salesforce-architect",
+      "tags": ["specialized", "salesforce", "architect"]
+    },
+    {
+      "body": "agents/specialized-workflow-architect.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Workflow design specialist who maps complete workflow trees for every system, user journey, and agent interaction.",
+      "emoji": "🔬",
+      "id": "agency-specialized-workflow-architect",
+      "name": "Workflow Architect Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/specialized-workflow-architect.md"
+      },
+      "packId": "agency-agents",
+      "role": "Workflow Architect",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "json-transformer",
+        "sql-query",
+        "data-visualizer",
+        "email-draft",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer"
+      ],
+      "slug": "specialized-workflow-architect",
+      "tags": ["specialized", "workflow", "architect"]
+    },
+    {
+      "body": "agents/supply-chain-strategist.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Expert supply chain management and procurement strategy specialist.",
+      "emoji": "🔬",
+      "id": "agency-supply-chain-strategist",
+      "name": "Supply Chain Strategist Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/supply-chain-strategist.md"
+      },
+      "packId": "agency-agents",
+      "role": "Supply Chain Strategist",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "rss-reader",
+        "slack-poster",
+        "notification-sender",
+        "calendar-manager",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "supply-chain-strategist",
+      "tags": ["specialized", "supply", "chain", "strategist"]
+    },
+    {
+      "body": "agents/zk-steward.json",
+      "category": "specialized",
+      "color": "#06B6D4",
+      "description": "Knowledge-base steward in the spirit of Niklas Luhmann's Zettelkasten.",
+      "emoji": "🔬",
+      "id": "agency-zk-steward",
+      "name": "ZK Steward Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/specialized/zk-steward.md"
+      },
+      "packId": "agency-agents",
+      "role": "ZK Steward",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "web-search",
+        "slack-poster",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "zk-steward",
+      "tags": ["specialized", "steward"]
+    },
+    {
+      "body": "agents/support-analytics-reporter.json",
+      "category": "support",
+      "color": "#84CC16",
+      "description": "Expert data analyst transforming raw data into actionable business insights.",
+      "emoji": "🛟",
+      "id": "agency-support-analytics-reporter",
+      "name": "Analytics Reporter Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/support/support-analytics-reporter.md"
+      },
+      "packId": "agency-agents",
+      "role": "Analytics Reporter",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "sql-query",
+        "data-visualizer",
+        "email-draft",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "support-analytics-reporter",
+      "tags": ["support", "analytics", "reporter"]
+    },
+    {
+      "body": "agents/support-executive-summary-generator.json",
+      "category": "support",
+      "color": "#84CC16",
+      "description": "Consultant-grade AI specialist trained to think and communicate like a senior strategy consultant.",
+      "emoji": "🛟",
+      "id": "agency-support-executive-summary-generator",
+      "name": "Executive Summary Generator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/support/support-executive-summary-generator.md"
+      },
+      "packId": "agency-agents",
+      "role": "Executive Summary Generator",
+      "skillIds": [
+        "code-search",
+        "linter",
+        "json-transformer",
+        "email-draft",
+        "slack-poster",
+        "meeting-notes",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "support-executive-summary-generator",
+      "tags": ["support", "executive", "summary", "generator"]
+    },
+    {
+      "body": "agents/support-finance-tracker.json",
+      "category": "support",
+      "color": "#84CC16",
+      "description": "Expert financial analyst and controller specializing in financial planning, budget management, and business performance analysis.",
+      "emoji": "🛟",
+      "id": "agency-support-finance-tracker",
+      "name": "Finance Tracker Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/support/support-finance-tracker.md"
+      },
+      "packId": "agency-agents",
+      "role": "Finance Tracker",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "sql-query",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "support-finance-tracker",
+      "tags": ["support", "finance", "tracker"]
+    },
+    {
+      "body": "agents/support-infrastructure-maintainer.json",
+      "category": "support",
+      "color": "#84CC16",
+      "description": "Expert infrastructure specialist focused on system reliability, performance optimization, and technical operations management.",
+      "emoji": "🛟",
+      "id": "agency-support-infrastructure-maintainer",
+      "name": "Infrastructure Maintainer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/support/support-infrastructure-maintainer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Infrastructure Maintainer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "sql-query",
+        "notification-sender",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "zip-handler",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "support-infrastructure-maintainer",
+      "tags": ["support", "infrastructure", "maintainer"]
+    },
+    {
+      "body": "agents/support-legal-compliance-checker.json",
+      "category": "support",
+      "color": "#84CC16",
+      "description": "Expert legal and compliance specialist ensuring business operations, data handling, and content creation comply with relevant laws and regulations.",
+      "emoji": "🛟",
+      "id": "agency-support-legal-compliance-checker",
+      "name": "Legal Compliance Checker Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/support/support-legal-compliance-checker.md"
+      },
+      "packId": "agency-agents",
+      "role": "Legal Compliance Checker",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "citation-formatter",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "support-legal-compliance-checker",
+      "tags": ["support", "legal", "compliance", "checker"]
+    },
+    {
+      "body": "agents/support-support-responder.json",
+      "category": "support",
+      "color": "#84CC16",
+      "description": "Expert customer support specialist delivering exceptional customer service, issue resolution, and user experience optimization.",
+      "emoji": "🛟",
+      "id": "agency-support-support-responder",
+      "name": "Support Responder Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/support/support-support-responder.md"
+      },
+      "packId": "agency-agents",
+      "role": "Support Responder",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "email-draft",
+        "slack-poster",
+        "notification-sender",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "support-support-responder",
+      "tags": ["support", "responder"]
+    },
+    {
+      "body": "agents/testing-accessibility-auditor.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Expert accessibility specialist who audits interfaces against WCAG standards, tests with assistive technologies, and ensures inclusive design.",
+      "emoji": "🧪",
+      "id": "agency-testing-accessibility-auditor",
+      "name": "Accessibility Auditor Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-accessibility-auditor.md"
+      },
+      "packId": "agency-agents",
+      "role": "Accessibility Auditor",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "web-scraper",
+        "api-tester",
+        "json-transformer",
+        "slack-poster",
+        "notification-sender",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "testing-accessibility-auditor",
+      "tags": ["testing", "accessibility", "auditor"]
+    },
+    {
+      "body": "agents/testing-api-tester.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Expert API testing specialist focused on comprehensive API validation, performance testing, and quality assurance across integrations.",
+      "emoji": "🧪",
+      "id": "agency-testing-api-tester",
+      "name": "API Tester Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-api-tester.md"
+      },
+      "packId": "agency-agents",
+      "role": "API Tester",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "json-transformer",
+        "sql-query",
+        "email-draft",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "testing-api-tester",
+      "tags": ["testing", "api", "tester"]
+    },
+    {
+      "body": "agents/testing-evidence-collector.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Screenshot-obsessed, fantasy-allergic QA specialist - Default to finding 3-5 issues, requires visual proof for everything.",
+      "emoji": "🧪",
+      "id": "agency-testing-evidence-collector",
+      "name": "Evidence Collector Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-evidence-collector.md"
+      },
+      "packId": "agency-agents",
+      "role": "Evidence Collector",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-scraper",
+        "api-tester",
+        "json-transformer",
+        "data-visualizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "testing-evidence-collector",
+      "tags": ["testing", "evidence", "collector"]
+    },
+    {
+      "body": "agents/testing-performance-benchmarker.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Expert performance testing specialist who measures, analyzes, and improves system performance across applications and infrastructure.",
+      "emoji": "🧪",
+      "id": "agency-testing-performance-benchmarker",
+      "name": "Performance Benchmarker Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-performance-benchmarker.md"
+      },
+      "packId": "agency-agents",
+      "role": "Performance Benchmarker",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-scraper",
+        "api-tester",
+        "rss-reader",
+        "json-transformer",
+        "sql-query",
+        "email-draft",
+        "meeting-notes",
+        "file-writer",
+        "image-resizer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "testing-performance-benchmarker",
+      "tags": ["testing", "performance", "benchmarker"]
+    },
+    {
+      "body": "agents/testing-reality-checker.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Stops fantasy approvals, evidence-based certification - Default to \"NEEDS WORK\", requires overwhelming proof for production readiness.",
+      "emoji": "🧪",
+      "id": "agency-testing-reality-checker",
+      "name": "Reality Checker Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-reality-checker.md"
+      },
+      "packId": "agency-agents",
+      "role": "Reality Checker",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "linter",
+        "web-scraper",
+        "api-tester",
+        "json-transformer",
+        "data-visualizer",
+        "file-reader",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer"
+      ],
+      "slug": "testing-reality-checker",
+      "tags": ["testing", "reality", "checker"]
+    },
+    {
+      "body": "agents/testing-test-results-analyzer.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Expert test analysis specialist focused on comprehensive test result evaluation, quality metrics analysis.",
+      "emoji": "🧪",
+      "id": "agency-testing-test-results-analyzer",
+      "name": "Test Results Analyzer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-test-results-analyzer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Test Results Analyzer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "testing-test-results-analyzer",
+      "tags": ["testing", "test", "results", "analyzer"]
+    },
+    {
+      "body": "agents/testing-tool-evaluator.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Expert technology assessment specialist who evaluates, tests, and recommends tools, software, and platforms for business use.",
+      "emoji": "🧪",
+      "id": "agency-testing-tool-evaluator",
+      "name": "Tool Evaluator Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-tool-evaluator.md"
+      },
+      "packId": "agency-agents",
+      "role": "Tool Evaluator",
+      "skillIds": [
+        "code-search",
+        "test-runner",
+        "python-executor",
+        "linter",
+        "web-search",
+        "api-tester",
+        "rss-reader",
+        "json-transformer",
+        "meeting-notes",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "note-taker",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "testing-tool-evaluator",
+      "tags": ["testing", "tool", "evaluator"]
+    },
+    {
+      "body": "agents/testing-workflow-optimizer.json",
+      "category": "testing",
+      "color": "#A855F7",
+      "description": "Expert process improvement specialist focused on analyzing, optimizing, and automating workflows across all business functions.",
+      "emoji": "🧪",
+      "id": "agency-testing-workflow-optimizer",
+      "name": "Workflow Optimizer Boo",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/testing/testing-workflow-optimizer.md"
+      },
+      "packId": "agency-agents",
+      "role": "Workflow Optimizer",
+      "skillIds": [
+        "bash-executor",
+        "code-search",
+        "python-executor",
+        "linter",
+        "web-search",
+        "pdf-reader",
+        "api-tester",
+        "rss-reader",
+        "csv-analyzer",
+        "json-transformer",
+        "data-visualizer",
+        "meeting-notes",
+        "file-reader",
+        "file-writer",
+        "markdown-renderer",
+        "quiz-generator",
+        "trend-analyzer",
+        "summarizer"
+      ],
+      "slug": "testing-workflow-optimizer",
+      "tags": ["testing", "workflow", "optimizer"]
+    }
+  ],
+  "counts": { "agents": 116, "skills": 0, "teams": 5 },
+  "description": "Role-specialist agents and workflow teams adapted from the MIT-licensed agency-agents repository. Entries were pruned, renamed, re-described and re-formatted; the bodies are adapted, not verbatim.",
+  "id": "agency-agents",
+  "idPrefix": "agency",
+  "name": "Agency Agents",
+  "provenance": {
+    "adaptation": "adapted",
+    "authors": ["msitarzewski"],
+    "color": "#3B82F6",
+    "importedAt": "2026-08-25T00:00:00.000Z",
+    "label": "Agency Agents",
+    "license": "MIT",
+    "ref": "64eee9f8e04f69b04e78e150d771a443c64720be",
+    "repo": "https://github.com/msitarzewski/agency-agents",
+    "sourceId": "agency-agents"
+  },
+  "schemaVersion": 1,
+  "skills": [],
+  "teams": [
+    {
+      "body": "teams/workflow-startup-mvp.json",
+      "category": "product",
+      "color": "#6366F1",
+      "description": "Coordinated squad that takes a SaaS idea from sprint plan to shipped MVP in four weeks.",
+      "emoji": "🚀",
+      "id": "agency-workflow-startup-mvp",
+      "members": [
+        {
+          "agentId": "agency-product-sprint-prioritizer",
+          "name": "Sprint Prioritizer Boo",
+          "role": "Sprint Prioritizer"
+        },
+        {
+          "agentId": "agency-design-ux-researcher",
+          "name": "UX Researcher Boo",
+          "role": "UX Researcher"
+        },
+        {
+          "agentId": "agency-engineering-backend-architect",
+          "name": "Backend Architect Boo",
+          "role": "Backend Architect"
+        },
+        {
+          "agentId": "agency-engineering-frontend-developer",
+          "name": "Frontend Developer Boo",
+          "role": "Frontend Developer"
+        },
+        {
+          "agentId": "agency-engineering-rapid-prototyper",
+          "name": "Rapid Prototyper Boo",
+          "role": "Rapid Prototyper"
+        },
+        {
+          "agentId": "agency-marketing-growth-hacker",
+          "name": "Growth Hacker Boo",
+          "role": "Growth Hacker"
+        },
+        {
+          "agentId": "agency-testing-reality-checker",
+          "name": "Reality Checker Boo",
+          "role": "Reality Checker"
+        }
+      ],
+      "name": "Startup MVP Sprint",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/examples/workflow-startup-mvp.md"
+      },
+      "packId": "agency-agents",
+      "slug": "workflow-startup-mvp",
+      "tags": ["workflow", "mvp", "startup", "sprint", "multi-agent"]
+    },
+    {
+      "body": "teams/workflow-with-memory.json",
+      "category": "product",
+      "color": "#8B5CF6",
+      "description": "Same startup MVP squad, but with agents that remember and recall context via an MCP memory server.",
+      "emoji": "🧠",
+      "id": "agency-workflow-with-memory",
+      "members": [
+        {
+          "agentId": "agency-product-sprint-prioritizer",
+          "name": "Sprint Prioritizer Boo",
+          "role": "Sprint Prioritizer"
+        },
+        {
+          "agentId": "agency-design-ux-researcher",
+          "name": "UX Researcher Boo",
+          "role": "UX Researcher"
+        },
+        {
+          "agentId": "agency-engineering-backend-architect",
+          "name": "Backend Architect Boo",
+          "role": "Backend Architect"
+        },
+        {
+          "agentId": "agency-engineering-frontend-developer",
+          "name": "Frontend Developer Boo",
+          "role": "Frontend Developer"
+        },
+        {
+          "agentId": "agency-engineering-rapid-prototyper",
+          "name": "Rapid Prototyper Boo",
+          "role": "Rapid Prototyper"
+        },
+        {
+          "agentId": "agency-marketing-growth-hacker",
+          "name": "Growth Hacker Boo",
+          "role": "Growth Hacker"
+        },
+        {
+          "agentId": "agency-testing-reality-checker",
+          "name": "Reality Checker Boo",
+          "role": "Reality Checker"
+        }
+      ],
+      "name": "Startup MVP with Persistent Memory",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/examples/workflow-with-memory.md"
+      },
+      "packId": "agency-agents",
+      "slug": "workflow-with-memory",
+      "tags": ["workflow", "mvp", "memory", "mcp", "multi-agent"]
+    },
+    {
+      "body": "teams/workflow-landing-page.json",
+      "category": "marketing",
+      "color": "#EC4899",
+      "description": "Ship a conversion-optimized landing page in one day with copy, design, build, and growth working together.",
+      "emoji": "📄",
+      "id": "agency-workflow-landing-page",
+      "members": [
+        {
+          "agentId": "agency-marketing-content-creator",
+          "name": "Content Creator Boo",
+          "role": "Content Creator"
+        },
+        {
+          "agentId": "agency-design-ui-designer",
+          "name": "UI Designer Boo",
+          "role": "UI Designer"
+        },
+        {
+          "agentId": "agency-engineering-frontend-developer",
+          "name": "Frontend Developer Boo",
+          "role": "Frontend Developer"
+        },
+        {
+          "agentId": "agency-marketing-growth-hacker",
+          "name": "Growth Hacker Boo",
+          "role": "Growth Hacker"
+        }
+      ],
+      "name": "Landing Page Sprint",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/examples/workflow-landing-page.md"
+      },
+      "packId": "agency-agents",
+      "slug": "workflow-landing-page",
+      "tags": ["workflow", "landing-page", "conversion", "sprint", "multi-agent"]
+    },
+    {
+      "body": "teams/workflow-book-chapter.json",
+      "category": "content",
+      "color": "#F59E0B",
+      "description": "Turns voice notes and fragments into a first-person chapter draft, structured against narrative theory and polished for publication.",
+      "emoji": "📖",
+      "id": "agency-workflow-book-chapter",
+      "members": [
+        {
+          "agentId": "agency-marketing-book-co-author",
+          "name": "Book Co-Author Boo",
+          "role": "Book Co-Author"
+        },
+        {
+          "agentId": "agency-academic-narratologist",
+          "name": "Academic Narratologist Boo",
+          "role": "Academic Narratologist"
+        },
+        {
+          "agentId": "agency-marketing-content-creator",
+          "name": "Content Creator Boo",
+          "role": "Content Creator"
+        }
+      ],
+      "name": "Book Chapter Development",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/examples/workflow-book-chapter.md"
+      },
+      "packId": "agency-agents",
+      "slug": "workflow-book-chapter",
+      "tags": ["workflow", "book", "writing", "long-form", "multi-agent"]
+    },
+    {
+      "body": "teams/workflow-nexus-spatial-discovery.json",
+      "category": "spatial",
+      "color": "#7C3AED",
+      "description": "Eight-agent full-agency discovery exercise from opportunity identification through spatial interface design.",
+      "emoji": "🥽",
+      "id": "agency-workflow-nexus-spatial-discovery",
+      "members": [
+        {
+          "agentId": "agency-product-trend-researcher",
+          "name": "Trend Researcher Boo",
+          "role": "Trend Researcher"
+        },
+        {
+          "agentId": "agency-engineering-backend-architect",
+          "name": "Backend Architect Boo",
+          "role": "Backend Architect"
+        },
+        {
+          "agentId": "agency-design-brand-guardian",
+          "name": "Brand Guardian Boo",
+          "role": "Brand Guardian"
+        },
+        {
+          "agentId": "agency-marketing-growth-hacker",
+          "name": "Growth Hacker Boo",
+          "role": "Growth Hacker"
+        },
+        {
+          "agentId": "agency-support-support-responder",
+          "name": "Support Responder Boo",
+          "role": "Support Responder"
+        },
+        {
+          "agentId": "agency-design-ux-researcher",
+          "name": "UX Researcher Boo",
+          "role": "UX Researcher"
+        },
+        {
+          "agentId": "agency-project-management-project-shepherd",
+          "name": "Project Shepherd Boo",
+          "role": "Project Shepherd"
+        },
+        {
+          "agentId": "agency-xr-interface-architect",
+          "name": "XR Interface Architect Boo",
+          "role": "XR Interface Architect"
+        }
+      ],
+      "name": "Nexus Spatial Discovery",
+      "origin": {
+        "url": "https://github.com/msitarzewski/agency-agents/blob/64eee9f8e04f69b04e78e150d771a443c64720be/examples/nexus-spatial-discovery.md"
+      },
+      "packId": "agency-agents",
+      "slug": "workflow-nexus-spatial-discovery",
+      "tags": ["workflow", "discovery", "spatial", "nexus", "multi-agent"]
+    }
+  ],
+  "version": "1.0.0"
+}
