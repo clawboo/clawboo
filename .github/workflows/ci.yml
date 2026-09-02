@@ -140,7 +140,14 @@ jobs:
       # install). The Linux `test` job gets this for free from `turbo test`, which
       # builds a package's dependencies first; here we invoke Vitest directly to
       # scope to the platform-sensitive suites, so the dependency build is explicit.
+      #
+      # Windows fails process CREATION under load: turbo forking a build for all 34
+      # packages at once has produced STATUS_DLL_INIT_FAILED (exit 0xC0000142) here,
+      # which reads as a build error but is the OS refusing to start another process.
+      # Bound the fan-out on that leg only; macOS builds at turbo's default width.
       - run: pnpm build
+        env:
+          TURBO_CONCURRENCY: ${{ matrix.os == 'windows-latest' && '4' || '10' }}
 
       # packages/worktrees: the real-git, per-task worktree lifecycle that underpins
       # every file-mutating task. Drives a real `git` binary via its gitHarness.
@@ -164,6 +171,38 @@ jobs:
       # The dedicated platform.test.ts step this replaces is redundant now, since that
       # file runs as part of the full suite here.
       - run: pnpm --filter @clawboo/web --fail-if-no-match exec vitest run server/
+
+  # website/ declares its own pnpm root so Cloudflare Pages can build the
+  # subdirectory alone, which also means the root workspace's Lint/Typecheck/Test/
+  # Build jobs never touch it. Without this job a website change ships to
+  # www.claw.boo on a green tick that only ever described the monorepo: the
+  # astro 5 -> 6 major landed exactly that way. These steps mirror the Pages build
+  # (same command, same Node), so green here means the deploy compiles.
+  #
+  # Deliberately NOT behind a paths filter. It is a required check, and a
+  # path-filtered required check never reports on unrelated PRs, which blocks them
+  # forever. Running it always costs ~1 minute and keeps the gate honest.
+  website:
+    name: Website
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
 
   build:
     name: Build
