@@ -1,11 +1,11 @@
 ---
 title: Misc resources API
-description: REST reference for cost records, chat history, graph layout, personality, skills, exec settings, fleet summary, and Boo Zero context.
+description: REST reference for cost records, chat history, graph layout, personality, skills, the marketplace catalog, exec settings, fleet summary, and Boo Zero context.
 ---
 
-REST surface for the remaining SQLite-backed resources that do not warrant their own group: per-run cost records and the cost summary, persisted chat transcripts, Ghost Graph node positions, per-agent personality and execution settings, skill installs (with a supply-chain injection scan), the read-only fleet-health summary, and Boo Zero's per-team / global briefs and display-name override.
+REST surface for the remaining resources that do not warrant their own group: per-run cost records and the cost summary, persisted chat transcripts, Ghost Graph node positions, per-agent personality and execution settings, skill installs (with a supply-chain injection scan), the marketplace catalog, the read-only fleet-health summary, and Boo Zero's per-team / global briefs and display-name override.
 
-Every handler in this group opens the SQLite database at `<CLAWBOO_HOME>/clawboo.db` (default `~/.clawboo/clawboo.db`); these routes serve and mutate local state and do not require the Gateway to be up. All POST/PUT bodies are parsed by `express.json({ limit: '2mb' })`.
+Almost every handler in this group opens the SQLite database at `<CLAWBOO_HOME>/clawboo.db` (default `~/.clawboo/clawboo.db`); these routes serve and mutate local state and do not require the Gateway to be up. The three `/api/catalog/*` routes are the exception: they touch no database at all. All POST/PUT bodies are parsed by `express.json({ limit: '2mb' })`.
 
 <Note>
 The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-settings/all` are registered before their shorter prefixes so the two-segment paths are not swallowed.
@@ -13,34 +13,37 @@ The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-
 
 ## Routes
 
-| Method | Path                                  | Summary                                              | Stream? |
-| ------ | ------------------------------------- | ---------------------------------------------------- | ------- |
-| GET    | `/api/cost-records`                   | List cost records (period + agent filter)            | No      |
-| POST   | `/api/cost-records`                   | Record one run's token usage; computes USD           | No      |
-| GET    | `/api/cost-records/summary`           | 30-day aggregation: totals, per-agent, time series   | No      |
-| GET    | `/api/chat-history`                   | Load a session's transcript entries                  | No      |
-| POST   | `/api/chat-history`                   | Batch-insert transcript entries (idempotent)         | No      |
-| DELETE | `/api/chat-history`                   | Clear a session's transcript                         | No      |
-| GET    | `/api/graph-layout`                   | Load saved Ghost Graph node positions                | No      |
-| POST   | `/api/graph-layout`                   | Upsert Ghost Graph node positions                    | No      |
-| GET    | `/api/personality`                    | Load an agent's personality slider values            | No      |
-| POST   | `/api/personality`                    | Upsert an agent's personality config                 | No      |
-| GET    | `/api/skills`                         | List installed skills (optional agent filter)        | No      |
-| POST   | `/api/skills`                         | Install a skill (injection scan → 422 on finding)    | No      |
-| DELETE | `/api/skills`                         | Remove an agent from a skill (drops the row if last) | No      |
-| GET    | `/api/exec-settings`                  | Load an agent's execution settings                   | No      |
-| GET    | `/api/exec-settings/all`              | Map of all agents' `execAsk` settings                | No      |
-| POST   | `/api/exec-settings`                  | Upsert an agent's execution settings                 | No      |
-| GET    | `/api/fleet/summary`                  | Read-only fleet-health aggregation                   | No      |
-| GET    | `/api/boo-zero/team-briefs/:teamId`   | Load a team's Boo Zero brief                         | No      |
-| PUT    | `/api/boo-zero/team-briefs/:teamId`   | Upsert a team's Boo Zero brief                       | No      |
-| DELETE | `/api/boo-zero/team-briefs/:teamId`   | Remove a team's Boo Zero brief                       | No      |
-| GET    | `/api/boo-zero/global-brief`          | Load the global Boo Zero brief                       | No      |
-| PUT    | `/api/boo-zero/global-brief`          | Upsert the global Boo Zero brief                     | No      |
-| GET    | `/api/boo-zero/display-name/:agentId` | Load Boo Zero's display-name override                | No      |
-| PUT    | `/api/boo-zero/display-name/:agentId` | Set Boo Zero's display-name override                 | No      |
-| GET    | `/api/boo-zero/override`              | Read the leader override + the effective Boo Zero    | No      |
-| POST   | `/api/boo-zero/override`              | Set or clear the leader override                     | No      |
+| Method | Path                                  | Summary                                               | Stream? |
+| ------ | ------------------------------------- | ----------------------------------------------------- | ------- |
+| GET    | `/api/cost-records`                   | List cost records (period + agent filter)             | No      |
+| POST   | `/api/cost-records`                   | Record one run's token usage; computes USD            | No      |
+| GET    | `/api/cost-records/summary`           | 30-day aggregation: totals, per-agent, time series    | No      |
+| GET    | `/api/chat-history`                   | Load a session's transcript entries                   | No      |
+| POST   | `/api/chat-history`                   | Batch-insert transcript entries (idempotent)          | No      |
+| DELETE | `/api/chat-history`                   | Clear a session's transcript                          | No      |
+| GET    | `/api/graph-layout`                   | Load saved Ghost Graph node positions                 | No      |
+| POST   | `/api/graph-layout`                   | Upsert Ghost Graph node positions                     | No      |
+| GET    | `/api/personality`                    | Load an agent's personality slider values             | No      |
+| POST   | `/api/personality`                    | Upsert an agent's personality config                  | No      |
+| GET    | `/api/skills`                         | List installed skills (optional agent filter)         | No      |
+| POST   | `/api/skills`                         | Install a skill (injection scan → 422 on finding)     | No      |
+| DELETE | `/api/skills`                         | Remove an agent from a skill (drops the row if last)  | No      |
+| GET    | `/api/catalog/index`                  | Marketplace browse rows: the seed plus verified packs | No      |
+| GET    | `/api/catalog/agents/:id`             | One catalog agent's document set                      | No      |
+| GET    | `/api/catalog/teams/:id`              | One catalog team's narrative and routing              | No      |
+| GET    | `/api/exec-settings`                  | Load an agent's execution settings                    | No      |
+| GET    | `/api/exec-settings/all`              | Map of all agents' `execAsk` settings                 | No      |
+| POST   | `/api/exec-settings`                  | Upsert an agent's execution settings                  | No      |
+| GET    | `/api/fleet/summary`                  | Read-only fleet-health aggregation                    | No      |
+| GET    | `/api/boo-zero/team-briefs/:teamId`   | Load a team's Boo Zero brief                          | No      |
+| PUT    | `/api/boo-zero/team-briefs/:teamId`   | Upsert a team's Boo Zero brief                        | No      |
+| DELETE | `/api/boo-zero/team-briefs/:teamId`   | Remove a team's Boo Zero brief                        | No      |
+| GET    | `/api/boo-zero/global-brief`          | Load the global Boo Zero brief                        | No      |
+| PUT    | `/api/boo-zero/global-brief`          | Upsert the global Boo Zero brief                      | No      |
+| GET    | `/api/boo-zero/display-name/:agentId` | Load Boo Zero's display-name override                 | No      |
+| PUT    | `/api/boo-zero/display-name/:agentId` | Set Boo Zero's display-name override                  | No      |
+| GET    | `/api/boo-zero/override`              | Read the leader override + the effective Boo Zero     | No      |
+| POST   | `/api/boo-zero/override`              | Set or clear the leader override                      | No      |
 
 ---
 
@@ -540,7 +543,7 @@ curl "http://localhost:18790/api/skills?agentId=<agent-id>"
 
 ### `POST /api/skills`
 
-Adds a skill (a capability annotation) to an agent. Before recording anything, the handler runs `scanForInjection` over the install blob (name + source + category + the raw body). A finding blocks the install with **422** and writes a blocked-install audit row; a clean install is also audited (the forensic trail). On a clean scan, an existing skill row merges the `agentId` into `metadata.agentIds`; otherwise a new row is inserted.
+Adds a skill (a capability annotation) to an agent. Before recording anything, the handler runs `evaluateInjection` over the install blob (name + source + category + the raw body) on the **`exec`** surface, where a skill install is spawn-bound and every rule that fires is blocking. A blocking finding refuses the install with **422** and writes a blocked-install audit row; a clean install is also audited (the forensic trail). The audit row stores only `{pattern, line, fingerprint}` per finding; full excerpts stay in the HTTP response. On a clean scan, an existing skill row merges the `agentId` into `metadata.agentIds`; otherwise a new row is inserted.
 
 - **Request body**:
 
@@ -646,6 +649,113 @@ Removes an agent from a skill's `metadata.agentIds`. If that was the last agent,
 ```bash
 curl -X DELETE "http://localhost:18790/api/skills?id=web-search&agentId=<agent-id>"
 ```
+
+---
+
+## Marketplace catalog: `/api/catalog/*`
+
+The only routes in this group backed by files rather than SQLite. Marketplace
+content lives in `catalog/`, which is excluded from the npm tarball; the server
+resolves it (local filesystem, then `CLAWBOO_CATALOG_INDEX_URL`, then a default
+URL), verifies each pack bundle against the digest the index publishes, and
+flattens the verified packs to entries. The browser therefore needs no integrity
+logic and no second origin.
+
+<Note>
+  These never fail closed. The built-in pack is compiled into the server and merged
+  unconditionally, so an unreachable or empty remote degrades the catalog rather than emptying it.
+  That matters because first-run onboarding renders its team picker with no "start from scratch"
+  escape hatch: an empty catalog is not a degraded browse experience, it is a first run with nothing
+  to click.
+</Note>
+
+### `GET /api/catalog/index`
+
+Browse rows only, never prose. Roughly 275 KB for the 436 agents and 85 teams
+this repo ships.
+
+```json
+{
+  "schemaVersion": 1,
+  "counts": { "agents": 436, "teams": 85 },
+  "agents": [
+    {
+      "id": "clawboo-dev-code-reviewer-boo",
+      "packId": "clawboo",
+      "source": "clawboo",
+      "name": "Code Reviewer Boo",
+      "role": "Code Reviewer",
+      "emoji": "🔍",
+      "color": "#34D399",
+      "description": "Reviews diffs for correctness, security and style.",
+      "category": "engineering",
+      "tags": ["review", "quality"],
+      "skillIds": ["code-search"]
+    }
+  ],
+  "teams": [
+    {
+      "id": "clawboo-dev",
+      "packId": "clawboo",
+      "source": "clawboo",
+      "name": "Dev Squad",
+      "emoji": "🛠️",
+      "color": "#34D399",
+      "description": "Ships code: fix, review, document.",
+      "category": "engineering",
+      "tags": ["dev"],
+      "agentIds": ["clawboo-dev-bug-fixer-boo", "clawboo-dev-code-reviewer-boo"]
+    }
+  ],
+  "packs": [
+    {
+      "publisher": "clawboo",
+      "slug": "builtin",
+      "id": "clawboo",
+      "version": "1.0.0",
+      "offline": true
+    }
+  ]
+}
+```
+
+A `packs[]` row with `offline: true` is the compiled seed rather than a fetched
+pack.
+
+### `GET /api/catalog/agents/:id`
+
+The agent's document set, keyed by filename. `404` on an unknown id.
+
+```json
+{
+  "id": "clawboo-dev-code-reviewer-boo",
+  "files": {
+    "SOUL.md": "# SOUL\n\n...",
+    "IDENTITY.md": "# Code Reviewer Boo\n\n...",
+    "TOOLS.md": "# TOOLS\n\n## Skills\n- code-search"
+  },
+  "sourceUrl": "https://github.com/..."
+}
+```
+
+`AGENTS.md` and `CLAWBOO.md` are **not** here. They are synthesized per-deploy
+from the team topology, and `IDENTITY.md` is rewritten with the agent's final,
+deduped name, so the deploy path overlays on this map rather than passing it
+through.
+
+### `GET /api/catalog/teams/:id`
+
+```json
+{
+  "id": "clawboo-dev",
+  "workflowNarrative": "...",
+  "routing": { "clawboo-dev-bug-fixer-boo": "# AGENTS\n\n..." }
+}
+```
+
+`404` on an unknown id. See
+[the marketplace catalog reference](/reference/marketplace-catalog) for the pack
+format and the verification rules.
 
 ---
 

@@ -5,7 +5,7 @@ description: Deploy a team of agents, run the Know-Your-Team gate, send a messag
 
 By the end of this tutorial you'll have a team of agents in Clawboo, you'll have run the one-time "Know Your Team" introduction flow, and you'll have sent a message in group chat and watched the team leader delegate a task onto the durable board.
 
-A _team_ is a named group of Boos (agents) that collaborate in one shared chat room. Clawboo gives you two ways to deploy one: pick a ready-made template from the marketplace catalog (82 teams, 304 agents), or, on the native-first path, let onboarding seed a starter team for you. This tutorial covers both, then walks the same group-chat-and-board collaboration loop that follows either.
+A _team_ is a named group of Boos (agents) that collaborate in one shared chat room. Clawboo gives you two ways to deploy one: pick a ready-made template from the marketplace catalog (85 teams, 436 agents), or, on the native-first path, let onboarding seed a starter team for you. This tutorial covers both, then walks the same group-chat-and-board collaboration loop that follows either.
 
 <Note>
 These docs describe Clawboo **v0.3.1**, the current release.
@@ -32,7 +32,7 @@ You either already have one (from native onboarding) or you deploy one now.
 
 **You already have a team.** During native onboarding you picked a starter team from the marketplace and deployed it (every agent `clawboo-native`). The wizard's "Your team is ready" screen was that team's **Meet your team** beat, so its group chat opens directly on the **introduce yourself** step. Skip to [step 3](#3-run-the-know-your-team-gate) and start from the second screen there; your team already exists.
 
-**Deploy a template team.** The **+** button in the leftmost sidebar takes you to the Marketplace's **Teams** tab (the catalog of 82 teams, 304 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
+**Deploy a template team.** The **+** button in the leftmost sidebar takes you to the Marketplace's **Teams** tab (the catalog of 85 teams, 436 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
 
 ![The team showcase, here in the create-team flow: the same curated template grid the Marketplace Teams tab renders, with Details and Deploy buttons](/images/team-gallery.png)
 

@@ -63,8 +63,9 @@ pnpm format:check                       # Prettier --check across the repo; fix 
 pnpm lint                               # ESLint flat config across all packages, plus the docs frontmatter + heading checks
 pnpm test                               # Vitest unit tests (node + jsdom projects)
 pnpm e2e                                # Playwright end-to-end tests (incl. board round-trip + eval smoke)
-pnpm verify:catalog                     # offline: committed marketplace catalog vs. its integrity manifest
-pnpm verify:ingest                      # live: re-derive the catalog from the pinned upstream commits
+pnpm verify:connectors                  # offline: committed connector catalog consistency check
+pnpm catalog:build                      # rebuild catalog/dist and the compiled marketplace seed
+pnpm catalog:verify                     # offline: every marketplace content rule, then "is catalog/dist current?"
 pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, and smoke-test it
 pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
@@ -74,6 +75,78 @@ Run them locally before pushing to avoid back-and-forth. Every one of them runs 
 `pnpm e2e` needs a built workspace (`pnpm build` first) and a Chromium download (`pnpm exec playwright install chromium`). It sandboxes itself into a throwaway `$HOME`, so it never touches your real `~/.clawboo`.
 
 `pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also drives the installed SPA in headless Chromium, so it needs the same `pnpm exec playwright install chromium` download as `pnpm e2e`. And it refuses to run while another Clawboo dashboard is listening on `18790`–`18809` (it would attach to that one instead of the tarball) — stop your `pnpm dev` server first.
+
+---
+
+## Contributing a marketplace pack
+
+Agent and team content lives in `catalog/`, a plain content folder that is
+deliberately **not** a pnpm workspace member and **not** part of any turbo task.
+A pull request that touches only `catalog/` runs `catalog-ci.yml` (about two
+minutes) instead of the full matrix. `catalog/README.md` has the layout;
+[the marketplace catalog reference](docs/reference/marketplace-catalog.md) has
+the format.
+
+```bash
+# edit catalog/packs/<publisher>/<slug>/**
+pnpm catalog:build     # regenerate catalog/dist and the compiled seed
+pnpm catalog:verify    # every content rule, then "is dist current?"
+```
+
+Commit the regenerated `catalog/dist/**` along with your change. It is committed
+on purpose: it is what makes the fallback URL work with no infrastructure, and
+`catalog:verify` fails if it is not byte-for-byte what a rebuild would write.
+
+**One exception to the fast path.** `catalog/packs/clawboo/**` is the seed, and
+the seed is compiled into the published tarball. Changing it changes shipped
+bytes, so it is treated as a product change and gets the full CI matrix. If you
+touch it, also commit the regenerated seed modules under
+`apps/web/src/features/marketplace/seed/` and `apps/web/server/lib/catalogSeed.ts`.
+
+### The review bar
+
+Content is prompt text that ships to a model and card text that ships to a user,
+so it is reviewed as writing, not just as JSON. Packs are merged by hand; there
+is no auto-merge.
+
+- **A description is a sentence.** One or two of them, written for a person
+  choosing between cards. Not a truncated first paragraph, and never ending in
+  an ellipsis.
+- **`IDENTITY.md` is the agent's complete instruction body**, not a summary and
+  not an excerpt. Whatever the detail sheet shows is what gets written on deploy.
+- **No YAML frontmatter.** The listing already carries `name`, `description`,
+  `emoji` and `color` as structured fields; repeating them as prompt text is
+  waste the model pays for.
+- **Attribution is not optional.** A pack that sets `provenance.repo` ships a
+  `NOTICE.md` with the upstream licence, the pinned commit, and a plain
+  statement of what was modified.
+- **A team has at least two members**, and routing for every one of them. A team
+  of one is a solo agent wearing a team's clothes.
+- **New taxonomy is declared.** A category the host ships no label for must be
+  listed in the manifest's `newCategories`, so it is a line in the diff rather
+  than a silent new filter chip.
+- **No competing registry, installer, or chat invite** in any string, body and
+  routing included.
+
+`pnpm catalog:verify` enforces every one of those mechanically, plus schema
+validation, referential integrity, and a prompt-injection scan of each field a
+deploy would write. A flagged injection finding needs a reviewed row in
+`scripts/catalog/injection-allowlist.ts` with a real reason and a real reviewer;
+regenerate the skeleton with
+`tsx scripts/catalog/validate.ts --update-allowlist`.
+
+### Fixture hygiene
+
+- `catalog/dist/**` is **generated**. Never hand-edit it, and never reformat it:
+  those are canonical bytes (sorted keys, no trailing newline) that every
+  published `integrity` value was computed over. `.prettierignore` keeps
+  Prettier away from them through its `**/dist/` entry.
+- The seed modules are generated too, from the same command. `catalog:verify`
+  fails when either copy drifts from the pack.
+- Pack **source** under `catalog/packs/**` is hand-edited and Prettier-formatted
+  like any other JSON in the repo. Only `dist/` is canonical.
+- Tests read the real packs off disk rather than a hand-written fixture, because
+  a fixture drifts and the content is what the assertions are about.
 
 ---
 
@@ -116,6 +189,8 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 - **No migration ladder; keep new columns addable.** The SQLite schema is the `CREATE TABLE IF NOT EXISTS` DDL in `packages/db/src/schemaBootstrap.ts` (there is no `drizzle/` directory, no `.sql` migrations, and no `db:migrate`/`db:generate`). Keep that DDL additive and idempotent. `CREATE TABLE IF NOT EXISTS` skips the whole statement when the table already exists, so a new column would be a silent no-op on every existing database; `reconcileSchema` closes that by reading the column set back out of the same DDL and adding what an older file is missing. What it asks of you: a **new column on an existing table** must be addable, which means it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one. Break one of those and the build fails, because `schemaBaseline.ts` records the columns as of the last review and a test asserts everything added since can reach a database that already exists. That file needs no upkeep: a column added after the snapshot simply reads as new and is held to the rule, which is the rule anyway. Changing an existing column's type or constraints, or removing one, is still not an in-place upgrade. `schemaSource.test.ts` and `schemaReconcile.test.ts` guard this.
 - **Version every persisted client store.** The rule above is about the server's SQLite; the browser is the opposite case, because you cannot hard-reset a user's storage for them. So a zustand `persist` store sets **both** `version` and `migrate` — never one without the other. Without a `migrate`, bumping the version makes zustand log an error and merge `undefined`, silently discarding the rows it just read back; and `migrate` receives the _partialized_ shape and fires on any version mismatch, downgrades included. Keep the migrate a pure exported function with its own `*.test.ts` in the node project. (There is currently no `persist` store in the repo. For a trivial single value, the Atlas layout toggle in `features/graph/store.ts` shows the lighter pattern — validate on read with an exact match, fall back to the default — which is the right weight for one enum; note the graph store must _not_ become a `persist` store, because `persist` re-serializes on every `set` and that store mutates per drag frame.)
 - **Pollers pause when the tab is hidden.** A new interval-based refresh uses `useVisiblePolling` from `apps/web/src/lib/useVisiblePolling.ts`, not a bare `setInterval`, so a backgrounded tab stops hitting the local API and catches up once on return. A wall-clock grace or expiry timer is the exception (see `ChatPanel.tsx`) — pausing those changes behaviour, so they keep a plain interval and say why in a comment.
+- **Schema fixtures are append-only.** `packages/pack-format/src/__fixtures__/v1/*.json` is the frozen record of what schema v1 looked like. Editing one to make a test pass is exactly how a version ladder silently stops covering the shape it claims to: the fixture stops being evidence and becomes a copy of the current code. When a shape changes, add a fixture under the new version's folder; never rewrite an old one.
+- **Every schema version gets a `kitchen-sink.json`.** Alongside `minimal.json` (the smallest valid document), each version needs one fixture that sets **every** optional field to a legal value. Optional fields are where a ladder rots unnoticed, because a `minimal` fixture keeps passing while nothing exercises the half of the schema that only some packs use.
 - **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
 - **No secrets in logs, responses, or storage.** A credential's presence may be shown (the env-var name plus true/false), never its value.
 
@@ -125,7 +200,7 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 
 Releases are automated via the `publish.yml` GitHub Actions workflow: when changesets land on `main`, the Changesets action opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the changed packages to npm. No manual `npm publish` needed.
 
-Before it publishes, the workflow re-runs the whole PR gate — `pnpm verify:catalog`, `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. The catalog gate there is the OFFLINE one by design; the live upstream re-derive (`pnpm verify:ingest`) runs in its own `verify-ingest.yml` workflow, off the release path, so an upstream outage cannot hold up a release. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
+Before it publishes, the workflow re-runs the whole PR gate — `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. Every check there is offline by design: nothing fetches an upstream repository, so an upstream outage cannot hold up a release. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
 
 ---
 

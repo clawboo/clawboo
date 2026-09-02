@@ -136,10 +136,10 @@ event catalog; see [Tools & MCP](/reference/rest-api/tools-and-mcp).) They set `
 | [Observability](/reference/rest-api/observability) | 8      | `/api/obs/*` (incl. SSE), `/api/eval/smoke`                                                                             |
 | [Schedules](/reference/rest-api/schedules)         | 5      | `/api/schedules*`: the unified Routines + Gateway-cron surface                                                          |
 | [System](/reference/rest-api/system)               | 11     | `/api/system/*`: status, install, configure, auto-configure, gateway, models, device pairing, self-version, self-update |
-| [Misc](/reference/rest-api/misc)                   | 26     | cost-records, chat-history, graph-layout, personality, skills, exec-settings, fleet, boo-zero                           |
+| [Misc](/reference/rest-api/misc)                   | 29     | cost-records, chat-history, graph-layout, personality, skills, catalog, exec-settings, fleet, boo-zero                  |
 
 <Note>
-The route counts above sum to 148, matching the router exactly; every registered route belongs to one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
+The route counts above sum to 151, matching the router exactly; every registered route belongs to one resource page. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page.
 </Note>
 
 ## See also

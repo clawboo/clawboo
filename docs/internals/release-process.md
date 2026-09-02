@@ -5,7 +5,7 @@ description: "How Clawboo ships: Changesets, the CI gate, the Version-PR publish
 
 A Clawboo release is the publish of **one npm package**: the `clawboo` CLI in `apps/cli`. Every `@clawboo/*` library in the workspace is `private: true` and never reaches npm on its own; the libraries it needs are _inlined_ into the CLI's shipped bundle. The release machinery is Changesets for versioning + changelog, a CI gate that mirrors the publish steps, and a two-phase `publish.yml` (open a Version PR, then publish on its merge).
 
-This page is for people working _on_ Clawboo who need to cut a release or understand why the publish posture looks the way it does. It covers the `.changeset` workflow, the CI gate (`lint` / `typecheck` / `test` / `build` / `verify:catalog` / `smoke-test-bundle` / `e2e`), the `publish.yml` flow including its provenance attestation, and the single-artifact posture enforced by a test. For the build mechanics behind it, Turbo, the bundle, `assemble-cli.sh`, read [Monorepo and build](/internals/monorepo-and-build).
+This page is for people working _on_ Clawboo who need to cut a release or understand why the publish posture looks the way it does. It covers the `.changeset` workflow, the CI gate (`lint` / `typecheck` / `test` / `build` / `verify:connectors` / `smoke-test-bundle` / `e2e`), the `publish.yml` flow including its provenance attestation, and the single-artifact posture enforced by a test. For the build mechanics behind it, Turbo, the bundle, `assemble-cli.sh`, read [Monorepo and build](/internals/monorepo-and-build).
 
 ## What ships, and what doesn't
 
@@ -71,24 +71,44 @@ Because the libraries don't publish, a changeset is in practice always *about th
 
 ## The CI gate
 
-Every push to `main` and every pull request runs `.github/workflows/ci.yml`. It is seven parallel jobs, all on Node 22 with `pnpm install --frozen-lockfile` (so the lockfile is authoritative; an out-of-sync lockfile fails the install):
+Every push to `main` and every pull request runs `.github/workflows/ci.yml`. A `filter` job runs first and decides whether the rest run at all (see below); the nine jobs it gates are parallel, all on Node 22 with `pnpm install --frozen-lockfile` (so the lockfile is authoritative; an out-of-sync lockfile fails the install):
 
-| Job                 | Command                                     | What it guards                                                                                  |
-| ------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `lint`              | `pnpm format:check` → `pnpm lint`           | Prettier formatting, then ESLint across the workspace + the docs frontmatter check.             |
-| `typecheck`         | `pnpm typecheck`                            | `tsc --noEmit` across the workspace.                                                            |
-| `test`              | `pnpm test:coverage`                        | Per-package Vitest suites plus a coverage table (no gate).                                      |
-| `build`             | `pnpm build` → `check-entry-chunk.mjs`      | Builds every package + app `dist/`, and asserts the marketplace catalog stays a deferred chunk. |
-| `verify-catalog`    | `pnpm verify:catalog`                       | The committed marketplace catalog matches its integrity manifest — offline, no upstream fetch.  |
-| `smoke-test-bundle` | `pnpm assemble` → `pnpm test:clean-install` | The published tarball actually works end-to-end.                                                |
-| `e2e`               | `pnpm build` → `pnpm e2e`                   | Playwright: the chat → board round-trip and onboarding.                                         |
+| Job                 | Command                                     | What it guards                                                                           |
+| ------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `lint`              | `pnpm format:check` → `pnpm lint`           | Prettier formatting, then ESLint across the workspace + the docs frontmatter check.      |
+| `typecheck`         | `pnpm typecheck`                            | `tsc --noEmit` across the workspace.                                                     |
+| `test`              | `pnpm test:coverage`                        | Per-package Vitest suites plus a coverage table (no gate).                               |
+| `build`             | `pnpm build` → `check-entry-chunk.mjs`      | Builds every package + app `dist/`, and asserts no agent prose reaches an emitted chunk. |
+| `catalog-verify`    | `pnpm catalog:verify` → `budget.mjs`        | The marketplace packs pass every content rule, and `catalog/dist` is current.            |
+| `verify-connectors` | `pnpm verify:connectors`                    | The committed connector catalog is internally consistent — offline, no upstream fetch.   |
+| `smoke-test-bundle` | `pnpm assemble` → `pnpm test:clean-install` | The published tarball actually works end-to-end.                                         |
+| `e2e`               | `pnpm build` → `pnpm e2e`                   | Playwright: the chat → board round-trip and onboarding.                                  |
+
+### The content-only fast path
+
+A pull request that touches only `catalog/` is content, not code. The `filter`
+job detects that and every job above skips, leaving
+`.github/workflows/catalog-ci.yml` to run the content gate in about two minutes.
+
+One carve-out: `catalog/packs/clawboo/**` is the compiled seed, so changing it
+changes bytes in the published tarball and the full matrix runs.
+
+This is a JOB and not a `paths-ignore`, deliberately. GitHub's `paths-ignore`
+has no exception syntax, so a blanket `catalog/**` entry would also skip the
+carve-out and a merge that changed the shipped seed would run zero CI. The push
+trigger's `paths-ignore` is therefore left alone.
+
+`catalog-ci.yml` must never be a branch-protection required check: it is
+paths-filtered, so on a PR that touches no catalog file it never reports, and a
+required check that never reports blocks the PR forever. `catalog-verify` in
+`ci.yml` is the one to require.
 
 The Prettier half of the `lint` job runs first because it takes seconds and needs no build, whereas `turbo lint` builds every workspace dependency before it can run ESLint. It also means a formatting-only failure reddens the `lint` job while ESLint itself is green; the fix is `pnpm format`.
 
 The `smoke-test-bundle` job is the one that earns its keep at release time, and it runs on a **`[ubuntu-latest, windows-latest, macos-latest]` matrix**. It first `pnpm assemble`s the CLI bundle, then `pnpm test:clean-install` simulates `npx clawboo` on a real machine. Crucially, it does not run the repo build in place: it `pnpm pack`s `apps/cli` and `npm install`s the tarball into a throwaway directory under the OS temp dir, so nothing resolves through the workspace's `node_modules` and the published `files` whitelist plus the published dependency closure are what get exercised. Against that install it asserts the packaged `bin` entries and their npm shims exist, that every module the bundles still load is declared / builtin / documented-optional, that the CLI's HTTP-signature port probe skips a fake non-Clawboo listener on 18791 (it picks 18790, never 18791), that the SPA renders at `/` and a deep route falls through to `index.html`, that `/api/settings` returns Clawboo-shaped JSON, that the SPA actually boots in headless Chromium rather than merely being served, that an installed MCP stdio bin completes a real JSON-RPC `tools/list` handshake, that a real `POST /api/runtimes/clawboo-native/run` drives a board task to `done`, and that a SECOND launch against an already-running dashboard reuses it instead of forking a second server. This exists because v0.1.1 shipped a `Cannot GET /` SPA-catch-all bug and v0.1.2 shipped a port-collision `Unauthorized` bug; the smoke test catches that whole class before a bundle reaches npm. The Windows leg is the regression gate for the v0.1.4 Windows-compat fixes (`npm.cmd` resolution, the `which`→`where` shim, `netstat`-based process lookup); the macOS leg covers a primary user OS. See [Testing](/internals/testing#the-clean-install-smoke-does-npx-clawboo-actually-work) for the full assertion list.
 
 <Tip>
-You can reproduce the release gate locally before authoring a changeset. `pnpm prepublish:check` is the alias for `pnpm verify:catalog && pnpm assemble && pnpm test:clean-install` — the catalog-and-artifact slice of the release gate, not the whole of it: `publish.yml` also runs `build`, `lint`, `typecheck` and `test`, so run those separately (or rely on the PR jobs) before cutting a release. If it fails locally, the release is broken; fix it before opening the PR. It drives the SPA in headless Chromium, so run `pnpm exec playwright install chromium` once on a fresh clone; the smoke fails with that exact command in the message if the browser is missing.
+You can reproduce the release gate locally before authoring a changeset. `pnpm prepublish:check` is the alias for `pnpm catalog:verify && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install` — the catalog-and-artifact slice of the release gate, not the whole of it: `publish.yml` also runs `build`, `lint`, `typecheck` and `test`, so run those separately (or rely on the PR jobs) before cutting a release. If it fails locally, the release is broken; fix it before opening the PR. It drives the SPA in headless Chromium, so run `pnpm exec playwright install chromium` once on a fresh clone; the smoke fails with that exact command in the message if the browser is missing.
 </Tip>
 
 ## The publish flow
@@ -105,16 +125,16 @@ sequenceDiagram
 
     Dev->>Main: merge feature PR (changeset present)
     Main->>Pub: push triggers publish.yml
-    Pub->>Pub: verify:catalog → build → lint/typecheck/test → assemble → test:clean-install
+    Pub->>Pub: build → lint/typecheck/test → assemble → test:clean-install
     Pub->>VPR: changesets/action opens "chore: version packages" PR
     Note over VPR: consumes the .changeset/*.md,<br/>bumps clawboo's version, writes CHANGELOG
     VPR->>Main: merge Version PR (no changeset left)
     Main->>Pub: push triggers publish.yml again
-    Pub->>Pub: verify:catalog → build → lint/typecheck/test → assemble → test:clean-install
+    Pub->>Pub: build → lint/typecheck/test → assemble → test:clean-install
     Pub->>npm: pnpm changeset publish → clawboo@<new>
 ```
 
-The workflow is a single `publish` job, and it runs unconditionally (see the warning below). It checks out with `fetch-depth: 0` (Changesets needs the full git history to compute tags), installs frozen, pulls headless Chromium for the clean-install gate, then re-runs the whole PR gate in order: `pnpm verify:catalog` → `pnpm build` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `bash scripts/assemble-cli.sh` → `pnpm test:clean-install`, _before_ the Changesets action. Finally it runs `changesets/action@v1` with `publish: pnpm changeset publish` and `commit: 'chore: version packages'`.
+The workflow is a single `publish` job, and it runs unconditionally (see the warning below). It checks out with `fetch-depth: 0` (Changesets needs the full git history to compute tags), installs frozen, pulls headless Chromium for the clean-install gate, then re-runs the whole PR gate in order: `pnpm build` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `bash scripts/assemble-cli.sh` → `pnpm test:clean-install`, _before_ the Changesets action. Finally it runs `changesets/action@v1` with `publish: pnpm changeset publish` and `commit: 'chore: version packages'`.
 
 Two details in that order are deliberate. `pnpm build` is bundler-only (Vite + tsup, no `tsc`), so a type error survives it — `typecheck` is the step that catches one, and without it a broken type could reach npm even though the build was green. And `lint` / `typecheck` / `test` run _before_ `assemble-cli.sh`, so a failure costs no bundle work and no Turbo task can restore a stale `apps/cli/dist` over the freshly assembled one.
 
@@ -151,9 +171,9 @@ The workflow used to carry a separate `check` job that computed exactly that cou
 The normal path to npm is:
 
 1. **Author a changeset.** `pnpm changeset` → commit the generated `.changeset/*.md` alongside your change on a feature branch; open a PR.
-2. **Pass CI.** The seven jobs (`lint`, `typecheck`, `test`, `build`, `verify-catalog`, `smoke-test-bundle`, `e2e`) must all be green, as must CodeQL. The bundle smoke test runs on Ubuntu, Windows, and macOS.
+2. **Pass CI.** The nine gated jobs (`lint`, `typecheck`, `test`, `test-cross-platform`, `build`, `catalog-verify`, `verify-connectors`, `smoke-test-bundle`, `e2e`) must all be green, as must CodeQL. The bundle smoke test runs on Ubuntu, Windows, and macOS.
 3. **Merge the feature PR.** `publish.yml` runs and `changesets/action` opens a `chore: version packages` Version PR.
-4. **Merge the Version PR.** `publish.yml` runs again: `verify:catalog` → `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` → `pnpm changeset publish`. The CLI publishes, the tag and changelog land.
+4. **Merge the Version PR.** `publish.yml` runs again: `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` → `pnpm changeset publish`. The CLI publishes, the tag and changelog land.
 5. **Verify.** `npm view clawboo version` should reflect the new version within roughly half a minute.
 
 <Danger>
@@ -182,7 +202,7 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 - [Monorepo and build](/internals/monorepo-and-build): Turbo, the build order, the bundle, and `assemble-cli.sh`
 - [Testing](/internals/testing): the unit / component / e2e / clean-install / evals strategy behind the CI gate
-- [Codegen and ingestion](/internals/codegen-and-ingestion): the offline `verify:catalog` gate that runs in CI and `publish.yml`, the live `verify:ingest` check that runs weekly, and the runbook for bumping a pinned SHA
+- [Marketplace catalog](/reference/marketplace-catalog): the pack format, the content gates, and the `catalog:build` / `catalog:verify` steps
 - [CLI reference](/reference/cli): `npx clawboo` and the bundled MCP bins
 - [Changelog](/appendices/changelog): the release history (0.1.0 → 0.3.1)
 - [Internals overview](/internals/index): the contributor map
