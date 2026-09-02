@@ -149,6 +149,33 @@ The `writable: false` derivation for a degraded OpenClaw connector or plugin is 
 
 The "one inventory" claim is structural, not aspirational: the Ghost Graph and the Capabilities dashboard both call the same browser client (`fetchCapabilities` → `GET /api/capabilities`) and never issue a divergent query. The Ghost Graph groups the `agent`-scoped records by `agentId` into its per-agent skill and connector nodes, and uses each record's `available` flag to grey unavailable nodes, the same greying the dashboard applies. This replaced an earlier per-agent `TOOLS.md` parse: the graph and the dashboard would have drifted if they read capabilities two different ways, so they were collapsed onto one stream.
 
+## What lands on one Boo's ring
+
+The Ghost Graph draws a tile per capability, and `groupAgentCapabilities` decides which
+records reach which agent. Two rules govern it, and they pull in opposite directions on
+purpose.
+
+**A runtime's global capabilities are inherited, additively.** An agent's ring shows its
+own `scope: 'agent'` records _plus_ every `scope: 'global'` record matching its runtime. A
+runtime builtin belongs to every agent on that runtime, so an OpenClaw Boo draws its
+built-in tools whether or not it also carries per-agent records. Inheritance does not cross
+runtimes: a Codex agent never picks up a native global.
+
+**A connector is never inherited.** Connecting one makes it available and gives it to
+nobody. An agent reaches a connector only through a grant, and the grant projection emits
+an agent-scoped record for exactly those, so a global connector record is dropped before
+the per-runtime bucket is built. That ordering is what keeps the first rule safe: what
+remains to inherit is builtins and extensions, and drawing those cannot claim access an
+agent does not have.
+
+<Note>
+  Inheritance used to be a fallback rather than a sum, applying only while an agent had
+  nothing of its own. Gaining a single agent-scoped record then dropped every inherited
+  tile at once, so installing one marketplace skill on an OpenClaw Boo took its runtime
+  builtins off the graph in the same frame. Nothing was lost in reality, which is the
+  point: the graph was under-reporting what the agent could do.
+</Note>
+
 ## Design rationale and trade-offs
 
 The inventory exists because "what can this team do?" had no single answer across five runtimes. Each runtime's capability model is genuinely different: a config domain, a filesystem of `SKILL.md`s, a `tool_registry` table, an inline MCP attach, and Clawboo's honest position is that it _cannot_ own all of them. Encoding "who owns this" as a per-record `manageability` tier, rather than as branching code in the UI, buys two things: the panel and the write path stay a pure function of the record (no per-runtime special cases to drift), and a new source can declare a mix of tiers without changing any consumer.

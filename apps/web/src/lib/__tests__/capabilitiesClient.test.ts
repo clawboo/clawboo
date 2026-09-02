@@ -68,14 +68,44 @@ describe('fetchCapabilities', () => {
   })
 })
 
-describe('groupAgentCapabilities — inherit-if-empty', () => {
-  it('an agent with its OWN agent-scoped caps shows those, NOT the shared globals', () => {
+describe('groupAgentCapabilities — inheritance is additive', () => {
+  it('an agent with its OWN agent-scoped caps ALSO keeps the shared globals', () => {
     const records = [
       cap({ scope: 'agent', agentId: 'native-1', runtime: 'clawboo-native', name: 'memory MCP' }),
       cap({ scope: 'global', runtime: 'clawboo-native', name: 'echo' }), // shared broker tool
     ]
     const out = groupAgentCapabilities(records, new Map([['native-1', 'clawboo-native']]))
-    expect((out.get('native-1') ?? []).map((r) => r.name)).toEqual(['memory MCP'])
+    expect((out.get('native-1') ?? []).map((r) => r.name).sort()).toEqual(['echo', 'memory MCP'])
+  })
+
+  // The regression this rule replaced. Grouping used to inherit only when an
+  // agent had nothing of its own, so gaining one agent-scoped record dropped
+  // every inherited tile in the same frame: installing a marketplace skill on an
+  // OpenClaw Boo took its runtime builtins off the graph and left the new skill
+  // alone with the model node. A runtime builtin belongs to every agent on that
+  // runtime, so hiding it under-reports what the agent can do.
+  it('gaining one agent-scoped cap does not drop the inherited ones', () => {
+    const globals = [
+      cap({ scope: 'global', runtime: 'openclaw', name: 'Built-in tools' }),
+      cap({ scope: 'global', runtime: 'openclaw', name: 'echo' }),
+    ]
+    const runtimes = new Map([['oc-1', 'openclaw']])
+
+    const before = groupAgentCapabilities(globals, runtimes)
+    expect((before.get('oc-1') ?? []).length).toBe(2)
+
+    const after = groupAgentCapabilities(
+      [
+        ...globals,
+        cap({ scope: 'agent', agentId: 'oc-1', runtime: 'openclaw', name: 'Brainstorming' }),
+      ],
+      runtimes,
+    )
+    expect((after.get('oc-1') ?? []).map((r) => r.name).sort()).toEqual([
+      'Brainstorming',
+      'Built-in tools',
+      'echo',
+    ])
   })
 
   it("an agent with NO caps inherits its runtime's shared (global) caps", () => {
