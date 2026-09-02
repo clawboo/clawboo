@@ -23,6 +23,8 @@ import {
 
 let root: string
 let outside: string
+/** A sibling whose path has the workspace root as a literal PREFIX. */
+let cousin: string
 
 beforeAll(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), 'clawboo-wsfs-'))
@@ -38,6 +40,14 @@ beforeAll(async () => {
   await symlink(path.join(outside, 'secret.txt'), path.join(root, 'link.txt'))
   // A symlinked DIRECTORY inside the workspace pointing outside.
   await symlink(outside, path.join(root, 'linkdir'))
+  // A LEXICAL PREFIX COUSIN: `<root>-evil` starts with `<root>`, so a prefix test
+  // that forgets to terminate the root with a separator lets it through. Reached
+  // through a symlinked ancestor, which is the only way a relative path can
+  // resolve out of the tree once `..` is refused.
+  cousin = `${root}-evil`
+  await mkdir(cousin, { recursive: true })
+  await writeFile(path.join(cousin, 'secret.txt'), 'cousin\n')
+  await symlink(cousin, path.join(root, 'cousindir'))
   // Binary sample.
   await writeFile(path.join(root, 'blob.bin'), Buffer.from([0x89, 0x50, 0x00, 0x47]))
 })
@@ -45,9 +55,20 @@ beforeAll(async () => {
 afterAll(async () => {
   await rm(root, { recursive: true, force: true })
   await rm(outside, { recursive: true, force: true })
+  await rm(cousin, { recursive: true, force: true })
 })
 
 describe('resolveWorkspaceRelPath confinement', () => {
+  it('refuses a sibling whose path has the root as a prefix', async () => {
+    // `<root>-evil/secret.txt` starts with `<root>`. Only the trailing separator
+    // on the compared prefix tells the two apart, and without it this resolves
+    // to a real file outside the workspace and is served.
+    await expect(resolveWorkspaceRelPath(root, 'cousindir/secret.txt')).rejects.toThrow(
+      WorkspacePathError,
+    )
+    await expect(readFileAt(root, 'cousindir/secret.txt')).rejects.toThrow(WorkspacePathError)
+  })
+
   it('resolves a plain relative path', async () => {
     const { abs } = await resolveWorkspaceRelPath(root, 'src/a.ts')
     expect(abs.endsWith(path.join('src', 'a.ts'))).toBe(true)

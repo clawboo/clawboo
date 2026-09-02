@@ -160,7 +160,12 @@ export async function listDirAt(
 ): Promise<WorkspaceDirListing> {
   const maxEntries = opts.maxEntries ?? MAX_DIR_ENTRIES
   const { abs, realRoot } = await resolveWorkspaceRelPath(root, relDir)
-  assertInside(realRoot, abs, 'The path escapes the workspace.')
+  const sinkPrefix = rootPrefixOf(realRoot)
+  if (abs !== realRoot) {
+    if (!abs.startsWith(sinkPrefix)) {
+      throw new WorkspacePathError('The path escapes the workspace.')
+    }
+  }
   const st = await lstat(abs)
   if (!st.isDirectory()) throw new WorkspacePathError('Not a directory.')
 
@@ -214,7 +219,12 @@ export async function readFileAt(
 ): Promise<WorkspaceFileRead> {
   const maxBytes = opts.maxBytes ?? MAX_FILE_BYTES
   const { abs, realRoot } = await resolveWorkspaceRelPath(root, relPath)
-  assertInside(realRoot, abs, 'The path escapes the workspace.')
+  const sinkPrefix = rootPrefixOf(realRoot)
+  if (abs !== realRoot) {
+    if (!abs.startsWith(sinkPrefix)) {
+      throw new WorkspacePathError('The path escapes the workspace.')
+    }
+  }
   const st = await lstat(abs)
   if (!st.isFile()) throw new WorkspacePathError('Not a file.')
 
@@ -376,7 +386,12 @@ export async function workspaceFileDiff(
   const { abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, wanted, {
     mustExist: false,
   })
-  assertInside(realRoot, abs, 'The path escapes the workspace.')
+  const sinkPrefix = rootPrefixOf(realRoot)
+  if (abs !== realRoot) {
+    if (!abs.startsWith(sinkPrefix)) {
+      throw new WorkspacePathError('The path escapes the workspace.')
+    }
+  }
   // A DIRECTORY must be refused. git's pathspec matches by prefix, so `.` or
   // `src` would return a whole-subtree diff from a route that promises one
   // file, under a response that echoes the requested path. The sibling readers
