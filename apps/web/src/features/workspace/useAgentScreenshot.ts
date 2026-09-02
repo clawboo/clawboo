@@ -10,7 +10,7 @@
 // caller renders, so a poll that finds nothing new costs a few bytes rather
 // than a screenshot.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch, apiUrl } from '@clawboo/control-client'
 
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
@@ -40,10 +40,19 @@ export function useAgentScreenshot(agentId: string | null, enabled = true): Agen
   const [meta, setMeta] = useState<ScreenshotMeta | null>(null)
   const [checked, setChecked] = useState(false)
 
+  // Which probe is current. `src` is built from the CURRENT agentId plus the
+  // metadata's `ts`, so a response for a PREVIOUS agent landing after the effect
+  // reset state would pair one agent's timestamp with another's URL and show the
+  // wrong Boo's screen. Polling makes an in-flight request at switch time the
+  // normal case, not a corner one.
+  const gen = useRef(0)
+
   const check = useCallback(() => {
     if (!agentId || !enabled) return
+    const mine = ++gen.current
     void apiFetch(`/api/agents/${encodeURIComponent(agentId)}/screenshot?meta=1`)
       .then(async (r) => {
+        if (mine !== gen.current) return
         setChecked(true)
         if (!r.ok) {
           setMeta(null)
@@ -57,7 +66,10 @@ export function useAgentScreenshot(agentId: string | null, enabled = true): Agen
           ts: body.ts,
         })
       })
-      .catch(() => setChecked(true))
+      .catch(() => {
+        if (mine !== gen.current) return
+        setChecked(true)
+      })
   }, [agentId, enabled])
 
   useEffect(() => {

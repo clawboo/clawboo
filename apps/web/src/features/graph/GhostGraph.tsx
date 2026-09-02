@@ -422,6 +422,21 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 })
 
+  /**
+   * The dock's REAL rendered width.
+   *
+   * `BrowserDock` caps itself to the graph pane (`min(DOCK_WIDTH, 100% - 32)`),
+   * but the canvas pan and the toolbar step-aside were computed from the
+   * VIEWPORT (`window.innerWidth * 0.82`, `82vw`). In a narrow pane, such as the
+   * graph beside a team chat, the two disagreed: the canvas shifted further than
+   * the panel actually moved and the toolbar slid past it. 32 is the dock's own
+   * EDGE * 2.
+   */
+  const dockWidth = useMemo(
+    () => Math.min(DOCK_WIDTH, Math.max(0, containerSize.w - 32)),
+    [containerSize.w],
+  )
+
   // Track layout state in refs to avoid stale closure issues
   const layoutRanRef = useRef(false)
   const prevNodeLengthRef = useRef(0)
@@ -535,12 +550,12 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     prevBrowserDockRef.current = showBrowserDock
     if (!hasRunLayout) return
     const vp = getViewport()
-    const shift = Math.min(DOCK_WIDTH, window.innerWidth * 0.82) / 2
+    const shift = dockWidth / 2
     void setViewport(
       { ...vp, x: vp.x + (showBrowserDock ? -shift : shift) },
       dockReduceMotion ? { duration: 0 } : { duration: 320, ease: easePremium },
     )
-  }, [showBrowserDock, hasRunLayout, getViewport, setViewport, dockReduceMotion])
+  }, [showBrowserDock, hasRunLayout, getViewport, setViewport, dockReduceMotion, dockWidth])
 
   // MiniMap stays small relative to the canvas — ~16% wide, ~22% tall, with
   // sensible min/max so it neither becomes invisible on tiny panels nor
@@ -1479,9 +1494,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           // the panel and the canvas pan, so all three land on one frame.
           // `transform`, never `right`: this bar sits over a compositing canvas
           // and animating a layout property here would judder the whole graph.
-          transform: showBrowserDock
-            ? `translateX(calc(-1 * min(${DOCK_WIDTH}px, 82vw) + 12px))`
-            : 'translateX(0)',
+          transform: showBrowserDock ? `translateX(${-dockWidth + 12}px)` : 'translateX(0)',
           transition: dockReduceMotion ? 'none' : 'transform 0.32s cubic-bezier(0.32, 0.72, 0, 1)',
         }}
       >

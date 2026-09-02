@@ -14,7 +14,7 @@
 // pointed at a 404 renders the JSON error body, which looks like a broken
 // preview instead of an honest "nothing built yet".
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch, apiUrl } from '@clawboo/control-client'
 
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
@@ -40,13 +40,23 @@ export function WorkspacePreview({ taskId }: { taskId: string }) {
   // page's own URL bar and confuse a relative-path build.
   const [generation, setGeneration] = useState(0)
 
+  // Which probe is current. Switching task while one is in flight let the older
+  // response win and report 'present' for a preview the new task does not have,
+  // mounting an iframe onto a 404.
+  const gen = useRef(0)
+
   const check = useCallback(() => {
+    const mine = ++gen.current
     void apiFetch(previewPath(taskId))
       .then((r) => {
+        if (mine !== gen.current) return
         setProbe(r.ok ? 'present' : 'absent')
         if (r.ok) setGeneration((n) => n + 1)
       })
-      .catch(() => setProbe('absent'))
+      .catch(() => {
+        if (mine !== gen.current) return
+        setProbe('absent')
+      })
   }, [taskId])
 
   useEffect(() => {
