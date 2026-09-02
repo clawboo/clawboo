@@ -707,6 +707,13 @@ export function WorkspacePanel({
                 </div>
                 <div className="min-h-0 flex-1">
                   <FilePane
+                    // REMOUNT on a task/path change. React runs a fiber's
+                    // effects in declaration order, so the fetch effect (which
+                    // reads `first.current`) runs before the reset effect that
+                    // sets it, and the pane kept the previous file's view under
+                    // the new file's name. `refreshKey` is deliberately absent:
+                    // a background status refresh should not flash a spinner.
+                    key={`${active.taskId}:${selectedPath}`}
                     taskId={active.taskId}
                     path={selectedPath}
                     changed={selectedChanged}

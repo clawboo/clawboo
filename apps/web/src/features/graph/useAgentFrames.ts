@@ -63,7 +63,10 @@ export function useAgentFrames(agentIds: readonly string[], enabled: boolean): F
       setFrames(new Map())
       return
     }
-    probe()
+    // RETURN the cleanup. Calling `probe()` bare discarded it, so a probe for a
+    // previous agent set could resolve after `agentIds` changed and replace the
+    // map with frames for agents no longer on the graph.
+    return probe()
   }, [probe, enabled])
 
   useVisiblePolling(probe, POLL_MS)

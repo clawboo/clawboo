@@ -451,7 +451,7 @@ export const BooNode = memo(function BooNode({
             See `boo-avatar/src/index.ts` for the tint reservation. */}
 
           <CircleContent
-            showStatusRow={!isRunning}
+            showStatusRow={!showsBubble}
             glowInk={glowInk}
             glowPulse={glowPulse}
             isSleeping={isSleeping}

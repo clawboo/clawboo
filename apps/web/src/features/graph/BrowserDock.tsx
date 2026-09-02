@@ -38,6 +38,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useReducedMotion } from 'framer-motion'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import { useAgentScreenshot } from '@/features/workspace/useAgentScreenshot'
 import { useBrowserGrant } from '@/features/workspace/useBrowserGrant'
 
@@ -108,20 +109,14 @@ export function BrowserDock({
     if (freshest !== selectedAgentId) onSelectAgent(freshest)
   }, [open, frames, selectedAgentId, onSelectAgent])
 
-  // Escape closes. Focus is NOT trapped: this floats beside the graph, it is
-  // not a modal over it, and trapping would make Tab feel broken on the canvas.
-  useEffect(() => {
-    if (!open) return
-    const el = panelRef.current
-    if (!el) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      e.stopPropagation()
-      onClose()
-    }
-    el.addEventListener('keydown', onKey)
-    return () => el.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  // Escape closes, through the shared layer rather than a listener on this
+  // element. The dock is not focusable and never takes focus on open, so a
+  // keydown handler bound to it only ever fired if the pointer had already put
+  // focus inside; with focus still on the toolbar button that opened it, the
+  // documented dismissal did nothing. Focus is deliberately NOT trapped: this
+  // floats beside the graph rather than over it, and trapping would make Tab
+  // feel broken on the canvas.
+  useDismissableLayer({ active: open, level: 'popover', onEscape: onClose })
 
   return (
     <div

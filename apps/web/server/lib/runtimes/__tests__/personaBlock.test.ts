@@ -12,11 +12,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { ensureSchema, openDb } from '@clawboo/db'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
-import { getDb, getDbPath, resetDb } from '../../db'
+import { getDb, resetDb } from '../../db'
 import { buildPersonaBlock, needsPersonaInjection, PERSONA_MAX_CHARS } from '../personaBlock'
 
 let home: string
@@ -27,7 +26,12 @@ beforeEach(async () => {
   prevHome = process.env['CLAWBOO_HOME']
   process.env['CLAWBOO_HOME'] = home
   resetDb()
-  ensureSchema(openDb(getDbPath()))
+  // `getDb()` opens AND bootstraps the schema, and registers the handle so
+  // `resetDb()` can close it. Calling `openDb(getDbPath())` here instead opened a
+  // SECOND connection that nothing tracked, so `resetDb()` left it open and the
+  // temp dir could not be removed on Windows, where an open file cannot be
+  // unlinked. See the ownership rule at the top of `server/lib/db.ts`.
+  getDb()
 })
 
 afterEach(async () => {

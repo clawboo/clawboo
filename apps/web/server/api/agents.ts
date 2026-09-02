@@ -583,6 +583,11 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
 //
 // Serves out of an in-memory bus, never the event log: the frame's value expires
 // in seconds and the log is append-only with no delete writer.
+/** What a captured frame may be served as. A connector states its own mimeType,
+ *  so this is the only thing standing between it and an HTML document on a
+ *  same-origin URL. */
+const SAFE_FRAME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+
 export function agentScreenshotGET(req: Request, res: Response): void {
   const agentId = (req.params['agentId'] as string | undefined) ?? ''
   const shot = getScreenshot(agentId)
@@ -601,7 +606,12 @@ export function agentScreenshotGET(req: Request, res: Response): void {
     res.status(500).json({ ok: false, error: 'frame is not decodable' })
     return
   }
-  res.setHeader('Content-Type', shot.mimeType)
+  // ALLOWLIST, never reflect. `mimeType` arrives on an MCP image content block
+  // and is only type-checked as a string on the way in, so a connector could put
+  // `text/html` here and have this same-origin endpoint serve it as a document.
+  // `nosniff` below stops the browser guessing, but it cannot undo a
+  // Content-Type the server itself stated.
+  res.setHeader('Content-Type', SAFE_FRAME_TYPES.has(shot.mimeType) ? shot.mimeType : 'image/png')
   res.setHeader('Content-Length', String(bytes.length))
   // The newest frame replaces the last one under the same URL, so a cached copy
   // would pin the panel to whatever the agent was looking at first.

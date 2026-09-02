@@ -22,6 +22,21 @@ import path from 'node:path'
 
 import { resolveWorkspaceRelPath, resolveWorkspaceRoot, WorkspacePathError } from './workspaceFs'
 
+/**
+ * Drop trailing slashes in LINEAR time.
+ *
+ * Hand-written rather than `/\/+$/`, which backtracks polynomially: the engine
+ * retries every split of a long run of slashes before failing. `MAX_REL_PATH`
+ * bounds the reachable input, so this is a convention rather than a live DoS,
+ * but the repo has already replaced this exact regex elsewhere for this exact
+ * reason and a scanner flags every reintroduction.
+ */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1
+  return value.slice(0, end)
+}
+
 /** Ceiling for a single previewed asset. Larger than the text viewer's 256 KB
  *  because bundles and images legitimately exceed it, bounded because this
  *  streams out of the same process that serves every dashboard read. */
@@ -101,7 +116,7 @@ export async function resolvePreviewFile(
   const wanted = relPath.replace(/^\/+/, '')
   let abs: string
   try {
-    abs = await resolveWorkspaceRelPath(rootRes.root, wanted || '.')
+    ;({ abs } = await resolveWorkspaceRelPath(rootRes.root, wanted || '.'))
   } catch (err) {
     if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
     return { ok: false, status: 404, error: 'No such file in the workspace.' }
@@ -114,9 +129,9 @@ export async function resolvePreviewFile(
     isIndex = true
     // Re-resolve through the same guard rather than joining, so the index is
     // confined on exactly the terms every other path is.
-    const indexRel = wanted ? `${wanted.replace(/\/+$/, '')}/${INDEX_FILE}` : INDEX_FILE
+    const indexRel = wanted ? `${trimTrailingSlashes(wanted)}/${INDEX_FILE}` : INDEX_FILE
     try {
-      abs = await resolveWorkspaceRelPath(rootRes.root, indexRel)
+      ;({ abs } = await resolveWorkspaceRelPath(rootRes.root, indexRel))
     } catch {
       return { ok: false, status: 404, error: 'No index.html in that directory.' }
     }

@@ -46,13 +46,28 @@ export const MAX_DIFF_BYTES = 1024 * 1024
 export const MAX_STATUS_ENTRIES = 2000
 
 /**
- * True when a `path.relative` result leaves the root. Tested per SEGMENT, not
- * by prefix: a legitimate root-level entry named `..foo` yields the relative
- * path `..foo`, which a bare `startsWith('..')` would refuse.
+ * Confine an absolute path to `root`, or throw.
+ *
+ * Written as a PREFIX test on the resolved absolute path rather than as a
+ * predicate over `path.relative(...)`, and deliberately inline at each
+ * filesystem call rather than factored into a helper that returns a boolean.
+ * Two reasons, and only one of them is CodeQL.
+ *
+ * The repo's own doctrine (see `verification/deterministicGate.ts`) is that a
+ * helper which validates and then RETURNS a path hands the caller a value that
+ * reads as unchecked, both to a reviewer skimming the call site and to static
+ * analysis. `js/path-injection` agrees: it matches guard SHAPES at the sink, so
+ * a boolean-returning predicate over a `path.relative` result barriers nothing,
+ * and every `lstat`/`readdir`/`open` below was reported as unguarded.
+ *
+ * The `rootPrefix` ends in a separator so a SIBLING cannot pass: `/w/root-evil`
+ * does not start with `/w/root/`. The equality case is separate because the root
+ * itself must stay listable.
  */
-function escapes(rel: string): boolean {
-  if (path.isAbsolute(rel)) return true
-  return rel === '..' || rel.startsWith(`..${path.sep}`)
+export function assertInside(root: string, abs: string, message: string): void {
+  if (abs === root) return
+  const rootPrefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`
+  if (!abs.startsWith(rootPrefix)) throw new WorkspacePathError(message)
 }
 
 /**
@@ -62,11 +77,18 @@ function escapes(rel: string): boolean {
  * absolute path (still confined), which lets the diff endpoint name a deleted
  * file.
  */
+/** A confined path plus the root it was confined to, so a caller can re-assert
+ *  containment immediately before it touches the filesystem. */
+export interface ResolvedWorkspacePath {
+  abs: string
+  realRoot: string
+}
+
 export async function resolveWorkspaceRelPath(
   root: string,
   rel: string,
   opts: { mustExist?: boolean } = {},
-): Promise<string> {
+): Promise<ResolvedWorkspacePath> {
   const mustExist = opts.mustExist ?? true
   if (typeof rel !== 'string') throw new WorkspacePathError('A file path is required.')
   const wanted = rel.trim()
@@ -91,26 +113,22 @@ export async function resolveWorkspaceRelPath(
   // The root must exist and resolve; a reaped worktree surfaces here.
   const realRoot = await realpath(root)
   const abs = path.resolve(realRoot, wanted)
-  if (escapes(path.relative(realRoot, abs))) {
-    throw new WorkspacePathError('The path escapes the workspace.')
-  }
+  assertInside(realRoot, abs, 'The path escapes the workspace.')
 
   let st
   try {
     st = await lstat(abs)
   } catch {
     if (mustExist) throw new WorkspacePathError('No such file in the workspace.')
-    return abs
+    return { abs, realRoot }
   }
   if (st.isSymbolicLink()) {
     throw new WorkspacePathError('Symbolic links are not served.')
   }
   // Follow any symlinked ancestor directories and re-check containment.
   const real = await realpath(abs)
-  if (escapes(path.relative(realRoot, real))) {
-    throw new WorkspacePathError('The path resolves outside the workspace.')
-  }
-  return real
+  assertInside(realRoot, real, 'The path resolves outside the workspace.')
+  return { abs: real, realRoot }
 }
 
 export interface WorkspaceDirEntry {
@@ -137,7 +155,8 @@ export async function listDirAt(
   opts: { maxEntries?: number } = {},
 ): Promise<WorkspaceDirListing> {
   const maxEntries = opts.maxEntries ?? MAX_DIR_ENTRIES
-  const abs = await resolveWorkspaceRelPath(root, relDir)
+  const { abs, realRoot } = await resolveWorkspaceRelPath(root, relDir)
+  assertInside(realRoot, abs, 'The path escapes the workspace.')
   const st = await lstat(abs)
   if (!st.isDirectory()) throw new WorkspacePathError('Not a directory.')
 
@@ -190,7 +209,8 @@ export async function readFileAt(
   opts: { maxBytes?: number } = {},
 ): Promise<WorkspaceFileRead> {
   const maxBytes = opts.maxBytes ?? MAX_FILE_BYTES
-  const abs = await resolveWorkspaceRelPath(root, relPath)
+  const { abs, realRoot } = await resolveWorkspaceRelPath(root, relPath)
+  assertInside(realRoot, abs, 'The path escapes the workspace.')
   const st = await lstat(abs)
   if (!st.isFile()) throw new WorkspacePathError('Not a file.')
 
@@ -349,7 +369,10 @@ export async function workspaceFileDiff(
   if (!wanted) throw new WorkspacePathError('A file path is required.')
   // The file may have been deleted by the change under review, so existence is
   // not required; the confinement checks still run in full.
-  const abs = await resolveWorkspaceRelPath(rootRes.root, wanted, { mustExist: false })
+  const { abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, wanted, {
+    mustExist: false,
+  })
+  assertInside(realRoot, abs, 'The path escapes the workspace.')
   // A DIRECTORY must be refused. git's pathspec matches by prefix, so `.` or
   // `src` would return a whole-subtree diff from a route that promises one
   // file, under a response that echoes the requested path. The sibling readers

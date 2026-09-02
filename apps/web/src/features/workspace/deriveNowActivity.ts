@@ -78,6 +78,11 @@ export function deriveNowActivity(events: readonly ObsLogEvent[]): NowActivity {
  *  the path is absolute but outside the workspace (a different repo, the
  *  agent's home): the now line must not imply it happened here. */
 export function toWorkspaceRelPath(p: string, workspaceRoot: string | null): string | null {
+  // A `..` segment survives the prefix test below: `/w/root/../other/f` starts
+  // with `/w/root/` and would be returned as `../other/f`. This is display-only
+  // today, but a relative path that climbs is exactly the shape a reader would
+  // later hand to a fetch.
+  if (p.split('/').some((seg) => seg === '..')) return null
   if (!p.startsWith('/')) return p
   if (!workspaceRoot) return null
   const root = workspaceRoot.endsWith('/') ? workspaceRoot : `${workspaceRoot}/`

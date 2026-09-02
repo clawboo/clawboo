@@ -49,7 +49,7 @@ afterAll(async () => {
 
 describe('resolveWorkspaceRelPath confinement', () => {
   it('resolves a plain relative path', async () => {
-    const abs = await resolveWorkspaceRelPath(root, 'src/a.ts')
+    const { abs } = await resolveWorkspaceRelPath(root, 'src/a.ts')
     expect(abs.endsWith(path.join('src', 'a.ts'))).toBe(true)
   })
 
@@ -97,7 +97,7 @@ describe('resolveWorkspaceRelPath confinement', () => {
   })
 
   it('confines but allows a missing leaf when mustExist is false', async () => {
-    const abs = await resolveWorkspaceRelPath(root, 'gone.txt', { mustExist: false })
+    const { abs } = await resolveWorkspaceRelPath(root, 'gone.txt', { mustExist: false })
     // Compare against the REALPATHED root: on macOS the tmpdir is /var/...,
     // which resolves to /private/var/..., and resolution works on real paths.
     expect(abs.startsWith(await realpath(root))).toBe(true)
@@ -127,7 +127,7 @@ describe('regressions fixed in review', () => {
     // `path.relative` returns "..foo" for this, which a prefix test would have
     // refused as an escape. The segment test accepts it.
     await writeFile(path.join(root, '..foo'), 'legit\n')
-    const abs = await resolveWorkspaceRelPath(root, '..foo')
+    const { abs } = await resolveWorkspaceRelPath(root, '..foo')
     expect(abs.endsWith('..foo')).toBe(true)
     // The real escape is still refused.
     await expect(resolveWorkspaceRelPath(root, '../foo')).rejects.toThrow(WorkspacePathError)

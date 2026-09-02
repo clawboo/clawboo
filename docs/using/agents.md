@@ -50,7 +50,7 @@ The MiniGraph header fuses the agent's **runtime icon** with a **model selector*
 
 The inline editor's file tabs are a single CodeMirror 6 instance (Markdown highlighting, line wrapping).
 
-**These seven files are OpenClaw's agent-file set, and which tabs you see depends on the agent's runtime.** An OpenClaw agent shows the four clawboo creates for it: SOUL, IDENTITY, TOOLS and AGENTS. A `clawboo-native` agent shows SOUL and AGENTS; a `claude-code`, `codex` or `hermes` agent shows AGENTS only, because those drivers read none of these files (clawboo stores them for the editor alone).
+**These seven files are OpenClaw's agent-file set, and which tabs you see depends on the agent's runtime.** An OpenClaw agent shows the four clawboo creates for it: SOUL, IDENTITY, TOOLS and AGENTS. A `clawboo-native` agent shows SOUL and AGENTS; a `claude-code`, `codex` or `hermes` agent shows SOUL and AGENTS. Those drivers read no agent file directly, so clawboo delivers SOUL.md to them itself: it is injected as a persona block at the top of the run's context, ahead of the team rules and the roster.
 
 USER, HEARTBEAT and MEMORY get no tab by default on any runtime. They belong to OpenClaw's file set, but clawboo never creates one and never reads one back, so an always-on editor for them would be a control wired to nothing. Any file that already has content stays visible whatever the runtime, so nothing you previously wrote disappears and a file your Gateway wrote is never hidden.
 

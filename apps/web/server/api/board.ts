@@ -636,8 +636,17 @@ export async function boardWorkspacePreviewGET(req: Request, res: Response): Pro
     // `…/preview` becomes `…/<taskId>/src/app.css` — and the artifact renders
     // unstyled, which reads as a broken preview rather than a broken URL.
     if (found.isIndex && !req.path.endsWith('/')) {
-      const [path0, query] = req.originalUrl.split('?')
-      res.redirect(302, `${path0}/${query ? `?${query}` : ''}`)
+      // Built from PARSED, root-relative parts. `req.originalUrl` is the raw
+      // request target, and HTTP/1.1 absolute-form (`GET http://evil.com/x`) puts
+      // someone else's origin into it, so redirecting to it makes this an open
+      // redirect. `req.baseUrl` and `req.path` are parsed by Express and can only
+      // ever be root-relative. The base path is re-added because the middleware
+      // strips it from `req.url` before routing, and a subpath install would
+      // otherwise be sent to the unprefixed URL and 404.
+      const base = typeof req.app.locals['basePath'] === 'string' ? req.app.locals['basePath'] : ''
+      const q = req.url.indexOf('?')
+      const search = q === -1 ? '' : req.url.slice(q)
+      res.redirect(302, `${base}${req.baseUrl}${req.path}/${search}`)
       return
     }
     res.setHeader('Content-Type', found.contentType)

@@ -270,7 +270,15 @@ export class ClawbooNativeAgentSource implements AgentSource {
     // creates a row nothing can ever read back.
     for (const [name, content] of Object.entries(files)) {
       if (!(AGENT_FILE_NAMES as readonly string[]).includes(name)) continue
-      if (typeof content === 'string' && content) writeNativeAgentFile(db, id, name, content)
+      // SOUL.md stores the RESOLVED prompt, not the caller's raw input. A caller
+      // may send both an `execConfig.systemPrompt` and a `files['SOUL.md']` that
+      // differ: `CreateTeamModal` sends the persona in the file and the persona
+      // PLUS the leader/specialist protocol block in the config. The config is
+      // what the agent runs on, so storing the shorter file made the SOUL tab
+      // show something the agent was not running, and saving it back unedited
+      // silently stripped the protocol block from a live agent.
+      const value = name === 'SOUL.md' ? config.systemPrompt : content
+      if (typeof value === 'string' && value) writeNativeAgentFile(db, id, name, value)
     }
     if (config.budgetUsd != null && config.budgetUsd > 0) {
       setBudgetLimit(db, {
@@ -361,8 +369,10 @@ export class ClawbooNativeAgentSource implements AgentSource {
    * SOUL.md IS the native persona surface, not a copy of it. The stored row is
    * seeded from the live `AgentConfig.systemPrompt` when it is empty, so the
    * tab opens showing what the agent is actually running rather than a blank
-   * box. Every server-seeded native agent is in exactly that state: the seed
-   * paths pass an explicit `systemPrompt` and write no files.
+   * box. A server-seeded native agent that passes only an explicit
+   * `systemPrompt` is in exactly that state; a caller that ALSO sends a
+   * `files['SOUL.md']` has it stored as the resolved prompt at create, so the
+   * two can never disagree.
    */
   async readFile(agentId: string, name: AgentFileName): Promise<string> {
     const db = this.db()
@@ -382,16 +392,19 @@ export class ClawbooNativeAgentSource implements AgentSource {
     if (!(AGENT_FILE_NAMES as readonly string[]).includes(name))
       throw new Error(`unknown agent file: ${name}`)
     const db = this.db()
-    writeNativeAgentFile(db, agentId, name, content)
-    if (name === 'SOUL.md') {
-      const config = loadAgentConfigOrDefault(db, agentId)
-      // An emptied SOUL.md falls back to the shipped default rather than
-      // leaving the agent with no system prompt at all.
-      saveAgentConfig(db, {
-        ...config,
-        systemPrompt: content.trim() ? content : DEFAULT_AGENT_CONFIG.systemPrompt,
-      })
+    if (name !== 'SOUL.md') {
+      writeNativeAgentFile(db, agentId, name, content)
+      return
     }
+    const config = loadAgentConfigOrDefault(db, agentId)
+    // An emptied SOUL.md falls back to the shipped default rather than leaving
+    // the agent with no system prompt at all. The SAME resolved value is stored
+    // in the file, so the tab can never show one thing while the agent runs
+    // another: a whitespace-only save used to store the whitespace and run the
+    // default.
+    const resolved = content.trim() ? content : DEFAULT_AGENT_CONFIG.systemPrompt
+    writeNativeAgentFile(db, agentId, name, resolved)
+    saveAgentConfig(db, { ...config, systemPrompt: resolved })
   }
 
   // ── Lifecycle / observability ──────────────────────────────────────────────

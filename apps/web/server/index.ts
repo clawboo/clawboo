@@ -240,6 +240,11 @@ async function main() {
   // header — a forged Host must never redirect a runtime's Tasks/Memory/Tools/TeamChat
   // traffic. Mirrors the `http://127.0.0.1:${port}` the boot/ticker callers use.
   app.locals['apiPort'] = port
+  // The base-path middleware STRIPS the prefix from `req.url` before routing, so
+  // a route that needs to build an absolute-on-this-origin redirect cannot
+  // recover it from the request. Publishing the validated value is how a route
+  // rebuilds a Location without reaching for the raw `req.originalUrl`.
+  app.locals['basePath'] = basePath
 
   // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
   // of it. The guards below decide what to protect with `startsWith('/api/')` and
