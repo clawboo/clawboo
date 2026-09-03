@@ -30,7 +30,8 @@ import { brokeredAppConnectorId, brokeredAppScope } from './brokeredApp'
 import { toolClassOf, toolSummaryOf } from './toolClass'
 import { verifyProvenance, type ProvenanceVerifyOpts } from './provenance'
 import type { ToolRegistry } from './registry'
-import type { Inspector, ToolCall, ToolCallContext } from './types'
+import { toolOutputOf } from './types'
+import type { Inspector, ToolCall, ToolCallContext, ToolImage } from './types'
 
 export interface BrokerOptions {
   registry: ToolRegistry
@@ -57,6 +58,14 @@ export interface BrokeredResult {
   ok: boolean
   output: string
   isError: boolean
+  /**
+   * Images the tool produced, for a caller that can carry them to the model.
+   *
+   * Deliberately NOT folded into `output`: that string is the audit record and
+   * the compaction input, and base64 image bytes belong in neither. A consumer
+   * that cannot render images ignores this and still gets the placeholder text.
+   */
+  images?: readonly ToolImage[]
   /** Set when a gate denied the call (availability/provenance/inspector/approval). */
   denied?: string
 }
@@ -287,16 +296,21 @@ export async function executeBrokeredCall(
   }
 
   // Execute.
-  let raw: string
+  let raw = ''
+  let images: readonly ToolImage[] = []
   let isError = false
   try {
-    raw = await Promise.resolve(descriptor.executor(effectiveArgs, ctx))
+    const produced = toolOutputOf(await Promise.resolve(descriptor.executor(effectiveArgs, ctx)))
+    raw = produced.text
+    images = produced.images
   } catch (err) {
     raw = err instanceof Error ? err.message : String(err)
     isError = true
   }
 
-  // Compact (pass-through-safe + failure-preserving) before returning.
+  // Compact (pass-through-safe + failure-preserving) before returning. Only the
+  // TEXT is compacted: images are already bounded at the connector client, and
+  // a truncated base64 payload is a corrupt image rather than a shorter one.
   const output = opts.compact === false ? raw : compactToolOutput(call.name, raw).text
 
   writeAuditAfter(db, {
@@ -311,7 +325,7 @@ export async function executeBrokeredCall(
     grantId: attribution.grantId ?? null,
     connectorId: attribution.connectorId ?? null,
   })
-  return { ok: !isError, output, isError }
+  return { ok: !isError, output, isError, ...(images.length > 0 ? { images } : {}) }
 }
 
 /**

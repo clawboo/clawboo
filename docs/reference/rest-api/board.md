@@ -13,27 +13,31 @@ The atomic claim is the board's concurrency primitive. `POST /api/board/:taskId/
 
 ## Routes
 
-| Method | Path                                   | Summary                                                     | Stream? |
-| ------ | -------------------------------------- | ----------------------------------------------------------- | ------- |
-| GET    | `/api/board`                           | List tasks (or ready-to-work tasks) for a team              | No      |
-| POST   | `/api/board`                           | Create a task                                               | No      |
-| GET    | `/api/board/:taskId`                   | One task + its comments + ancestor chain                    | No      |
-| POST   | `/api/board/:taskId/claim`             | Atomically claim a `todo` task (409 contract)               | No      |
-| PATCH  | `/api/board/:taskId`                   | Transition status (verification-gated) and/or edit metadata | No      |
-| POST   | `/api/board/:taskId/comments`          | Add a comment                                               | No      |
-| GET    | `/api/board/:taskId/executions`        | The run ledger for a task                                   | No      |
-| POST   | `/api/board/:taskId/executions`        | Open an execution row (after a claim)                       | No      |
-| PATCH  | `/api/board/executions/:execId`        | Close an execution with its outcome + ledger                | No      |
-| POST   | `/api/board/:taskId/deps`              | Link a dependency (plan / blocked-by)                       | No      |
-| POST   | `/api/board/:taskId/cancel-dependents` | Cancel the dead downstream chain of a failed task           | No      |
-| POST   | `/api/board/:taskId/workspace`         | Provision a worktree + branch + SoR scaffold                | No      |
-| GET    | `/api/board/:taskId/workspace`         | Cold-resume read: workspace + reconstructed state           | No      |
-| PATCH  | `/api/board/:taskId/workspace`         | `pause` or `complete` the worktree                          | No      |
-| POST   | `/api/board/:taskId/workspace/handoff` | Write the clock-out `AGENT_HANDOFF.json`                    | No      |
-| GET    | `/api/board/:taskId/workspace/detail`  | SoR file contents + unified diff (drawer view)              | No      |
+| Method | Path                                     | Summary                                                     | Stream? |
+| ------ | ---------------------------------------- | ----------------------------------------------------------- | ------- |
+| GET    | `/api/board`                             | List tasks (or ready-to-work tasks) for a team              | No      |
+| POST   | `/api/board`                             | Create a task                                               | No      |
+| GET    | `/api/board/:taskId`                     | One task + its comments + ancestor chain                    | No      |
+| POST   | `/api/board/:taskId/claim`               | Atomically claim a `todo` task (409 contract)               | No      |
+| PATCH  | `/api/board/:taskId`                     | Transition status (verification-gated) and/or edit metadata | No      |
+| POST   | `/api/board/:taskId/comments`            | Add a comment                                               | No      |
+| GET    | `/api/board/:taskId/executions`          | The run ledger for a task                                   | No      |
+| POST   | `/api/board/:taskId/executions`          | Open an execution row (after a claim)                       | No      |
+| PATCH  | `/api/board/executions/:execId`          | Close an execution with its outcome + ledger                | No      |
+| POST   | `/api/board/:taskId/deps`                | Link a dependency (plan / blocked-by)                       | No      |
+| POST   | `/api/board/:taskId/cancel-dependents`   | Cancel the dead downstream chain of a failed task           | No      |
+| POST   | `/api/board/:taskId/workspace`           | Provision a worktree + branch + SoR scaffold                | No      |
+| GET    | `/api/board/:taskId/workspace`           | Cold-resume read: workspace + reconstructed state           | No      |
+| PATCH  | `/api/board/:taskId/workspace`           | `pause` or `complete` the worktree                          | No      |
+| POST   | `/api/board/:taskId/workspace/handoff`   | Write the clock-out `AGENT_HANDOFF.json`                    | No      |
+| GET    | `/api/board/:taskId/workspace/detail`    | SoR file contents + unified diff (drawer view)              | No      |
+| GET    | `/api/board/:taskId/workspace/tree`      | List ONE directory level of the worktree                    | No      |
+| GET    | `/api/board/:taskId/workspace/file`      | Read one file, size-capped                                  | No      |
+| GET    | `/api/board/:taskId/workspace/file-diff` | Unified diff for ONE file vs the baseline                   | No      |
+| GET    | `/api/board/:taskId/workspace/status`    | `git status --porcelain` for the worktree                   | No      |
 
 <Note>
-The worktree routes share a `:taskId` prefix; the router registers the longer two-segment paths (`/workspace/handoff`, `/workspace/detail`) before the bare `/workspace`, and the execution paths (`/executions`, `/executions/:execId`) are distinct two-segment forms, so there is no path collision with `/:taskId`.
+The worktree routes share a `:taskId` prefix; the router registers every longer two-segment path (`/workspace/handoff`, `/workspace/detail`, `/workspace/tree`, `/workspace/file`, `/workspace/file-diff`, `/workspace/status`) before the bare `/workspace`, and the execution paths (`/executions`, `/executions/:execId`) are distinct two-segment forms, so there is no path collision with `/:taskId`.
 </Note>
 
 The 7 task statuses are `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. `done` and `cancelled` are terminal. The legal forward transitions are fixed by the state machine; an illegal transition is rejected with **409** `illegal_transition`.
@@ -984,3 +988,49 @@ Every error response on these routes is the standard envelope `{ error: string }
 - [Runtimes API](/reference/rest-api/runtimes), `POST /api/runtimes/:id/run` claims and drives one of these tasks end to end
 - [Database schema](/reference/database-schema), the `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes` tables
 - [REST API overview](/reference/rest-api/index)
+
+---
+
+## The workspace filesystem view
+
+Four read-only routes behind the agent-detail **Workspace** tab. They serve the task's worktree: the tree, one file, one file's diff, and the git status that drives the change badges. Nothing here writes.
+
+Paths are resolved from the stored `workspaces` row, never from the request. Every relative path is confined to the worktree root in three layers: absolute paths and `..` segments are refused; the resolved path must sit inside the root (checked with `path.relative`, so a sibling directory like `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the result re-checked after resolving any symlinked ancestor. A refused path answers **400** with a message naming the problem.
+
+All four share one miss shape. `reason` distinguishes three states that must not be conflated:
+
+| Status | `reason`     | Meaning                                                                             |
+| ------ | ------------ | ----------------------------------------------------------------------------------- |
+| 404    | `not_found`  | No workspace row, or the row carries no worktree path                               |
+| 404    | `gone`       | The row exists but the checkout is not on disk (paused or reaped; branch survives)  |
+| 409    | `unreadable` | The checkout is on disk but git refuses it (orphaned by a repo move, corrupt index) |
+
+`unreadable` is deliberately **not** a 404: a client that treated a git failure as "no workspace" would render a dirty worktree as clean.
+
+### `GET /api/board/:taskId/workspace/tree`
+
+One directory level, for a lazily-expanded tree. `.git`, symlinks and special files are omitted; directories sort before files, then case-insensitively by name.
+
+- **Query**: `dir` (worktree-relative; omitted or empty lists the root).
+- **`200 OK`**: `{ ok, dir, entries: [{ name, kind: "file" | "dir", size? }], truncated }`. `size` is present on files only. At most 500 entries; `truncated` reports that the cap was hit.
+
+### `GET /api/board/:taskId/workspace/file`
+
+One file's contents, capped at 256 KB.
+
+- **Query**: `path` (worktree-relative).
+- **`200 OK`** (text): `{ ok, path, binary: false, size, content, truncated }`. A cut lands on a codepoint boundary, so a truncated file never ends in a broken character.
+- **`200 OK`** (binary): `{ ok, path, binary: true, size }`. A NUL byte in the first 8 KB classifies the file as binary; no bytes are returned.
+
+### `GET /api/board/:taskId/workspace/file-diff`
+
+The unified diff for ONE file against the task's baseline commit.
+
+- **Query**: `path` (worktree-relative). A directory is refused with **400** `Not a file.`, since git pathspecs match by prefix and would otherwise return a whole subtree.
+- **`200 OK`**: `{ ok, path, diff, truncated }`. Capped at 1 MB, measured in bytes and cut on a codepoint boundary. The diff is empty for an untracked file; clients fall back to the file route.
+
+### `GET /api/board/:taskId/workspace/status`
+
+`git status --porcelain -z --untracked-files=all`, parsed.
+
+- **`200 OK`**: `{ ok, branch, entries: [{ path, x, y, origPath? }], truncated }`. `x` is the index column and `y` the worktree column; `origPath` carries the rename or copy source. At most 2000 entries.

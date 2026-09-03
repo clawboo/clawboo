@@ -4,6 +4,7 @@
 // so clawboo "hosts" the connection setup.
 
 import type { IncomingMessage } from 'node:http'
+import { putScreenshot } from '../lib/screenshotBus'
 import path from 'node:path'
 
 import {
@@ -178,6 +179,13 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
         // the array would have frozen the list at initialize.
         connectorTools: connectorToolsForServer,
         onConnectorsChanged,
+        // Keep the newest frame so the agent's Browser panel can show a human
+        // what it just looked at. Ephemeral and per-agent; never the event log.
+        onToolImages: ({ agentId, toolName, images }) => {
+          const first = images[0]
+          if (!agentId || !first) return
+          putScreenshot(agentId, { data: first.data, mimeType: first.mimeType, toolName })
+        },
       })
     }),
     teamchat: createStreamableHttpHandlers((req) => {

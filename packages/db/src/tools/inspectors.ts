@@ -91,7 +91,9 @@ export const argClampInspector: Inspector = (call): InspectorDecision => {
 /** RISK — destructive/external tools require human approval (risk-classified, so
  *  only these prompt — safe tools run unattended). */
 export const riskClassifierInspector: Inspector = (_call, descriptor): InspectorDecision => {
-  if (descriptor.risk === 'destructive') {
+  // An explicit destructive annotation prompts whatever the connector-level
+  // risk floor says, and outranks a contradictory `readOnly` on the same tool.
+  if (descriptor.risk === 'destructive' || descriptor.destructive === true) {
     return {
       kind: 'require_approval',
       message: `"${descriptor.name}" is destructive and needs approval.`,

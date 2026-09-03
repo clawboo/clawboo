@@ -20,6 +20,7 @@ import { agents, setSetting, teams, type ClawbooDb } from '@clawboo/db'
 import type { TurnFraming } from '@clawboo/team-orchestration'
 
 import { getDb, resetDb } from '../../db'
+import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
 import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { buildServerTeamContext } from '../contextPreamble'
 
@@ -244,5 +245,33 @@ describe('buildServerTeamContext coordination blocks', () => {
     expect(worker).not.toContain(LEADER_BLOCK)
     expect(worker).not.toContain(CODING_LEADER_TOOL)
     expect(worker).not.toContain(OPENCLAW_BLOCK)
+  })
+
+  // ── Persona injection: the Personality tab reaching a coding runtime ──────
+  // 'hlead' is the hermes fixture. Its driver reads no agent file, so this block
+  // is the ONLY way its persona (and the Personality sliders, which merge their
+  // text into SOUL.md on save) reach the model.
+
+  it('a coding-runtime turn carries the agent SOUL.md as a persona block', () => {
+    const db = getDb()
+    writeRuntimeAgentFile(db, 'hlead', 'SOUL.md', 'You are blunt and allergic to filler.')
+    const ctx = buildServerTeamContext(db, 'T', 'hlead', LEADER) ?? ''
+    expect(ctx).toContain('[Your persona')
+    expect(ctx).toContain('You are blunt and allergic to filler.')
+    // It frames the turn, so it precedes the coordination rules.
+    expect(ctx.indexOf('[Your persona')).toBeLessThan(ctx.indexOf(CODING_LEADER_TOOL))
+  })
+
+  it('a native turn gets NO persona block (its SOUL.md is already the systemPrompt)', () => {
+    const db = getDb()
+    writeRuntimeAgentFile(db, 'nlead', 'SOUL.md', 'should not be injected twice')
+    const ctx = buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? ''
+    expect(ctx).not.toContain('[Your persona')
+    expect(ctx).not.toContain('should not be injected twice')
+  })
+
+  it('a coding-runtime turn with no SOUL.md adds nothing', () => {
+    const ctx = buildServerTeamContext(getDb(), 'T', 'hlead', LEADER) ?? ''
+    expect(ctx).not.toContain('[Your persona')
   })
 })

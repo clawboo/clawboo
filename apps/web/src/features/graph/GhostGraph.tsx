@@ -23,6 +23,7 @@ import type {
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   GitBranch,
+  Globe,
   LayoutDashboard,
   Lock,
   LockOpen,
@@ -54,6 +55,8 @@ import { ConnectionLine } from './edges/ConnectionLine'
 import { TeamHaloLayer } from './TeamHaloLayer'
 import { TeamStatusClusterLayer } from './TeamStatusClusterLayer'
 import { useFleetStore } from '@/stores/fleet'
+import { BrowserDock, DOCK_WIDTH, type DockAgent } from './BrowserDock'
+import { useReducedMotion } from 'framer-motion'
 import { useViewStore } from '@/stores/view'
 import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
@@ -394,6 +397,14 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // doing" terminal. Always mounted (so the slide animates both ways); the obs
   // subscription is gated on `showActivityDock` so it only tails when open.
   const [showActivityDock, setShowActivityDock] = useState(false)
+  // Browser dock — the right-edge twin of the activity dock above. Kept as two
+  // pieces of state rather than one enum because only Atlas has both, and an
+  // enum would make the team-scope case carry a variant it can never hold.
+  const [showBrowserDock, setShowBrowserDock] = useState(false)
+  // Shared by the toolbar shift and the canvas pan, so all three moving parts
+  // honour the setting together rather than one of them still sliding.
+  const dockReduceMotion = useReducedMotion()
+  const [dockAgentId, setDockAgentId] = useState<string | null>(null)
 
   // Canvas interactivity lock (viewport bar). When locked, node dragging +
   // selection are frozen (pan/zoom stay free) so the graph can be inspected
@@ -402,13 +413,29 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   const [locked, setLocked] = useState(false)
 
   const nodesInitialized = useNodesInitialized()
-  const { fitView, zoomIn, zoomOut, getNode, screenToFlowPosition } = useReactFlow()
+  const { fitView, zoomIn, zoomOut, getNode, getViewport, setViewport, screenToFlowPosition } =
+    useReactFlow()
 
   // Track the canvas wrapper size so we can (a) re-fit the graph when the
   // panel is resized (e.g. user drags the divider in the new vertical group
   // chat layout) and (b) size the MiniMap proportionally to the canvas.
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 })
+
+  /**
+   * The dock's REAL rendered width.
+   *
+   * `BrowserDock` caps itself to the graph pane (`min(DOCK_WIDTH, 100% - 32)`),
+   * but the canvas pan and the toolbar step-aside were computed from the
+   * VIEWPORT (`window.innerWidth * 0.82`, `82vw`). In a narrow pane, such as the
+   * graph beside a team chat, the two disagreed: the canvas shifted further than
+   * the panel actually moved and the toolbar slid past it. 32 is the dock's own
+   * EDGE * 2.
+   */
+  const dockWidth = useMemo(
+    () => Math.min(DOCK_WIDTH, Math.max(0, containerSize.w - 32)),
+    [containerSize.w],
+  )
 
   // Track layout state in refs to avoid stale closure issues
   const layoutRanRef = useRef(false)
@@ -490,6 +517,45 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
       if (refitTimerRef.current) clearTimeout(refitTimerRef.current)
     }
   }, [containerSize.w, containerSize.h, hasRunLayout, fitView])
+
+  // ── Browser dock: who can be watched, and the canvas pan ────────────────
+  //
+  // Team scope shows that team's Boos; Atlas shows the whole fleet, which is
+  // exactly the set of Boos drawn on each graph.
+  const allAgents = useFleetStore((s) => s.agents)
+  const dockAgents = useMemo<DockAgent[]>(() => {
+    const pool = scope === 'atlas' ? allAgents : allAgents.filter((a) => a.teamId === obsTeamId)
+    return pool.map((a) => ({ id: a.id, name: a.name }))
+  }, [allAgents, scope, obsTeamId])
+
+  // Keep the selection valid without fighting the user: only auto-pick when
+  // nothing is chosen, or when the chosen agent has left the graph.
+  useEffect(() => {
+    if (dockAgents.length === 0) {
+      if (dockAgentId !== null) setDockAgentId(null)
+      return
+    }
+    if (dockAgentId && dockAgents.some((a) => a.id === dockAgentId)) return
+    setDockAgentId(dockAgents[0]?.id ?? null)
+  }, [dockAgents, dockAgentId])
+
+  // THE PAN. The canvas is never resized — instead React Flow's own viewport
+  // slides left by half the dock's width, on the same 320ms/easePremium the
+  // panel's CSS transform uses, so the two land on the same frame and read as
+  // one gesture. Half rather than full: the graph should look like it stepped
+  // aside, not like it was shoved off-screen.
+  const prevBrowserDockRef = useRef(showBrowserDock)
+  useEffect(() => {
+    if (prevBrowserDockRef.current === showBrowserDock) return
+    prevBrowserDockRef.current = showBrowserDock
+    if (!hasRunLayout) return
+    const vp = getViewport()
+    const shift = dockWidth / 2
+    void setViewport(
+      { ...vp, x: vp.x + (showBrowserDock ? -shift : shift) },
+      dockReduceMotion ? { duration: 0 } : { duration: 320, ease: easePremium },
+    )
+  }, [showBrowserDock, hasRunLayout, getViewport, setViewport, dockReduceMotion, dockWidth])
 
   // MiniMap stays small relative to the canvas — ~16% wide, ~22% tall, with
   // sensible min/max so it neither becomes invisible on tiny panels nor
@@ -1424,6 +1490,12 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           gap: 2,
           padding: 4,
           borderRadius: 12,
+          // Steps aside for the browser dock on the SAME curve and duration as
+          // the panel and the canvas pan, so all three land on one frame.
+          // `transform`, never `right`: this bar sits over a compositing canvas
+          // and animating a layout property here would judder the whole graph.
+          transform: showBrowserDock ? `translateX(${-dockWidth + 12}px)` : 'translateX(0)',
+          transition: dockReduceMotion ? 'none' : 'transform 0.32s cubic-bezier(0.32, 0.72, 0, 1)',
         }}
       >
         {/* LAYOUT — re-run the ELK layout + (Atlas) the Tree|Radial mode pick.
@@ -1453,10 +1525,33 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
               label={showActivityDock ? 'Hide activity feed' : 'Activity feed (all teams)'}
               tint="mint"
               active={showActivityDock}
-              onClick={() => setShowActivityDock((v) => !v)}
+              onClick={() =>
+                setShowActivityDock((v) => {
+                  if (!v) setShowBrowserDock(false)
+                  return !v
+                })
+              }
             />
           </>
         )}
+
+        {/* WATCH — the agent's browser, docked right. Present in BOTH scopes:
+            "what is it looking at" is as much a team question as an Atlas one. */}
+        <BarDivider />
+        <BarBtn
+          icon={Globe}
+          label={showBrowserDock ? 'Hide browser' : 'Agent browser'}
+          tint="neutral"
+          active={showBrowserDock}
+          onClick={() => {
+            setShowBrowserDock((v) => {
+              // Two docks share the right edge; opening one closes the other
+              // rather than stacking them.
+              if (!v) setShowActivityDock(false)
+              return !v
+            })
+          }}
+        />
 
         {/* EDIT — draw routing edges (red = the single forward authoring
             action). Only prefix a divider when a cluster precedes it, so the
@@ -1548,6 +1643,14 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           </div>
         </div>
       )}
+
+      <BrowserDock
+        open={showBrowserDock}
+        agents={dockAgents}
+        selectedAgentId={dockAgentId}
+        onSelectAgent={setDockAgentId}
+        onClose={() => setShowBrowserDock(false)}
+      />
 
       {/* Connect-mode armed ring — a subtle inset accent so edge-drawing mode
           reads across the whole canvas, not only the corner toggle. Below the

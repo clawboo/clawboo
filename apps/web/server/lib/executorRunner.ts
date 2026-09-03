@@ -96,6 +96,7 @@ import {
 import type { RuntimeRunContext } from './runtimes'
 import { estimateRunCostUsdFromUsage } from './runtimes/estimateCost'
 import { runtimeIdentityHomePath } from './runtimes/identityHome'
+import { buildPersonaBlock } from './runtimes/personaBlock'
 import {
   actOnTaskWorkspace,
   getTaskWorkspace,
@@ -673,9 +674,16 @@ async function runTaskInner(
       addressed: packedAddressed.bodies.length ? [{ text: packedAddressed.bodies.join('\n') }] : [],
       ambient: packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : [],
     }) ?? ''
+  // A board run does NOT go through the team preamble, so the persona has to be
+  // injected here too or a codex/claude-code/hermes agent works its tasks with
+  // no persona at all while the same agent has one in team chat. It rides the
+  // STABLE tier: it does not change between turns of the same task.
+  const personaBlock = buildPersonaBlock(db, assigneeAgentId, runtimeId)
   const assemblePrompt = (handoffNote: string): string =>
     assembleTiers({
-      stable: `# Task: ${task.title}\n\n${task.description ?? ''}`,
+      stable: [personaBlock, `# Task: ${task.title}\n\n${task.description ?? ''}`]
+        .filter(Boolean)
+        .join('\n\n'),
       context: [baseContext, resumeNote, fixNote, handoffNote, inboxDigest]
         .filter(Boolean)
         .join('\n\n'),

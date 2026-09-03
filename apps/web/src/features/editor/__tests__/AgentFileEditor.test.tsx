@@ -23,6 +23,7 @@ import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GatewayClient } from '@clawboo/gateway-client'
+import { AGENT_FILE_META } from '@clawboo/protocol'
 
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useConnectionStore } from '@/stores/connection'
@@ -124,15 +125,20 @@ describe('AgentFileEditor', () => {
     renderEditor(<AgentFileEditor agentId={AGENT_ID} agentName="Research Boo" onClose={vi.fn()} />)
     await waitForLoaded('Soul body copy')
     // The footer renders AGENT_FILE_META[activeTab].hint — a stale hint after a
-    // tab switch is exactly the kind of drift this test is named for.
-    expect(screen.getByText('Persona, tone, and boundaries.')).toBeInTheDocument()
+    // tab switch is exactly the kind of drift this test is named for. The
+    // expected strings come from the constant so that rewording a hint edits
+    // one place, not two.
+    const soulHint = AGENT_FILE_META['SOUL.md'].hint
+    const identityHint = AGENT_FILE_META['IDENTITY.md'].hint
+    expect(soulHint).not.toBe(identityHint)
+    expect(screen.getByText(soulHint)).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'IDENTITY' }))
 
     await waitForLoaded('Identity body copy')
     expect(cmText()).not.toContain('Soul body copy')
-    expect(screen.getByText('Name, vibe, and emoji.')).toBeInTheDocument()
-    expect(screen.queryByText('Persona, tone, and boundaries.')).not.toBeInTheDocument()
+    expect(screen.getByText(identityHint)).toBeInTheDocument()
+    expect(screen.queryByText(soulHint)).not.toBeInTheDocument()
   })
 
   it('closing while clean calls onClose and writes nothing', async () => {

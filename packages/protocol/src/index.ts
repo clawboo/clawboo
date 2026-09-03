@@ -112,14 +112,84 @@ export interface AgentFileMeta {
   hint: string
 }
 
+/**
+ * Hints DESCRIBE the file; they must not assert an effect the runtime does not
+ * deliver. These seven names are OpenClaw's agent-file set. Only OpenClaw
+ * agents have a runtime that reads them: the clawboo-native, claude-code,
+ * codex and hermes drivers read none of them (see
+ * apps/web/server/lib/agentSource/runtimeAgentFileStore.ts and
+ * apps/web/server/lib/runtimes/contextPreamble.ts). Wording that promised
+ * otherwise is why this comment exists. Do not reinstate it.
+ */
 export const AGENT_FILE_META: Record<AgentFileName, AgentFileMeta> = {
-  'AGENTS.md': { title: 'AGENTS.md', hint: 'Operating instructions, priorities, and rules.' },
-  'SOUL.md': { title: 'SOUL.md', hint: 'Persona, tone, and boundaries.' },
-  'IDENTITY.md': { title: 'IDENTITY.md', hint: 'Name, vibe, and emoji.' },
-  'USER.md': { title: 'USER.md', hint: 'User profile and preferences.' },
-  'TOOLS.md': { title: 'TOOLS.md', hint: 'Local tool notes and conventions.' },
-  'HEARTBEAT.md': { title: 'HEARTBEAT.md', hint: 'Small checklist for heartbeat runs.' },
-  'MEMORY.md': { title: 'MEMORY.md', hint: 'Durable memory for this agent.' },
+  'AGENTS.md': {
+    title: 'AGENTS.md',
+    hint: "Operating notes. Its links also draw this agent's graph edges.",
+  },
+  'SOUL.md': {
+    title: 'SOUL.md',
+    hint: 'Persona, tone, and boundaries. The one agent file every runtime reads.',
+  },
+  'IDENTITY.md': { title: 'IDENTITY.md', hint: 'Name, vibe, and emoji. Read by OpenClaw agents.' },
+  'USER.md': {
+    title: 'USER.md',
+    hint: 'Notes about you. Clawboo never writes or reads this; only your Gateway might.',
+  },
+  'TOOLS.md': {
+    title: 'TOOLS.md',
+    hint: 'Tool notes for the agent to read. Does not configure tools.',
+  },
+  'HEARTBEAT.md': {
+    title: 'HEARTBEAT.md',
+    hint: 'Checklist an OpenClaw heartbeat can be pointed at. Clawboo never reads it.',
+  },
+  'MEMORY.md': {
+    title: 'MEMORY.md',
+    hint: 'Notes for OpenClaw agents. Not the Hermes memory file, and not clawboo memory.',
+  },
+}
+
+/**
+ * Which agent files a runtime actually consumes, and therefore which tabs are
+ * honest to show. Derived from a full trace of every read path, 2026-08-25:
+ *
+ * - `openclaw`: the Gateway owns this file set and is the only runtime with a
+ *   substrate that reads it. Clawboo passes the bytes through blind.
+ * - `clawboo-native`: SOUL.md drives `AgentConfig.systemPrompt` (the source
+ *   re-derives it on write); AGENTS.md draws graph edges.
+ * - `claude-code` / `codex` / `hermes`: these drivers read no agent file from
+ *   disk, so clawboo injects SOUL.md into the prompt itself as a
+ *   `[Your persona]` block on both the team and board paths (see
+ *   apps/web/server/lib/runtimes/personaBlock.ts). AGENTS.md is listed for its
+ *   graph edges, a real effect even though no prompt sees the file.
+ *
+ * IDENTITY and TOOLS stay OpenClaw-only on purpose: wiring them would turn the
+ * prompt into a second, undocumented context channel. An unlisted runtime falls
+ * back to the full set: never hide a file we cannot prove is inert.
+ *
+ * OpenClaw lists the four files clawboo itself seeds at agent creation
+ * (openClawAgentSource.ts), not all seven. USER / HEARTBEAT / MEMORY are part
+ * of OpenClaw's file set but clawboo neither creates nor reads them, so an
+ * always-on editor for them promises an effect clawboo cannot stand behind.
+ * They stay reachable: the editor still shows any file that already has
+ * content, so a file a Gateway-side process wrote is never hidden.
+ */
+export const AGENT_FILE_RUNTIME_SUPPORT: Readonly<Record<string, readonly AgentFileName[]>> = {
+  openclaw: ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'],
+  'clawboo-native': ['SOUL.md', 'AGENTS.md'],
+  // SOUL.md became real for the coding runtimes when clawboo started injecting
+  // it as a `[Your persona]` block on both prompt paths (personaBlock.ts). That
+  // is also what makes the Personality sliders work here: they merge their text
+  // into SOUL.md on save.
+  'claude-code': ['SOUL.md', 'AGENTS.md'],
+  codex: ['SOUL.md', 'AGENTS.md'],
+  hermes: ['SOUL.md', 'AGENTS.md'],
+}
+
+/** The files worth showing a tab for on `runtime`. Unknown runtime → all. */
+export function agentFilesForRuntime(runtime: string | null | undefined): readonly AgentFileName[] {
+  if (!runtime) return AGENT_FILE_NAMES
+  return AGENT_FILE_RUNTIME_SUPPORT[runtime] ?? AGENT_FILE_NAMES
 }
 
 export const AGENT_FILE_PLACEHOLDERS: Record<AgentFileName, string> = {

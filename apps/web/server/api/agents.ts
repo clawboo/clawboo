@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express'
+import { getScreenshot } from '../lib/screenshotBus'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 import {
   agents,
@@ -14,6 +15,7 @@ import {
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { getDb } from '../lib/db'
+import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
 import { runtimeAgentFileKey } from '../lib/agentSource/runtimeAgentFileStore'
@@ -193,6 +195,11 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
       files: body.files,
       tenantId: getTenantId(req),
     })
+    // A new Boo gets a browser, the way a new hire gets a laptop. Per-agent and
+    // browser-only; see `browserGrants.ts` for why this is not the fleet-wide
+    // grant that was removed. Best-effort: a missing grant costs one panel, and
+    // failing the creation over it would be worse.
+    ensureBrowserGrantsForAgent(getDb(), agent.id)
     // Eagerly materialize the DEFAULT-NATIVE Boo Zero the moment a native team gains a
     // member, so the client identifies the native leader right away instead of the
     // OpenClaw `main` fallback shown in the window before the first orchestrator run
@@ -573,4 +580,48 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
+}
+
+// ─── GET /api/agents/:agentId/screenshot ─────────────────────────────────────
+// The newest frame this agent captured, for the Browser panel. `?meta=1` returns
+// just the descriptor so the panel can decide whether to render at all without
+// pulling megabytes it may not show.
+//
+// Serves out of an in-memory bus, never the event log: the frame's value expires
+// in seconds and the log is append-only with no delete writer.
+/** What a captured frame may be served as. A connector states its own mimeType,
+ *  so this is the only thing standing between it and an HTML document on a
+ *  same-origin URL. */
+const SAFE_FRAME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+
+export function agentScreenshotGET(req: Request, res: Response): void {
+  const agentId = (req.params['agentId'] as string | undefined) ?? ''
+  const shot = getScreenshot(agentId)
+  if (!shot) {
+    res.status(404).json({ ok: false, error: 'no screenshot for this agent' })
+    return
+  }
+  if (req.query['meta'] !== undefined) {
+    res.json({ ok: true, mimeType: shot.mimeType, toolName: shot.toolName, ts: shot.ts })
+    return
+  }
+  let bytes: Buffer
+  try {
+    bytes = Buffer.from(shot.data, 'base64')
+  } catch {
+    res.status(500).json({ ok: false, error: 'frame is not decodable' })
+    return
+  }
+  // ALLOWLIST, never reflect. `mimeType` arrives on an MCP image content block
+  // and is only type-checked as a string on the way in, so a connector could put
+  // `text/html` here and have this same-origin endpoint serve it as a document.
+  // `nosniff` below stops the browser guessing, but it cannot undo a
+  // Content-Type the server itself stated.
+  res.setHeader('Content-Type', SAFE_FRAME_TYPES.has(shot.mimeType) ? shot.mimeType : 'image/png')
+  res.setHeader('Content-Length', String(bytes.length))
+  // The newest frame replaces the last one under the same URL, so a cached copy
+  // would pin the panel to whatever the agent was looking at first.
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.end(bytes)
 }

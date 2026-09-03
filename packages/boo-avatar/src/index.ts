@@ -148,9 +148,15 @@ function renderAccessory(acc: Accessory, tint: string): string {
       )
     case 'hat': {
       const dark = darkenHex(tint, 0.6)
+      // Nothing may be drawn above y=0. The UA rule `svg:not(:root) { overflow:
+      // hidden }` cuts it, and a drop-shadow on the mascot then traces the cut
+      // as a hard straight edge instead of the artwork's outline. That is why
+      // the crown sits at y=0 rather than y=-2, where its `rx` corners fell
+      // entirely inside the cut. Its extra height lands inside the brim, which
+      // is the same fill, so the silhouette keeps its size.
       return (
         `<rect x="30" y="6" width="40" height="8" rx="2" fill="${dark}"/>` +
-        `<rect x="38" y="-2" width="24" height="10" rx="3" fill="${dark}"/>`
+        `<rect x="38" y="0" width="24" height="10" rx="3" fill="${dark}"/>`
       )
     }
     case 'headphones':

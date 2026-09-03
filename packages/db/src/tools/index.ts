@@ -9,10 +9,14 @@ export type {
   ToolCall,
   ToolCallContext,
   ToolDescriptor,
+  ToolExecutorResult,
+  ToolImage,
   ToolOwner,
   ToolProvenance,
   ToolRisk,
 } from './types'
+
+export { toolOutputOf } from './types'
 
 export {
   defaultAvailabilityContext,

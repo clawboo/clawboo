@@ -109,18 +109,21 @@ function toDescriptor(
     executor: async (args) => {
       const session = live.get(connectorInstanceId(def.slug))?.session
       if (!session) return `connector ${def.slug} is not connected`
-      const text = (await session.callTool(tool.name, args)).text
+      const res = await session.callTool(tool.name, args)
       // A REMOTE SERVER CAN FAIL WITH A 200. When it does, the failure is a
       // sentence inside the payload, and returning it as an ordinary result
       // records the call as a success: ten consecutive failed Gmail fetches were
       // all audited `is_error = 0`, so nothing in the activity log said anything
       // had gone wrong while an agent asked for the same permission five times.
-      // Throwing is how this seam reports a failure (the executor contract
-      // returns a string), and the broker catches it and keeps the message, so
-      // the server's own words still reach the model and the audit row.
-      const failure = brokeredFailureMessage(text)
+      // Throwing is how this seam reports a failure, and the broker catches it
+      // and keeps the message, so the server's own words still reach the model
+      // and the audit row.
+      const failure = brokeredFailureMessage(res.text)
       if (failure) throw new Error(failure)
-      return text
+      // Images travel BESIDE the text rather than inside it. `text` still holds
+      // the `[image: …, not rendered]` placeholder, which is what the audit row
+      // stores and what a consumer with no way to render pixels falls back to.
+      return res.images && res.images.length > 0 ? { text: res.text, images: res.images } : res.text
     },
   })
 }
