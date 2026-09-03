@@ -15,6 +15,7 @@ import {
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { getDb } from '../lib/db'
+import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
 import { runtimeAgentFileKey } from '../lib/agentSource/runtimeAgentFileStore'
@@ -194,6 +195,11 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
       files: body.files,
       tenantId: getTenantId(req),
     })
+    // A new Boo gets a browser, the way a new hire gets a laptop. Per-agent and
+    // browser-only; see `browserGrants.ts` for why this is not the fleet-wide
+    // grant that was removed. Best-effort: a missing grant costs one panel, and
+    // failing the creation over it would be worse.
+    ensureBrowserGrantsForAgent(getDb(), agent.id)
     // Eagerly materialize the DEFAULT-NATIVE Boo Zero the moment a native team gains a
     // member, so the client identifies the native leader right away instead of the
     // OpenClaw `main` fallback shown in the window before the first orchestrator run

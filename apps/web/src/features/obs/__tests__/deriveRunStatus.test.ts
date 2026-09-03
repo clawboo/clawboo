@@ -15,7 +15,10 @@ function ev(partial: Partial<ObsLogEvent> & { kind: string }): ObsLogEvent {
   return {
     id: `e${seq}`,
     seq,
-    ts: 1_700_000_000_000 + seq * 1000,
+    // RELATIVE to now, not a fixed epoch. `deriveRunStatus` ignores an
+    // `execution_started` older than STALE_RUN_MS, so a hardcoded 2023 timestamp
+    // would make every one of these fixtures read as a dead run.
+    ts: Date.now() - 60_000 + seq * 1000,
     teamId: null,
     taskId: null,
     agentId: null,
@@ -25,6 +28,51 @@ function ev(partial: Partial<ObsLogEvent> & { kind: string }): ObsLogEvent {
     ...partial,
   }
 }
+
+describe('deriveRunStatus — a start that never completed', () => {
+  const NOW = 1_700_000_000_000
+  const ev = (kind: string, agentId: string, ts: number, data: Record<string, unknown> = {}) => ({
+    id: `e-${ts}`,
+    seq: ts,
+    ts,
+    kind,
+    teamId: null,
+    taskId: null,
+    agentId,
+    runtime: null,
+    traceId: null,
+    data,
+  })
+
+  it('still reports a RECENT unfinished run as running', () => {
+    const events = [ev('execution_started', 'a1', NOW - 60_000)]
+    expect(deriveRunStatus(events, NOW).get('a1')).toBe('running')
+  })
+
+  it('stops reporting an ANCIENT unfinished run as running', () => {
+    // The shipped bug: a start from 7 July, killed with the dev server, still lit
+    // the Boo up on the graph nearly two months later. Nothing writes the
+    // completion for a run whose process died, so without a bound this is forever.
+    const events = [ev('execution_started', 'a1', NOW - 60 * 24 * 60 * 60 * 1000)]
+    expect(deriveRunStatus(events, NOW).has('a1')).toBe(false)
+  })
+
+  it('leaves the agent ALONE rather than forcing it idle', () => {
+    // Evidence-only, same rule as an agent the window says nothing about: a stale
+    // start is evidence of nothing, and forcing idle would clobber a chat run.
+    const events = [ev('execution_started', 'a1', NOW - 60 * 24 * 60 * 60 * 1000)]
+    const out = deriveRunStatus(events, NOW)
+    expect(out.get('a1')).toBeUndefined()
+  })
+
+  it('a completion still lands however old the start was', () => {
+    const events = [
+      ev('execution_started', 'a1', NOW - 60 * 24 * 60 * 60 * 1000),
+      ev('execution_completed', 'a1', NOW - 60 * 24 * 60 * 60 * 1000 + 1000, { status: 'ok' }),
+    ]
+    expect(deriveRunStatus(events, NOW).get('a1')).toBe('idle')
+  })
+})
 
 describe('deriveRunStatus', () => {
   it('reports an agent running from execution_started', () => {

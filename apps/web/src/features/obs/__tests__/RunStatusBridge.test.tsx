@@ -45,7 +45,9 @@ function ev(kind: string, agentId: string, data: Record<string, unknown> = {}): 
   return {
     id: `e${seq}`,
     seq,
-    ts: 1_000_000 + seq,
+    // RELATIVE to now: `deriveRunStatus` ignores an `execution_started` older
+    // than STALE_RUN_MS, and a 1970 timestamp reads as a run that died long ago.
+    ts: Date.now() - 60_000 + seq,
     kind,
     teamId: null,
     taskId: 't1',

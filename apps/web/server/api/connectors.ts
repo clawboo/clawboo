@@ -19,6 +19,7 @@ import {
   setConnectorConfigBody,
   type ClawbooDb,
   listConnectors,
+  getConnector,
 } from '@clawboo/db'
 import {
   CONNECT_REFUSAL_COPY,
@@ -30,6 +31,7 @@ import {
   launchArgsSatisfied,
   resolveLaunchArgs,
   type ConnectorDefinition,
+  connectorsByCategory,
 } from '@clawboo/connector-catalog'
 import { readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -598,6 +600,47 @@ export function connectorsPathSuggestionsGET(req: Request, res: Response): void 
  * the rest, and a failure is left to the ordinary health path rather than
  * retried in a loop nobody asked for.
  */
+/**
+ * Bring the browsers up on a machine that has never had one.
+ *
+ * An agent that cannot open a page cannot show you what it is doing, and every
+ * agent is granted the browser connectors already, so a fresh install that has
+ * to be told to connect one is a grant pointing at nothing.
+ *
+ * BOTH browsers, and neither needs anything opened first. `chrome-devtools-mcp`
+ * LAUNCHES its own Chrome by default, into its own profile under
+ * `$HOME/.cache/chrome-devtools-mcp`; attaching to an already-running instance is
+ * the opt-in path (`--autoConnect`, `--browserUrl`, `--wsEndpoint`), not the
+ * default. Connecting only starts the MCP server, and Chrome itself is launched
+ * lazily on the first tool call, so nothing appears on screen at boot.
+ *
+ * ONLY WHEN NO DECISION EXISTS. A connectors row means a person has already
+ * chosen: `desiredState: 'connected'` is restored by the sweep below, and
+ * `'disconnected'` is a deliberate Disconnect that must stay disconnected. This
+ * tests for the ROW, not its state, so it cannot undo either.
+ */
+export async function ensureBrowserConnectedAtBoot(db: ClawbooDb): Promise<number> {
+  let started = 0
+  for (const def of connectorsByCategory('browser')) {
+    if (getConnector(db, connectorInstanceId(def.slug))) continue
+    try {
+      await connectConnector(
+        db,
+        toConnectable(def, resolveLaunchArgs(def, getConnectorArgument(db, def.slug) ?? undefined)),
+        // Same reasoning as the restore: nobody is watching this one, so the
+        // grant pins are left alone rather than re-consented to on the
+        // operator's behalf.
+        { restoring: true },
+      )
+      started += 1
+    } catch {
+      // A browser that will not start is a degraded panel, not a failed boot.
+      // The shelf reports it as disconnected, which is the truth.
+    }
+  }
+  return started
+}
+
 export async function restoreConnectorsAtBoot(db: ClawbooDb): Promise<number> {
   let restored = 0
   for (const row of listConnectors(db)) {

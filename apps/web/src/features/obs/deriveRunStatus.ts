@@ -21,6 +21,16 @@ import type { AgentStatus } from '@clawboo/gateway-client'
 
 import type { ObsLogEvent } from './useObsStream'
 
+/**
+ * How long an `execution_started` may stand alone before it stops meaning
+ * "running".
+ *
+ * Generous on purpose: a long agent run is normal and must not be declared dead
+ * underneath itself. This only has to be shorter than "forever", which is what
+ * it was.
+ */
+export const STALE_RUN_MS = 6 * 60 * 60 * 1000
+
 /** Terminal `execution_completed.status` values that should read as a failure. */
 const FAILED = new Set(['failed', 'error', 'errored', 'crashed'])
 
@@ -31,11 +41,21 @@ const FAILED = new Set(['failed', 'error', 'errored', 'crashed'])
  * it reverses the newest-first backfill and appends the live tail. Only agents
  * with an execution event in the window appear in the result.
  */
-export function deriveRunStatus(events: readonly ObsLogEvent[]): Map<string, AgentStatus> {
+export function deriveRunStatus(
+  events: readonly ObsLogEvent[],
+  now: number = Date.now(),
+): Map<string, AgentStatus> {
   const out = new Map<string, AgentStatus>()
   for (const e of events) {
     if (!e.agentId) continue
     if (e.kind === 'execution_started') {
+      // A start with no completion means the run is in flight OR the process
+      // died holding it. Nothing ever writes the completion for a killed run, so
+      // without an age bound the agent reads as running forever: a start from
+      // two months ago was still lighting Boos up on the graph. Past the bound
+      // the event is evidence of nothing, so the agent is left alone rather than
+      // forced to idle, which is the same evidence-only rule as above.
+      if (now - e.ts > STALE_RUN_MS) continue
       out.set(e.agentId, 'running')
       continue
     }
