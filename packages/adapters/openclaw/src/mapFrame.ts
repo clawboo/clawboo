@@ -29,6 +29,43 @@ export function isTerminalFrame(frame: EventFrame): boolean {
  * optional `accumulatedText` used to give an aborted run a non-empty summary
  * (the Gateway drops streamed text on abort).
  */
+/** Bytes of a tool result worth keeping. Comfortably above the largest row the
+ *  event log has ever held, far below what one `exec` can produce. */
+const TOOL_PAYLOAD_MAX = 4000
+
+/**
+ * A tool result, shrunk to something an event log can hold.
+ *
+ * REQUIRED at this boundary rather than downstream. `appendEvent` scrubs secrets
+ * but applies no length cap, and a tool result is arbitrary: a file read, a
+ * directory listing, the whole of a page. The largest row the log has ever held
+ * is about 3KB, and one unbounded `exec` result would dwarf every row before it
+ * in a table that has no prune path.
+ *
+ * The cap is honest about itself. A silently shortened result reads as a tool
+ * that returned little, so the suffix says what happened and how much is missing.
+ */
+function capToolPayload(value: unknown): string {
+  const text =
+    typeof value === 'string'
+      ? value
+      : value === null || value === undefined
+        ? ''
+        : safeStringify(value)
+  if (text.length <= TOOL_PAYLOAD_MAX) return text
+  const dropped = text.length - TOOL_PAYLOAD_MAX
+  return `${text.slice(0, TOOL_PAYLOAD_MAX)}\n... [${dropped} more characters not recorded]`
+}
+
+/** Never throws on a cyclic or exotic payload: this runs inside an event handler. */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
 export function mapFrameToRuntimeEvents(
   frame: EventFrame,
   ctx: MapContext,
@@ -131,6 +168,51 @@ export function mapFrameToRuntimeEvents(
           fatal: true,
         })
       }
+      return events
+    }
+
+    // ── Tool calls ────────────────────────────────────────────────────────
+    //
+    // The stream that makes an OpenClaw agent's work visible at all. Every other
+    // branch here carries what the agent SAID; this one carries what it DID, and
+    // without it a Boo that spent ten minutes running commands showed up in
+    // clawboo as a paragraph of prose and nothing else.
+    //
+    // These frames only arrive because the connection declared the `tool-events`
+    // capability (see the AgentSource registry). They are addressed to the
+    // connection that STARTED the run, which is what keeps them from arriving
+    // twice: the Gateway's other tool sink explicitly excludes the recipients of
+    // this one.
+    if (stream === 'tool') {
+      const phase = typeof data['phase'] === 'string' ? data['phase'] : ''
+      const toolCallId = typeof data['toolCallId'] === 'string' ? data['toolCallId'] : ''
+      const name = typeof data['name'] === 'string' ? data['name'] : ''
+      // Both required. A frame without them cannot be paired into a call and a
+      // result, and a half-identified tool call in the feed is worse than none.
+      if (!toolCallId || !name) return events
+
+      if (phase === 'start') {
+        events.push({
+          ...base(),
+          kind: 'tool-call',
+          toolCallId,
+          name,
+          input: data['args'] ?? null,
+          partial: false,
+        })
+      } else if (phase === 'result') {
+        events.push({
+          ...base(),
+          kind: 'tool-result',
+          toolCallId,
+          name,
+          output: capToolPayload(data['result']),
+          isError: data['isError'] === true,
+        })
+      }
+      // `update` carries partialResult and is dropped on purpose. It is the bulk
+      // of the volume, and the activity feed logs only settled calls anyway, so
+      // keeping it would grow the event log to show something nothing reads.
       return events
     }
 

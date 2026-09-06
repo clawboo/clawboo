@@ -281,3 +281,150 @@ describe('OpenClawAdapter chat.send verification', () => {
     expect(run.runId).toBeNull()
   })
 })
+
+// ─── The tool stream ─────────────────────────────────────────────────────────
+//
+// The branch that makes an OpenClaw agent's work visible. Thirteen of twenty two
+// live agents run on that runtime, and until this existed their tool calls
+// reached clawboo as nothing at all: the activity feed showed the prose a Boo
+// wrote and no trace of the commands it ran.
+//
+// These frames arrive on event 'agent' with stream 'tool', which is a DIFFERENT
+// shape from the tool blocks the chat branch above looks for. That distinction is
+// the whole reason this suite exists: the chat-branch mapping was written against
+// a frame the Gateway does not emit, so it passed its own test and mapped nothing
+// in production.
+
+describe('mapFrameToRuntimeEvents: the tool stream', () => {
+  const ctx = { runId: RUN, sessionId: SK }
+  const seq = () => {
+    let s = 0
+    return () => (s += 1)
+  }
+
+  const toolFrame = (data: Record<string, unknown>): EventFrame => ({
+    type: 'event',
+    event: 'agent',
+    payload: { runId: RUN, sessionKey: SK, stream: 'tool', data },
+  })
+
+  it('maps a start phase to a tool-call, carrying the arguments', () => {
+    const evs = mapFrameToRuntimeEvents(
+      toolFrame({
+        phase: 'start',
+        name: 'exec',
+        toolCallId: 'tc-1',
+        args: { command: 'open https://example.com' },
+      }),
+      ctx,
+      seq(),
+      () => 1,
+    )
+
+    expect(evs).toHaveLength(1)
+    expect(evs[0]).toMatchObject({
+      kind: 'tool-call',
+      name: 'exec',
+      toolCallId: 'tc-1',
+      partial: false,
+      input: { command: 'open https://example.com' },
+    })
+  })
+
+  it('maps a result phase to a tool-result, and carries the failure flag', () => {
+    const ok = mapFrameToRuntimeEvents(
+      toolFrame({ phase: 'result', name: 'exec', toolCallId: 'tc-1', result: 'done' }),
+      ctx,
+      seq(),
+      () => 1,
+    )
+    expect(ok[0]).toMatchObject({ kind: 'tool-result', toolCallId: 'tc-1', isError: false })
+
+    const bad = mapFrameToRuntimeEvents(
+      toolFrame({
+        phase: 'result',
+        name: 'exec',
+        toolCallId: 'tc-1',
+        result: 'boom',
+        isError: true,
+      }),
+      ctx,
+      seq(),
+      () => 1,
+    )
+    expect(bad[0]).toMatchObject({ kind: 'tool-result', isError: true })
+  })
+
+  it('DROPS the update phase, which is the volume', () => {
+    // partialResult streams while a long command runs. The activity feed logs
+    // only settled calls, so keeping these would grow an append-only table with
+    // no prune path to show something nothing reads.
+    const evs = mapFrameToRuntimeEvents(
+      toolFrame({ phase: 'update', name: 'exec', toolCallId: 'tc-1', partialResult: 'working' }),
+      ctx,
+      seq(),
+      () => 1,
+    )
+    expect(evs).toHaveLength(0)
+  })
+
+  it('refuses a frame it cannot identify, rather than logging half a call', () => {
+    // Without both an id and a name the call cannot be paired with its result,
+    // and an unattributable row in the feed is worse than no row.
+    for (const data of [
+      { phase: 'start', name: 'exec' },
+      { phase: 'start', toolCallId: 'tc-1' },
+      { phase: 'start', name: '', toolCallId: 'tc-1' },
+    ]) {
+      expect(mapFrameToRuntimeEvents(toolFrame(data), ctx, seq(), () => 1)).toHaveLength(0)
+    }
+  })
+
+  it('caps a huge result, and says how much it dropped', () => {
+    // `appendEvent` scrubs secrets but never truncates, and one directory listing
+    // would dwarf every row before it in the log.
+    const huge = 'x'.repeat(50_000)
+    const evs = mapFrameToRuntimeEvents(
+      toolFrame({ phase: 'result', name: 'exec', toolCallId: 'tc-1', result: huge }),
+      ctx,
+      seq(),
+      () => 1,
+    )
+
+    const out = (evs[0] as { output: string }).output
+    expect(out.length).toBeLessThan(5_000)
+    // Honest about itself: a silently shortened result reads as a tool that
+    // returned almost nothing.
+    expect(out).toContain('more characters not recorded')
+  })
+
+  it('stringifies a structured result instead of dropping it', () => {
+    const evs = mapFrameToRuntimeEvents(
+      toolFrame({
+        phase: 'result',
+        name: 'list',
+        toolCallId: 'tc-2',
+        result: { files: ['a', 'b'] },
+      }),
+      ctx,
+      seq(),
+      () => 1,
+    )
+    expect((evs[0] as { output: string }).output).toContain('files')
+  })
+
+  it('survives a cyclic result without throwing', () => {
+    // This runs inside a websocket event handler. A throw here would take the
+    // Gateway connection down and stop the whole fleet reporting.
+    const cyclic: Record<string, unknown> = { name: 'loop' }
+    cyclic['self'] = cyclic
+    expect(() =>
+      mapFrameToRuntimeEvents(
+        toolFrame({ phase: 'result', name: 'x', toolCallId: 'tc-3', result: cyclic }),
+        ctx,
+        seq(),
+        () => 1,
+      ),
+    ).not.toThrow()
+  })
+})

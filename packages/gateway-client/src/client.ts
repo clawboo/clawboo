@@ -347,7 +347,7 @@ export class GatewayClient {
       role,
       scopes,
       device,
-      caps: [],
+      caps: opts.caps ?? [],
       auth,
     }
 

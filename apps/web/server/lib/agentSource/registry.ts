@@ -92,6 +92,26 @@ class ServerAgentRegistry {
           // identity (signConnect below) + the gateway token.
           clientName: 'cli',
           mode: 'webchat',
+          // WHY THE FLEET'S TOOL CALLS ARE VISIBLE AT ALL.
+          //
+          // An OpenClaw agent runs in its own process and clawboo sees none of
+          // its tool calls by default, which left thirteen of twenty two agents
+          // doing invisible work. The Gateway does emit those frames, but it
+          // addresses them to connections that DECLARED this capability: it
+          // registers a tool-event recipient per run only when the connect frame
+          // carried `tool-events`. We sent `caps: []`, so that channel was shut
+          // and no amount of subscribing would have opened it.
+          //
+          // Declared HERE and nowhere else. This is the single long-lived
+          // operator connection every OpenClaw run is driven through, so one
+          // declaration covers the fleet; putting it in the client default would
+          // also pull full tool arguments across every browser socket, which has
+          // no reader.
+          //
+          // The literal is undefined in OpenClaw's shipped docs, so an upgrade
+          // must re-check it against the Gateway's own constant rather than
+          // assuming it survived.
+          caps: ['tool-events'],
           token: s.gatewayToken?.trim() || undefined,
           // The browser device path needs crypto.subtle + localStorage (absent in
           // Node); we sign with the proxy identity instead. Both flags set on
