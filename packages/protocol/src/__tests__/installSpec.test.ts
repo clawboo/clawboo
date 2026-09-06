@@ -97,8 +97,19 @@ describe('withBrowsingGuidance', () => {
 
   it('tells the agent what to use, not only what to avoid', () => {
     // An instruction that only forbids leaves the agent with no route, and it
-    // will find its own.
-    expect(BROWSING_GUIDANCE).toContain('browser')
+    // will find its own. That route is the shell.
     expect(BROWSING_GUIDANCE).toContain('exec')
+  })
+
+  it('names a tool the agent ACTUALLY HAS', () => {
+    // The correction this assertion exists for. An earlier draft said "use your
+    // browser tool", and a live test found OpenClaw agents have no browser tool:
+    // the Gateway registers it only when a dedicated browser profile and its
+    // control service are configured. Naming a missing tool fails exactly like
+    // naming none, because the agent falls back to the shell.
+    //
+    // `web_fetch` is in every OpenClaw agent's toolset and is what they already
+    // reach for when asked to read a page.
+    expect(BROWSING_GUIDANCE).toContain('web_fetch')
   })
 })

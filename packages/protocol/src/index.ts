@@ -44,9 +44,16 @@ export const BROWSING_GUIDANCE_HEADING = '## Opening web pages'
  * An agent on an external runtime carries its own shell, and reaching for it is
  * the shortest path to a web page. That path uses the operator's REAL default
  * browser and their signed-in profile, which is not the agent's to act in, and
- * clawboo cannot show it either. The agent's own browser tool opens a separate
- * browser instead, and its default profile is already held away from the
- * operator's.
+ * clawboo cannot show it either.
+ *
+ * NAMES THE TOOL THE AGENT ACTUALLY HAS. An earlier draft said "use your browser
+ * tool", and a live test found that OpenClaw agents here have no browser tool at
+ * all: the Gateway registers it only when a dedicated browser profile and its
+ * control service are configured. Guidance pointing at a missing tool is the
+ * same failure as no guidance, because the agent falls back to the shell, which
+ * is the one path this exists to close. `web_fetch` is what they have and what
+ * they already reach for; the browser line is written to stay correct if a
+ * browser tool is later enabled.
  *
  * ADVISORY, and the wording does not pretend otherwise. Nothing here prevents a
  * shell call; it makes the safe path the obvious one and says why, which is the
@@ -55,16 +62,22 @@ export const BROWSING_GUIDANCE_HEADING = '## Opening web pages'
  */
 export const BROWSING_GUIDANCE = `${BROWSING_GUIDANCE_HEADING}
 
-When you need a web page, use your **browser** tool. Do not shell out to open
-pages (no \`open\`, \`xdg-open\`, \`start\`, or launching a browser binary from
-\`exec\`).
+To READ a web page, use \`web_fetch\`. It returns the page content and is the
+right tool for looking something up.
 
-Your browser tool opens a separate browser that is kept away from the operator's
-own signed-in one. Opening a page from the command line uses the operator's real
-default browser and their personal profile, which is not yours to act in.
+If you have a browser tool, use it for anything a fetch cannot do: clicking,
+typing, or seeing a page as it renders.
 
-Never pass \`profile: "user"\` unless the operator asked for it in the current
-conversation. That profile is their real browser, with their sessions.
+Never use \`exec\` to open a page. No \`open\`, \`xdg-open\`, \`start\`, and no
+launching a browser binary. That opens the operator's real default browser with
+their personal signed-in profile, which is not yours to act in, and it happens
+where clawboo cannot see it.
+
+If a task genuinely needs a browser and you have no browser tool, say so and
+stop. Do not reach for the shell instead.
+
+Never pass \`profile: "user"\` to a browser tool unless the operator asked for it
+in this conversation. That profile is their real browser, with their sessions.
 `
 
 /**
