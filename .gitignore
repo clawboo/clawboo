@@ -38,3 +38,6 @@ website/.astro/
 # artifact, never a source file.
 *.tgz
 
+
+# Playwright MCP page snapshots, written by the browser connector at runtime
+.playwright-mcp/
