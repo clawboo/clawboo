@@ -32,6 +32,27 @@ const SYSTEM_EVENT_BLOCK_RE = /^System:\s*\[[^\]]+\][\s\S]*?\n\s*\n/
 
 // ─── WeakMap caches (module-level, not exported) ──────────────────────────────
 
+/**
+ * The npm spec clawboo installs the OpenClaw Gateway with.
+ *
+ * TILDE, NOT CARET, and that is the whole point of this constant existing.
+ * `^2026.5` means "any 2026.x", because caret only pins the leftmost non-zero
+ * digit, so it shipped 2026.9.1 to every new user while the comment beside it
+ * claimed it held them on 2026.5. Four things break on that version: agent
+ * creation, the capability toggles, chat sends and approvals. `~2026.5` is what
+ * "the 2026.5 line" actually spells.
+ *
+ * It lives in @clawboo/protocol because the server spawns the install and the
+ * onboarding UI prints the same command for people who need to run it by hand.
+ * Those three copies drifted once already; one exported string is what stops it
+ * happening again. Widen this only alongside a clawboo that has been tested
+ * against the newer Gateway.
+ */
+export const OPENCLAW_INSTALL_SPEC = 'openclaw@~2026.5'
+
+/** The manual fallback, for a machine whose global installs need sudo. */
+export const OPENCLAW_INSTALL_COMMAND_SUDO = `sudo npm install -g ${OPENCLAW_INSTALL_SPEC}`
+
 export interface ToolCall {
   id?: string
   name: string
