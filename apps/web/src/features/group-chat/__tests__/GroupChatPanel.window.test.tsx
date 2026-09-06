@@ -18,7 +18,6 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 
 import { RENDER_WINDOW_INITIAL } from '@/features/chat/chatComponents'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
-import { FIRST_TASK_FLAG } from '@/lib/oneTimeFlag'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
@@ -82,7 +81,6 @@ function userEntry(i: number): TranscriptEntry {
  */
 function seedTeam(entryCount: number, stream?: { text: string; startedAt: number }): void {
   // Opt out of the one-time guided-first-task prefill.
-  localStorage.setItem(FIRST_TASK_FLAG, '1')
   useTeamStore.setState({ teams: [TEAM], selectedTeamId: 't1' })
   useFleetStore.setState({ agents: [agent('a1', 'Team Lead')], selectedAgentId: null })
   useConnectionStore.setState({ status: 'connected', client: null, gatewayUrl: '' })

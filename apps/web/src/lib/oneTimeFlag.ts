@@ -6,7 +6,6 @@
  * use them without importing the wizard module).
  */
 
-export const FIRST_TASK_FLAG = 'clawboo.firstTask.shown'
 export const CAPABILITY_TOUR_FLAG = 'clawboo.tour.shown'
 
 export function hasSeenFlag(key: string): boolean {
