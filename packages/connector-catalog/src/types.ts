@@ -127,6 +127,24 @@ export interface ConnectorStdioLaunch {
    * already run and already read the child environment. Pin, or do not ship.
    */
   pinnedVersion: string
+  /**
+   * The CLI flag this server takes for an on-disk browser profile, if giving
+   * each agent its own is meaningful for it.
+   *
+   * Declared HERE rather than decided in the supervisor, because the supervisor
+   * has no notion of a category: `ConnectableDefinition` carries only what is
+   * needed to spawn, and nothing in it could distinguish a browser from a
+   * filesystem server. Putting the flag beside the launch line makes per-agent
+   * isolation a property of the connector definition, so a community or custom
+   * entry cannot acquire it by accident.
+   *
+   * Deliberately NOT part of the hashed spec: `specDigest` covers transport,
+   * command and args, and a profile directory is clawboo's own isolation
+   * mechanism rather than something the operator chose. Hashing it would give
+   * every agent a different specHash for one row under UNIQUE(slug), and every
+   * other agent's pin would then read as drift.
+   */
+  perAgentProfileFlag?: string
 }
 
 export interface ConnectorHttpLaunch {

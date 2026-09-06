@@ -8,7 +8,7 @@
 import { z } from 'zod'
 
 import { isBrokeredReadOnlyMetaTool } from './brokeredApp'
-import type { ToolDescriptor, ToolExecutorResult, ToolRisk } from './types'
+import type { ToolCallContext, ToolDescriptor, ToolExecutorResult, ToolRisk } from './types'
 
 /** The shape an MCP `tools/list` entry arrives in. */
 export interface RemoteToolFacts {
@@ -39,10 +39,22 @@ export interface ConnectorDescriptorOptions {
   trustAnnotations: boolean
   /** The connector's declared exfiltration legs, from the CATALOG. */
   trifecta: { readsPrivateData: boolean; ingestsUntrustedContent: boolean; canEgress: boolean }
-  /** Proxies the call to the live session. May return the object form when the
-   *  tool produced images, so a screenshot reaches the model instead of being
-   *  described to it. */
-  executor: (args: Record<string, unknown>) => Promise<ToolExecutorResult> | ToolExecutorResult
+  /**
+   * Proxies the call to the live session. May return the object form when the
+   * tool produced images, so a screenshot reaches the model instead of being
+   * described to it.
+   *
+   * Takes the CALL CONTEXT as well as the args, which is what lets a connector
+   * pick a session per caller rather than serving everyone from one. The broker
+   * has always passed it (`descriptor.executor(effectiveArgs, ctx)`); this
+   * wrapper used to drop it on the floor, so a browser connector had no way to
+   * know which agent was asking and every agent shared one browser. Widening
+   * only: an implementation that ignores the second argument is unaffected.
+   */
+  executor: (
+    args: Record<string, unknown>,
+    ctx: ToolCallContext,
+  ) => Promise<ToolExecutorResult> | ToolExecutorResult
 }
 
 export function buildConnectorDescriptor(
@@ -78,6 +90,6 @@ export function buildConnectorDescriptor(
     ...(destructive ? { destructive: true } : {}),
     trifecta: opts.trifecta,
     risk,
-    executor: (args) => opts.executor(args),
+    executor: (args, ctx) => opts.executor(args, ctx),
   }
 }

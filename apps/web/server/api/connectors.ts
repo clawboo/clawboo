@@ -366,6 +366,11 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
       // Already resolved: a user-supplied path has been substituted or appended.
       args,
       pinnedVersion: def.launch.pinnedVersion,
+      // Spread conditionally so the object's shape is unchanged for every
+      // connector that does not declare one.
+      ...(def.launch.perAgentProfileFlag
+        ? { perAgentProfileFlag: def.launch.perAgentProfileFlag }
+        : {}),
     },
     egressAllow: def.egressAllow,
     trifecta: def.trifecta,
