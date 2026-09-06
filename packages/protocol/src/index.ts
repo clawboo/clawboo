@@ -33,6 +33,56 @@ const SYSTEM_EVENT_BLOCK_RE = /^System:\s*\[[^\]]+\][\s\S]*?\n\s*\n/
 // ─── WeakMap caches (module-level, not exported) ──────────────────────────────
 
 /**
+ * The heading the browsing guidance is filed under, and the marker that makes
+ * adding it idempotent.
+ */
+export const BROWSING_GUIDANCE_HEADING = '## Opening web pages'
+
+/**
+ * What every externally-run agent is told about opening web pages.
+ *
+ * An agent on an external runtime carries its own shell, and reaching for it is
+ * the shortest path to a web page. That path uses the operator's REAL default
+ * browser and their signed-in profile, which is not the agent's to act in, and
+ * clawboo cannot show it either. The agent's own browser tool opens a separate
+ * browser instead, and its default profile is already held away from the
+ * operator's.
+ *
+ * ADVISORY, and the wording does not pretend otherwise. Nothing here prevents a
+ * shell call; it makes the safe path the obvious one and says why, which is the
+ * most an instruction can do. The enforcement question is separate and is a
+ * decision about the agent's command line, not about this text.
+ */
+export const BROWSING_GUIDANCE = `${BROWSING_GUIDANCE_HEADING}
+
+When you need a web page, use your **browser** tool. Do not shell out to open
+pages (no \`open\`, \`xdg-open\`, \`start\`, or launching a browser binary from
+\`exec\`).
+
+Your browser tool opens a separate browser that is kept away from the operator's
+own signed-in one. Opening a page from the command line uses the operator's real
+default browser and their personal profile, which is not yours to act in.
+
+Never pass \`profile: "user"\` unless the operator asked for it in the current
+conversation. That profile is their real browser, with their sessions.
+`
+
+/**
+ * Add the browsing guidance to an agent instruction file, once.
+ *
+ * APPENDS, and that is the whole contract. These files carry the operator's own
+ * words: a pack's instructions, a persona someone wrote by hand. Replacing them
+ * to deliver one paragraph would destroy the thing the file exists for. Returns
+ * the input unchanged when the guidance is already present, so a resync or a
+ * repeated create cannot stack copies.
+ */
+export function withBrowsingGuidance(existing: string | undefined | null): string {
+  const current = (existing ?? '').trim()
+  if (current.includes(BROWSING_GUIDANCE_HEADING)) return existing ?? ''
+  return current ? `${current}\n\n${BROWSING_GUIDANCE}` : BROWSING_GUIDANCE
+}
+
+/**
  * The npm spec clawboo installs the OpenClaw Gateway with.
  *
  * TILDE, NOT CARET, and that is the whole point of this constant existing.

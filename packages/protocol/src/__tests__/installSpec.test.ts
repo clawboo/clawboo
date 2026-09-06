@@ -13,7 +13,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { OPENCLAW_INSTALL_COMMAND_SUDO, OPENCLAW_INSTALL_SPEC } from '../index'
+import {
+  BROWSING_GUIDANCE,
+  BROWSING_GUIDANCE_HEADING,
+  OPENCLAW_INSTALL_COMMAND_SUDO,
+  OPENCLAW_INSTALL_SPEC,
+  withBrowsingGuidance,
+} from '../index'
 
 describe('OPENCLAW_INSTALL_SPEC', () => {
   it('is NEVER a caret range', () => {
@@ -48,5 +54,51 @@ describe('OPENCLAW_INSTALL_COMMAND_SUDO', () => {
 
   it('is a runnable global install command', () => {
     expect(OPENCLAW_INSTALL_COMMAND_SUDO).toBe(`sudo npm install -g ${OPENCLAW_INSTALL_SPEC}`)
+  })
+})
+
+// ─── Browsing guidance ───────────────────────────────────────────────────────
+//
+// An externally-run agent carries its own shell, and shelling out to open a page
+// uses the operator's REAL browser and their signed-in profile. The guidance
+// points agents at their own browser tool instead. It is advisory, so what these
+// tests protect is not that it works, but that it is DELIVERED and delivered
+// once, without eating the operator's own instructions on the way in.
+
+describe('withBrowsingGuidance', () => {
+  it('adds the guidance to a file that has none', () => {
+    const out = withBrowsingGuidance('# My agent\n\nDo the thing.')
+    expect(out).toContain(BROWSING_GUIDANCE_HEADING)
+    // The operator's words survive. This file is theirs; the guidance is a guest.
+    expect(out).toContain('Do the thing.')
+  })
+
+  it('writes the guidance even when the file is empty or missing', () => {
+    // The creation path skips a file with no content, so an agent created with no
+    // AGENTS.md would silently never receive this.
+    for (const empty of [undefined, null, '', '   \n']) {
+      expect(withBrowsingGuidance(empty)).toContain(BROWSING_GUIDANCE_HEADING)
+    }
+  })
+
+  it('does NOT stack copies when applied twice', () => {
+    // A resync or a repeated create must not append it again.
+    const once = withBrowsingGuidance('# Mine')
+    const twice = withBrowsingGuidance(once)
+    expect(twice).toBe(once)
+    expect(twice.split(BROWSING_GUIDANCE_HEADING)).toHaveLength(2)
+  })
+
+  it("names the profile that reaches the operator's real browser", () => {
+    // The load-bearing line. The other two are hygiene; this one is the reason
+    // the guidance exists, and a reworded version that drops it has lost the point.
+    expect(BROWSING_GUIDANCE).toContain('profile: "user"')
+  })
+
+  it('tells the agent what to use, not only what to avoid', () => {
+    // An instruction that only forbids leaves the agent with no route, and it
+    // will find its own.
+    expect(BROWSING_GUIDANCE).toContain('browser')
+    expect(BROWSING_GUIDANCE).toContain('exec')
   })
 })
