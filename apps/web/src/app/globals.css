@@ -216,6 +216,10 @@
      deep black. Multi-layer for natural depth perception. */
   --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.02);
   --shadow-floating: 0 4px 12px rgb(15 23 42 / 0.08), 0 8px 24px rgb(15 23 42 / 0.06);
+  /* The floating tier's edge and shadow, re-expressed as a FILTER so it can
+     wrap a shape that is not a box. See `.chooser-union`. */
+  --shadow-floating-drop: drop-shadow(0 0 0.5px rgb(15 23 42 / 0.14))
+    drop-shadow(0 4px 10px rgb(15 23 42 / 0.09)) drop-shadow(0 8px 22px rgb(15 23 42 / 0.06));
   --shadow-overlay: 0 12px 32px rgb(15 23 42 / 0.16), 0 24px 64px rgb(15 23 42 / 0.12);
 
   /* Cast shadow for the Boo mascots on the graph canvas. A `filter` chain, not
@@ -355,6 +359,8 @@
      close to current production values. */
   --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.25), 0 1px 1px rgb(0 0 0 / 0.15);
   --shadow-floating: 0 8px 24px rgb(0 0 0 / 0.5), 0 4px 8px rgb(0 0 0 / 0.3);
+  --shadow-floating-drop: drop-shadow(0 0 0.5px rgb(255 255 255 / 0.12))
+    drop-shadow(0 8px 20px rgb(0 0 0 / 0.5)) drop-shadow(0 4px 8px rgb(0 0 0 / 0.3));
   --shadow-overlay: 0 24px 80px rgb(0 0 0 / 0.6), 0 12px 32px rgb(0 0 0 / 0.4);
 
   /* Deeper and blacker: a 0.13-alpha slate shadow is invisible on the dark
@@ -461,6 +467,93 @@ samp {
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--border-floating);
   box-shadow: var(--shadow-floating);
+}
+
+/* The browser dock's chooser: a team bar joined to the agent row it opens onto.
+   TWO shapes, not one card. Each row is sized to its own contents, so no box can
+   enclose both without sizing to the wider one and padding the other out with
+   dead margin either side. The edge and shadow therefore cannot come from a box
+   at all.
+
+   `drop-shadow` traces the ALPHA of what is painted rather than the border box,
+   so a chain of them outlines the UNION of the two rows as one continuous edge,
+   whatever their relative widths. The hairline is FIRST: filter lists are
+   sequential, so the soft shadows then trace the hairline-expanded silhouette
+   instead of drawing beside it.
+
+   `backdrop-filter` is deliberately absent. It resolves against the nearest
+   filtered ancestor, so a blur on these children would sample this element's own
+   filtered output rather than the canvas behind it. The rows use the opaque
+   `--surface` instead, which is also what lets the raised tab read as solid
+   white where it bleeds across the seam. */
+.chooser-union {
+  filter: var(--shadow-floating-drop);
+  /* Clips the fillets below when the two rows come out the SAME width. There are
+     no shoulders to round then, and an unclipped fillet would hang off the side
+     of a shape that has no step in it. The column is already exactly as wide as
+     the wider row, so the clip needs no measuring: it lands precisely where the
+     shoulders stop existing. The shadow is a filter and is generated from the
+     clipped result, so it is not clipped with it. */
+  overflow: hidden;
+}
+
+/* The inside corner, where the bar's side runs into the row's top edge.
+   Two rectangles meeting at right angles leave that corner sharp however round
+   their own corners are, and it is the one corner a person reads as the join.
+   These two boxes sit just outside the bar at exactly that height and fill the
+   nook with a CONCAVE quarter-circle, so the side flares out into the row's
+   surface instead of stopping against it.
+   The mask is what makes it concave: transparent INSIDE the circle, painted
+   outside, which is the opposite of a border-radius. */
+.chooser-bar::before,
+.chooser-bar::after {
+  content: '';
+  position: absolute;
+  /* A pixel INTO the bar and into the row along the two inner edges.
+     Flush, those edges land on fractional device pixels, antialias to partial
+     alpha, and the hairline in --shadow-floating-drop traces them: a faint
+     vertical line down the bar's side and a horizontal one along the row's top,
+     meeting at the very corner this element exists to remove. Overlapping leaves
+     no boundary to trace. */
+  bottom: calc(var(--chooser-seam) - 1px);
+  width: calc(var(--chooser-fillet) + 1px);
+  height: calc(var(--chooser-fillet) + 1px);
+  background: var(--surface);
+  pointer-events: none;
+}
+/* The circle's radius is stated OUTRIGHT. Left implicit it resolves to
+   `farthest-corner`, which in a square box is the diagonal — half again the size
+   of the box — so the cut swallows the whole fillet and nothing paints. */
+.chooser-bar::before {
+  left: calc(-1 * var(--chooser-fillet));
+  -webkit-mask: radial-gradient(circle var(--chooser-fillet) at 0 0, transparent 99%, #000 100%);
+  mask: radial-gradient(circle var(--chooser-fillet) at 0 0, transparent 99%, #000 100%);
+}
+.chooser-bar::after {
+  right: calc(-1 * var(--chooser-fillet));
+  -webkit-mask: radial-gradient(
+    circle var(--chooser-fillet) at calc(100% - 1px) 0,
+    transparent 99%,
+    #000 100%
+  );
+  mask: radial-gradient(
+    circle var(--chooser-fillet) at calc(100% - 1px) 0,
+    transparent 99%,
+    #000 100%
+  );
+}
+
+/* The selected team, when the palette is not ours to choose.
+   In forced-colors the selected tab's fill collapses to a system colour along
+   with everything around it, which leaves NOTHING marking the selection: the
+   icon opacity goes too. An outline is the one
+   indicator forced-colors keeps, and it is skipped on a focused tab so the focus
+   ring is still the thing that moves. */
+@media (forced-colors: active) {
+  .chooser-union [role='tab'][aria-selected='true']:not(:focus-visible) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 /* Tier 4 — Overlay: modals / sheets / command palettes / wizards.

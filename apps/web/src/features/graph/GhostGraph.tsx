@@ -55,7 +55,11 @@ import { ConnectionLine } from './edges/ConnectionLine'
 import { TeamHaloLayer } from './TeamHaloLayer'
 import { TeamStatusClusterLayer } from './TeamStatusClusterLayer'
 import { useFleetStore } from '@/stores/fleet'
-import { BrowserDock, DOCK_WIDTH, type DockAgent } from './BrowserDock'
+import { BrowserDock, DOCK_WIDTH, type DockAgent, type DockTeam } from './BrowserDock'
+
+/** The tab id for Boos that belong to no team, Boo Zero among them. Not a team
+ *  id, so it can never collide with one. */
+const UNTEAMED = '__no_team__'
 import { useReducedMotion } from 'framer-motion'
 import { useViewStore } from '@/stores/view'
 import { useToastStore } from '@/stores/toast'
@@ -523,10 +527,57 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // Team scope shows that team's Boos; Atlas shows the whole fleet, which is
   // exactly the set of Boos drawn on each graph.
   const allAgents = useFleetStore((s) => s.agents)
+  const allTeams = useTeamStore((s) => s.teams)
+
+  /**
+   * The team tabs, and only on Atlas.
+   *
+   * A team graph has already answered "which team", so it passes none and the
+   * dock renders faces alone. Atlas draws the whole fleet, where a flat row of
+   * every Boo is a row nobody can read.
+   *
+   * Only teams that actually HAVE a Boo on this graph, plus a final tab for the
+   * teamless ones when any exist. Boo Zero belongs to no team, and a tab list
+   * built from `teams` alone would hide it entirely.
+   */
+  const dockTeams = useMemo<DockTeam[]>(() => {
+    if (scope !== 'atlas') return []
+    const withAgents = new Set(allAgents.map((a) => a.teamId).filter((t): t is string => !!t))
+    const tabs = allTeams
+      .filter((t) => withAgents.has(t.id))
+      .map((t) => ({ id: t.id, name: t.name, icon: t.icon }))
+    if (allAgents.some((a) => !a.teamId)) {
+      // "the rest", not a stray dot. Boo Zero lives here.
+      tabs.push({ id: UNTEAMED, name: 'No team', icon: '⋯' })
+    }
+    return tabs
+  }, [scope, allAgents, allTeams])
+
+  const [dockTeamId, setDockTeamId] = useState<string | null>(null)
+  // Keep the team selection valid the same way the agent one is kept: only pick
+  // when nothing is chosen, or when the chosen team has left the graph.
+  useEffect(() => {
+    if (dockTeams.length === 0) return
+    if (dockTeamId && dockTeams.some((t) => t.id === dockTeamId)) return
+    setDockTeamId(dockTeams[0]?.id ?? null)
+  }, [dockTeams, dockTeamId])
+
   const dockAgents = useMemo<DockAgent[]>(() => {
-    const pool = scope === 'atlas' ? allAgents : allAgents.filter((a) => a.teamId === obsTeamId)
-    return pool.map((a) => ({ id: a.id, name: a.name }))
-  }, [allAgents, scope, obsTeamId])
+    const pool =
+      scope === 'atlas'
+        ? // On Atlas the team tab is the filter. Before one is picked the dock
+          // would otherwise flash the whole fleet, which is the row this exists
+          // to avoid.
+          dockTeams.length > 1
+          ? allAgents.filter((a) =>
+              dockTeamId === UNTEAMED ? !a.teamId : !!dockTeamId && a.teamId === dockTeamId,
+            )
+          : allAgents
+        : allAgents.filter((a) => a.teamId === obsTeamId)
+    // `runtime` travels with the agent so the panel can say WHY it has
+    // nothing to show, rather than claiming the Boo never browsed.
+    return pool.map((a) => ({ id: a.id, name: a.name, runtime: a.runtime ?? null }))
+  }, [allAgents, scope, obsTeamId, dockTeams, dockTeamId])
 
   // Keep the selection valid without fighting the user: only auto-pick when
   // nothing is chosen, or when the chosen agent has left the graph.
@@ -1646,6 +1697,9 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
 
       <BrowserDock
         open={showBrowserDock}
+        teams={dockTeams}
+        selectedTeamId={dockTeamId}
+        onSelectTeam={setDockTeamId}
         agents={dockAgents}
         selectedAgentId={dockAgentId}
         onSelectAgent={setDockAgentId}

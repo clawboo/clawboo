@@ -42,6 +42,7 @@ import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { agents } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
+import { restoreScreenshots } from './lib/screenshotBus'
 import { mountSpa } from './lib/serveSpa'
 import { ensureBrowserConnectedAtBoot, restoreConnectorsAtBoot } from './api/connectors'
 import { refreshConnectedApps } from './lib/connectors/composio'
@@ -587,6 +588,14 @@ async function main() {
     // AFTER THE REAP, so a child left by a previous process is killed before a
     // new one is spawned, and NOT awaited: a cold `npx` install can take the
     // better part of a minute and the server must be serving long before that.
+    // Frames BEFORE anything can serve a read. A restart used to wipe every
+    // captured screen, so the browser panel said "Nothing captured yet" for a
+    // Boo that had browsed all afternoon.
+    safeStart('frame-restore', () => {
+      const frames = restoreScreenshots()
+      if (frames > 0) log.info({ frames }, 'Browser: restored frames captured before the restart')
+    })
+
     safeStart('connector-restore', () => {
       void restoreConnectorsAtBoot(getDb())
         .then(async (restored) => {

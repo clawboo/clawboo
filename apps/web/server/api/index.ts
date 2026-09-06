@@ -59,6 +59,7 @@ import {
   agentFileGET,
   agentFilePUT,
   agentSessionsGET,
+  agentScreenshotCapturePOST,
   agentScreenshotGET,
 } from './agents'
 import { agentChatIngestPOST, agentChatStopPOST, agentChatStreamGET } from './agentChat'
@@ -308,6 +309,7 @@ router.get('/api/agents/:agentId/sessions', agentSessionsGET)
 // The task worktrees this agent is assigned. Reads the board; the worktree
 // contents themselves are served by the /api/board/:taskId/workspace/* routes.
 router.get('/api/agents/:agentId/screenshot', agentScreenshotGET)
+router.post('/api/agents/:agentId/screenshot/capture', agentScreenshotCapturePOST)
 router.get('/api/agents/:agentId/workspaces', agentWorkspacesGET)
 
 // A clawboo-native agent's 1:1 PERSONAL chat (the Boo-Zero personal chat). The

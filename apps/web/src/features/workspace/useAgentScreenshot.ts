@@ -23,6 +23,8 @@ export interface ScreenshotMeta {
   mimeType: string
   toolName: string
   ts: number
+  /** Came back from disk after a restart, so it can be hours old. */
+  restored?: boolean
 }
 
 export interface AgentScreenshot {
@@ -58,12 +60,18 @@ export function useAgentScreenshot(agentId: string | null, enabled = true): Agen
           setMeta(null)
           return
         }
-        const body = (await r.json()) as { mimeType?: string; toolName?: string; ts?: number }
+        const body = (await r.json()) as {
+          mimeType?: string
+          toolName?: string
+          ts?: number
+          restored?: boolean
+        }
         if (typeof body.ts !== 'number') return
         setMeta({
           mimeType: body.mimeType ?? 'image/png',
           toolName: body.toolName ?? 'unknown',
           ts: body.ts,
+          ...(body.restored ? { restored: true } : {}),
         })
       })
       .catch(() => {

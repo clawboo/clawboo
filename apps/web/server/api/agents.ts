@@ -1,5 +1,11 @@
 import type { Request, Response } from 'express'
-import { getScreenshot } from '../lib/screenshotBus'
+import { connectorsByCategory } from '@clawboo/connector-catalog'
+import { isToolVisibleToAgent } from '@clawboo/db'
+
+import { connectorInstanceIdForSlug } from '../lib/capabilitySource/connectorIdentity'
+import { callIfRunning } from '../lib/connectors/agentBrowsers'
+import { getLiveConnector } from '../lib/connectors/supervisor'
+import { getScreenshot, putScreenshot } from '../lib/screenshotBus'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 import {
   agents,
@@ -582,6 +588,68 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
   }
 }
 
+// ─── POST /api/agents/:agentId/screenshot/capture ────────────────────────────
+// Re-photograph the browser as it is NOW, rather than waiting for the agent's
+// next tool call to produce a frame as a side effect.
+//
+// SCREENSHOT ONLY. It never navigates, and that is a safety property rather than
+// a scope decision: every agent shares one browser context, so a capture that
+// opened a page would throw away whatever another Boo had on screen mid-task.
+// With no page open this fails and the panel stays empty, which is the correct
+// outcome — the alternative is clawboo opening a window nobody asked for, and
+// the browser is headed by default.
+//
+// The frame is filed under a RESERVED id, not the requesting agent's. The shared
+// context means this is the fleet's browser, not that agent's, and storing it as
+// theirs would drop the "Shared browser" label the view needs to stay honest.
+/**
+ * The screenshot tool, found by SUFFIX rather than named outright.
+ *
+ * The two browsers in the catalog do not agree on what to call it: Playwright
+ * ships `browser_take_screenshot`, chrome-devtools ships `take_screenshot`. A
+ * literal would work against whichever one happened to be connected on the
+ * machine it was written on and silently do nothing on the other.
+ */
+const isScreenshotTool = (name: string): boolean => name.endsWith('take_screenshot')
+
+export async function agentScreenshotCapturePOST(req: Request, res: Response): Promise<void> {
+  const agentId = (req.params['agentId'] as string | undefined) ?? ''
+  if (!agentId) {
+    res.status(400).json({ ok: false, error: 'agentId is required' })
+    return
+  }
+  for (const def of connectorsByCategory('browser')) {
+    const connectorId = connectorInstanceIdForSlug(def.slug)
+    const live = getLiveConnector(connectorId)
+    if (!live) continue
+    const shooter = live.descriptors.find((d) => isScreenshotTool(d.name))
+    const rawName = shooter ? live.rawToolNames.get(shooter.name) : undefined
+    if (!shooter || !rawName) continue
+
+    // THE AGENT'S OWN GRANT DECIDES, even though the operator is the one asking.
+    // Without this an agent whose browser grant was revoked would still have a
+    // frame taken from its browser and filed under its name, and `browserGrants`
+    // is insert-only for exactly the opposite reason: so a revoke sticks.
+    if (!isToolVisibleToAgent(getDb(), shooter, { agentId, connectorId })) continue
+
+    // NEVER CREATES. `callIfRunning` returns null when this agent has no browser
+    // open, and that is the whole safety property of this route: the panel
+    // photographs a window that already exists and is never the thing that opens
+    // one.
+    const result = await callIfRunning(connectorId, agentId, rawName).catch(() => null)
+    const first = result?.images?.[0]
+    if (!first) continue
+    putScreenshot(agentId, {
+      data: first.data,
+      mimeType: first.mimeType,
+      toolName: shooter.name,
+    })
+    res.json({ ok: true, ts: Date.now() })
+    return
+  }
+  res.status(409).json({ ok: false, error: 'this Boo has no browser open right now' })
+}
+
 // ─── GET /api/agents/:agentId/screenshot ─────────────────────────────────────
 // The newest frame this agent captured, for the Browser panel. `?meta=1` returns
 // just the descriptor so the panel can decide whether to render at all without
@@ -596,13 +664,27 @@ const SAFE_FRAME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image
 
 export function agentScreenshotGET(req: Request, res: Response): void {
   const agentId = (req.params['agentId'] as string | undefined) ?? ''
+  // THIS AGENT'S OWN FRAME, and nobody else's.
+  //
+  // There was briefly a fallback to the fleet's newest frame, which was true
+  // while every agent shared one browser. Each Boo now has its own, so another
+  // agent's frame is another agent's page, and showing it would be the panel
+  // asserting something false rather than filling a gap.
   const shot = getScreenshot(agentId)
   if (!shot) {
     res.status(404).json({ ok: false, error: 'no screenshot for this agent' })
     return
   }
   if (req.query['meta'] !== undefined) {
-    res.json({ ok: true, mimeType: shot.mimeType, toolName: shot.toolName, ts: shot.ts })
+    res.json({
+      ok: true,
+      mimeType: shot.mimeType,
+      toolName: shot.toolName,
+      ts: shot.ts,
+      // How much to TRUST the frame. A restored one can be hours old, and the
+      // panel says so in words rather than showing it as live.
+      ...(shot.restored ? { restored: true } : {}),
+    })
     return
   }
   let bytes: Buffer
