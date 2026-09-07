@@ -1,0 +1,68 @@
+---
+/**
+ * The sky, rebuilt.
+ *
+ * The previous version was a full-viewport photographic sky with drifting
+ * mascot sprites, and it was darkest exactly where the headline sat, so every
+ * string in the hero carried a text-shadow halo to stay legible. This is a
+ * shallow band instead: saturated at the very top, pale by the time it reaches
+ * the type, gone before the page continues. The product screenshot breaks
+ * across its lower edge, which is what makes it read as composed rather than
+ * decorated.
+ *
+ * Pure CSS. No image request, no JS, no React island. The clouds are blurred
+ * radial gradients on their own layer so the base gradient stays crisp.
+ */
+interface Props {
+  class?: string
+}
+const { class: cls = '' } = Astro.props
+---
+
+<div class={`sky ${cls}`} aria-hidden="true">
+  <div class="sky-clouds"></div>
+</div>
+
+<style>
+  .sky {
+    position: absolute;
+    inset: 0 0 auto;
+    height: clamp(30rem, 26rem + 18vw, 46rem);
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+    /* Saturated at the crown, and fully out before the type starts, so nothing
+       below needs a shadow to survive it. */
+    background: linear-gradient(
+      180deg,
+      var(--sky-1) 0%,
+      var(--sky-2) 34%,
+      var(--sky-3) 62%,
+      transparent 100%
+    );
+  }
+
+  .sky-clouds {
+    position: absolute;
+    inset: -6rem -4rem auto;
+    height: 78%;
+    filter: blur(34px);
+    opacity: var(--sky-cloud-opacity);
+    background:
+      radial-gradient(9rem 4.2rem at 12% 34%, var(--sky-cloud) 0%, transparent 68%),
+      radial-gradient(12rem 5rem at 26% 22%, var(--sky-cloud) 0%, transparent 70%),
+      radial-gradient(7rem 3.4rem at 38% 41%, var(--sky-cloud) 0%, transparent 66%),
+      radial-gradient(14rem 5.6rem at 58% 17%, var(--sky-cloud) 0%, transparent 72%),
+      radial-gradient(8rem 3.8rem at 72% 37%, var(--sky-cloud) 0%, transparent 68%),
+      radial-gradient(11rem 4.6rem at 88% 26%, var(--sky-cloud) 0%, transparent 70%),
+      radial-gradient(6rem 3rem at 48% 52%, var(--sky-cloud) 0%, transparent 64%);
+  }
+
+  /* The band is decorative and its contrast against the page is deliberately
+     low, so it costs nothing to drop it for anyone who has asked for less. */
+  @media (prefers-reduced-transparency: reduce) {
+    .sky-clouds {
+      display: none;
+    }
+  }
+</style>

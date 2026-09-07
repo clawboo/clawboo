@@ -138,8 +138,24 @@
   text-align: center;
 }
 
-/* A single soft brand wash behind the hero media. Replaces the photographic
-   sky: one gradient, no image request, no text-shadow needed on top of it. */
+/* Sky band. A light, illustrated gradient rather than a photograph, pale where
+   the headline sits so nothing needs a text-shadow to survive it. */
+:root {
+  --sky-1: #b7dcfb;
+  --sky-2: #d9ecfd;
+  --sky-3: #eef7ff;
+  --sky-cloud: #ffffff;
+  --sky-cloud-opacity: 0.9;
+}
+:root.dark {
+  --sky-1: #12233f;
+  --sky-2: #0d1728;
+  --sky-3: #0b1120;
+  --sky-cloud: #9dc4f0;
+  --sky-cloud-opacity: 0.16;
+}
+
+/* A softer wash for pages that want the tint without the weather. */
 .hero-wash {
   position: absolute;
   inset: -10% -20% auto;

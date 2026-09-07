@@ -1,31 +1,30 @@
 ---
 /**
- * Hero. The product is the argument, so the product is what you see first.
+ * Hero.
  *
- * What changed and why: the old hero was a full-viewport photographic sky with
- * seven mascots and no product visual at all — the first screenshot was 900px
- * down the page. It also needed a text-shadow halo on every string to stay
- * legible over the clouds, which is the tell that a background is fighting its
- * own content. One flat gradient wash replaces it, the type drops from 800 to
- * 500 weight, and the board screenshot moves above the fold.
+ * The sky is back, rebuilt as a shallow illustrated band (see SkyBand.astro):
+ * saturated at the crown, pale by the time it reaches the headline, gone before
+ * the page continues. The board screenshot breaks across its lower edge, the
+ * way Aside and Deta do it — the overlap is what makes the band read as
+ * composed rather than as wallpaper behind unrelated text.
+ *
+ * The install command's caption and the four trust badges are gone at your
+ * request. The install command itself still appears in "See it work" and in the
+ * closing CTA.
  */
 import { Picture } from 'astro:assets'
 import InstallCommand from '../components/InstallCommand.astro'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
-import Icon from '../components/Icon.astro'
-import { site, links } from '../lib/site'
+import SkyBand from '../components/SkyBand.astro'
+import { links } from '../lib/site'
 import teamSpace from '../assets/screenshots/team-space.png'
-
-// Node 22.12, not "22+": the CLI is bundled CJS and ora is ESM-only, so
-// 22.0-22.11 hard-exit with ERR_REQUIRE_ESM (apps/cli/src/node-version.ts:14).
-const trust = [`npm ${site.version}`, 'MIT licensed', 'Node.js 22.12+', 'macOS · Linux · Windows']
 ---
 
 <section id="hero" class="relative overflow-hidden">
-  <div class="hero-wash" aria-hidden="true"></div>
+  <SkyBand />
 
-  <div class="container container-wide relative z-10 pb-14 pt-28 sm:pt-32">
+  <div class="container container-wide relative z-10 pb-16 pt-28 sm:pt-32">
     <div class="mx-auto max-w-3xl text-center">
       <span class="eyebrow">Open-source · MIT · Local-first</span>
 
@@ -37,10 +36,10 @@ const trust = [`npm ${site.version}`, 'MIT licensed', 'Node.js 22.12+', 'macOS �
       </p>
 
       <div class="mt-8 flex justify-center">
-        <InstallCommand caption={`Node.js 22.12+. Or run ${site.tryInstall} with no install.`} />
+        <InstallCommand />
       </div>
 
-      <div class="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+      <div class="mt-5 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <GitHubStars variant="solid" label="Star on GitHub" />
         <Button
           href={links.docs}
@@ -53,22 +52,11 @@ const trust = [`npm ${site.version}`, 'MIT licensed', 'Node.js 22.12+', 'macOS �
           Read the docs
         </Button>
       </div>
-
-      <ul class="mt-7 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-        {
-          trust.map((t) => (
-            <li class="font-data inline-flex items-center gap-1.5 text-[12px] text-secondary">
-              <Icon name="check" size={13} class="text-mint" />
-              {t}
-            </li>
-          ))
-        }
-      </ul>
     </div>
 
     <!-- The board, at full content width and actually readable. The source is
          2720x1720, so it can carry this size; it was previously rendered at
-         300px inside a drawn browser window. -->
+         300px inside a drawn browser window, 900px down the page. -->
     <figure class="shot mt-14 sm:mt-16">
       <Picture
         src={teamSpace}

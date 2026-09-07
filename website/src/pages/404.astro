@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
 import Button from '../components/Button.astro'
+import SkyBand from '../components/SkyBand.astro'
 import InstallCommand from '../components/InstallCommand.astro'
 import { booAvatarToDataUrl } from '../lib/boo-avatar'
 import { site } from '../lib/site'
@@ -16,7 +17,7 @@ const boo = booAvatarToDataUrl({ seed: 'lost-boo', isBooZero: true })
   robots="noindex,follow"
 >
   <section class="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-5 text-center">
-    <div class="hero-wash" aria-hidden="true"></div>
+    <SkyBand />
     <div class="relative z-10 flex flex-col items-center">
       <img
         src={boo}
