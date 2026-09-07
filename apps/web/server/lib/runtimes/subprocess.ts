@@ -17,7 +17,7 @@ import path from 'node:path'
 import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { killProcessTree, killProcessTreeByPid } from './killTree'
-import { resolveWindowsSpawn } from './winSpawn'
+import { resolveWindowsSpawn, type WinSpawnPlan } from './winSpawn'
 
 /**
  * Every spawned runtime child that is still running.
@@ -258,8 +258,15 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
       if (started) return
       started = true
       let resolved: ResolvedSpawn
+      let plan: WinSpawnPlan
       try {
         resolved = await cfg.resolve()
+        // Planned inside the same guard as resolve(). Planning REFUSES a Windows
+        // shim path that cmd.exe would substitute before quotes take effect (`%`
+        // or `!`), and that refusal has to end the run the way a failed resolve
+        // does. Outside this try it would escape start() as an unhandled
+        // rejection instead of reaching the driver as a reported failure.
+        plan = resolveWindowsSpawn({ command: resolved.command, args: resolved.args })
       } catch (err) {
         for (const ev of cfg.onClose(
           null,
@@ -271,7 +278,6 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
         return
       }
       cwd = resolved.cwd ?? null
-      const plan = resolveWindowsSpawn({ command: resolved.command, args: resolved.args })
       child = spawn(plan.command, plan.args, {
         cwd: resolved.cwd ?? undefined,
         // Scrub clawboo's own server secrets before the untrusted agent subprocess

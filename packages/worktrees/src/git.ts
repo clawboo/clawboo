@@ -123,11 +123,27 @@ export function worktreeRootFor(repoPath: string, rootDir?: string): string {
   return rootDir ?? path.join(repoPath, '.clawboo', 'worktrees')
 }
 
-/** The absolute directory a task's worktree occupies: one validated segment
- *  directly under the (resolved) worktree root. */
+/**
+ * The absolute directory a task's worktree occupies: one validated segment
+ * directly under the (resolved) worktree root.
+ *
+ * Containment is ONE test, written out here rather than delegated to
+ * `assertWithin`: the resolved candidate has to start with the root plus a
+ * trailing separator. `assertWithin` answers a broader question (it admits the
+ * root itself, which a general helper should), but a task directory is always
+ * exactly one segment DOWN, so here the root is as wrong as a path outside it
+ * and one test states the whole invariant. The value handed back is the very
+ * value that passed the test, so every consumer of a task's worktree location
+ * builds on a path that has already been pinned under the root.
+ */
 export function worktreePathFor(repoPath: string, taskId: string, rootDir?: string): string {
   const root = path.resolve(worktreeRootFor(repoPath, rootDir))
-  return assertWithin(root, path.join(root, assertSafeTaskId(taskId)))
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  const candidate = path.resolve(root, assertSafeTaskId(taskId))
+  if (!candidate.startsWith(prefix)) {
+    throw new Error(`task directory escapes ${root}: ${candidate}`)
+  }
+  return candidate
 }
 
 /**
