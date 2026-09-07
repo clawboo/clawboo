@@ -54,9 +54,46 @@ export function defaultDbPath(): string {
  * connection is not a bottleneck — writes already serialize on the one Node
  * thread whether there is one handle or four hundred.
  */
+/**
+ * Keep the database, its WAL sidecars and its directory readable only by the
+ * user who owns them.
+ *
+ * WHY THIS IS NOT COSMETIC. The file holds the per-install HMAC secret that MCP
+ * attach scopes are signed with, and `mcpAttachSecret.ts` justifies that design
+ * on the claim that a spawned runtime "can never read" it. Created under a normal
+ * umask the file lands 0644, so on this machine it was world-readable and that
+ * claim was false for any process running as the same user — which is every agent
+ * holding `exec`. Tightening the mode does not make the secret unreachable to a
+ * same-uid process, and is not pretended to: what it removes is the OTHER-user
+ * read on a shared or multi-account host, where 0644 is a real leak.
+ *
+ * The directory goes with it because it is clawboo's own state directory and its
+ * neighbours are no less sensitive: saved browser frames and the per-agent
+ * browser profiles, which hold live logged-in sessions.
+ *
+ * BEST EFFORT BY DESIGN. chmod is close to meaningless on Windows and throws when
+ * the file belongs to another user, and neither is a reason to refuse to open a
+ * database that already opened fine. A failure is reported once rather than
+ * swallowed, because a security fix that quietly did nothing is the worse outcome.
+ */
+function restrictDbPermissions(dbPath: string, dir: string): void {
+  try {
+    fs.chmodSync(dir, 0o700)
+    // The sidecars only exist once WAL mode has engaged, and they carry recently
+    // written pages, so they need the same mode as the database itself.
+    for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+      if (fs.existsSync(f)) fs.chmodSync(f, 0o600)
+    }
+  } catch (err) {
+    console.warn(`clawboo: could not restrict permissions on ${dir}:`, err)
+  }
+}
+
 export function openDb(dbPath: string): ClawbooDb {
   const dir = path.dirname(dbPath)
-  fs.mkdirSync(dir, { recursive: true })
+  // 0o700 on create, so a fresh install is never briefly world-readable between
+  // mkdir and the chmod below. Existing directories keep their mode until then.
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
 
   const sqlite = new Database(dbPath)
 
@@ -71,6 +108,20 @@ export function openDb(dbPath: string): ClawbooDb {
   // BEGIN IMMEDIATE in the board repository (see src/board/contention.ts).
   sqlite.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`)
   sqlite.pragma('wal_autocheckpoint = 50')
+
+  // `:memory:` has no path to chmod, and `path.dirname` of it is the cwd, which
+  // must not be touched.
+  if (dbPath !== ':memory:') {
+    // MATERIALIZE THE SIDECARS FIRST. Setting `journal_mode = WAL` does not by
+    // itself create `-wal`/`-shm`; SQLite creates them on the first access that
+    // actually touches the database, so a chmod here would silently find nothing
+    // and they would appear later at whatever the umask says — 0644, holding
+    // recently written pages. Reading `user_version` is the cheapest access that
+    // brings both into existence, and unlike an empty BEGIN IMMEDIATE it takes no
+    // write lock, so it cannot contend with the other processes on this file.
+    sqlite.pragma('user_version')
+    restrictDbPermissions(dbPath, dir)
+  }
 
   noteConnectionOpened()
   return drizzle(sqlite, { schema })

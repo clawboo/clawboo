@@ -40,6 +40,29 @@ export interface MemoryServerOptions {
    * Unset ⇒ the model's scope args are used (the stdio bin / unbound default).
    */
   boundScope?: MemoryScope
+
+  /**
+   * The caller reached us over a transport that CAN carry a verified scope and
+   * did NOT — so we know its identity is unproven rather than irrelevant.
+   *
+   * WHY THIS IS NOT THE SAME AS `boundScope` BEING UNSET. Unset has always meant
+   * "the operator ran the stdio bin themselves", where the model's scope args are
+   * the only steering available and the operator is the one supplying them. Over
+   * HTTP the same absence means something else entirely: an attach URL that
+   * carried no signed scope. There the scope args are supplied by the MODEL, and
+   * honouring them lets any agent save a fact tagged as another agent's team and
+   * read every team's facts back. Distinguishing the two is the whole point of
+   * this flag; collapsing them would either re-open that hole or break the bin.
+   *
+   * Effect: the model's `scopeTeamId`/`scopeAgentId` args are IGNORED. Saves go
+   * to the global tier (attributable to nobody, which is honest, rather than to
+   * whoever the model named) and reads see the global tier only.
+   *
+   * This is what `openClawAgentSource` has always CLAIMED happens for OpenClaw
+   * agents ("Memory stays global-scoped for OpenClaw"). It was never true: the
+   * scope came from the model. This flag makes the code do what that comment says.
+   */
+  unverifiedCaller?: boolean
 }
 
 export function createMemoryServer(
@@ -49,16 +72,24 @@ export function createMemoryServer(
 ): Server {
   const store = new SqliteMemoryStore(db, embed)
   const bound = opts.boundScope
+  // Only meaningful when there is no bound scope to prefer; see the field's doc.
+  const unverified = opts.unverifiedCaller === true && !bound
 
   // Auto-saved team facts are team-shared (drop agentId) so a teammate on ANY
   // runtime recalls them — agent-scoping a save would defeat the shared tier.
+  // An unverified caller saves GLOBAL: not tagged with a team it cannot prove.
   const saveScope = (args: Record<string, unknown>): MemoryScope =>
-    bound ? { teamId: bound.teamId ?? null, tenantId: bound.tenantId ?? null } : scopeOf(args)
+    bound
+      ? { teamId: bound.teamId ?? null, tenantId: bound.tenantId ?? null }
+      : unverified
+        ? { teamId: null, agentId: null }
+        : scopeOf(args)
   // Reads see team-shared + global + this-agent-private; never another team's. A
   // bound run with NO team (teamId null) reads global-only — '' is the store's
   // global-only sentinel; passing null would skip the team filter (cross-team leak).
+  // An unverified caller gets that same global-only sentinel, for the same reason.
   const readScope = (args: Record<string, unknown>): MemoryScope =>
-    bound ? { ...bound, teamId: bound.teamId ?? '' } : scopeOf(args)
+    bound ? { ...bound, teamId: bound.teamId ?? '' } : unverified ? { teamId: '' } : scopeOf(args)
 
   const tools: ToolDef[] = [
     {

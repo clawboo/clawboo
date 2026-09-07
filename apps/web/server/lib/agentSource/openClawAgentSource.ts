@@ -335,6 +335,17 @@ export class OpenClawAgentSource implements AgentSource {
       // an in-Gateway autonomous tool call can't be per-run scoped without
       // reaching into the Gateway) — an organizational, not security, boundary
       // for the local-first single-user model; the multi-tenant horizon is parked.
+      //
+      // THAT SENTENCE DESCRIBED AN INTENT THE CODE DID NOT IMPLEMENT, until the
+      // `unverifiedCaller` flag threaded from `api/mcp.ts`. Memory was not
+      // global-scoped here; it was MODEL-scoped, because an unbound memory server
+      // read `scopeTeamId`/`scopeAgentId` out of the tool arguments. So an
+      // OpenClaw agent could save a fact tagged as any team and read every team's
+      // facts back — the exact spoof the TeamChat paragraph above exists to
+      // prevent, arrived at by a different door. Tasks had the matching hole in
+      // `claim_task`/`assign_task`, whose `assigneeAgentId` is likewise a model
+      // argument. Both now fail closed on an unverified HTTP caller, so the
+      // boundary this comment claims is the boundary the code enforces.
       // TOOLS IS REGISTERED, and its omission was a plain gap rather than a
       // decision: an OpenClaw agent could reach no connector at all, so an agent
       // the operator had granted Gmail answered that it had no email tools while

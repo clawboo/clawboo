@@ -116,14 +116,33 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       'activity',
       'workspace',
       'browser',
-      'permissions',
+      // Permissions is OpenClaw-only, because it is the only runtime that reads
+      // it. The tab writes exec-approval policy into the Gateway's own
+      // `exec-approvals.json`, keyed by OpenClaw agent id. For a native agent
+      // that file is not consulted by anything, so the tab accepted a setting,
+      // reported success, and changed nothing — and it left evidence: that file
+      // still carries an entry for `native-boo-zero-3efff3`, an agent that no
+      // longer exists. Same rule as the file tabs above: do not show an editor
+      // whose bytes no driver will ever read.
+      ...(agentRuntime === 'openclaw' ? (['permissions'] as const) : []),
       ...(isBooZero ? (['brief'] as const) : []),
       ...visibleFileTabs,
     ],
-    [visibleFileTabs, isBooZero],
+    [visibleFileTabs, isBooZero, agentRuntime],
   )
 
   const [activeTab, setActiveTab] = useState<EditorTab>('personality')
+
+  // Fall back when the OPEN tab stops being offered. `allTabs` is per-agent and
+  // per-runtime, so a tab can disappear under a selection that is still active:
+  // switch from an OpenClaw agent to a native one with Permissions open, or from
+  // Boo Zero with Brief open. The strip stops drawing the tab, but `activeTab`
+  // still matches its content block below, so the panel keeps rendering an editor
+  // the strip says does not exist. Cheap to guard, and it covers every future tab
+  // that becomes conditional rather than only the two that are today.
+  useEffect(() => {
+    if (!allTabs.includes(activeTab)) setActiveTab('personality')
+  }, [allTabs, activeTab])
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)

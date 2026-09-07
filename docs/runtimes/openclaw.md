@@ -24,7 +24,7 @@ OpenClaw is a separate project. Clawboo connects to an OpenClaw Gateway you run 
 
 - An OpenClaw Gateway, reachable over WebSocket (default `ws://localhost:18789`). The Clawboo server connects to the URL stored in [settings](/reference/configuration) (`gatewayUrl`).
 - The Gateway's auth token. Clawboo's onboarding writes one into OpenClaw's `~/.openclaw/.env` as `GATEWAY_AUTH_TOKEN` and mirrors it into Clawboo's `settings.json` (`gatewayToken`).
-- Node.js (Clawboo's prerequisite). The install step runs `npm install -g openclaw@^2026.5`, so `npm` must be on `PATH`.
+- Node.js (Clawboo's prerequisite). The install step runs `npm install -g openclaw@~2026.5`, so `npm` must be on `PATH`.
 - For OpenClaw **2026.5.x and later**: a one-time **device pairing approval**, see [Device pairing](#device-pairing-not_paired).
 
 ## How OpenClaw connects
@@ -87,7 +87,7 @@ The OpenClaw onboarding path runs these from the wizard, but each maps to a `/ap
 
 ### 2. Install (optional)
 
-`POST /api/system/install-openclaw` is a Server-Sent Events stream that runs `npm install -g openclaw@^2026.5`. The version is pinned to the `^2026.5` range deliberately: the gateway-client advertises connect protocol `minProtocol: 3, maxProtocol: 4`, and pinning the install keeps a fresh user on a protocol-compatible OpenClaw until that range is widened.
+`POST /api/system/install-openclaw` is a Server-Sent Events stream that runs `npm install -g openclaw@~2026.5`. The version is pinned to the `~2026.5` range deliberately: the gateway-client advertises connect protocol `minProtocol: 3, maxProtocol: 4`, and pinning the install keeps a fresh user on a protocol-compatible OpenClaw until that range is widened.
 
 | Event `type` | Payload                      | Meaning                                   |
 | ------------ | ---------------------------- | ----------------------------------------- |

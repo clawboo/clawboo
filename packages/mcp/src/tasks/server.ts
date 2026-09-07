@@ -92,6 +92,8 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
  *  a model-issued `create_task`/`claim_task` would race the engine's writes or
  *  orphan a task no dispatcher runs). */
 const READ_ONLY_TOOL_NAMES = new Set(['list_tasks', 'get_task'])
+/** Tools whose ARGUMENTS name an agent, so an unidentified caller acts as anyone. */
+const IDENTITY_TOOL_NAMES = new Set(['claim_task', 'assign_task'])
 
 export interface TasksServerOptions {
   /** Serve only {@link READ_ONLY_TOOL_NAMES} — board reads, no mutations. */
@@ -116,6 +118,26 @@ export interface TasksServerOptions {
    * the calling agent's undelivered mailbox rows ride each tool response.
    */
   boundScope?: { teamId?: string | null; agentId?: string | null }
+
+  /**
+   * The caller reached us over a transport that CAN carry a verified scope and
+   * did NOT. Distinct from `boundScope` being unset, which means the operator ran
+   * the stdio bin themselves; see the Memory server's `unverifiedCaller` for the
+   * full reasoning, which applies here identically.
+   *
+   * Effect: the two tools that take an agent id as an ARGUMENT are not served,
+   * and `add_comment` drops its `authorAgentId`. Those three are the entire
+   * impersonation surface here — `claim_task` and `assign_task` require
+   * `assigneeAgentId`, so an unidentified caller could claim work as anyone and
+   * hand work to anyone.
+   *
+   * DELIBERATELY NARROW. The other writes (create, release, status, block,
+   * unblock, link) name no agent, so they are anonymous board edits, not
+   * impersonation, and they keep working. Serving `readOnly` here instead would
+   * have been the easy call and would have taken board editing away from every
+   * OpenClaw agent to close a hole that only three tools open.
+   */
+  unverifiedCaller?: boolean
 }
 
 export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Server {
@@ -334,7 +356,9 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
             str(args['taskId']),
             str(args['body']),
             (optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ?? 'agent',
-            optStr(args['authorAgentId']),
+            // An unverified caller cannot prove it is the author it names, so the
+            // comment posts unattributed rather than under someone else's name.
+            opts?.unverifiedCaller === true ? undefined : optStr(args['authorAgentId']),
           ),
         )
       },
@@ -366,7 +390,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   ]
 
   const active =
-    opts?.readOnly === true ? tools.filter((t) => READ_ONLY_TOOL_NAMES.has(t.name)) : tools
+    opts?.readOnly === true
+      ? tools.filter((t) => READ_ONLY_TOOL_NAMES.has(t.name))
+      : opts?.unverifiedCaller === true
+        ? tools.filter((t) => !IDENTITY_TOOL_NAMES.has(t.name))
+        : tools
   // Mid-run inbox piggyback for a bound calling agent (see ../piggyback.ts).
   const boundAgentId = opts?.boundScope?.agentId ?? undefined
   return buildServer(

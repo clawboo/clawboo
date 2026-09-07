@@ -11,6 +11,9 @@
 // test asserted what range it described. These assertions are cheap and they fail
 // loudly the next time someone reaches for a caret.
 
+import fs from 'node:fs'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -111,5 +114,53 @@ describe('withBrowsingGuidance', () => {
     // `web_fetch` is in every OpenClaw agent's toolset and is what they already
     // reach for when asked to read a page.
     expect(BROWSING_GUIDANCE).toContain('web_fetch')
+  })
+})
+
+// ─── Docs must not contradict the constant ───────────────────────────────────
+//
+// Fixing the spec in code fixed nothing for anyone READING the docs: eight lines
+// across four user-facing pages still said `npm install -g openclaw@^2026.5`,
+// which resolves to the newest 2026.x — the exact version the code was changed to
+// avoid, and the one that breaks agent creation, the capability toggles, chat
+// sends and approvals. Someone following the written instructions got the broken
+// install while the product installed the right one.
+//
+// This is the gate that keeps the two in step. It fails when a doc names an
+// OpenClaw install spec that is not the shipped constant, so the next person to
+// change the pin cannot leave the docs behind.
+
+const REPO_DOCS = path.resolve(__dirname, '../../../../docs')
+/** `npm install -g openclaw@<spec>` in prose, however the line is worded. */
+const INSTALL_IN_PROSE = /openclaw@[^\s`'")\]]+/g
+
+function docFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name)
+    if (e.isDirectory()) return docFiles(full)
+    return /\.mdx?$/.test(e.name) ? [full] : []
+  })
+}
+
+describe('docs agree with OPENCLAW_INSTALL_SPEC', () => {
+  it('no user-facing page names a different OpenClaw install spec', () => {
+    const files = docFiles(REPO_DOCS)
+    // Guard the guard: a zero-file sweep would pass silently if docs/ ever moves.
+    expect(files.length).toBeGreaterThan(0)
+
+    const offenders: string[] = []
+    for (const file of files) {
+      // The changelog RECORDS what past versions did, including the caret bug
+      // itself. Rewriting history to match today's pin would make it a lie.
+      if (path.basename(file).startsWith('changelog')) continue
+      const text = fs.readFileSync(file, 'utf8')
+      for (const [spec] of text.matchAll(INSTALL_IN_PROSE)) {
+        if (spec !== OPENCLAW_INSTALL_SPEC) {
+          offenders.push(`${path.relative(REPO_DOCS, file)}: ${spec}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
   })
 })

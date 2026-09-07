@@ -88,7 +88,7 @@ curl http://localhost:18790/api/system/status
 
 ## `POST /api/system/install-openclaw`
 
-Installs the OpenClaw CLI by running `npm install -g openclaw@^2026.5`. The version is pinned to `^2026.5` (not `@latest`) so a new install gets an OpenClaw whose WS connect protocol matches the bundled `gateway-client` (`maxProtocol: 4`); a future protocol bump would otherwise break the connection silently. On success the OpenClaw version cache is invalidated and re-read.
+Installs the OpenClaw CLI by running `npm install -g openclaw@~2026.5`. The version is pinned to `~2026.5` (not `@latest`, and not `^2026.5`) so a new install gets an OpenClaw whose WS connect protocol matches the bundled `gateway-client` (`maxProtocol: 4`); a future protocol bump would otherwise break the connection silently. On success the OpenClaw version cache is invalidated and re-read.
 
 - **Path/query params**: none.
 - **Request body**: none.
