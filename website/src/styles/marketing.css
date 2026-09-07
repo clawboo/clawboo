@@ -4,7 +4,7 @@
    tokens.css is VENDORED VERBATIM from the product's globals.css so the
    brand reads identically, and it must stay re-syncable. Nothing here
    redefines a product token; this file only adds the things a landing
-   page needs and the app does not — a display type scale, section
+   page needs and the app does not: a display type scale, section
    rhythm, and container widths.
    ────────────────────────────────────────────────────────────────── */
 

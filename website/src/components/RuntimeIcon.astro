@@ -1,0 +1,66 @@
+---
+/**
+ * A runtime's real brand mark in a tinted tile, matching the dashboard's
+ * RuntimeBrand exactly. Replaces the lettermarks (N, C, Cx, H, O) the site used
+ * to draw, which were both less recognisable and, for Codex and Hermes, tinted
+ * with accent colours those brands do not have.
+ *
+ * Monochrome brands (Codex, Hermes) resolve `currentColor`, so they take the
+ * theme foreground and read correctly in both light and dark.
+ */
+import { RUNTIME_MARKS, type RuntimeMarkId } from '../lib/brandMarks'
+
+interface Props {
+  id: RuntimeMarkId
+  size?: number
+  tile?: number
+  class?: string
+}
+const { id, size = 18, tile = 36, class: cls = '' } = Astro.props
+const { color, glyph } = RUNTIME_MARKS[id]
+const mono = color === 'currentColor'
+
+// A brand-tinted tile for the coloured marks; a neutral one for the monochrome
+// brands, since tinting those would invent a colour they do not own.
+const tileStyle = mono
+  ? 'background:color-mix(in srgb, var(--foreground) 8%, transparent);color:var(--foreground)'
+  : `background:color-mix(in srgb, ${color} 14%, transparent);color:${color}`
+---
+
+<span
+  class={`rt-tile ${cls}`}
+  style={`${tileStyle};width:${tile}px;height:${tile}px`}
+  aria-hidden="true"
+>
+  <svg
+    width={size}
+    height={size}
+    viewBox={glyph.viewBox ?? '0 0 24 24'}
+    fill="currentColor"
+    fill-rule="evenodd"
+    clip-rule="evenodd"
+  >
+    {glyph.paths.map((d) => <path d={d} />)}
+    {
+      glyph.strokePaths?.map((d) => (
+        <path
+          d={d}
+          fill="none"
+          stroke="currentColor"
+          stroke-width={glyph.strokeWidth ?? 2}
+          stroke-linecap="round"
+        />
+      ))
+    }
+  </svg>
+</span>
+
+<style>
+  .rt-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    border-radius: 9px;
+  }
+</style>

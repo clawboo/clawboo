@@ -2,13 +2,11 @@
 /**
  * See it work. Merges the old Proof and HowItWorks sections.
  *
- * They made the same promise twice — "about a minute", "localhost:18790",
- * "no cloud account" — each inside its own drawn browser window, one around a
+ * They made the same promise twice ("about a minute", "localhost:18790",
+ * "no cloud account"), each inside its own drawn browser window, one around a
  * video and one around a typed terminal. The video already shows the terminal,
  * so TerminalDemo is gone. ~230 words of copy became ~70.
  */
-import { site } from '../lib/site'
-import InstallCommand from '../components/InstallCommand.astro'
 
 const steps = [
   {
@@ -66,10 +64,6 @@ const steps = [
         ))
       }
     </ol>
-
-    <div class="mt-10 flex justify-center">
-      <InstallCommand caption={`Or run ${site.tryInstall} with no install.`} />
-    </div>
   </div>
 </section>
 

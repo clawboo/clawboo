@@ -5,7 +5,7 @@
  * The sky is back, rebuilt as a shallow illustrated band (see SkyBand.astro):
  * saturated at the crown, pale by the time it reaches the headline, gone before
  * the page continues. The board screenshot breaks across its lower edge, the
- * way Aside and Deta do it — the overlap is what makes the band read as
+ * way Aside and Deta do it. The overlap is what makes the band read as
  * composed rather than as wallpaper behind unrelated text.
  *
  * The install command's caption and the four trust badges are gone at your
@@ -13,7 +13,6 @@
  * closing CTA.
  */
 import { Picture } from 'astro:assets'
-import InstallCommand from '../components/InstallCommand.astro'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
 import SkyBand from '../components/SkyBand.astro'
@@ -36,11 +35,7 @@ import teamSpace from '../assets/screenshots/team-space.png'
         Native agents are built in, so you can paste a key and start.
       </p>
 
-      <div class="mt-8 flex justify-center">
-        <InstallCommand />
-      </div>
-
-      <div class="mt-5 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+      <div class="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <GitHubStars variant="solid" label="Star on GitHub" />
         <Button
           href={links.docs}

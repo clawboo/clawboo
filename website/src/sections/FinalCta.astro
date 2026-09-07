@@ -5,10 +5,9 @@
  * caption, same solid Star button, same outline secondary. It is now a quiet
  * closing band that repeats only the one thing worth repeating.
  */
-import InstallCommand from '../components/InstallCommand.astro'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
-import { links, site } from '../lib/site'
+import { links } from '../lib/site'
 ---
 
 <section id="cta" class="section rule relative overflow-hidden">
@@ -16,11 +15,7 @@ import { links, site } from '../lib/site'
   <div class="container container-prose relative z-10 text-center">
     <h2 class="d2">A team of agents, running in about a minute.</h2>
 
-    <div class="mt-8 flex justify-center">
-      <InstallCommand caption={`Node.js 22.12+. Or run ${site.tryInstall}.`} />
-    </div>
-
-    <div class="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+    <div class="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
       <GitHubStars variant="solid" label="Star on GitHub" />
       <Button
         href={links.discussions}

@@ -4,17 +4,17 @@
  *
  * These four are claims, not features with a screenshot, so this is the one
  * section where the reference pattern is HubSpot's and Notion's text grid: a
- * hairline-ruled column, a title, two lines. No icons — the tinted rounded
+ * hairline-ruled column, a title, two lines. No icons: the tinted rounded
  * square that used to head each card is the generic element the redesign is
  * trying to get away from, and inventing a screenshot for a claim would be
  * worse than having none.
  *
  * Corrections carried in from the code audit:
  *  - "approvals for sensitive steps" was MISLEADING in four places. Spawned
- *    runtimes execute board tasks with approvals OFF — bypassPermissions
+ *    runtimes execute board tasks with approvals OFF: bypassPermissions
  *    (claudeCodeDriver.ts:236), --dangerously-bypass-approvals-and-sandbox
  *    (codexDriver.ts:121), --yolo (hermesDriver.ts:234). What ships is a
- *    DELEGATION-level gate: risky task text is matched and queued to the leader
+ *    delegation-level gate, where risky task text is matched and queued to the leader
  *    (riskyDelegation.ts:13), fail-closed. Stated with that scope.
  *  - The critic runs on delegated or large diffs, not every completion
  *    (criticTrigger.ts:23-30).

@@ -8,15 +8,17 @@
  * runtimes IS the product thesis, and naming them is proof rather than
  * decoration.
  *
- * Lettermarks, not reproduced third-party logos — the same convention
- * RuntimeMark already follows.
+ * Marks come from the product's own brand map, so the site and the dashboard
+ * show the identical icon for each runtime.
  */
+import RuntimeIcon from './RuntimeIcon.astro'
+
 const runtimes = [
-  { name: 'Clawboo Native', mark: 'N', accent: '#e94560' },
-  { name: 'Claude Code', mark: 'C', accent: '#d97757' },
-  { name: 'Codex', mark: 'Cx', accent: '#10a37f' },
-  { name: 'Hermes', mark: 'H', accent: '#a78bfa' },
-  { name: 'OpenClaw', mark: 'O', accent: '#1f9ec4' },
+  { id: 'clawboo-native' as const, name: 'Clawboo Native' },
+  { id: 'claude-code' as const, name: 'Claude Code' },
+  { id: 'codex' as const, name: 'Codex' },
+  { id: 'hermes' as const, name: 'Hermes' },
+  { id: 'openclaw' as const, name: 'OpenClaw' },
 ]
 ---
 
@@ -28,13 +30,7 @@ const runtimes = [
     {
       runtimes.map((r) => (
         <li class="tile">
-          <span
-            class="mark"
-            style={`background:color-mix(in srgb, ${r.accent} 16%, transparent);color:${r.accent}`}
-            aria-hidden="true"
-          >
-            {r.mark}
-          </span>
+          <RuntimeIcon id={r.id} tile={22} size={13} />
           {r.name}
         </li>
       ))

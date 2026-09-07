@@ -2,9 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro'
 import Button from '../components/Button.astro'
 import SkyBand from '../components/SkyBand.astro'
-import InstallCommand from '../components/InstallCommand.astro'
 import { booAvatarToDataUrl } from '../lib/boo-avatar'
-import { site } from '../lib/site'
 
 // The Boo stays here: this is the one page where the mascot is the whole idea,
 // and it is a generated data URL, not a photograph.
@@ -34,7 +32,6 @@ const boo = booAvatarToDataUrl({ seed: 'lost-boo', isBooZero: true })
       </p>
       <div class="mt-8 flex flex-col items-center gap-4">
         <Button href="/" variant="primary" size="lg" iconRight="arrow-right">Back home</Button>
-        <InstallCommand caption={`Or run ${site.tryInstall}, no install.`} />
       </div>
     </div>
   </section>
