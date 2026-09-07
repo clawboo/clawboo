@@ -77,15 +77,32 @@ export function defaultDbPath(): string {
  * swallowed, because a security fix that quietly did nothing is the worse outcome.
  */
 function restrictDbPermissions(dbPath: string, dir: string): void {
-  try {
-    fs.chmodSync(dir, 0o700)
-    // The sidecars only exist once WAL mode has engaged, and they carry recently
-    // written pages, so they need the same mode as the database itself.
-    for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
-      if (fs.existsSync(f)) fs.chmodSync(f, 0o600)
+  // ONE TRY PER TARGET, not one around the lot. Sharing a single try made the
+  // whole thing all-or-nothing in two places: a throw on the directory skipped
+  // every file, and a throw on the database skipped both sidecars. The realistic
+  // way to hit it is the documented CLAWBOO_DB_PATH override pointing into a
+  // directory the operator can write but does not own — a sticky /tmp, a shared
+  // team directory, a container volume mounted 0777 — where chmod on the
+  // directory raises EPERM while chmod on their own files would have succeeded.
+  // That is precisely the multi-user host this function exists for, so failing
+  // there silently and completely was the worst available outcome.
+  //
+  // Naming the path that actually failed matters for the same reason: the old
+  // message always said the directory, so a file-level failure was reported
+  // against the wrong target.
+  const tighten = (target: string, mode: number): void => {
+    try {
+      fs.chmodSync(target, mode)
+    } catch (err) {
+      console.warn(`clawboo: could not restrict permissions on ${target}:`, err)
     }
-  } catch (err) {
-    console.warn(`clawboo: could not restrict permissions on ${dir}:`, err)
+  }
+
+  tighten(dir, 0o700)
+  // The sidecars only exist once WAL mode has engaged, and they carry recently
+  // written pages, so they need the same mode as the database itself.
+  for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (fs.existsSync(f)) tighten(f, 0o600)
   }
 }
 

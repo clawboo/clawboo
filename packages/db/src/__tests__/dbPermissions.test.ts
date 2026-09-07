@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { openDb } from '../db'
 
@@ -70,6 +70,26 @@ describe.skipIf(process.platform === 'win32')('database file permissions', () =>
     expect(mode(path.dirname(dbPath))).toBe(0o755)
     openDb(dbPath)
     expect(mode(path.dirname(dbPath))).toBe(0o700)
+  })
+
+  it('still tightens the files when the DIRECTORY chmod fails', () => {
+    // The targets used to share one try block, so a throw on the directory
+    // skipped every file. The case that produces it is the documented
+    // CLAWBOO_DB_PATH override into a directory the operator can write but does
+    // not own, which is exactly the multi-user host this guard is for.
+    const dbPath = freshDbPath()
+    const dir = path.dirname(dbPath)
+    const real = fs.chmodSync
+    const spy = vi.spyOn(fs, 'chmodSync').mockImplementation((target, mode) => {
+      if (target === dir) throw Object.assign(new Error('EPERM'), { code: 'EPERM' })
+      return real(target, mode)
+    })
+    try {
+      openDb(dbPath)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(mode(dbPath)).toBe(0o600)
   })
 
   it('still opens an in-memory database, which has no path to chmod', () => {

@@ -126,10 +126,11 @@ export interface TasksServerOptions {
    * full reasoning, which applies here identically.
    *
    * Effect: the two tools that take an agent id as an ARGUMENT are not served,
-   * and `add_comment` drops its `authorAgentId`. Those three are the entire
-   * impersonation surface here — `claim_task` and `assign_task` require
-   * `assigneeAgentId`, so an unidentified caller could claim work as anyone and
-   * hand work to anyone.
+   * and `add_comment` drops BOTH its `authorAgentId` and its `authorType`. Those
+   * are the entire impersonation surface here — `claim_task` and `assign_task`
+   * require `assigneeAgentId`, so an unidentified caller could claim work as
+   * anyone and hand work to anyone, and a comment's `authorType` is rendered to
+   * the operator as its attribution.
    *
    * DELIBERATELY NARROW. The other writes (create, release, status, block,
    * unblock, link) name no agent, so they are anonymous board edits, not
@@ -350,15 +351,31 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       handler: (args) => {
         const denied = outOfTeam(str(args['taskId']))
         if (denied) return denied
+        // An unverified caller cannot prove it is the author it names, so the
+        // comment posts as a plain agent comment rather than under someone else's
+        // name OR under someone else's KIND.
+        //
+        // Both halves are needed and the first version of this guard only had one.
+        // Dropping `authorAgentId` while still honouring `authorType` left the
+        // more useful forgery intact: the task drawer renders the type verbatim as
+        // the comment's attribution, so `authorType: 'user'` displays as
+        // "user: <body>" to the operator and is handed to peer agents by
+        // `get_task`. Choosing 'user' also drops the comment out of the drawer's
+        // Report section, which filters on 'agent' — so the same argument both
+        // forges an authority and hides the forgery from the place a human looks.
+        // Nothing authorizes on this field, so it is a labelling attack rather
+        // than a privilege one, but the label is aimed squarely at the human.
+        const unverified = opts?.unverifiedCaller === true
         return jsonResult(
           addComment(
             db,
             str(args['taskId']),
             str(args['body']),
-            (optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ?? 'agent',
-            // An unverified caller cannot prove it is the author it names, so the
-            // comment posts unattributed rather than under someone else's name.
-            opts?.unverifiedCaller === true ? undefined : optStr(args['authorAgentId']),
+            unverified
+              ? 'agent'
+              : ((optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ??
+                  'agent'),
+            unverified ? undefined : optStr(args['authorAgentId']),
           ),
         )
       },

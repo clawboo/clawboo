@@ -142,6 +142,29 @@ function totalOpen(): number {
   return n
 }
 
+/**
+ * Slots granted but not yet filled.
+ *
+ * `totalOpen()` alone counts browsers that EXIST, and a browser does not exist
+ * until `spawnFor` records it — which is on the far side of
+ * `connectStdioConnector`, i.e. after `npx` has been fetched and a cold Chromium
+ * has launched against an empty profile. That window is seconds wide, and every
+ * caller inside it reads the same stale count. A board fan-out where each agent's
+ * first browser call lands together therefore put ALL of them past a cap of four,
+ * each launching a real Chromium: the exact memory exhaustion the cap exists to
+ * prevent, arrived at through the cap's own check.
+ *
+ * Counting a grant at the moment it is GRANTED closes it. The reservation is held
+ * across the spawn and released only once the browser is in `browsers`, so there
+ * is no instant in which a slot is counted by neither.
+ */
+let reserved = 0
+
+/** Slots in use: browsers that exist, plus browsers on their way. */
+function capacityUsed(): number {
+  return totalOpen() + reserved
+}
+
 /** The least recently used browser with nothing in flight, or null. */
 function oldestQuiescent(): { connectorId: string; agentId: string } | null {
   let best: { connectorId: string; agentId: string; at: number } | null = null
@@ -204,14 +227,21 @@ export async function closeAllAgentBrowsers(): Promise<void> {
   await Promise.all([...browsers.keys()].map((id) => closeAllForConnector(id)))
   browsers.clear()
   creating.clear()
+  // The counter is module state like the maps, so a suite that tore down mid-spawn
+  // would otherwise leak a reservation into the next one and starve it.
+  reserved = 0
 }
 
 /** Wake queued callers, now that a slot may exist. */
 function drainWaiting(): void {
-  while (waiting.length > 0 && totalOpen() < MAX_AGENT_BROWSERS) {
+  while (waiting.length > 0 && capacityUsed() < MAX_AGENT_BROWSERS) {
     const next = waiting.shift()
     if (!next) return
     clearTimeout(next.timer)
+    // CLAIMED HERE, not by the woken caller. `resolve()` only schedules the
+    // continuation, so the loop condition would otherwise re-read an unchanged
+    // count and wake every waiter on a single freed slot.
+    reserved += 1
     next.resolve()
   }
 }
@@ -225,12 +255,19 @@ function drainWaiting(): void {
  * wait a moment. Bounded, so one wedged browser cannot hang a run forever.
  */
 async function waitForSlot(): Promise<void> {
-  if (totalOpen() < MAX_AGENT_BROWSERS) return
+  if (capacityUsed() < MAX_AGENT_BROWSERS) {
+    reserved += 1
+    return
+  }
   const idle = oldestQuiescent()
   if (idle) {
     await closeAgentBrowser(idle.connectorId, idle.agentId)
+    reserved += 1
     return
   }
+  // The queued path claims in `drainWaiting` at the moment it is woken, so a
+  // caller that reaches here and later resumes must NOT claim again. A caller
+  // that times out never claimed, which is why the reject path needs no release.
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       const i = waiting.findIndex((w) => w.timer === timer)
@@ -268,7 +305,33 @@ async function spawnFor(
   agentId: string,
 ): Promise<AgentBrowser> {
   await waitForSlot()
+  // HOLD THE RESERVATION ACROSS THE WHOLE SPAWN, and release it in a `finally`
+  // that covers every throw in it: the unresolved-command error, the handshake
+  // rethrow, an EACCES from either mkdir. A leaked reservation is strictly worse
+  // than the race being fixed here, because the counter only ever climbs — once
+  // it reaches the cap every later call queues and then fails with "every browser
+  // is busy" while zero browsers are open, and nothing short of a restart
+  // recovers it.
+  //
+  // On success the release runs AFTER the browser is in `browsers`, so it is
+  // already counted by `totalOpen()` and no slot is momentarily uncounted. On
+  // failure the slot genuinely frees, and `drainWaiting` is what stops a queued
+  // caller sitting out its full timeout beside it — a failed spawn emits no close
+  // event, so nothing else would wake it.
+  try {
+    return await spawnReservedBrowser(spec, connectorId, agentId)
+  } finally {
+    reserved -= 1
+    drainWaiting()
+  }
+}
 
+/** The spawn itself. Runs holding a reservation; see {@link spawnFor}. */
+async function spawnReservedBrowser(
+  spec: AgentBrowserSpawn,
+  connectorId: string,
+  agentId: string,
+): Promise<AgentBrowser> {
   const profileDir = profileDirFor(spec.slug, agentId)
   const scratchDir = scratchDirFor(spec.slug, agentId)
   fs.mkdirSync(profileDir, { recursive: true })
