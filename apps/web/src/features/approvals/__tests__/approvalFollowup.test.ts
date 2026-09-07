@@ -1,9 +1,18 @@
-// The webchat approval-followup recovery (runApprovalFollowup): a deterministic,
-// restore-guaranteed re-run of the approved command via deliver:false. Covers both
-// the allow-once and allow-always branches, the no-op when the agent is already
-// responding, and the load-bearing guarantee: the allow-once exec policy is ALWAYS
-// restored — even when the re-run throws (a transport error can't strand a session
-// with exec approval disabled).
+// The webchat approval-followup recovery (runApprovalFollowup): a deterministic
+// re-run of the approved command via deliver:false, for ALLOW-ALWAYS ONLY.
+//
+// The allow-once branch used to drop exec approval, re-run inside that window, and
+// restore afterwards, and these tests pinned that. On OpenClaw 2026.9 it had three
+// faults at once: `sessions.patch` now rejects `execSecurity`/`execAsk` on key
+// presence, so every allow-once approval reported a spurious failure on an approval
+// that had already succeeded; the restore path wrote an EMPTY allowlist, because
+// setting 'off' drops the agent entry and the restore then found no prior; and
+// between the two the agent could run anything with no approval at all.
+//
+// The tests below now pin the absence of that whole dance. They are written as
+// "must not call" assertions because the faults were all extra calls, and because
+// the previous tests passed throughout — their fake returned {} for
+// exec.approvals.get, which is exactly the empty-prior state that caused the wipe.
 
 import { describe, expect, it } from 'vitest'
 
@@ -35,9 +44,7 @@ const base = {
   command: 'ls -la',
   sessionKey: 'agent:a1:main',
   activeRunId: 'run-1',
-  originalExecAsk: 'always',
   isAgentResponding: () => false,
-  waitForRerunIdle: async () => {},
   delay: async () => {}, // no real timers
 }
 
@@ -69,23 +76,44 @@ describe('runApprovalFollowup', () => {
     expect(execOffPatches(calls)).toHaveLength(0)
   })
 
-  it('allow-once: disables exec approval, re-runs deliver:false, then restores', async () => {
+  it('allow-once: does NOT touch the exec policy at all', async () => {
+    // The headline regression. Any sessions.patch here reintroduces the retired
+    // execSecurity/execAsk fields, which 2026.9 rejects on key presence — and the
+    // rejection surfaces to the operator as a failed approval that in fact succeeded.
     const { client, calls } = makeClient()
     await runApprovalFollowup({ ...base, client, decision: 'allow-once' })
-    expect(execOffPatches(calls)).toHaveLength(1) // disabled for the re-run
-    expect(sentReruns(calls)[0]?.params?.['deliver']).toBe(false)
-    // The LAST sessions.patch is the restore (back to the original policy, not 'off').
-    const last = sessionPatches(calls).at(-1)
-    expect(last?.params?.['execAsk']).not.toBe('off')
+    expect(sessionPatches(calls)).toHaveLength(0)
+    expect(execOffPatches(calls)).toHaveLength(0)
   })
 
-  it('allow-once: ALWAYS restores the exec policy even when the re-run throws', async () => {
-    const { client, calls } = makeClient({ throwOn: 'chat.send' })
-    // Best-effort recovery: the throw is swallowed, never surfaced as an approval error.
+  it('allow-once: does NOT rewrite the stored approval policy', async () => {
+    // The wipe. Writing the policy for an allow-once round-trip is what emptied the
+    // operator's accumulated allow-always entries, because 'off' drops the agent's
+    // entry and the restore then re-read a store with no prior to carry forward.
+    const { client, calls } = makeClient()
     await runApprovalFollowup({ ...base, client, decision: 'allow-once' })
-    // Restore still happened (the finally), despite the chat.send failure.
-    const patches = sessionPatches(calls)
-    expect(patches.length).toBeGreaterThanOrEqual(2) // off + restore
-    expect(patches.at(-1)?.params?.['execAsk']).not.toBe('off')
+    expect(calls.filter((c) => c.method === 'exec.approvals.set')).toHaveLength(0)
+  })
+
+  it('allow-once: does not re-run the command', async () => {
+    // The trade this makes, stated as a test rather than left implicit. Recovering
+    // the output was only possible by disabling approvals first, so the recovery
+    // goes and the output may simply not appear. 2026.9 ships its own followup with
+    // turn-source delivery; one live approved exec decides whether this whole
+    // function can be deleted.
+    const { client, calls } = makeClient()
+    await runApprovalFollowup({ ...base, client, decision: 'allow-once' })
+    expect(sentReruns(calls)).toHaveLength(0)
+  })
+
+  it('allow-always still recovers, and a transport error stays swallowed', async () => {
+    // The path that survives. The approval already succeeded at the Gateway, so a
+    // failed re-run must never surface as an approval error.
+    const { client, calls } = makeClient({ throwOn: 'chat.send' })
+    await expect(
+      runApprovalFollowup({ ...base, client, decision: 'allow-always' }),
+    ).resolves.toBeUndefined()
+    expect(sentReruns(calls)).toHaveLength(1)
+    expect(sessionPatches(calls)).toHaveLength(0)
   })
 })

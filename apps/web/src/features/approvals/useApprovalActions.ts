@@ -5,7 +5,6 @@ import type { ApprovalDecision, ApprovalRequest } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
-import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
 import { apiFetch, listAgentSessions } from '@clawboo/control-client'
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
@@ -77,12 +76,8 @@ export interface ApprovalFollowupDeps {
   command: string
   sessionKey: string
   activeRunId: string | null
-  /** The agent's exec-ask before we (allow-once only) drop it; restored in `finally`. */
-  originalExecAsk: string
   /** True when the Gateway's own followup already started the agent — no recovery needed. */
   isAgentResponding: () => boolean
-  /** allow-once: wait for the re-run to finish before restoring the exec policy. */
-  waitForRerunIdle: () => Promise<void>
   /** Injected so tests need no real timers; defaults to a real `setTimeout`. */
   delay?: (ms: number) => Promise<void>
 }
@@ -94,13 +89,14 @@ const realDelay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r
  * deliver:true followup fails silently (webchat-only setups — no channel). Once
  * the original run ends and the agent is NOT already responding, ask the agent to
  * re-run the command itself with **deliver:false** (clawboo's own send — never
- * depending on the Gateway's deliver:true path failing-then-recovering). For
- * allow-once we briefly drop exec approval so the re-run doesn't re-prompt, then
- * ALWAYS restore it in a `finally` (so a transport error can't leave the session
- * with exec approval disabled). No-op when the agent is already responding.
+ * depending on the Gateway's deliver:true path failing-then-recovering). No-op
+ * when the agent is already responding.
+ *
+ * ALLOW-ALWAYS ONLY. allow-once returns early; see the block below for why, and
+ * for the one live test that decides whether this function should exist at all.
  */
 export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<void> {
-  const { client, agentId, decision, command, sessionKey, activeRunId, originalExecAsk } = deps
+  const { client, decision, command, sessionKey, activeRunId } = deps
   const delay = deps.delay ?? realDelay
   const allowOnce = decision === 'allow-once'
 
@@ -117,19 +113,35 @@ export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<v
   // 3. If the Gateway followup already started the agent, the output is not lost.
   if (deps.isAgentResponding()) return
 
-  // For allow-once, temporarily disable exec approval so the re-run doesn't loop
-  // back into another approval prompt. Both the session-level and file-level
-  // policies must be off (the Gateway checks both). allow-always needs no change
-  // (the command pattern is already on the allowlist).
-  if (allowOnce) {
-    await client.call('sessions.patch', {
-      key: sessionKey,
-      execHost: 'gateway',
-      execSecurity: 'full',
-      execAsk: 'off',
-    })
-    await upsertExecApprovalPolicy(client, agentId, 'off')
-  }
+  // ALLOW-ONCE NO LONGER RE-RUNS. It used to drop exec approval (session AND
+  // file), re-run the command in that window, and restore afterwards. On OpenClaw
+  // 2026.9 that path had three faults at once, and the first one is what made
+  // every allow-once approval report a spurious failure:
+  //
+  //  1. `sessions.patch` rejects `execSecurity`/`execAsk` on KEY PRESENCE now
+  //     ("retired; set permissionMode instead"). The call sits before the
+  //     try/finally, so it threw out of here into handleApproval's catch and
+  //     surfaced the raw retirement string — on an approval that had ALREADY
+  //     succeeded, because `exec.approval.resolve` runs first.
+  //  2. Deleting those two fields alone would not have been enough. Restoring the
+  //     policy called `upsertExecApprovalPolicy(agentId, 'off')`, which DROPS the
+  //     agent's entry; the restore then re-read the store, found no prior entry
+  //     and wrote `allowlist: []`, destroying every allow-always the operator had
+  //     accumulated. The two faults masked each other.
+  //  3. Between the drop and the restore the agent could run ANY command with no
+  //     approval at all. That window is the thing approvals exist to remove.
+  //
+  // Repairing 1 and 2 would have kept 3, to recover output in a case the Gateway
+  // may now handle itself: 2026.9 ships `sendExecApprovalFollowup` with
+  // turn-source delivery. Whether that covers this webchat-only setup cannot be
+  // settled without a live approved exec, so this takes the honest trade — an
+  // allow-once whose output may not appear, rather than a workaround that
+  // silently disables approvals to fetch it.
+  //
+  // TO REVISIT: run one real allow-once approval against 2026.9. If the output
+  // arrives, delete this function outright. If it does not, recover it WITHOUT
+  // disabling approvals (ask the agent to re-run and let the prompt fire again).
+  if (allowOnce) return
 
   try {
     await client.call('chat.send', {
@@ -142,25 +154,13 @@ export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<v
       deliver: false,
       idempotencyKey: crypto.randomUUID(),
     })
-    if (allowOnce) await deps.waitForRerunIdle()
   } catch {
     // Best-effort recovery — the approval itself already succeeded at the Gateway;
     // a transport hiccup on the re-run must not surface as an approval error.
-  } finally {
-    // ALWAYS restore the allow-once exec policy — even if the re-run threw — so a
-    // transport error can't strand the session with exec approval disabled.
-    if (allowOnce) {
-      try {
-        await client.call('sessions.patch', {
-          key: sessionKey,
-          ...resolveExecPatchParams(),
-        })
-        await upsertExecApprovalPolicy(client, agentId, originalExecAsk)
-      } catch {
-        // Best-effort — the settings page re-applies the policy on the next send.
-      }
-    }
   }
+  // No policy to restore any more: only allow-always reaches here, and its command
+  // is already on the allowlist, so the re-run cannot re-prompt and nothing was
+  // switched off to need switching back on.
 }
 
 // ─── useApprovalActions hook ──────────────────────────────────────────────────
@@ -238,16 +238,8 @@ export function useApprovalActions() {
               command: approval?.command ?? 'the requested command',
               sessionKey,
               activeRunId: agent?.runId ?? null,
-              originalExecAsk: agent?.execConfig?.execAsk ?? 'always',
               isAgentResponding: () =>
                 useFleetStore.getState().agents.find((a) => a.id === agentId)?.status === 'running',
-              waitForRerunIdle: async () => {
-                for (let i = 0; i < 60; i++) {
-                  await new Promise((r) => setTimeout(r, 1_000))
-                  const a = useFleetStore.getState().agents.find((x) => x.id === agentId)
-                  if (!a || a.status === 'idle' || a.status === 'error') break
-                }
-              },
             })
           }
 
