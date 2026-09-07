@@ -159,18 +159,42 @@ export const OPENCLAW_NODE_REQUIREMENT = '>=22.22.3 <23 || >=24.15.0 <25 || >=25
  * letting npm be the one to disagree.
  */
 export function isNodeVersionSupportedByOpenclaw(version: string | null | undefined): boolean {
-  const raw = (version ?? '').trim()
-  const m = /^v?(\d+)\.(\d+)\.(\d+)(.*)$/.exec(raw)
-  if (!m) return false
-  // Anything trailing the patch number that is not pure build metadata is a
-  // prerelease (`-nightly`, `-rc.1`, `-pre`).
-  const suffix = m[4] ?? ''
-  if (suffix.startsWith('-')) return false
-  const got: [number, number, number] = [Number(m[1]), Number(m[2]), Number(m[3])]
-  const atLeast = (a: [number, number, number], b: [number, number, number]): boolean =>
-    a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] >= b[2]
+  let raw = (version ?? '').trim()
+  if (raw.startsWith('v')) raw = raw.slice(1)
+
+  // A PRERELEASE is unsupported before anything else is considered. See above:
+  // npm resolves engines through node-semver, which excludes prereleases from a
+  // range whose comparators carry none.
+  if (raw.includes('-')) return false
+  // Build metadata (`+abc`) does not affect precedence, so drop it.
+  const plus = raw.indexOf('+')
+  if (plus !== -1) raw = raw.slice(0, plus)
+
+  // Parsed by splitting rather than by one regex over the whole string. The
+  // regex form was flagged js/polynomial-redos: not reproducible here (flat
+  // ~0.03ms at 80k chars), but a scanner that cannot be satisfied is a scanner
+  // people learn to override, and this reads better anyway.
+  const parts = raw.split('.')
+  if (parts.length !== 3) return false
+
+  const got: number[] = []
+  for (const part of parts) {
+    if (part.length === 0 || part.length > 10) return false
+    for (const ch of part) {
+      if (ch < '0' || ch > '9') return false
+    }
+    got.push(Number(part))
+  }
+
+  const atLeast = (a: number[], b: readonly number[]): boolean =>
+    a[0] !== b[0]
+      ? (a[0] as number) > (b[0] as number)
+      : a[1] !== b[1]
+        ? (a[1] as number) > (b[1] as number)
+        : (a[2] as number) >= (b[2] as number)
+
   return OPENCLAW_NODE_RANGES.some(
-    (r) => atLeast(got, r.min) && (r.ltMajor === undefined || got[0] < r.ltMajor),
+    (r) => atLeast(got, r.min) && (r.ltMajor === undefined || (got[0] as number) < r.ltMajor),
   )
 }
 

@@ -259,14 +259,24 @@ const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 function migrateAgentRoster(
   agents: Record<string, unknown>,
 ): Record<string, Record<string, unknown>> {
-  if (
-    !agents['entries'] ||
-    typeof agents['entries'] !== 'object' ||
-    Array.isArray(agents['entries'])
-  ) {
-    agents['entries'] = {}
-  }
-  const entries = agents['entries'] as Record<string, Record<string, unknown>>
+  const source =
+    agents['entries'] && typeof agents['entries'] === 'object' && !Array.isArray(agents['entries'])
+      ? (agents['entries'] as Record<string, Record<string, unknown>>)
+      : {}
+
+  // PROTOTYPE-LESS on purpose. `JSON.parse` hands back ordinary objects, on which
+  // `entries['__proto__']` does not miss: it returns `Object.prototype`, and the
+  // caller's `entry['model'] = ...` then writes a property onto the prototype
+  // every plain object in the process inherits from. UNSAFE_OBJECT_KEYS rejects
+  // that id up front, but a `Set.has` guard is invisible to dataflow analysis and
+  // to the next reader; a map with no prototype makes the write unreachable
+  // rather than merely unreached. `JSON.stringify` treats it identically, so the
+  // config round-trip is unchanged.
+  const entries: Record<string, Record<string, unknown>> = Object.assign(
+    Object.create(null) as Record<string, Record<string, unknown>>,
+    source,
+  )
+  agents['entries'] = entries
 
   const legacy = agents['list']
   if (Array.isArray(legacy)) {
