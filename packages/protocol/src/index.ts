@@ -162,13 +162,16 @@ export function isNodeVersionSupportedByOpenclaw(version: string | null | undefi
   let raw = (version ?? '').trim()
   if (raw.startsWith('v')) raw = raw.slice(1)
 
-  // A PRERELEASE is unsupported before anything else is considered. See above:
-  // npm resolves engines through node-semver, which excludes prereleases from a
-  // range whose comparators carry none.
-  if (raw.includes('-')) return false
-  // Build metadata (`+abc`) does not affect precedence, so drop it.
+  // Build metadata (`+abc`) does not affect precedence, so drop it FIRST. It may
+  // itself contain a hyphen (`22.23.2+build-nightly` is a RELEASE), so testing
+  // for a prerelease before stripping it rejects perfectly good versions.
   const plus = raw.indexOf('+')
   if (plus !== -1) raw = raw.slice(0, plus)
+
+  // A PRERELEASE is unsupported. See above: npm resolves engines through
+  // node-semver, which excludes prereleases from a range whose comparators
+  // carry none.
+  if (raw.includes('-')) return false
 
   // Parsed by splitting rather than by one regex over the whole string. The
   // regex form was flagged js/polynomial-redos: not reproducible here (flat

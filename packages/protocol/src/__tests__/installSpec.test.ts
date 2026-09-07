@@ -219,6 +219,19 @@ describe('isNodeVersionSupportedByOpenclaw', () => {
     expect(isNodeVersionSupportedByOpenclaw('22.23.0-rc.1')).toBe(false)
   })
 
+  it('accepts build metadata, even when it contains a hyphen', () => {
+    // `+build-nightly` is BUILD METADATA on a release, not a prerelease. Testing
+    // for `-` before stripping everything after `+` rejected a perfectly good
+    // version. Build metadata does not affect precedence at all.
+    expect(isNodeVersionSupportedByOpenclaw('22.23.2+build-nightly')).toBe(true)
+    expect(isNodeVersionSupportedByOpenclaw('v24.15.0+abc')).toBe(true)
+  })
+
+  it('still rejects a real prerelease that also carries build metadata', () => {
+    // Here the hyphen precedes the `+`, so it IS a prerelease.
+    expect(isNodeVersionSupportedByOpenclaw('22.23.2-rc.1+build')).toBe(false)
+  })
+
   it('still accepts ordinary release versions', () => {
     expect(isNodeVersionSupportedByOpenclaw('v22.23.2')).toBe(true)
   })
