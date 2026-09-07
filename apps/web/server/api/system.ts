@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { OPENCLAW_INSTALL_COMMAND_SUDO, OPENCLAW_INSTALL_SPEC } from '@clawboo/protocol'
 import { resolveStateDir, resolveClawbooDir, loadSettings, saveSettings } from '@clawboo/config'
 import {
   readGatewayPid,
@@ -453,15 +454,19 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
   //   3. `windowsHide: isWindows` — with shell:true on Windows, Node spawns
   //      through cmd.exe, which by default pops a console window in front
   //      of the dashboard. Hide it. No-op on Unix.
-  //   4. Pin to `openclaw@^2026.5` rather than `@latest`. OpenClaw bumped the
-  //      WS connect protocol from 3 to 4 in 2026.5.x, and Clawboo's
-  //      gateway-client now advertises maxProtocol: 4 to match. A future
-  //      OpenClaw 2026.6+ could bump to protocol 5; pinning to ^2026.5 means
-  //      new users get a Clawboo-compatible openclaw until we widen the
-  //      protocol range and ship a new clawboo.
+  //   4. Pin with OPENCLAW_INSTALL_SPEC rather than `@latest`, so a new user
+  //      gets a Gateway this clawboo has been tested against.
+  //
+  //      This line used to read `openclaw@^2026.5` under a comment claiming it
+  //      held new users on the 2026.5 line. It did not: caret pins only the
+  //      leftmost non-zero digit, so `^2026.5` means any 2026.x and npm was
+  //      serving 2026.9.1. Every install after 2026.6 shipped got a Gateway
+  //      that fails on agent creation, the capability toggles, chat sends and
+  //      approvals. The spec is a shared constant now precisely because the
+  //      comment and the code were allowed to disagree.
   let child
   try {
-    child = spawn(resolveShimName('npm'), ['install', '-g', 'openclaw@^2026.5'], {
+    child = spawn(resolveShimName('npm'), ['install', '-g', OPENCLAW_INSTALL_SPEC], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: isWindows,
       windowsHide: isWindows,
@@ -493,8 +498,7 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
       sendEvent(res, {
         type: 'error',
         code: 'EACCES',
-        message:
-          'Permission denied. Your Node.js installation may require sudo for global installs. Try: sudo npm install -g openclaw@latest',
+        message: `Permission denied. Your Node.js installation may require sudo for global installs. Try: ${OPENCLAW_INSTALL_COMMAND_SUDO}`,
       })
     }
     const lines = text.split('\n').filter(Boolean)

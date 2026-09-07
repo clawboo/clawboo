@@ -191,7 +191,8 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
 
       useToastStore.getState().addToast({ message: `Saved ${tab}`, type: 'success' })
 
-      if (tab === 'TOOLS.md' || tab === 'AGENTS.md') {
+      // AGENTS.md only: the graph never reads TOOLS.md. See useAgentFiles.
+      if (tab === 'AGENTS.md') {
         useGraphStore.getState().triggerRefresh()
       }
     } catch (err) {
@@ -224,8 +225,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
       }
     }
 
-    const hasGraphFiles = dirtyTabs.includes('TOOLS.md') || dirtyTabs.includes('AGENTS.md')
-    if (hasGraphFiles) {
+    if (dirtyTabs.includes('AGENTS.md')) {
       useGraphStore.getState().triggerRefresh()
     }
   }, [agentId, client])

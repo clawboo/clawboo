@@ -40,8 +40,11 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
+import { agents } from '@clawboo/db'
+import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
+import { restoreScreenshots } from './lib/screenshotBus'
 import { mountSpa } from './lib/serveSpa'
-import { restoreConnectorsAtBoot } from './api/connectors'
+import { ensureBrowserConnectedAtBoot, restoreConnectorsAtBoot } from './api/connectors'
 import { refreshConnectedApps } from './lib/connectors/composio'
 import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
 
@@ -240,6 +243,11 @@ async function main() {
   // header — a forged Host must never redirect a runtime's Tasks/Memory/Tools/TeamChat
   // traffic. Mirrors the `http://127.0.0.1:${port}` the boot/ticker callers use.
   app.locals['apiPort'] = port
+  // The base-path middleware STRIPS the prefix from `req.url` before routing, so
+  // a route that needs to build an absolute-on-this-origin redirect cannot
+  // recover it from the request. Publishing the validated value is how a route
+  // rebuilds a Location without reaching for the raw `req.originalUrl`.
+  app.locals['basePath'] = basePath
 
   // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
   // of it. The guards below decide what to protect with `startsWith('/api/')` and
@@ -413,6 +421,24 @@ async function main() {
     void ensureNativeBooZero(getDb(), getRegistry().nativeSource).catch(() => undefined)
   })
 
+  // ── Browser grants ──────────────────────────────────────────────────────────
+  // Every agent gets the browser connectors, including the ones no create-time
+  // hook can reach: the onboarding seed, Boo Zero, and the rows the OpenClaw sync
+  // mints for agents that already existed in the operator's Gateway. Insert-only,
+  // so a browser an operator revoked stays revoked across restarts, and running
+  // it on every boot needs no migration flag. Best-effort; never blocks boot.
+  safeStart('browser-grants', () => {
+    const db = getDb()
+    ensureBrowserGrantsForAllAgents(
+      db,
+      db
+        .select({ id: agents.id })
+        .from(agents)
+        .all()
+        .map((r) => r.id),
+    )
+  })
+
   // ── MCP liveness supervisor ─────────────────────────────────────────────────
   // Pre-warm the in-process MCP servers + health-probe them (rebuild-on-failure
   // with backoff). Best-effort, never blocks boot.
@@ -562,10 +588,25 @@ async function main() {
     // AFTER THE REAP, so a child left by a previous process is killed before a
     // new one is spawned, and NOT awaited: a cold `npx` install can take the
     // better part of a minute and the server must be serving long before that.
+    // Frames BEFORE anything can serve a read. A restart used to wipe every
+    // captured screen, so the browser panel said "Nothing captured yet" for a
+    // Boo that had browsed all afternoon.
+    safeStart('frame-restore', () => {
+      const frames = restoreScreenshots()
+      if (frames > 0) log.info({ frames }, 'Browser: restored frames captured before the restart')
+    })
+
     safeStart('connector-restore', () => {
       void restoreConnectorsAtBoot(getDb())
         .then(async (restored) => {
           if (restored > 0) log.info({ restored }, 'Connectors: restored previous session')
+          // AFTER the restore, so a browser the operator already connected comes
+          // back through the sweep and this sees a row and stands down. Only a
+          // machine that has never had one gets a browser started for it.
+          const browsers = await ensureBrowserConnectedAtBoot(getDb())
+          if (browsers > 0) {
+            log.info({ browsers }, 'Connectors: started a browser so every agent has one')
+          }
           // WARM THE BROKER'S APP LIST TOO. The graph draws a node per connected
           // app from a cache that nothing filled at boot, so the apps an
           // operator had granted stayed invisible until something happened to

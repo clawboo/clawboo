@@ -86,8 +86,13 @@ export interface ToolDescriptor {
   risk?: ToolRisk
   /**
    * MCP ToolAnnotations, mirrored so the grant gate can classify a tool without
-   * a second vocabulary. NOTHING POPULATES THESE YET: an outbound MCP client
-   * reading `tools/list` is what fills them.
+   * a second vocabulary. Populated by `buildConnectorDescriptor` from a
+   * connector's `tools/list`, but ONLY for a CURATED catalog entry: the MCP spec
+   * calls annotations untrusted hints, so the trust has to come from the catalog
+   * vouching for the package rather than from the server's own say-so. It is
+   * also set BY NAME for a broker's own read-only meta-tools
+   * (`isBrokeredReadOnlyMetaTool`), which are clawboo's rather than a vendor's,
+   * so `readOnly: true` does not by itself mean an annotation was vouched for.
    *
    * CONSEQUENCE WORTH KNOWING: `requiredMode` treats anything not declaring
    * `readOnly: true` as a write, so a `mode: 'read'` grant denies every
@@ -110,8 +115,51 @@ export interface ToolDescriptor {
    * `inputSchema` remains the local validator.
    */
   jsonSchema?: Record<string, unknown>
-  executor: (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<string> | string
+  executor: (
+    args: Record<string, unknown>,
+    ctx: ToolCallContext,
+  ) => Promise<ToolExecutorResult> | ToolExecutorResult
   provenance?: ToolProvenance
+}
+
+/**
+ * An image a tool produced, carried alongside its text.
+ *
+ * Described STRUCTURALLY rather than imported from the MCP SDK, for the same
+ * reason `RemoteToolFacts` is: @clawboo/db must not depend on @clawboo/mcp. The
+ * field names mirror an MCP `image` content block so the tools server can emit
+ * one without a translation table.
+ */
+export interface ToolImage {
+  /** Base64, no data: prefix — exactly what an MCP image block carries. */
+  data: string
+  mimeType: string
+}
+
+/**
+ * What an executor may return.
+ *
+ * A bare string is the common case and stays valid, so no existing executor
+ * changes. The object form exists for tools whose output is not only prose: a
+ * screenshot flattened to `[image: image/png, not rendered]` told the model a
+ * picture existed and then withheld it, which is worse than useless on a tool
+ * whose entire purpose is to look at something.
+ *
+ * `text` remains the canonical rendering. It is what the audit row stores, what
+ * compaction operates on, and what any consumer that cannot carry images falls
+ * back to — so the placeholder is still the right text even when the image
+ * travels beside it.
+ */
+export type ToolExecutorResult = string | { text: string; images?: readonly ToolImage[] }
+
+/** Normalize either executor return shape to the object form. */
+export function toolOutputOf(raw: ToolExecutorResult): {
+  text: string
+  images: readonly ToolImage[]
+} {
+  return typeof raw === 'string'
+    ? { text: raw, images: [] }
+    : { text: raw.text, images: raw.images ?? [] }
 }
 
 export type InspectorDecision =

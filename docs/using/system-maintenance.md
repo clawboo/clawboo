@@ -65,7 +65,7 @@ This is the fleet-wide default. A single agent overrides it in its detail view's
 
 The **System Info** section shows the OpenClaw version (or "Not installed"), the Node.js version, OpenClaw's state dir (`~/.openclaw` by default), and whether `openclaw.json` was found, all from a single `GET /api/system/status` read on mount. This card does not poll; it re-reads only after a successful update.
 
-**Check for Updates** runs the OpenClaw installer in place: it streams `POST /api/system/install-openclaw` (which runs `npm install -g openclaw@^2026.5`) as SSE, renders every `progress` and `output` line in the update log below the button, and on success re-fetches status so the version row shows the new value.
+**Check for Updates** runs the OpenClaw installer in place: it streams `POST /api/system/install-openclaw` (which runs `npm install -g openclaw@~2026.5`) as SSE, renders every `progress` and `output` line in the update log below the button, and on success re-fetches status so the version row shows the new value.
 
 ## Options / variations
 
@@ -90,7 +90,7 @@ The **System Info** section shows the OpenClaw version (or "Not installed"), the
 </Warning>
 
 <Danger>
-**Check for Updates reinstalls globally.** It runs `npm install -g`, which can hit `EACCES` on a system Node install. If the log shows a permission error, prefer a Node version manager (nvm/fnm) or Homebrew over `sudo`. Pinning is to `openclaw@^2026.5` to stay protocol-compatible with this Clawboo.
+**Check for Updates reinstalls globally.** It runs `npm install -g`, which can hit `EACCES` on a system Node install. If the log shows a permission error, prefer a Node version manager (nvm/fnm) or Homebrew over `sudo`. Pinning is to `openclaw@~2026.5` to stay protocol-compatible with this Clawboo.
 </Danger>
 
 ## See also

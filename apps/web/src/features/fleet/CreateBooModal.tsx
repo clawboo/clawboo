@@ -3,20 +3,19 @@ import { apiFetch } from '@clawboo/control-client'
 import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { createAgent } from '@/lib/createAgent'
-import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
+import {
+  DEFAULT_PERSONALITY as SHIPPED_DEFAULT_PERSONALITY,
+  mergeSoulWithPersonality,
+  type PersonalityValues,
+} from '@/lib/soulPersonality'
 import { Button } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { Modal } from '@/features/shared/Modal'
 
 const DEFAULT_SOUL = `# SOUL\n\nYou are a helpful AI assistant. You approach tasks methodically, communicate clearly, and ask for clarification when needed.`
 
-const DEFAULT_PERSONALITY: PersonalityValues = {
-  verbosity: 50,
-  humor: 50,
-  caution: 50,
-  speed_cost: 50,
-  formality: 50,
-}
+// One shared default so the three creation paths cannot drift apart.
+const DEFAULT_PERSONALITY: PersonalityValues = SHIPPED_DEFAULT_PERSONALITY
 
 export function CreateBooModal({
   isOpen,

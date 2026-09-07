@@ -66,7 +66,7 @@ Resolving the same tool/delegation row twice is a no-op; the resolve is guarded 
 
 ### 3. Watch the per-Boo indicator
 
-While a Boo has an exec approval pending, its node in the [Ghost Graph](/using/ghost-graph) shows a pulsing **amber ring**, a circle when the Boo is idle, a rounded outline when it is rendered as an active card. The ring is matched by `agentId`, so it points at exactly the Boo waiting on you. It clears the instant you resolve.
+While a Boo has an exec approval pending, its node in the [Ghost Graph](/using/ghost-graph) shows a pulsing **amber ring** around the circle. The ring is matched by `agentId`, so it points at exactly the Boo waiting on you. It clears the instant you resolve.
 
 ## What the cards report
 

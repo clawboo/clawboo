@@ -1,4 +1,11 @@
 import type { Request, Response } from 'express'
+import { connectorsByCategory } from '@clawboo/connector-catalog'
+import { isToolVisibleToAgent } from '@clawboo/db'
+
+import { connectorInstanceIdForSlug } from '../lib/capabilitySource/connectorIdentity'
+import { callIfRunning } from '../lib/connectors/agentBrowsers'
+import { getLiveConnector } from '../lib/connectors/supervisor'
+import { getScreenshot, putScreenshot } from '../lib/screenshotBus'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 import {
   agents,
@@ -14,6 +21,7 @@ import {
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray } from 'drizzle-orm'
 import { getDb } from '../lib/db'
+import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
 import { runtimeAgentFileKey } from '../lib/agentSource/runtimeAgentFileStore'
@@ -193,6 +201,11 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
       files: body.files,
       tenantId: getTenantId(req),
     })
+    // A new Boo gets a browser, the way a new hire gets a laptop. Per-agent and
+    // browser-only; see `browserGrants.ts` for why this is not the fleet-wide
+    // grant that was removed. Best-effort: a missing grant costs one panel, and
+    // failing the creation over it would be worse.
+    ensureBrowserGrantsForAgent(getDb(), agent.id)
     // Eagerly materialize the DEFAULT-NATIVE Boo Zero the moment a native team gains a
     // member, so the client identifies the native leader right away instead of the
     // OpenClaw `main` fallback shown in the window before the first orchestrator run
@@ -573,4 +586,124 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
+}
+
+// ─── POST /api/agents/:agentId/screenshot/capture ────────────────────────────
+// Re-photograph the browser as it is NOW, rather than waiting for the agent's
+// next tool call to produce a frame as a side effect.
+//
+// SCREENSHOT ONLY. It never navigates, and that is a safety property rather than
+// a scope decision: every agent shares one browser context, so a capture that
+// opened a page would throw away whatever another Boo had on screen mid-task.
+// With no page open this fails and the panel stays empty, which is the correct
+// outcome — the alternative is clawboo opening a window nobody asked for, and
+// the browser is headed by default.
+//
+// The frame is filed under a RESERVED id, not the requesting agent's. The shared
+// context means this is the fleet's browser, not that agent's, and storing it as
+// theirs would drop the "Shared browser" label the view needs to stay honest.
+/**
+ * The screenshot tool, found by SUFFIX rather than named outright.
+ *
+ * The two browsers in the catalog do not agree on what to call it: Playwright
+ * ships `browser_take_screenshot`, chrome-devtools ships `take_screenshot`. A
+ * literal would work against whichever one happened to be connected on the
+ * machine it was written on and silently do nothing on the other.
+ */
+const isScreenshotTool = (name: string): boolean => name.endsWith('take_screenshot')
+
+export async function agentScreenshotCapturePOST(req: Request, res: Response): Promise<void> {
+  const agentId = (req.params['agentId'] as string | undefined) ?? ''
+  if (!agentId) {
+    res.status(400).json({ ok: false, error: 'agentId is required' })
+    return
+  }
+  for (const def of connectorsByCategory('browser')) {
+    const connectorId = connectorInstanceIdForSlug(def.slug)
+    const live = getLiveConnector(connectorId)
+    if (!live) continue
+    const shooter = live.descriptors.find((d) => isScreenshotTool(d.name))
+    const rawName = shooter ? live.rawToolNames.get(shooter.name) : undefined
+    if (!shooter || !rawName) continue
+
+    // THE AGENT'S OWN GRANT DECIDES, even though the operator is the one asking.
+    // Without this an agent whose browser grant was revoked would still have a
+    // frame taken from its browser and filed under its name, and `browserGrants`
+    // is insert-only for exactly the opposite reason: so a revoke sticks.
+    if (!isToolVisibleToAgent(getDb(), shooter, { agentId, connectorId })) continue
+
+    // NEVER CREATES. `callIfRunning` returns null when this agent has no browser
+    // open, and that is the whole safety property of this route: the panel
+    // photographs a window that already exists and is never the thing that opens
+    // one.
+    const result = await callIfRunning(connectorId, agentId, rawName).catch(() => null)
+    const first = result?.images?.[0]
+    if (!first) continue
+    putScreenshot(agentId, {
+      data: first.data,
+      mimeType: first.mimeType,
+      toolName: shooter.name,
+    })
+    res.json({ ok: true, ts: Date.now() })
+    return
+  }
+  res.status(409).json({ ok: false, error: 'this Boo has no browser open right now' })
+}
+
+// ─── GET /api/agents/:agentId/screenshot ─────────────────────────────────────
+// The newest frame this agent captured, for the Browser panel. `?meta=1` returns
+// just the descriptor so the panel can decide whether to render at all without
+// pulling megabytes it may not show.
+//
+// Serves out of an in-memory bus, never the event log: the frame's value expires
+// in seconds and the log is append-only with no delete writer.
+/** What a captured frame may be served as. A connector states its own mimeType,
+ *  so this is the only thing standing between it and an HTML document on a
+ *  same-origin URL. */
+const SAFE_FRAME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+
+export function agentScreenshotGET(req: Request, res: Response): void {
+  const agentId = (req.params['agentId'] as string | undefined) ?? ''
+  // THIS AGENT'S OWN FRAME, and nobody else's.
+  //
+  // There was briefly a fallback to the fleet's newest frame, which was true
+  // while every agent shared one browser. Each Boo now has its own, so another
+  // agent's frame is another agent's page, and showing it would be the panel
+  // asserting something false rather than filling a gap.
+  const shot = getScreenshot(agentId)
+  if (!shot) {
+    res.status(404).json({ ok: false, error: 'no screenshot for this agent' })
+    return
+  }
+  if (req.query['meta'] !== undefined) {
+    res.json({
+      ok: true,
+      mimeType: shot.mimeType,
+      toolName: shot.toolName,
+      ts: shot.ts,
+      // How much to TRUST the frame. A restored one can be hours old, and the
+      // panel says so in words rather than showing it as live.
+      ...(shot.restored ? { restored: true } : {}),
+    })
+    return
+  }
+  let bytes: Buffer
+  try {
+    bytes = Buffer.from(shot.data, 'base64')
+  } catch {
+    res.status(500).json({ ok: false, error: 'frame is not decodable' })
+    return
+  }
+  // ALLOWLIST, never reflect. `mimeType` arrives on an MCP image content block
+  // and is only type-checked as a string on the way in, so a connector could put
+  // `text/html` here and have this same-origin endpoint serve it as a document.
+  // `nosniff` below stops the browser guessing, but it cannot undo a
+  // Content-Type the server itself stated.
+  res.setHeader('Content-Type', SAFE_FRAME_TYPES.has(shot.mimeType) ? shot.mimeType : 'image/png')
+  res.setHeader('Content-Length', String(bytes.length))
+  // The newest frame replaces the last one under the same URL, so a cached copy
+  // would pin the panel to whatever the agent was looking at first.
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.end(bytes)
 }

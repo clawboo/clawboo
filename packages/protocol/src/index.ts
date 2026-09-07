@@ -32,6 +32,90 @@ const SYSTEM_EVENT_BLOCK_RE = /^System:\s*\[[^\]]+\][\s\S]*?\n\s*\n/
 
 // ─── WeakMap caches (module-level, not exported) ──────────────────────────────
 
+/**
+ * The heading the browsing guidance is filed under, and the marker that makes
+ * adding it idempotent.
+ */
+export const BROWSING_GUIDANCE_HEADING = '## Opening web pages'
+
+/**
+ * What every externally-run agent is told about opening web pages.
+ *
+ * An agent on an external runtime carries its own shell, and reaching for it is
+ * the shortest path to a web page. That path uses the operator's REAL default
+ * browser and their signed-in profile, which is not the agent's to act in, and
+ * clawboo cannot show it either.
+ *
+ * NAMES THE TOOL THE AGENT ACTUALLY HAS. An earlier draft said "use your browser
+ * tool", and a live test found that OpenClaw agents here have no browser tool at
+ * all: the Gateway registers it only when a dedicated browser profile and its
+ * control service are configured. Guidance pointing at a missing tool is the
+ * same failure as no guidance, because the agent falls back to the shell, which
+ * is the one path this exists to close. `web_fetch` is what they have and what
+ * they already reach for; the browser line is written to stay correct if a
+ * browser tool is later enabled.
+ *
+ * ADVISORY, and the wording does not pretend otherwise. Nothing here prevents a
+ * shell call; it makes the safe path the obvious one and says why, which is the
+ * most an instruction can do. The enforcement question is separate and is a
+ * decision about the agent's command line, not about this text.
+ */
+export const BROWSING_GUIDANCE = `${BROWSING_GUIDANCE_HEADING}
+
+To READ a web page, use \`web_fetch\`. It returns the page content and is the
+right tool for looking something up.
+
+If you have a browser tool, use it for anything a fetch cannot do: clicking,
+typing, or seeing a page as it renders.
+
+Never use \`exec\` to open a page. No \`open\`, \`xdg-open\`, \`start\`, and no
+launching a browser binary. That opens the operator's real default browser with
+their personal signed-in profile, which is not yours to act in, and it happens
+where clawboo cannot see it.
+
+If a task genuinely needs a browser and you have no browser tool, say so and
+stop. Do not reach for the shell instead.
+
+Never pass \`profile: "user"\` to a browser tool unless the operator asked for it
+in this conversation. That profile is their real browser, with their sessions.
+`
+
+/**
+ * Add the browsing guidance to an agent instruction file, once.
+ *
+ * APPENDS, and that is the whole contract. These files carry the operator's own
+ * words: a pack's instructions, a persona someone wrote by hand. Replacing them
+ * to deliver one paragraph would destroy the thing the file exists for. Returns
+ * the input unchanged when the guidance is already present, so a resync or a
+ * repeated create cannot stack copies.
+ */
+export function withBrowsingGuidance(existing: string | undefined | null): string {
+  const current = (existing ?? '').trim()
+  if (current.includes(BROWSING_GUIDANCE_HEADING)) return existing ?? ''
+  return current ? `${current}\n\n${BROWSING_GUIDANCE}` : BROWSING_GUIDANCE
+}
+
+/**
+ * The npm spec clawboo installs the OpenClaw Gateway with.
+ *
+ * TILDE, NOT CARET, and that is the whole point of this constant existing.
+ * `^2026.5` means "any 2026.x", because caret only pins the leftmost non-zero
+ * digit, so it shipped 2026.9.1 to every new user while the comment beside it
+ * claimed it held them on 2026.5. Four things break on that version: agent
+ * creation, the capability toggles, chat sends and approvals. `~2026.5` is what
+ * "the 2026.5 line" actually spells.
+ *
+ * It lives in @clawboo/protocol because the server spawns the install and the
+ * onboarding UI prints the same command for people who need to run it by hand.
+ * Those three copies drifted once already; one exported string is what stops it
+ * happening again. Widen this only alongside a clawboo that has been tested
+ * against the newer Gateway.
+ */
+export const OPENCLAW_INSTALL_SPEC = 'openclaw@~2026.5'
+
+/** The manual fallback, for a machine whose global installs need sudo. */
+export const OPENCLAW_INSTALL_COMMAND_SUDO = `sudo npm install -g ${OPENCLAW_INSTALL_SPEC}`
+
 export interface ToolCall {
   id?: string
   name: string
@@ -112,14 +196,84 @@ export interface AgentFileMeta {
   hint: string
 }
 
+/**
+ * Hints DESCRIBE the file; they must not assert an effect the runtime does not
+ * deliver. These seven names are OpenClaw's agent-file set. Only OpenClaw
+ * agents have a runtime that reads them: the clawboo-native, claude-code,
+ * codex and hermes drivers read none of them (see
+ * apps/web/server/lib/agentSource/runtimeAgentFileStore.ts and
+ * apps/web/server/lib/runtimes/contextPreamble.ts). Wording that promised
+ * otherwise is why this comment exists. Do not reinstate it.
+ */
 export const AGENT_FILE_META: Record<AgentFileName, AgentFileMeta> = {
-  'AGENTS.md': { title: 'AGENTS.md', hint: 'Operating instructions, priorities, and rules.' },
-  'SOUL.md': { title: 'SOUL.md', hint: 'Persona, tone, and boundaries.' },
-  'IDENTITY.md': { title: 'IDENTITY.md', hint: 'Name, vibe, and emoji.' },
-  'USER.md': { title: 'USER.md', hint: 'User profile and preferences.' },
-  'TOOLS.md': { title: 'TOOLS.md', hint: 'Local tool notes and conventions.' },
-  'HEARTBEAT.md': { title: 'HEARTBEAT.md', hint: 'Small checklist for heartbeat runs.' },
-  'MEMORY.md': { title: 'MEMORY.md', hint: 'Durable memory for this agent.' },
+  'AGENTS.md': {
+    title: 'AGENTS.md',
+    hint: "Operating notes. Its links also draw this agent's graph edges.",
+  },
+  'SOUL.md': {
+    title: 'SOUL.md',
+    hint: 'Persona, tone, and boundaries. The one agent file every runtime reads.',
+  },
+  'IDENTITY.md': { title: 'IDENTITY.md', hint: 'Name, vibe, and emoji. Read by OpenClaw agents.' },
+  'USER.md': {
+    title: 'USER.md',
+    hint: 'Notes about you. Clawboo never writes or reads this; only your Gateway might.',
+  },
+  'TOOLS.md': {
+    title: 'TOOLS.md',
+    hint: 'Tool notes for the agent to read. Does not configure tools.',
+  },
+  'HEARTBEAT.md': {
+    title: 'HEARTBEAT.md',
+    hint: 'Checklist an OpenClaw heartbeat can be pointed at. Clawboo never reads it.',
+  },
+  'MEMORY.md': {
+    title: 'MEMORY.md',
+    hint: 'Notes for OpenClaw agents. Not the Hermes memory file, and not clawboo memory.',
+  },
+}
+
+/**
+ * Which agent files a runtime actually consumes, and therefore which tabs are
+ * honest to show. Derived from a full trace of every read path, 2026-08-25:
+ *
+ * - `openclaw`: the Gateway owns this file set and is the only runtime with a
+ *   substrate that reads it. Clawboo passes the bytes through blind.
+ * - `clawboo-native`: SOUL.md drives `AgentConfig.systemPrompt` (the source
+ *   re-derives it on write); AGENTS.md draws graph edges.
+ * - `claude-code` / `codex` / `hermes`: these drivers read no agent file from
+ *   disk, so clawboo injects SOUL.md into the prompt itself as a
+ *   `[Your persona]` block on both the team and board paths (see
+ *   apps/web/server/lib/runtimes/personaBlock.ts). AGENTS.md is listed for its
+ *   graph edges, a real effect even though no prompt sees the file.
+ *
+ * IDENTITY and TOOLS stay OpenClaw-only on purpose: wiring them would turn the
+ * prompt into a second, undocumented context channel. An unlisted runtime falls
+ * back to the full set: never hide a file we cannot prove is inert.
+ *
+ * OpenClaw lists the four files clawboo itself seeds at agent creation
+ * (openClawAgentSource.ts), not all seven. USER / HEARTBEAT / MEMORY are part
+ * of OpenClaw's file set but clawboo neither creates nor reads them, so an
+ * always-on editor for them promises an effect clawboo cannot stand behind.
+ * They stay reachable: the editor still shows any file that already has
+ * content, so a file a Gateway-side process wrote is never hidden.
+ */
+export const AGENT_FILE_RUNTIME_SUPPORT: Readonly<Record<string, readonly AgentFileName[]>> = {
+  openclaw: ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'],
+  'clawboo-native': ['SOUL.md', 'AGENTS.md'],
+  // SOUL.md became real for the coding runtimes when clawboo started injecting
+  // it as a `[Your persona]` block on both prompt paths (personaBlock.ts). That
+  // is also what makes the Personality sliders work here: they merge their text
+  // into SOUL.md on save.
+  'claude-code': ['SOUL.md', 'AGENTS.md'],
+  codex: ['SOUL.md', 'AGENTS.md'],
+  hermes: ['SOUL.md', 'AGENTS.md'],
+}
+
+/** The files worth showing a tab for on `runtime`. Unknown runtime → all. */
+export function agentFilesForRuntime(runtime: string | null | undefined): readonly AgentFileName[] {
+  if (!runtime) return AGENT_FILE_NAMES
+  return AGENT_FILE_RUNTIME_SUPPORT[runtime] ?? AGENT_FILE_NAMES
 }
 
 export const AGENT_FILE_PLACEHOLDERS: Record<AgentFileName, string> = {

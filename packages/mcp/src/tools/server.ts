@@ -21,9 +21,23 @@ import {
 import { z } from 'zod'
 
 import { DEFAULT_TOOL_RESULT_BUDGET_BYTES, makeResultCeiling } from '../ceiling'
-import { buildServer, textResult, type Server, type ToolDef } from '../shared'
+import { buildServer, mediaResult, textResult, type Server, type ToolDef } from '../shared'
 
 export interface ToolsServerOptions {
+  /**
+   * Called when a brokered call produced images, so a host can show a human
+   * what the agent just looked at.
+   *
+   * A HOOK rather than a return value because the images have two different
+   * consumers with different lifetimes: the model gets them inline on this
+   * result, and the UI needs them to outlive the call. Optional, so a server
+   * built without one behaves exactly as before.
+   */
+  onToolImages?: (info: {
+    agentId: string | undefined
+    toolName: string
+    images: readonly { data: string; mimeType: string }[]
+  }) => void
   /** Availability context (defaults to env-based). Determines which tools register. */
   availability?: AvailabilityContext
   /** The calling agent (recorded in audit + approvals). */
@@ -278,9 +292,20 @@ export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}):
               },
               { registry: live.registry, ...opts.broker },
             )
+            const images = result.images ?? []
+            if (images.length > 0 && opts.onToolImages) {
+              // Never let a host's side effect break the tool call it observed.
+              try {
+                opts.onToolImages({ agentId: opts.agentId, toolName: descriptor.name, images })
+              } catch {
+                /* the model still gets its result */
+              }
+            }
             // Carry a typed denial (availability/provenance/inspector/approval) on
             // `_meta` so an in-process caller can surface a policy-denied signal.
-            return textResult(result.output, result.isError, result.denied)
+            // `mediaResult` degrades to exactly `textResult` when a tool produced
+            // no images, so a builtin's wire shape is unchanged.
+            return mediaResult(result.output, images, result.isError, result.denied)
           },
         }))
     )

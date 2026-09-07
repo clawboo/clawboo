@@ -4,6 +4,7 @@
 // so clawboo "hosts" the connection setup.
 
 import type { IncomingMessage } from 'node:http'
+import { putScreenshot } from '../lib/screenshotBus'
 import path from 'node:path'
 
 import {
@@ -146,13 +147,34 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     // Tasks binds the run's TEAM (same `scopeTeamId` param the Memory server
     // reads) so board READS are team-scoped — an agent is never told its own
     // teamId, so a bare `list_tasks` must mean "my team's board", not "every
-    // team's". Writes are unaffected; unbound (no scope) stays board-wide.
-    tasks: createStreamableHttpHandlers((req) =>
-      createTasksServer(getDb(), { boundScope: parseBoundScope(req) }),
-    ),
-    memory: createStreamableHttpHandlers((req) =>
-      createMemoryServer(getDb(), cachedEmbed, { boundScope: parseBoundScope(req) }),
-    ),
+    // team's".
+    //
+    // AND, when no signed scope arrives, the caller is UNVERIFIED rather than
+    // merely unscoped — a distinction only this file can draw, because only here
+    // is the transport known. Absent scope over stdio is the operator running the
+    // bin; absent scope over HTTP is an attach URL that carried no signature, and
+    // every OpenClaw agent's URL is currently exactly that. Both surfaces below
+    // key on identity, and both were reading it out of the MODEL'S OWN arguments:
+    // `claim_task`/`assign_task` take an `assigneeAgentId`, and memory's scope
+    // came straight from `scopeTeamId`/`scopeAgentId`. So any OpenClaw agent could
+    // claim work as any other agent and read and write any team's memory.
+    //
+    // `tools` above has always failed closed here (no identity ⇒ no grants ⇒ 4
+    // tools). These two did not. This is that same rule, applied late.
+    tasks: createStreamableHttpHandlers((req) => {
+      const scope = parseBoundScope(req)
+      return createTasksServer(getDb(), {
+        boundScope: scope,
+        unverifiedCaller: scope === undefined,
+      })
+    }),
+    memory: createStreamableHttpHandlers((req) => {
+      const scope = parseBoundScope(req)
+      return createMemoryServer(getDb(), cachedEmbed, {
+        boundScope: scope,
+        unverifiedCaller: scope === undefined,
+      })
+    }),
     // `req` was previously dropped here, alone among the four handlers, so the
     // HMAC-verified scope params the attach URL carries were parsed by nobody.
     // Over HTTP that left ctx.agentId undefined, which makes an agent-scoped
@@ -178,6 +200,13 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
         // the array would have frozen the list at initialize.
         connectorTools: connectorToolsForServer,
         onConnectorsChanged,
+        // Keep the newest frame so the agent's Browser panel can show a human
+        // what it just looked at. Ephemeral and per-agent; never the event log.
+        onToolImages: ({ agentId, toolName, images }) => {
+          const first = images[0]
+          if (!agentId || !first) return
+          putScreenshot(agentId, { data: first.data, mimeType: first.mimeType, toolName })
+        },
       })
     }),
     teamchat: createStreamableHttpHandlers((req) => {

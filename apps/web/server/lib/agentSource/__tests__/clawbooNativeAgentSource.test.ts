@@ -11,7 +11,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 
-import { NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
+import { DEFAULT_AGENT_CONFIG, NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
 import { agents, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
 
 import { getDb, resetDb } from '../../db'
@@ -19,6 +19,7 @@ import { adapterFactoryFor } from '../../runtimes'
 import type { RuntimeRunContext } from '../../runtimes/types'
 import {
   loadAgentConfig,
+  loadAgentConfigOrDefault,
   nativeConfigKey,
   nativeFileKey,
 } from '../../runtimes/native/agentConfigStore'
@@ -152,9 +153,30 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
 
   it('file round-trip through the KV namespace (missing read is empty)', async () => {
     const a = await source.createAgent({ name: 'Files Boo' })
-    expect(await source.readFile(a.id, 'SOUL.md')).toBe('')
+    // Every file EXCEPT SOUL.md reads back empty when never written.
+    expect(await source.readFile(a.id, 'IDENTITY.md')).toBe('')
+    await source.writeFile(a.id, 'IDENTITY.md', '# Me')
+    expect(await source.readFile(a.id, 'IDENTITY.md')).toBe('# Me')
+  })
+
+  it('SOUL.md IS the systemPrompt: it mirrors on read and re-derives on write', async () => {
+    const a = await source.createAgent({ name: 'Soul Boo' })
+    const config = loadAgentConfigOrDefault(db, a.id)
+
+    // An unwritten SOUL.md shows what the agent is ACTUALLY running rather
+    // than a blank box. Every server-seeded native agent is in this state.
+    expect(await source.readFile(a.id, 'SOUL.md')).toBe(config.systemPrompt)
+
+    // Writing it re-derives the systemPrompt the run path reads. Before this
+    // wiring the bytes were stored and nothing consumed them.
     await source.writeFile(a.id, 'SOUL.md', '# Soulful')
     expect(await source.readFile(a.id, 'SOUL.md')).toBe('# Soulful')
+    expect(loadAgentConfigOrDefault(db, a.id).systemPrompt).toBe('# Soulful')
+
+    // Emptying it falls back to the shipped default rather than leaving the
+    // agent with no system prompt at all.
+    await source.writeFile(a.id, 'SOUL.md', '   ')
+    expect(loadAgentConfigOrDefault(db, a.id).systemPrompt).toBe(DEFAULT_AGENT_CONFIG.systemPrompt)
   })
 
   it('events fire on mutations', async () => {

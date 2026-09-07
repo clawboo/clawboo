@@ -28,6 +28,7 @@ The graph reads your fleet from the agent registry and the capability inventory;
 | Team halos toggle                 | Visible (Atlas-only).                                                                                                   | Hidden, and halos are forced off regardless of the sticky toggle value.                      |
 | Atlas layout pill (Tree / Radial) | Visible.                                                                                                                | Not applicable.                                                                              |
 | Activity dock                     | A right-edge slide-in "all teams" live activity terminal.                                                               | Not present (group chat already narrates the team).                                          |
+| Browser dock                      | A right-edge slide-in view of the page an agent is looking at, with its team's Boos above it to switch between them.    | Present. What an agent is looking at is as much a team question as an Atlas one.             |
 | Toolbar chrome                    | Shown: Atlas is the view's only identity.                                                                               | The panel toolbar is suppressed (`embedded`); the team chat header owns identity and counts. |
 
 The selected team in the sidebar is **preserved** when you enter Atlas, so the two graphs keep independent saved layouts (Atlas positions are global and split by layout mode; team positions are keyed `team-<id>`). Switching scopes never overwrites the other's positions.
@@ -84,23 +85,47 @@ flowchart TD
   B -.->|resource| R1
 ```
 
-- **Boo nodes** (red dots / cards) are your agents. The leader-rooted spanning tree from `AGENTS.md` routing rules drives the org-chart hierarchy: ELK lays out Boos and the primary dependency edges; secondary routes are revealed only on hover.
+- **Boo nodes** (red dots) are your agents. The leader-rooted spanning tree from `AGENTS.md` routing rules drives the org-chart hierarchy: ELK lays out Boos and the primary dependency edges; secondary routes are revealed only on hover.
 - **Dependency edges** (red, with arrowheads) are agent-to-agent routing: "this agent routes work to the target." Each one is a line in the source agent's `AGENTS.md`, and the `N routes` count under a Boo's name counts exactly those: the routes a person authored, never the invisible backbone Atlas adds to lay teams out.
 - **Skill nodes** (mint circles) and **connector nodes** (violet circles) are each Boo's capabilities, drawn as orbitals around their parent. They are hidden by default and revealed by [expanding a Boo](#expand-a-boos-skills-peacock). A Boo draws its own per-agent capabilities AND its runtime's shared ones together, so an agent that has picked up a skill of its own keeps the built-ins it already had. An agent with none of its own (Codex, OpenClaw, a not-yet-run Hermes agent) therefore shows exactly its runtime's shared capabilities, so every agent surfaces its attached MCP and built-ins.
 - **Grant edges** connect a Boo to a [connector](/using/connectors) somebody deliberately shared with it. Drag a connector tile onto a second Boo to share it, and use **Stop sharing** on the edge to revoke, which leaves an 8-second Undo. That is distinct from **Turn off**, which stops the connector itself rather than one agent's access to it. Only a deliberate share draws an edge: a connector a Boo's own runtime already attaches is authorized too, but the tile itself is that statement, so drawing it again would be noise. The edge's state is not a second reading of a status column; it is the verdict the tool broker would return for that pair right now, so a grant that has expired or [drifted](/appendices/glossary) renders as expired or drifted because that is what a call would actually do.
 - **Runtime badge + model orbital.** Every Boo carries a small **runtime brand chip** on its avatar, so you can tell Native, OpenClaw, Claude Code, Codex, and Hermes apart at a glance. Expanding a Boo also pops out a **model orbital**, the provider logo plus the LLM it runs on. Every Boo has one: an account/SDK-default runtime (Codex, Claude Code) shows a neutral "default" chip rather than a specific model, and an OpenClaw agent shows its Gateway default model.
 
-### Dual-shape Boo nodes (idle circle / active card)
+### The Boo and its thought bubble
 
-A Boo renders in one of two shapes, and morphs between them with a CSS size-and-shape transition:
+A Boo is always a **circle**: a degree-aware disc (bigger if it has more edges) with the avatar
+filling it, and the name, a status dot and a "seen Xm ago" timestamp stacked below. It stays a
+circle while it works. It used to morph into a card, which cost the mascot its identity at the
+moment it was most interesting, shrinking the character to a corner icon to make room for a single
+line of text.
 
-- **Idle** (`status !== 'running'`): a degree-aware **circle** (bigger if it has more edges), avatar filling the disc, with the name, a status dot, and a "seen Xm ago" timestamp stacked below it. This is the relaxed org-chart reading: agents waiting in a room.
-- **Active** (`status === 'running'`): a **card** in two bands: a header (avatar + name + status dot) and a **live activity feed** below it. The card morphs in when the agent starts working, so the canvas reads as a live control room when things are happening. It also appears when a Boo **errors**, which is how the error line inside the feed becomes readable at all.
+That line now lives in a **thought bubble** above the Boo's right shoulder, sized to its own
+contents, with two trailing puffs leading up from the mascot. The bubble appears while an agent is
+**running**, and stays up when it **errors**, so the reason a run failed remains on screen.
 
-The activity-feed band of the active card, the lower of its two, is a real-time feed. It shows, in priority order, the agent's **in-flight streaming text**, then its **most recent assistant message**, then its **most recent tool call** (formatted `[[tool: <label>]]`). Thinking, meta, and user lines are skipped; the feed shows what the agent is _doing_, not its reasoning or your prompt. While running with no signal yet, it shows a typing indicator.
+What the bubble says, in priority order: the agent's **in-flight streaming text**, then its **most
+recent assistant message**, then its **reasoning**, then its **most recent tool call**, rendered as
+"Using `<tool>`". A task running on the board has no chat session, so its line comes from the event
+stream instead and is already phrased for a reader. With nothing to report yet it says _thinking_,
+because a reasoning model can think for a long time before its first tool call and a bubble that
+stayed hidden through the longest part of a run made the canvas look dead.
+
+Reasoning IS shown. It was previously withheld as private, which left the bubble empty for exactly
+the stretch where the honest answer to "what is it doing" is the thinking itself. It is
+model-written text, so it is displayed and never acted on, and clamped to two lines.
+
+Three dots pulse in the bubble for as long as the run lasts, and collapse to one solid dot on an
+error. That pulse is the only looping animation on the node: it carries the one claim that decays
+if it stops moving, which is that this agent is working right now. A frozen line cannot tell a busy
+agent from a hung one. Every other change in the bubble is a real event, and a new line tickers up
+as the old one leaves.
+
+Beneath the name, the status dot and its verb stand down while the bubble is up, because the bubble
+is already saying what the agent is doing in more detail than one word can. The **ring counts** stay
+put: they are the node's only advertisement that the orbital ring exists.
 
 <Tip>
-Status drives the glow: a running Boo pulses mint, an error Boo glows red, a sleeping Boo dims. The status dot matches, and error and sleeping are deliberately different marks: an error is red because it wants you, a sleeping Boo is the same quiet neutral as idle because it does not.
+Status drives the glow, and the glow traces the mascot's own outline rather than sitting behind it: elevation and status are `drop-shadow` filters computed from the artwork's alpha, so they follow the wavy skirt and the arms instead of painting a disc around a character that is not round. A running Boo pulses mint and an error Boo glows red. A sleeping Boo does NOT glow, because a glow adds light and could only make a dormant agent more prominent than a working one; it desaturates instead. The status dot matches, and error and sleeping are deliberately different marks: an error is red because it wants you, a sleeping Boo is the same quiet neutral as idle because it does not.
 </Tip>
 
 ### Hover to focus a cluster
@@ -238,4 +263,4 @@ The MiniMap (bottom-right overview) is **hidden by default** to give Boos more c
 - [Using group chat](/using/group-chat), where the per-team Ghost Graph is embedded
 - [The board](/concepts/the-board), the durable task board the orchestration runs on
 - [Capabilities dashboard](/using/capabilities-dashboard), the full capability inventory that drives the skill and connector nodes
-- [Observability dashboard](/using/observability-dashboard), the event log behind the Atlas activity dock and live Boo cards
+- [Observability dashboard](/using/observability-dashboard), the event log behind the Atlas activity dock and the live Boo bubbles

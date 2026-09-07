@@ -267,3 +267,26 @@ describe('searchConnectors', () => {
     expect(searchConnectors('zzzzzz')).toEqual([])
   })
 })
+
+describe('per-agent browser profiles', () => {
+  it('is declared ONLY by browser connectors', () => {
+    // The constraint the supervisor cannot express. It routes on this flag alone
+    // and has no category concept, so the catalog is where "only browsers get a
+    // process per agent" is actually enforced. A community or custom entry that
+    // picked this up would start spawning a child per agent.
+    for (const def of CONNECTOR_DEFINITIONS) {
+      if (def.launch.transport !== 'stdio') continue
+      if (def.launch.perAgentProfileFlag === undefined) continue
+      expect(def.category).toBe('browser')
+    }
+  })
+
+  it('gives every browser connector a profile flag, so none is left sharing', () => {
+    for (const def of connectorsByCategory('browser')) {
+      expect(def.launch.transport).toBe('stdio')
+      expect(
+        def.launch.transport === 'stdio' ? def.launch.perAgentProfileFlag : undefined,
+      ).toBeTruthy()
+    }
+  })
+})

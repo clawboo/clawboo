@@ -124,6 +124,18 @@ export interface GatewayDeviceField {
 }
 
 export interface ConnectOptions {
+  /**
+   * Capabilities this connection declares to the Gateway.
+   *
+   * OPT IN, never global. The Gateway gates whole event channels on these: with
+   * `tool-events` declared it registers this connection as the recipient of tool
+   * frames for runs this connection starts, and without it those frames are
+   * simply never addressed here. Left empty by default so the browser SPA and
+   * every proxied connection stay byte-identical on the wire, since nothing in
+   * the browser writes activity rows and pulling full tool arguments across that
+   * socket would be cost with no reader.
+   */
+  caps?: string[]
   clientName?: string
   clientVersion?: string
   token?: string

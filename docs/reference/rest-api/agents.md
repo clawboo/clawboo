@@ -25,6 +25,7 @@ Per-agent routes are multi-source: each operation routes to the source that OWNS
 | GET    | `/api/agents/:agentId/files/:name` | Read one agent file                                        | No      |
 | PUT    | `/api/agents/:agentId/files/:name` | Write one agent file                                       | No      |
 | GET    | `/api/agents/:agentId/sessions`    | List the agent's live sessions                             | No      |
+| GET    | `/api/agents/:agentId/workspaces`  | The task worktrees assigned to this agent                  | No      |
 | PATCH  | `/api/agents/:agentId/model`       | Change a native/hermes agent's model + provider (404 else) | No      |
 | POST   | `/api/agents/:agentId/chat`        | Drive one 1:1 turn on a native agent (detached, 202)       | No      |
 | POST   | `/api/agents/:agentId/chat/stop`   | Abort the agent's in-flight 1:1 turn                       | No      |
@@ -812,3 +813,39 @@ Every error response on these routes is the standard `{ error: string }` envelop
 - [Runtimes API](/reference/rest-api/runtimes), drive a board task on a runtime; `sourceId` peer creates
 - [@clawboo/agent-registry](/reference/packages/agent-registry), `AgentSource`, `AgentRecord`, `AGENT_FILE_NAMES`
 - [REST API overview](/reference/rest-api/index)
+
+---
+
+## `GET /api/agents/:agentId/workspaces`
+
+The task worktrees belonging to this agent's assigned tasks, newest first. Backs the agent-detail **Workspace** tab: it picks which worktree to show and drives the honest empty state when the agent has none.
+
+Archived workspaces are omitted. `onDisk: false` marks a checkout that was paused or reaped, where the row and the branch survive but the files are not there; the tab reports that state rather than an empty tree. The worktree contents themselves come from the [`/api/board/:taskId/workspace/*`](/reference/rest-api/board) routes.
+
+- **Path params**: `agentId`.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**:
+
+```json
+{
+  "ok": true,
+  "workspaces": [
+    {
+      "taskId": "t_8f2c",
+      "title": "Fix the flaky board round-trip test",
+      "taskStatus": "in_progress",
+      "branch": "clawboo/task-t_8f2c",
+      "repoPath": "/Users/you/code/clawboo",
+      "worktreePath": "/Users/you/.clawboo/worktrees/ab12cd34ef56/t_8f2c",
+      "workspaceStatus": "active",
+      "onDisk": true,
+      "updatedAt": 1756000000000
+    }
+  ]
+}
+```
+
+An agent with no worktree-backed tasks returns `{ "ok": true, "workspaces": [] }`.

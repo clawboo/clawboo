@@ -160,6 +160,9 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       command: 'npx',
       args: ['-y', '@playwright/mcp@0.0.79'],
       pinnedVersion: '0.0.79',
+      // One browser profile per agent, so two Boos can hold different logins on
+      // the same site. Verified present in 0.0.79's own --help.
+      perAgentProfileFlag: '--user-data-dir',
     },
     auth: { kind: 'none', inputs: [] },
     // Deliberately broad: a browser can reach anything. The egress allowlist is
@@ -182,6 +185,9 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       command: 'npx',
       args: ['-y', 'chrome-devtools-mcp@1.7.0'],
       pinnedVersion: '1.7.0',
+      // Same idea, different spelling: this one takes --userDataDir. Verified
+      // present in 1.7.0's own --help.
+      perAgentProfileFlag: '--userDataDir',
     },
     auth: { kind: 'none', inputs: [] },
     egressAllow: ['*'],

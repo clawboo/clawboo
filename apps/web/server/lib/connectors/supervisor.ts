@@ -31,6 +31,14 @@ import {
 } from '@clawboo/db'
 
 import { connectorInstanceIdForSlug } from '../capabilitySource/connectorIdentity'
+import {
+  agentBrowserSession,
+  closeAllAgentBrowsers,
+  closeAllForConnector,
+  noteCallEnd,
+  noteCallStart,
+  type AgentBrowserSpawn,
+} from './agentBrowsers'
 import { killProcessTreeByPid } from '../runtimes/killTree'
 import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
@@ -44,7 +52,23 @@ export interface ConnectableDefinition {
   /** Only a CURATED entry earns belief in its own tool annotations. */
   provenance: 'curated' | 'community' | 'custom'
   launch:
-    | { transport: 'stdio'; command: string; args: string[]; pinnedVersion: string }
+    | {
+        transport: 'stdio'
+        command: string
+        args: string[]
+        pinnedVersion: string
+        /**
+         * The flag this server takes for an on-disk browser profile.
+         *
+         * PRESENCE IS THE ROUTING DECISION. When it is set, this connector gets
+         * one child per agent with its own profile; when it is absent, every
+         * caller shares the one session, exactly as before. The supervisor has
+         * no category concept, so this is how "only browsers isolate per agent"
+         * reaches it, and the catalog test is what keeps anything else from
+         * declaring it.
+         */
+        perAgentProfileFlag?: string
+      }
     | { transport: 'streamable-http'; url: string }
   /**
    * A bearer token for a remote connector, or a callback that produces one.
@@ -67,6 +91,16 @@ export interface LiveConnector {
   slug: string
   session: ConnectorSession
   descriptors: ToolDescriptor[]
+  /**
+   * Namespaced tool name to the RAW name the server knows it by.
+   *
+   * Kept because a caller outside the broker (the Browser panel's capture) has
+   * to reach one specific tool on one specific session, and only the namespaced
+   * name survives into a descriptor. Rebuilding it by splitting the namespace
+   * back off would be a guess about a separator that tool names are allowed to
+   * contain.
+   */
+  rawToolNames: Map<string, string>
   /** Tools that could not be represented, with why. Surfaced, never swallowed. */
   skipped: { name: string; reason: string }[]
   specHash: string
@@ -106,23 +140,85 @@ function toDescriptor(
     // from the catalog vouching for the package, never from the server's say-so.
     trustAnnotations: def.provenance === 'curated',
     trifecta: def.trifecta,
-    executor: async (args) => {
-      const session = live.get(connectorInstanceId(def.slug))?.session
+    executor: async (args, ctx) => {
+      const connectorId = connectorInstanceId(def.slug)
+      // WHICH BROWSER. For a connector that declares a per-agent profile this
+      // routes to the calling agent's own child, creating it on that agent's
+      // first browser call. For everything else it is the line it always was:
+      // the one shared session. `ctx.agentId` is safe to route on because the
+      // grant gate already trusts it, and it is not model-supplied - over HTTP
+      // it is HMAC-verified before it is believed, and on the native path it
+      // comes from the run.
+      const routedAgentId = perAgentTarget(def, ctx.agentId ?? null)
+      const session = routedAgentId
+        ? await agentBrowserSession(spawnSpecFor(def), connectorId, routedAgentId, { create: true })
+        : (live.get(connectorId)?.session ?? null)
       if (!session) return `connector ${def.slug} is not connected`
-      const text = (await session.callTool(tool.name, args)).text
-      // A REMOTE SERVER CAN FAIL WITH A 200. When it does, the failure is a
-      // sentence inside the payload, and returning it as an ordinary result
-      // records the call as a success: ten consecutive failed Gmail fetches were
-      // all audited `is_error = 0`, so nothing in the activity log said anything
-      // had gone wrong while an agent asked for the same permission five times.
-      // Throwing is how this seam reports a failure (the executor contract
-      // returns a string), and the broker catches it and keeps the message, so
-      // the server's own words still reach the model and the audit row.
-      const failure = brokeredFailureMessage(text)
-      if (failure) throw new Error(failure)
-      return text
+      if (routedAgentId) noteCallStart(connectorId, routedAgentId)
+      try {
+        return await callThrough(session, tool.name, args)
+      } finally {
+        // In a `finally` so a throw still releases the browser for eviction.
+        // Without it one failed navigation would pin a slot until the process
+        // restarted.
+        if (routedAgentId) noteCallEnd(connectorId, routedAgentId)
+      }
     },
   })
+}
+
+/**
+ * The agent whose own browser should serve this call, or null for the shared
+ * session.
+ *
+ * Null whenever the connector declares no per-agent profile (every non-browser
+ * connector, unchanged) OR the call arrives with no agent identity. That second
+ * case is real: a connector tool can be reached by an unbound OpenClaw session,
+ * and there is no agent to give a browser to. Falling back to the shared session
+ * keeps that path working exactly as it does today rather than failing it.
+ */
+function perAgentTarget(def: ConnectableDefinition, agentId: string | null): string | null {
+  if (def.launch.transport !== 'stdio') return null
+  if (!def.launch.perAgentProfileFlag) return null
+  return agentId && agentId.length > 0 ? agentId : null
+}
+
+function spawnSpecFor(def: ConnectableDefinition): AgentBrowserSpawn {
+  if (def.launch.transport !== 'stdio' || !def.launch.perAgentProfileFlag) {
+    throw new Error(`${def.slug} does not declare a per-agent profile`)
+  }
+  return {
+    slug: def.slug,
+    command: def.launch.command,
+    args: def.launch.args,
+    profileFlag: def.launch.perAgentProfileFlag,
+    ...(def.authInputs ? { authInputs: def.authInputs } : {}),
+  }
+}
+
+/** The call itself, shared by both routes so neither can drift from the other. */
+async function callThrough(
+  session: ConnectorSession,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string | { text: string; images: { data: string; mimeType: string }[] }> {
+  {
+    const res = await session.callTool(toolName, args)
+    // A REMOTE SERVER CAN FAIL WITH A 200. When it does, the failure is a
+    // sentence inside the payload, and returning it as an ordinary result
+    // records the call as a success: ten consecutive failed Gmail fetches were
+    // all audited `is_error = 0`, so nothing in the activity log said anything
+    // had gone wrong while an agent asked for the same permission five times.
+    // Throwing is how this seam reports a failure, and the broker catches it
+    // and keeps the message, so the server's own words still reach the model
+    // and the audit row.
+    const failure = brokeredFailureMessage(res.text)
+    if (failure) throw new Error(failure)
+    // Images travel BESIDE the text rather than inside it. `text` still holds
+    // the `[image: …, not rendered]` placeholder, which is what the audit row
+    // stores and what a consumer with no way to render pixels falls back to.
+    return res.images && res.images.length > 0 ? { text: res.text, images: res.images } : res.text
+  }
 }
 
 export interface ConnectResult {
@@ -268,6 +364,7 @@ async function performConnect(
 
   try {
     const descriptors: ToolDescriptor[] = []
+    const rawToolNames = new Map<string, string>()
     const skipped: { name: string; reason: string }[] = []
     const claimed = new Set<string>()
     for (const tool of discovered) {
@@ -288,6 +385,7 @@ async function performConnect(
         continue
       }
       claimed.add(named.name)
+      rawToolNames.set(named.name, tool.name)
       descriptors.push(toDescriptor(def, tool, named.name))
     }
     if (session.wasTruncated()) {
@@ -346,6 +444,7 @@ async function performConnect(
       slug: def.slug,
       session,
       descriptors,
+      rawToolNames,
       skipped,
       specHash,
       toolsHash,
@@ -488,6 +587,15 @@ export async function disconnectConnector(connectorId: string, db?: ClawbooDb): 
   const attempt = inFlight.get(connectorId)
   if (attempt) await attempt.catch(() => {})
 
+  // THE AGENT BROWSERS GO FIRST, and above the early return rather than below
+  // it. The canonical entry is removed by its own `onClose` on any crash, OOM
+  // kill or external `pkill`, and by a previous disconnect. In that state every
+  // disconnect route would return `false` here and never reach a sweep placed
+  // after it, leaving one headed browser per agent running that no route could
+  // address. The boolean below still answers "was the canonical connector live",
+  // so the 404 its callers raise is unchanged.
+  await closeAllForConnector(connectorId)
+
   const connector = live.get(connectorId)
   if (!connector) return false
   live.delete(connectorId)
@@ -552,4 +660,9 @@ export function listLiveConnectors(): LiveConnector[] {
 /** Test seam. Closes everything and clears the map. */
 export async function resetConnectorsForTests(): Promise<void> {
   for (const id of [...live.keys()]) await disconnectConnector(id)
+  // These suites spawn REAL servers, so a per-agent child is a real process.
+  // Clearing a map neither closes a session nor kills a tree, and a connector
+  // whose canonical entry never existed is not in `live` to be visited by the
+  // loop above, so its browsers would survive the whole run.
+  await closeAllAgentBrowsers()
 }

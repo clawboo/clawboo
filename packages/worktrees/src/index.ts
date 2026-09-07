@@ -60,6 +60,9 @@ export {
 // (resolve a base SHA, inspect a diff, detect a detached reviewer HEAD).
 export {
   GitError,
+  // The raw git seam, for server-side read paths (workspace status / per-file
+  // diff) that need invocations these helpers do not wrap.
+  execGit,
   isGitRepo,
   resolveBaseSha,
   revParse,

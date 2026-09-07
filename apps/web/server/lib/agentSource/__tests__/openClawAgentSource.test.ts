@@ -286,7 +286,16 @@ describe('OpenClawAgentSource', () => {
     expect(fake.createdWith[0]?.workspace).toContain('workspace-designer')
     expect(record.id).toBe('new-Designer')
     expect(record.teamId).toBe('team-3')
-    expect(fake.fileWrites.map((w) => w.name)).toEqual(['SOUL.md', 'TOOLS.md'])
+    // AGENTS.md is written even though the caller supplied none: every agent is
+    // told how to open a web page, and an instruction that reaches only the
+    // agents whose creator happened to pass a file is worse than none, because
+    // it reads as a fleet rule while part of the fleet never received it.
+    expect(fake.fileWrites.map((w) => w.name)).toEqual(['SOUL.md', 'TOOLS.md', 'AGENTS.md'])
+    const agentsMd = fake.fileWrites.find((w) => w.name === 'AGENTS.md')?.content ?? ''
+    expect(agentsMd).toContain('Opening web pages')
+    // The load-bearing line: this is the profile that reaches the operator's own
+    // signed-in browser.
+    expect(agentsMd).toContain('profile: "user"')
     expect(await src.getAgent('new-Designer')).not.toBeNull()
     await src.stop()
   })

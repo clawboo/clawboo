@@ -225,7 +225,10 @@ export class RuntimeAgentSource implements AgentSource {
       })
       .run()
 
+    // Allowlisted for the same reason as the native source: a name outside
+    // AGENT_FILE_NAMES becomes a row the REST read path can never return.
     for (const [name, content] of Object.entries(files)) {
+      if (!(AGENT_FILE_NAMES as readonly string[]).includes(name)) continue
       if (typeof content === 'string' && content) writeRuntimeAgentFile(db, id, name, content)
     }
 

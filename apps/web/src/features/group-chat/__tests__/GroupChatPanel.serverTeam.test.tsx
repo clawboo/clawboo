@@ -15,7 +15,6 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
-import { FIRST_TASK_FLAG } from '@/lib/oneTimeFlag'
 
 import { server } from '../../../__vitest__/mswServer'
 import { GroupChatPanel } from '../GroupChatPanel'
@@ -52,7 +51,6 @@ const TEAM: Team = {
 function seedNativeTeam(): void {
   // Opt out of the one-time guided-first-task prefill — it would prepend a
   // suggestion to the composer and this test asserts the exact sent message.
-  localStorage.setItem(FIRST_TASK_FLAG, '1')
   useTeamStore.setState({ teams: [TEAM], selectedTeamId: 't1' })
   useFleetStore.setState({
     agents: [agent('a1', 'Team Lead'), agent('a2', 'Coder')],
@@ -134,7 +132,6 @@ function agentWithTeam(id: string, name: string, teamId: string | null): AgentSt
 }
 
 function seedRosterTest(booZero: AgentState): void {
-  localStorage.setItem(FIRST_TASK_FLAG, '1')
   useTeamStore.setState({ teams: [TEAM], selectedTeamId: 't1' })
   useFleetStore.setState({
     agents: [agentWithTeam('a1', 'Team Lead', 't1'), agentWithTeam('a2', 'Coder', 't1'), booZero],

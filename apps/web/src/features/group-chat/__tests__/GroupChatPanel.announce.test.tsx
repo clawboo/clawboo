@@ -17,7 +17,6 @@ import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
-import { FIRST_TASK_FLAG } from '@/lib/oneTimeFlag'
 import { buildTeamSessionKey } from '@/lib/sessionUtils'
 
 import { server } from '../../../__vitest__/mswServer'
@@ -55,7 +54,6 @@ const TEAM: Team = {
 const CODER_KEY = buildTeamSessionKey('a2', 't1')
 
 function seedNativeTeam(): void {
-  localStorage.setItem(FIRST_TASK_FLAG, '1')
   useTeamStore.setState({ teams: [TEAM], selectedTeamId: 't1' })
   useFleetStore.setState({
     agents: [agent('a1', 'Team Lead'), agent('a2', 'Coder')],

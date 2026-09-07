@@ -42,7 +42,6 @@ beforeEach(() => {
   localStorage.removeItem('clawboo.wizard.active')
   // Otherwise the one-time tour opens a focus-trapped full-screen overlay.
   localStorage.setItem('clawboo.tour.shown', '1')
-  localStorage.setItem('clawboo.firstTask.shown', '1')
 
   useConnectionStore.setState({ status: 'disconnected', client: null, gatewayUrl: null })
   useFleetStore.setState({ agents: [] })

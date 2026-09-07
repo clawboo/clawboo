@@ -43,16 +43,8 @@ import { stripDelegationBlocks, stripPlanBlocks } from './delegationTags'
 import { blockKey, blockTimestamp, describeBlock } from './announceBlock'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
-import { Sparkles, X } from 'lucide-react'
-import { IconButton } from '@/features/shared/Button'
-import { FIRST_TASK_FLAG, hasSeenFlag, markSeenFlag } from '@/lib/oneTimeFlag'
 
 // ─── GroupChatPanel ──────────────────────────────────────────────────────────
-
-// The one-time "guided first task" prefill — a friendly, dependency-free prompt
-// that shows off a native team collaborating (it naturally triggers delegation).
-const FIRST_TASK_SUGGESTION =
-  'Plan a simple landing page for a new app, and split the work across the team.'
 
 // How long a server-orchestrated team stays "busy" after the last SSE frame before
 // the composer flips Stop → Send. DYNAMIC by whether a delegation cascade is in
@@ -169,22 +161,6 @@ export function GroupChatPanel({
   )
   const knownAgentNames = useMemo(() => participants.map((a) => a.name), [participants])
   const composerRef = useRef<MessageComposerHandle>(null)
-
-  // ── Guided first task (one-time) ────────────────────────────────────────────
-  // The first time a user lands in a server-orchestrated (native) team chat, pre-
-  // fill the composer with a suggested prompt + show a dismissible hint so the
-  // "premium first action" is obvious. Marked-once so it never repeats.
-  const [firstTaskTip, setFirstTaskTip] = useState(false)
-  const firstTaskFiredRef = useRef(false)
-  useEffect(() => {
-    if (firstTaskFiredRef.current) return
-    if (teamAgents.length === 0) return
-    if (hasSeenFlag(FIRST_TASK_FLAG)) return
-    firstTaskFiredRef.current = true
-    markSeenFlag(FIRST_TASK_FLAG)
-    composerRef.current?.prefill(FIRST_TASK_SUGGESTION)
-    setFirstTaskTip(true)
-  }, [teamAgents.length])
 
   // Team-scoped sessionKeys for isolation from 1:1 agent chat
   const teamSessionKeys = useMemo(
@@ -600,8 +576,6 @@ export function GroupChatPanel({
   // ── Send handler ──────────────────────────────────────────────────────────
   const handleSend = useCallback(
     async (message: string) => {
-      // Dismiss the guided first-task hint once the user actually sends.
-      setFirstTaskTip(false)
       // Start fresh in a team room. A team has no single session behind it: the
       // room a person sees is every teammate's own conversation merged, so every
       // one of them has to stop carrying the thread. The room keeps every message
@@ -952,29 +926,6 @@ export function GroupChatPanel({
 
       {/* Inline approval cards for team agents */}
       <InlineApprovalTray teamId={teamId} />
-
-      {/* Guided first task — one-time prefilled-composer hint */}
-      {firstTaskTip && (
-        <div
-          className="mx-3 mb-2 flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary/[0.06] px-3.5 py-2.5"
-          data-testid="first-task-tip"
-        >
-          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" strokeWidth={2} />
-          <div className="flex-1 text-[12px] leading-relaxed text-foreground/80">
-            <span className="font-semibold text-foreground">Try your first task.</span> We filled in
-            a prompt below — press Enter to send it to your team, or edit it first.
-          </div>
-          <IconButton
-            variant="ghost"
-            size="sm"
-            label="Dismiss"
-            onClick={() => setFirstTaskTip(false)}
-            className="shrink-0"
-          >
-            <X className="h-3.5 w-3.5" strokeWidth={2} />
-          </IconButton>
-        </div>
-      )}
 
       {/* Composer */}
       <MessageComposer

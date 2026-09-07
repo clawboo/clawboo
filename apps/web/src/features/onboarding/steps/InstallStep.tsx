@@ -2,7 +2,7 @@
  * features/onboarding/steps/InstallStep.tsx
  *
  * Installation progress with terminal output.
- * Streams `npm install -g openclaw@latest` via SSE and
+ * Streams the pinned `npm install -g` (see OPENCLAW_INSTALL_SPEC) via SSE and
  * handles EACCES permission errors with fix instructions.
  */
 
@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, Check, ChevronDown, Loader2, RotateCcw } from 'lucide-react'
 import { consumeApiSSE } from '@clawboo/control-client'
+import { OPENCLAW_INSTALL_COMMAND_SUDO } from '@clawboo/protocol'
 import { useSystemStore } from '@/stores/system'
 import { NATIVE_STEPS } from '../StepIndicator'
 import { OnboardingGhost, OnboardingPrimary, OnboardingScreen } from '../OnboardingScreen'
@@ -219,7 +220,7 @@ export function InstallStep({ onInstalled, onBack }: InstallStepProps) {
                       <li>
                         <strong>Otherwise:</strong> Run{' '}
                         <code className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[10px]">
-                          sudo npm install -g openclaw@latest
+                          {OPENCLAW_INSTALL_COMMAND_SUDO}
                         </code>{' '}
                         in your terminal
                       </li>

@@ -8,6 +8,7 @@
 // GatewayClient + the proxy-device `signConnect`; tests pass a fake). This is the
 // "who exists" layer — it never touches RuntimeAdapter ("how they run").
 
+import { withBrowsingGuidance } from '@clawboo/protocol'
 import {
   agents,
   approvalHistory,
@@ -334,6 +335,17 @@ export class OpenClawAgentSource implements AgentSource {
       // an in-Gateway autonomous tool call can't be per-run scoped without
       // reaching into the Gateway) — an organizational, not security, boundary
       // for the local-first single-user model; the multi-tenant horizon is parked.
+      //
+      // THAT SENTENCE DESCRIBED AN INTENT THE CODE DID NOT IMPLEMENT, until the
+      // `unverifiedCaller` flag threaded from `api/mcp.ts`. Memory was not
+      // global-scoped here; it was MODEL-scoped, because an unbound memory server
+      // read `scopeTeamId`/`scopeAgentId` out of the tool arguments. So an
+      // OpenClaw agent could save a fact tagged as any team and read every team's
+      // facts back — the exact spoof the TeamChat paragraph above exists to
+      // prevent, arrived at by a different door. Tasks had the matching hole in
+      // `claim_task`/`assign_task`, whose `assigneeAgentId` is likewise a model
+      // argument. Both now fail closed on an unverified HTTP caller, so the
+      // boundary this comment claims is the boundary the code enforces.
       // TOOLS IS REGISTERED, and its omission was a plain gap rather than a
       // decision: an OpenClaw agent could reach no connector at all, so an agent
       // the operator had granted Gmail answered that it had no email tools while
@@ -796,7 +808,19 @@ export class OpenClawAgentSource implements AgentSource {
     const agentId = created.agentId.trim()
     if (!agentId) throw new Error('Gateway did not return an agentId for the created agent.')
 
-    const files = input.files ?? {}
+    // EVERY OpenClaw agent is told how to open a web page, whoever created it.
+    //
+    // Applied here rather than in the callers because there is no single template
+    // for these files: content arrives from packs, from the create form, from the
+    // seed. Chasing those would leave the next one to be written without it, and
+    // an instruction that reaches most agents is worse than useless, because it
+    // reads as a fleet rule while some of the fleet never received it.
+    //
+    // AGENTS.md rather than TOOLS.md on purpose: TOOLS.md is dropped from the
+    // Gateway's bootstrap allowlist in the 2026.9 line, so guidance filed there
+    // would stop reaching the model on upgrade with nothing on screen to say so.
+    const files = { ...(input.files ?? {}) }
+    files['AGENTS.md'] = withBrowsingGuidance(files['AGENTS.md'])
     for (const name of ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'] as const) {
       const content = files[name]
       if (content) await client.agents.files.set(agentId, name, content)

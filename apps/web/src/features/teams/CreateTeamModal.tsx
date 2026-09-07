@@ -50,7 +50,11 @@ import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { MemberModelSelect, type ModelPickerGroup } from './MemberModelSelect'
 import { computeDedupSuffix, rewriteAgentsMd, rewriteTemplateName } from '@/lib/deployDedup'
 import { buildClawbooHelpDoc, buildTeamAgentsMd } from '@/lib/teamProtocol'
-import { mergeSoulWithPersonality, type PersonalityValues } from '@/lib/soulPersonality'
+import {
+  DEFAULT_PERSONALITY as SHIPPED_DEFAULT_PERSONALITY,
+  mergeSoulWithPersonality,
+  type PersonalityValues,
+} from '@/lib/soulPersonality'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { detectGenuineLeader, matchedLeadershipKeyword } from '@/lib/genuineLeader'
 import { buildTeamBrief, type TeamBriefMember } from '@/lib/booZeroBrief'
@@ -683,13 +687,7 @@ export function CreateTeamModal({
         const finalAgentName = dedupPlan.agentNameMap.get(agent.name) ?? agent.name
         setProgress({ current: i, total: resolved.length, label: finalAgentName })
 
-        const defaultPersonality: PersonalityValues = {
-          verbosity: 50,
-          humor: 50,
-          caution: 50,
-          speed_cost: 50,
-          formality: 50,
-        }
+        const defaultPersonality: PersonalityValues = SHIPPED_DEFAULT_PERSONALITY
         const baseSoul =
           rewriteTemplateName(agent.files[AGENT_FILE.soul] ?? '', agent.name, finalAgentName) ||
           '# SOUL\n'

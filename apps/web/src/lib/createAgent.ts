@@ -8,7 +8,7 @@
  */
 
 import { createAgentRecord, readAgentFile, writeAgentFile } from '@clawboo/control-client'
-import { buildClawbooHelpDoc, buildTeamAgentsMd, type TeammateDef } from './teamProtocol'
+import { buildTeamAgentsMd, type TeammateDef } from './teamProtocol'
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -111,14 +111,11 @@ export async function refreshTeamAgentsMd(params: {
     universalLeaderName,
     teamInternalLeadName,
   })
-  const clawboo = buildClawbooHelpDoc({ agentName, teamName, teammates, universalLeaderName })
-
   await writeAgentFile(agentId, 'AGENTS.md', enhanced)
-  // CLAWBOO.md is best-effort — Gateways that reject the filename shouldn't
-  // poison "Refresh Protocol".
-  try {
-    await writeAgentFile(agentId, 'CLAWBOO.md', clawboo)
-  } catch {
-    // Silent fallback — preamble injection delivers the operating reference.
-  }
+  // No CLAWBOO.md write here. It is not in AGENT_FILE_NAMES, so the PUT was
+  // refused with 400 by clawboo's own route before reaching any Gateway: the
+  // call never once succeeded on any runtime, and its catch made that look
+  // like an occasional Gateway quirk. The operating reference reaches the
+  // agent through runtime preamble injection, and the OpenClaw create path
+  // writes the file via the Gateway client directly.
 }

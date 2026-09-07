@@ -1,6 +1,7 @@
 import { Providers } from './app/providers'
 import { ToastContainer } from '@/features/ui/ToastContainer'
 import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
+import { RunStatusBridge } from '@/features/obs/RunStatusBridge'
 import { TeamSidebar } from '@/features/layout/TeamSidebar'
 import { AgentListColumn } from '@/features/layout/AgentListColumn'
 import { ContentArea } from '@/features/layout/ContentArea'
@@ -38,6 +39,8 @@ export function App() {
     <Providers>
       <ToastContainer />
       <GatewayBootstrap />
+      {/* Lights the fleet up during board runs, which no other status writer covers. */}
+      <RunStatusBridge />
       <div
         inert={settingsOpen || undefined}
         className="flex h-screen overflow-hidden bg-background text-foreground"

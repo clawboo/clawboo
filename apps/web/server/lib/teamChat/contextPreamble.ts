@@ -23,6 +23,7 @@ import { eq } from 'drizzle-orm'
 
 import { listLiveConnectors } from '../connectors/supervisor'
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
+import { buildPersonaBlock } from '../runtimes/personaBlock'
 import { buildConnectorAwareness } from './connectorAwareness'
 
 /** Durable team rules (settings key `team-rules:<teamId>`, JSON `{ content }`). */
@@ -229,6 +230,7 @@ export function buildServerTeamContext(
   selfAgentId: string,
   framing: TurnFraming,
 ): string | null {
+  const runtime = readAgentRuntime(db, selfAgentId)
   const rulesContent = readTeamRulesContent(db, teamId).trim()
   const rulesBlock = rulesContent
     ? `[Team Rules — set by the user, authoritative]\n${rulesContent}\n[End Team Rules]`
@@ -248,7 +250,6 @@ export function buildServerTeamContext(
   // behavioral-guidance block; a worker gets the guardrail; a turn that is neither
   // (an @mentioned specialist, an idle agent receiving a system message) gets both
   // the roster and the rules and neither block.
-  const runtime = readAgentRuntime(db, selfAgentId)
   const coordinationBlock = coordinationBlockFor(
     runtime,
     framing,
@@ -258,6 +259,12 @@ export function buildServerTeamContext(
     ),
   )
 
+  // The persona goes FIRST: it frames who the agent is, and everything after it
+  // (the user's authoritative Team Rules, the roster, the coordination rules)
+  // reads as constraints on top of that identity. Null for OpenClaw and native,
+  // which deliver SOUL.md through their own channel.
+  const personaBlock = buildPersonaBlock(db, selfAgentId, runtime)
+
   // What this agent could reach and does not. Rides only a user-facing turn,
   // because a suggestion on a background worker's turn is spent on a transcript
   // nobody opens. See ./connectorAwareness for why the prohibitions are in it.
@@ -266,7 +273,14 @@ export function buildServerTeamContext(
     isUserFacing: framing.isUserFacing,
   })
 
-  const composed = [rulesBlock, aboutUserBlock, rosterBlock, coordinationBlock, connectorsBlock]
+  const composed = [
+    personaBlock,
+    rulesBlock,
+    aboutUserBlock,
+    rosterBlock,
+    coordinationBlock,
+    connectorsBlock,
+  ]
     .filter(Boolean)
     .join('\n\n')
   return composed.length > 0 ? composed : null
