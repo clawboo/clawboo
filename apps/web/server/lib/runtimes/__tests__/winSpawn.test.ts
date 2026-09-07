@@ -6,9 +6,11 @@
 //
 // Two DIFFERENT protections share one command line. Arguments are caret-escaped,
 // so no bare metacharacter survives in them. The program token is wrapped in real
-// double quotes instead, inside which cmd treats those characters as literal, so
-// it legitimately carries a bare `&`. Assertions about carets must therefore be
-// scoped to the arguments, never applied to the whole line.
+// double quotes instead, which make the substitution-phase metacharacters
+// literal, so it legitimately carries a bare `&`. Assertions about carets must
+// therefore be scoped to the arguments, never applied to the whole line.
+// Quoting does NOT cover `%` or `!`: cmd substitutes those before quotes mean
+// anything, so such a path is refused rather than quoted.
 
 import { describe, expect, it, vi } from 'vitest'
 
@@ -92,5 +94,36 @@ describe('resolveWindowsSpawn', () => {
     expect(line.startsWith(`""${command}"`)).toBe(true) // one quoted program token
     expect(line).not.toContain('^&') // the path's & is quote-protected, not caret-escaped
     expect(/(?<!\^)&/.test(argsPortion(line))).toBe(false) // arguments still carry no bare &
+  })
+
+  // `%` and `!` are substituted BEFORE quotes take effect, so unlike & they cannot
+  // be made literal by the wrapping. main's caret pass happened to defeat %VAR% by
+  // corrupting the variable name; quoting does not, so the path is refused instead.
+  for (const { label, command } of [
+    { label: '%VAR% expansion', command: 'C:\\tools\\%TEMP%\\codex.cmd' },
+    { label: 'delayed !VAR! expansion', command: 'C:\\tools\\!TEMP!\\codex.cmd' },
+  ]) {
+    it(`refuses a command path cmd would substitute (${label})`, () => {
+      expect(() => resolveWindowsSpawn({ command, args: ['login'] })).toThrow(/% or !/)
+    })
+  }
+
+  it('refuses the substitutable path rather than emitting an expandable token', () => {
+    // The regression guard: quoting alone would have produced a live %TEMP% pair
+    // in the program position for cmd to expand.
+    let line = ''
+    try {
+      line = resolveWindowsSpawn({ command: 'C:\\tools\\%TEMP%\\x.cmd', args: [] }).args[3] ?? ''
+    } catch {
+      line = ''
+    }
+    expect(/%[A-Za-z_][A-Za-z0-9_]*%/.test(line)).toBe(false)
+  })
+
+  it('refuses even a lone %, because the guard rejects on the character not the pair', () => {
+    // Deliberately broader than strictly required. A lone % cannot expand on its
+    // own, but pair-matching the guard would make it depend on cmd's scanner
+    // behaviour, and a resolved binary path carrying % is pathological anyway.
+    expect(() => resolveWindowsSpawn({ command: 'C:\\tools\\100%\\x.cmd', args: [] })).toThrow()
   })
 })

@@ -8,6 +8,8 @@
 // resolved command token double-quoted, and every untrusted argument quoted
 // (CommandLineToArgvW boundaries) AND caret-escaped (cmd.exe metacharacters) so
 // a prompt like `do X & calc.exe` cannot break out and chain a second command.
+// Quoting the token is not sufficient for `%` and `!`, which cmd substitutes
+// before quotes mean anything, so a path carrying either is refused outright.
 //
 // The escaping below implements cmd.exe's documented quoting rules — the
 // CommandLineToArgvW argument-boundary rules plus caret-escaping of cmd.exe's
@@ -18,6 +20,24 @@
 import { isWindows } from '../platform'
 
 const META_CHARS = /([()\][%!^"`<>&|;, *?])/g
+
+/**
+ * The two metacharacters double quotes CANNOT make literal in the program token.
+ *
+ * cmd.exe expands `%VAR%` in an EARLIER phase than the one that gives quotes
+ * their meaning, so `"%TEMP%\tool.cmd"` is already substituted by the time the
+ * quotes are read. `!VAR!` behaves the same way on a machine with delayed
+ * expansion enabled. A caret cannot rescue either, because carets are processed
+ * in that same later phase.
+ *
+ * An argument is safe (`escapeCmdArg` caret-escapes both, and its escape lands
+ * before the batch body re-parses), but the program token is not, so a resolved
+ * path carrying one is refused rather than launched. The sign-in path already
+ * refuses such a binary upstream via `UNSAFE_BIN_CHARS` in `cliLoginPlans.ts`;
+ * refusing here covers the driver paths, which resolve through
+ * `resolveRuntimeBin` and reach no such filter.
+ */
+const EXPANDS_INSIDE_QUOTES = /[%!]/
 
 const isBatch = (command: string): boolean => /\.(cmd|bat)$/i.test(command)
 
@@ -59,13 +79,17 @@ export function needsCmdShim(command: string): boolean {
  */
 export function buildCmdShimPlan(plan: { command: string; args: string[] }): WinSpawnPlan {
   const comspec = process.env['ComSpec'] || process.env['comspec'] || 'cmd.exe'
+  if (EXPANDS_INSIDE_QUOTES.test(plan.command)) {
+    throw new Error(`refusing to launch a Windows shim whose path contains % or !: ${plan.command}`)
+  }
   // The command token is QUOTED, not caret-escaped. Real double quotes are what
   // cmd.exe honours in the program position (with /s the outer quotes strip and
   // a `"C:\path with spaces\tool.cmd" args…` line runs the quoted program), and
-  // inside them cmd's metacharacters are inert, so a path carrying `&`, `^`, or
-  // parentheses stays one literal token. A quote inside the path itself cannot
-  // occur: `"` is not a legal character in a Windows file name, so nothing the
-  // filesystem resolves can close the wrapping early.
+  // they make the SUBSTITUTION-phase metacharacters literal, so a path carrying
+  // `&`, `^`, `|`, `<`, `>` or parentheses stays one literal token. A quote
+  // inside the path itself cannot occur: `"` is not a legal character in a
+  // Windows file name, so nothing the filesystem resolves can close the wrapping
+  // early. `%` and `!` are the exception and are refused above.
   const shellCommand = [`"${plan.command}"`, ...plan.args.map(escapeCmdArg)].join(' ')
   return {
     command: comspec,
