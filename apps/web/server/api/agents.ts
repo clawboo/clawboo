@@ -5,6 +5,8 @@ import { isToolVisibleToAgent } from '@clawboo/db'
 import { connectorInstanceIdForSlug } from '../lib/capabilitySource/connectorIdentity'
 import { callIfRunning } from '../lib/connectors/agentBrowsers'
 import { getLiveConnector } from '../lib/connectors/supervisor'
+import { newestTabForSourceAgent } from '../lib/openclawSessionTabs'
+import { captureOpenClawTab } from '../lib/openclawTabCapture'
 import { getScreenshot, putScreenshot } from '../lib/screenshotBus'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 import {
@@ -647,6 +649,46 @@ export async function agentScreenshotCapturePOST(req: Request, res: Response): P
     res.json({ ok: true, ts: Date.now() })
     return
   }
+
+  // ── OpenClaw agents browse somewhere clawboo does not broker ────────────────
+  //
+  // The loop above only reaches browsers clawboo itself started, which an OpenClaw
+  // agent can never have: the Gateway's MCP URLs carry no signed scope, so no
+  // agent-scoped grant resolves and it is never offered clawboo's browser tools.
+  // Meanwhile OpenClaw 2026.9 turns its OWN browser on by default, so these agents
+  // do browse — the panel simply had no way to see it, which is why an agent could
+  // demonstrably open a page and the panel still show "nothing captured yet".
+  //
+  // The identity here is READ, NOT INFERRED. OpenClaw stamps the owning session
+  // onto each tab it tracks, and that stamp is the same string clawboo builds for
+  // the agent. Every route that tried to INFER which agent was calling was
+  // rejected precisely because a lost race files one Boo's browsing under another
+  // Boo's name, and that is a privacy bug rather than a missing feature.
+  const agent = getDb()
+    .select({ sourceAgentId: agents.sourceAgentId, runtime: agents.runtime })
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .get()
+  if (agent?.runtime === 'openclaw' && agent.sourceAgentId) {
+    const tab = newestTabForSourceAgent(agent.sourceAgentId)
+    if (tab) {
+      const shot = await captureOpenClawTab(tab.targetId).catch(() => null)
+      if (shot) {
+        // FILED UNDER THE CLAWBOO ROW ID, not the OpenClaw agent id inside the
+        // session key. They are equal on every row today, so getting this wrong
+        // passes every test that can be written now and misattributes the first
+        // time an OpenClaw agent is renamed or re-imported under a different id.
+        putScreenshot(agentId, {
+          data: shot.data,
+          mimeType: shot.mimeType,
+          toolName: 'openclaw__browser',
+        })
+        res.json({ ok: true, ts: Date.now() })
+        return
+      }
+    }
+  }
+
   res.status(409).json({ ok: false, error: 'this Boo has no browser open right now' })
 }
 
