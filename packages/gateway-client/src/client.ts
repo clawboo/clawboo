@@ -6,7 +6,7 @@ import {
   clearDeviceToken,
   generateUUID,
 } from './device-auth'
-import { encodeConfigPatchParams } from './helpers'
+import { encodeConfigPatchParams, GATEWAY_BROWSER_CAPS, GATEWAY_BROWSER_CLIENT_ID } from './helpers'
 import type {
   ReqFrame,
   ResFrame,
@@ -329,16 +329,19 @@ export class GatewayClient {
     }
 
     const params = {
-      // OpenClaw bumped the connect protocol from 3 → 4 in 2026.5.x.
-      // We advertise support for both so old (2026.3.x and earlier) and new
-      // (2026.5+) Gateways both negotiate cleanly. If openclaw ever bumps to
-      // 5, the install spec in apps/web/server/api/system.ts pins to ^2026.5
-      // — that prevents fresh installs from grabbing an incompatible version
-      // before this range is widened.
+      // OpenClaw bumped the connect protocol from 3 to 4 in 2026.5.x. We
+      // advertise support for both so old (2026.3.x and earlier) and new
+      // Gateways negotiate cleanly: the rule is that the range must CONTAIN the
+      // Gateway's current protocol, and 2026.9 still runs v4. If OpenClaw ever
+      // bumps to 5, widen this alongside OPENCLAW_INSTALL_SPEC in
+      // @clawboo/protocol, which pins the version a fresh install receives.
       minProtocol: 3,
       maxProtocol: 4,
       client: {
-        id: opts.clientName ?? 'openclaw-control-ui',
+        // NOT the Control UI. See GATEWAY_BROWSER_CLIENT_ID: claiming
+        // `openclaw-control-ui` from a browser is build-checked from 2026.9 and
+        // clawboo can never match that build.
+        id: opts.clientName ?? GATEWAY_BROWSER_CLIENT_ID,
         version: opts.clientVersion ?? '0.0.0',
         platform: opts.platform ?? 'web',
         mode: opts.mode ?? 'webchat',
@@ -347,7 +350,7 @@ export class GatewayClient {
       role,
       scopes,
       device,
-      caps: opts.caps ?? [],
+      caps: opts.caps ?? GATEWAY_BROWSER_CAPS,
       auth,
     }
 
@@ -601,13 +604,19 @@ export class GatewayClient {
   readonly config = {
     get: (): Promise<GatewayConfig> => this.call<GatewayConfig>('config.get'),
 
-    // OpenClaw 2026.5.x's `config.patch` RPC requires a `{ raw: <json-string>,
-    // baseHash }` envelope (it deep-merges the parsed partial AND enforces the
+    // OpenClaw's `config.patch` RPC requires a `{ raw: <json-string>, baseHash }`
+    // envelope (it deep-merges the parsed partial AND enforces the
     // optimistic-concurrency hash from a prior `config.get`); a bare top-level key
     // like `{ mcp }` is rejected. `encodeConfigPatchParams` does the wire encoding
-    // so callers keep passing a plain partial-config object + the snapshot hash.
-    patch: (updates: Partial<GatewayConfig>, baseHash?: string): Promise<void> =>
-      this.call<void>('config.patch', encodeConfigPatchParams(updates, baseHash)),
+    // so callers keep passing a plain partial-config object + the snapshot hash,
+    // and derives the `replacePaths` that 2026.9 requires before it will shorten
+    // an array. Pass `replacePaths` to override that derivation.
+    patch: (
+      updates: Partial<GatewayConfig>,
+      baseHash?: string,
+      replacePaths?: string[],
+    ): Promise<void> =>
+      this.call<void>('config.patch', encodeConfigPatchParams(updates, baseHash, replacePaths)),
   }
 
   // ── chat namespace ────────────────────────────────────────────────────────

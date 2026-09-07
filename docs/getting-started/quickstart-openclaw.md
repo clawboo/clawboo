@@ -14,13 +14,13 @@ These docs describe Clawboo **v0.3.1**, the current release.
 ## Prerequisites
 
 <Note>
-- **Node.js 22 or newer**: Clawboo's `engines` field requires `node >=22.0.0`.
-- **`npm` on your `PATH`**: the install step runs `npm install -g openclaw@~2026.5`.
+- **Node.js**: this page installs OpenClaw, which requires `>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`. That is stricter than Clawboo's own `engines` (`node >=22.12.0`), so a Node that runs Clawboo can still be refused by the OpenClaw install. The System Check reports the exact range it wants.
+- **`npm` on your `PATH`**: the install step runs `npm install -g openclaw@~2026.9`.
 - **A provider API key** for whichever model provider you'll configure OpenClaw with (Anthropic, OpenAI, Google, OpenRouter, and others). Ollama needs no key, but it must be running locally.
 - No prior OpenClaw install is required; the wizard can install, configure, and start one for you.
 </Note>
 
-OpenClaw is a separate project; Clawboo connects to a Gateway you run locally, it does not bundle OpenClaw. The wizard pins the install to `openclaw@~2026.5` deliberately: Clawboo's gateway client advertises connect protocol `minProtocol: 3, maxProtocol: 4`, and the pin keeps a fresh user on a protocol-compatible OpenClaw.
+OpenClaw is a separate project; Clawboo connects to a Gateway you run locally, it does not bundle OpenClaw. The wizard pins the install to `openclaw@~2026.9` deliberately. The pin is not about the connect protocol, which negotiates cleanly across both lines. It holds the OpenClaw **config shape**: 2026.9 moved the agent roster from `agents.list` to `agents.entries` and tightened `config.patch`, and Clawboo writes both.
 
 ## Steps
 
@@ -57,7 +57,7 @@ On **Add more runtimes**, find the **Set up OpenClaw** row and click **Set up Op
 
 The **System Check** step fetches `GET /api/system/status` on mount and shows an animated three-item checklist: **Node.js**, **OpenClaw**, and **Gateway**, each revealed in sequence:
 
-- **Node.js**: a green check when your version is 22 or newer (a red X with a Download link otherwise).
+- **Node.js**: a green check when your version satisfies OpenClaw's supported range (a red X naming that range, with a Download link, otherwise). It is not a bare major-version check: Node 22.12 has the right major and is still refused, and Node 23 is excluded outright.
 - **OpenClaw**: green with the detected version when the `openclaw` binary is on your `PATH`; an amber dot reading "Not found" otherwise.
 - **Gateway**: green "Running on :18789" when a managed Gateway process is alive or the port probes reachable; amber "Not running" otherwise.
 
@@ -71,7 +71,7 @@ If you already run a Gateway on another machine, click **Connect to remote gatew
 
 ### 5. Install OpenClaw
 
-If OpenClaw isn't installed, clicking **Install OpenClaw** opens the **Installing OpenClaw** step, which streams `POST /api/system/install-openclaw`, a Server-Sent Events stream that runs `npm install -g openclaw@~2026.5` and shows live `npm` output in a terminal log.
+If OpenClaw isn't installed, clicking **Install OpenClaw** opens the **Installing OpenClaw** step, which streams `POST /api/system/install-openclaw`, a Server-Sent Events stream that runs `npm install -g openclaw@~2026.9` and shows live `npm` output in a terminal log.
 
 The stream emits typed events:
 

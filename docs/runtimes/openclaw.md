@@ -24,7 +24,7 @@ OpenClaw is a separate project. Clawboo connects to an OpenClaw Gateway you run 
 
 - An OpenClaw Gateway, reachable over WebSocket (default `ws://localhost:18789`). The Clawboo server connects to the URL stored in [settings](/reference/configuration) (`gatewayUrl`).
 - The Gateway's auth token. Clawboo's onboarding writes one into OpenClaw's `~/.openclaw/.env` as `GATEWAY_AUTH_TOKEN` and mirrors it into Clawboo's `settings.json` (`gatewayToken`).
-- Node.js (Clawboo's prerequisite). The install step runs `npm install -g openclaw@~2026.5`, so `npm` must be on `PATH`.
+- Node.js (Clawboo's prerequisite). The install step runs `npm install -g openclaw@~2026.9`, so `npm` must be on `PATH`.
 - For OpenClaw **2026.5.x and later**: a one-time **device pairing approval**, see [Device pairing](#device-pairing-not_paired).
 
 ## How OpenClaw connects
@@ -87,7 +87,7 @@ The OpenClaw onboarding path runs these from the wizard, but each maps to a `/ap
 
 ### 2. Install (optional)
 
-`POST /api/system/install-openclaw` is a Server-Sent Events stream that runs `npm install -g openclaw@~2026.5`. The version is pinned to the `~2026.5` range deliberately: the gateway-client advertises connect protocol `minProtocol: 3, maxProtocol: 4`, and pinning the install keeps a fresh user on a protocol-compatible OpenClaw until that range is widened.
+`POST /api/system/install-openclaw` is a Server-Sent Events stream that runs `npm install -g openclaw@~2026.9`. The version is pinned to the `~2026.9` range deliberately. Both 2026.5 and 2026.9 speak connect protocol v4, so the pin is not a protocol pin; what it holds is the OpenClaw config shape (`agents.entries`, and the `replacePaths` requirement on `config.patch`) that Clawboo writes against.
 
 | Event `type` | Payload                      | Meaning                                   |
 | ------------ | ---------------------------- | ----------------------------------------- |
@@ -125,7 +125,7 @@ Use `models auth login`, never `openclaw onboard` — the onboard wizard can res
 Clawboo surfaces this in two places: the onboarding wizard's OpenAI card offers **Sign in with ChatGPT** (Recommended — the economical path), and once Codex is connected the OpenClaw setup flow offers a one-click **Sign in with ChatGPT** of its own. The one-click button spawns OpenClaw's login locally and relays its output; the login runs the same browser flow as `codex login` (your browser opens, you approve, no code to type, and no dependence on the ChatGPT device-authorization setting). Detection is a presence-only scan of the auth-profile files (an `oauth`-type `openai-codex` profile; token values are never read into responses or logs). Once the profile exists, the configure path is fully keyless: the default model is set to `openai-codex/gpt-5.5` and no key line touches `.env`. A codex-CLI login alone is NOT enough — OpenClaw needs its own sign-in (distinct OAuth grants; this also keeps refresh-token lineages separate).
 
 <Note>
-Model refs: `openai-codex/<model>` is the minimal activation on the current OpenClaw generation (2026.5.x); newer OpenClaw's `doctor --fix` rewrites these refs to the canonical `openai/*` form. Also note the subscription quota is shared — OpenClaw agents, Codex-runtime agents, Hermes subscription runs, and your own `codex` usage all draw from the same ChatGPT plan allowance, and these turns report no USD cost to Clawboo's budgets.
+Model refs: Clawboo writes `openai-codex/<model>`, which is the minimal activation that validates on its own. OpenClaw 2026.8.1 made `openai/*` the canonical form, and `openclaw doctor --fix` migrates the ref for you: it rewrites `openai-codex/<model>` to `openai/<model>` **and** enables the `openai` and `codex` plugin entries that the canonical ref needs. Both halves matter, which is why Clawboo does not write `openai/*` directly. A config naming `openai/<model>` without those plugin entries does not merely warn, it stops the CLI with `Unable to resolve Codex doctor health API: install the official Codex plugin with openclaw plugins install @openclaw/codex`. Also note the subscription quota is shared: OpenClaw agents, Codex-runtime agents, Hermes subscription runs, and your own `codex` usage all draw from the same ChatGPT plan allowance, and these turns report no USD cost to Clawboo's budgets.
 </Note>
 
 ### 4. Start the Gateway

@@ -117,12 +117,12 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       'workspace',
       'browser',
       // Permissions is OpenClaw-only, because it is the only runtime that reads
-      // it. The tab writes exec-approval policy into the Gateway's own
-      // `exec-approvals.json`, keyed by OpenClaw agent id. For a native agent
-      // that file is not consulted by anything, so the tab accepted a setting,
-      // reported success, and changed nothing — and it left evidence: that file
-      // still carries an entry for `native-boo-zero-3efff3`, an agent that no
-      // longer exists. Same rule as the file tabs above: do not show an editor
+      // it. The tab writes exec-approval policy into the Gateway's own approvals
+      // store (`exec.approvals.set`), keyed by OpenClaw agent id. For a native
+      // agent that store is not consulted by anything, so the tab accepted a
+      // setting, reported success, and changed nothing, and it left evidence: the
+      // store still carries an entry for `native-boo-zero-3efff3`, an agent that
+      // no longer exists. Same rule as the file tabs above: do not show an editor
       // whose bytes no driver will ever read.
       ...(agentRuntime === 'openclaw' ? (['permissions'] as const) : []),
       ...(isBooZero ? (['brief'] as const) : []),

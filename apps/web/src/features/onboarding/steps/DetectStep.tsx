@@ -42,7 +42,9 @@ function deriveChecklist(info: SystemInfo): CheckItem[] {
     {
       label: 'Node.js',
       status: info.node.sufficient ? 'pass' : 'fail',
-      detail: info.node.sufficient ? info.node.version : `${info.node.version} (v22+ required)`,
+      detail: info.node.sufficient
+        ? info.node.version
+        : `${info.node.version} (needs ${info.node.required})`,
     },
     {
       label: 'OpenClaw',
@@ -298,7 +300,7 @@ export function DetectStep({
               role="alert"
               className="rounded-xl border border-destructive/20 bg-destructive/8 px-4 py-3 text-[13px] leading-snug text-destructive"
             >
-              Node.js 22 or later is required.{' '}
+              This Node.js cannot run OpenClaw. It requires {info.node.required}.{' '}
               <a
                 href="https://nodejs.org"
                 target="_blank"

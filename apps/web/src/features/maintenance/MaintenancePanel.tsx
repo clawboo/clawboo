@@ -12,7 +12,7 @@ import { Spinner } from '@/features/shared/Spinner'
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface SystemStatus {
-  node: { version: string; major: number; sufficient: boolean; path: string }
+  node: { version: string; major: number; sufficient: boolean; required: string; path: string }
   openclaw: {
     installed: boolean
     version: string | null

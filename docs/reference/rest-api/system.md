@@ -51,7 +51,8 @@ OpenClaw detection is async, cached per resolved binary path, and bounded by a 6
   node: {
     version: string // process.version, e.g. "v22.3.0"
     major: number // parsed major version
-    sufficient: boolean // major >= 22
+    sufficient: boolean // whether this Node satisfies OpenClaw's engines, NOT a bare major check
+    required: string // the range OpenClaw requires, e.g. ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
     path: string // process.execPath
   }
   openclaw: {
@@ -88,7 +89,7 @@ curl http://localhost:18790/api/system/status
 
 ## `POST /api/system/install-openclaw`
 
-Installs the OpenClaw CLI by running `npm install -g openclaw@~2026.5`. The version is pinned to `~2026.5` (not `@latest`, and not `^2026.5`) so a new install gets an OpenClaw whose WS connect protocol matches the bundled `gateway-client` (`maxProtocol: 4`); a future protocol bump would otherwise break the connection silently. On success the OpenClaw version cache is invalidated and re-read.
+Installs the OpenClaw CLI by running `npm install -g openclaw@~2026.9`. The version is pinned to `~2026.9` (not `@latest`, and not `^2026.9`, which would mean any 2026.x) so a new install gets an OpenClaw whose config shape and `config.patch` contract match what Clawboo writes. On success the OpenClaw version cache is invalidated and re-read.
 
 - **Path/query params**: none.
 - **Request body**: none.

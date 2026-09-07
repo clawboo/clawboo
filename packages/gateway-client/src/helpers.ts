@@ -164,27 +164,116 @@ export const isLocalGatewayUrl = (url: string): boolean => {
   }
 }
 
+// ─── Client identity ──────────────────────────────────────────────────────────
+
+/**
+ * The `client.id` clawboo's BROWSER connections announce.
+ *
+ * The Gateway validates `client.id` against a fixed allowlist, so this cannot be
+ * a clawboo-specific name: `clawboo-server` is rejected with
+ * `invalid connect params: at /client/id` and the socket closes 1008.
+ *
+ * It must not be `openclaw-control-ui` either, which is what every browser call
+ * site used to send. OpenClaw 2026.9 added a build check on that exact id: a
+ * connection claiming to be the Control UI, from a browser origin on the Gateway
+ * host, whose `client.buildId` does not equal the Gateway's own, is refused with
+ *
+ *   protocol mismatch: Control UI updated; reload this page to continue
+ *
+ * which names a protocol and means nothing of the kind. clawboo is not the
+ * Gateway's bundled Control UI and has no build id to match, so it could never
+ * satisfy that check. `webchat-ui` is the other allowlisted browser-UI id, it
+ * carries the same browser-origin requirement, and the build check does not
+ * apply to it.
+ *
+ * The server-side AgentSource connection is headless and uses `cli` instead: the
+ * browser-UI ids additionally require a browser `Origin` header that a Node
+ * connection cannot send (`CONTROL_UI_ORIGIN_NOT_ALLOWED`).
+ */
+export const GATEWAY_BROWSER_CLIENT_ID = 'webchat-ui'
+
+/**
+ * Capabilities clawboo's BROWSER connections declare at connect.
+ *
+ * `exec-approvals` is what makes the socket an approval SURFACE. The Gateway
+ * registers an approval route per run only for connections that declared it, and
+ * a run with no route does not queue a card and wait: it is denied outright with
+ *
+ *   exec denied: Headless runs cannot wait for interactive exec approval.
+ *
+ * so the agent reports the command as blocked and the operator never sees a
+ * prompt. Measured against a real 2026.9.2 Gateway: with this capability the
+ * round trip completes (`exec.approval.requested` then `exec.approval.resolve`
+ * then `exec.approval.resolved`), and without it no request is ever emitted.
+ *
+ * Deliberately NOT `tool-events`, which the single long-lived server-side
+ * operator connection declares instead: that one pulls full tool arguments, and
+ * on a browser socket there is no reader for them. The server connection passes
+ * its own `caps` explicitly, so it is unaffected by this default.
+ */
+export const GATEWAY_BROWSER_CAPS: readonly string[] = ['exec-approvals']
+
 // ─── Config patch encoding ────────────────────────────────────────────────────
 
 /**
+ * Collect the dotted path of every ARRAY inside a partial config.
+ *
+ * `config.patch` deep-merges, and from OpenClaw 2026.9 a patch that would make
+ * an array SHORTER is refused outright rather than silently merged:
+ *
+ *   config.patch would remove entries from array path(s): tools.allow.
+ *   Pass replacePaths with the exact path(s) when this is intentional,
+ *   or use config.apply for full-config replacement.
+ *
+ * Every clawboo caller reads the live config, rebuilds the whole array, and
+ * sends the intended final set, so "replace" is always what is meant. Deriving
+ * the paths from the payload rather than hand-listing them at each call site is
+ * what stops the next caller forgetting one and shipping a write that the
+ * Gateway rejects. Growing an array needs no declaration, but declaring it is
+ * harmless, so this does not try to work out which direction a change goes.
+ *
+ * Object maps are deliberately NOT collected: `mcp.servers` is merged RFC 7386
+ * style, where a key is removed by sending it as null, and replacing that whole
+ * map would drop servers clawboo does not own.
+ */
+export const collectArrayPaths = (value: unknown, prefix = ''): string[] => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) => {
+    const path = prefix ? `${prefix}.${key}` : key
+    if (Array.isArray(child)) return [path]
+    return collectArrayPaths(child, path)
+  })
+}
+
+/**
  * Encode a partial-config update into the wire shape OpenClaw's `config.patch`
- * RPC expects: `{ raw: <JSON string of the partial config>, baseHash }`. OpenClaw
- * 2026.5.x tightened `config.patch` params to `{ raw: NonEmptyString, baseHash?,
- * ... }` with `additionalProperties: false`, deep-merges the parsed `raw` into the
- * live config, AND requires the `baseHash` (the snapshot hash from `config.get` —
- * optimistic concurrency; the handler rejects a patch without it: "config base
- * hash required; re-run config.get and retry"). So a partial patch like
- * `{ mcp: { servers } }` must be JSON-stringified under `raw`, carrying the hash
- * from a prior `config.get`. The merge preserves unrelated config keys, so callers
- * still send only what changes; this helper centralizes the wire encoding.
+ * RPC expects: `{ raw: <JSON string of the partial config>, baseHash,
+ * replacePaths }`. OpenClaw tightened `config.patch` params to
+ * `{ raw: NonEmptyString, baseHash?, ... }` with `additionalProperties: false`,
+ * deep-merges the parsed `raw` into the live config, AND requires the `baseHash`
+ * (the snapshot hash from `config.get`, optimistic concurrency; the handler
+ * rejects a patch without it: "config base hash required; re-run config.get and
+ * retry"). So a partial patch like `{ mcp: { servers } }` must be
+ * JSON-stringified under `raw`, carrying the hash from a prior `config.get`.
+ * The merge preserves unrelated config keys, so callers still send only what
+ * changes; this helper centralizes the wire encoding.
+ *
+ * `replacePaths` is derived from the payload (see `collectArrayPaths`) so an
+ * array a caller re-asserts is replaced rather than refused. Pass
+ * `replacePaths` explicitly to override that.
  */
 export const encodeConfigPatchParams = (
   updates: Partial<GatewayConfig>,
   baseHash?: string,
-): { raw: string; baseHash?: string } => ({
-  raw: JSON.stringify(updates),
-  ...(baseHash ? { baseHash } : {}),
-})
+  replacePaths?: string[],
+): { raw: string; baseHash?: string; replacePaths?: string[] } => {
+  const paths = replacePaths ?? collectArrayPaths(updates)
+  return {
+    raw: JSON.stringify(updates),
+    ...(baseHash ? { baseHash } : {}),
+    ...(paths.length ? { replacePaths: paths } : {}),
+  }
+}
 
 // ─── Error formatting ─────────────────────────────────────────────────────────
 

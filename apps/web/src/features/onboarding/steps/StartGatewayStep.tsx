@@ -13,6 +13,7 @@ import {
   GatewayClient,
   GatewayResponseError,
   resolveProxyGatewayUrl,
+  GATEWAY_BROWSER_CLIENT_ID,
 } from '@clawboo/gateway-client'
 import { consumeApiSSE } from '@clawboo/control-client'
 import { useSystemStore } from '@/stores/system'
@@ -65,7 +66,7 @@ export function StartGatewayStep({ onStarted, onBack }: StartGatewayStepProps) {
 
     try {
       await client.connect(resolveProxyGatewayUrl(), {
-        clientName: 'openclaw-control-ui',
+        clientName: GATEWAY_BROWSER_CLIENT_ID,
         clientVersion: '0.1.0',
         disableDeviceAuth: true,
       })

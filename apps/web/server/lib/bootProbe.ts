@@ -84,6 +84,9 @@ export interface BootReport {
 // rather than assume it.
 const FATAL_IDS = new Set(['clawbooHomeWritable', 'databaseIntegrity', 'databaseSchema'])
 
+/** How often to re-read the Gateway connection while waiting for it to settle. */
+const GATEWAY_SETTLE_POLL_MS = 50
+
 // A core subset of the bootstrap schema; their absence means the DDL never ran.
 const CORE_TABLES = ['teams', 'agents', 'settings', 'budgets', 'orchestration_events', 'tasks']
 
@@ -236,12 +239,10 @@ function checkGatewayProbeTimeoutMs(): number {
   return DEFAULTS.gatewayProbeTimeoutMs
 }
 
-async function probeGatewayConnection(): Promise<CheckOutcome> {
-  const settings = loadSettings(process.env)
-  if (!settings.gatewayUrl) {
-    return { ok: true, message: 'OpenClaw Gateway not configured (skipped)' }
-  }
-  const timeoutMs = checkGatewayProbeTimeoutMs()
+/** One instantaneous read of the source's connection state, bounded so a wedged
+ *  `health()` cannot hang the probe. The read itself is cheap: an in-memory field
+ *  plus one settings row, never a network round trip. */
+async function readGatewayConnection(timeoutMs: number): Promise<string> {
   const health = await Promise.race([
     // .catch() so a late health() rejection (after the timeout wins the race) can
     // never surface as an unhandled rejection.
@@ -252,12 +253,45 @@ async function probeGatewayConnection(): Promise<CheckOutcome> {
       setTimeout(() => resolve({ connection: 'timeout' }), timeoutMs).unref(),
     ),
   ])
-  if (health.connection === 'connected') {
+  return health.connection
+}
+
+/**
+ * WAIT for the Gateway to settle; do not sample once.
+ *
+ * The boot probe is fired as `void runBootProbe(...)` alongside the Gateway
+ * connect, so a single sample reads whatever state the handshake happens to be in
+ * a few milliseconds after boot, which is `connecting`. Measured on a healthy
+ * install: probe at +60ms, `hello-ok` at +187ms. The check therefore failed EVERY
+ * boot, `getLastBootReport()` froze that failure, and `/api/health` reported
+ * "running degraded / OpenClaw Gateway not reachable" forever on a Gateway that
+ * had been connected and serving the whole time. A warning that is always wrong
+ * is worse than no warning, because it teaches people to ignore the real one.
+ *
+ * Polling to the SAME budget keeps the honest signal: a Gateway that is genuinely
+ * down still reports unreachable, it just takes the full window to say so instead
+ * of answering before the answer could possibly be true.
+ */
+async function probeGatewayConnection(): Promise<CheckOutcome> {
+  const settings = loadSettings(process.env)
+  if (!settings.gatewayUrl) {
+    return { ok: true, message: 'OpenClaw Gateway not configured (skipped)' }
+  }
+  const timeoutMs = checkGatewayProbeTimeoutMs()
+  const deadline = Date.now() + timeoutMs
+
+  let connection = await readGatewayConnection(timeoutMs)
+  while (connection !== 'connected' && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, GATEWAY_SETTLE_POLL_MS).unref())
+    connection = await readGatewayConnection(Math.max(1, deadline - Date.now()))
+  }
+
+  if (connection === 'connected') {
     return { ok: true, message: 'OpenClaw Gateway reachable + synced' }
   }
   return {
     ok: false,
-    message: `OpenClaw Gateway not reachable (${health.connection}) — serving last-synced agents from SQLite`,
+    message: `OpenClaw Gateway not reachable (${connection}) — serving last-synced agents from SQLite`,
     detail: settings.gatewayUrl,
   }
 }

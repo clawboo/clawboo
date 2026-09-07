@@ -153,7 +153,7 @@ export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<v
       try {
         await client.call('sessions.patch', {
           key: sessionKey,
-          ...resolveExecPatchParams(originalExecAsk),
+          ...resolveExecPatchParams(),
         })
         await upsertExecApprovalPolicy(client, agentId, originalExecAsk)
       } catch {

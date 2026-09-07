@@ -80,7 +80,15 @@ async function connectWithTeam(
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        node: { version: process.version, major: 22, sufficient: true, path: '/usr/bin/node' },
+        node: {
+          // A version that actually satisfies the `required` range below, so the
+          // mocked status is self-consistent whatever Node the runner is on.
+          version: 'v22.23.2',
+          major: 22,
+          sufficient: true,
+          required: '>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0',
+          path: '/usr/bin/node',
+        },
         openclaw: {
           installed: true,
           version: '0.3.0',

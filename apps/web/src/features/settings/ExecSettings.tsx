@@ -78,7 +78,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
         const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
         if (agent?.sessionKey) {
           try {
-            const execParams = resolveExecPatchParams(newAsk)
+            const execParams = resolveExecPatchParams()
             await client.call('sessions.patch', {
               key: agent.sessionKey,
               ...execParams,

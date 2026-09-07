@@ -7,9 +7,12 @@ import type { SystemInfo } from '../system'
 function makeSystemInfo(overrides: Partial<SystemInfo> = {}): SystemInfo {
   return {
     node: {
-      version: 'v22.12.0',
+      // A version OpenClaw will actually run on. v22.12.0 used to sit here with
+      // `sufficient: true`, which the real check now (correctly) calls false.
+      version: 'v22.23.2',
       major: 22,
       sufficient: true,
+      required: '>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0',
       path: '/usr/local/bin/node',
     },
     openclaw: {
