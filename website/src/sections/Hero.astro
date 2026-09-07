@@ -2,6 +2,12 @@
 /**
  * Hero.
  *
+ * The sky is the ORIGINAL SignatureSky, restored verbatim from main: two
+ * server-rendered SkyAtmosphere islands (day and night, CSS-swapped so there is
+ * no flash), each with its drifting BackgroundBoos. It is scoped to a band
+ * rather than the viewport so the product screenshot still breaks across its
+ * lower edge.
+ *
  * The sky is back, rebuilt as a shallow illustrated band (see SkyBand.astro):
  * saturated at the crown, pale by the time it reaches the headline, gone before
  * the page continues. The board screenshot breaks across its lower edge, the
@@ -15,14 +21,14 @@
 import { Picture } from 'astro:assets'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
-import SkyBand from '../components/SkyBand.astro'
+import SignatureSky from '../components/atmosphere/SignatureSky.astro'
 import RuntimeStrip from '../components/RuntimeStrip.astro'
 import { links } from '../lib/site'
 import teamSpace from '../assets/screenshots/team-space.png'
 ---
 
 <section id="hero" class="relative overflow-hidden on-sky">
-  <SkyBand />
+  <div class="sky-band" aria-hidden="true"><SignatureSky /></div>
 
   <div class="container container-wide relative z-10 pb-16 pt-28 sm:pt-32">
     <div class="mx-auto max-w-3xl text-center">
@@ -70,17 +76,29 @@ import teamSpace from '../assets/screenshots/team-space.png'
 </section>
 
 <style>
-  /* The band carries real colour behind the eyebrow and the lead, so those two
-     need darker ink to clear 4.5:1 against it. Measured against the painted
-     pixels, not against the token: --secondary was 2.98:1 on the sky.
-     The original solved the same problem with a text-shadow halo behind every
-     string; contrast from colour costs nothing and leaves the type clean. */
+  /* The band scopes the restored full-bleed sky. SignatureSky is absolute
+     inset-0, so it fills this wrapper rather than the whole hero. */
+  .sky-band {
+    position: absolute;
+    inset: 0 0 auto;
+    height: clamp(30rem, 26rem + 18vw, 46rem);
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 62%, transparent 96%);
+    mask-image: linear-gradient(180deg, #000 0%, #000 62%, transparent 96%);
+  }
+
+  /* The original sky is saturated where the type sits, which is why the old hero
+     used a text-shadow halo on every string. Those tokens are still in
+     tokens.css, so the restored sky gets the treatment it was designed with. */
   .on-sky :global(.eyebrow),
   .on-sky :global(.lead) {
-    color: #334155;
+    color: var(--sky-ink-soft);
+    text-shadow: var(--sky-halo-soft);
   }
-  :global(:root.dark) .on-sky :global(.eyebrow),
-  :global(:root.dark) .on-sky :global(.lead) {
-    color: #c7d3e3;
+  .on-sky :global(h1) {
+    color: var(--sky-ink);
+    text-shadow: var(--sky-halo);
   }
 </style>

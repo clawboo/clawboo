@@ -1,7 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
 import Button from '../components/Button.astro'
-import SkyBand from '../components/SkyBand.astro'
+import SignatureSky from '../components/atmosphere/SignatureSky.astro'
 import { booAvatarToDataUrl } from '../lib/boo-avatar'
 
 // The Boo stays here: this is the one page where the mascot is the whole idea,
@@ -15,7 +15,7 @@ const boo = booAvatarToDataUrl({ seed: 'lost-boo', isBooZero: true })
   robots="noindex,follow"
 >
   <section class="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-5 text-center">
-    <SkyBand />
+    <div class="pointer-events-none absolute inset-0 overflow-hidden"><SignatureSky boos={5} /></div>
     <div class="relative z-10 flex flex-col items-center">
       <img
         src={boo}

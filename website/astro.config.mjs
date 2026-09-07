@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config'
+import react from '@astrojs/react'
 import sitemap from '@astrojs/sitemap'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -11,8 +12,9 @@ export default defineConfig({
   site: SITE,
   output: 'static',
   integrations: [
-    // No React integration: every island (the sky, the drifting mascots, the Boo
-    // squad) is gone, so the site ships zero client-side framework code.
+    // Required by the atmosphere components (SignatureSky -> SkyAtmosphere ->
+    // BackgroundBoos), which are restored verbatim from main and are React.
+    react(),
     sitemap({
       // Freshness/priority hints. lastmod is a fixed calendar date, not the wall
       // clock (`new Date()` with no args), so every build stays byte-deterministic;
