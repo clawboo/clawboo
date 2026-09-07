@@ -30,7 +30,7 @@ import {
 } from '../lib/runtimes/codexAuth'
 import { hasUsableCodexAuth } from '../lib/runtimes/codexDriver'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
-import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
+import { buildCmdShimPlan, needsCmdShim } from '../lib/runtimes/winSpawn'
 import { killProcessTree } from '../lib/runtimes/killTree'
 import {
   buildCliLoginPlan,
@@ -110,24 +110,35 @@ export function cliLoginPOST(req: Request, res: Response): void {
     message: `Starting ${plan.displayCommand}…`,
   })
 
-  // Windows .cmd/.bat shims (codex/hermes) route through the repo's safe spawn
-  // planner — quoted + caret-escaped, NEVER `shell: true` (a bare shell spawn
-  // misparses a resolved bin path containing a space, e.g. a spaced Windows
-  // username). No-op on POSIX and for .exe targets.
-  const winPlan = resolveWindowsSpawn({ command: plan.command, args: plan.args })
-
+  // Two DISTINCT spawn modes, each its own call so a spawn is exactly what it
+  // says. A Windows .cmd/.bat shim (codex/hermes) routes through the repo's safe
+  // cmd.exe planner, quoted + caret-escaped, NEVER `shell: true` (a bare shell
+  // spawn misparses a resolved bin path containing a space, e.g. a spaced
+  // Windows username). Everything else is a plain argv spawn that no shell ever
+  // parses.
   let child: ChildProcess
   try {
-    child = spawn(winPlan.command, winPlan.args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: plan.env,
-      // Process-group leader so Cancel kills the whole tree (browser helpers,
-      // the script-wrapped openclaw). Windows: no process groups; taskkill /T
-      // inside killProcessTree covers it.
-      detached: !isWindows,
-      windowsVerbatimArguments: winPlan.windowsVerbatimArguments,
-      windowsHide: isWindows,
-    })
+    if (needsCmdShim(plan.command)) {
+      const shim = buildCmdShimPlan({ command: plan.command, args: plan.args })
+      child = spawn(shim.command, shim.args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: plan.env,
+        // Windows: no process groups; taskkill /T inside killProcessTree covers
+        // tree cleanup.
+        detached: false,
+        windowsVerbatimArguments: shim.windowsVerbatimArguments,
+        windowsHide: true,
+      })
+    } else {
+      child = spawn(plan.command, plan.args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: plan.env,
+        // Process-group leader so Cancel kills the whole tree (browser helpers,
+        // the script-wrapped openclaw).
+        detached: !isWindows,
+        windowsHide: isWindows,
+      })
+    }
   } catch (err) {
     sendEvent(res, {
       type: 'error',

@@ -29,16 +29,26 @@ export function sanitizeAgentId(agentId: string | null | undefined): string {
   return segment
 }
 
-/** `<clawboo home>/runtimes/<runtimeId>/<sanitized agentId>` — stable across runs. */
+/**
+ * `<clawboo home>/runtimes/<runtimeId>/<sanitized agentId>`, stable across runs.
+ *
+ * The assembled path is pinned under the runtimes root with a single startsWith
+ * test before it is handed out. The segment rewrite above should make an escape
+ * impossible by construction, but this home is created with mkdir and then given
+ * to a runtime as its private state directory, so the location itself carries
+ * the final say: a path that resolves outside the root is refused here, not
+ * discovered later as a directory materialized somewhere it should never be.
+ */
 export function runtimeIdentityHomePath(
   runtimeId: string,
   agentId: string | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return path.join(
-    resolveClawbooDir(env),
-    'runtimes',
-    sanitizeAgentId(runtimeId),
-    sanitizeAgentId(agentId),
-  )
+  const root = path.resolve(resolveClawbooDir(env), 'runtimes')
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  const home = path.resolve(root, sanitizeAgentId(runtimeId), sanitizeAgentId(agentId))
+  if (!home.startsWith(prefix)) {
+    throw new Error(`runtime identity home escapes ${root}: ${home}`)
+  }
+  return home
 }

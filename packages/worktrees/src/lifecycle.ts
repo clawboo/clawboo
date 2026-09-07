@@ -91,8 +91,13 @@ export interface ProvisionOptions {
  * is initialization, not work).
  */
 export async function provisionWorktree(opts: ProvisionOptions): Promise<Worktree> {
-  const root = path.resolve(worktreeRootFor(opts.repoPath, opts.rootDir))
   const worktreePath = worktreePathFor(opts.repoPath, opts.taskId, opts.rootDir)
+  // The root that gets created below is DERIVED from the pinned worktree path
+  // rather than resolved a second time from the raw inputs, so the directory
+  // mkdir materializes is by construction the parent of the location every
+  // other operation was checked against; two independent derivations could
+  // drift apart.
+  const root = path.dirname(worktreePath)
   const branch = branchNameForTask(opts.taskId)
 
   return mutex.run(worktreePath, async () => {

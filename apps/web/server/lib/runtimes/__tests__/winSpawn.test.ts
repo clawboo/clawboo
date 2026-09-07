@@ -50,4 +50,15 @@ describe('resolveWindowsSpawn', () => {
     expect(line).toContain('^&') // the prompt's & is escaped inside the command line
     expect(/(?<!\^)&/.test(line)).toBe(false) // no bare & cmd could chain on
   })
+
+  it('double-quotes the command token so a spaced or meta-bearing path stays one program', () => {
+    const plan = resolveWindowsSpawn({
+      command: 'C:\\Users\\Jo Doe\\bin (x86)\\codex.cmd',
+      args: ['login'],
+    })
+    const line = plan.args[3] ?? ''
+    // The program is one quoted token; inside real quotes cmd treats spaces and
+    // parentheses as literal, so the path cannot split or start a group.
+    expect(line.startsWith('""C:\\Users\\Jo Doe\\bin (x86)\\codex.cmd"')).toBe(true)
+  })
 })
