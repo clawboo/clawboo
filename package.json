@@ -32,7 +32,7 @@
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.6",
     "@types/jest-axe": "^3.5.9",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.4.1",
     "@types/ws": "^8.5.0",
     "@vitest/coverage-v8": "3.2.4",
     "eslint": "^9.0.0",
