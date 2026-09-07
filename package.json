@@ -30,7 +30,7 @@
     "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.6",
+    "@testing-library/user-event": "^14.6.7",
     "@types/jest-axe": "^3.5.9",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
@@ -48,7 +48,7 @@
     "tsx": "^4.23.13",
     "turbo": "^2.10.12",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.68.0",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^3.2.7",
     "ws": "^8.21.3"
   },
