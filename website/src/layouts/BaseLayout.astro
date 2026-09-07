@@ -344,11 +344,10 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
               try {
                 sessionStorage.setItem('cb.stars', String(d.stargazers_count))
               } catch (e) {}
-            } else {
-              starEls.forEach(function (el) {
-                if (el.textContent === '★') el.textContent = 'Star'
-              })
             }
+            // On failure leave the build-time number in place. Overwriting it
+            // made the button read "Star on GitHub Star" whenever GitHub
+            // rate-limited the visitor, which is most of the time on a shared IP.
           })
           .catch(function () {
             starEls.forEach(function (el) {

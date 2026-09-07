@@ -2,27 +2,30 @@
 /**
  * Hero.
  *
+ * Positioning: this is NOT a coding tool. The catalogue is 436 agents across
+ * categories like agency-agents, growth-marketing, lifecycle-commerce,
+ * google-ads-analytics, creator-studio, business-desk and product-craft, and
+ * the screenshot below shows a marketing squad, not engineers. The headline
+ * used to say "your coding agents", which fought both the product and its own
+ * picture. Claude Code, Codex and Hermes are the ENGINES; the agents built on
+ * them do any kind of work, so the runtimes are named further down the page
+ * rather than in the promise.
+ *
  * The sky is the ORIGINAL SignatureSky, restored verbatim from main: two
  * server-rendered SkyAtmosphere islands (day and night, CSS-swapped so there is
  * no flash), each with its drifting BackgroundBoos. It is scoped to a band
- * rather than the viewport so the product screenshot still breaks across its
- * lower edge.
+ * rather than the viewport so the dashboard breaks across its lower edge.
  *
- * The sky is back, rebuilt as a shallow illustrated band (see SkyBand.astro):
- * saturated at the crown, pale by the time it reaches the headline, gone before
- * the page continues. The board screenshot breaks across its lower edge, the
- * way Aside and Deta do it. The overlap is what makes the band read as
- * composed rather than as wallpaper behind unrelated text.
- *
- * The install command's caption and the four trust badges are gone at your
- * request. The install command itself still appears in "See it work" and in the
- * closing CTA.
+ * BooSquad sits between the CTAs and the dashboard, where a row of runtime tile
+ * buttons used to be. Those tiles were a third button style stacked directly
+ * under two others, and the marks now dock onto the dashboard itself.
  */
 import { Picture } from 'astro:assets'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
 import SignatureSky from '../components/atmosphere/SignatureSky.astro'
-import RuntimeStrip from '../components/RuntimeStrip.astro'
+import { BooSquad } from '../components/atmosphere/BooSquad.tsx'
+import RuntimeDock from '../components/RuntimeDock.astro'
 import { links } from '../lib/site'
 import teamSpace from '../assets/screenshots/team-space.png'
 ---
@@ -34,11 +37,11 @@ import teamSpace from '../assets/screenshots/team-space.png'
     <div class="mx-auto max-w-3xl text-center">
       <span class="eyebrow">Open-source · MIT · Local-first</span>
 
-      <h1 class="d1 mt-5">Your coding agents, working as one team.</h1>
+      <h1 class="d1 mt-5">Put a whole team of AI agents on it.</h1>
 
       <p class="lead mx-auto mt-5 max-w-xl">
-        Claude Code, Codex, Hermes and OpenClaw on one shared board, in one chat, with one memory.
-        Native agents are built in, so you can paste a key and start.
+        Marketing, research, ops, content, code. Give one brief to a team of agents and watch them
+        split it up, hand work between each other, and finish it on a board you can see.
       </p>
 
       <div class="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
@@ -56,22 +59,30 @@ import teamSpace from '../assets/screenshots/team-space.png'
       </div>
     </div>
 
-    <RuntimeStrip />
+    <!-- The squad, back where the runtime tiles were. -->
+    <div class="relative z-10 mt-10 flex w-full justify-center overflow-hidden sm:mt-8">
+      <BooSquad client:visible />
+    </div>
 
-    <!-- The board, at full content width and actually readable. The source is
-         2720x1720, so it can carry this size; it was previously rendered at
-         300px inside a drawn browser window, 900px down the page. -->
-    <figure class="shot mt-12 sm:mt-14">
-      <Picture
-        src={teamSpace}
-        alt="The Clawboo board: a team of agents with tasks moving across todo, in progress and done columns, with the group chat beside it."
-        formats={['avif', 'webp']}
-        widths={[720, 1080, 1440, 1920, 2400]}
-        sizes="(min-width: 1280px) 1200px, 94vw"
-        loading="eager"
-        fetchpriority="high"
-      />
-    </figure>
+    <!-- The dashboard, at full content width and actually readable. The source
+         is 2720x1720, so it carries this size; it used to render at 300px
+         inside a drawn browser window, 900px down the page. -->
+    <!-- The dock is a SIBLING of .shot, not a child: .shot has overflow:hidden
+         to clip the screenshot's corners, which was slicing the dock in half. -->
+    <div class="relative mt-10 sm:mt-12">
+      <RuntimeDock />
+      <figure class="shot">
+        <Picture
+          src={teamSpace}
+          alt="The Clawboo board: a marketing squad of agents with tasks moving across todo, in progress and done, and the group chat alongside."
+          formats={['avif', 'webp']}
+          widths={[720, 1080, 1440, 1920, 2400]}
+          sizes="(min-width: 1280px) 1200px, 94vw"
+          loading="eager"
+          fetchpriority="high"
+        />
+      </figure>
+    </div>
   </div>
 </section>
 
@@ -100,5 +111,25 @@ import teamSpace from '../assets/screenshots/team-space.png'
   .on-sky :global(h1) {
     color: var(--sky-ink);
     text-shadow: var(--sky-halo);
+  }
+
+  /* Responsive scale for the foreground Boo squad, as the original hero had. */
+  :global(.clawboo-boo-squad) {
+    transform-origin: center bottom;
+  }
+  @media (max-width: 1024px) {
+    :global(.clawboo-boo-squad) {
+      transform: scale(0.82);
+    }
+  }
+  @media (max-width: 768px) {
+    :global(.clawboo-boo-squad) {
+      transform: scale(0.62);
+    }
+  }
+  @media (max-width: 520px) {
+    :global(.clawboo-boo-squad) {
+      transform: scale(0.46);
+    }
   }
 </style>

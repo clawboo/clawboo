@@ -6,12 +6,17 @@
  */
 import Icon from './Icon.astro'
 import { links } from '../lib/site'
+import { getStarCount, formatStars } from '../lib/stars'
 interface Props {
   variant?: 'pill' | 'solid'
   label?: string
   class?: string
 }
 const { variant = 'pill', label = 'Star', class: cls = '' } = Astro.props
+
+// Resolved at build time so the badge always ships a number; the client script
+// in BaseLayout refreshes it when GitHub answers.
+const stars = formatStars(await getStarCount())
 ---
 <a
   href={links.github}
@@ -31,7 +36,7 @@ const { variant = 'pill', label = 'Star', class: cls = '' } = Astro.props
     data-gh-stars
     class={`font-data rounded-md px-1.5 py-0.5 text-[12px] tabular-nums ${
       variant === 'solid' ? 'bg-white/20' : 'bg-amber/15 text-amber'
-    }`}>★</span>
+    }`}>{stars}</span>
 </a>
 
 <style>

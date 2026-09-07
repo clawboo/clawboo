@@ -26,9 +26,9 @@ export const site = {
   install: 'npm install -g clawboo',
   tryInstall: 'npx clawboo@latest',
   version: 'v0.3.1',
-  tagline: 'Run your coding agents as one team.',
+  tagline: 'Put a whole team of AI agents on it.',
   subhead:
-    'Claude Code, Codex, Hermes and OpenClaw on one shared board, in one chat, with one memory. Native agents are built in, so you can paste a key and start.',
+    'Marketing, research, ops, content, code. Give one brief to a team of AI agents and watch them split it up, hand work between each other, and finish it on a board you can see.',
   description:
     'Deploy a team of AI agents and watch them collaborate live. Native agents are built in, and Claude Code, Codex, Hermes, and OpenClaw join as peer teammates in one chat. Open-source, MIT, local-first. Install with npm install -g clawboo, or run npx clawboo@latest.',
 } as const
