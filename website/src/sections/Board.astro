@@ -1,0 +1,74 @@
+---
+/**
+ * The board. Merges the old BoardShowpiece with the Features card that
+ * restated it. Its three claims are the strongest verifiable things in the
+ * codebase, so they are stated flatly and each one is checkable:
+ *
+ *  - a race-free claim is one SQL statement (board/repository.ts:365-377)
+ *  - a non-promotable verdict rejects `-> done` for every caller
+ *    (board/repository.ts:619-621) — not a convention an agent can route around
+ *  - you drive the same board they do (BoardPanel.tsx:159,202,422,516)
+ */
+import { Picture } from 'astro:assets'
+import Icon from '../components/Icon.astro'
+import sharedMemory from '../assets/screenshots/shared-memory.png'
+
+const points = [
+  {
+    icon: 'columns',
+    title: 'One source of truth',
+    body: 'Tasks survive restarts. Two agents can never claim the same one — the claim is a single conditional write.',
+  },
+  {
+    icon: 'shield',
+    title: 'Done has to be earned',
+    body: 'A task carrying a failed verdict cannot move to done, from any caller. Only an audited human override gets past it.',
+  },
+  {
+    icon: 'users',
+    title: 'You are on the board too',
+    body: 'Create tasks, edit them, drag them between columns, and override the gate yourself when you decide to.',
+  },
+]
+---
+
+<section id="board" class="section rule">
+  <div class="container">
+    <div class="grid items-center gap-12 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-16">
+      <div>
+        <span class="eyebrow">The board</span>
+        <h2 class="d2 mt-4">A durable board, with a live chat running alongside it.</h2>
+        <p class="lead mt-4">
+          The board is where decisions land. The chat is the narration.
+        </p>
+
+        <ul class="mt-8 grid gap-6">
+          {
+            points.map((p) => (
+              <li class="flex gap-3.5">
+                <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Icon name={p.icon} size={16} />
+                </span>
+                <div>
+                  <h3 class="d3">{p.title}</h3>
+                  <p class="mt-1 text-[15px] leading-relaxed text-secondary">{p.body}</p>
+                </div>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <figure class="shot">
+        <Picture
+          src={sharedMemory}
+          alt="The shared memory panel: facts and procedures every runtime on the team can read and write."
+          formats={['avif', 'webp']}
+          widths={[720, 1080, 1440, 1920]}
+          sizes="(min-width: 1024px) 640px, 94vw"
+          loading="lazy"
+        />
+      </figure>
+    </div>
+  </div>
+</section>

@@ -32,9 +32,9 @@ import Icon from './Icon.astro'
     function get() {
       try {
         var s = localStorage.getItem(KEY)
-        return s === 'light' || s === 'dark' || s === 'system' ? s : 'light'
+        return s === 'light' || s === 'dark' || s === 'system' ? s : 'system'
       } catch (e) {
-        return 'light'
+        return 'system'
       }
     }
     function resolved(pref) {

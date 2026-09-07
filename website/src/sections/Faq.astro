@@ -1,31 +1,34 @@
 ---
-import Kicker from '../components/Kicker.astro'
-import Reveal from '../components/Reveal.astro'
 import Icon from '../components/Icon.astro'
 import { faqs } from '../lib/faq'
 ---
-<section id="faq" class="relative mx-auto max-w-3xl px-5 py-20 sm:px-8 sm:py-28">
-  <Reveal class="text-center">
-    <Kicker text="Straight answers" class="justify-center" />
-    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
-      Questions, answered honestly.
-    </h2>
-  </Reveal>
 
-  <div class="mt-10 flex flex-col gap-3">
-    {
-      faqs.map((f, i) => (
-        <Reveal delay={Math.min(i * 30, 180)}>
-          <details class="cb-faq surface-raised-tier group rounded-xl px-5 py-1">
-            <summary class="flex cursor-pointer list-none items-center gap-3 py-4 text-[15px] font-semibold text-foreground">
+<section id="faq" class="section rule">
+  <div class="container container-prose">
+    <div class="section-head section-head--center">
+      <span class="eyebrow">FAQ</span>
+      <!-- Was "Questions, answered honestly." One of six places the old page
+           announced its own honesty; a page that has to say it undercuts it. -->
+      <h2 class="d2 mt-4">Questions.</h2>
+    </div>
+
+    <div class="flex flex-col gap-2.5">
+      {
+        faqs.map((f) => (
+          <details class="cb-faq group rounded-xl border border-border bg-surface px-5">
+            <summary class="flex cursor-pointer list-none items-center gap-3 py-4 text-[15px] font-medium text-foreground">
               <span class="flex-1">{f.q}</span>
-              <Icon name="chevron-down" size={18} class="shrink-0 text-foreground/40 transition-transform duration-200 group-open:rotate-180" />
+              <Icon
+                name="chevron-down"
+                size={18}
+                class="shrink-0 text-foreground/35 transition-transform duration-200 group-open:rotate-180"
+              />
             </summary>
-            <p class="pb-4 text-[14px] leading-relaxed text-secondary">{f.a}</p>
+            <p class="pb-4 text-[14.5px] leading-relaxed text-secondary">{f.a}</p>
           </details>
-        </Reveal>
-      ))
-    }
+        ))
+      }
+    </div>
   </div>
 </section>
 
@@ -33,7 +36,11 @@ import { faqs } from '../lib/faq'
   .cb-faq summary::-webkit-details-marker {
     display: none;
   }
+  .cb-faq {
+    transition: border-color 160ms var(--motion-easing-standard);
+  }
+  .cb-faq:hover,
   .cb-faq[open] {
-    box-shadow: var(--shadow-floating);
+    border-color: color-mix(in srgb, var(--foreground) 18%, transparent);
   }
 </style>

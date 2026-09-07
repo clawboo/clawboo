@@ -1,0 +1,84 @@
+---
+/**
+ * See it work. Merges the old Proof and HowItWorks sections.
+ *
+ * They made the same promise twice — "about a minute", "localhost:18790",
+ * "no cloud account" — each inside its own drawn browser window, one around a
+ * video and one around a typed terminal. The video already shows the terminal,
+ * so TerminalDemo is gone. ~230 words of copy became ~70.
+ */
+import { site } from '../lib/site'
+import InstallCommand from '../components/InstallCommand.astro'
+
+const steps = [
+  {
+    n: '01',
+    title: 'Install and run',
+    body: 'One npm install, then <code>clawboo</code>. The dashboard opens on your machine.',
+  },
+  {
+    n: '02',
+    title: 'Add a key, or a CLI',
+    body: 'Paste a provider key to use the built-in agents, or connect Claude Code, Codex or Hermes.',
+  },
+  {
+    n: '03',
+    title: 'Give the team a task',
+    body: 'A leader breaks it up, delegates, and every step lands on the board as it happens.',
+  },
+]
+---
+
+<section id="how" class="section rule">
+  <div class="container">
+    <div class="section-head section-head--center">
+      <span class="eyebrow">See it work</span>
+      <h2 class="d2 mt-4">One request, split across specialists, tracked on the board.</h2>
+      <p class="lead">A leader takes the request, delegates it, and narrates the work in chat.</p>
+    </div>
+
+    <!-- The recording is the proof. The old copy said "Nothing here is a mockup"
+         underneath it; a product that has to say that is arguing with itself. -->
+    <figure class="shot">
+      <video
+        autoplay
+        loop
+        muted
+        playsinline
+        poster="/demo/clawboo-demo-poster.webp"
+        width="1080"
+        height="608"
+        aria-label="A Clawboo session: one request is delegated to specialists, tracked on the board, and narrated in chat."
+      >
+        <source src="/demo/clawboo-demo.webm" type="video/webm" />
+        <source src="/demo/clawboo-demo.mp4" type="video/mp4" />
+      </video>
+    </figure>
+
+    <ol class="mt-12 grid gap-6 sm:grid-cols-3 sm:gap-8">
+      {
+        steps.map((s) => (
+          <li>
+            <span class="font-data text-[12px] text-primary">{s.n}</span>
+            <h3 class="d3 mt-2">{s.title}</h3>
+            <p class="mt-1.5 text-[15px] leading-relaxed text-secondary" set:html={s.body} />
+          </li>
+        ))
+      }
+    </ol>
+
+    <div class="mt-10 flex justify-center">
+      <InstallCommand caption={`Or run ${site.tryInstall} with no install.`} />
+    </div>
+  </div>
+</section>
+
+<style>
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--code-block-bg);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+</style>

@@ -1,114 +1,114 @@
 ---
-import Kicker from '../components/Kicker.astro'
-import Reveal from '../components/Reveal.astro'
+/**
+ * Every runtime, one team. Absorbs the old Problem section's argument and two
+ * Features cards that repeated this section's own subhead word for word.
+ *
+ * Corrections carried in from the code audit:
+ *  - Native reaches ELEVEN providers, not four (nativeProviders.ts:20-53 is
+ *    seven OpenAI-compatible plus four built-in). The old copy said four and
+ *    contradicted the FAQ on the same page.
+ *  - "Each runtime keeps its own native powers" was false as a universal; it is
+ *    true of Hermes and OpenClaw (README.md:78). Said about those two only.
+ *  - "Coordination flows over structured lifecycle events and MCP calls, never
+ *    terminal-output scraping" is true but unreadable. Said in plain words.
+ */
 import RuntimeMark from '../components/RuntimeMark.astro'
-import ScreenshotFrame from '../components/ScreenshotFrame.astro'
-import Icon from '../components/Icon.astro'
+import { Picture } from 'astro:assets'
 import { links } from '../lib/site'
-import runtimesImg from '../assets/screenshots/runtimes-panel.png'
+import Icon from '../components/Icon.astro'
+import runtimesPanel from '../assets/screenshots/runtimes-panel.png'
 
 const runtimes = [
   {
     name: 'Clawboo Native',
     img: '/logo.svg',
-    accent: '#e94560',
+    tagline: 'Built in. Reaches eleven providers — Anthropic, OpenAI, Google, xAI, Groq, Mistral, and more — with one key.',
     chip: 'Built in',
     chipTone: 'mint' as const,
+    accent: '#e94560',
     featured: true,
-    tagline:
-      'Built-in conversational runtime. Talks to Anthropic, OpenAI, OpenRouter, or a local Ollama directly.',
   },
   {
     name: 'Claude Code',
     monogram: 'C',
-    accent: '#d97757',
+    tagline: "Anthropic's coding agent.",
     chip: 'Install + connect',
-    tagline: "Anthropic's coding agent on the Claude Agent SDK.",
+    accent: '#d97757',
   },
   {
     name: 'Codex',
     monogram: 'Cx',
-    accent: '#10a37f',
-    chip: 'Install + connect',
     tagline: "OpenAI's coding agent CLI. One codex login.",
+    chip: 'Install + connect',
+    accent: '#10a37f',
   },
   {
     name: 'Hermes',
     monogram: 'H',
-    accent: '#a78bfa',
+    tagline: 'Open-source, over OpenRouter. Keeps its own skills and self-improvement.',
     chip: 'Install + connect',
-    tagline: 'Open-source runtime over OpenRouter. Keeps its self-improvement and skills.',
+    accent: '#a78bfa',
   },
   {
     name: 'OpenClaw',
     monogram: 'O',
-    accent: '#1f9ec4',
+    tagline: 'Connects as a Gateway. Keeps its own channels and always-on presence.',
     chip: 'Connect Gateway',
-    tagline: 'A local OpenClaw Gateway. Keeps its own channels and always-on heartbeat.',
+    accent: '#1f9ec4',
   },
 ]
 ---
-<section id="runtimes" class="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
-  <Reveal class="mx-auto max-w-3xl text-center">
-    <Kicker text="One room, many runtimes" />
-    <h2 class="font-display mt-4 text-[28px] font-extrabold leading-tight text-foreground sm:text-[40px]">
-      Native agents built in. The best coding agents, one click away.
-    </h2>
-    <p class="mt-4 text-[16px] leading-relaxed text-secondary">
-      Native, Claude Code, Codex, Hermes, and OpenClaw are all named peers in one room, and any
-      runtime can lead. Coordination flows over structured lifecycle events and MCP calls, never
-      terminal-output scraping. Each runtime keeps its own native powers.
-    </p>
-  </Reveal>
 
-  <!-- Coordination plane pill -->
-  <Reveal delay={60} class="mt-10 flex justify-center">
-    <div class="surface-floating-tier inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-full px-5 py-2.5">
-      <span class="font-data text-[11px] font-semibold uppercase tracking-wider text-primary">Shared plane</span>
-      {
-        ['Board', 'Chat', 'Memory', 'Capabilities'].map((p, i) => (
-          <span class="inline-flex items-center gap-3">
-            {i > 0 && <span class="text-foreground/25">·</span>}
-            <span class="text-[13px] font-medium text-foreground/80">{p}</span>
-          </span>
-        ))
-      }
+<section id="runtimes" class="section rule">
+  <div class="container">
+    <div class="section-head section-head--center">
+      <span class="eyebrow">Every runtime, one team</span>
+      <h2 class="d2 mt-4">Your best agents don&rsquo;t talk to each other. Now they do.</h2>
+      <p class="lead">
+        Each one is strong on its own and trapped in its own terminal, with its own memory and no
+        record of what the others did. Clawboo gives all five one board, one chat and one memory —
+        and any of them can lead.
+      </p>
     </div>
-  </Reveal>
 
-  <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-    {
-      runtimes.map((r, i) => (
-        <Reveal delay={i * 50}>
-          <RuntimeMark {...r} />
-        </Reveal>
-      ))
-    }
-    <Reveal delay={runtimes.length * 50}>
-      <a
-        href={links.docs}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="group surface-raised-tier flex h-full flex-col justify-center gap-2 rounded-2xl border-dashed p-5 transition-colors hover:border-[color:var(--primary)]"
-      >
-        <span class="font-display text-[15px] font-bold text-foreground">Behind one interface</span>
-        <p class="text-[13px] leading-relaxed text-secondary">
-          Code tasks get their own git worktree on Native, Claude Code, Codex and Hermes; OpenClaw
-          runs over its own Gateway connection. A structured handoff moves work between runtimes.
-        </p>
-        <span class="mt-1 inline-flex items-center gap-1 text-[13px] font-semibold text-primary">
-          See the Runtimes guide
-          <Icon name="arrow-up-right" size={14} class="transition-transform group-hover:translate-x-0.5" />
-        </span>
-      </a>
-    </Reveal>
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {runtimes.map((r) => <RuntimeMark {...r} />)}
+
+      <div class="card flex h-full flex-col justify-between">
+        <div>
+          <h3 class="d3">They hand work over properly</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-secondary">
+            Agents coordinate through the board and structured messages, never by reading each
+            other&rsquo;s screen output. Each one works in its own copy of the code, so two agents
+            can&rsquo;t overwrite each other.
+          </p>
+        </div>
+        <a
+          class="mt-4 inline-flex items-center gap-1.5 text-[14px] font-medium text-primary hover:underline"
+          href={links.docs}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Read the runtimes guide
+          <Icon name="arrow-up-right" size={14} />
+        </a>
+      </div>
+    </div>
+
+    <figure class="mt-12">
+      <div class="shot">
+        <Picture
+          src={runtimesPanel}
+          alt="The Runtimes panel: Clawboo Native connected, Claude Code and Codex ready to connect, Hermes connected, and an OpenClaw Gateway."
+          formats={['avif', 'webp']}
+          widths={[720, 1080, 1440, 1920]}
+          sizes="(min-width: 1280px) 1080px, 94vw"
+          loading="lazy"
+        />
+      </div>
+      <figcaption class="shot-caption">
+        Connect a runtime from the dashboard. Native needs nothing installed.
+      </figcaption>
+    </figure>
   </div>
-
-  <Reveal delay={120} class="mx-auto mt-12 max-w-5xl">
-    <ScreenshotFrame
-      src={runtimesImg}
-      alt="The Clawboo Runtimes panel: Clawboo Native and Hermes connected, Claude Code and Codex ready to connect, and an OpenClaw Gateway healthy."
-      caption="Runtimes panel: Native is built in; connect Claude Code, Codex, Hermes, or a local OpenClaw Gateway in a click."
-    />
-  </Reveal>
 </section>

@@ -3,30 +3,23 @@ import BaseLayout from '../layouts/BaseLayout.astro'
 import Nav from '../components/Nav.astro'
 import Footer from '../components/Footer.astro'
 import Hero from '../sections/Hero.astro'
-import Proof from '../sections/Proof.astro'
-import Problem from '../sections/Problem.astro'
+import SeeItWork from '../sections/SeeItWork.astro'
 import Runtimes from '../sections/Runtimes.astro'
-import HowItWorks from '../sections/HowItWorks.astro'
-import BoardShowpiece from '../sections/BoardShowpiece.astro'
-import Features from '../sections/Features.astro'
-import Surface from '../sections/Surface.astro'
-import Observability from '../sections/Observability.astro'
+import Board from '../sections/Board.astro'
+import Trust from '../sections/Trust.astro'
 import Faq from '../sections/Faq.astro'
 import FinalCta from '../sections/FinalCta.astro'
 import { faqs } from '../lib/faq'
 ---
-<BaseLayout faq={faqs} ogTitle="clawboo: deploy a team of AI agents and watch them collaborate live">
+
+<BaseLayout faq={faqs} ogTitle="Clawboo: your coding agents, working as one team">
   <Nav />
   <main>
     <Hero />
-    <Proof />
-    <Problem />
+    <SeeItWork />
     <Runtimes />
-    <HowItWorks />
-    <BoardShowpiece />
-    <Features />
-    <Surface />
-    <Observability />
+    <Board />
+    <Trust />
     <Faq />
     <FinalCta />
   </main>

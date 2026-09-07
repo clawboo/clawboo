@@ -24,19 +24,19 @@ export const site = {
   url: 'https://www.claw.boo',
   domain: 'www.claw.boo',
   install: 'npm install -g clawboo',
-  tryInstall: 'npx clawboo',
+  tryInstall: 'npx clawboo@latest',
   version: 'v0.3.1',
-  tagline: 'A TypeScript orchestrator for heterogeneous AI agent runtimes.',
+  tagline: 'Run your coding agents as one team.',
   subhead:
-    'Deploy a team of agents and watch them collaborate live. Native agents are built in: paste one key and go. Claude Code, Codex, Hermes, and OpenClaw join as peer teammates in one chat, sharing one board, one memory, and one capability dashboard.',
+    'Claude Code, Codex, Hermes and OpenClaw on one shared board, in one chat, with one memory. Native agents are built in, so you can paste a key and start.',
   description:
-    'Deploy a team of AI agents and watch them collaborate live. Native agents are built in, and Claude Code, Codex, Hermes, and OpenClaw join as peer teammates in one chat. Open-source, MIT, local-first. Install with npm i -g clawboo, or try npx clawboo.',
+    'Deploy a team of AI agents and watch them collaborate live. Native agents are built in, and Claude Code, Codex, Hermes, and OpenClaw join as peer teammates in one chat. Open-source, MIT, local-first. Install with npm install -g clawboo, or run npx clawboo@latest.',
 } as const
 
 export const nav = [
-  { label: 'Runtimes', href: '#runtimes' },
   { label: 'How it works', href: '#how' },
-  { label: 'Features', href: '#features' },
+  { label: 'Runtimes', href: '#runtimes' },
+  { label: 'Trust', href: '#trust' },
   { label: 'FAQ', href: '#faq' },
 ] as const
 
