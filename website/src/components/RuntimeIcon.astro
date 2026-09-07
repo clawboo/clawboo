@@ -20,10 +20,17 @@ const { id, size = 18, tile = 36, class: cls = '' } = Astro.props
 const { color, glyph } = RUNTIME_MARKS[id]
 const mono = color === 'currentColor'
 
-// A brand-tinted tile for the coloured marks; a neutral one for the monochrome
-// brands, since tinting those would invent a colour they do not own.
-const tileStyle = mono
-  ? 'background:color-mix(in srgb, var(--foreground) 8%, transparent);color:var(--foreground)'
+// Clawboo Native and OpenClaw are both red in the product's brand map (#ff4d4d
+// and #E94560), which is fine in the dashboard where they rarely appear
+// together, but on a six-card grid two red creatures three cards apart read as
+// a duplicate. Native keeps its mascot red and drops the red tint behind it, so
+// the tinted red tile belongs to OpenClaw alone. This is a site-side
+// presentation choice: brandMarks.ts stays a faithful mirror of the product map
+// so the two can still be re-synced.
+const neutralTile = mono || id === 'clawboo-native'
+
+const tileStyle = neutralTile
+  ? `background:color-mix(in srgb, var(--foreground) 8%, transparent);color:${mono ? 'var(--foreground)' : color}`
   : `background:color-mix(in srgb, ${color} 14%, transparent);color:${color}`
 ---
 
