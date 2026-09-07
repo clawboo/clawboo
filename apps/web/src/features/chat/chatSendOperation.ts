@@ -151,7 +151,7 @@ export async function sendChatMessage({
 
     // 2. Patch the live session with exec settings
     try {
-      const execParams = resolveExecPatchParams(agent.execConfig.execAsk)
+      const execParams = resolveExecPatchParams()
       await client.call('sessions.patch', {
         key: sessionKey,
         ...execParams,

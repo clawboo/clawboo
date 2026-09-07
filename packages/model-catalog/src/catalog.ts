@@ -35,8 +35,11 @@ export const MODEL_GROUPS: ModelGroup[] = [
   {
     // The ChatGPT subscription (Codex OAuth) — OpenClaw's `openai-codex` provider.
     // Keyless: configured via `openclaw models auth login --provider openai-codex`,
-    // never an API key. Model ids are the 2026.5.x routing refs (newer OpenClaw
-    // `doctor --fix` rewrites them to `openai/*`). The display name must slug to
+    // never an API key. Model ids stay in the `openai-codex/*` form because that
+    // is what validates on its own: `openclaw doctor --fix` migrates them to the
+    // canonical `openai/*` AND enables the `openai` + `codex` plugin entries that
+    // form needs, and writing `openai/*` here without those entries stops the
+    // OpenClaw CLI outright. The display name must slug to
     // `openaicodex` so the live CLI's lowercase `openai-codex` group canonicalizes
     // onto this one (see providerSlug).
     provider: 'OpenAI Codex',

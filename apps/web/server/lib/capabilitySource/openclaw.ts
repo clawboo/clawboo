@@ -220,11 +220,20 @@ export class OpenClawCapabilitySource implements CapabilitySource {
     }
     tools.allow = [...allow]
     tools.deny = [...deny]
-    // OpenClaw 2026.5.x's `config.patch` wants a `{ raw: <json>, baseHash }`
-    // envelope (it deep-merges the parsed partial + enforces the snapshot hash) —
+    // `config.patch` wants a `{ raw: <json>, baseHash, replacePaths }` envelope
+    // (it deep-merges the parsed partial + enforces the snapshot hash), and
     // `encodeConfigPatchParams` does the wire encoding, carrying the hash from the
-    // `config.get` above. The full allow/deny arrays are re-asserted, so the merge
-    // replaces them wholesale (the intended set), not appends.
+    // `config.get` above.
+    //
+    // The full allow/deny arrays are re-asserted here, which from OpenClaw 2026.9
+    // is only honoured because the encoder names them in `replacePaths`. Without
+    // that the DISABLE half of this toggle is refused outright, because dropping
+    // the id from `allow` shortens an array:
+    //
+    //   config.patch would remove entries from array path(s): tools.allow
+    //
+    // The encoder derives those paths from the payload, so nothing here has to
+    // remember to declare them.
     await this.deps.client.operatorCall(
       'config.patch',
       encodeConfigPatchParams({ tools }, snapshot.hash ?? snapshot.baseHash),

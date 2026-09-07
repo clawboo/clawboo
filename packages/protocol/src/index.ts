@@ -101,17 +101,64 @@ export function withBrowsingGuidance(existing: string | undefined | null): strin
  * TILDE, NOT CARET, and that is the whole point of this constant existing.
  * `^2026.5` means "any 2026.x", because caret only pins the leftmost non-zero
  * digit, so it shipped 2026.9.1 to every new user while the comment beside it
- * claimed it held them on 2026.5. Four things break on that version: agent
- * creation, the capability toggles, chat sends and approvals. `~2026.5` is what
- * "the 2026.5 line" actually spells.
+ * claimed it held them on 2026.5. `~2026.9` is what "the 2026.9 line" actually
+ * spells.
  *
  * It lives in @clawboo/protocol because the server spawns the install and the
  * onboarding UI prints the same command for people who need to run it by hand.
  * Those three copies drifted once already; one exported string is what stops it
  * happening again. Widen this only alongside a clawboo that has been tested
  * against the newer Gateway.
+ *
+ * The pin is NOT about the connect protocol. Both 2026.5 and 2026.9 speak
+ * protocol v4, and the Gateway accepts any advertised range that contains its
+ * current protocol, so the client's `minProtocol: 3, maxProtocol: 4` negotiates
+ * against either. What the pin actually holds is the CONFIG SHAPE and the
+ * `config.patch` contract, which 2026.9 tightened in two ways clawboo depends
+ * on: the agent roster moved from `agents.list` to `agents.entries`, and a
+ * patch that shortens an array is rejected unless it names that array in
+ * `replacePaths`.
  */
-export const OPENCLAW_INSTALL_SPEC = 'openclaw@~2026.5'
+export const OPENCLAW_INSTALL_SPEC = 'openclaw@~2026.9'
+
+/**
+ * The Node.js versions the pinned OpenClaw will actually run on, as its own
+ * package `engines` field states them:
+ *
+ *   >=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0
+ *
+ * This is a real gate, not advice: npm refuses the global install on an
+ * unsupported Node, and the Gateway will not boot. It is also NOT a plain
+ * "major >= 22" question, which is what clawboo used to ask. Node 22.12 has the
+ * right major and is still too old, and Node 23 has a higher major and is
+ * excluded outright, so a major-only check tells a user everything is fine right
+ * up until the install fails.
+ *
+ * Keep this in step with OPENCLAW_INSTALL_SPEC. Moving the pin without moving
+ * these is how the check goes quietly stale.
+ */
+export const OPENCLAW_NODE_RANGES: readonly { min: [number, number, number]; ltMajor?: number }[] =
+  [{ min: [22, 22, 3], ltMajor: 23 }, { min: [24, 15, 0], ltMajor: 25 }, { min: [25, 9, 0] }]
+
+/** Human-readable form of {@link OPENCLAW_NODE_RANGES}, for error text and docs. */
+export const OPENCLAW_NODE_REQUIREMENT = '>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0'
+
+/**
+ * Whether a Node version string (`v22.23.2` or `22.23.2`) satisfies OpenClaw.
+ * Unparseable input is reported as UNSUPPORTED: a version we cannot read is not
+ * evidence that it works, and claiming otherwise sends the user into an install
+ * that fails with a worse message than this one.
+ */
+export function isNodeVersionSupportedByOpenclaw(version: string | null | undefined): boolean {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec((version ?? '').trim())
+  if (!m) return false
+  const got: [number, number, number] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const atLeast = (a: [number, number, number], b: [number, number, number]): boolean =>
+    a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] >= b[2]
+  return OPENCLAW_NODE_RANGES.some(
+    (r) => atLeast(got, r.min) && (r.ltMajor === undefined || got[0] < r.ltMajor),
+  )
+}
 
 /** The manual fallback, for a machine whose global installs need sudo. */
 export const OPENCLAW_INSTALL_COMMAND_SUDO = `sudo npm install -g ${OPENCLAW_INSTALL_SPEC}`

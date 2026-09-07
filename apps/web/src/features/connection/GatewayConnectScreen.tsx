@@ -7,6 +7,7 @@ import {
   formatGatewayError,
   isLocalGatewayUrl,
   resolveProxyGatewayUrl,
+  GATEWAY_BROWSER_CLIENT_ID,
 } from '@clawboo/gateway-client'
 import { apiFetch } from '@clawboo/control-client'
 import { useConnectionStore } from '@/stores/connection'
@@ -120,7 +121,7 @@ export function GatewayConnectScreen({
       // using a persistent keypair stored at ~/.openclaw/clawboo/proxy-device-identity.json.
       // This works in any browser context (incognito, preview, fresh installs).
       await client.connect(resolveProxyGatewayUrl(), {
-        clientName: 'openclaw-control-ui',
+        clientName: GATEWAY_BROWSER_CLIENT_ID,
         clientVersion: '0.1.0',
         token: trimmedToken || undefined,
         authScopeKey: trimmedUrl,

@@ -55,7 +55,13 @@ test.describe('Native onboarding — reload stays on the dashboard', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          node: { version: 'v22.0.0', major: 22, sufficient: true, path: '/usr/bin/node' },
+          node: {
+            version: 'v22.23.2',
+            major: 22,
+            sufficient: true,
+            required: '>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0',
+            path: '/usr/bin/node',
+          },
           openclaw: {
             installed: false,
             version: null,

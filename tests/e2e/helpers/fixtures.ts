@@ -1,4 +1,5 @@
 import { test as base, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { OPENCLAW_NODE_REQUIREMENT } from '@clawboo/protocol'
 import os from 'node:os'
 import { startMockGateway, type MockGateway } from './mockGateway'
 
@@ -223,7 +224,13 @@ export async function connectToMockGateway(
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        node: { version: process.version, major: 22, sufficient: true, path: '/usr/bin/node' },
+        node: {
+          version: process.version,
+          major: 22,
+          sufficient: true,
+          required: OPENCLAW_NODE_REQUIREMENT,
+          path: '/usr/bin/node',
+        },
         openclaw: {
           installed: true,
           version: '0.3.0',

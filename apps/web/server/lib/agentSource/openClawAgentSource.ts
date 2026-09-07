@@ -67,7 +67,10 @@ export interface OpenClawClientLike {
     /** Live operator config patch (Partial<GatewayConfig>; the loose Gateway
      *  shape accepts arbitrary nested keys). Used to register clawboo's MCP
      *  servers in the top-level `mcp.servers`. `baseHash` is the optimistic-
-     *  concurrency token from `config.get`, required by OpenClaw 2026.5.x. */
+     *  concurrency token from `config.get`, which the patch handler requires.
+     *  Arrays in `updates` are declared to the Gateway as `replacePaths` by
+     *  `encodeConfigPatchParams`, without which a patch that SHORTENS one is
+     *  refused. */
     patch(updates: Record<string, unknown>, baseHash?: string): Promise<void>
   }
 }
@@ -272,8 +275,10 @@ export class OpenClawAgentSource implements AgentSource {
         baseHash?: string
       }
       const current = snapshot.config?.mcp?.servers ?? snapshot.mcp?.servers ?? {}
-      // OpenClaw 2026.5.x's config.patch requires the snapshot hash (optimistic
-      // concurrency). config.get returns it as `hash` (defensively also `baseHash`).
+      // config.patch requires the snapshot hash (optimistic concurrency).
+      // config.get returns it as `hash` (defensively also `baseHash`); 2026.9 also
+      // returns `configRevisionHash` and `appliedConfigHash`, which are different
+      // values and are NOT what this envelope wants.
       const baseHash = snapshot.hash ?? snapshot.baseHash
 
       // Anti-sub-agent enforcement (a Tier-1 team invariant): deny the OpenClaw

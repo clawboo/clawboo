@@ -23,7 +23,11 @@
  */
 
 import { apiFetch } from '@clawboo/control-client'
-import { GatewayClient, resolveProxyGatewayUrl } from '@clawboo/gateway-client'
+import {
+  GatewayClient,
+  resolveProxyGatewayUrl,
+  GATEWAY_BROWSER_CLIENT_ID,
+} from '@clawboo/gateway-client'
 
 export async function connectGatewayFromSettings(): Promise<{
   client: GatewayClient
@@ -41,7 +45,7 @@ export async function connectGatewayFromSettings(): Promise<{
 
   const client = new GatewayClient()
   await client.connect(resolveProxyGatewayUrl(), {
-    clientName: 'openclaw-control-ui',
+    clientName: GATEWAY_BROWSER_CLIENT_ID,
     clientVersion: '0.1.0',
     disableDeviceAuth: true,
   })

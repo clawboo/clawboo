@@ -13,6 +13,8 @@ export interface NodeInfo {
   version: string
   major: number
   sufficient: boolean
+  /** The range OpenClaw actually requires, so the UI never has to hardcode it. */
+  required: string
   path: string
 }
 

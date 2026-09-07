@@ -3,7 +3,12 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { OPENCLAW_INSTALL_COMMAND_SUDO, OPENCLAW_INSTALL_SPEC } from '@clawboo/protocol'
+import {
+  OPENCLAW_INSTALL_COMMAND_SUDO,
+  OPENCLAW_INSTALL_SPEC,
+  OPENCLAW_NODE_REQUIREMENT,
+  isNodeVersionSupportedByOpenclaw,
+} from '@clawboo/protocol'
 import { resolveStateDir, resolveClawbooDir, loadSettings, saveSettings } from '@clawboo/config'
 import {
   readGatewayPid,
@@ -50,9 +55,11 @@ const OPENCLAW_MODEL_MAP: Record<string, string> = {
   cerebras: 'cerebras/zai-glm-4.7',
   venice: 'venice/llama-3.3-70b',
   ollama: 'ollama/llama3.2',
-  // The ChatGPT subscription (Codex OAuth). The `openai-codex/*` ref is the
-  // minimal activation on the installed 2026.5.x generation; newer OpenClaw
-  // `doctor --fix` auto-repairs it forward to `openai/*`.
+  // The ChatGPT subscription (Codex OAuth). `openai-codex/*` is what validates
+  // on its own, so it stays the ref clawboo writes. `openclaw doctor --fix`
+  // migrates it forward to the canonical `openai/*` AND enables the `openai` +
+  // `codex` plugin entries that form requires; writing `openai/*` here without
+  // those entries stops the OpenClaw CLI, so the two halves cannot be split.
   'openai-codex': 'openai-codex/gpt-5.5',
 }
 
@@ -227,6 +234,46 @@ function parseEnvFlags(content: string | null): Record<string, boolean> {
   return flags
 }
 
+/**
+ * Return the agent roster as OpenClaw 2026.9's keyed `agents.entries` map,
+ * folding a legacy `agents.list` array into it and dropping the array.
+ *
+ * The two shapes are an either/or, not a pair. `list` is accepted on its own as
+ * a legacy alias, but alongside `entries` it is rejected with
+ * `Unrecognized key: "list"` at `agents`, and an OpenClaw that cannot validate
+ * its config will not start, so authoring both is worse than authoring the old
+ * one. Mutates and returns the live `entries` object so callers can write to it.
+ */
+function migrateAgentRoster(
+  agents: Record<string, unknown>,
+): Record<string, Record<string, unknown>> {
+  if (
+    !agents['entries'] ||
+    typeof agents['entries'] !== 'object' ||
+    Array.isArray(agents['entries'])
+  ) {
+    agents['entries'] = {}
+  }
+  const entries = agents['entries'] as Record<string, Record<string, unknown>>
+
+  const legacy = agents['list']
+  if (Array.isArray(legacy)) {
+    for (const item of legacy) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as Record<string, unknown>
+      const id = row['id']
+      if (typeof id !== 'string' || !id) continue
+      // `id` becomes the key, so it is not carried into the value. Anything
+      // already under `entries` wins: it is the migrated, current shape.
+      const { id: _id, ...rest } = row
+      entries[id] = { ...rest, ...(entries[id] ?? {}) }
+    }
+    delete agents['list']
+  }
+
+  return entries
+}
+
 function resolvePort(stateDir: string): number {
   const pidInfo = readGatewayPid()
   if (pidInfo) return pidInfo.port
@@ -321,7 +368,13 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
       node: {
         version: nodeVersion,
         major,
-        sufficient: major >= 22,
+        // NOT `major >= 22`. OpenClaw's engines are
+        // `>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`, so Node 22.12 has the
+        // right major and still cannot run it, and Node 23 has a higher major
+        // and is excluded. A major-only check reports "sufficient" right up
+        // until `npm install -g` refuses the install.
+        sufficient: isNodeVersionSupportedByOpenclaw(nodeVersion),
+        required: OPENCLAW_NODE_REQUIREMENT,
         path: process.execPath,
       },
       openclaw: {
@@ -1130,38 +1183,42 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
       gateway['port'] = gatewayPort
     }
 
-    // Per-agent model override → agents.list[]
+    // Per-agent model override → agents.entries[<id>].model
+    //
+    // OpenClaw 2026.9 keys the roster by agent id under `agents.entries` and
+    // treats the legacy `agents.list` array as an alias for it. The two cannot
+    // coexist: once `entries` is present, `list` is rejected as
+    // `Unrecognized key: "list"` and the Gateway then refuses to load the file
+    // at all. Writing a per-agent model used to append to `list`, so on any
+    // install `openclaw doctor` had already migrated, one model change here
+    // wrote a config that would not boot. `migrateAgentRoster` folds a legacy
+    // `list` into `entries` before this writes, so clawboo can never author
+    // that combination.
     if (agentModelField && typeof agentModelField === 'object' && !Array.isArray(agentModelField)) {
       const am = agentModelField as Record<string, unknown>
       const agentId = am['agentId']
       const agentModel = am['model']
 
       if (typeof agentId === 'string' && agentId) {
-        if (!agents['list'] || !Array.isArray(agents['list'])) agents['list'] = []
-        const list = agents['list'] as Record<string, unknown>[]
-
-        const existingIdx = list.findIndex(
-          (entry) => entry && typeof entry === 'object' && entry['id'] === agentId,
-        )
+        const entries = migrateAgentRoster(agents)
+        const existing = entries[agentId]
+        const entry = existing && typeof existing === 'object' ? existing : {}
+        entries[agentId] = entry
 
         if (agentModel === null || agentModel === '') {
-          // Remove per-agent model override (revert to default)
-          if (existingIdx >= 0) {
-            const entry = list[existingIdx] as Record<string, unknown>
-            delete entry['model']
-            // Remove entry entirely if only 'id' key remains
-            const keys = Object.keys(entry).filter((k) => k !== 'id')
-            if (keys.length === 0) {
-              list.splice(existingIdx, 1)
-            }
-          }
+          // Revert to the default model. Only the override is dropped: under
+          // `entries` the KEY is the agent's roster membership, so deleting the
+          // entry (as the `list` version did once it held nothing but an id)
+          // would remove the agent, not just its model.
+          delete entry['model']
         } else if (typeof agentModel === 'string') {
-          // Set per-agent model override
-          if (existingIdx >= 0) {
-            ;(list[existingIdx] as Record<string, unknown>)['model'] = agentModel
-          } else {
-            list.push({ id: agentId, model: agentModel })
-          }
+          entry['model'] = agentModel
+        }
+
+        // A multi-agent roster is invalid without an explicit owner, and this may
+        // be the write that makes the roster multi-agent.
+        if (Object.keys(entries).length > 1 && typeof agents['ownership'] !== 'string') {
+          agents['ownership'] = 'explicit'
         }
       }
     }

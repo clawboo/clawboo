@@ -29,6 +29,7 @@ import {
   formatGatewayError,
   isLocalGatewayUrl,
   resolveProxyGatewayUrl,
+  GATEWAY_BROWSER_CLIENT_ID,
 } from '@clawboo/gateway-client'
 import { apiFetch } from '@clawboo/control-client'
 import {
@@ -283,7 +284,7 @@ function ConnectStep({
       // directly to the Gateway URL — upholds Architecture Invariant #2.
       // The proxy injects the auth token server-side from saved settings.
       await client.connect(resolveProxyGatewayUrl(), {
-        clientName: 'openclaw-control-ui',
+        clientName: GATEWAY_BROWSER_CLIENT_ID,
         clientVersion: '0.1.0',
         disableDeviceAuth: true,
       })
