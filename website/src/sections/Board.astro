@@ -1,74 +1,84 @@
 ---
 /**
- * The board. Merges the old BoardShowpiece with the Features card that
- * restated it. Its three claims are the strongest verifiable things in the
- * codebase, so they are stated flatly and each one is checkable:
+ * What you actually get.
  *
+ * Built on the Tines grid: the card IS a cropped piece of the product and the
+ * words sit under it. No icon in a tinted rounded square anywhere — that
+ * element is the single most generic thing on a SaaS page and none of the
+ * references use one.
+ *
+ * Claims, each checkable in the codebase:
  *  - a race-free claim is one SQL statement (board/repository.ts:365-377)
  *  - a non-promotable verdict rejects `-> done` for every caller
- *    (board/repository.ts:619-621) — not a convention an agent can route around
- *  - you drive the same board they do (BoardPanel.tsx:159,202,422,516)
+ *    (board/repository.ts:619-621), not a convention an agent can route around
+ *  - one memory tier every runtime reads and writes
+ *  - capabilities and spend visible per agent
  */
 import { Picture } from 'astro:assets'
-import Icon from '../components/Icon.astro'
 import sharedMemory from '../assets/screenshots/shared-memory.png'
+import capabilities from '../assets/screenshots/capabilities-panel.png'
+import agentDetail from '../assets/screenshots/agent-detail.png'
+import ghostGraph from '../assets/screenshots/ghost-graph.png'
 
-const points = [
+const panels = [
   {
-    icon: 'columns',
-    title: 'One source of truth',
-    body: 'Tasks survive restarts. Two agents can never claim the same one — the claim is a single conditional write.',
+    src: sharedMemory,
+    title: 'One memory, shared',
+    body: 'Facts and procedures every runtime on the team can read and write, instead of four private context windows.',
+    alt: 'The shared memory panel, listing facts and versioned procedures.',
   },
   {
-    icon: 'shield',
-    title: 'Done has to be earned',
-    body: 'A task carrying a failed verdict cannot move to done, from any caller. Only an audited human override gets past it.',
+    src: capabilities,
+    title: 'Every capability, in one place',
+    body: 'Skills and connectors across all five runtimes, in one inventory you can actually audit.',
+    alt: 'The capabilities panel, listing skills and connectors across runtimes.',
   },
   {
-    icon: 'users',
-    title: 'You are on the board too',
-    body: 'Create tasks, edit them, drag them between columns, and override the gate yourself when you decide to.',
+    src: agentDetail,
+    title: 'Agents you can open up',
+    body: 'Model, prompt, tools, budget and history for each teammate, editable in place.',
+    alt: 'An agent detail view with its model, prompt, tools and budget.',
+  },
+  {
+    src: ghostGraph,
+    title: 'See the whole team at once',
+    body: 'Who delegated what to whom, live, across every team you are running.',
+    alt: 'The team graph, showing a leader delegating to specialist agents.',
   },
 ]
 ---
 
-<section id="board" class="section rule">
+<section id="board" class="section band">
   <div class="container">
-    <div class="grid items-center gap-12 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-16">
-      <div>
-        <span class="eyebrow">The board</span>
-        <h2 class="d2 mt-4">A durable board, with a live chat running alongside it.</h2>
-        <p class="lead mt-4">
-          The board is where decisions land. The chat is the narration.
-        </p>
+    <div class="section-head section-head--center">
+      <span class="eyebrow">The board</span>
+      <h2 class="d2 mt-4">A durable board, with the chat running alongside it.</h2>
+      <p class="lead">
+        The board is where decisions land and the chat is the narration. Tasks survive restarts,
+        two agents can never claim the same one, and a task carrying a failed verdict cannot move
+        to done — from any caller.
+      </p>
+    </div>
 
-        <ul class="mt-8 grid gap-6">
-          {
-            points.map((p) => (
-              <li class="flex gap-3.5">
-                <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Icon name={p.icon} size={16} />
-                </span>
-                <div>
-                  <h3 class="d3">{p.title}</h3>
-                  <p class="mt-1 text-[15px] leading-relaxed text-secondary">{p.body}</p>
-                </div>
-              </li>
-            ))
-          }
-        </ul>
-      </div>
-
-      <figure class="shot">
-        <Picture
-          src={sharedMemory}
-          alt="The shared memory panel: facts and procedures every runtime on the team can read and write."
-          formats={['avif', 'webp']}
-          widths={[720, 1080, 1440, 1920]}
-          sizes="(min-width: 1024px) 640px, 94vw"
-          loading="lazy"
-        />
-      </figure>
+    <div class="grid gap-x-6 gap-y-10 sm:grid-cols-2">
+      {
+        panels.map((p) => (
+          <div class="shot-card">
+            <figure>
+              <Picture
+                src={p.src}
+                alt={p.alt}
+                formats={['avif', 'webp']}
+                widths={[560, 840, 1120]}
+                sizes="(min-width: 640px) 520px, 92vw"
+                loading="lazy"
+              />
+            </figure>
+            <h3 class="d3">{p.title}</h3>
+            <p>{p.body}</p>
+          </div>
+        ))
+      }
     </div>
   </div>
 </section>

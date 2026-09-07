@@ -1,0 +1,43 @@
+---
+/**
+ * The runtimes we interoperate with, as a quiet strip under the hero.
+ *
+ * This is Notion's "Trusted by top teams" slot and Railway's integration tile
+ * row, filled with the only thing we can put there honestly: a pre-traction
+ * open-source project has no customer logos, but interoperating with five
+ * runtimes IS the product thesis, and naming them is proof rather than
+ * decoration.
+ *
+ * Lettermarks, not reproduced third-party logos — the same convention
+ * RuntimeMark already follows.
+ */
+const runtimes = [
+  { name: 'Clawboo Native', mark: 'N', accent: '#e94560' },
+  { name: 'Claude Code', mark: 'C', accent: '#d97757' },
+  { name: 'Codex', mark: 'Cx', accent: '#10a37f' },
+  { name: 'Hermes', mark: 'H', accent: '#a78bfa' },
+  { name: 'OpenClaw', mark: 'O', accent: '#1f9ec4' },
+]
+---
+
+<div class="mt-14 sm:mt-16">
+  <p class="mb-5 text-center text-[12.5px] text-secondary">
+    One board. Five runtimes, as peers.
+  </p>
+  <ul class="tile-row">
+    {
+      runtimes.map((r) => (
+        <li class="tile">
+          <span
+            class="mark"
+            style={`background:color-mix(in srgb, ${r.accent} 16%, transparent);color:${r.accent}`}
+            aria-hidden="true"
+          >
+            {r.mark}
+          </span>
+          {r.name}
+        </li>
+      ))
+    }
+  </ul>
+</div>

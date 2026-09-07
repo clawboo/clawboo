@@ -1,8 +1,13 @@
 ---
 /**
- * Run it with confidence. Absorbs the whole Observability section (which was
- * contained in a single Features card), two surviving Features cards, and the
- * three Surface numbers that were real.
+ * Run it with confidence.
+ *
+ * These four are claims, not features with a screenshot, so this is the one
+ * section where the reference pattern is HubSpot's and Notion's text grid: a
+ * hairline-ruled column, a title, two lines. No icons — the tinted rounded
+ * square that used to head each card is the generic element the redesign is
+ * trying to get away from, and inventing a screenshot for a claim would be
+ * worse than having none.
  *
  * Corrections carried in from the code audit:
  *  - "approvals for sensitive steps" was MISLEADING in four places. Spawned
@@ -12,31 +17,25 @@
  *    DELEGATION-level gate: risky task text is matched and queued to the leader
  *    (riskyDelegation.ts:13), fail-closed. Stated with that scope.
  *  - The critic runs on delegated or large diffs, not every completion
- *    (criticTrigger.ts:23-30). Scope stated.
- *  - Catalogue counts are not quoted. PR #184 makes the catalogue a live fetch
- *    (catalogIndex.ts:59), so a hardcoded number would be contradicted by the
- *    product's own screen. The shape is quoted instead.
+ *    (criticTrigger.ts:23-30).
+ *  - Catalogue counts are not quoted: PR #184 makes the catalogue a live fetch
+ *    (catalogIndex.ts:59), so a hardcoded number could be contradicted by the
+ *    product's own screen.
  */
-import Icon from '../components/Icon.astro'
-
 const pillars = [
   {
-    icon: 'shield',
     title: 'The builder is not the judge',
-    body: 'Work is checked by its own verify command, and delegated or large diffs get an independent reviewer on a detached, push-less copy of the repo. No verify command configured means the task fails — never quietly passes.',
+    body: 'Work is checked by its own verify command, and delegated or large diffs get an independent reviewer on a detached, push-less copy of the repo. No verify command configured means the task fails, never quietly passes.',
   },
   {
-    icon: 'coins',
     title: 'Spend is tracked, and you set the ceiling',
     body: 'Budgets per agent, per team and per mission. Warn by default; a hard cap that auto-pauses is one setting away. Nothing is throttled behind your back.',
   },
   {
-    icon: 'gauge',
     title: 'Limits live below the model',
-    body: 'Nesting depth, fan-out, lifetime children and create rate are enforced in code, not requested in a prompt. An agent cannot talk its way past them. Risky delegations wait for the leader.',
+    body: 'Nesting depth, fan-out, lifetime children and create rate are enforced in code, not requested in a prompt. An agent cannot talk its way past them, and risky delegations wait for the leader.',
   },
   {
-    icon: 'lock',
     title: 'Local-first, with an address',
     body: 'Your board and history are SQLite at ~/.clawboo/clawboo.db. Your keys are in an AES-256-GCM vault at ~/.clawboo/secrets/. No account, no product analytics.',
   },
@@ -59,25 +58,22 @@ const stats = [
       </p>
     </div>
 
-    <div class="grid gap-4 sm:grid-cols-2">
+    <dl class="grid gap-x-12 gap-y-9 sm:grid-cols-2">
       {
         pillars.map((p) => (
-          <div class="card">
-            <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground/[0.05] text-foreground/70">
-              <Icon name={p.icon} size={17} />
-            </span>
-            <h3 class="d3 mt-3.5">{p.title}</h3>
-            <p class="mt-1.5 text-[14.5px] leading-relaxed text-secondary">{p.body}</p>
+          <div class="border-t border-border pt-5">
+            <dt class="d3">{p.title}</dt>
+            <dd class="mt-2 text-[14.5px] leading-relaxed text-secondary">{p.body}</dd>
           </div>
         ))
       }
-    </div>
+    </dl>
 
-    <dl class="mt-10 grid grid-cols-3 gap-4 border-t border-border pt-8">
+    <dl class="mt-14 grid grid-cols-3 gap-4">
       {
         stats.map((s) => (
           <div class="text-center">
-            <dt class="font-display text-[28px] font-medium leading-none tracking-tight text-foreground sm:text-[34px]">
+            <dt class="font-display text-[30px] font-medium leading-none tracking-tight text-foreground sm:text-[38px]">
               {s.n}
             </dt>
             <dd class="mt-2 text-[13px] leading-snug text-secondary">{s.label}</dd>

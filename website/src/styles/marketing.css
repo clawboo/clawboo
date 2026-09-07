@@ -195,3 +195,183 @@
   border-radius: 999px;
   background: var(--primary);
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Section-level patterns, taken from how Notion, Tines and Deta build
+   a landing page and rebuilt in our own palette.
+
+   The thing they all avoid: a card whose visual is an icon in a tinted
+   rounded square. Every one of them leads with a cropped piece of the
+   real product instead. That single swap is most of the difference
+   between a page that looks made and a page that looks generated.
+   ────────────────────────────────────────────────────────────────── */
+
+/* Tinted band. Alternating a section's ground gives the page a pulse;
+   six identical hairline-separated sections read flat. */
+.band {
+  background: var(--band);
+}
+:root {
+  --band: #f1f4f8;
+  --panel: #f4f6f9;
+}
+:root.dark {
+  --band: #0d131f;
+  --panel: #121a29;
+}
+
+/* Notion's "one line item" figure: a soft panel, copy on one side, the
+   product bleeding off the other edge so it reads as a window onto
+   something larger rather than a pasted-in rectangle. */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.panel-grid {
+  display: grid;
+  gap: 2rem;
+  align-items: center;
+  padding: 2rem;
+}
+@media (min-width: 900px) {
+  .panel-grid {
+    grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+    gap: 3rem;
+    padding: 3rem 0 3rem 3rem;
+  }
+  /* The bleed: the screenshot runs past the panel's right edge. */
+  .panel-media {
+    margin-right: -3rem;
+  }
+}
+.panel-media img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px 0 0 12px;
+  border: 1px solid var(--border);
+  border-right: 0;
+  box-shadow: var(--shadow-floating);
+}
+@media (max-width: 899px) {
+  .panel-media img {
+    border-radius: 12px;
+    border-right: 1px solid var(--border);
+  }
+}
+
+/* Tines' grid: the card IS a screenshot, and the words sit under it. */
+.shot-card figure {
+  margin: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  aspect-ratio: 16 / 10;
+}
+.shot-card figure img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+}
+.shot-card h3 {
+  margin-top: 1rem;
+}
+.shot-card p {
+  margin-top: 0.35rem;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--secondary);
+}
+
+/* Notion's "trusted by" strip, in the only form we can use honestly: the
+   runtimes we actually interoperate with. */
+.logo-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem 2.25rem;
+}
+.logo-strip li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--secondary);
+}
+.logo-strip .mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Dark surfaces, after Railway: on a near-black ground a drop shadow does
+   nothing, so a card is defined by a hairline border plus a one-pixel top
+   highlight that reads as light catching an edge. */
+:root.dark .card,
+:root.dark .panel,
+:root.dark .shot-card figure {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.4);
+}
+:root.dark .shot {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 24px 60px rgb(0 0 0 / 0.55);
+}
+
+/* Railway's integration row: small square tiles carrying a mark, sized so a
+   lettermark and a logo sit on the same optical grid. */
+.tile-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 0.75rem 0 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--secondary);
+  transition:
+    border-color 160ms var(--motion-easing-standard),
+    color 160ms var(--motion-easing-standard);
+}
+.tile:hover {
+  color: var(--foreground);
+  border-color: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+.tile .mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}

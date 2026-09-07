@@ -59,7 +59,7 @@ const runtimes = [
 ]
 ---
 
-<section id="runtimes" class="section rule">
+<section id="runtimes" class="section">
   <div class="container">
     <div class="section-head section-head--center">
       <span class="eyebrow">Every runtime, one team</span>
@@ -95,20 +95,26 @@ const runtimes = [
       </div>
     </div>
 
-    <figure class="mt-12">
-      <div class="shot">
-        <Picture
-          src={runtimesPanel}
-          alt="The Runtimes panel: Clawboo Native connected, Claude Code and Codex ready to connect, Hermes connected, and an OpenClaw Gateway."
-          formats={['avif', 'webp']}
-          widths={[720, 1080, 1440, 1920]}
-          sizes="(min-width: 1280px) 1080px, 94vw"
-          loading="lazy"
-        />
+    <div class="panel mt-12">
+      <div class="panel-grid">
+        <div>
+          <h3 class="d3">Connect one from the dashboard</h3>
+          <p class="mt-2 text-[15px] leading-relaxed text-secondary">
+            Native is already connected and needs nothing installed. The others take a key or a
+            single sign-in, and the panel tells you which is missing.
+          </p>
+        </div>
+        <div class="panel-media">
+          <Picture
+            src={runtimesPanel}
+            alt="The Runtimes panel: Clawboo Native connected, Claude Code and Codex ready to connect, Hermes connected, and an OpenClaw Gateway."
+            formats={['avif', 'webp']}
+            widths={[720, 1080, 1440, 1920]}
+            sizes="(min-width: 900px) 680px, 94vw"
+            loading="lazy"
+          />
+        </div>
       </div>
-      <figcaption class="shot-caption">
-        Connect a runtime from the dashboard. Native needs nothing installed.
-      </figcaption>
-    </figure>
+    </div>
   </div>
 </section>

@@ -17,6 +17,7 @@ import InstallCommand from '../components/InstallCommand.astro'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
 import SkyBand from '../components/SkyBand.astro'
+import RuntimeStrip from '../components/RuntimeStrip.astro'
 import { links } from '../lib/site'
 import teamSpace from '../assets/screenshots/team-space.png'
 ---
@@ -54,10 +55,12 @@ import teamSpace from '../assets/screenshots/team-space.png'
       </div>
     </div>
 
+    <RuntimeStrip />
+
     <!-- The board, at full content width and actually readable. The source is
          2720x1720, so it can carry this size; it was previously rendered at
          300px inside a drawn browser window, 900px down the page. -->
-    <figure class="shot mt-14 sm:mt-16">
+    <figure class="shot mt-12 sm:mt-14">
       <Picture
         src={teamSpace}
         alt="The Clawboo board: a team of agents with tasks moving across todo, in progress and done columns, with the group chat beside it."
