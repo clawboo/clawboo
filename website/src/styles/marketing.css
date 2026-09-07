@@ -141,18 +141,18 @@
 /* Sky band. A light, illustrated gradient rather than a photograph, pale where
    the headline sits so nothing needs a text-shadow to survive it. */
 :root {
-  --sky-1: #b7dcfb;
-  --sky-2: #d9ecfd;
-  --sky-3: #eef7ff;
-  --sky-cloud: #ffffff;
-  --sky-cloud-opacity: 0.9;
+  /* The crown has to carry real saturation or white clouds at 23% opacity have
+     nothing to sit on: that, not the cloud layers, was what made the band look
+     bland. Sampled toward the original day gradient (#2f74c9 -> #e7f2fc) but
+     reaching pale sooner, so the headline still needs no text-shadow. */
+  --sky-1: #6fade6;
+  --sky-2: #a8d0f2;
+  --sky-3: #dcecfb;
 }
 :root.dark {
-  --sky-1: #12233f;
-  --sky-2: #0d1728;
+  --sky-1: #16294a;
+  --sky-2: #101c33;
   --sky-3: #0b1120;
-  --sky-cloud: #9dc4f0;
-  --sky-cloud-opacity: 0.16;
 }
 
 /* A softer wash for pages that want the tint without the weather. */

@@ -21,7 +21,7 @@ import { links } from '../lib/site'
 import teamSpace from '../assets/screenshots/team-space.png'
 ---
 
-<section id="hero" class="relative overflow-hidden">
+<section id="hero" class="relative overflow-hidden on-sky">
   <SkyBand />
 
   <div class="container container-wide relative z-10 pb-16 pt-28 sm:pt-32">
@@ -68,3 +68,19 @@ import teamSpace from '../assets/screenshots/team-space.png'
     </figure>
   </div>
 </section>
+
+<style>
+  /* The band carries real colour behind the eyebrow and the lead, so those two
+     need darker ink to clear 4.5:1 against it. Measured against the painted
+     pixels, not against the token: --secondary was 2.98:1 on the sky.
+     The original solved the same problem with a text-shadow halo behind every
+     string; contrast from colour costs nothing and leaves the type clean. */
+  .on-sky :global(.eyebrow),
+  .on-sky :global(.lead) {
+    color: #334155;
+  }
+  :global(:root.dark) .on-sky :global(.eyebrow),
+  :global(:root.dark) .on-sky :global(.lead) {
+    color: #c7d3e3;
+  }
+</style>
