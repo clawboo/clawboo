@@ -186,6 +186,10 @@ When the server-side connection comes up, `OpenClawAgentSource` registers Clawbo
 Two scoping facts follow from the Gateway config being process-wide:
 
 - **Memory is registered at GLOBAL scope for OpenClaw.** The other four runtimes get a _per-run team scope_ baked into their attach URL; a single static Gateway-config URL can't carry a per-run team binding, so an OpenClaw agent's memory facts are team-unscoped. This is an organizational boundary for the local-first single-user model, not a security one.
+
+  Global scope here is **enforced, not assumed**. Because the Gateway's URLs carry no signed scope, an OpenClaw agent's MCP session is treated as an unidentified HTTP caller: the `scopeTeamId` / `scopeAgentId` arguments it passes are ignored, saves land on the global tier and reads see the global tier only. Without that, "global" would have meant "whatever the model asked for", and any agent could have written a fact tagged as another team and read every team's facts back.
+
+- **Tasks refuses the tools that name an agent.** For the same reason, an OpenClaw session is not served `claim_task` or `assign_task` (both require an `assigneeAgentId` the caller cannot prove), and `add_comment` drops a caller-supplied `authorAgentId` and `authorType`. The anonymous board writes are unaffected, so an OpenClaw agent can still create, re-status, block, unblock and link tasks. Server-orchestrated board runs are unaffected either way: Clawboo claims those directly, without going through the MCP tool.
 - **TeamChat is deliberately NOT registered for OpenClaw.** A process-wide static URL can't carry a per-run author binding, and registering the `team_chat` tool unbound would let an OpenClaw agent post as any author (identity from tool args), breaking the anti-spoof property that the [peer-chat](/concepts/peer-chat) room depends on. Instead, an OpenClaw agent's room participation is fully server-mediated through the team exchange, which posts the agent's drained turn under the authoritative bound identity.
 
 ## Verify it worked

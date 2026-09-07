@@ -193,7 +193,7 @@ Do not work around the cycle refusal by re-linking in the other direction. A cyc
 - **Save** tags the fact with the bound team only (agentId dropped = team-shared, so any runtime's agent on the team recalls it).
 - **Search / browse** filter by the full bound scope (team + agent inclusive + global), never another team's private facts.
 
-When unset (the raw stdio bin / unbound default), the model's scope args are used. Over HTTP the binding rides query params on the Memory attach URL (`scopeTeamId` / `scopeAgentId` / `scopeTenantId`); see [the attach-URL scope](#scope-and-identity-binding).
+When unset, what happens depends on how the caller reached the server, because the two absences mean different things. Over the raw **stdio bin** the operator is the caller, so the model's scope args are used as before. Over **HTTP** an absent binding means an attach URL that carried no signed scope, so the caller is unidentified: its scope args are ignored, saves go to the global tier and reads see the global tier only. The binding itself rides query params on the Memory attach URL (`scopeTeamId` / `scopeAgentId` / `scopeTenantId`); see [the attach-URL scope](#scope-and-identity-binding).
 </Info>
 
 ### `memory_save`
@@ -350,7 +350,7 @@ Over HTTP, the authoritative bindings ride query params on the attach URL the se
 - **Tasks**: `scopeTeamId` / `scopeAgentId` bind the run's board reads to its team (`boundScope`); `scopeAgentId` also carries the mid-run inbox piggyback.
 - **Tools**: no scope params; the URL stays bare.
 
-When these params are absent (an external attach, or the stdio bins), the server is unbound and the model supplies scope/identity in args.
+When these params are absent, the server is unbound, and what that means splits by transport. For the **stdio bins** the model supplies scope/identity in args, as before, because the operator is the caller. For an **HTTP** attach the caller is unidentified instead, and identity taken from tool args is refused: Memory ignores `scopeTeamId`/`scopeAgentId` and works on the global tier only, Tasks does not serve `claim_task` or `assign_task`, and `add_comment` drops both `authorAgentId` and `authorType`. The anonymous board writes (create, release, status, block, unblock, link) are unaffected, because they name no agent. Every OpenClaw agent currently attaches this way.
 
 ## See also
 
