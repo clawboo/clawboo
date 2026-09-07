@@ -17,15 +17,14 @@
  * rather than the viewport so the dashboard breaks across its lower edge.
  *
  * BooSquad sits between the CTAs and the dashboard, where a row of runtime tile
- * buttons used to be. Those tiles were a third button style stacked directly
- * under two others, and the marks now dock onto the dashboard itself.
+ * buttons used to be. The runtime marks moved out of this section entirely and
+ * now head the Runtimes section, in place of its eyebrow text.
  */
 import { Picture } from 'astro:assets'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
 import SignatureSky from '../components/atmosphere/SignatureSky.astro'
 import { BooSquad } from '../components/atmosphere/BooSquad.tsx'
-import RuntimeDock from '../components/RuntimeDock.astro'
 import { links } from '../lib/site'
 import teamSpace from '../assets/screenshots/team-space.png'
 ---
@@ -67,22 +66,17 @@ import teamSpace from '../assets/screenshots/team-space.png'
     <!-- The dashboard, at full content width and actually readable. The source
          is 2720x1720, so it carries this size; it used to render at 300px
          inside a drawn browser window, 900px down the page. -->
-    <!-- The dock is a SIBLING of .shot, not a child: .shot has overflow:hidden
-         to clip the screenshot's corners, which was slicing the dock in half. -->
-    <div class="relative mt-10 sm:mt-12">
-      <RuntimeDock />
-      <figure class="shot">
-        <Picture
-          src={teamSpace}
-          alt="The Clawboo board: a marketing squad of agents with tasks moving across todo, in progress and done, and the group chat alongside."
-          formats={['avif', 'webp']}
-          widths={[720, 1080, 1440, 1920, 2400]}
-          sizes="(min-width: 1280px) 1200px, 94vw"
-          loading="eager"
-          fetchpriority="high"
-        />
-      </figure>
-    </div>
+    <figure class="shot mt-10 sm:mt-12">
+      <Picture
+        src={teamSpace}
+        alt="The Clawboo board: a marketing squad of agents with tasks moving across todo, in progress and done, and the group chat alongside."
+        formats={['avif', 'webp']}
+        widths={[720, 1080, 1440, 1920, 2400]}
+        sizes="(min-width: 1280px) 1200px, 94vw"
+        loading="eager"
+        fetchpriority="high"
+      />
+    </figure>
   </div>
 </section>
 

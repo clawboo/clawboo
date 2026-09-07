@@ -13,6 +13,7 @@
  *    terminal-output scraping" is true but unreadable. Said in plain words.
  */
 import RuntimeMark from '../components/RuntimeMark.astro'
+import RuntimeMarks from '../components/RuntimeMarks.astro'
 import { Picture } from 'astro:assets'
 import { links } from '../lib/site'
 import Icon from '../components/Icon.astro'
@@ -48,8 +49,8 @@ const runtimes = [
 <section id="runtimes" class="section">
   <div class="container">
     <div class="section-head section-head--center">
-      <span class="eyebrow">Every runtime, one team</span>
-      <h2 class="d2 mt-4">Bring the agents you already use. They finally talk to each other.</h2>
+      <RuntimeMarks class="mb-5" />
+      <h2 class="d2">Bring the agents you already use. They finally talk to each other.</h2>
       <p class="lead">
         Each one is strong on its own and trapped in its own terminal, with its own memory and no
         record of what the others did. Clawboo gives all five one board, one chat and one memory,
