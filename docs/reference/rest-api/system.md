@@ -51,7 +51,8 @@ OpenClaw detection is async, cached per resolved binary path, and bounded by a 6
   node: {
     version: string // process.version, e.g. "v22.3.0"
     major: number // parsed major version
-    sufficient: boolean // major >= 22
+    sufficient: boolean // whether this Node satisfies OpenClaw's engines, NOT a bare major check
+    required: string // the range OpenClaw requires, e.g. ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
     path: string // process.execPath
   }
   openclaw: {

@@ -143,6 +143,50 @@ describe('PATCH /api/openclaw/config: agent roster shape', () => {
     expect(entries['brand-new-boo']).toEqual({})
   })
 
+  it('refuses a prototype-polluting agentId and leaves Object.prototype alone', async () => {
+    // `entries['__proto__']` does not miss, it returns Object.prototype, so the
+    // later `entry['model'] = ...` set a `model` property on EVERY plain object in
+    // the process. Reproduced before the guard: `({}).model === 'pwned'`.
+    writeConfig({ ownership: 'explicit', entries: { main: {} } })
+    const { res, statusCode } = mockRes()
+    await openclawConfigPATCH(
+      { body: { agentModel: { agentId: '__proto__', model: 'pwned' } } } as unknown as Request,
+      res,
+    )
+
+    expect(statusCode()).toBe(400)
+    expect(({} as Record<string, unknown>)['model']).toBeUndefined()
+    // Rejected before the write, so the file is untouched.
+    expect(Object.keys((readConfig()['agents'] as Record<string, never>)['entries'])).toEqual([
+      'main',
+    ])
+  })
+
+  it('refuses constructor and prototype too', async () => {
+    for (const id of ['constructor', 'prototype']) {
+      writeConfig({ ownership: 'explicit', entries: { main: {} } })
+      const { res, statusCode } = mockRes()
+      await openclawConfigPATCH(
+        { body: { agentModel: { agentId: id, model: 'x' } } } as unknown as Request,
+        res,
+      )
+      expect(statusCode()).toBe(400)
+    }
+  })
+
+  it('drops a prototype key while folding a legacy list, without polluting', async () => {
+    // The same footgun reached through the config file rather than the request.
+    writeConfig({ list: [{ id: 'main' }, { id: '__proto__', model: 'pwned' }, { id: 'boo' }] })
+    await patchModel('boo', 'new/model')
+
+    const entries = (readConfig()['agents'] as Record<string, never>)['entries'] as Record<
+      string,
+      never
+    >
+    expect(({} as Record<string, unknown>)['model']).toBeUndefined()
+    expect(Object.keys(entries).sort()).toEqual(['boo', 'main'])
+  })
+
   it('sets ownership=explicit when the write makes the roster multi-agent', async () => {
     // A multi-agent roster with no owner is rejected:
     //   multi-agent rosters require agents.ownership="explicit" ...

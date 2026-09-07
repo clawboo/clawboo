@@ -145,13 +145,27 @@ export const OPENCLAW_NODE_REQUIREMENT = '>=22.22.3 <23 || >=24.15.0 <25 || >=25
 
 /**
  * Whether a Node version string (`v22.23.2` or `22.23.2`) satisfies OpenClaw.
+ *
  * Unparseable input is reported as UNSUPPORTED: a version we cannot read is not
  * evidence that it works, and claiming otherwise sends the user into an install
  * that fails with a worse message than this one.
+ *
+ * A PRERELEASE is likewise unsupported, which is stricter than a numeric compare
+ * would be and is the point. This predicate exists to answer "will
+ * `npm install -g` accept this Node", and npm resolves engines through
+ * node-semver, which excludes prereleases from any range whose comparators carry
+ * none: `24.15.0-nightly` does NOT satisfy `>=24.15.0 <25`. Accepting it here
+ * would put us back where we started, telling the user the machine is ready and
+ * letting npm be the one to disagree.
  */
 export function isNodeVersionSupportedByOpenclaw(version: string | null | undefined): boolean {
-  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec((version ?? '').trim())
+  const raw = (version ?? '').trim()
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(.*)$/.exec(raw)
   if (!m) return false
+  // Anything trailing the patch number that is not pure build metadata is a
+  // prerelease (`-nightly`, `-rc.1`, `-pre`).
+  const suffix = m[4] ?? ''
+  if (suffix.startsWith('-')) return false
   const got: [number, number, number] = [Number(m[1]), Number(m[2]), Number(m[3])]
   const atLeast = (a: [number, number, number], b: [number, number, number]): boolean =>
     a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] >= b[2]

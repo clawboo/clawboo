@@ -235,6 +235,18 @@ function parseEnvFlags(content: string | null): Record<string, boolean> {
 }
 
 /**
+ * Keys that must never be used to index a plain object.
+ *
+ * `entries['__proto__']` does not miss and return undefined, it returns
+ * `Object.prototype`. Writing a field onto that value sets it on the prototype
+ * every plain object in the process inherits from, so one request carrying
+ * `agentId: "__proto__"` would give every `{}` in the server a `model`
+ * property. `constructor` and `prototype` are the same class of reachable
+ * footgun. No OpenClaw agent id is ever one of these.
+ */
+const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+/**
  * Return the agent roster as OpenClaw 2026.9's keyed `agents.entries` map,
  * folding a legacy `agents.list` array into it and dropping the array.
  *
@@ -263,6 +275,7 @@ function migrateAgentRoster(
       const row = item as Record<string, unknown>
       const id = row['id']
       if (typeof id !== 'string' || !id) continue
+      if (UNSAFE_OBJECT_KEYS.has(id)) continue
       // `id` becomes the key, so it is not carried into the value. Anything
       // already under `entries` wins: it is the migrated, current shape.
       const { id: _id, ...rest } = row
@@ -1198,6 +1211,13 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
       const am = agentModelField as Record<string, unknown>
       const agentId = am['agentId']
       const agentModel = am['model']
+
+      if (typeof agentId === 'string' && UNSAFE_OBJECT_KEYS.has(agentId)) {
+        // Rejected BEFORE any indexing. The file is written at the end of this
+        // handler, so returning here persists nothing.
+        res.status(400).json({ error: 'invalid agentId' })
+        return
+      }
 
       if (typeof agentId === 'string' && agentId) {
         const entries = migrateAgentRoster(agents)

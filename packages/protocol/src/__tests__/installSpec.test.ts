@@ -210,8 +210,17 @@ describe('isNodeVersionSupportedByOpenclaw', () => {
     expect(isNodeVersionSupportedByOpenclaw('v22.23.2')).toBe(true)
   })
 
-  it('tolerates a prerelease suffix', () => {
-    expect(isNodeVersionSupportedByOpenclaw('v24.15.0-nightly')).toBe(true)
+  it('rejects a prerelease, because npm does', () => {
+    // node-semver excludes prereleases from a range whose comparators carry none,
+    // so `>=24.15.0 <25` does NOT admit `24.15.0-nightly`. A numeric compare would
+    // have said yes and handed the user back the original bug: told it was fine,
+    // then refused by `npm install -g`.
+    expect(isNodeVersionSupportedByOpenclaw('v24.15.0-nightly')).toBe(false)
+    expect(isNodeVersionSupportedByOpenclaw('22.23.0-rc.1')).toBe(false)
+  })
+
+  it('still accepts ordinary release versions', () => {
+    expect(isNodeVersionSupportedByOpenclaw('v22.23.2')).toBe(true)
   })
 
   it('treats an unreadable version as UNSUPPORTED, not as fine', () => {
