@@ -14,9 +14,11 @@ interface Props {
   id: RuntimeMarkId
   size?: number
   tile?: number
+  /** Drop the tinted tile and render the mark alone, at brand colour. */
+  bare?: boolean
   class?: string
 }
-const { id, size = 18, tile = 36, class: cls = '' } = Astro.props
+const { id, size = 18, tile = 36, bare = false, class: cls = '' } = Astro.props
 const { color, glyph } = RUNTIME_MARKS[id]
 const mono = color === 'currentColor'
 
@@ -35,8 +37,12 @@ const tileStyle = neutralTile
 ---
 
 <span
-  class={`rt-tile ${cls}`}
-  style={`${tileStyle};width:${tile}px;height:${tile}px`}
+  class={`rt-tile ${bare ? 'rt-bare' : ''} ${cls}`}
+  style={
+    bare
+      ? `color:${mono ? 'var(--foreground)' : color}`
+      : `${tileStyle};width:${tile}px;height:${tile}px`
+  }
   aria-hidden="true"
 >
   <svg
@@ -69,5 +75,10 @@ const tileStyle = neutralTile
     justify-content: center;
     flex: none;
     border-radius: 9px;
+  }
+  /* No tile, no chrome: just the mark. */
+  .rt-bare {
+    border-radius: 0;
+    background: none;
   }
 </style>
