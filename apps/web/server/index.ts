@@ -30,7 +30,9 @@ import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycle
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { getTeamOrchestrator } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
+import { eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
+import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
 import {
   resolveApiPort,
   writeApiPortFile,
@@ -540,6 +542,27 @@ async function main() {
     // shared Memory/Tasks MCP servers in the Gateway config after connect.
     .start({ log, mcpBaseUrl: `http://127.0.0.1:${port}` })
     .catch((err: unknown) => log.error({ err }, 'Agent registry: startup failed (non-fatal)'))
+
+  // Log what OpenClaw agents do when nobody asked them to: their own cron, an
+  // incoming WhatsApp or Telegram message, someone at OpenClaw's own terminal.
+  // Those runs are addressed to no clawboo connection, so they were absent from
+  // the activity feed rather than merely thin. Started after the registry because
+  // it hangs off that source's connection, and idempotent on reconnect.
+  safeStart('openclaw-session-activity', () => {
+    const db = getDb()
+    startSessionActivityWatcher(getRegistry().source, (sourceAgentId) => {
+      // OpenClaw's agent id maps to clawboo's ROW id, which is what the feed and
+      // the panel are keyed on. They are equal on every row today, so resolving
+      // properly costs nothing now and is the difference between a correct feed
+      // and a misattributed one the first time an agent is re-imported.
+      const row = db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.sourceAgentId, sourceAgentId))
+        .get()
+      return row?.id ?? null
+    })
+  })
 
   // ── Listen ────────────────────────────────────────────────────────────────
 

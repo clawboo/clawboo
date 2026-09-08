@@ -6,7 +6,12 @@
 // it stays decoupled from the app's Zustand-shaped `EventIntent`.
 
 import type { EventFrame } from '@clawboo/gateway-client'
-import { isReasoningStream, parseAgentPayload, parseChatPayload } from '@clawboo/events'
+import {
+  isReasoningStream,
+  parseAgentPayload,
+  parseChatPayload,
+  parseSessionMessagePayload,
+} from '@clawboo/events'
 import { extractText, extractThinking, parseMessage } from '@clawboo/protocol'
 import type { RuntimeEvent, RuntimeEventBase } from '@clawboo/executor'
 
@@ -137,6 +142,56 @@ export function mapFrameToRuntimeEvents(
         fatal: true,
       })
       events.push({ ...base(), kind: 'done', reason: 'error', summary: msg })
+    }
+    return events
+  }
+
+  // ── Committed transcript rows ─────────────────────────────────────────
+  //
+  // THE ONLY CHANNEL THAT CARRIES WORK NOBODY ASKED FOR. The `chat` and `agent`
+  // streams above are addressed to the connection that STARTED a run, so a Boo
+  // woken by its own cron, by an incoming WhatsApp or Telegram message, or by
+  // someone at OpenClaw's own terminal reaches nobody on either. Those runs were
+  // invisible in clawboo entirely: two real CLI runs on this machine produced not
+  // one row in the activity feed.
+  //
+  // `session.message` is driven by the TRANSCRIPT COMMIT rather than by who is
+  // watching, so it fires for every trigger source. It carries the row in full,
+  // and `parseMessage` reads it unchanged — the same parser the `chat` branch
+  // uses, because it is the same message shape once committed.
+  //
+  // Deliberately NO text-delta and NO `done`. A committed row is not a stream, so
+  // emitting deltas from it would double every sentence the chat branch already
+  // streamed for runs clawboo did start, and a transcript row is not a run
+  // terminal. This branch contributes tool activity and nothing else; the dedup
+  // that keeps clawboo's own runs from appearing twice lives in the watcher,
+  // which is the only place that knows which runs it started.
+  if (frame.event === 'session.message') {
+    const p = parseSessionMessagePayload(frame.payload)
+    if (!p) return events
+    const parsed = parseMessage(p.message)
+    for (const tc of parsed.toolCalls) {
+      events.push({
+        ...base(),
+        kind: 'tool-call',
+        // A committed row may carry no runId, so the synthetic fallback keys on
+        // the session instead: two different sessions must never collide into one
+        // tool call, which is what a bare tool name would do.
+        toolCallId: tc.id ?? `${p.runId ?? p.sessionKey}:${tc.name}`,
+        name: tc.name,
+        input: tc.arguments,
+        partial: false,
+      })
+    }
+    for (const tr of parsed.toolResults) {
+      events.push({
+        ...base(),
+        kind: 'tool-result',
+        toolCallId: tr.toolCallId ?? '',
+        name: tr.name,
+        output: capToolPayload(tr.output),
+        isError: tr.isError ?? false,
+      })
     }
     return events
   }

@@ -93,6 +93,7 @@ import {
   withTaskSpan,
   type SpanCtx,
 } from './obs'
+import { markToolCallLogged } from './agentSource/loggedToolCalls'
 import type { RuntimeRunContext } from './runtimes'
 import { estimateRunCostUsdFromUsage } from './runtimes/estimateCost'
 import { runtimeIdentityHomePath } from './runtimes/identityHome'
@@ -955,6 +956,11 @@ async function runTaskInner(
       } else if (ev.kind === 'tool-call') {
         // Emit only the settled call (not each streaming-input delta).
         if (!ev.partial) {
+          // CLAIM IT before logging, so the session-activity watcher does not log
+          // it again. That watcher reads committed transcript rows, which include
+          // the rows of runs clawboo started, so both writers see this call. The
+          // runner gets there first because it is on the live stream.
+          markToolCallLogged(ev.toolCallId)
           emitEvent(db, {
             kind: 'tool_call',
             traceId: span.traceId,
@@ -977,6 +983,9 @@ async function runTaskInner(
           }
         }
       } else if (ev.kind === 'tool-result') {
+        // Claimed under a distinct key from the call: a tool's call and its
+        // result are two rows, and one ledger entry cannot stand for both.
+        markToolCallLogged(`${ev.toolCallId}:result`)
         emitEvent(db, {
           kind: 'tool_result',
           traceId: span.traceId,

@@ -180,6 +180,7 @@ export class OpenClawAgentSource implements AgentSource {
   private readonly listeners = new Set<(e: AgentEvent) => void>()
   // Reconnect-stable broadcast fan-out: the client (and its onEvent
   // subscription) is torn down per connection; this listener set is not.
+  private readonly connectionListeners = new Set<(c: HealthResult['connection']) => void>()
   private readonly broadcastListeners = new Set<
     (frame: { event: string; payload?: unknown }) => void
   >()
@@ -228,6 +229,24 @@ export class OpenClawAgentSource implements AgentSource {
   onGatewayBroadcast(cb: (frame: { event: string; payload?: unknown }) => void): () => void {
     this.broadcastListeners.add(cb)
     return () => this.broadcastListeners.delete(cb)
+  }
+
+  /**
+   * Fires on every connection-state transition.
+   *
+   * EXISTS FOR RE-SUBSCRIBING. A Gateway subscription is keyed on the connection
+   * that asked for it, so it dies silently with the socket and no error is raised
+   * on either side — a watcher that subscribes once looks correct on day one and
+   * is deaf by day three. `onGatewayBroadcast` above deliberately outlives any
+   * single client, so it cannot be the hook that notices.
+   *
+   * A callback rather than the existing `emit({kind:'connection'})`, which feeds
+   * an async-iterable stream meant for the UI: a re-subscribe has to happen the
+   * moment the socket is up, not whenever a consumer next pulls.
+   */
+  onConnectionChange(cb: (c: HealthResult['connection']) => void): () => void {
+    this.connectionListeners.add(cb)
+    return () => this.connectionListeners.delete(cb)
   }
 
   /**
@@ -479,6 +498,13 @@ export class OpenClawAgentSource implements AgentSource {
     if (this.connection === c) return
     this.connection = c
     this.emit({ kind: 'connection', at: Date.now(), connection: c })
+    for (const fn of this.connectionListeners) {
+      try {
+        fn(c)
+      } catch {
+        // A listener must never be able to break the connection state machine.
+      }
+    }
   }
 
   private async openConnection(): Promise<void> {

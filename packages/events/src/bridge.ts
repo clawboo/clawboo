@@ -1,7 +1,12 @@
 import type { EventFrame } from '@clawboo/gateway-client'
 import { extractText, extractThinking, extractToolLines } from '@clawboo/protocol'
 
-import type { AgentEventPayload, ChatEventPayload, ClassifiedEvent } from './types'
+import type {
+  AgentEventPayload,
+  ChatEventPayload,
+  ClassifiedEvent,
+  SessionMessagePayload,
+} from './types'
 
 // ── Session key → agent ID ─────────────────────────────────────────────────
 
@@ -87,6 +92,40 @@ export function parseChatPayload(payload: unknown): ChatEventPayload | null {
     message: p['message'],
     errorMessage: typeof p['errorMessage'] === 'string' ? p['errorMessage'] : undefined,
     model: typeof p['model'] === 'string' ? p['model'] : undefined,
+  }
+}
+
+// ── parseSessionMessagePayload ─────────────────────────────────────────────
+
+/**
+ * A committed transcript row off `session.message`.
+ *
+ * A SIBLING OF `parseChatPayload`, NOT A WIDENING OF IT. That parser requires a
+ * `state` of delta/final/aborted/error and returns null without one, and a
+ * `session.message` payload has no state because it is not a stream: the row has
+ * already landed. Loosening `parseChatPayload` to accept both would let a
+ * committed row masquerade as a streaming delta everywhere that parser is used.
+ *
+ * `runId` is optional here, unlike on a chat frame. A row committed by a run
+ * clawboo never saw still carries the work; refusing it for want of a run id
+ * would discard exactly the self-started activity this channel exists to surface.
+ */
+export function parseSessionMessagePayload(payload: unknown): SessionMessagePayload | null {
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as Record<string, unknown>
+  const sessionKey = typeof p['sessionKey'] === 'string' ? p['sessionKey'] : ''
+  if (!sessionKey || p['message'] === undefined) return null
+
+  return {
+    sessionKey,
+    message: p['message'],
+    ...(typeof p['agentId'] === 'string' ? { agentId: p['agentId'] } : {}),
+    ...(typeof p['messageId'] === 'string' ? { messageId: p['messageId'] } : {}),
+    ...(typeof p['messageSeq'] === 'number' ? { messageSeq: p['messageSeq'] } : {}),
+    ...(typeof p['runId'] === 'string' ? { runId: p['runId'] } : {}),
+    ...(p['usage'] && typeof p['usage'] === 'object'
+      ? { usage: p['usage'] as Record<string, unknown> }
+      : {}),
   }
 }
 
