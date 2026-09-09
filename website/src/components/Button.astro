@@ -72,12 +72,20 @@ const iconSize = size === 'sm' ? 15 : 17
 
 <style>
   .cb-btn-primary {
-    background-color: var(--primary);
+    /* --brand-fill, not --primary: white on the dark theme's #e94560 is
+       3.83:1. See the accessibility block in marketing.css. */
+    background-color: var(--brand-fill);
     box-shadow: var(--shadow-raised);
+  }
+  /* This element sets its own box-shadow, which replaces the global focus
+     halo instead of adding to it; without this the ring is red only,
+     and red on the hero sky is 1.03:1. */
+  .cb-btn-primary:focus-visible {
+    box-shadow: var(--focus-halo), var(--shadow-raised);
   }
   .cb-btn-primary:hover {
     transform: translateY(-1px);
-    background-color: color-mix(in srgb, var(--primary) 88%, #000);
+    background-color: color-mix(in srgb, var(--brand-fill) 88%, #000);
     box-shadow: var(--shadow-floating);
   }
 </style>

@@ -55,7 +55,10 @@ import { nav, links, site } from '../lib/site'
 <!-- Mobile sheet -->
 <div id="cb-sheet" class="fixed inset-0 z-[60] hidden md:hidden" role="dialog" aria-modal="true">
   <div id="cb-sheet-scrim" class="absolute inset-0" style="background:var(--overlay-scrim)"></div>
-  <div class="surface-overlay-tier absolute inset-x-3 top-3 rounded-2xl p-5">
+  <div
+    id="cb-sheet-panel"
+    class="surface-overlay-tier absolute inset-x-3 top-3 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain rounded-2xl p-5"
+  >
     <div class="flex items-center justify-between">
       <span class="font-display text-[17px] font-extrabold text-foreground">clawboo</span>
       <button id="cb-menu-close" type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground/70 hover:bg-foreground/[0.06]" aria-label="Close menu">
@@ -92,23 +95,84 @@ import { nav, links, site } from '../lib/site'
     window.addEventListener('scroll', onScroll, { passive: true })
 
     var sheet = document.getElementById('cb-sheet')
+    var panel = document.getElementById('cb-sheet-panel')
     var open = document.getElementById('cb-menu-open')
     var close = document.getElementById('cb-menu-close')
     var scrim = document.getElementById('cb-sheet-scrim')
-    function show() {
-      if (sheet) sheet.classList.remove('hidden')
-      document.body.style.overflow = 'hidden'
+
+    // The sheet declares aria-modal, so it owes the two things that implies:
+    // focus goes in and cannot walk out, and it comes back to the trigger on
+    // close. Without them Tab walked straight out of the sheet into the
+    // header and hero underneath it, which are visually covered.
+    var opener = null
+
+    function backdrop(off) {
+      // Everything the sheet covers. The sheet itself is a sibling of these,
+      // so it stays reachable.
+      document.querySelectorAll('#cb-nav, main, footer').forEach(function (el) {
+        if (off) el.setAttribute('inert', '')
+        else el.removeAttribute('inert')
+      })
     }
+
+    function focusables() {
+      if (!panel) return []
+      return Array.prototype.filter.call(
+        panel.querySelectorAll('a[href], button:not([disabled])'),
+        function (el) { return el.offsetWidth > 0 || el.offsetHeight > 0 }
+      )
+    }
+
+    function show() {
+      if (!sheet) return
+      opener = document.activeElement
+      sheet.classList.remove('hidden')
+      document.body.style.overflow = 'hidden'
+      backdrop(true)
+      if (close) close.focus()
+    }
+
     function hide() {
-      if (sheet) sheet.classList.add('hidden')
+      if (!sheet || sheet.classList.contains('hidden')) return
+      // Order matters twice over. Lift inert first, or focus() on a trigger
+      // still inside an inert subtree is a silent no-op; and restore focus
+      // before display:none, or the focused node leaves the tab order under
+      // us and activeElement falls back to <body>.
+      backdrop(false)
+      if (opener && document.contains(opener)) opener.focus()
+      opener = null
+      sheet.classList.add('hidden')
       document.body.style.overflow = ''
     }
+
     if (open) open.addEventListener('click', show)
     if (close) close.addEventListener('click', hide)
     if (scrim) scrim.addEventListener('click', hide)
     document.querySelectorAll('[data-sheet-link]').forEach(function (l) {
-      l.addEventListener('click', hide)
+      // An in-page link moves focus to its target, so the sheet must not drag
+      // it back to the hamburger.
+      l.addEventListener('click', function () { opener = null; hide() })
     })
+
+    // inert covers assistive tech and browsers that support it; this covers
+    // the Tab key everywhere else, and the wrap at both ends.
+    if (sheet) {
+      sheet.addEventListener('keydown', function (e) {
+        if (e.key !== 'Tab') return
+        var f = focusables()
+        if (!f.length) return
+        var first = f[0]
+        var last = f[f.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      })
+    }
+
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') hide()
     })

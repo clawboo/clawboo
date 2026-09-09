@@ -375,3 +375,39 @@
   font-weight: 700;
   line-height: 1;
 }
+
+/* ── Accessibility overrides ──
+   These DO redefine three product tokens, deliberately, and they live here
+   rather than in tokens.css so that file stays a clean re-syncable copy of
+   the product's globals.css: an override placed there would be silently
+   reverted by the next sync.
+
+   Each was measured against the painted pixel behind the glyphs on the real
+   grounds this page uses, not against the token in isolation, which is why
+   values that look fine in a palette fail here:
+     --secondary  light #64748b clears the base ground by 0.05 and FAILS on
+                  the tinted band (4.31:1) and panel (4.40:1); dark #6b7280
+                  fails on all five dark grounds (3.60:1 worst) as the site's
+                  body-copy colour.
+     --brand-fill white labels on the dark fill #e94560 measure 3.83:1. The
+                  hue stays for borders and rings; only the fill darkens.
+     --brand-text #dc2a48 as SMALL text measures 4.49:1 on the page ground and
+                  4.34:1 on the panel. Fills are unaffected. */
+:root {
+  --secondary: #5b6a80;
+  --brand-fill: var(--primary);
+  --brand-text: #c8203c;
+  --amber-ink: #a35107;
+}
+.dark {
+  --secondary: #868e9e;
+  --brand-fill: #d6304c;
+  --brand-text: #ef5c74;
+  --amber-ink: var(--amber);
+}
+
+/* Brand colour at text weights. Deliberately not a Tailwind `text-primary`
+   override: the fill and the text want different reds. */
+.text-brand {
+  color: var(--brand-text);
+}

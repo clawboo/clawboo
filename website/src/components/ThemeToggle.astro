@@ -14,7 +14,7 @@ import Icon from './Icon.astro'
   type="button"
   data-theme-toggle
   class="surface-raised-tier inline-flex h-10 w-10 items-center justify-center rounded-xl text-foreground/70 transition-colors duration-150 hover:text-foreground"
-  aria-label="Toggle color theme"
+  aria-label="Theme: system. Activate to switch."
   title="Toggle theme"
 >
   <span class="cb-theme-light hidden"><Icon name="sun" size={18} /></span>
@@ -54,6 +54,11 @@ import Icon from './Icon.astro'
           var el = btn.querySelector('.' + map[p])
           if (el) el.classList.toggle('hidden', p !== pref)
         })
+        // The icon is the only thing that changed before, so to a screen
+        // reader this was one button with a fixed name and three silent
+        // states. The name now carries the state.
+        btn.setAttribute('aria-label', 'Theme: ' + pref + '. Activate to switch.')
+        btn.setAttribute('title', 'Theme: ' + pref)
       })
     }
     // Delegated click so it survives Astro view-transition DOM swaps.
