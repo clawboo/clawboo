@@ -2,21 +2,23 @@
 /**
  * The five runtime marks as a floating row, used in place of a section eyebrow.
  *
- * These started life perched on the dashboard's corner, which put them in the
- * same corner as the app's own toolbar and read as clutter. Here they do the
- * job an eyebrow does — announce the section — while saying it in logos rather
- * than in the words "EVERY RUNTIME, ONE TEAM", which nobody needed to be told.
+ * These started life perched on the dashboard's corner, then briefly sat above
+ * the heading as an eyebrow, which is what made them feel cramped: an eyebrow
+ * is a label and sits tight to its heading by design. They now sit BELOW the
+ * heading and lead, where they are the section's payoff rather than its label,
+ * and can take the space that needs.
  *
- * No tiles, no container. `lift` staggers them so the row reads as floating
- * rather than ruled, and each bobs on its own offset.
+ * No tiles, no container, no names. `lift` staggers them so the row reads as
+ * floating rather than ruled, and each bobs on its own offset.
  */
 import RuntimeIcon from './RuntimeIcon.astro'
 import type { RuntimeMarkId } from '../lib/brandMarks'
 
 interface Props {
+  size?: number
   class?: string
 }
-const { class: cls = '' } = Astro.props
+const { size = 56, class: cls = '' } = Astro.props
 
 const runtimes: { id: RuntimeMarkId; name: string; lift: number }[] = [
   { id: 'openclaw', name: 'OpenClaw', lift: 0 },
@@ -31,7 +33,7 @@ const runtimes: { id: RuntimeMarkId; name: string; lift: number }[] = [
   {
     runtimes.map((r) => (
       <li class="mark" style={`--lift:${r.lift}px`} title={r.name}>
-        <RuntimeIcon id={r.id} bare size={44} />
+        <RuntimeIcon id={r.id} bare size={size} />
         <span class="vh">{r.name}</span>
       </li>
     ))
@@ -43,9 +45,10 @@ const runtimes: { id: RuntimeMarkId; name: string; lift: number }[] = [
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    gap: clamp(1.25rem, 3vw, 2.5rem);
+    flex-wrap: wrap;
+    gap: clamp(2rem, 6vw, 4.5rem);
     margin: 0;
-    padding: 0 0 0.5rem;
+    padding: 0;
     list-style: none;
   }
 
@@ -84,13 +87,22 @@ const runtimes: { id: RuntimeMarkId; name: string; lift: number }[] = [
     border: 0;
   }
 
-  @media (max-width: 560px) {
+  @media (max-width: 640px) {
     .marks {
-      gap: 1rem;
+      gap: 1.75rem;
     }
     .mark :global(svg) {
-      width: 32px;
-      height: 32px;
+      width: 40px;
+      height: 40px;
+    }
+  }
+  @media (max-width: 380px) {
+    .marks {
+      gap: 1.25rem;
+    }
+    .mark :global(svg) {
+      width: 34px;
+      height: 34px;
     }
   }
 

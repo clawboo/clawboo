@@ -1,55 +1,35 @@
 ---
 /**
- * Every runtime, one team. Absorbs the old Problem section's argument and two
- * Features cards that repeated this section's own subhead word for word.
+ * Bring the agents you already use.
  *
- * Corrections carried in from the code audit:
- *  - Native reaches ELEVEN providers, not four (nativeProviders.ts:20-53 is
- *    seven OpenAI-compatible plus four built-in). The old copy said four and
- *    contradicted the FAQ on the same page.
- *  - "Each runtime keeps its own native powers" was false as a universal; it is
- *    true of Hermes and OpenClaw (README.md:78). Said about those two only.
- *  - "Coordination flows over structured lifecycle events and MCP calls, never
- *    terminal-output scraping" is true but unreadable. Said in plain words.
+ * The six cards are gone. Five of them repeated the marks that now float in the
+ * middle of the section, and explained brands the reader already knows; the
+ * sixth was a text card wedged into a logo grid. Everything true and load-
+ * bearing in them survives in the panel copy below, so nothing was lost except
+ * repetition:
+ *  - Native is built in and reaches ELEVEN providers with one key
+ *    (nativeProviders.ts:20-53 is seven OpenAI-compatible plus four built-in).
+ *  - Agents coordinate through the board and structured messages, never by
+ *    reading each other's terminal output (codexDriver.ts:1-4).
+ *  - Each works in its own copy of the code, so two cannot overwrite each other.
+ *  - The runtimes guide link.
+ *
+ * ONE CAVEAT, deliberately accepted: "everyone knows these logos" holds for
+ * Claude Code and Codex, less so for Hermes and OpenClaw, and not at all for
+ * Clawboo Native, which is this project's own mascot AND the one carrying the
+ * eleven-providers story. That is why the panel copy leads with Native by name
+ * rather than leaving its mark to speak for itself.
  */
-import RuntimeMark from '../components/RuntimeMark.astro'
 import RuntimeMarks from '../components/RuntimeMarks.astro'
 import { Picture } from 'astro:assets'
 import { links } from '../lib/site'
 import Icon from '../components/Icon.astro'
 import runtimesPanel from '../assets/screenshots/runtimes-panel.png'
-
-const runtimes = [
-  {
-    id: 'clawboo-native' as const,
-    name: 'Clawboo Native',
-    tagline:
-      'Built in, and reaches eleven providers with one key: Anthropic, OpenAI, Google, xAI, Groq, Mistral and more.',
-    featured: true,
-  },
-  {
-    id: 'claude-code' as const,
-    name: 'Claude Code',
-    tagline: "Anthropic's coding agent. Paste an API key, or use the CLI you are already signed in to.",
-  },
-  { id: 'codex' as const, name: 'Codex', tagline: "OpenAI's coding agent CLI. One codex login." },
-  {
-    id: 'hermes' as const,
-    name: 'Hermes',
-    tagline: 'Open-source, over OpenRouter. Keeps its own skills and self-improvement.',
-  },
-  {
-    id: 'openclaw' as const,
-    name: 'OpenClaw',
-    tagline: 'Connects as a Gateway. Keeps its own channels and always-on presence.',
-  },
-]
 ---
 
 <section id="runtimes" class="section">
   <div class="container">
     <div class="section-head section-head--center">
-      <RuntimeMarks class="mb-5" />
       <h2 class="d2">Bring the agents you already use. They finally talk to each other.</h2>
       <p class="lead">
         Each one is strong on its own and trapped in its own terminal, with its own memory and no
@@ -58,38 +38,37 @@ const runtimes = [
       </p>
     </div>
 
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {runtimes.map((r) => <RuntimeMark {...r} />)}
-
-      <div class="card flex h-full flex-col justify-between">
-        <div>
-          <h3 class="d3">They hand work over properly</h3>
-          <p class="mt-2 text-[14px] leading-relaxed text-secondary">
-            Agents coordinate through the board and structured messages, never by reading each
-            other&rsquo;s screen output. Each one works in its own copy of the code, so two agents
-            can&rsquo;t overwrite each other.
-          </p>
-        </div>
-        <a
-          class="mt-4 inline-flex items-center gap-1.5 text-[14px] font-medium text-primary hover:underline"
-          href={links.docs}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Read the runtimes guide
-          <Icon name="arrow-up-right" size={14} />
-        </a>
-      </div>
+    <!-- The marks are the payoff here, not a label, so they get the room. The
+         spacing lives on a wrapper this component owns: a class passed into
+         RuntimeMarks lands on an element in ITS scope, so a scoped rule here
+         would never match it. -->
+    <div class="marks-block">
+      <RuntimeMarks />
     </div>
 
-    <div class="panel mt-12">
+    <div class="panel">
       <div class="panel-grid">
         <div>
-          <h3 class="d3">Connect one from the dashboard</h3>
+          <h3 class="d3">Nothing to install to start</h3>
           <p class="mt-2 text-[15px] leading-relaxed text-secondary">
-            Native is already connected and needs nothing installed. The others take a key or a
-            single sign-in, and the panel tells you which is missing.
+            Clawboo Native is built in and reaches eleven providers with one key, so a team can be
+            running before you install anything. Claude Code, Codex and Hermes take a key or a
+            single sign-in; OpenClaw connects as a Gateway.
           </p>
+          <p class="mt-3 text-[15px] leading-relaxed text-secondary">
+            However they join, they coordinate through the board and structured messages, never by
+            reading each other&rsquo;s screen output, and each works in its own copy of the code so
+            two agents can&rsquo;t overwrite each other.
+          </p>
+          <a
+            class="mt-4 inline-flex items-center gap-1.5 text-[15px] font-medium text-primary hover:underline"
+            href={links.docs}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Read the runtimes guide
+            <Icon name="arrow-up-right" size={14} />
+          </a>
         </div>
         <div class="panel-media">
           <Picture
@@ -105,3 +84,12 @@ const runtimes = [
     </div>
   </div>
 </section>
+
+<style>
+  /* Generous on both sides: the row is the centre of gravity for this section
+     now that the cards are gone, and it was the tight margin against the
+     heading that made it feel congested when it sat above. */
+  .marks-block {
+    margin-block: clamp(3rem, 7vw, 5.5rem);
+  }
+</style>
