@@ -255,6 +255,19 @@ export function useGatewayEvents(client: GatewayClient | null): void {
 
       useChatStore.getState().appendTranscript(sessionKey, entries)
 
+      // OPENCLAW TURNS ARE PERSISTED SERVER-SIDE, so only the POST is skipped
+      // here, never the append above: the live view of a one-to-one chat still
+      // renders from this path, and there is no SSE behind it the way there is
+      // for team sessions.
+      //
+      // The server writes these off the committed transcript, which is the only
+      // way they survive at all — this browser only recorded them while a tab
+      // happened to be open, so closing it lost the conversation. Both writers
+      // running would duplicate every turn, because each mints a fresh random
+      // `entryId` and the unique index cannot collapse them. That is the same
+      // failure that forced team chat to a single writer.
+      if (agent?.runtime === 'openclaw') return
+
       // Best-effort persistence — never throw in an event handler
       const gwUrl = useConnectionStore.getState().gatewayUrl ?? ''
       void apiFetch('/api/chat-history', {

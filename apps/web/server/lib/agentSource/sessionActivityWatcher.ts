@@ -29,11 +29,14 @@ import type { EventFrame } from '@clawboo/gateway-client'
 import { createLogger } from '@clawboo/logger'
 
 import { costRecords } from '@clawboo/db'
+import { extractText } from '@clawboo/protocol'
+import { isTeamSessionKey } from '@clawboo/team-orchestration'
 
 import { calculateCostUsd } from '../costUtils'
 import { getDb } from '../db'
 import { emitEvent } from '../obs/emit'
 import { markToolCallLogged } from './loggedToolCalls'
+import { persistDirectChatEntry } from './persistDirectChatEntry'
 import { SessionTokenSpend, type TurnSpend } from './sessionTokenSpend'
 
 const log = createLogger('session-activity')
@@ -196,6 +199,26 @@ export function startSessionActivityWatcher(
         } catch (err) {
           // Cost is a report, never a reason to lose the activity row below it.
           log.debug({ err }, 'could not record token spend')
+        }
+      }
+
+      // ── The conversation itself ─────────────────────────────────────────
+      //
+      // Written HERE rather than in the browser, which only recorded it while a
+      // tab happened to be open: close the tab and the conversation happened and
+      // was never saved. Team sessions are skipped because the server already
+      // owns them (`persistTeamChatEntry`), and writing them again would
+      // reintroduce the duplicate that move was made to fix.
+      if (!isTeamSessionKey(payload.sessionKey)) {
+        const text = extractText(payload.message)
+        if (text) {
+          persistDirectChatEntry(getDb(), {
+            sessionKey: payload.sessionKey,
+            text,
+            messageId: payload.messageId,
+            messageSeq: payload.messageSeq,
+            runId: payload.runId,
+          })
         }
       }
 
