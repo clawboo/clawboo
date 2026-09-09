@@ -54,8 +54,26 @@ export type SessionMessagePayload = {
   messageId?: string
   messageSeq?: number
   runId?: string
-  /** Real token counts, when the row carries them. */
-  usage?: Record<string, unknown>
+
+  /**
+   * Token spend for the request that produced this row, from the session
+   * snapshot the payload carries.
+   *
+   * PER REQUEST, NOT PER SESSION, which is the whole reason these can be summed.
+   * Every request re-sends the conversation, so the provider bills the full
+   * prompt each time and the turn-by-turn figures add up to the real total.
+   * Confirmed against live sessions where `inputTokens` sits both well below and
+   * well above `totalTokens` (866 against 20573, and 51477 against 25775) — a
+   * running total could do neither.
+   *
+   * There is NO `usage` or `cost` object on this payload. An earlier design
+   * assumed one and it does not exist: searching every transcript row in a live
+   * agent's store returns zero hits for either key. These three snapshot fields
+   * are what is actually on offer.
+   */
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
 }
 
 export type AgentEventPayload = {

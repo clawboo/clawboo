@@ -92,6 +92,16 @@ export function gatewayRunFailureText(reason: string | null | undefined): string
 }
 
 export function recordChatCost(agentId: string, runId: string | null, cost: ChatCost): void {
+  // OPENCLAW AGENTS ARE RECORDED SERVER-SIDE, and must not be recorded here too.
+  // `sessionActivityWatcher` bills them off the session snapshot, which carries
+  // the real model and the real prompt size for every turn, including the ones
+  // this browser never sees. Letting both writers run would charge a webchat turn
+  // twice, once truthfully and once with the estimate below.
+  //
+  // The other runtimes keep this path: they do not commit through
+  // `session.message`, so it is the only place their spend is seen at all.
+  if (useFleetStore.getState().agents.find((a) => a.id === agentId)?.runtime === 'openclaw') return
+
   let inputTokens = cost.inputTokens ?? 0
 
   // `null` input means the Gateway sent no usage block — estimate the prompt

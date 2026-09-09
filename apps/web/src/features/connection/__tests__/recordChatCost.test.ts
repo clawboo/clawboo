@@ -79,6 +79,26 @@ afterEach(() => {
 })
 
 describe('recordChatCost', () => {
+  it('records NOTHING for an OpenClaw agent, which the server now bills', () => {
+    // Both writers see a webchat run: this one off the chat stream, and the
+    // server's session watcher off the committed transcript. Without this guard a
+    // webchat turn is charged twice, once with the real numbers and once with the
+    // estimate this function falls back to. The server wins because it also sees
+    // the runs this browser never does, and because it has the real model name
+    // rather than the literal "unknown" that made every price zero.
+    useFleetStore.setState({ agents: [{ ...agent(), runtime: 'openclaw' }] })
+    recordChatCost(AGENT_ID, 'r1', { model: 'gpt-x', inputTokens: 500, outputTokens: 20 })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('still records for the runtimes the server does not see', () => {
+    // The other runtimes never commit through `session.message`, so this path is
+    // the only place their spend is seen at all. Dropping it wholesale would have
+    // traded one silent gap for another.
+    recordChatCost(AGENT_ID, 'r1', { model: 'gpt-x', inputTokens: 500, outputTokens: 20 })
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
   it('posts real Gateway usage verbatim', () => {
     const cost: ChatCost = { model: 'claude-opus-5', inputTokens: 120, outputTokens: 340 }
     recordChatCost(AGENT_ID, 'r1', cost)

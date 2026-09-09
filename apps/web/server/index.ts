@@ -30,7 +30,7 @@ import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycle
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { getTeamOrchestrator } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
 import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
 import {
@@ -42,7 +42,7 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
-import { agents } from '@clawboo/db'
+import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
 import { restoreScreenshots } from './lib/screenshotBus'
 import { mountSpa } from './lib/serveSpa'
@@ -550,18 +550,36 @@ async function main() {
   // it hangs off that source's connection, and idempotent on reconnect.
   safeStart('openclaw-session-activity', () => {
     const db = getDb()
-    startSessionActivityWatcher(getRegistry().source, (sourceAgentId) => {
-      // OpenClaw's agent id maps to clawboo's ROW id, which is what the feed and
-      // the panel are keyed on. They are equal on every row today, so resolving
-      // properly costs nothing now and is the difference between a correct feed
-      // and a misattributed one the first time an agent is re-imported.
-      const row = db
-        .select({ id: agents.id })
-        .from(agents)
-        .where(eq(agents.sourceAgentId, sourceAgentId))
-        .get()
-      return row?.id ?? null
-    })
+    startSessionActivityWatcher(
+      getRegistry().source,
+      (sourceAgentId) => {
+        // OpenClaw's agent id maps to clawboo's ROW id, which is what the feed and
+        // the panel are keyed on. They are equal on every row today, so resolving
+        // properly costs nothing now and is the difference between a correct feed
+        // and a misattributed one the first time an agent is re-imported.
+        const row = db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.sourceAgentId, sourceAgentId))
+          .get()
+        return row?.id ?? null
+      },
+      // What this agent was last billed for, so a restart mid-conversation
+      // resumes rather than charging the turn in flight a second time.
+      (agentId) => {
+        const row = db
+          .select({
+            model: costRecords.model,
+            inputTokens: costRecords.inputTokens,
+            outputTokens: costRecords.outputTokens,
+          })
+          .from(costRecords)
+          .where(eq(costRecords.agentId, agentId))
+          .orderBy(desc(costRecords.createdAt))
+          .get()
+        return row ? { ...row } : null
+      },
+    )
   })
 
   // ── Listen ────────────────────────────────────────────────────────────────

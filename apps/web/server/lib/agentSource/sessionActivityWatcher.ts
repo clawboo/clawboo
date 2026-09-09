@@ -28,9 +28,13 @@ import { parseSessionMessagePayload } from '@clawboo/events'
 import type { EventFrame } from '@clawboo/gateway-client'
 import { createLogger } from '@clawboo/logger'
 
+import { costRecords } from '@clawboo/db'
+
+import { calculateCostUsd } from '../costUtils'
 import { getDb } from '../db'
 import { emitEvent } from '../obs/emit'
 import { markToolCallLogged } from './loggedToolCalls'
+import { SessionTokenSpend, type TurnSpend } from './sessionTokenSpend'
 
 const log = createLogger('session-activity')
 
@@ -45,6 +49,9 @@ export interface SessionActivitySource {
 
 /** Resolve an OpenClaw agent id to the clawboo row id the feed is keyed on. */
 export type ResolveAgentId = (sourceAgentId: string) => string | null
+
+/** The last token spend already recorded for an agent, so a restart does not re-bill it. */
+export type LastRecordedSpend = (agentId: string) => TurnSpend | null
 
 /**
  * The OpenClaw agent id inside a session key.
@@ -79,9 +86,13 @@ export interface SessionActivityWatcher {
 export function startSessionActivityWatcher(
   source: SessionActivitySource,
   resolveAgentId: ResolveAgentId,
+  lastRecordedSpend?: LastRecordedSpend,
 ): SessionActivityWatcher {
   /** sessionKey -> clawboo agent id, learned from frames so no lookup is needed per row. */
   const agentBySession = new Map<string, string>()
+  const spend = new SessionTokenSpend()
+  /** Sessions whose already-recorded spend has been loaded once. */
+  const seeded = new Set<string>()
   let subscribed = false
 
   const remember = (sessionKey: string, agentId: string): void => {
@@ -148,6 +159,45 @@ export function startSessionActivityWatcher(
       // a guess: a row filed against the wrong agent is worse than a missing row,
       // because the feed is what an operator trusts to say what an agent did.
       if (!agentId) return
+
+      // ── Real money ──────────────────────────────────────────────────────
+      //
+      // The same frame that carries the tool activity carries the session's
+      // token snapshot, so cost costs nothing extra to collect. Only a turn
+      // whose numbers CHANGED is billed: several messages land per turn and all
+      // of them carry the same snapshot, so writing on every frame would charge
+      // one request once per message.
+      // SEED BEFORE THE FIRST BILL. A restart leaves the tracker empty, so the
+      // first frame of every live conversation looks like a brand new turn and
+      // gets charged a second time. Loading what is already recorded turns a
+      // restart mid-conversation into a resume instead of a repeat, and it is the
+      // only way this design can over-count.
+      if (!seeded.has(payload.sessionKey)) {
+        seeded.add(payload.sessionKey)
+        const prior = lastRecordedSpend?.(agentId) ?? null
+        if (prior) spend.seed(payload.sessionKey, prior)
+      }
+
+      const turn = spend.take(payload.sessionKey, payload)
+      if (turn) {
+        try {
+          getDb()
+            .insert(costRecords)
+            .values({
+              agentId,
+              model: turn.model,
+              inputTokens: turn.inputTokens,
+              outputTokens: turn.outputTokens,
+              costUsd: calculateCostUsd(turn.model, turn.inputTokens, turn.outputTokens),
+              runId: payload.runId ?? null,
+              createdAt: Date.now(),
+            })
+            .run()
+        } catch (err) {
+          // Cost is a report, never a reason to lose the activity row below it.
+          log.debug({ err }, 'could not record token spend')
+        }
+      }
 
       // A per-frame sequence is enough: these events are written straight to the
       // log, never ordered against another frame's.
