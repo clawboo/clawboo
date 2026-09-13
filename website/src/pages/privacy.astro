@@ -68,13 +68,20 @@ const a = 'text-foreground underline decoration-foreground/30 underline-offset-2
         Clawboo account and no product usage tracking.
       </p>
       <p class={p}>
-        Clawboo does make these network requests, and no others. Your prompts and code go to the
-        model provider you configure, and nowhere else. On startup and on demand it asks the npm
-        registry for the latest published version, so it can tell you an update exists. It fetches
-        the marketplace catalogue of agents and teams from this project&rsquo;s own GitHub
-        repository, cached for six hours. If you have configured a provider key, it asks that
-        provider which models your key can use. An OpenTelemetry trace bridge is available and is
-        off until you enable it and point it at a collector you control.
+        Out of the box, Clawboo makes only the network requests listed here. Your prompts and code
+        go to the model provider you configure. On startup and on demand it asks the npm registry
+        for the latest published version, so it can tell you an update exists. It fetches the
+        marketplace catalogue of agents and teams from this project&rsquo;s own GitHub repository,
+        cached for six hours. If you have configured a provider key, it asks that provider which
+        models your key can use. The dashboard loads its typeface from Google Fonts. An
+        OpenTelemetry trace bridge is available and is off until you enable it and point it at a
+        collector you control.
+      </p>
+      <p class={p}>
+        Anything you switch on reaches what you point it at. A connector or MCP server talks to its
+        own host, an agent given a browser reaches whatever it browses, and installing a connector
+        on first use pulls its package from npm or PyPI. Those are your choices to make, and they
+        are not covered by the list above.
       </p>
       <p class={p}>
         If we add optional product telemetry in the future, we will document exactly what it collects,

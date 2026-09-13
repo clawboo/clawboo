@@ -88,4 +88,10 @@ const iconSize = size === 'sm' ? 15 : 17
     background-color: color-mix(in srgb, var(--brand-fill) 88%, #000);
     box-shadow: var(--shadow-floating);
   }
+  /* :hover and :focus-visible are both (0,2,0), so the hover rule above wins on
+     source order and takes the halo with it. A keyboard user whose pointer
+     happens to rest on the button was left with the bare red outline. */
+  .cb-btn-primary:hover:focus-visible {
+    box-shadow: var(--focus-halo), var(--shadow-floating);
+  }
 </style>
