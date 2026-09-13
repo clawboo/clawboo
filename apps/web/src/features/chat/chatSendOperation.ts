@@ -8,7 +8,7 @@ import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
-import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@/lib/execSettingsForGateway'
+import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@clawboo/gateway-client'
 import { nextSeq } from '@/lib/sequenceKey'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
