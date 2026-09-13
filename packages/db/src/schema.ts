@@ -589,6 +589,18 @@ export const toolCallApprovals = sqliteTable(
     toolClass: text('tool_class'),
     /** The tool's own one-line description, for a card that cannot name the verb. */
     toolSummary: text('tool_summary'),
+    /**
+     * WHO holds the call while the human decides: `tool` (clawboo's own broker,
+     * blocking inside `waitForApproval`) or `exec` (an OpenClaw shell command,
+     * held by the Gateway; clawboo only mirrors and answers it).
+     *
+     * EXPLICIT RATHER THAN INFERRED. The two are resolved by different means — a
+     * broker approval releases a local promise, an exec approval is answered with
+     * `exec.approval.resolve` over the Gateway — so a resolver that guessed from
+     * a null `connector_id` or a tool named "exec" would silently do the wrong
+     * one the first time either assumption stopped holding.
+     */
+    kind: text('kind').notNull().default('tool'),
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     resolvedAt: integer('resolved_at'),

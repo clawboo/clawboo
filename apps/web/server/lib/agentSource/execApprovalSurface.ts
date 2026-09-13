@@ -1,0 +1,192 @@
+// Make clawboo somewhere an exec approval can actually be asked.
+//
+// THE PROBLEM. OpenClaw holds a shell command while a human decides, but it only
+// sends the question to connections that DECLARE they can answer it. Today the
+// only such connection is a browser tab: `GATEWAY_BROWSER_CAPS = ['exec-approvals']`.
+// clawboo's own long-lived server connection declares `tool-events` and nothing
+// else, so with no tab open there is no surface at all — and with no surface the
+// Gateway does not queue the request, it expires it immediately with
+// `no-approval-route`. The command is refused and the agent is told the policy is
+// wrong.
+//
+// That is why the fleet policy cannot be switched on first. An operator who turns
+// on "ask me" while the only surface is a tab has not made their agents ask; they
+// have made every command fail whenever the tab is shut.
+//
+// THE ORDER MATTERS AND IS THE OPPOSITE OF THE OBVIOUS ONE. Declaring the
+// capability is the LAST step, not the first. The Gateway counts a declaring
+// connection as a real surface, so declaring it without handling the request
+// turns a fast, explicit refusal into a thirty-minute silent hang. OpenClaw's own
+// docs put it plainly: advertise only capabilities the client actually implements.
+//
+// WHAT THIS DOES NOT DO. It does not decide anything. The command stays held by
+// the Gateway; clawboo mirrors the question so it survives a closed tab, and
+// relays the answer back. The policy that decides WHICH commands ask is OpenClaw's
+// own, and clawboo must never keep a second copy of it — two allowlists that
+// disagree produce approvals the Gateway then ignores.
+
+import { toolCallApprovals } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
+import { eq } from 'drizzle-orm'
+
+import { getDb } from '../db'
+
+const log = createLogger('exec-approvals')
+
+/**
+ * How long clawboo keeps a mirrored request live.
+ *
+ * MATCHED TO THE GATEWAY'S OWN WINDOW, deliberately. clawboo's broker approvals
+ * expire in five minutes, which is right for a tool call someone is watching
+ * happen. A shell prompt is different: OpenClaw holds it for thirty minutes
+ * (`DEFAULT_EXEC_APPROVAL_TIMEOUT_MS`), and a mirror that gave up at five would
+ * show the operator an expired card for a question the Gateway is still asking.
+ */
+export const EXEC_APPROVAL_TTL_MS = 30 * 60_000
+
+export interface ExecApprovalRequest {
+  id: string
+  command: string
+  agentId: string | null
+  cwd: string | null
+  reason: string | null
+  expiresAtMs: number | null
+}
+
+/** The Gateway frame, read defensively; a shape we do not recognise is ignored. */
+export function parseExecApprovalRequest(payload: unknown): ExecApprovalRequest | null {
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as Record<string, unknown>
+  const id = typeof p['id'] === 'string' ? p['id'] : ''
+  const req = (p['request'] ?? p) as Record<string, unknown>
+  const command = typeof req['command'] === 'string' ? req['command'] : ''
+  if (!id || !command) return null
+
+  return {
+    id,
+    command,
+    agentId: typeof req['agentId'] === 'string' ? req['agentId'] : null,
+    cwd: typeof req['cwd'] === 'string' ? req['cwd'] : null,
+    reason: typeof req['reason'] === 'string' ? req['reason'] : null,
+    expiresAtMs: typeof p['expiresAtMs'] === 'number' ? p['expiresAtMs'] : null,
+  }
+}
+
+export interface ExecApprovalSource {
+  operatorCall<T>(method: string, params?: unknown): Promise<T>
+  onGatewayBroadcast(cb: (frame: { event: string; payload?: unknown }) => void): () => void
+}
+
+/** Map an OpenClaw agent id to the clawboo row id the card is filed under. */
+export type ResolveAgentId = (sourceAgentId: string) => string | null
+
+export interface ExecApprovalSurface {
+  stop(): void
+}
+
+/**
+ * Mirror OpenClaw's exec approvals into clawboo, and answer them.
+ *
+ * The row is written with the GATEWAY'S OWN id as the primary key, which is what
+ * makes the whole thing idempotent: a redelivered request lands on the existing
+ * row, and the id is also the handle `exec.approval.resolve` needs, so no
+ * separate mapping has to be kept in step.
+ */
+export function startExecApprovalSurface(
+  source: ExecApprovalSource,
+  resolveAgentId: ResolveAgentId,
+): ExecApprovalSurface {
+  const off = source.onGatewayBroadcast((frame) => {
+    try {
+      if (frame.event === 'exec.approval.requested') {
+        const req = parseExecApprovalRequest(frame.payload)
+        if (!req) return
+        const now = Date.now()
+        getDb()
+          .insert(toolCallApprovals)
+          .values({
+            id: req.id,
+            kind: 'exec',
+            toolName: 'exec',
+            // Resolved to clawboo's row id where possible, but NOT dropped when it
+            // cannot be: unlike an activity row, an unattributed approval still
+            // has to be answerable. Showing a command whose agent is unknown is
+            // worse than nothing only if it is silently ignored.
+            agentId: req.agentId ? (resolveAgentId(req.agentId) ?? req.agentId) : null,
+            argsSummary: JSON.stringify({ command: req.command, cwd: req.cwd }),
+            reason: req.reason ?? 'this command is not on the trusted list',
+            status: 'pending',
+            // The shell is the one tool clawboo cannot classify, because the risk
+            // is in the command text rather than in a descriptor it owns.
+            toolClass: 'destructive',
+            toolSummary: req.command.slice(0, 200),
+            // "Always" is OpenClaw's to mint, into ITS allowlist. Offering it here
+            // without writing it there would be a button that appears to work.
+            neverRemember: 1,
+            createdAt: now,
+            expiresAt: req.expiresAtMs ?? now + EXEC_APPROVAL_TTL_MS,
+          })
+          .onConflictDoNothing()
+          .run()
+        log.info({ id: req.id, agentId: req.agentId }, 'mirrored an exec approval')
+        return
+      }
+
+      // The Gateway tells every surface when any of them answers, which is how a
+      // card clears from the tab after being answered here, and the reverse.
+      if (frame.event === 'exec.approval.resolved') {
+        const p = frame.payload as Record<string, unknown> | undefined
+        const id = typeof p?.['id'] === 'string' ? p['id'] : ''
+        const decision = typeof p?.['decision'] === 'string' ? p['decision'] : 'resolved'
+        if (!id) return
+        getDb()
+          .update(toolCallApprovals)
+          .set({ status: decision, resolvedAt: Date.now() })
+          .where(eq(toolCallApprovals.id, id))
+          .run()
+      }
+    } catch (err) {
+      // A malformed frame must never break the fan-out for every other listener.
+      log.debug({ err }, 'exec approval frame dropped')
+    }
+  })
+
+  return {
+    stop: () => off(),
+  }
+}
+
+/**
+ * Answer a mirrored approval.
+ *
+ * THE GATEWAY IS THE SOURCE OF TRUTH, so the RPC goes first and the local row is
+ * only updated once it succeeds. Writing the row first would leave clawboo
+ * showing an answered card for a command the Gateway is still holding, and the
+ * operator would have no way to tell.
+ *
+ * A second answer is expected rather than exceptional: the same card may be open
+ * in a browser tab. The Gateway replies `APPROVAL_ALREADY_RESOLVED`, which is a
+ * normal race and not a failure to report.
+ */
+export async function resolveExecApproval(
+  source: ExecApprovalSource,
+  id: string,
+  decision: 'allow-once' | 'allow-always' | 'deny',
+): Promise<{ ok: boolean; alreadyResolved?: boolean }> {
+  try {
+    await source.operatorCall('exec.approval.resolve', { id, decision })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('APPROVAL_ALREADY_RESOLVED') || msg.includes('already resolved')) {
+      return { ok: true, alreadyResolved: true }
+    }
+    log.warn({ err, id }, 'could not resolve exec approval')
+    return { ok: false }
+  }
+  getDb()
+    .update(toolCallApprovals)
+    .set({ status: decision === 'deny' ? 'deny' : 'allow_once', resolvedAt: Date.now() })
+    .where(eq(toolCallApprovals.id, id))
+    .run()
+  return { ok: true }
+}

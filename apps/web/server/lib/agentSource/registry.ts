@@ -111,7 +111,14 @@ class ServerAgentRegistry {
           // The literal is undefined in OpenClaw's shipped docs, so an upgrade
           // must re-check it against the Gateway's own constant rather than
           // assuming it survived.
-          caps: ['tool-events'],
+          // `exec-approvals` is declared LAST, after the handler exists
+          // (lib/agentSource/execApprovalSurface.ts). The Gateway counts any
+          // declaring connection as a real approval surface, so declaring it
+          // without answering turns an immediate, explicit `no-approval-route`
+          // refusal into a silent thirty-minute hang. It is also what lets an
+          // approval outlive a closed browser tab, which was the only surface
+          // before this and is why the fleet policy could not be turned on.
+          caps: ['tool-events', 'exec-approvals'],
           token: s.gatewayToken?.trim() || undefined,
           // The browser device path needs crypto.subtle + localStorage (absent in
           // Node); we sign with the proxy identity instead. Both flags set on

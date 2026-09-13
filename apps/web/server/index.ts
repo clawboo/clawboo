@@ -32,6 +32,7 @@ import { getTeamOrchestrator } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
+import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
 import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
 import {
   resolveApiPort,
@@ -548,6 +549,21 @@ async function main() {
   // Those runs are addressed to no clawboo connection, so they were absent from
   // the activity feed rather than merely thin. Started after the registry because
   // it hangs off that source's connection, and idempotent on reconnect.
+  // Somewhere an exec approval can be asked that is not a browser tab. Started
+  // BEFORE the capability is declared (see execApprovalSurface): a declared
+  // capability with no handler turns a fast refusal into a silent 30-minute hang.
+  safeStart('openclaw-exec-approvals', () => {
+    const db = getDb()
+    startExecApprovalSurface(getRegistry().source, (sourceAgentId) => {
+      const row = db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.sourceAgentId, sourceAgentId))
+        .get()
+      return row?.id ?? null
+    })
+  })
+
   safeStart('openclaw-session-activity', () => {
     const db = getDb()
     startSessionActivityWatcher(

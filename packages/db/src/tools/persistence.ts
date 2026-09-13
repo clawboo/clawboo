@@ -175,6 +175,10 @@ export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToo
   const now = Date.now()
   const row: DbToolCallApproval = {
     id: randomUUID(),
+    // clawboo's OWN broker holds this call, blocked inside `waitForApproval`.
+    // Stated rather than defaulted, because the other kind (an OpenClaw shell
+    // command, held by the Gateway) is released by an entirely different means.
+    kind: 'tool',
     toolName: input.toolName,
     agentId: input.agentId ?? null,
     argsSummary: scrubArgsSummary(input.args),
