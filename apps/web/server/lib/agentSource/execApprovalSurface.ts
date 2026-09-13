@@ -27,7 +27,7 @@
 
 import { toolCallApprovals } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
-import { eq } from 'drizzle-orm'
+import { and, eq, lt } from 'drizzle-orm'
 
 import { getDb } from '../db'
 
@@ -79,6 +79,41 @@ export interface ExecApprovalSource {
 
 /** Map an OpenClaw agent id to the clawboo row id the card is filed under. */
 export type ResolveAgentId = (sourceAgentId: string) => string | null
+
+/** How often the mirror checks whether the Gateway has stopped waiting. */
+const EXPIRY_SWEEP_MS = 30_000
+
+/**
+ * Retire mirrored approvals the Gateway has already given up on.
+ *
+ * REQUIRED, because a timeout is the one outcome nobody announces. The Gateway
+ * emits `exec.approval.resolved` when a human answers, but on timeout it
+ * resolves internally with null and says nothing — the browser carries its own
+ * sweep for exactly this reason.
+ *
+ * Without this the mirror is wrong in the direction that matters. clawboo's
+ * generic reaper expires a pending row after 24 HOURS, judged on its age, while
+ * the Gateway gives up after 30 MINUTES. So a card would stay on screen looking
+ * answerable for most of a day after the command behind it had been refused, and
+ * pressing Approve would do nothing. This expires on the row's OWN `expiresAt`,
+ * which is copied from the Gateway's deadline, so the card stops offering a
+ * choice at the moment the choice stops existing.
+ */
+export function expireStaleExecApprovals(db: ReturnType<typeof getDb>): number {
+  const rows = db
+    .update(toolCallApprovals)
+    .set({ status: 'expired', resolvedAt: Date.now() })
+    .where(
+      and(
+        eq(toolCallApprovals.kind, 'exec'),
+        eq(toolCallApprovals.status, 'pending'),
+        lt(toolCallApprovals.expiresAt, Date.now()),
+      ),
+    )
+    .returning()
+    .all()
+  return rows.length
+}
 
 export interface ExecApprovalSurface {
   stop(): void
@@ -151,8 +186,22 @@ export function startExecApprovalSurface(
     }
   })
 
+  const sweep = setInterval(() => {
+    try {
+      const n = expireStaleExecApprovals(getDb())
+      if (n > 0) log.info({ count: n }, 'retired exec approvals the Gateway stopped waiting on')
+    } catch (err) {
+      log.debug({ err }, 'exec approval sweep failed')
+    }
+  }, EXPIRY_SWEEP_MS)
+  // Unref'd so a mirror with nothing to do never holds the process open.
+  sweep.unref()
+
   return {
-    stop: () => off(),
+    stop: () => {
+      clearInterval(sweep)
+      off()
+    },
   }
 }
 

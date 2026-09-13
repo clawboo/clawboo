@@ -23,8 +23,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 let db: ClawbooDb
 vi.mock('../../db', () => ({ getDb: () => db }))
 
-const { parseExecApprovalRequest, resolveExecApproval, startExecApprovalSurface } =
-  await import('../execApprovalSurface')
+const {
+  expireStaleExecApprovals,
+  parseExecApprovalRequest,
+  resolveExecApproval,
+  startExecApprovalSurface,
+} = await import('../execApprovalSurface')
 
 function makeSource(opts: { failWith?: string } = {}) {
   const calls: { method: string; params?: unknown }[] = []
@@ -127,6 +131,54 @@ describe('startExecApprovalSurface', () => {
     s.stop()
     h.frame(requestFrame('ap-5'))
     expect(rows()).toHaveLength(0)
+  })
+})
+
+describe('expireStaleExecApprovals', () => {
+  it('retires a card the Gateway has stopped waiting on', () => {
+    // The outcome nobody announces. The Gateway emits a resolved event when a
+    // human answers, but on timeout it resolves internally and says nothing, so
+    // an unswept mirror shows an answerable card for a command already refused.
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame({
+      event: 'exec.approval.requested',
+      payload: {
+        id: 'ap-old',
+        expiresAtMs: Date.now() - 1_000, // the Gateway's deadline has passed
+        request: { command: 'rm -rf /', agentId: 'doc-writer-boo' },
+      },
+    })
+    expect(rows()[0]?.status).toBe('pending')
+
+    expect(expireStaleExecApprovals(db)).toBe(1)
+    expect(rows()[0]?.status).toBe('expired')
+  })
+
+  it('leaves a card the Gateway is still holding', () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-live'))
+    expect(expireStaleExecApprovals(db)).toBe(0)
+    expect(rows()[0]?.status).toBe('pending')
+  })
+
+  it("does not touch clawboo's own broker approvals", () => {
+    // Those are held by a blocked promise in this process with its own, much
+    // shorter clock. Expiring them on the Gateway's schedule would release a
+    // caller nobody answered for.
+    db.insert(toolCallApprovals)
+      .values({
+        id: 'broker-1',
+        kind: 'tool',
+        toolName: 'mcp__chrome-devtools__navigate_page',
+        status: 'pending',
+        neverRemember: 0,
+        createdAt: Date.now() - 10_000,
+        expiresAt: Date.now() - 5_000,
+      })
+      .run()
+    expect(expireStaleExecApprovals(db)).toBe(0)
   })
 })
 
