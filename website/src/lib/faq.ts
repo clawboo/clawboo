@@ -29,7 +29,7 @@ export const faqs: FaqItem[] = [
   },
   {
     q: 'Which agents can I use?',
-    a: 'The built-in Native runtime reaches eleven providers with one key, and nothing else needs installing. Claude Code, Codex, Hermes and OpenClaw connect as optional peers.',
+    a: 'The built-in Native runtime speaks to eleven providers, and a key from any one of them is enough to start. Nothing else needs installing. Claude Code, Codex, Hermes and OpenClaw connect as optional peers.',
   },
   {
     q: 'Where does my data go?',

@@ -11,10 +11,12 @@ const boo = booAvatarToDataUrl({ seed: 'lost-boo', isBooZero: true })
 
 <BaseLayout
   title="Page not found · Clawboo"
-  description="That page drifted off. Head back home or install Clawboo with npm install -g clawboo."
+  description="That page drifted off. Head back home and start a team of agents instead."
   robots="noindex,follow"
 >
-  <section class="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-5 text-center">
+  <section
+    class="on-sky relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-5 text-center"
+  >
     <div class="pointer-events-none absolute inset-0 overflow-hidden"><SignatureSky boos={5} /></div>
     <div class="relative z-10 flex flex-col items-center">
       <img

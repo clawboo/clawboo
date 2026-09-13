@@ -32,7 +32,7 @@ const runtimes: { id: RuntimeMarkId; name: string; lift: number }[] = [
 <ul class={`marks ${cls}`} aria-label="Runtimes that work together in Clawboo">
   {
     runtimes.map((r) => (
-      <li class="mark" style={`--lift:${r.lift}px`} title={r.name}>
+      <li class="mark" style={`--lift:${r.lift}px;--bob-delay:${r.lift * 110}ms`} title={r.name}>
         <RuntimeIcon id={r.id} bare size={size} />
         <span class="vh">{r.name}</span>
       </li>
@@ -59,7 +59,10 @@ const runtimes: { id: RuntimeMarkId; name: string; lift: number }[] = [
        to lift them off it, not separate them from a busy background. */
     filter: drop-shadow(0 8px 14px rgb(15 23 42 / 0.14));
     animation: mark-bob 6.5s ease-in-out infinite;
-    animation-delay: calc(var(--lift) * 110ms);
+    /* --bob-delay, not calc(var(--lift) * 110ms): calc needs a <number> on one
+       side of a multiplication, and length x time is invalid, so that whole
+       declaration was thrown away and all five marks bobbed in unison. */
+    animation-delay: var(--bob-delay);
   }
   :global(:root.dark) .mark {
     filter: drop-shadow(0 8px 16px rgb(0 0 0 / 0.5));

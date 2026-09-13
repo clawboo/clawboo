@@ -128,22 +128,6 @@ import teamSpace from '../assets/screenshots/team-space.png'
   /* The original sky is saturated where the type sits, which is why the old hero
      used a text-shadow halo on every string. Those tokens are still in
      tokens.css, so the restored sky gets the treatment it was designed with. */
-  /* The lead sits low enough that the soft ink clears 4.5:1; the eyebrow is
-     11px in the most saturated part of the gradient and measured 3.65:1, so
-     it takes the opaque ink (5.26:1 on the same worst-case pixel). */
-  .on-sky :global(.eyebrow) {
-    color: var(--sky-ink);
-    text-shadow: var(--sky-halo-soft);
-  }
-  .on-sky :global(.lead) {
-    color: var(--sky-ink-soft);
-    text-shadow: var(--sky-halo-soft);
-  }
-  .on-sky :global(h1) {
-    color: var(--sky-ink);
-    text-shadow: var(--sky-halo);
-  }
-
   /* Responsive scale for the foreground Boo squad, as the original hero had. */
   :global(.clawboo-boo-squad) {
     transform-origin: center bottom;

@@ -79,17 +79,31 @@ const steps = [
           b.setAttribute('aria-label', playing ? 'Pause the demo' : 'Play the demo')
           b.classList.toggle('is-playing', playing)
         }
+        // Pressing Pause has to STICK. The observer fires every time the video
+        // re-enters the viewport, so without this flag a scroll down and back
+        // restarted the loop and WCAG 2.2.2 was not really satisfied: a pause
+        // any scroll undoes is not a pause.
+        var userPaused = false
         v.addEventListener('play', sync)
         v.addEventListener('pause', sync)
         b.addEventListener('click', function () {
-          if (v.paused) v.play()
-          else v.pause()
+          if (v.paused) {
+            userPaused = false
+            v.play()
+          } else {
+            userPaused = true
+            v.pause()
+          }
         })
         if (!calm) {
           var io = new IntersectionObserver(
             function (es) {
               es.forEach(function (e) {
-                if (e.isIntersecting) v.play().catch(function () {})
+                if (!e.isIntersecting || userPaused) return
+                v.play().catch(function () {})
+                // One autostart is all this owes the reader; after that the
+                // button is in charge and the observer is just a leak.
+                io.disconnect()
               })
             },
             { threshold: 0.25 }

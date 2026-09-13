@@ -406,6 +406,29 @@
   --amber-ink: var(--amber);
 }
 
+/* Type sitting on the SignatureSky.
+
+   These were scoped inside Hero.astro, which is exactly why the 404 page
+   failed: it renders the same eyebrow/h1/lead on the same sky and could never
+   match a rule scoped to another component, so it kept the plain --foreground
+   and --secondary against a saturated blue. They live here now so both pages
+   are governed by one definition.
+
+   The soft ink is fine for the lead at 19px; the 11px eyebrow needs the opaque
+   one, which is what the accessibility pass established on the hero. */
+.on-sky .eyebrow {
+  color: var(--sky-ink);
+  text-shadow: var(--sky-halo-soft);
+}
+.on-sky .lead {
+  color: var(--sky-ink-soft);
+  text-shadow: var(--sky-halo-soft);
+}
+.on-sky h1 {
+  color: var(--sky-ink);
+  text-shadow: var(--sky-halo);
+}
+
 /* Brand colour at text weights. Deliberately not a Tailwind `text-primary`
    override: the fill and the text want different reds. */
 .text-brand {

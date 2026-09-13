@@ -9,8 +9,15 @@
  *
  * Claims, each checkable in the codebase:
  *  - a race-free claim is one SQL statement (board/repository.ts:365-377)
- *  - a non-promotable verdict rejects `-> done` for every caller
- *    (board/repository.ts:619-621), not a convention an agent can route around
+ *  - promotion to done is GATED on the verification verdict
+ *    (board/repository.ts:619-621), not a convention an agent can route around.
+ *    Read that gate carefully before restating it: the condition is
+ *    `to === 'done' && !opts.humanOverride && !verdictCellPromotable(...)`, so
+ *    it is not unconditional. Two server paths pass humanOverride deliberately
+ *    (worktrees.ts:332 for an empty diff, openclawDispatch.ts:433 for an
+ *    OpenClaw connected-substrate completion, which audits itself as
+ *    `unverified: true`). An earlier draft of this page claimed the gate
+ *    rejected `-> done` "from any caller", which those two paths falsify.
  *  - one memory tier every runtime reads and writes
  *  - capabilities and spend visible per agent
  */
@@ -24,7 +31,7 @@ const panels = [
   {
     src: sharedMemory,
     title: 'One memory, shared',
-    body: 'Facts and procedures every runtime on the team can read and write, instead of four private context windows.',
+    body: 'Facts and procedures every runtime on the team can read and write, instead of a private context window per runtime.',
     alt: 'The shared memory panel, listing facts and versioned procedures.',
   },
   {
@@ -55,8 +62,8 @@ const panels = [
       <h2 class="d2 mt-4">A durable board, with the chat running alongside it.</h2>
       <p class="lead">
         The board is where decisions land and the chat is the narration. Tasks survive restarts,
-        two agents can never claim the same one, and a task carrying a failed verdict cannot move
-        to done, from any caller.
+        two agents can never claim the same one, and done is gated on a verification verdict
+        rather than an agent&rsquo;s word for it.
       </p>
     </div>
 
