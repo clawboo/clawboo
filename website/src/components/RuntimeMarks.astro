@@ -1,0 +1,117 @@
+---
+/**
+ * The five runtime marks as a floating row, used in place of a section eyebrow.
+ *
+ * These started life perched on the dashboard's corner, then briefly sat above
+ * the heading as an eyebrow, which is what made them feel cramped: an eyebrow
+ * is a label and sits tight to its heading by design. They now sit BELOW the
+ * heading and lead, where they are the section's payoff rather than its label,
+ * and can take the space that needs.
+ *
+ * No tiles, no container, no names. `lift` staggers them so the row reads as
+ * floating rather than ruled, and each bobs on its own offset.
+ */
+import RuntimeIcon from './RuntimeIcon.astro'
+import type { RuntimeMarkId } from '../lib/brandMarks'
+
+interface Props {
+  size?: number
+  class?: string
+}
+const { size = 56, class: cls = '' } = Astro.props
+
+const runtimes: { id: RuntimeMarkId; name: string; lift: number }[] = [
+  { id: 'openclaw', name: 'OpenClaw', lift: 0 },
+  { id: 'hermes', name: 'Hermes', lift: 7 },
+  { id: 'claude-code', name: 'Claude Code', lift: 3 },
+  { id: 'clawboo-native', name: 'Clawboo Native', lift: 11 },
+  { id: 'codex', name: 'Codex', lift: 5 },
+]
+---
+
+<ul class={`marks ${cls}`} aria-label="Runtimes that work together in Clawboo">
+  {
+    runtimes.map((r) => (
+      <li class="mark" style={`--lift:${r.lift}px;--bob-delay:${r.lift * 110}ms`} title={r.name}>
+        <RuntimeIcon id={r.id} bare size={size} />
+        <span class="vh">{r.name}</span>
+      </li>
+    ))
+  }
+</ul>
+
+<style>
+  .marks {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: clamp(2rem, 6vw, 4.5rem);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .mark {
+    display: inline-flex;
+    transform: translateY(calc(var(--lift) * -1));
+    /* Soft and low: these sit on a flat section ground, so the shadow only has
+       to lift them off it, not separate them from a busy background. */
+    filter: drop-shadow(0 8px 14px rgb(15 23 42 / 0.14));
+    animation: mark-bob 6.5s ease-in-out infinite;
+    /* --bob-delay, not calc(var(--lift) * 110ms): calc needs a <number> on one
+       side of a multiplication, and length x time is invalid, so that whole
+       declaration was thrown away and all five marks bobbed in unison. */
+    animation-delay: var(--bob-delay);
+  }
+  :global(:root.dark) .mark {
+    filter: drop-shadow(0 8px 16px rgb(0 0 0 / 0.5));
+  }
+
+  @keyframes mark-bob {
+    0%,
+    100% {
+      transform: translateY(calc(var(--lift) * -1));
+    }
+    50% {
+      transform: translateY(calc(var(--lift) * -1 - 6px));
+    }
+  }
+
+  .vh {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (max-width: 640px) {
+    .marks {
+      gap: 1.75rem;
+    }
+    .mark :global(svg) {
+      width: 40px;
+      height: 40px;
+    }
+  }
+  @media (max-width: 380px) {
+    .marks {
+      gap: 1.25rem;
+    }
+    .mark :global(svg) {
+      width: 34px;
+      height: 34px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mark {
+      animation: none;
+    }
+  }
+</style>

@@ -1,44 +1,43 @@
 ---
-import SignatureSky from '../components/atmosphere/SignatureSky.astro'
-import InstallCommand from '../components/InstallCommand.astro'
+/**
+ * Final CTA. Was a structural clone of the hero: same sky island (two more
+ * client:load React components), same install command with a near-identical
+ * caption, same solid Star button, same outline secondary. It is now a quiet
+ * closing band that repeats only the one thing worth repeating.
+ */
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
 import { links } from '../lib/site'
 ---
-<section id="cta" class="relative isolate overflow-hidden bg-[#8fb9ee] dark:bg-[#070d1e]">
-  <SignatureSky boos={4} />
-  <div class="relative z-10 mx-auto flex max-w-3xl flex-col items-center px-5 py-24 text-center sm:px-8 sm:py-32">
-    <span class="cb-cta-soft font-data text-[11px] font-semibold uppercase tracking-[0.2em]">Start now</span>
-    <h2 class="cb-cta-ink font-display mt-4 text-[32px] font-extrabold leading-[1.08] sm:text-[48px]">
-      Your team is ready in about a minute.
-    </h2>
-    <p class="cb-cta-soft mx-auto mt-4 max-w-xl text-[16px] leading-relaxed sm:text-[18px]">
-      Open-source, MIT, local-first. One command, one key, one room of agents that actually work
-      together.
-    </p>
 
-    <div class="mt-8">
-      <InstallCommand caption="Or try npx clawboo, no install." onSky />
-    </div>
+<section id="cta" class="section rule relative overflow-hidden">
+  <div class="cta-wash" aria-hidden="true"></div>
+  <div class="container container-prose relative z-10 text-center">
+    <h2 class="d2">A team of agents, running in about a minute.</h2>
 
-    <div class="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+    <div class="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
       <GitHubStars variant="solid" label="Star on GitHub" />
-      <Button href={links.discussions} target="_blank" rel="noopener noreferrer" variant="secondary" size="lg" iconRight="arrow-up-right">
-        Ask in Discussions
-      </Button>
+      <Button
+        href={links.discussions}
+        target="_blank"
+        rel="noopener noreferrer"
+        variant="secondary"
+        size="lg"
+        iconRight="arrow-up-right">Ask in Discussions</Button
+      >
     </div>
   </div>
-
-  <div class="pointer-events-none absolute inset-x-0 top-0 z-[11] h-24" style="background:linear-gradient(180deg, var(--background), transparent)"></div>
 </section>
 
 <style>
-  .cb-cta-ink {
-    color: var(--sky-ink);
-    text-shadow: var(--sky-halo);
-  }
-  .cb-cta-soft {
-    color: var(--sky-ink-soft);
-    text-shadow: var(--sky-halo-soft);
+  .cta-wash {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      52% 60% at 50% 100%,
+      rgb(var(--primary-rgb) / 0.09),
+      transparent 72%
+    );
   }
 </style>

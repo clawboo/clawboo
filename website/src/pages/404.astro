@@ -1,37 +1,40 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
-import SignatureSky from '../components/atmosphere/SignatureSky.astro'
 import Button from '../components/Button.astro'
-import InstallCommand from '../components/InstallCommand.astro'
+import SignatureSky from '../components/atmosphere/SignatureSky.astro'
 import { booAvatarToDataUrl } from '../lib/boo-avatar'
 
+// The Boo stays here: this is the one page where the mascot is the whole idea,
+// and it is a generated data URL, not a photograph.
 const boo = booAvatarToDataUrl({ seed: 'lost-boo', isBooZero: true })
 ---
-<BaseLayout title="Page not found · Clawboo" description="That page drifted off. Head back home or install Clawboo with npm i -g clawboo." robots="noindex,follow">
-  <section class="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-5 text-center bg-[#8fb9ee] dark:bg-[#070d1e]">
-    <SignatureSky boos={5} />
+
+<BaseLayout
+  title="Page not found · Clawboo"
+  description="That page drifted off. Head back home and start a team of agents instead."
+  robots="noindex,follow"
+>
+  <section
+    class="on-sky relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-5 text-center"
+  >
+    <div class="pointer-events-none absolute inset-0 overflow-hidden"><SignatureSky boos={5} /></div>
     <div class="relative z-10 flex flex-col items-center">
-      <img src={boo} alt="A lost Boo" width="96" height="88" class="clawboo-float" style="filter:drop-shadow(0 14px 28px rgba(18,28,56,0.28))" />
-      <p class="cb-ink font-data mt-6 text-[13px] font-semibold uppercase tracking-[0.2em]">Error 404</p>
-      <h1 class="cb-ink font-display mt-2 text-[40px] font-extrabold leading-tight sm:text-[56px]">This Boo drifted off.</h1>
-      <p class="cb-ink-soft mt-3 max-w-md text-[16px] leading-relaxed">
+      <img
+        src={boo}
+        alt="A lost Boo"
+        width="88"
+        height="81"
+        class="clawboo-float"
+        style="filter:drop-shadow(0 14px 28px rgb(var(--foreground-rgb) / 0.18))"
+      />
+      <p class="eyebrow mt-7">Error 404</p>
+      <h1 class="d1 mt-3">This Boo drifted off.</h1>
+      <p class="lead mt-4 max-w-md">
         The page you are looking for is not here. Head back home, or start a team of your own.
       </p>
-      <div class="mt-7 flex flex-col items-center gap-4">
+      <div class="mt-8 flex flex-col items-center gap-4">
         <Button href="/" variant="primary" size="lg" iconRight="arrow-right">Back home</Button>
-        <InstallCommand caption="Or try npx clawboo, no install." onSky />
       </div>
     </div>
   </section>
 </BaseLayout>
-
-<style>
-  .cb-ink {
-    color: var(--sky-ink);
-    text-shadow: var(--sky-halo);
-  }
-  .cb-ink-soft {
-    color: var(--sky-ink-soft);
-    text-shadow: var(--sky-halo-soft);
-  }
-</style>

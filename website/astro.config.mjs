@@ -12,6 +12,8 @@ export default defineConfig({
   site: SITE,
   output: 'static',
   integrations: [
+    // Required by the atmosphere components (SignatureSky -> SkyAtmosphere ->
+    // BackgroundBoos), which are restored verbatim from main and are React.
     react(),
     sitemap({
       // Freshness/priority hints. lastmod is a fixed calendar date, not the wall

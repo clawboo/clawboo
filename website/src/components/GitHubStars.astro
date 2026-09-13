@@ -6,12 +6,17 @@
  */
 import Icon from './Icon.astro'
 import { links } from '../lib/site'
+import { getStarCount, formatStars } from '../lib/stars'
 interface Props {
   variant?: 'pill' | 'solid'
   label?: string
   class?: string
 }
 const { variant = 'pill', label = 'Star', class: cls = '' } = Astro.props
+
+// Resolved at build time so the badge always ships a number; the client script
+// in BaseLayout refreshes it when GitHub answers.
+const stars = formatStars(await getStarCount())
 ---
 <a
   href={links.github}
@@ -27,25 +32,39 @@ const { variant = 'pill', label = 'Star', class: cls = '' } = Astro.props
 >
   <Icon name="star" size={16} fill class="text-amber transition-transform duration-200 group-hover:scale-110" />
   <span>{label}</span>
+  <!-- Solid: no chip. The bg-white/20 wash lifted the ground under the count
+       to #ed6a80, dropping white to 3.01:1; on the flat brand fill it is
+       4.70:1. Pill: --amber-ink is the amber darkened for text, since --amber
+       itself on its own /15 tint measures 2.67:1. -->
   <span
     data-gh-stars
-    class={`font-data rounded-md px-1.5 py-0.5 text-[12px] tabular-nums ${
-      variant === 'solid' ? 'bg-white/20' : 'bg-amber/15 text-amber'
-    }`}>★</span>
+    class={`font-data px-1.5 py-0.5 text-[12px] tabular-nums ${
+      variant === 'solid' ? '' : 'rounded-md bg-amber/15 text-[color:var(--amber-ink)]'
+    }`}>{stars}</span>
 </a>
 
 <style>
+  /* Matches .cb-btn-primary: flat brand fill and a real shadow, not a coloured
+     halo. The two sit side by side in the hero, so they have to agree. */
   .cb-star-solid {
-    background-image: linear-gradient(135deg, #ff4d4d 0%, #c81d3b 100%);
-    box-shadow:
-      0 8px 24px rgb(var(--primary-rgb) / 0.3),
-      0 0 0 1px rgb(var(--primary-rgb) / 0.15),
-      inset 0 1px 0 rgb(255 255 255 / 0.18);
+    background-color: var(--brand-fill);
+    box-shadow: var(--shadow-raised);
+  }
+  /* This element sets its own box-shadow, which replaces the global focus
+     halo instead of adding to it; without this the ring is red only,
+     and red on the hero sky is 1.03:1. */
+  .cb-star-solid:focus-visible {
+    box-shadow: var(--focus-halo), var(--shadow-raised);
   }
   .cb-star-solid:hover {
     transform: translateY(-1px);
-    box-shadow:
-      0 12px 30px rgb(var(--primary-rgb) / 0.4),
-      0 0 0 1px rgb(var(--primary-rgb) / 0.2);
+    background-color: color-mix(in srgb, var(--brand-fill) 88%, #000);
+    box-shadow: var(--shadow-floating);
+  }
+  /* :hover and :focus-visible are both (0,2,0), so the hover rule above wins on
+     source order and takes the halo with it. A keyboard user whose pointer
+     happens to rest on the button was left with the bare red outline. */
+  .cb-star-solid:hover:focus-visible {
+    box-shadow: var(--focus-halo), var(--shadow-floating);
   }
 </style>

@@ -1,109 +1,150 @@
 ---
-import SignatureSky from '../components/atmosphere/SignatureSky.astro'
-import { BooSquad } from '../components/atmosphere/BooSquad.tsx'
-import InstallCommand from '../components/InstallCommand.astro'
+/**
+ * Hero.
+ *
+ * Positioning: this is NOT a coding tool. The catalogue is 436 agents across
+ * categories like agency-agents, growth-marketing, lifecycle-commerce,
+ * google-ads-analytics, creator-studio, business-desk and product-craft, and
+ * the screenshot below shows a marketing squad, not engineers. The headline
+ * used to say "your coding agents", which fought both the product and its own
+ * picture. Claude Code, Codex and Hermes are the ENGINES; the agents built on
+ * them do any kind of work, so the runtimes are named further down the page
+ * rather than in the promise.
+ *
+ * The sky is the ORIGINAL SignatureSky, restored verbatim from main: two
+ * server-rendered SkyAtmosphere islands (day and night, CSS-swapped so there is
+ * no flash), each with its drifting BackgroundBoos. It is scoped to a band
+ * rather than the viewport so the dashboard breaks across its lower edge.
+ *
+ * BooSquad sits between the CTAs and the dashboard, where a row of runtime tile
+ * buttons used to be. The runtime marks moved out of this section entirely and
+ * now head the Runtimes section, in place of its eyebrow text.
+ */
+import { Picture } from 'astro:assets'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
-import Icon from '../components/Icon.astro'
-import { site, links } from '../lib/site'
-
-const trust = ['npm v0.3.1', 'MIT licensed', 'TypeScript strict', 'Node.js 22+']
+import SignatureSky from '../components/atmosphere/SignatureSky.astro'
+import { BooSquad } from '../components/atmosphere/BooSquad.tsx'
+import { links } from '../lib/site'
+import teamSpace from '../assets/screenshots/team-space.png'
 ---
-<section
-  id="hero"
-  class="relative flex min-h-[100svh] flex-col overflow-hidden bg-[#8fb9ee] dark:bg-[#070d1e]"
->
-  <!-- Signature sky backdrop: day clouds in light mode, deep night clouds in dark mode. -->
-  <SignatureSky />
 
-  <div class="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col items-center px-5 pt-28 text-center sm:px-8 sm:pt-32">
-    <span class="cb-ink-soft font-data inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em]">
-      <span class="h-1.5 w-1.5 rounded-full" style="background:#dc2a48"></span>
-      Open-source · MIT · Local-first
-    </span>
+<section id="hero" class="relative overflow-hidden on-sky">
+  <div class="sky-band" aria-hidden="true"><SignatureSky /></div>
 
-    <h1 class="cb-ink font-display mx-auto mt-5 max-w-4xl text-balance text-[36px] font-extrabold leading-[1.04] sm:text-[56px] lg:text-[68px]">
-      Get a week of work done by morning.
-    </h1>
+  <div class="container container-wide relative z-10 pb-16 pt-28 sm:pt-32">
+    <div class="mx-auto max-w-3xl text-center">
+      <span class="eyebrow">Open-source · MIT · Local-first</span>
 
-    <p class="cb-ink font-display mx-auto mt-4 max-w-2xl text-[20px] font-bold leading-snug sm:text-[26px]">
-      Put a whole team of AI agents on it.
-    </p>
+      <h1 class="d1 mt-5">Put a whole team of AI agents on it.</h1>
 
-    <p class="cb-ink-soft mx-auto mt-4 max-w-xl text-[16px] leading-relaxed sm:text-[18px]">
-      They actually work together, on one shared board and chat you watch live. Native is built in,
-      so paste one key and go.
-    </p>
+      <p class="lead mx-auto mt-5 max-w-xl">
+        Marketing, research, ops, content, code. Give one brief to a team of agents and watch them
+        split it up, hand work between each other, and finish it on a board you can see.
+      </p>
 
-    <div class="mt-8">
-      <InstallCommand caption="Node.js 22+. Or try npx clawboo, no install." onSky />
+      <div class="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+        <GitHubStars variant="solid" label="Star on GitHub" />
+        <Button
+          href={links.docs}
+          target="_blank"
+          rel="noopener noreferrer"
+          variant="secondary"
+          size="lg"
+          iconRight="arrow-up-right"
+        >
+          Read the docs
+        </Button>
+      </div>
     </div>
 
-    <div class="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-      <GitHubStars variant="solid" label="Star on GitHub" />
-      <Button href={links.docs} target="_blank" rel="noopener noreferrer" variant="secondary" size="lg" iconRight="arrow-up-right">
-        Read the docs
-      </Button>
+    <!-- The squad, back where the runtime tiles were. -->
+    <div class="relative z-10 mt-10 flex w-full justify-center overflow-hidden sm:mt-8">
+      <BooSquad client:visible />
     </div>
 
-    <ul class="mt-7 flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
-      {
-        trust.map((t, i) => (
-          <li class="flex items-center gap-2">
-            {i > 0 && <span class="cb-ink-faint hidden sm:inline">·</span>}
-            <span class="cb-ink-soft font-data inline-flex items-center gap-1.5 text-[12px]">
-              <Icon name="check" size={13} class="text-[#0c8a52] dark:text-[#5fe0a0]" />
-              {t}
-            </span>
-          </li>
-        ))
-      }
-    </ul>
-  </div>
-
-  <!-- Live Boo squad sits on the lower band of the sky. -->
-  <div class="relative z-10 mt-8 flex w-full justify-center overflow-hidden pb-2 sm:mt-4">
-    <BooSquad client:visible />
-  </div>
-
-  <!-- Soft fade into the page below. -->
-  <div
-    class="pointer-events-none absolute inset-x-0 bottom-0 z-[11] h-28"
-    style="background:linear-gradient(180deg, transparent, var(--background))"
-  >
+    <!-- The dashboard, at full content width and actually readable. The source
+         is 2720x1720, so it carries this size; it used to render at 300px
+         inside a drawn browser window, 900px down the page. -->
+    <figure class="shot mt-10 sm:mt-12">
+      <Picture
+        src={teamSpace}
+        alt="The Clawboo board: a marketing squad of agents with tasks moving across todo, in progress and done, and the group chat alongside."
+        formats={['avif', 'webp']}
+        widths={[720, 1080, 1440, 1920, 2400]}
+        sizes="(min-width: 1280px) 1200px, 94vw"
+        loading="eager"
+        fetchpriority="high"
+      />
+    </figure>
   </div>
 </section>
 
 <style>
-  /* Pinned-dark hero text (the sky is always light in both themes). */
-  .cb-ink {
-    color: var(--sky-ink);
-    text-shadow: var(--sky-halo);
+  /* The band scopes the restored full-bleed sky. SignatureSky is absolute
+     inset-0, so it fills this wrapper rather than the whole hero. */
+  .sky-band {
+    position: absolute;
+    inset: 0 0 auto;
+    height: clamp(30rem, 26rem + 18vw, 46rem);
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 48%, transparent 88%);
+    mask-image: linear-gradient(180deg, #000 0%, #000 48%, transparent 88%);
   }
-  .cb-ink-soft {
-    color: var(--sky-ink-soft);
-    text-shadow: var(--sky-halo-soft);
+
+  /* Haze at the zenith. This is here for the nav: its links sit in the most
+     saturated part of the gradient and measured 2.83:1 against it, and no
+     text colour fixes that (opaque --foreground on that blue is 4.09:1,
+     white 4.36:1). Lightening the ground under them is the only lever, and a
+     top-down haze is the one that costs the sky nothing: it reads as glare,
+     the clouds still run through it, and the nav keeps its transparent state
+     instead of wearing a frosted bar from page load. */
+  .sky-band::after {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 11rem;
+    background: linear-gradient(
+      180deg,
+      rgb(255 255 255 / 0.62) 0%,
+      rgb(255 255 255 / 0.44) 34%,
+      rgb(255 255 255 / 0.18) 68%,
+      transparent 100%
+    );
+    pointer-events: none;
   }
-  .cb-ink-faint {
-    color: rgba(30, 37, 64, 0.4);
+  :global(:root.dark) .sky-band::after {
+    background: linear-gradient(
+      180deg,
+      rgb(6 10 22 / 0.6) 0%,
+      rgb(6 10 22 / 0.42) 34%,
+      rgb(6 10 22 / 0.18) 68%,
+      transparent 100%
+    );
   }
-  /* Responsive scale for the foreground Boo squad. */
-  .clawboo-boo-squad {
+
+  /* The original sky is saturated where the type sits, which is why the old hero
+     used a text-shadow halo on every string. Those tokens are still in
+     tokens.css, so the restored sky gets the treatment it was designed with. */
+  /* Responsive scale for the foreground Boo squad, as the original hero had. */
+  :global(.clawboo-boo-squad) {
     transform-origin: center bottom;
   }
   @media (max-width: 1024px) {
-    .clawboo-boo-squad {
+    :global(.clawboo-boo-squad) {
       transform: scale(0.82);
     }
   }
   @media (max-width: 768px) {
-    .clawboo-boo-squad {
+    :global(.clawboo-boo-squad) {
       transform: scale(0.62);
     }
   }
   @media (max-width: 520px) {
-    .clawboo-boo-squad {
-      transform: scale(0.42);
+    :global(.clawboo-boo-squad) {
+      transform: scale(0.46);
     }
   }
 </style>

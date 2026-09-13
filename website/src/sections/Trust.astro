@@ -1,0 +1,85 @@
+---
+/**
+ * Run it with confidence.
+ *
+ * These four are claims, not features with a screenshot, so this is the one
+ * section where the reference pattern is HubSpot's and Notion's text grid: a
+ * hairline-ruled column, a title, two lines. No icons: the tinted rounded
+ * square that used to head each card is the generic element the redesign is
+ * trying to get away from, and inventing a screenshot for a claim would be
+ * worse than having none.
+ *
+ * Corrections carried in from the code audit:
+ *  - "approvals for sensitive steps" was MISLEADING in four places. Spawned
+ *    runtimes execute board tasks with approvals OFF: bypassPermissions
+ *    (claudeCodeDriver.ts:236), --dangerously-bypass-approvals-and-sandbox
+ *    (codexDriver.ts:121), --yolo (hermesDriver.ts:234). What ships is a
+ *    delegation-level gate, where risky task text is matched and queued to the leader
+ *    (riskyDelegation.ts:13), fail-closed. Stated with that scope.
+ *  - The critic runs on delegated or large diffs, not every completion
+ *    (criticTrigger.ts:23-30).
+ *  - Catalogue counts are not quoted: PR #184 makes the catalogue a live fetch
+ *    (catalogIndex.ts:59), so a hardcoded number could be contradicted by the
+ *    product's own screen.
+ */
+const pillars = [
+  {
+    title: 'The builder is not the judge',
+    body: 'Work is checked by its own verify command, and delegated or large diffs get an independent reviewer on a detached, push-less copy of the repo. A missing verify command scores as a failed check, never as a silent pass.',
+  },
+  {
+    title: 'Spend is tracked, and you set the ceiling',
+    body: 'Budgets per agent, per team and per mission. Warn by default; a hard cap that auto-pauses is one setting away. Nothing is throttled behind your back.',
+  },
+  {
+    title: 'Limits live below the model',
+    body: 'Nesting depth, fan-out, lifetime children and create rate are enforced in code, not requested in a prompt. An agent cannot talk its way past them, and risky delegations wait for the leader.',
+  },
+  {
+    title: 'Local-first, with an address',
+    body: 'Your board and history are SQLite at ~/.clawboo/clawboo.db. Your keys are in an AES-256-GCM vault at ~/.clawboo/secrets/. No account, no product analytics.',
+  },
+]
+
+const stats = [
+  { n: '5', label: 'runtimes as peers' },
+  { n: '11', label: 'providers built in' },
+  { n: '3', label: 'operating systems, one CI matrix' },
+]
+---
+
+<section id="trust" class="section rule">
+  <div class="container">
+    <div class="section-head section-head--center">
+      <span class="eyebrow">Run it with confidence</span>
+      <h2 class="d2 mt-4">Autonomous, but never unaccountable.</h2>
+      <p class="lead">
+        You can see what every agent did, what it cost, and why a task was allowed to finish.
+      </p>
+    </div>
+
+    <dl class="grid gap-x-12 gap-y-9 sm:grid-cols-2">
+      {
+        pillars.map((p) => (
+          <div class="border-t border-border pt-5">
+            <dt class="d3">{p.title}</dt>
+            <dd class="mt-2 text-[14.5px] leading-relaxed text-secondary">{p.body}</dd>
+          </div>
+        ))
+      }
+    </dl>
+
+    <dl class="mt-14 grid grid-cols-3 gap-4">
+      {
+        stats.map((s) => (
+          <div class="text-center">
+            <dt class="font-display text-[30px] font-medium leading-none tracking-tight text-foreground sm:text-[38px]">
+              {s.n}
+            </dt>
+            <dd class="mt-2 text-[13px] leading-snug text-secondary">{s.label}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+</section>

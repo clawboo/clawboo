@@ -7,10 +7,10 @@ const columns = [
   {
     title: 'Product',
     items: [
-      { label: 'Quickstart', href: '#how' },
-      { label: 'Runtimes', href: '#runtimes' },
-      { label: 'Features', href: '#features' },
-      { label: 'FAQ', href: '#faq' },
+      { label: 'Quickstart', href: '/#how' },
+      { label: 'Runtimes', href: '/#runtimes' },
+      { label: 'The board', href: '/#board' },
+      { label: 'FAQ', href: '/#faq' },
     ],
   },
   {
@@ -52,14 +52,13 @@ const columns = [
         </a>
         <p class="mt-3 max-w-[240px] text-[13px] leading-relaxed text-secondary">{site.tagline}</p>
         <div class="mt-4">
-          <CopyButton text={site.install} label={site.install} class="font-data surface-raised-tier rounded-lg px-3 py-2 text-[12px] text-foreground/70 hover:text-foreground" />
         </div>
       </div>
 
       {
         columns.map((col) => (
           <div>
-            <h3 class="text-[12px] font-semibold uppercase tracking-wider text-foreground/45">{col.title}</h3>
+            <h3 class="text-[12px] font-semibold uppercase tracking-wider text-foreground/70">{col.title}</h3>
             <ul class="mt-3 space-y-2">
               {col.items.map((it) => (
                 <li>

@@ -1,7 +1,20 @@
 /**
  * Homepage FAQ, shared by the visible <Faq> section and the FAQPage JSON-LD in
  * BaseLayout. Single source of truth so the structured data can never drift from
- * the rendered copy. Copy law: no em dashes; claims match the shipped v0.3.0 surface.
+ * the rendered copy. Copy law: no em dashes.
+ *
+ * Cut from 11 items to 6 and from ~560 words to ~200. Every dropped question
+ * either duplicated a section on the page or duplicated another answer:
+ *  - "Do I need OpenClaw" folded into the runtimes answer
+ *  - "How is this different" is now the Runtimes section's own subhead
+ *  - "Is it production-ready" and "What is not in yet" merged into one
+ *
+ * Claims verified against the code, not against the previous copy:
+ *  - Node floor is 22.12, not 22 (apps/cli/src/node-version.ts:14-15)
+ *  - Hermes additionally needs Python 3.11-3.13 + pipx (descriptor.ts:114-119)
+ *  - Catalogue counts are deliberately not quoted: PR #184 makes the catalogue a
+ *    live fetch (catalogIndex.ts:59-60), so any number here could be
+ *    contradicted by the user's own screen.
  */
 
 export interface FaqItem {
@@ -12,46 +25,26 @@ export interface FaqItem {
 export const faqs: FaqItem[] = [
   {
     q: 'Is Clawboo free and open-source?',
-    a: 'Yes. Clawboo is open-source under the MIT license, free to use and to fork. The code lives on GitHub and the package is on npm. The strongest thing you can do to help is star the repo.',
+    a: 'Yes, MIT licensed and free to use or fork. The code is on GitHub and the package is on npm.',
   },
   {
-    q: 'Do I need OpenClaw to use it?',
-    a: 'No. Clawboo Native is built in and is the default runtime. Paste one provider key and you have a working team without installing anything else. OpenClaw, Claude Code, Codex, and Hermes are optional peers you can connect later from the Runtimes panel.',
+    q: 'Which agents can I use?',
+    a: 'The built-in Native runtime speaks to eleven providers, and a key from any one of them is enough to start. Nothing else needs installing. Claude Code, Codex, Hermes and OpenClaw connect as optional peers.',
   },
   {
-    q: 'Which providers and models can I use?',
-    a: 'Clawboo Native talks directly to Anthropic, OpenAI, OpenRouter and a local Ollama, plus seven more OpenAI-compatible providers: Google, xAI, Groq, Mistral, Together, Cerebras and Moonshot. Connected runtimes bring their own: Claude Code uses Anthropic, Codex uses OpenAI, and Hermes runs over OpenRouter. You only paste the keys for the runtimes you actually turn on.',
-  },
-  {
-    q: 'Where does my data live?',
-    a: 'On your machine. The Clawboo app does not collect telemetry, usage data, or analytics. Your board, chat history, memory and settings are stored locally in ~/.clawboo/, with the board in SQLite at ~/.clawboo/clawboo.db and your API keys in an AES-256-GCM encrypted vault under ~/.clawboo/secrets/. Model calls go only to the provider you configure, whether that is Anthropic, OpenRouter, or a local Ollama that never leaves your machine.',
-  },
-  {
-    q: 'Is it production-ready?',
-    a: 'Treat it as an early, working release. The current version is v0.3.x: a real studio you can run today, not a sealed 1.0. Core surfaces are covered by end-to-end tests, and releases ship as features land.',
-  },
-  {
-    q: 'How is this different from just using one coding agent?',
-    a: 'A single coding agent is a brilliant soloist in its own terminal, with its own memory and no shared record. Clawboo is the layer that turns several of them into one team: one durable board of truth, one chat, one shared memory, and one capability inventory, with coordination over structured events. Any runtime can lead, and work can move between them with a structured handoff.',
-  },
-  {
-    q: 'Can I add my own agents, skills, and teams?',
-    a: 'Yes. v0.3.x ships 304+ first-class agents across 15 domains and 82 workflow teams, browsable in a 3-tab marketplace for Skills, Agents, and Teams. You compose teams from these and connect the runtimes you want behind them.',
-  },
-  {
-    q: 'How does Clawboo control cost?',
-    a: 'Spend tracking and warnings are on by default, with depth and fan-out caps and approvals for sensitive steps. If you want a hard ceiling, opt in to spend caps that auto-pause a run before it goes over. You always see spend as work happens, not after the fact.',
+    q: 'Where does my data go?',
+    a: 'Your board, chat and memory stay on your machine. Prompts and code go only to the model provider you configure. Clawboo itself has no account and no product analytics.',
   },
   {
     q: 'How do agents avoid stepping on each other?',
-    a: 'The board is the canonical source of truth. Claims are race-free, every delegation is a real board mutation, and code tasks get their own git worktree on Native, Claude Code, Codex and Hermes. OpenClaw runs over its own Gateway connection, without a worktree. Coordination flows over structured lifecycle events and MCP calls.',
+    a: 'Each task is claimed by a single conditional write, so two agents can never take the same one, and each works in its own copy of the repo.',
   },
   {
-    q: 'What is not in yet?',
-    a: 'We are honest about open seams. Onboarding seeds a native starter team (you build mixed-runtime teams yourself), or you can pick one straight from the marketplace. Human participants on the board plus multi-tenant deployments are on the roadmap, not shipped yet.',
+    q: 'What do I need to run it?',
+    a: 'Node.js 22.12 or newer, on macOS, Linux or Windows. Connecting Hermes also needs Python 3.11 to 3.13 and pipx.',
   },
   {
-    q: 'Which platforms does it run on?',
-    a: 'macOS, Linux, and Windows are all first-class. The only prerequisite is Node.js 22+.',
+    q: 'Is it ready for real work?',
+    a: 'It is early and moves fast. The board, chat, runtimes, memory and verification gate all ship and are covered by end-to-end tests. Expect rough edges at the margins.',
   },
 ]

@@ -72,17 +72,26 @@ const iconSize = size === 'sm' ? 15 : 17
 
 <style>
   .cb-btn-primary {
-    background-image: linear-gradient(135deg, #ff4d4d 0%, #c81d3b 100%);
-    box-shadow:
-      0 8px 24px rgb(var(--primary-rgb) / 0.3),
-      0 0 0 1px rgb(var(--primary-rgb) / 0.15),
-      inset 0 1px 0 rgb(255 255 255 / 0.18);
+    /* --brand-fill, not --primary: white on the dark theme's #e94560 is
+       3.83:1. See the accessibility block in marketing.css. */
+    background-color: var(--brand-fill);
+    box-shadow: var(--shadow-raised);
+  }
+  /* This element sets its own box-shadow, which replaces the global focus
+     halo instead of adding to it; without this the ring is red only,
+     and red on the hero sky is 1.03:1. */
+  .cb-btn-primary:focus-visible {
+    box-shadow: var(--focus-halo), var(--shadow-raised);
   }
   .cb-btn-primary:hover {
     transform: translateY(-1px);
-    box-shadow:
-      0 12px 30px rgb(var(--primary-rgb) / 0.4),
-      0 0 0 1px rgb(var(--primary-rgb) / 0.2),
-      inset 0 1px 0 rgb(255 255 255 / 0.22);
+    background-color: color-mix(in srgb, var(--brand-fill) 88%, #000);
+    box-shadow: var(--shadow-floating);
+  }
+  /* :hover and :focus-visible are both (0,2,0), so the hover rule above wins on
+     source order and takes the halo with it. A keyboard user whose pointer
+     happens to rest on the button was left with the bare red outline. */
+  .cb-btn-primary:hover:focus-visible {
+    box-shadow: var(--focus-halo), var(--shadow-floating);
   }
 </style>

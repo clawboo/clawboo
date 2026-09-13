@@ -1,0 +1,190 @@
+---
+/**
+ * See it work. Merges the old Proof and HowItWorks sections.
+ *
+ * They made the same promise twice ("about a minute", "localhost:18790",
+ * "no cloud account"), each inside its own drawn browser window, one around a
+ * video and one around a typed terminal. The video already shows the terminal,
+ * so TerminalDemo is gone. ~230 words of copy became ~70.
+ */
+
+const steps = [
+  {
+    n: '01',
+    title: 'Install and run',
+    body: 'One npm install, then <code>clawboo</code>. The dashboard opens on your machine.',
+  },
+  {
+    n: '02',
+    title: 'Add a key, or a CLI',
+    body: 'Paste a provider key to use the built-in agents, or connect Claude Code, Codex or Hermes.',
+  },
+  {
+    n: '03',
+    title: 'Give the team a task',
+    body: 'A leader breaks it up, delegates, and every step lands on the board as it happens.',
+  },
+]
+---
+
+<!-- No `rule` here: this section meets the hero's sky, and a hairline against
+     a soft fade reads as a seam. Every other section keeps its divider. -->
+<section id="how" class="section">
+  <div class="container">
+    <div class="section-head section-head--center">
+      <span class="eyebrow">See it work</span>
+      <h2 class="d2 mt-4">One request, split across specialists, tracked on the board.</h2>
+      <p class="lead">A leader takes the request, delegates it, and narrates the work in chat.</p>
+    </div>
+
+    <!-- The recording is the proof. The old copy said "Nothing here is a mockup"
+         underneath it; a product that has to say that is arguing with itself. -->
+    <!-- It loops forever, so it needs a way to stop: a keyboard-reachable
+         control, not native <video controls>, which would hang a player bar
+         across the one piece of product footage on the page. Reduced-motion
+         users get it paused on the poster frame with the button offering
+         Play instead. -->
+    <figure class="shot vid">
+      <video
+        id="cb-demo"
+        loop
+        muted
+        playsinline
+        preload="metadata"
+        poster="/demo/clawboo-demo-poster.webp"
+        width="1080"
+        height="608"
+        aria-label="A Clawboo session: one request is delegated to specialists, tracked on the board, and narrated in chat."
+      >
+        <source src="/demo/clawboo-demo.webm" type="video/webm" />
+        <source src="/demo/clawboo-demo.mp4" type="video/mp4" />
+      </video>
+      <button id="cb-demo-toggle" type="button" class="vid-btn" aria-label="Pause the demo">
+        <span class="vid-pause" aria-hidden="true"></span>
+        <svg class="vid-play" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <path d="M8 5.5v13l11-6.5z" fill="currentColor"></path>
+        </svg>
+      </button>
+    </figure>
+
+    <script is:inline>
+      ;(function () {
+        var v = document.getElementById('cb-demo')
+        var b = document.getElementById('cb-demo-toggle')
+        if (!v || !b) return
+        var calm =
+          window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        function sync() {
+          var playing = !v.paused
+          b.setAttribute('aria-label', playing ? 'Pause the demo' : 'Play the demo')
+          b.classList.toggle('is-playing', playing)
+        }
+        // Pressing Pause has to STICK. The observer fires every time the video
+        // re-enters the viewport, so without this flag a scroll down and back
+        // restarted the loop and WCAG 2.2.2 was not really satisfied: a pause
+        // any scroll undoes is not a pause.
+        var userPaused = false
+        v.addEventListener('play', sync)
+        v.addEventListener('pause', sync)
+        b.addEventListener('click', function () {
+          if (v.paused) {
+            userPaused = false
+            v.play()
+          } else {
+            userPaused = true
+            v.pause()
+          }
+        })
+        if (!calm) {
+          var io = new IntersectionObserver(
+            function (es) {
+              es.forEach(function (e) {
+                if (!e.isIntersecting || userPaused) return
+                v.play().catch(function () {})
+                // One autostart is all this owes the reader; after that the
+                // button is in charge and the observer is just a leak.
+                io.disconnect()
+              })
+            },
+            { threshold: 0.25 }
+          )
+          io.observe(v)
+        }
+        sync()
+      })()
+    </script>
+
+    <ol class="mt-12 grid gap-6 sm:grid-cols-3 sm:gap-8">
+      {
+        steps.map((s) => (
+          <li>
+            <span class="font-data text-[12px] text-brand">{s.n}</span>
+            <h3 class="d3 mt-2">{s.title}</h3>
+            <p class="mt-1.5 text-[15px] leading-relaxed text-secondary" set:html={s.body} />
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>
+
+<style>
+  .vid {
+    position: relative;
+  }
+  .vid-btn {
+    position: absolute;
+    right: 0.875rem;
+    bottom: 0.875rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    color: #fff;
+    background: rgb(9 14 26 / 0.55);
+    backdrop-filter: blur(8px) saturate(140%);
+    -webkit-backdrop-filter: blur(8px) saturate(140%);
+    border: 1px solid rgb(255 255 255 / 0.22);
+    opacity: 0;
+    transition:
+      opacity 150ms ease,
+      background 150ms ease;
+  }
+  /* Present on hover, on focus, and always on touch, where there is no hover
+     to reveal it. */
+  .vid:hover .vid-btn,
+  .vid-btn:focus-visible {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .vid-btn {
+      opacity: 1;
+    }
+  }
+  .vid-btn:hover {
+    background: rgb(9 14 26 / 0.72);
+  }
+  .vid-pause {
+    display: none;
+    width: 11px;
+    height: 12px;
+    border-left: 3.5px solid currentColor;
+    border-right: 3.5px solid currentColor;
+  }
+  .vid-btn.is-playing .vid-pause {
+    display: block;
+  }
+  .vid-btn.is-playing .vid-play {
+    display: none;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--code-block-bg);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+</style>

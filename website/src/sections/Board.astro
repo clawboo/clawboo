@@ -1,0 +1,91 @@
+---
+/**
+ * What you actually get.
+ *
+ * Built on the Tines grid: the card IS a cropped piece of the product and the
+ * words sit under it. No icon in a tinted rounded square anywhere: that
+ * element is the single most generic thing on a SaaS page and none of the
+ * references use one.
+ *
+ * Claims, each checkable in the codebase:
+ *  - a race-free claim is one SQL statement (board/repository.ts:365-377)
+ *  - promotion to done is GATED on the verification verdict
+ *    (board/repository.ts:619-621), not a convention an agent can route around.
+ *    Read that gate carefully before restating it: the condition is
+ *    `to === 'done' && !opts.humanOverride && !verdictCellPromotable(...)`, so
+ *    it is not unconditional. Two server paths pass humanOverride deliberately
+ *    (worktrees.ts:332 for an empty diff, openclawDispatch.ts:433 for an
+ *    OpenClaw connected-substrate completion, which audits itself as
+ *    `unverified: true`). An earlier draft of this page claimed the gate
+ *    rejected `-> done` "from any caller", which those two paths falsify.
+ *  - one memory tier every runtime reads and writes
+ *  - capabilities and spend visible per agent
+ */
+import { Picture } from 'astro:assets'
+import sharedMemory from '../assets/screenshots/shared-memory.png'
+import capabilities from '../assets/screenshots/capabilities-panel.png'
+import agentDetail from '../assets/screenshots/agent-detail.png'
+import ghostGraph from '../assets/screenshots/ghost-graph.png'
+
+const panels = [
+  {
+    src: sharedMemory,
+    title: 'One memory, shared',
+    body: 'Facts and procedures every runtime on the team can read and write, instead of a private context window per runtime.',
+    alt: 'The shared memory panel, listing facts and versioned procedures.',
+  },
+  {
+    src: capabilities,
+    title: 'Every capability, in one place',
+    body: 'Skills and connectors across all five runtimes, in one inventory you can actually audit.',
+    alt: 'The capabilities panel, listing skills and connectors across runtimes.',
+  },
+  {
+    src: agentDetail,
+    title: 'Agents you can open up',
+    body: 'Model, prompt, tools, budget and history for each teammate, editable in place.',
+    alt: 'An agent detail view with its model, prompt, tools and budget.',
+  },
+  {
+    src: ghostGraph,
+    title: 'See the whole team at once',
+    body: 'Who delegated what to whom, live, across every team you are running.',
+    alt: 'The team graph, showing a leader delegating to specialist agents.',
+  },
+]
+---
+
+<section id="board" class="section band">
+  <div class="container">
+    <div class="section-head section-head--center">
+      <span class="eyebrow">The board</span>
+      <h2 class="d2 mt-4">A durable board, with the chat running alongside it.</h2>
+      <p class="lead">
+        The board is where decisions land and the chat is the narration. Tasks survive restarts,
+        two agents can never claim the same one, and a failed verification verdict blocks the move
+        to done unless it is explicitly overridden.
+      </p>
+    </div>
+
+    <div class="grid gap-x-6 gap-y-10 sm:grid-cols-2">
+      {
+        panels.map((p) => (
+          <div class="shot-card">
+            <figure>
+              <Picture
+                src={p.src}
+                alt={p.alt}
+                formats={['avif', 'webp']}
+                widths={[560, 840, 1120]}
+                sizes="(min-width: 640px) 520px, 92vw"
+                loading="lazy"
+              />
+            </figure>
+            <h3 class="d3">{p.title}</h3>
+            <p>{p.body}</p>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>

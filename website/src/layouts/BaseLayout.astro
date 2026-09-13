@@ -3,6 +3,7 @@ import { ClientRouter } from 'astro:transitions'
 import { site, links } from '../lib/site'
 import type { FaqItem } from '../lib/faq'
 import '../styles/global.css'
+import '../styles/marketing.css'
 
 interface Props {
   title?: string
@@ -145,7 +146,9 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
       ;(function () {
         try {
           var stored = window.localStorage.getItem('clawboo.theme')
-          var pref = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light'
+          // Default to the visitor's OS setting, not to light: a first visit from a
+          // dark-mode machine was rendering light until they found the toggle.
+          var pref = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system'
           var resolved =
             pref === 'system'
               ? window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -341,11 +344,10 @@ const jsonLd = { '@context': 'https://schema.org', '@graph': graph }
               try {
                 sessionStorage.setItem('cb.stars', String(d.stargazers_count))
               } catch (e) {}
-            } else {
-              starEls.forEach(function (el) {
-                if (el.textContent === '★') el.textContent = 'Star'
-              })
             }
+            // On failure leave the build-time number in place. Overwriting it
+            // made the button read "Star on GitHub Star" whenever GitHub
+            // rate-limited the visitor, which is most of the time on a shared IP.
           })
           .catch(function () {
             starEls.forEach(function (el) {

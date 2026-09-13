@@ -1,0 +1,436 @@
+/* ──────────────────────────────────────────────────────────────────
+   Marketing-only layer.
+
+   tokens.css is VENDORED VERBATIM from the product's globals.css so the
+   brand reads identically, and it must stay re-syncable. Nothing here
+   redefines a product token; this file only adds the things a landing
+   page needs and the app does not: a display type scale, section
+   rhythm, and container widths.
+   ────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Display scale. Large sizes carry LIGHT weight and tight tracking; that
+     pairing, not size alone, is what separates a considered page from a
+     template. The old hero was 68px/800 with a text-shadow behind it. */
+  --d1-size: clamp(2.5rem, 1.6rem + 3.6vw, 4.25rem);
+  --d1-weight: 500;
+  --d1-track: -0.035em;
+  --d1-leading: 1.03;
+
+  --d2-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem);
+  --d2-weight: 500;
+  --d2-track: -0.028em;
+  --d2-leading: 1.1;
+
+  --d3-size: 1.125rem;
+  --d3-weight: 550;
+  --d3-track: -0.014em;
+  --d3-leading: 1.4;
+
+  --lead-size: clamp(1rem, 0.95rem + 0.35vw, 1.1875rem);
+  --lead-leading: 1.55;
+
+  /* Section rhythm. One vertical step, used everywhere, so the page has a
+     pulse instead of eleven different paddings. */
+  --section-y: clamp(4.5rem, 3rem + 6vw, 8rem);
+  --section-gap: clamp(2rem, 1.4rem + 2.4vw, 3.5rem);
+
+  /* Containers. 1080px for prose and cards; 1200px for full-bleed media. */
+  --container: 67.5rem;
+  --container-wide: 75rem;
+  --container-prose: 44rem;
+}
+
+/* ── Type ── */
+.d1 {
+  font-family: var(--font-display);
+  font-size: var(--d1-size);
+  font-weight: var(--d1-weight);
+  letter-spacing: var(--d1-track);
+  line-height: var(--d1-leading);
+  text-wrap: balance;
+}
+.d2 {
+  font-family: var(--font-display);
+  font-size: var(--d2-size);
+  font-weight: var(--d2-weight);
+  letter-spacing: var(--d2-track);
+  line-height: var(--d2-leading);
+  text-wrap: balance;
+}
+.d3 {
+  font-family: var(--font-display);
+  font-size: var(--d3-size);
+  font-weight: var(--d3-weight);
+  letter-spacing: var(--d3-track);
+  line-height: var(--d3-leading);
+}
+.lead {
+  font-size: var(--lead-size);
+  line-height: var(--lead-leading);
+  color: var(--secondary);
+  text-wrap: pretty;
+}
+
+/* ── Layout ── */
+.section {
+  padding-block: var(--section-y);
+}
+.container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+}
+@media (min-width: 640px) {
+  .container {
+    padding-inline: 2rem;
+  }
+}
+.container-wide {
+  max-width: var(--container-wide);
+}
+.container-prose {
+  max-width: var(--container-prose);
+}
+
+/* A section's heading block: eyebrow, headline, one line of lead. */
+.section-head {
+  max-width: var(--container-prose);
+  margin-bottom: var(--section-gap);
+}
+.section-head .lead {
+  margin-top: 0.875rem;
+}
+.section-head--center {
+  margin-inline: auto;
+  text-align: center;
+}
+
+/* ── Hairline rules between sections, instead of eleven coloured bands ── */
+.rule {
+  border-top: 1px solid var(--border);
+}
+
+/* ── Media ──
+   Product screenshots are the argument. They get the full content width and
+   no fake browser chrome: the captures already contain the app's own chrome,
+   so drawing a second window around them was decoration on top of decoration. */
+.shot {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-floating);
+}
+.shot img,
+.shot video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.shot-caption {
+  margin-top: 0.875rem;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--secondary);
+  text-align: center;
+}
+
+/* Sky band. A light, illustrated gradient rather than a photograph, pale where
+   the headline sits so nothing needs a text-shadow to survive it. */
+:root {
+  /* The crown has to carry real saturation or white clouds at 23% opacity have
+     nothing to sit on: that, not the cloud layers, was what made the band look
+     bland. Sampled toward the original day gradient (#2f74c9 -> #e7f2fc) but
+     reaching pale sooner, so the headline still needs no text-shadow. */
+  --sky-1: #6fade6;
+  --sky-2: #a8d0f2;
+  --sky-3: #dcecfb;
+}
+:root.dark {
+  --sky-1: #16294a;
+  --sky-2: #101c33;
+  --sky-3: #0b1120;
+}
+
+/* A softer wash for pages that want the tint without the weather. */
+.hero-wash {
+  position: absolute;
+  inset: -10% -20% auto;
+  height: 60rem;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 42% at 50% 0%, rgb(var(--primary-rgb) / 0.11), transparent 70%),
+    radial-gradient(38% 30% at 78% 12%, rgb(var(--mint-rgb) / 0.07), transparent 70%);
+}
+
+/* ── Cards ── */
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 1.375rem;
+  box-shadow: var(--shadow-raised);
+}
+
+/* ── Eyebrow ── */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.eyebrow::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Section-level patterns, taken from how Notion, Tines and Deta build
+   a landing page and rebuilt in our own palette.
+
+   The thing they all avoid: a card whose visual is an icon in a tinted
+   rounded square. Every one of them leads with a cropped piece of the
+   real product instead. That single swap is most of the difference
+   between a page that looks made and a page that looks generated.
+   ────────────────────────────────────────────────────────────────── */
+
+/* Tinted band. Alternating a section's ground gives the page a pulse;
+   six identical hairline-separated sections read flat. */
+.band {
+  background: var(--band);
+}
+:root {
+  --band: #f1f4f8;
+  --panel: #f4f6f9;
+}
+:root.dark {
+  --band: #0d131f;
+  --panel: #121a29;
+}
+
+/* Notion's "one line item" figure: a soft panel, copy on one side, the
+   product bleeding off the other edge so it reads as a window onto
+   something larger rather than a pasted-in rectangle. */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.panel-grid {
+  display: grid;
+  gap: 2rem;
+  align-items: center;
+  padding: 2rem;
+}
+@media (min-width: 900px) {
+  .panel-grid {
+    grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+    gap: 3rem;
+    padding: 3rem 0 3rem 3rem;
+  }
+  /* The bleed: the screenshot runs past the panel's right edge. */
+  .panel-media {
+    margin-right: -3rem;
+  }
+}
+.panel-media img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px 0 0 12px;
+  border: 1px solid var(--border);
+  border-right: 0;
+  box-shadow: var(--shadow-floating);
+}
+@media (max-width: 899px) {
+  .panel-media img {
+    border-radius: 12px;
+    border-right: 1px solid var(--border);
+  }
+}
+
+/* Tines' grid: the card IS a screenshot, and the words sit under it. */
+.shot-card figure {
+  margin: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  aspect-ratio: 16 / 10;
+}
+.shot-card figure img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+}
+.shot-card h3 {
+  margin-top: 1rem;
+}
+.shot-card p {
+  margin-top: 0.35rem;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--secondary);
+}
+
+/* Notion's "trusted by" strip, in the only form we can use honestly: the
+   runtimes we actually interoperate with. */
+.logo-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem 2.25rem;
+}
+.logo-strip li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--secondary);
+}
+.logo-strip .mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Dark surfaces, after Railway: on a near-black ground a drop shadow does
+   nothing, so a card is defined by a hairline border plus a one-pixel top
+   highlight that reads as light catching an edge. */
+:root.dark .card,
+:root.dark .panel,
+:root.dark .shot-card figure {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.4);
+}
+:root.dark .shot {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 24px 60px rgb(0 0 0 / 0.55);
+}
+
+/* Railway's integration row: small square tiles carrying a mark, sized so a
+   lettermark and a logo sit on the same optical grid. */
+.tile-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 0.75rem 0 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--secondary);
+  transition:
+    border-color 160ms var(--motion-easing-standard),
+    color 160ms var(--motion-easing-standard);
+}
+.tile:hover {
+  color: var(--foreground);
+  border-color: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+.tile .mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Accessibility overrides ──
+   These DO redefine three product tokens, deliberately, and they live here
+   rather than in tokens.css so that file stays a clean re-syncable copy of
+   the product's globals.css: an override placed there would be silently
+   reverted by the next sync.
+
+   Each was measured against the painted pixel behind the glyphs on the real
+   grounds this page uses, not against the token in isolation, which is why
+   values that look fine in a palette fail here:
+     --secondary  light #64748b clears the base ground by 0.05 and FAILS on
+                  the tinted band (4.31:1) and panel (4.40:1); dark #6b7280
+                  fails on all five dark grounds (3.60:1 worst) as the site's
+                  body-copy colour.
+     --brand-fill white labels on the dark fill #e94560 measure 3.83:1. The
+                  hue stays for borders and rings; only the fill darkens.
+     --brand-text #dc2a48 as SMALL text measures 4.49:1 on the page ground and
+                  4.34:1 on the panel. Fills are unaffected. */
+:root {
+  --secondary: #5b6a80;
+  --brand-fill: var(--primary);
+  --brand-text: #c8203c;
+  --amber-ink: #a35107;
+}
+.dark {
+  --secondary: #868e9e;
+  --brand-fill: #d6304c;
+  --brand-text: #ef5c74;
+  --amber-ink: var(--amber);
+}
+
+/* Type sitting on the SignatureSky.
+
+   These were scoped inside Hero.astro, which is exactly why the 404 page
+   failed: it renders the same eyebrow/h1/lead on the same sky and could never
+   match a rule scoped to another component, so it kept the plain --foreground
+   and --secondary against a saturated blue. They live here now so both pages
+   are governed by one definition.
+
+   The soft ink is fine for the lead at 19px; the 11px eyebrow needs the opaque
+   one, which is what the accessibility pass established on the hero. */
+.on-sky .eyebrow {
+  color: var(--sky-ink);
+  text-shadow: var(--sky-halo-soft);
+}
+.on-sky .lead {
+  color: var(--sky-ink-soft);
+  text-shadow: var(--sky-halo-soft);
+}
+.on-sky h1 {
+  color: var(--sky-ink);
+  text-shadow: var(--sky-halo);
+}
+
+/* Brand colour at text weights. Deliberately not a Tailwind `text-primary`
+   override: the fill and the text want different reds. */
+.text-brand {
+  color: var(--brand-text);
+}

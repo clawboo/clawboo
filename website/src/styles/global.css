@@ -155,8 +155,23 @@ body {
 :focus {
   outline: none;
 }
+/* Three tones on purpose. The brand-red outline alone measured 1.03:1 against
+   the hero sky, so every focusable control in the header was effectively
+   unindicated at page top, and no single colour clears 3:1 on grounds that
+   run from white through sky blue to near-black. So the ring carries one
+   light tone and one dark one either side of the red, and whichever the
+   ground is, one of them has the edge: dark hairline on light grounds and on
+   the sky, white halo on dark ones.
+
+   Exposed as a token because any component that sets its own box-shadow
+   REPLACES this one rather than adding to it, and then keeps only the red.
+   Those components re-declare `var(--focus-halo), <their own shadow>`. */
+:root {
+  --focus-halo: 0 0 0 4px rgb(255 255 255 / 0.92), 0 0 0 5px rgb(15 23 42 / 0.85);
+}
 :focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
   border-radius: inherit;
+  box-shadow: var(--focus-halo);
 }

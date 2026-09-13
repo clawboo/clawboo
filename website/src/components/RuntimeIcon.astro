@@ -1,0 +1,84 @@
+---
+/**
+ * A runtime's real brand mark in a tinted tile, matching the dashboard's
+ * RuntimeBrand exactly. Replaces the lettermarks (N, C, Cx, H, O) the site used
+ * to draw, which were both less recognisable and, for Codex and Hermes, tinted
+ * with accent colours those brands do not have.
+ *
+ * Monochrome brands (Codex, Hermes) resolve `currentColor`, so they take the
+ * theme foreground and read correctly in both light and dark.
+ */
+import { RUNTIME_MARKS, type RuntimeMarkId } from '../lib/brandMarks'
+
+interface Props {
+  id: RuntimeMarkId
+  size?: number
+  tile?: number
+  /** Drop the tinted tile and render the mark alone, at brand colour. */
+  bare?: boolean
+  class?: string
+}
+const { id, size = 18, tile = 36, bare = false, class: cls = '' } = Astro.props
+const { color, glyph } = RUNTIME_MARKS[id]
+const mono = color === 'currentColor'
+
+// Clawboo Native and OpenClaw are both red in the product's brand map (#ff4d4d
+// and #E94560), which is fine in the dashboard where they rarely appear
+// together, but on a six-card grid two red creatures three cards apart read as
+// a duplicate. Native keeps its mascot red and drops the red tint behind it, so
+// the tinted red tile belongs to OpenClaw alone. This is a site-side
+// presentation choice: brandMarks.ts stays a faithful mirror of the product map
+// so the two can still be re-synced.
+const neutralTile = mono || id === 'clawboo-native'
+
+const tileStyle = neutralTile
+  ? `background:color-mix(in srgb, var(--foreground) 8%, transparent);color:${mono ? 'var(--foreground)' : color}`
+  : `background:color-mix(in srgb, ${color} 14%, transparent);color:${color}`
+---
+
+<span
+  class={`rt-tile ${bare ? 'rt-bare' : ''} ${cls}`}
+  style={
+    bare
+      ? `color:${mono ? 'var(--foreground)' : color}`
+      : `${tileStyle};width:${tile}px;height:${tile}px`
+  }
+  aria-hidden="true"
+>
+  <svg
+    width={size}
+    height={size}
+    viewBox={glyph.viewBox ?? '0 0 24 24'}
+    fill="currentColor"
+    fill-rule="evenodd"
+    clip-rule="evenodd"
+  >
+    {glyph.paths.map((d) => <path d={d} />)}
+    {
+      glyph.strokePaths?.map((d) => (
+        <path
+          d={d}
+          fill="none"
+          stroke="currentColor"
+          stroke-width={glyph.strokeWidth ?? 2}
+          stroke-linecap="round"
+        />
+      ))
+    }
+  </svg>
+</span>
+
+<style>
+  .rt-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    border-radius: 9px;
+  }
+  /* No tile, no chrome: just the mark. */
+  .rt-bare {
+    border-radius: 0;
+    background: none;
+  }
+</style>
