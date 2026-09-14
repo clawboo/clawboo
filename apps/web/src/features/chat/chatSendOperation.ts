@@ -8,7 +8,7 @@ import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
-import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@clawboo/gateway-client'
+import { resolveExecPatchParams } from '@clawboo/gateway-client'
 import { nextSeq } from '@/lib/sequenceKey'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -142,14 +142,25 @@ export async function sendChatMessage({
     }
   }
   if (agent?.execConfig) {
-    // 1. Write per-agent approval policy (best-effort — enables approval events)
-    try {
-      await upsertExecApprovalPolicy(client, agentId, agent.execConfig.execAsk)
-    } catch {
-      // Non-fatal — policy may already be set from ExecSettings
-    }
-
-    // 2. Patch the live session with exec settings
+    // NO APPROVAL-POLICY WRITE HERE ANY MORE. It used to run on every send as a
+    // safety net for the browser-only write in the Permissions tab, and it was
+    // wrong in two ways that a best-effort `catch {}` kept quiet.
+    //
+    // It wrote for ANY runtime. Only OpenClaw agents have a Gateway policy, so a
+    // clawboo-native Boo with an exec setting minted an entry keyed to an agent
+    // the Gateway has never heard of. Such an entry is never consulted and never
+    // complains, and one was found sitting in the live store.
+    //
+    // It also passed clawboo's ROW id where the Gateway keys by its own. Those
+    // coincide for the agents on this machine, so it was latent rather than
+    // broken, but `sourceAgentId` exists precisely because they need not.
+    //
+    // `POST /api/exec-settings` now performs this write from the server, which
+    // checks the runtime, resolves `sourceAgentId`, and reports a refusal instead
+    // of swallowing it. A second writer of a hash-guarded document buys nothing
+    // and is the failure this area keeps producing.
+    //
+    // Patch the live session with exec settings
     try {
       const execParams = resolveExecPatchParams()
       await client.call('sessions.patch', {

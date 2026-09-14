@@ -4,8 +4,9 @@ import { apiFetch } from '@clawboo/control-client'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
-import { resolveExecPatchParams, upsertExecApprovalPolicy } from '@clawboo/gateway-client'
+import { resolveExecPatchParams } from '@clawboo/gateway-client'
 import { Select } from '@/features/shared/Select'
+import { ExecAllowlist } from './ExecAllowlist'
 
 // ─── Option definitions ─────────────────────────────────────────────────────
 
@@ -49,47 +50,64 @@ export function ExecSettings({ agentId }: { agentId: string }) {
       .catch(() => setLoaded(true))
   }, [agentId, updateExecConfig])
 
+  // THE SERVER OWNS THE GATEWAY WRITE, and this no longer duplicates it.
+  //
+  // This function used to call `upsertExecApprovalPolicy` itself, behind
+  // `if (client)` and inside a `catch {}`, then show the success toast whatever
+  // happened. A tab with no Gateway connection therefore reported "Saved" while
+  // OpenClaw's policy stayed empty and the Boo went on running every command
+  // unasked. `POST /api/exec-settings` now performs that write from the server,
+  // which holds a long-lived connection and resolves OPENCLAW'S agent id rather
+  // than clawboo's row id, and returns 502 when the Gateway refuses.
+  //
+  // HALF OF THAT FIX WAS STILL BEING THROWN AWAY HERE. `apiFetch` is a thin
+  // wrapper over `fetch`, so a 502 resolves normally and the `catch` never runs.
+  // The server reported the failure honestly and the browser discarded the
+  // report and toasted success, which is the same lie one layer up.
   const persist = useCallback(
-    async (newAsk: string) => {
-      // Update Zustand store immediately
+    async (newAsk: string, prevAsk: string) => {
       updateExecConfig(agentId, { execAsk: newAsk })
 
-      // Persist to SQLite
+      let failure: string | null = null
       try {
-        await apiFetch('/api/exec-settings', {
+        const res = await apiFetch('/api/exec-settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentId, values: { execAsk: newAsk } }),
         })
-      } catch {
-        // Non-fatal
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null
+          failure = body?.error ?? `clawboo could not apply this (${res.status})`
+        }
+      } catch (err) {
+        failure = err instanceof Error ? err.message : 'clawboo could not be reached'
       }
 
-      // Apply immediately if connected
-      if (client) {
-        // 1. Write per-agent approval policy to Gateway's exec-approvals file
-        try {
-          await upsertExecApprovalPolicy(client, agentId, newAsk)
-        } catch {
-          // Non-fatal — policy will be retried on next message
-        }
+      if (failure) {
+        // PUT THE CONTROL BACK. A permissions switch left sitting in the position
+        // you moved it to is itself a claim that the change took, and this one is
+        // read later as the state of the gate.
+        setExecAsk(prevAsk)
+        updateExecConfig(agentId, { execAsk: prevAsk })
+        addToast({ message: `Not applied. ${failure}`, type: 'error' })
+        return
+      }
 
-        // 2. Patch the live session with exec settings
-        const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
-        if (agent?.sessionKey) {
-          try {
-            const execParams = resolveExecPatchParams()
-            await client.call('sessions.patch', {
-              key: agent.sessionKey,
-              ...execParams,
-            })
-          } catch {
-            addToast({
-              message:
-                'Could not apply setting to live session. It will be retried on next message.',
-              type: 'error',
-            })
-          }
+      // A separate concern from the policy: this only tells the live session to
+      // run commands on the Gateway host. Its failure does not mean the approval
+      // posture was not applied, so it does not undo the change above.
+      const agent = useFleetStore.getState().agents.find((a) => a.id === agentId)
+      if (client && agent?.sessionKey) {
+        try {
+          await client.call('sessions.patch', {
+            key: agent.sessionKey,
+            ...resolveExecPatchParams(),
+          })
+        } catch {
+          addToast({
+            message: 'Saved. The running session picks this up on its next message.',
+            type: 'error',
+          })
         }
       }
 
@@ -100,13 +118,12 @@ export function ExecSettings({ agentId }: { agentId: string }) {
 
   const handleChange = useCallback(
     (value: string) => {
+      const prev = execAsk
       setExecAsk(value)
-      void persist(value)
+      void persist(value, prev)
     },
-    [persist],
+    [persist, execAsk],
   )
-
-  if (!loaded) return null
 
   const selected = EXEC_OPTIONS.find((o) => o.value === execAsk) ?? EXEC_OPTIONS[0]
 
@@ -123,23 +140,31 @@ export function ExecSettings({ agentId }: { agentId: string }) {
         effect on the next message.
       </p>
 
-      <div
-        className="rounded-2xl border border-border bg-surface p-4"
-        style={{ boxShadow: 'var(--shadow-raised)' }}
-      >
-        <label className="mb-2 block font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-          Command Execution
-        </label>
-        <Select
-          value={execAsk}
-          onChange={handleChange}
-          options={EXEC_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
-          style={{ width: '100%' }}
-        />
-        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          {selected.description}
-        </p>
-      </div>
+      {/* GATED SEPARATELY from the grants list below. `loaded` tracks clawboo's
+          own exec_config read; letting it hide the whole component meant a failed
+          local read also hid a working, Gateway-backed permission list. */}
+      {loaded && (
+        <div
+          className="rounded-2xl border border-border bg-surface p-4"
+          style={{ boxShadow: 'var(--shadow-raised)' }}
+        >
+          <label className="mb-2 block font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Command Execution
+          </label>
+          <Select
+            data-testid="exec-ask-select"
+            value={execAsk}
+            onChange={handleChange}
+            options={EXEC_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+            style={{ width: '100%' }}
+          />
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+            {selected.description}
+          </p>
+        </div>
+      )}
+
+      <ExecAllowlist agentId={agentId} />
     </div>
   )
 }
