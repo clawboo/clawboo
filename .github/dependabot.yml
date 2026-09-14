@@ -77,6 +77,16 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    # A major bump of the release action is not a routine dependency update: it
+    # is a rewrite of the contract publish.yml depends on. changesets/action v2
+    # renamed every input and started requiring Changesets CLI v3, and because
+    # the bump landed as a one-line PR it went in unreviewed and broke
+    # publishing for six days. Majors on this one action are a human decision;
+    # minors and patches still flow.
+    ignore:
+      - dependency-name: changesets/action
+        update-types:
+          - version-update:semver-major
     groups:
       github-actions:
         patterns:

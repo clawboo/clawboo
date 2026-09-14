@@ -134,11 +134,11 @@ sequenceDiagram
     Pub->>npm: pnpm changeset publish → clawboo@<new>
 ```
 
-The workflow is a single `publish` job, and it runs unconditionally (see the warning below). It checks out with `fetch-depth: 0` (Changesets needs the full git history to compute tags), installs frozen, pulls headless Chromium for the clean-install gate, then re-runs the whole PR gate in order: `pnpm build` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `bash scripts/assemble-cli.sh` → `pnpm test:clean-install`, _before_ the Changesets action. Finally it runs `changesets/action@v1` with `publish: pnpm changeset publish` and `commit: 'chore: version packages'`.
+The workflow is a single `publish` job, and it runs unconditionally (see the warning below). It checks out with `fetch-depth: 0` (Changesets needs the full git history to compute tags), installs frozen, pulls headless Chromium for the clean-install gate, then re-runs the whole PR gate in order: `pnpm build` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `bash scripts/assemble-cli.sh` → `pnpm test:clean-install`, _before_ the Changesets action. Finally it runs `changesets/action` (pinned to the v2.1.2 commit) with `publish-script: pnpm changeset publish`, `commit-message: 'chore: version packages'` and `pr-title: 'chore: version packages'`.
 
 Two details in that order are deliberate. `pnpm build` is bundler-only (Vite + tsup, no `tsc`), so a type error survives it — `typecheck` is the step that catches one, and without it a broken type could reach npm even though the build was green. And `lint` / `typecheck` / `test` run _before_ `assemble-cli.sh`, so a failure costs no bundle work and no Turbo task can restore a stale `apps/cli/dist` over the freshly assembled one.
 
-The `changesets/action@v1` step is what gives the flow its two phases, deciding internally based on the repo state:
+The Changesets action step is what gives the flow its two phases, deciding internally based on the repo state:
 
 - **Changesets present** (a feature PR merged with a `.changeset/*.md`) → the action opens (or updates) a **Version PR** titled `chore: version packages`. That PR, when merged, consumes the `.md` file, bumps `clawboo`'s version in `package.json`, and writes the `CHANGELOG.md` entry.
 - **No changesets present** (the Version PR itself just merged; Changesets already consumed the `.md`) → the action runs `pnpm changeset publish`, which publishes the CLI to npm (using `NODE_AUTH_TOKEN` from the `NPM_TOKEN` secret) and creates the git tag + GitHub release.
@@ -148,7 +148,7 @@ The `changesets/action@v1` step is what gives the flow its two phases, deciding 
 The published tarball carries an [npm provenance](https://docs.npmjs.com/generating-provenance-statements) attestation: a signed statement that _this_ tarball was built from _this_ repository, at a specific commit, by _this_ workflow. Two things in `publish.yml` produce it, and both are load-bearing:
 
 - `id-token: write` in the `publish` job's `permissions:` block. This is what lets the job mint a short-lived OIDC token from GitHub; npm verifies that token to establish who is publishing. It is the reason that job's permission block is wider than the workflow's `contents: read` default.
-- `NPM_CONFIG_PROVENANCE: true` in the `changesets/action@v1` step's `env:`. This is the npm-side switch; without it the OIDC permission sits unused.
+- `NPM_CONFIG_PROVENANCE: true` in the Changesets action step's `env:`. This is the npm-side switch; without it the OIDC permission sits unused.
 
 A third requirement lives outside the workflow: `apps/cli/package.json` must carry a `repository` field (it does, pointing at this repo with `directory: apps/cli`). npm refuses to generate provenance for a package that doesn't say where it came from.
 
@@ -161,7 +161,7 @@ npm audit signatures
 This matters more here than for a typical library. Clawboo is installed with `npx` and then spawns coding-agent runtimes on the user's machine, so "is the code I'm about to run the code in the public repository?" is a question worth being able to answer without trusting us.
 
 <Warning>
-The `publish` job has **no changeset gate**, and must not get one. Counting `.changeset/*.md` and adding `if: has_changesets == 'true'` looks right, and is right for the "open a Version PR" run (changesets are present), but it would **block the publish step on the Version-PR-merge run**; at that point Changesets has *already consumed* the `.md` file, so the count is zero and the gate would skip the very run that's supposed to publish. `changesets/action@v1` handles both phases internally; it just needs the job to run unconditionally.
+The `publish` job has **no changeset gate**, and must not get one. Counting `.changeset/*.md` and adding `if: has_changesets == 'true'` looks right, and is right for the "open a Version PR" run (changesets are present), but it would **block the publish step on the Version-PR-merge run**; at that point Changesets has *already consumed* the `.md` file, so the count is zero and the gate would skip the very run that's supposed to publish. The Changesets action handles both phases internally; it just needs the job to run unconditionally.
 
 The workflow used to carry a separate `check` job that computed exactly that count. The `if:` was removed once the trap was hit, which left the job wired in by `needs:` but feeding nothing; it has since been deleted so the workflow's intent reads plainly. A comment in `publish.yml` records the same reasoning at the point where someone would be tempted to re-add it.
 </Warning>
