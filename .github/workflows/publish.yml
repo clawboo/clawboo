@@ -26,7 +26,7 @@ jobs:
   # "open a Version PR" run but WRONG for the run that actually publishes — by
   # then the Version PR has merged and Changesets has already consumed the .md
   # files, so the gate would skip the very run that ships to npm.
-  # `changesets/action@v1` decides between the two phases internally; it only
+  # The Changesets action decides between the two phases internally; it only
   # needs the job to run unconditionally. Do not add a changeset gate here.
   publish:
     name: Publish packages
@@ -93,13 +93,28 @@ jobs:
       # upstream-changed lockfiles could cause divergence.
       - run: pnpm test:clean-install
 
+      # Pinned to a commit, not to @v2. There is no v2 TAG in changesets/action,
+      # only a moving v2 BRANCH, and this is the step that holds NPM_TOKEN and
+      # mints the OIDC signing token. Dependabot updates the pin and shows the
+      # version in the comment.
+      #
+      # push-with-git-cli is set because v2 flipped the default. v1 had
+      # commitMode, defaulting to "git-cli"; v2's equivalent defaults to false,
+      # which pushes via the GitHub API and re-attributes release commits and
+      # tags to the token owner, signed with GitHub's GPG key. true keeps the
+      # behaviour every release so far has had.
+      #
+      # No GITHUB_TOKEN in env on purpose. v2 takes the token through the
+      # github-token input (default ${{ github.token }}) and hard-errors if an
+      # env GITHUB_TOKEN disagrees with it. The action injects the token into
+      # the publish subprocess itself.
       - name: Create Release PR or Publish
-        uses: changesets/action@v2
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          publish: pnpm changeset publish
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
+          publish-script: pnpm changeset publish
+          commit-message: 'chore: version packages'
+          pr-title: 'chore: version packages'
+          push-with-git-cli: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
