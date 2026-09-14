@@ -6,4 +6,6 @@ export * from './helpers'
 // apps/web/server may not import from apps/web/src, so anything both need lives
 // in a package. This one writes the Gateway's own exec-approval policy.
 export * from './execApprovals'
+export * from './execAllowlist'
+export * from './execRevoke'
 // device-auth is internal — not re-exported
