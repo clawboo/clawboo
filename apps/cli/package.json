@@ -41,7 +41,7 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@clack/prompts": "^1.7.0",
+    "@clack/prompts": "^1.8.0",
     "@composio/client": "0.1.0-alpha.76",
     "better-sqlite3": "12.11.1",
     "chalk": "^5.4.0",
@@ -56,7 +56,7 @@
     "@clawboo/process-lookup": "workspace:*",
     "@clawboo/tsconfig": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.5.1",
     "tsup": "^8.4.0",
     "typescript": "^6.0.3"
   }
