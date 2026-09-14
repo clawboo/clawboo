@@ -117,6 +117,15 @@ describe('withBrowsingGuidance', () => {
     // reach for when asked to read a page.
     expect(BROWSING_GUIDANCE).toContain('web_fetch')
   })
+
+  it('names the browser tool, which these agents now have', () => {
+    // OpenClaw 2026.9 enables the browser plugin by default with no config block,
+    // so the hedged "if you have a browser tool" became simply true and the
+    // "if you have none, say so and stop" became advice that sends an agent away
+    // from a tool it holds. Both were retired.
+    expect(BROWSING_GUIDANCE).toContain('`browser`')
+    expect(BROWSING_GUIDANCE).not.toContain('say so and')
+  })
 })
 
 // ─── Docs must not contradict the constant ───────────────────────────────────

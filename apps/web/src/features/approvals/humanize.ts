@@ -56,6 +56,16 @@ export interface HumanizedApproval {
   agentNote: string | null
   /** False when the request could not be read and raw detail must be shown. */
   confident: boolean
+  /**
+   * What the Allow button should say, when the class alone gets it wrong.
+   *
+   * The card derives a verb from the action class, which works for a tool whose
+   * class describes what it does. A shell command is classed destructive because
+   * clawboo cannot read shell text, not because THIS command deletes anything,
+   * so that derivation put "Delete it" over an `echo`. The seriousness is right
+   * and the verb is not, and only the verb is worth overriding.
+   */
+  allowLabel?: string
 }
 
 // VERBS ONLY, and matched as whole tokens.
@@ -275,6 +285,63 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
   const args = parseArgs(input.argsSummary)
   const bare = bareName(input.toolName)
 
+  // ── A shell command ──
+  //
+  // TWO TOOL NAMES, ONE CARD. `exec` is the OpenClaw Gateway's mirrored shell;
+  // `run_command` is clawboo's own native one. They are held open by different
+  // machinery and are deliberately named apart so the audit trail can tell them
+  // apart, but to the person being asked they are the same question, and a
+  // second renderer would be a second chance to word it worse.
+  //
+  // This one is not a tool clawboo brokered and it has no descriptor, so the
+  // general path below describes it from its name and its stored class: `wants
+  // to run "Exec"`, chipped `Deletes your data`, under a button reading `Delete
+  // it`. Every one of those is wrong about an `echo`, and a card that cries
+  // delete over every command teaches an operator to stop reading the one signal
+  // that should mean something.
+  //
+  // WHAT IS HONEST HERE is narrow. clawboo does not read shell text, so it says
+  // nothing about what the command does; it shows the command, which is the only
+  // thing that decides anything, and keeps the serious weighting because an
+  // arbitrary shell command genuinely can destroy. The words change, the rail
+  // does not.
+  if (bare === 'exec' || bare === 'run_command') {
+    // ARGV WHEN IT EXISTS, because joining on spaces destroys the only thing
+    // this card promises. `["echo","a b"]` and `["echo","a","b"]` flatten to the
+    // same string and are different commands, and `spawn` honours the original
+    // boundaries. An operator reading the flattened form could approve something
+    // other than what they saw. `command` remains the fallback for the Gateway's
+    // mirrored shell, which sends no argv.
+    const rawArgv = args?.['argv']
+    const argv =
+      Array.isArray(rawArgv) && rawArgv.every((a) => typeof a === 'string')
+        ? (rawArgv as string[])
+        : null
+    const command =
+      (argv ? quoteArgv(argv) : null) ??
+      (typeof args?.['command'] === 'string' ? args['command'] : null) ??
+      input.toolSummary?.trim() ??
+      ''
+    if (command) {
+      const cwd = typeof args?.['cwd'] === 'string' ? args['cwd'] : null
+      return {
+        headline: `${who} wants to run a command on this computer.`,
+        // Not a safety claim in either direction. It states the kind of thing
+        // this is and leaves the judgement to the command printed below it.
+        chip: 'Runs a command',
+        actionClass: 'destroys',
+        decisive: [
+          { label: 'Command', value: command },
+          ...(cwd ? [{ label: 'Folder', value: cwd }] : []),
+        ],
+        remainder: [],
+        agentNote: null,
+        confident: true,
+        allowLabel: 'Run it',
+      }
+    }
+  }
+
   // ── The broker: the app and the operation live in the arguments ──
   const batch = args?.['tools']
   if (Array.isArray(batch) && batch.length > 0) {
@@ -413,6 +480,20 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
     // keeps showing the raw request rather than a reassuring summary of it.
     confident: Boolean(input.toolClass),
   }
+}
+
+/**
+ * Render an argv so the boundaries survive the screen.
+ *
+ * Single-quoted POSIX form for anything that is not plainly safe, so a reader
+ * can see where one argument ends and the next begins. Not for re-execution:
+ * nothing here is ever passed back to a shell, and this tier exists precisely
+ * because that would be unsafe. It is for the eyes.
+ */
+function quoteArgv(argv: string[]): string {
+  return argv
+    .map((a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`))
+    .join(' ')
 }
 
 /** A readable name from a namespaced tool id: `browser_navigate` -> `Browser navigate`. */

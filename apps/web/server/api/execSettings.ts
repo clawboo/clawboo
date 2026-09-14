@@ -2,6 +2,8 @@ import type { Request, Response } from 'express'
 import { agents } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../lib/db'
+import { getRegistry } from '../lib/agentSource'
+import { applyExecApprovalPolicy, isExecAsk } from '../lib/agentSource/execApprovalPolicy'
 
 // ─── GET /api/exec-settings?agentId=xxx ─────────────────────────────────────
 // Returns the stored execution permission values for an agent, or null if none.
@@ -70,7 +72,7 @@ type PostBody = {
   values: { execAsk: string; execSecurity?: string }
 }
 
-export function execSettingsPOST(req: Request, res: Response): void {
+export async function execSettingsPOST(req: Request, res: Response): Promise<void> {
   const body = req.body as PostBody | undefined
   if (!body || typeof body !== 'object') {
     res.status(400).json({ error: 'invalid JSON' })
@@ -106,7 +108,55 @@ export function execSettingsPOST(req: Request, res: Response): void {
       })
       .run()
 
-    res.json({ ok: true })
+    // ── And the half that actually gates anything ───────────────────────────
+    //
+    // The write above is clawboo's OWN record. It changes nothing about what a
+    // Boo may run: the Gateway keeps its own policy and consults only that when
+    // deciding whether to ask. Until now the Gateway write lived in the browser,
+    // behind a connection check and a swallowed error, with the success message
+    // shown regardless — so a tab with no Gateway connection reported "Saved"
+    // while the Boo carried on running every command unasked.
+    //
+    // Doing it here removes the tab from the path entirely. The server's
+    // connection is long-lived and reconnects on its own.
+    const row = db
+      .select({ sourceAgentId: agents.sourceAgentId, runtime: agents.runtime })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get()
+
+    // Only OpenClaw has a Gateway policy to write. For every other runtime the
+    // local record IS the whole setting, so reporting a Gateway failure would be
+    // inventing a problem.
+    if (row?.runtime !== 'openclaw' || !row.sourceAgentId) {
+      res.json({ ok: true, gateway: 'not-applicable' })
+      return
+    }
+    if (!isExecAsk(values.execAsk)) {
+      res.status(400).json({ error: `unknown execAsk: ${String(values.execAsk)}` })
+      return
+    }
+
+    // OPENCLAW'S id, not clawboo's row id: the Gateway keys its policy by its own
+    // ids, and a policy written under the wrong one is never consulted and never
+    // complains.
+    const applied = await applyExecApprovalPolicy(
+      getRegistry().source,
+      row.sourceAgentId,
+      values.execAsk,
+    )
+    if (!applied.ok) {
+      // 502 rather than 200. The caller asked for a permission change and did not
+      // get one; saying "ok" here is the defect this replaces.
+      res.status(502).json({
+        ok: false,
+        savedLocally: true,
+        error: `saved in clawboo, but the Gateway did not accept it: ${applied.error ?? 'unknown'}`,
+      })
+      return
+    }
+
+    res.json({ ok: true, gateway: 'applied' })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

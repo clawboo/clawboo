@@ -18,6 +18,7 @@ export type {
   EventIntent,
   EventKind,
   EventPlane,
+  SessionMessagePayload,
 } from './types'
 
 // ── Bridge ─────────────────────────────────────────────────────────────────
@@ -30,6 +31,7 @@ export {
   isReasoningStream,
   parseAgentPayload,
   parseChatPayload,
+  parseSessionMessagePayload,
 } from './bridge'
 
 // ── Policy ─────────────────────────────────────────────────────────────────

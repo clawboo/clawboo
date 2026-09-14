@@ -79,7 +79,16 @@ export function ToolApprovalCard({ approval, onResolve, compact = false }: ToolA
   // otherwise, which is a control that lies. It is also withheld when clawboo
   // could not read the request: remembering a call nobody could describe is not
   // a decision anyone can make.
-  const rememberable = !approval.neverRemember && Boolean(approval.grantId) && human.confident
+  //
+  // A SHELL APPROVAL IS REMEMBERED SOMEWHERE ELSE. Its "Always" is minted by the
+  // Gateway into OpenClaw's own allowlist, never by clawboo's grant table, so it
+  // has no grantId and requiring one would retire the button entirely. The gate
+  // that matters there is whether the GATEWAY would accept Always for this
+  // request, which the server already asked and recorded in `neverRemember`.
+  const isExec = approval.kind === 'exec'
+  const rememberable = isExec
+    ? !approval.neverRemember
+    : !approval.neverRemember && Boolean(approval.grantId) && human.confident
 
   const [remember, setRemember] = useState(false)
   const expiresIn = Math.max(0, Math.round((approval.expiresAt - Date.now()) / 1000))
@@ -215,7 +224,12 @@ export function ToolApprovalCard({ approval, onResolve, compact = false }: ToolA
             onChange={(e) => setRemember(e.target.checked)}
             className="size-3.5 cursor-pointer accent-[rgb(var(--primary-rgb))]"
           />
-          Do not ask again for this for 30 days
+          {isExec
+            ? // The Gateway's entry is bound to the command AND the directory it
+              // ran in, which is why its own prompt says "Always allow here".
+              // Promising it for the Boo everywhere would over-state the grant.
+              'Always allow this command in this folder'
+            : 'Do not ask again for this for 30 days'}
         </label>
       )}
 
@@ -234,13 +248,14 @@ export function ToolApprovalCard({ approval, onResolve, compact = false }: ToolA
               difference between reading an inbox and emptying it, and a WRONG
               label is worse than a generic one: this said "Send it" over a fetch
               until the verb classifier was fixed. */}
-          {human.actionClass === 'sends'
-            ? 'Send it'
-            : human.actionClass === 'destroys'
-              ? 'Delete it'
-              : human.actionClass === 'reads'
-                ? 'Allow read'
-                : 'Allow'}
+          {human.allowLabel ??
+            (human.actionClass === 'sends'
+              ? 'Send it'
+              : human.actionClass === 'destroys'
+                ? 'Delete it'
+                : human.actionClass === 'reads'
+                  ? 'Allow read'
+                  : 'Allow')}
         </Button>
         <Button
           variant="outline"

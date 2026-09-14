@@ -64,6 +64,7 @@
     "@opentelemetry/sdk-node": "^0.222.0",
     "@radix-ui/react-slider": "^1.4.7",
     "@xyflow/react": "^12.11.6",
+    "better-sqlite3": "^12.11.1",
     "camera-controls": "^3.1.2",
     "codemirror": "^6.0.2",
     "cors": "^2.8.6",
@@ -87,6 +88,7 @@
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
+    "@types/better-sqlite3": "^7.6.0",
     "@types/cors": "^2.8.19",
     "@types/culori": "^4.0.1",
     "@types/express": "^5.0.6",

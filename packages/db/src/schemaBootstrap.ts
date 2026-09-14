@@ -110,9 +110,11 @@ const SCHEMA_DDL = `
       output_tokens  INTEGER NOT NULL,
       cost_usd       REAL    NOT NULL,
       run_id         TEXT,
+      session_key    TEXT,
       created_at     INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_cost_records_agent_id   ON cost_records (agent_id);
+    CREATE INDEX IF NOT EXISTS idx_cost_records_session    ON cost_records (session_key, created_at);
     CREATE INDEX IF NOT EXISTS idx_cost_records_run_id     ON cost_records (run_id);
     CREATE INDEX IF NOT EXISTS idx_cost_records_created_at ON cost_records (created_at);
 
@@ -424,6 +426,12 @@ const SCHEMA_DDL = `
       -- version of an answer the server already had.
       tool_class     TEXT,
       tool_summary   TEXT,
+      -- Who is HOLDING the call while the human decides: 'tool' (clawboo's own
+      -- broker, blocked inside waitForApproval) or 'exec' (an OpenClaw shell
+      -- command held by the Gateway, which clawboo mirrors and answers over
+      -- exec.approval.resolve). The two are released by different means, so the
+      -- resolver must be told rather than left to infer it.
+      kind         TEXT    NOT NULL DEFAULT 'tool',
       created_at   INTEGER NOT NULL,
       expires_at   INTEGER NOT NULL,
       resolved_at  INTEGER

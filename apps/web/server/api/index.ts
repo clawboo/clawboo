@@ -19,6 +19,8 @@ import {
 import { costRecordsGET, costRecordsPOST } from './costRecords'
 import { costRecordsSummaryGET } from './costRecordsSummary'
 import { graphLayoutGET, graphLayoutPOST } from './graphLayout'
+import { execAllowlistGET, execAllowlistRevokePOST } from './execAllowlist'
+import { nativeShellGET, nativeShellPOST } from './nativeShell'
 import { execSettingsGET, execSettingsAllGET, execSettingsPOST } from './execSettings'
 import { personalityGET, personalityPOST } from './personality'
 import { skillsGET, skillsPOST, skillsDELETE } from './skills'
@@ -213,6 +215,16 @@ router.post('/api/graph-layout', graphLayoutPOST)
 router.get('/api/exec-settings/all', execSettingsAllGET)
 router.get('/api/exec-settings', execSettingsGET)
 router.post('/api/exec-settings', execSettingsPOST)
+
+// Standing exec grants. The revoke rewrites the fleet's permissions document, so
+// it takes the sensitive limiter; the longer path is registered first.
+router.post('/api/exec-allowlist/revoke', sensitiveLimiter, execAllowlistRevokePOST)
+router.get('/api/exec-allowlist', execAllowlistGET)
+
+// The native shell switch. Changing what a Boo may ask to run is a permissions
+// change, so the write takes the sensitive limiter.
+router.get('/api/agents/:agentId/shell', nativeShellGET)
+router.post('/api/agents/:agentId/shell', sensitiveLimiter, nativeShellPOST)
 
 // Personality
 router.get('/api/personality', personalityGET)

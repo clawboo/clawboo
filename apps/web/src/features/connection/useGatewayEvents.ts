@@ -92,6 +92,16 @@ export function gatewayRunFailureText(reason: string | null | undefined): string
 }
 
 export function recordChatCost(agentId: string, runId: string | null, cost: ChatCost): void {
+  // OPENCLAW AGENTS ARE RECORDED SERVER-SIDE, and must not be recorded here too.
+  // `sessionActivityWatcher` bills them off the session snapshot, which carries
+  // the real model and the real prompt size for every turn, including the ones
+  // this browser never sees. Letting both writers run would charge a webchat turn
+  // twice, once truthfully and once with the estimate below.
+  //
+  // The other runtimes keep this path: they do not commit through
+  // `session.message`, so it is the only place their spend is seen at all.
+  if (useFleetStore.getState().agents.find((a) => a.id === agentId)?.runtime === 'openclaw') return
+
   let inputTokens = cost.inputTokens ?? 0
 
   // `null` input means the Gateway sent no usage block — estimate the prompt
@@ -244,6 +254,19 @@ export function useGatewayEvents(client: GatewayClient | null): void {
       }))
 
       useChatStore.getState().appendTranscript(sessionKey, entries)
+
+      // OPENCLAW TURNS ARE PERSISTED SERVER-SIDE, so only the POST is skipped
+      // here, never the append above: the live view of a one-to-one chat still
+      // renders from this path, and there is no SSE behind it the way there is
+      // for team sessions.
+      //
+      // The server writes these off the committed transcript, which is the only
+      // way they survive at all — this browser only recorded them while a tab
+      // happened to be open, so closing it lost the conversation. Both writers
+      // running would duplicate every turn, because each mints a fresh random
+      // `entryId` and the unique index cannot collapse them. That is the same
+      // failure that forced team chat to a single writer.
+      if (agent?.runtime === 'openclaw') return
 
       // Best-effort persistence — never throw in an event handler
       const gwUrl = useConnectionStore.getState().gatewayUrl ?? ''

@@ -46,14 +46,22 @@ export const BROWSING_GUIDANCE_HEADING = '## Opening web pages'
  * browser and their signed-in profile, which is not the agent's to act in, and
  * clawboo cannot show it either.
  *
- * NAMES THE TOOL THE AGENT ACTUALLY HAS. An earlier draft said "use your browser
- * tool", and a live test found that OpenClaw agents here have no browser tool at
- * all: the Gateway registers it only when a dedicated browser profile and its
- * control service are configured. Guidance pointing at a missing tool is the
- * same failure as no guidance, because the agent falls back to the shell, which
- * is the one path this exists to close. `web_fetch` is what they have and what
- * they already reach for; the browser line is written to stay correct if a
- * browser tool is later enabled.
+ * NAMES THE TOOLS THE AGENT ACTUALLY HAS, and that set has now changed twice.
+ * The first draft named a `browser` tool; a live test found OpenClaw agents had
+ * none, because 2026.5 registered it only with a configured profile and control
+ * service, so the guidance pointed at nothing and the agent fell back to the
+ * shell — the one path this exists to close. It was rewritten around `web_fetch`.
+ *
+ * OpenClaw 2026.9 turns the browser plugin on BY DEFAULT, with no config block,
+ * and these agents are now offered the tool. So the hedged "if you have a browser
+ * tool" and the "if you have none, say so and stop" have both been retired: the
+ * first is now simply true, and the second sent an agent away from a tool it
+ * holds. Re-check this against the running Gateway's actual toolset before
+ * rewording it again; that is what caught it both times.
+ *
+ * The `profile: "user"` line matters MORE on 2026.9, not less. OpenClaw injects a
+ * `user` profile into every resolved browser config even when none is written,
+ * and it attaches to the operator's own signed-in Chrome.
  *
  * ADVISORY, and the wording does not pretend otherwise. Nothing here prevents a
  * shell call; it makes the safe path the obvious one and says why, which is the
@@ -65,19 +73,17 @@ export const BROWSING_GUIDANCE = `${BROWSING_GUIDANCE_HEADING}
 To READ a web page, use \`web_fetch\`. It returns the page content and is the
 right tool for looking something up.
 
-If you have a browser tool, use it for anything a fetch cannot do: clicking,
-typing, or seeing a page as it renders.
+For anything a fetch cannot do, use your \`browser\` tool: clicking, typing,
+filling a form, or seeing a page as it actually renders.
 
 Never use \`exec\` to open a page. No \`open\`, \`xdg-open\`, \`start\`, and no
 launching a browser binary. That opens the operator's real default browser with
 their personal signed-in profile, which is not yours to act in, and it happens
 where clawboo cannot see it.
 
-If a task genuinely needs a browser and you have no browser tool, say so and
-stop. Do not reach for the shell instead.
-
-Never pass \`profile: "user"\` to a browser tool unless the operator asked for it
-in this conversation. That profile is their real browser, with their sessions.
+Never pass \`profile: "user"\` to the browser tool unless the operator asked for
+it in this conversation. Every other profile is yours to work in; that one is
+their real browser, already signed in as them.
 `
 
 /**

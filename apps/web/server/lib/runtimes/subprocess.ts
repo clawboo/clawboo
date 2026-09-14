@@ -45,6 +45,35 @@ const liveChildren = new Set<ChildProcess>()
  */
 const liveConnectorPids = new Set<number>()
 
+/**
+ * Track a child spawned by a LOCAL TOOL so shutdown reaps its whole tree.
+ *
+ * `liveChildren` is module-private, and every existing writer is a runtime
+ * launcher in this file. A tool that spawns its own child would therefore be
+ * invisible to `killLiveSubprocesses`, and would survive a Ctrl-C, a self
+ * restart, and the shutdown wait that exists precisely to stop a child outliving
+ * the server. That is the failure class this registry was written to prevent, so
+ * a new spawner joins it rather than keeping its own.
+ *
+ * Handle-based, unlike `registerConnectorPid`: a local tool owns its
+ * `ChildProcess` outright, so the richer `killProcessTree` is available and the
+ * pid-only path is unnecessary.
+ */
+export function registerRuntimeChild(child: ChildProcess): void {
+  // Shutdown has already taken its snapshot, so a late registrant would outlive
+  // the server. Kill it on arrival, exactly as a late connector pid is.
+  if (shuttingDown) {
+    killProcessTree(child)
+    return
+  }
+  liveChildren.add(child)
+}
+
+/** Stop tracking a local-tool child that closed cleanly. */
+export function unregisterRuntimeChild(child: ChildProcess): void {
+  liveChildren.delete(child)
+}
+
 /** Track a connector child so shutdown reaps its whole tree. */
 export function registerConnectorPid(pid: number | null | undefined): void {
   if (typeof pid !== 'number' || pid <= 0) return

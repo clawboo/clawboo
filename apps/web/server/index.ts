@@ -30,7 +30,10 @@ import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycle
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { getTeamOrchestrator } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
+import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
+import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
+import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
 import {
   resolveApiPort,
   writeApiPortFile,
@@ -40,7 +43,7 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
-import { agents } from '@clawboo/db'
+import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
 import { restoreScreenshots } from './lib/screenshotBus'
 import { mountSpa } from './lib/serveSpa'
@@ -540,6 +543,66 @@ async function main() {
     // shared Memory/Tasks MCP servers in the Gateway config after connect.
     .start({ log, mcpBaseUrl: `http://127.0.0.1:${port}` })
     .catch((err: unknown) => log.error({ err }, 'Agent registry: startup failed (non-fatal)'))
+
+  // Log what OpenClaw agents do when nobody asked them to: their own cron, an
+  // incoming WhatsApp or Telegram message, someone at OpenClaw's own terminal.
+  // Those runs are addressed to no clawboo connection, so they were absent from
+  // the activity feed rather than merely thin. Started after the registry because
+  // it hangs off that source's connection, and idempotent on reconnect.
+  // Somewhere an exec approval can be asked that is not a browser tab. Started
+  // BEFORE the capability is declared (see execApprovalSurface): a declared
+  // capability with no handler turns a fast refusal into a silent 30-minute hang.
+  safeStart('openclaw-exec-approvals', () => {
+    const db = getDb()
+    startExecApprovalSurface(getRegistry().source, (sourceAgentId) => {
+      const row = db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.sourceAgentId, sourceAgentId))
+        .get()
+      return row?.id ?? null
+    })
+  })
+
+  safeStart('openclaw-session-activity', () => {
+    const db = getDb()
+    startSessionActivityWatcher(
+      getRegistry().source,
+      (sourceAgentId) => {
+        // OpenClaw's agent id maps to clawboo's ROW id, which is what the feed and
+        // the panel are keyed on. They are equal on every row today, so resolving
+        // properly costs nothing now and is the difference between a correct feed
+        // and a misattributed one the first time an agent is re-imported.
+        const row = db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.sourceAgentId, sourceAgentId))
+          .get()
+        return row?.id ?? null
+      },
+      // What this agent was last billed for, so a restart mid-conversation
+      // resumes rather than charging the turn in flight a second time.
+      (agentId, sessionKey) => {
+        const row = db
+          .select({
+            model: costRecords.model,
+            inputTokens: costRecords.inputTokens,
+            outputTokens: costRecords.outputTokens,
+          })
+          .from(costRecords)
+          // BOTH keys. An agent can hold several conversations, and the newest
+          // row for the agent may belong to a different one; seeding this
+          // session with that cumulative snapshot makes the next turn bill the
+          // difference between two unrelated numbers. Rows written before
+          // `session_key` existed carry null and simply never match, which
+          // degrades to not seeding rather than to seeding wrongly.
+          .where(and(eq(costRecords.agentId, agentId), eq(costRecords.sessionKey, sessionKey)))
+          .orderBy(desc(costRecords.createdAt))
+          .get()
+        return row ? { ...row } : null
+      },
+    )
+  })
 
   // ── Listen ────────────────────────────────────────────────────────────────
 

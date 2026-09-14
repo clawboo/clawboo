@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { resolveExecPatchParams } from '../execSettingsForGateway'
+import { resolveExecPatchParams } from '@clawboo/gateway-client'
 
 describe('resolveExecPatchParams', () => {
   it('never sends the retired execSecurity field', () => {

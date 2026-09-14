@@ -20,6 +20,7 @@ import type { RuntimeRunContext } from '../types'
 import { loadAgentConfigOrDefault } from './agentConfigStore'
 import { Conversation } from './conversation'
 import { buildDelegateTool } from './delegateTool'
+import { buildExecTool } from './execTool'
 import { buildFileTools } from './fileTools'
 import { connectMcpBridge, type McpBridge } from './mcpBridge'
 import { createRoutedClient, type RoutedProviderClient } from './routeCall'
@@ -140,6 +141,16 @@ export function createNativeDriver(
         // there is no orchestrator, so the tool is (correctly) absent.
         localTools: [
           ...buildFileTools(ctx.cwd ?? null),
+          // The shell, if someone switched it on for this Boo. `buildExecTool`
+          // returns nothing when it is off, when the run has no working
+          // directory, or on Windows: absent rather than present-and-refusing,
+          // because a tool the model can see is a tool it will spend turns on.
+          ...buildExecTool({
+            db,
+            agentId: opts.agentId,
+            cwd: ctx.cwd ?? null,
+            enabled: config.tools.shell === true,
+          }),
           ...(isTeamSessionKey(opts.sessionKey) ? [buildDelegateTool()] : []),
         ],
         opts,

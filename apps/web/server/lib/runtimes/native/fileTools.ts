@@ -11,11 +11,26 @@ import path from 'node:path'
 export interface NativeToolOutcome {
   output: string
   isError: boolean
-  /** Set (to the reason) when a brokered MCP tool call was DENIED by the tools
-   *  broker. The conversation surfaces it as a non-fatal `policy_denied` signal so
-   *  the host's circuit breaker can trip on repeated denials. Local file tools
-   *  never set it. */
+  /** Set (to the reason) when a call was DENIED by policy: either the tools
+   *  broker refusing a brokered MCP call, or a LOCAL tool that gates itself. The
+   *  conversation surfaces it as a non-fatal `policy_denied` signal so the host's
+   *  circuit breaker can trip on repeated denials. The three file tools never set
+   *  it; they are confined by `resolveJailed` rather than by a decision. */
   denied?: string
+}
+
+/**
+ * What a local tool is handed when it runs.
+ *
+ * ONLY THE RUN'S ABORT, for now. Local tools are dispatched directly rather than
+ * through the broker, so nothing in that path could previously see a Stop. That
+ * is harmless for the file tools, which complete in microseconds, and not
+ * harmless at all for a tool that spawns a child: without the signal the child
+ * outlives the Stop, the budget kill switch, a breaker trip and the drain guard,
+ * while the run itself reports `aborted`.
+ */
+export interface NativeLocalToolContext {
+  signal: AbortSignal
 }
 
 /** Provider-neutral tool definition (JSON Schema args) + its local executor. */
@@ -23,7 +38,8 @@ export interface NativeLocalTool {
   name: string
   description: string
   inputSchema: Record<string, unknown>
-  run(args: Record<string, unknown>): Promise<NativeToolOutcome>
+  /** `ctx` is optional so the file tools, which ignore it, need no change. */
+  run(args: Record<string, unknown>, ctx?: NativeLocalToolContext): Promise<NativeToolOutcome>
 }
 
 const READ_CAP_BYTES = 64 * 1024

@@ -29,6 +29,53 @@ export type ChatCost = {
   outputTokens: number
 }
 
+/**
+ * One committed transcript row, as `session.message` delivers it.
+ *
+ * A DIFFERENT SHAPE FROM `chat`, which is why this cannot reuse
+ * `ChatEventPayload`: a chat frame is a streaming delta and carries a required
+ * `state` of delta/final/aborted/error, while this is a row that has already
+ * landed and has no state at all. Feeding one to `parseChatPayload` returns null.
+ *
+ * WHY IT MATTERS. The `chat` and `agent` streams are addressed only to the
+ * connection that STARTED a run, so everything an agent does on its own — a cron
+ * job, an incoming WhatsApp or Telegram message, someone at OpenClaw's own
+ * terminal — reaches no one on those channels. `session.message` is driven by the
+ * transcript commit rather than by who is watching, so it is the only channel
+ * that carries that work, and it carries it in full: tool calls with their
+ * arguments, tool results, and a `usage` block with real token counts.
+ */
+export type SessionMessagePayload = {
+  sessionKey: string
+  /** Absent on some rows; the watcher falls back to a key it has already learned. */
+  agentId?: string
+  /** The transcript row itself. `parseMessage` in @clawboo/protocol reads it as-is. */
+  message: unknown
+  messageId?: string
+  messageSeq?: number
+  runId?: string
+
+  /**
+   * Token spend for the request that produced this row, from the session
+   * snapshot the payload carries.
+   *
+   * PER REQUEST, NOT PER SESSION, which is the whole reason these can be summed.
+   * Every request re-sends the conversation, so the provider bills the full
+   * prompt each time and the turn-by-turn figures add up to the real total.
+   * Confirmed against live sessions where `inputTokens` sits both well below and
+   * well above `totalTokens` (866 against 20573, and 51477 against 25775) — a
+   * running total could do neither.
+   *
+   * There is NO `usage` or `cost` object on this payload. An earlier design
+   * assumed one and it does not exist: searching every transcript row in a live
+   * agent's store returns zero hits for either key. These three snapshot fields
+   * are what is actually on offer.
+   */
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+}
+
 export type AgentEventPayload = {
   runId: string
   seq?: number

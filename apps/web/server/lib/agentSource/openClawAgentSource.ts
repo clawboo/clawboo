@@ -35,7 +35,10 @@ import type {
 } from '@clawboo/agent-registry'
 import type { OpenClawGatewayClient } from '@clawboo/adapter-openclaw'
 import { authRetryAfterMs, isAuthConnectError } from '@clawboo/gateway-client'
+import { createLogger } from '@clawboo/logger'
 import { mcpHttpUrl } from '@clawboo/mcp'
+
+import { applyExecApprovalPolicy, isExecAsk, type ExecAsk } from './execApprovalPolicy'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 // ── The subset of GatewayClient this source uses (the real client satisfies it;
@@ -159,6 +162,19 @@ function parseJson(value: string | null): unknown | null {
   }
 }
 
+/**
+ * What a Boo asks about before it has been configured.
+ *
+ * 'on-miss' means a command that is not already trusted raises an approval
+ * rather than running. The alternative, and what shipped before this, is that
+ * a brand new agent runs anything at all on the user's own machine without
+ * asking once, because an agent with no Gateway policy resolves to
+ * `security: full, ask: off`.
+ */
+const DEFAULT_EXEC_ASK: ExecAsk = 'on-miss'
+
+const log = createLogger('openclaw-agents')
+
 export class OpenClawAgentSource implements AgentSource {
   readonly id = 'openclaw'
 
@@ -180,6 +196,7 @@ export class OpenClawAgentSource implements AgentSource {
   private readonly listeners = new Set<(e: AgentEvent) => void>()
   // Reconnect-stable broadcast fan-out: the client (and its onEvent
   // subscription) is torn down per connection; this listener set is not.
+  private readonly connectionListeners = new Set<(c: HealthResult['connection']) => void>()
   private readonly broadcastListeners = new Set<
     (frame: { event: string; payload?: unknown }) => void
   >()
@@ -228,6 +245,24 @@ export class OpenClawAgentSource implements AgentSource {
   onGatewayBroadcast(cb: (frame: { event: string; payload?: unknown }) => void): () => void {
     this.broadcastListeners.add(cb)
     return () => this.broadcastListeners.delete(cb)
+  }
+
+  /**
+   * Fires on every connection-state transition.
+   *
+   * EXISTS FOR RE-SUBSCRIBING. A Gateway subscription is keyed on the connection
+   * that asked for it, so it dies silently with the socket and no error is raised
+   * on either side — a watcher that subscribes once looks correct on day one and
+   * is deaf by day three. `onGatewayBroadcast` above deliberately outlives any
+   * single client, so it cannot be the hook that notices.
+   *
+   * A callback rather than the existing `emit({kind:'connection'})`, which feeds
+   * an async-iterable stream meant for the UI: a re-subscribe has to happen the
+   * moment the socket is up, not whenever a consumer next pulls.
+   */
+  onConnectionChange(cb: (c: HealthResult['connection']) => void): () => void {
+    this.connectionListeners.add(cb)
+    return () => this.connectionListeners.delete(cb)
   }
 
   /**
@@ -479,6 +514,13 @@ export class OpenClawAgentSource implements AgentSource {
     if (this.connection === c) return
     this.connection = c
     this.emit({ kind: 'connection', at: Date.now(), connection: c })
+    for (const fn of this.connectionListeners) {
+      try {
+        fn(c)
+      } catch {
+        // A listener must never be able to break the connection state machine.
+      }
+    }
   }
 
   private async openConnection(): Promise<void> {
@@ -839,6 +881,46 @@ export class OpenClawAgentSource implements AgentSource {
       }
     }
 
+    // A NEW BOO ASKS BEFORE RUNNING AN UNKNOWN COMMAND, and the gate is applied
+    // here for the same reason the browsing guidance above is: there is no single
+    // template for a created agent, so a default set in one caller reads as a
+    // fleet rule while part of the fleet never receives it.
+    //
+    // The Gateway is the only thing that gates anything. With no entry in its
+    // policy, field resolution falls through to the document defaults and then to
+    // `security: full, ask: off`, which is unrestricted shell access on the user's
+    // own machine. That was the shipped default for every Boo.
+    //
+    // EVERY POSTURE GOES TO THE GATEWAY, including one the caller supplied. An
+    // earlier version applied only the default and stored an explicit `execAsk`
+    // in SQLite alone, so a Boo created with 'always' showed "Always Ask" in the
+    // Permissions tab while the Gateway held nothing and the Boo ran everything
+    // unasked. That is the dead lever this area keeps producing, with the local
+    // record as the thing telling the lie.
+    //
+    // AND A REFUSAL FAILS THE CREATION. Persisting the agent anyway leaves a Boo
+    // whose stated posture is not the one in force; the operator asked for a
+    // gated agent and would get an ungated one. The upstream agent is removed
+    // first so a retry is not blocked by a half-created name.
+    const execConfig = input.execConfig ?? { execAsk: DEFAULT_EXEC_ASK }
+    const wantedAsk = (execConfig as { execAsk?: unknown }).execAsk
+    if (isExecAsk(wantedAsk)) {
+      const applied = await applyExecApprovalPolicy(this, agentId, wantedAsk)
+      if (!applied.ok) {
+        log.warn({ agentId, err: applied.error }, 'could not gate a new agent; removing it')
+        try {
+          await client.agents.delete(agentId)
+        } catch (err) {
+          // Reported, not swallowed: the operator needs to know a half-created
+          // agent is sitting upstream, because the throw below will not say so.
+          log.warn({ agentId, err }, 'could not remove the ungated agent upstream')
+        }
+        throw new Error(
+          `Could not set this agent's command permissions on the Gateway, so it was not created: ${applied.error ?? 'unknown error'}`,
+        )
+      }
+    }
+
     const db = this.db()
     const now = Date.now()
     db.insert(agents)
@@ -854,7 +936,7 @@ export class OpenClawAgentSource implements AgentSource {
         teamId: input.teamId ?? null,
         personalityConfig:
           input.personalityConfig != null ? JSON.stringify(input.personalityConfig) : null,
-        execConfig: input.execConfig != null ? JSON.stringify(input.execConfig) : null,
+        execConfig: execConfig != null ? JSON.stringify(execConfig) : null,
         avatarSeed: input.avatarSeed ?? null,
         // Insert-branch only — the conflict `set` is Gateway-owned columns ONLY, so a
         // re-create never re-stamps an existing row's tenant (mirrors upsertFromList).

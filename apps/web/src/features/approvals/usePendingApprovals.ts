@@ -52,6 +52,17 @@ export interface ToolApproval {
    */
   toolClass?: 'read' | 'write' | 'destructive' | null
   toolSummary?: string | null
+  /**
+   * Which system is holding the call open.
+   *
+   * `'exec'` is a shell command held by the OpenClaw Gateway and MIRRORED here so
+   * it survives a closed tab. It is not a tool call clawboo brokered, and it must
+   * not be rendered as one: `ToolApprovalCard` would describe an `echo` with the
+   * stored destructive class and offer a button labelled "Delete it".
+   *
+   * Older rows predate the column, so an absent value means `'tool'`.
+   */
+  kind?: 'tool' | 'exec' | null
 }
 
 export type ToolDecision = 'allow_once' | 'allow_always' | 'deny'
@@ -77,6 +88,47 @@ export interface ApprovalScope {
 // live poller; approvals expire in ~30-60s, so a few-second cadence is what keeps the
 // queue responsive.
 const POLL_MS = 3000
+
+/**
+ * Read a mirrored exec approval back into the shape the exec card renders.
+ *
+ * WHY THE MIRROR IS NOT REDUNDANT with the Gateway socket that also delivers
+ * these: the socket store only holds frames this tab was connected for. Open a
+ * tab ten minutes into a thirty-minute window and the store is empty while the
+ * command is still held, which is the case the whole mirror exists to cover.
+ *
+ * Fields the mirror does not keep (`host`, `security`, `resolvedPath`) are null
+ * rather than invented. The card shows the command, which is the part that
+ * decides anything.
+ */
+export function execRequestFromMirror(a: ToolApproval): ApprovalRequest | null {
+  let command = a.toolSummary?.trim() ?? ''
+  let cwd: string | null = null
+  try {
+    const args = a.argsSummary ? (JSON.parse(a.argsSummary) as Record<string, unknown>) : null
+    if (typeof args?.['command'] === 'string') command = args['command']
+    if (typeof args?.['cwd'] === 'string') cwd = args['cwd']
+  } catch {
+    // `toolSummary` still carries the command; an unreadable args blob is not a
+    // reason to drop a card someone has to answer.
+  }
+  if (!command) return null
+  return {
+    id: a.id,
+    agentId: a.agentId,
+    sessionKey: null,
+    command,
+    cwd,
+    host: null,
+    security: null,
+    ask: null,
+    resolvedPath: null,
+    createdAtMs: a.createdAt,
+    expiresAtMs: a.expiresAt,
+    resolving: false,
+    error: null,
+  }
+}
 
 /** The raw, UNSCOPED tool-approval poll + resolve. Used by the Governance dashboard's
  *  queue (which shows everything) and composed by `usePendingApprovals` below. */
@@ -179,15 +231,32 @@ export function usePendingApprovals(scope: ApprovalScope): {
     [scope.agentId, scope.includeUnscoped, teamAgentIds, booZeroId],
   )
 
-  const exec = useMemo(
-    () =>
-      Array.from(pendingExec.values())
-        .filter((a) => matches(a.agentId))
-        .sort((a, b) => a.createdAtMs - b.createdAtMs),
-    [pendingExec, matches],
-  )
+  // ONE CARD PER COMMAND, AND IT IS THE SHELL CARD.
+  //
+  // A shell approval can arrive twice: live over the Gateway socket, and again
+  // from the server's mirror through the poll. Rendering both put the same
+  // command on screen as two cards with different wording, one of them offering
+  // "Delete it" over an `echo`. Merging on the id keeps whichever arrived, and
+  // the SOCKET entry wins a tie because it carries the fuller request (the
+  // session, host and resolved path the mirror does not keep).
+  const exec = useMemo(() => {
+    const byId = new Map<string, ApprovalRequest>()
+    for (const a of pendingExec.values()) byId.set(a.id, a)
+    for (const row of toolAll) {
+      if (row.kind !== 'exec' || byId.has(row.id)) continue
+      const req = execRequestFromMirror(row)
+      if (req) byId.set(req.id, req)
+    }
+    return Array.from(byId.values())
+      .filter((a) => matches(a.agentId))
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+  }, [pendingExec, toolAll, matches])
+
   const tool = useMemo(
-    () => toolAll.filter((a) => matches(a.agentId)).sort((a, b) => a.createdAt - b.createdAt),
+    () =>
+      toolAll
+        .filter((a) => a.kind !== 'exec' && matches(a.agentId))
+        .sort((a, b) => a.createdAt - b.createdAt),
     [toolAll, matches],
   )
 

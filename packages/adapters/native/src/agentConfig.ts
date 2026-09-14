@@ -60,6 +60,20 @@ export const agentConfigSchema = z.object({
     tasks: z.union([z.boolean(), z.literal('read')]),
     /** TeamChat MCP — post + listen in the shared team room as a named peer. */
     teamchat: z.boolean(),
+    /**
+     * The native shell (`run_command`), off unless someone switched it on.
+     *
+     * OPTIONAL, and deliberately absent from `DEFAULT_AGENT_CONFIG`. Optional is
+     * load-bearing twice over: a required field would make `parseAgentConfig`
+     * reject every config stored before this existed, and the loader would then
+     * fall back to the defaults for every one of them. And leaving it out of the
+     * defaults is what stops a shell arriving switched on for a Boo nobody chose.
+     *
+     * Absent reads as off. The capability it gates asks a human before every
+     * single command, so this switch decides whether the Boo may ASK, not whether
+     * it may run.
+     */
+    shell: z.boolean().optional(),
     /** Additional MCP service refs (reserved). */
     custom: z.array(z.string()).optional(),
   }),
