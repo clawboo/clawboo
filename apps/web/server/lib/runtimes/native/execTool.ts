@@ -31,7 +31,7 @@ import { and, eq } from 'drizzle-orm'
 import { createLogger } from '@clawboo/logger'
 import { connectorChildEnv } from '@clawboo/mcp'
 
-import { classifyArgv, classifyResolvedProgram, resolveProgramPath } from './execPolicy'
+import { classifyArgv, inspectResolvedProgram, isSameFile, resolveProgramPath } from './execPolicy'
 import { runApprovedCommand } from './execRun'
 import type { NativeLocalTool, NativeToolOutcome } from './fileTools'
 
@@ -189,8 +189,12 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
             isError: true,
           }
         }
-        const afterResolve = classifyResolvedProgram(resolved)
-        if (!afterResolve.ok) return { output: afterResolve.message, isError: true }
+        // Inspects the REAL FILE: its basename, and its shebang, because a
+        // script named innocently can be run by an interpreter that is not. Also
+        // records the file's identity, so the spawn can refuse if the file is
+        // swapped while the approval waits.
+        const inspected = await inspectResolvedProgram(resolved)
+        if (!inspected.ok) return { output: inspected.message, isError: true }
 
         const finalArgv = [resolved, ...verdict.argv.slice(1)]
         const why = typeof args['why'] === 'string' ? args['why'].slice(0, 200) : null
@@ -244,6 +248,17 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
               'Report this rather than trying other commands.',
             isError: true,
           }
+        }
+
+        // THE FILE THAT WAS APPROVED, not merely the path. An approval sits in
+        // front of a person for minutes, and the binary at that path can be
+        // replaced in between; spawning on the path alone would execute
+        // something nobody was shown.
+        if (!(await isSameFile(resolved, inspected.identity))) {
+          return deny(
+            'The program changed on disk while this was waiting to be approved, so it was not run.',
+            'run_command:file-changed',
+          )
         }
 
         try {

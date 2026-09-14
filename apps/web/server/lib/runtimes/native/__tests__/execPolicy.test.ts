@@ -8,13 +8,15 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { mkdtemp, rm, symlink, writeFile, chmod } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
 import {
   classifyArgv,
-  classifyResolvedProgram,
+  inspectResolvedProgram,
+  isSameFile,
+  isShellEscapingProgram,
   programBasename,
   resolveProgramPath,
   SHELL_ESCAPING_PROGRAMS,
@@ -168,7 +170,7 @@ describe.skipIf(process.platform === 'win32')('resolving before deciding', () =>
     // The second one, on the resolved target, is the one that matters.
     const resolved = await resolveProgramPath(link, dir)
     expect(resolved).toBeTruthy()
-    const verdict = classifyResolvedProgram(resolved as string)
+    const verdict = await inspectResolvedProgram(resolved as string)
     expect(verdict.ok).toBe(false)
     if (!verdict.ok) expect(verdict.code).toBe('interpreter')
   })
@@ -176,7 +178,7 @@ describe.skipIf(process.platform === 'win32')('resolving before deciding', () =>
   it('resolves a bare name against the PATH it is given', async () => {
     const resolved = await resolveProgramPath('echo', '/bin:/usr/bin')
     expect(resolved).toMatch(/\/echo$/)
-    expect(classifyResolvedProgram(resolved as string).ok).toBe(true)
+    expect((await inspectResolvedProgram(resolved as string)).ok).toBe(true)
   })
 
   it('returns null when nothing executable matches', async () => {
@@ -188,5 +190,76 @@ describe.skipIf(process.platform === 'win32')('resolving before deciding', () =>
     await writeFile(f, 'x')
     await chmod(f, 0o644)
     expect(await resolveProgramPath(f, dir)).toBeNull()
+  })
+})
+
+describe('versioned interpreter names', () => {
+  it('refuses an interpreter however it is versioned', () => {
+    // Exact membership let these straight through while `python` and `node`
+    // were refused, which made the denylist trivially avoidable.
+    for (const p of ['python3.11', 'python3.12', 'node22', 'perl5.36', 'PYTHON3.9']) {
+      expect(isShellEscapingProgram(p.toLowerCase())).toBe(true)
+    }
+    expect(classifyArgv(['/usr/bin/python3.11', 'x.py']).ok).toBe(false)
+  })
+
+  it('does not refuse an unrelated program that merely ends in digits', () => {
+    // The suffix rule only re-checks the stem, so these are unaffected.
+    for (const p of ['base64', 'sha256sum', '7z', 'gzip']) {
+      expect(isShellEscapingProgram(p)).toBe(false)
+    }
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('what the file really is', () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-shebang-'))
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const script = async (name: string, firstLine: string) => {
+    const f = path.join(dir, name)
+    await writeFile(f, `${firstLine}\necho hi\n`)
+    await chmod(f, 0o755)
+    return f
+  }
+
+  it('refuses a script whose shebang names a shell', async () => {
+    // The basename says `mytool`. The card would have shown `mytool` while
+    // /bin/sh did the work.
+    const f = await script('mytool', '#!/bin/sh')
+    const r = await inspectResolvedProgram(f)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.code).toBe('interpreter')
+  })
+
+  it('refuses a script run through env', async () => {
+    // `#!/usr/bin/env python3` hides the interpreter in the second word.
+    const f = await script('helper', '#!/usr/bin/env python3')
+    expect((await inspectResolvedProgram(f)).ok).toBe(false)
+  })
+
+  it('accepts a real binary', async () => {
+    const r = await inspectResolvedProgram('/bin/echo')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.identity.ino).toBeGreaterThan(0)
+  })
+
+  it('notices when the file is swapped after it was inspected', async () => {
+    // An approval waits minutes in front of a person. Spawning on the path alone
+    // would run whatever occupies it by then.
+    const f = await script('tool', '#!/bin/echo')
+    const r = await inspectResolvedProgram(f)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(await isSameFile(f, r.identity)).toBe(true)
+
+    await rm(f)
+    await writeFile(f, '#!/bin/echo\nreplaced\n')
+    await chmod(f, 0o755)
+    expect(await isSameFile(f, r.identity)).toBe(false)
   })
 })

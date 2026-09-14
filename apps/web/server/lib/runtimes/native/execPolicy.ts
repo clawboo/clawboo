@@ -50,7 +50,7 @@
  * same gap between what was approved and what runs, one layer down.
  */
 
-import { access, realpath, stat } from 'node:fs/promises'
+import { access, open, realpath, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 
@@ -187,6 +187,25 @@ export function programBasename(program: string): string {
 }
 
 /**
+ * Whether this basename names a shell escape, version suffix and all.
+ *
+ * EXACT MEMBERSHIP WAS NOT ENOUGH. Interpreters ship under versioned names, and
+ * `python3.11`, `node22` and `perl5.36` were all accepted while `python` and
+ * `node` were refused. Measured, not theorised. The suffix is stripped and the
+ * stem re-checked, so a family already on the list stays on it however it is
+ * versioned, and an unrelated program that merely ends in digits is unaffected
+ * because its stem is not on the list either.
+ */
+export function isShellEscapingProgram(basename: string): boolean {
+  if (SHELL_ESCAPING_PROGRAMS.has(basename)) return true
+  const stem = basename.replace(/[0-9]+(?:\.[0-9]+)*$/, '')
+  if (stem !== basename && SHELL_ESCAPING_PROGRAMS.has(stem)) return true
+  // `python3.11` reduces to `python3.` above; drop a trailing separator too.
+  const trimmed = stem.replace(/[.\-_]$/, '')
+  return trimmed !== stem && SHELL_ESCAPING_PROGRAMS.has(trimmed)
+}
+
+/**
  * Decide whether this argv may be put in front of a human.
  *
  * Pure and synchronous: no filesystem, no PATH, no spawning. Resolving argv[0]
@@ -236,7 +255,7 @@ export function classifyArgv(input: unknown): ExecAccepted | ExecRefusal {
   }
 
   const base = programBasename(program)
-  if (SHELL_ESCAPING_PROGRAMS.has(base)) {
+  if (isShellEscapingProgram(base)) {
     return refuse(
       'interpreter',
       `"${base}" runs other commands, so the approval card could not show what would actually run. ` +
@@ -289,7 +308,7 @@ export async function resolveProgramPath(
  */
 export function classifyResolvedProgram(resolved: string): ExecAccepted | ExecRefusal {
   const base = programBasename(resolved)
-  if (SHELL_ESCAPING_PROGRAMS.has(base)) {
+  if (isShellEscapingProgram(base)) {
     return refuse(
       'interpreter',
       `that resolves to "${base}", which runs other commands, so the approval card ` +
@@ -297,4 +316,97 @@ export function classifyResolvedProgram(resolved: string): ExecAccepted | ExecRe
     )
   }
   return { ok: true, program: resolved, argv: [resolved] }
+}
+
+/**
+ * The identity of the file that was approved.
+ *
+ * A path is not an identity. The approval sits in front of a human for minutes,
+ * and the file at that path can be replaced in the meantime, so what was
+ * inspected and what gets executed need not be the same bytes. Recording the
+ * device and inode lets the spawn refuse when they no longer match.
+ */
+export interface ExecFileIdentity {
+  dev: number
+  ino: number
+}
+
+export interface ExecInspection {
+  ok: true
+  resolved: string
+  identity: ExecFileIdentity
+}
+
+/**
+ * Everything that must be true of the real file before a person is asked.
+ *
+ * READS THE SHEBANG, because a basename says nothing about what actually
+ * interprets a script. A file named `mytool` whose first line is `#!/bin/sh` is
+ * a shell script: it passed the denylist, and the card would have shown
+ * `mytool` while `/bin/sh` did the work. Verified against a real file, not
+ * reasoned about.
+ */
+export async function inspectResolvedProgram(
+  resolved: string,
+): Promise<ExecInspection | ExecRefusal> {
+  const base = programBasename(resolved)
+  if (isShellEscapingProgram(base)) {
+    return refuse(
+      'interpreter',
+      `that resolves to "${base}", which runs other commands, so the approval card ` +
+        'could not show what would actually run. Call the program you want directly.',
+    )
+  }
+
+  let identity: ExecFileIdentity
+  let shebang = ''
+  try {
+    const handle = await open(resolved, 'r')
+    try {
+      const st = await handle.stat()
+      identity = { dev: st.dev, ino: st.ino }
+      const buf = Buffer.alloc(256)
+      const { bytesRead } = await handle.read(buf, 0, 256, 0)
+      shebang = buf.subarray(0, bytesRead).toString('utf8')
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return refuse('not-found', `"${resolved}" could not be read.`)
+  }
+
+  if (shebang.startsWith('#!')) {
+    const line = shebang.split('\n', 1)[0] ?? ''
+    // `#!/usr/bin/env python3` names the interpreter in the second word, so both
+    // are checked: `env` is itself on the list, and so is what it would run.
+    const words = line.slice(2).trim().split(/\s+/).filter(Boolean)
+    for (const word of words.slice(0, 2)) {
+      const wordBase = programBasename(word)
+      if (isShellEscapingProgram(wordBase)) {
+        return refuse(
+          'interpreter',
+          `"${base}" is a script run by "${wordBase}", which runs other commands, so the ` +
+            'approval card could not show what would actually run.',
+        )
+      }
+    }
+  }
+
+  return { ok: true, resolved, identity }
+}
+
+/**
+ * Whether the file about to be spawned is still the one that was approved.
+ *
+ * Narrows the window rather than closing it: the file could in principle change
+ * between this check and the spawn. It removes the case that actually matters,
+ * which is a swap during the minutes an approval waits for a human.
+ */
+export async function isSameFile(resolved: string, identity: ExecFileIdentity): Promise<boolean> {
+  try {
+    const st = await stat(resolved)
+    return st.dev === identity.dev && st.ino === identity.ino
+  } catch {
+    return false
+  }
 }
