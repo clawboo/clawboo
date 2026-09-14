@@ -251,6 +251,13 @@ describe.skipIf(process.platform === 'win32')('what the file really is', () => {
   it('notices when the file is swapped after it was inspected', async () => {
     // An approval waits minutes in front of a person. Spawning on the path alone
     // would run whatever occupies it by then.
+    //
+    // THE REPLACEMENT IS A DIFFERENT SIZE ON PURPOSE. An earlier version of this
+    // test relied on the inode changing, which held on macOS and did NOT hold on
+    // ext4 in CI: the recreated file reused the inode and the check reported
+    // "same file" about different bytes. That was a real weakness in the
+    // implementation, not just in the test, and both are fixed: the identity now
+    // carries size and both timestamps.
     const f = await script('tool', '#!/bin/echo')
     const r = await inspectResolvedProgram(f)
     expect(r.ok).toBe(true)
@@ -258,8 +265,28 @@ describe.skipIf(process.platform === 'win32')('what the file really is', () => {
     expect(await isSameFile(f, r.identity)).toBe(true)
 
     await rm(f)
-    await writeFile(f, '#!/bin/echo\nreplaced\n')
+    await writeFile(f, '#!/bin/echo\nreplaced with something longer\n')
     await chmod(f, 0o755)
     expect(await isSameFile(f, r.identity)).toBe(false)
+  })
+
+  it('notices a replacement that reused the inode', async () => {
+    // THE COMPARISON, NOT THE FILESYSTEM. Whether a delete-and-recreate reuses an
+    // inode is a platform decision: ext4 in CI did, APFS locally did not. A test
+    // that recreates a file therefore proves nothing here, and that is exactly
+    // how the weakness reached CI in the first place. Holding dev and ino fixed
+    // and varying the rest pins the check itself on every platform.
+    const f = await script('reused', '#!/bin/echo')
+    const r = await inspectResolvedProgram(f)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    // Same inode, different bytes: what ext4 handed us.
+    expect(await isSameFile(f, { ...r.identity, size: r.identity.size + 1 })).toBe(false)
+    // Same inode and size, rewritten: timestamps are the only witness left.
+    expect(await isSameFile(f, { ...r.identity, mtimeMs: r.identity.mtimeMs - 1000 })).toBe(false)
+    expect(await isSameFile(f, { ...r.identity, ctimeMs: r.identity.ctimeMs - 1000 })).toBe(false)
+    // And the unchanged file still matches, so this is not just always-false.
+    expect(await isSameFile(f, r.identity)).toBe(true)
   })
 })

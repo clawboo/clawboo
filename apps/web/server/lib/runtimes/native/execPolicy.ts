@@ -323,12 +323,20 @@ export function classifyResolvedProgram(resolved: string): ExecAccepted | ExecRe
  *
  * A path is not an identity. The approval sits in front of a human for minutes,
  * and the file at that path can be replaced in the meantime, so what was
- * inspected and what gets executed need not be the same bytes. Recording the
- * device and inode lets the spawn refuse when they no longer match.
+ * inspected and what gets executed need not be the same bytes.
+ *
+ * DEVICE AND INODE ARE NOT ENOUGH, which CI proved rather than theory: on ext4
+ * a delete-and-recreate at the same path REUSED the inode, so the check said
+ * "same file" about different bytes. macOS did not reuse it, so the gap only
+ * appeared on Linux. Size and the two timestamps are recorded as well, and all
+ * of them change when a file is replaced.
  */
 export interface ExecFileIdentity {
   dev: number
   ino: number
+  size: number
+  mtimeMs: number
+  ctimeMs: number
 }
 
 export interface ExecInspection {
@@ -364,7 +372,13 @@ export async function inspectResolvedProgram(
     const handle = await open(resolved, 'r')
     try {
       const st = await handle.stat()
-      identity = { dev: st.dev, ino: st.ino }
+      identity = {
+        dev: st.dev,
+        ino: st.ino,
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        ctimeMs: st.ctimeMs,
+      }
       const buf = Buffer.alloc(256)
       const { bytesRead } = await handle.read(buf, 0, 256, 0)
       shebang = buf.subarray(0, bytesRead).toString('utf8')
@@ -398,14 +412,26 @@ export async function inspectResolvedProgram(
 /**
  * Whether the file about to be spawned is still the one that was approved.
  *
- * Narrows the window rather than closing it: the file could in principle change
- * between this check and the spawn. It removes the case that actually matters,
- * which is a swap during the minutes an approval waits for a human.
+ * NARROWS THE WINDOW, DOES NOT CLOSE IT, and the comment says so because the
+ * alternative is a reader trusting it further than it earns. The file can still
+ * change between this check and the spawn; closing that properly means holding
+ * the descriptor open from inspection and executing it directly, which is not
+ * portable. What this does remove is the case that actually matters: a swap
+ * during the minutes an approval waits for a human.
+ *
+ * Every recorded field is compared, not just the inode, because inode reuse is
+ * real and was observed in CI.
  */
 export async function isSameFile(resolved: string, identity: ExecFileIdentity): Promise<boolean> {
   try {
     const st = await stat(resolved)
-    return st.dev === identity.dev && st.ino === identity.ino
+    return (
+      st.dev === identity.dev &&
+      st.ino === identity.ino &&
+      st.size === identity.size &&
+      st.mtimeMs === identity.mtimeMs &&
+      st.ctimeMs === identity.ctimeMs
+    )
   } catch {
     return false
   }
