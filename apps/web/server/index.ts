@@ -30,7 +30,7 @@ import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycle
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { getTeamOrchestrator } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
 import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
@@ -582,7 +582,7 @@ async function main() {
       },
       // What this agent was last billed for, so a restart mid-conversation
       // resumes rather than charging the turn in flight a second time.
-      (agentId) => {
+      (agentId, sessionKey) => {
         const row = db
           .select({
             model: costRecords.model,
@@ -590,7 +590,13 @@ async function main() {
             outputTokens: costRecords.outputTokens,
           })
           .from(costRecords)
-          .where(eq(costRecords.agentId, agentId))
+          // BOTH keys. An agent can hold several conversations, and the newest
+          // row for the agent may belong to a different one; seeding this
+          // session with that cumulative snapshot makes the next turn bill the
+          // difference between two unrelated numbers. Rows written before
+          // `session_key` existed carry null and simply never match, which
+          // degrades to not seeding rather than to seeding wrongly.
+          .where(and(eq(costRecords.agentId, agentId), eq(costRecords.sessionKey, sessionKey)))
           .orderBy(desc(costRecords.createdAt))
           .get()
         return row ? { ...row } : null

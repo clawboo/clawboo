@@ -46,6 +46,7 @@ class FakeGateway implements OpenClawClientLike {
   onEvent(): () => void {
     return () => {}
   }
+  deleted: string[] = []
   approvalsDoc: Record<string, unknown> = { version: 1, agents: {} }
   approvalsCalls: Array<{ method: string; params?: unknown }> = []
   /** Set to make the policy write fail, as a disconnected Gateway would. */
@@ -78,7 +79,10 @@ class FakeGateway implements OpenClawClientLike {
       this.createdWith.push(cfg)
       return Promise.resolve({ agentId: `new-${cfg.name}` })
     },
-    delete: () => Promise.resolve(),
+    delete: (agentId: string) => {
+      this.deleted.push(agentId)
+      return Promise.resolve()
+    },
     files: {
       read: (agentId: string, name: string) =>
         Promise.resolve(this.files.get(`${agentId}/${name}`) ?? ''),
@@ -645,7 +649,10 @@ describe('OpenClawAgentSource', () => {
       await src.stop()
     })
 
-    it('does NOT claim a gate the Gateway refused', async () => {
+    // Superseded: creation now FAILS rather than persisting an ungated agent, so
+    // there is no longer a local record that could claim anything. The refusal
+    // itself is asserted above.
+    it.skip('does NOT claim a gate the Gateway refused', async () => {
       // The honesty property. `execConfig` is what the Permissions tab reads, so
       // stamping 'on-miss' after a failed policy write would put "Ask for Unknown"
       // on screen over an agent that asks nothing. Null renders "Run Freely", which
@@ -664,7 +671,10 @@ describe('OpenClawAgentSource', () => {
       await src.stop()
     })
 
-    it('never overrides a posture the caller asked for', async () => {
+    it('applies a caller-supplied posture to the GATEWAY, not just to SQLite', async () => {
+      // This previously asserted the DEFECT: it expected zero Gateway calls for
+      // an explicit posture, which meant the Permissions tab showed "Always Ask"
+      // over an agent the Gateway let run everything unasked.
       const fake = new FakeGateway()
       const src = makeSource(fake)
       await src.start()
@@ -672,8 +682,22 @@ describe('OpenClawAgentSource', () => {
       const record = await src.createAgent({ name: 'Explicit', execConfig: { execAsk: 'always' } })
 
       expect(record.execConfig).toEqual({ execAsk: 'always' })
-      // No default write went out at all.
-      expect(fake.approvalsCalls).toHaveLength(0)
+      expect(fake.askFor(record.id)).toBe('always')
+      await src.stop()
+    })
+
+    it('REFUSES to create an agent it could not gate', async () => {
+      // Persisting it anyway leaves a Boo whose stated posture is not the one in
+      // force. The operator asked for a gated agent, and an ungated one is not a
+      // degraded version of that: it is a different thing.
+      const fake = new FakeGateway()
+      fake.approvalsFail = true
+      const src = makeSource(fake)
+      await src.start()
+
+      await expect(src.createAgent({ name: 'Ungated' })).rejects.toThrow(/command permissions/i)
+      // And it does not leave the half-created agent upstream.
+      expect(fake.deleted).toContain('new-Ungated')
       await src.stop()
     })
   })

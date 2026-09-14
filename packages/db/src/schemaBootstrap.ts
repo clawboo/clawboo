@@ -110,9 +110,11 @@ const SCHEMA_DDL = `
       output_tokens  INTEGER NOT NULL,
       cost_usd       REAL    NOT NULL,
       run_id         TEXT,
+      session_key    TEXT,
       created_at     INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_cost_records_agent_id   ON cost_records (agent_id);
+    CREATE INDEX IF NOT EXISTS idx_cost_records_session    ON cost_records (session_key, created_at);
     CREATE INDEX IF NOT EXISTS idx_cost_records_run_id     ON cost_records (run_id);
     CREATE INDEX IF NOT EXISTS idx_cost_records_created_at ON cost_records (created_at);
 

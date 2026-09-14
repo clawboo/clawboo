@@ -26,10 +26,25 @@ describe('SessionTokenSpend', () => {
     // THE HEADLINE. A turn commits several messages and every one repeats the
     // session snapshot, so a writer that fired per frame would charge one request
     // three times and the dashboard would read high with total confidence.
+    //
+    // `commit` is what marks it billed, and the caller only calls it once the
+    // cost row is durable. See the test below for why that split exists.
     const snap = { model: 'minimax/minimax-m2.5', inputTokens: 27287, outputTokens: 117 }
+    const turn = spend.take(KEY, snap)
+    expect(turn).toEqual(snap)
+    spend.commit(KEY, turn!)
+    expect(spend.take(KEY, snap)).toBeNull()
+    expect(spend.take(KEY, snap)).toBeNull()
+  })
+
+  it('leaves a turn billable when the cost row could not be written', () => {
+    // The charge used to be lost for good: `take` marked the turn seen before the
+    // caller wrote the row, so a failed insert meant every later frame matched
+    // the signature and nothing ever retried.
+    const snap = { model: 'gpt-x', inputTokens: 100, outputTokens: 10 }
     expect(spend.take(KEY, snap)).toEqual(snap)
-    expect(spend.take(KEY, snap)).toBeNull()
-    expect(spend.take(KEY, snap)).toBeNull()
+    // No commit: the insert threw. The next frame must still offer it.
+    expect(spend.take(KEY, snap)).toEqual(snap)
   })
 
   it('bills each new turn, so the running total is the real one', () => {
@@ -42,7 +57,13 @@ describe('SessionTokenSpend', () => {
       { model, inputTokens: 1500, outputTokens: 90 },
       { model, inputTokens: 2400, outputTokens: 30 },
     ]
-    const billed = turns.map((t) => spend.take(KEY, t)).filter((t) => t !== null)
+    const billed = turns
+      .map((t) => {
+        const got = spend.take(KEY, t)
+        if (got) spend.commit(KEY, got)
+        return got
+      })
+      .filter((t) => t !== null)
     expect(billed).toHaveLength(3)
     expect(billed.reduce((n, t) => n + (t?.inputTokens ?? 0), 0)).toBe(4700)
   })
@@ -78,5 +99,53 @@ describe('SessionTokenSpend', () => {
     expect(spend.take(KEY, {})).toBeNull()
     expect(spend.take(KEY, { model: 'gpt-x' })).toBeNull()
     expect(spend.take(KEY, { model: 'gpt-x', inputTokens: 0, outputTokens: 0 })).toBeNull()
+  })
+})
+
+// ─── Telling two turns apart ───────────────────────────────────────────────
+//
+// The signature was model plus token counts alone, so two consecutive turns
+// that happened to bill identical numbers looked like one turn repeated and the
+// second charge was dropped. The frame carries a message id; using it means two
+// frames are the same turn only when they say so.
+describe('turn identity', () => {
+  const snap = { model: 'gpt-x', inputTokens: 500, outputTokens: 20 }
+
+  it('bills two DIFFERENT turns that happen to cost the same', () => {
+    const a = spend.take(KEY, { ...snap, turnId: 'msg-1' })
+    expect(a).not.toBeNull()
+    spend.commit(KEY, a!, 'msg-1')
+    // Same model, same counts, different turn. This was silently dropped.
+    expect(spend.take(KEY, { ...snap, turnId: 'msg-2' })).not.toBeNull()
+  })
+
+  it('still bills one turn once across its many frames', () => {
+    const a = spend.take(KEY, { ...snap, turnId: 'msg-1' })
+    spend.commit(KEY, a!, 'msg-1')
+    expect(spend.take(KEY, { ...snap, turnId: 'msg-1' })).toBeNull()
+  })
+
+  it('falls back to the counts when the frame carries no id', () => {
+    const a = spend.take(KEY, snap)
+    spend.commit(KEY, a!)
+    expect(spend.take(KEY, snap)).toBeNull()
+  })
+})
+
+describe('what is not a token count', () => {
+  it('refuses a negative count, which would write a negative charge', () => {
+    // The old pair test only rejected a frame when BOTH counts were non-positive.
+    expect(spend.take(KEY, { model: 'gpt-x', inputTokens: -1, outputTokens: 1 })).toBeNull()
+    expect(spend.take(KEY, { model: 'gpt-x', inputTokens: 1, outputTokens: -5 })).toBeNull()
+  })
+
+  it('refuses values that are not finite whole numbers', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      expect(spend.take(KEY, { model: 'gpt-x', inputTokens: bad, outputTokens: 10 })).toBeNull()
+    }
+  })
+
+  it('still bills an ordinary turn', () => {
+    expect(spend.take(KEY, { model: 'gpt-x', inputTokens: 0, outputTokens: 10 })).not.toBeNull()
   })
 })

@@ -54,7 +54,14 @@ export interface SessionActivitySource {
 export type ResolveAgentId = (sourceAgentId: string) => string | null
 
 /** The last token spend already recorded for an agent, so a restart does not re-bill it. */
-export type LastRecordedSpend = (agentId: string) => TurnSpend | null
+/**
+ * The last spend already recorded FOR THIS SESSION.
+ *
+ * Keyed by session as well as agent: an agent can hold several conversations,
+ * and seeding one of them with another's cumulative snapshot makes the next turn
+ * bill the difference between two unrelated numbers.
+ */
+export type LastRecordedSpend = (agentId: string, sessionKey: string) => TurnSpend | null
 
 /**
  * The OpenClaw agent id inside a session key.
@@ -177,11 +184,15 @@ export function startSessionActivityWatcher(
       // only way this design can over-count.
       if (!seeded.has(payload.sessionKey)) {
         seeded.add(payload.sessionKey)
-        const prior = lastRecordedSpend?.(agentId) ?? null
+        const prior = lastRecordedSpend?.(agentId, payload.sessionKey) ?? null
         if (prior) spend.seed(payload.sessionKey, prior)
       }
 
-      const turn = spend.take(payload.sessionKey, payload)
+      // The message id is the turn identifier when the frame carries one, so two
+      // turns that happen to bill identical counts are not read as a repeat.
+      const turnId =
+        payload.messageId ?? (payload.messageSeq != null ? `seq:${payload.messageSeq}` : undefined)
+      const turn = spend.take(payload.sessionKey, { ...payload, turnId })
       if (turn) {
         try {
           getDb()
@@ -193,9 +204,15 @@ export function startSessionActivityWatcher(
               outputTokens: turn.outputTokens,
               costUsd: calculateCostUsd(turn.model, turn.inputTokens, turn.outputTokens),
               runId: payload.runId ?? null,
+              sessionKey: payload.sessionKey,
               createdAt: Date.now(),
             })
             .run()
+          // COMMITTED ONLY NOW. Marking the turn seen before the insert meant a
+          // failed write lost the charge for good: every later frame matched the
+          // signature and was skipped, so nothing retried. Committing here leaves
+          // a failed insert billable on the next frame.
+          spend.commit(payload.sessionKey, turn, turnId)
         } catch (err) {
           // Cost is a report, never a reason to lose the activity row below it.
           log.debug({ err }, 'could not record token spend')

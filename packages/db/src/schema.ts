@@ -150,6 +150,17 @@ export const costRecords = sqliteTable(
     outputTokens: integer('output_tokens').notNull(),
     costUsd: real('cost_usd').notNull(),
     runId: text('run_id'),
+    /**
+     * Which conversation this spend belongs to.
+     *
+     * Needed to RESUME billing after a restart. The tracker is seeded from the
+     * last recorded spend so a restart does not re-bill a live turn, and without
+     * a session key that lookup could return a row from a different session of
+     * the same agent and seed the tracker with an unrelated cumulative snapshot.
+     * Nullable: rows written before this existed have no answer, and inventing
+     * one would be worse than admitting it.
+     */
+    sessionKey: text('session_key'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [

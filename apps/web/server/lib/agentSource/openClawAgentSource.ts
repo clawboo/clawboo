@@ -38,7 +38,7 @@ import { authRetryAfterMs, isAuthConnectError } from '@clawboo/gateway-client'
 import { createLogger } from '@clawboo/logger'
 import { mcpHttpUrl } from '@clawboo/mcp'
 
-import { applyExecApprovalPolicy, type ExecAsk } from './execApprovalPolicy'
+import { applyExecApprovalPolicy, isExecAsk, type ExecAsk } from './execApprovalPolicy'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 // ── The subset of GatewayClient this source uses (the real client satisfies it;
@@ -891,16 +891,34 @@ export class OpenClawAgentSource implements AgentSource {
     // `security: full, ask: off`, which is unrestricted shell access on the user's
     // own machine. That was the shipped default for every Boo.
     //
-    // STAMPED LOCALLY ONLY IF THE GATEWAY TOOK IT. `execConfig` is what the
-    // Permissions tab reads to draw the posture, so writing 'on-miss' after a
-    // failed policy write would put "Ask for Unknown" on screen over an agent that
-    // asks nothing. Leaving it null instead renders "Run Freely", which is the
-    // truth, and the operator can set it themselves and be told if that fails too.
-    let execConfig = input.execConfig ?? null
-    if (execConfig == null) {
-      const applied = await applyExecApprovalPolicy(this, agentId, DEFAULT_EXEC_ASK)
-      if (applied.ok) execConfig = { execAsk: DEFAULT_EXEC_ASK }
-      else log.warn({ agentId, err: applied.error }, 'new agent left without an approval gate')
+    // EVERY POSTURE GOES TO THE GATEWAY, including one the caller supplied. An
+    // earlier version applied only the default and stored an explicit `execAsk`
+    // in SQLite alone, so a Boo created with 'always' showed "Always Ask" in the
+    // Permissions tab while the Gateway held nothing and the Boo ran everything
+    // unasked. That is the dead lever this area keeps producing, with the local
+    // record as the thing telling the lie.
+    //
+    // AND A REFUSAL FAILS THE CREATION. Persisting the agent anyway leaves a Boo
+    // whose stated posture is not the one in force; the operator asked for a
+    // gated agent and would get an ungated one. The upstream agent is removed
+    // first so a retry is not blocked by a half-created name.
+    const execConfig = input.execConfig ?? { execAsk: DEFAULT_EXEC_ASK }
+    const wantedAsk = (execConfig as { execAsk?: unknown }).execAsk
+    if (isExecAsk(wantedAsk)) {
+      const applied = await applyExecApprovalPolicy(this, agentId, wantedAsk)
+      if (!applied.ok) {
+        log.warn({ agentId, err: applied.error }, 'could not gate a new agent; removing it')
+        try {
+          await client.agents.delete(agentId)
+        } catch (err) {
+          // Reported, not swallowed: the operator needs to know a half-created
+          // agent is sitting upstream, because the throw below will not say so.
+          log.warn({ agentId, err }, 'could not remove the ungated agent upstream')
+        }
+        throw new Error(
+          `Could not set this agent's command permissions on the Gateway, so it was not created: ${applied.error ?? 'unknown error'}`,
+        )
+      }
     }
 
     const db = this.db()

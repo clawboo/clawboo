@@ -35,6 +35,15 @@ export interface SpendSnapshot {
   model?: string | undefined
   inputTokens?: number | undefined
   outputTokens?: number | undefined
+  /**
+   * Which message this snapshot arrived on, when the frame said.
+   *
+   * WITHOUT IT THE DEDUP IS A GUESS. Two consecutive turns can bill identical
+   * model and token counts, and a signature built from those alone reads the
+   * second as a repeat of the first and drops a real charge. With an id, two
+   * frames are the same turn only when they say they are.
+   */
+  turnId?: string | undefined
 }
 
 /**
@@ -45,6 +54,13 @@ export interface SpendSnapshot {
  * one way this design can OVER-count. The caller seeds it from what is already
  * recorded, so a restart mid-conversation resumes rather than repeats.
  */
+/** A finite, whole, non-negative token count. */
+function isCount(value: unknown): value is number {
+  return (
+    typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0
+  )
+}
+
 export class SessionTokenSpend {
   private readonly lastSeen = new Map<string, string>()
 
@@ -62,8 +78,12 @@ export class SessionTokenSpend {
    */
   take(sessionKey: string, snapshot: SpendSnapshot): TurnSpend | null {
     const { model, inputTokens, outputTokens } = snapshot
-    if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') return null
-    if (inputTokens <= 0 && outputTokens <= 0) return null
+    // FINITE, WHOLE AND NOT NEGATIVE. `typeof x === 'number'` admits NaN,
+    // Infinity and -1, and the old pair test only rejected a frame when BOTH
+    // counts were non-positive, so `{input: -1, output: 1}` was billed and wrote
+    // a negative token count into the ledger.
+    if (!isCount(inputTokens) || !isCount(outputTokens)) return null
+    if (inputTokens === 0 && outputTokens === 0) return null
 
     const spend: TurnSpend = {
       // A real name or nothing. "unknown" was what made every price zero, so
@@ -74,11 +94,24 @@ export class SessionTokenSpend {
     }
     if (!spend.model) return null
 
-    const sig = this.signature(spend)
+    const sig = this.signature(spend, snapshot.turnId)
     if (this.lastSeen.get(sessionKey) === sig) return null
-    this.remember(sessionKey, sig)
+    // NOT REMEMBERED YET. The caller has to write a cost row, and that write can
+    // throw. Marking the turn seen here meant a failed insert lost the charge
+    // permanently: every later frame matched the signature and returned null, so
+    // nothing ever retried. `commit` is called once the row is durable.
     log.debug({ sessionKey, ...spend }, 'billing a turn')
     return spend
+  }
+
+  /**
+   * Mark a turn as billed, AFTER its cost row is durable.
+   *
+   * Separated from `take` so a persistence failure leaves the turn billable on
+   * the next frame rather than silently dropping it.
+   */
+  commit(sessionKey: string, spend: TurnSpend, turnId?: string | undefined): void {
+    this.remember(sessionKey, this.signature(spend, turnId))
   }
 
   /** Test seam. Forgetting mid-conversation re-bills the next turn. */
@@ -86,8 +119,11 @@ export class SessionTokenSpend {
     this.lastSeen.clear()
   }
 
-  private signature(s: TurnSpend): string {
-    return `${s.model}|${s.inputTokens}|${s.outputTokens}`
+  private signature(s: TurnSpend, turnId?: string | undefined): string {
+    // The turn id when the frame carried one, so two turns with identical counts
+    // stay distinct. Without it this falls back to the counts alone, which is
+    // what it always did and is still right for a frame that says nothing.
+    return `${turnId ?? ''}|${s.model}|${s.inputTokens}|${s.outputTokens}`
   }
 
   private remember(sessionKey: string, sig: string): void {
