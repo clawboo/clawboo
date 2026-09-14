@@ -47,7 +47,7 @@
   "dependencies": {
     "@clawboo/db": "workspace:*",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",

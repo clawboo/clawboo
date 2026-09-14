@@ -143,10 +143,10 @@ importers:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.260
-        version: 0.3.260(@anthropic-ai/sdk@0.123.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(zod@3.25.76)
+        version: 0.3.260(@anthropic-ai/sdk@0.123.0(zod@4.6.2))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(zod@4.6.2)
       '@anthropic-ai/sdk':
         specifier: 0.123.0
-        version: 0.123.0(zod@3.25.76)
+        version: 0.123.0(zod@4.6.2)
       '@clawboo/adapter-claude-code':
         specifier: workspace:*
         version: link:../../packages/adapters/claude-code
@@ -317,7 +317,7 @@ importers:
         version: 0.468.0(react@19.2.8)
       openai:
         specifier: 6.42.0
-        version: 6.42.0(ws@8.21.3)(zod@3.25.76)
+        version: 6.42.0(ws@8.21.3)(zod@4.6.2)
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -483,8 +483,8 @@ importers:
         specifier: workspace:*
         version: link:../../executor
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -632,8 +632,8 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.12)(@types/node@26.4.1)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@26.4.1)(typescript@6.0.3))(tsx@4.23.13)(yaml@2.9.0)
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
 
   packages/control-client:
     dependencies:
@@ -678,8 +678,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(gel@2.2.0)
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -715,8 +715,8 @@ importers:
         specifier: workspace:*
         version: link:../obs
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -833,8 +833,8 @@ importers:
   packages/governance:
     dependencies:
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -878,10 +878,10 @@ importers:
         version: link:../db
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
-        version: 1.30.0(zod@3.25.76)
+        version: 1.30.0(zod@4.6.2)
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -917,8 +917,8 @@ importers:
   packages/obs:
     dependencies:
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -936,8 +936,8 @@ importers:
   packages/pack-format:
     dependencies:
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -985,8 +985,8 @@ importers:
         specifier: ^10.0.0
         version: 10.0.1
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -1068,8 +1068,8 @@ importers:
   packages/worktrees:
     dependencies:
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.6.2
+        version: 4.6.2
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -5354,8 +5354,8 @@ packages:
   react-is@18.3.1:
     resolution: {integrity: sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==}
 
-  react-is@19.2.8:
-    resolution: {integrity: sha512-s5un28nYxKJw5gvUHyW5PCC28CvBqLu9r3cWgzHT4Vo/5fqqkFcdRYsGcKf50WMPpjjFZS5d76fn3YCo2njKwQ==}
+  react-is@19.3.0:
+    resolution: {integrity: sha512-UpMYezM4v5/18F28aC66AEsjXIgE02kyEMH6yLdgLXu/UTfa1Ntwck/nNLrbqJsEXW7gPb0coNO9FQse9WTovA==}
 
   react-markdown@9.1.0:
     resolution: {integrity: sha512-xaijuJB0kzGiUdG7nc2MOMDUDBWPyGAjZtUrow9XxUeua8IqeP+VlIfAZ3bphpcLTnSZXz6z9jcVC/TCwbfgdw==}
@@ -6195,8 +6195,8 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+  zod@4.6.2:
+    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
 
   zustand@4.5.7:
     resolution: {integrity: sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw==}
@@ -6269,11 +6269,11 @@ snapshots:
   '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.260':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk@0.3.260(@anthropic-ai/sdk@0.123.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(zod@3.25.76)':
+  '@anthropic-ai/claude-agent-sdk@0.3.260(@anthropic-ai/sdk@0.123.0(zod@4.6.2))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(zod@4.6.2)':
     dependencies:
-      '@anthropic-ai/sdk': 0.123.0(zod@3.25.76)
-      '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
-      zod: 3.25.76
+      '@anthropic-ai/sdk': 0.123.0(zod@4.6.2)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.6.2)
+      zod: 4.6.2
     optionalDependencies:
       '@anthropic-ai/claude-agent-sdk-darwin-arm64': 0.3.260
       '@anthropic-ai/claude-agent-sdk-darwin-x64': 0.3.260
@@ -6284,12 +6284,12 @@ snapshots:
       '@anthropic-ai/claude-agent-sdk-win32-arm64': 0.3.260
       '@anthropic-ai/claude-agent-sdk-win32-x64': 0.3.260
 
-  '@anthropic-ai/sdk@0.123.0(zod@3.25.76)':
+  '@anthropic-ai/sdk@0.123.0(zod@4.6.2)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.1.1
     optionalDependencies:
-      zod: 3.25.76
+      zod: 4.6.2
 
   '@asamuzakjp/css-color@6.0.7':
     dependencies:
@@ -7130,7 +7130,7 @@ snapshots:
 
   '@marijn/find-cluster-break@1.0.4': {}
 
-  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.30.0(zod@4.6.2)':
     dependencies:
       '@hono/node-server': 2.0.12(hono@4.12.34)
       ajv: 8.20.0
@@ -7147,8 +7147,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.6.2
+      zod-to-json-schema: 3.25.2(zod@4.6.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -10130,10 +10130,10 @@ snapshots:
     dependencies:
       mimic-function: 5.0.1
 
-  openai@6.42.0(ws@8.21.3)(zod@3.25.76):
+  openai@6.42.0(ws@8.21.3)(zod@4.6.2):
     optionalDependencies:
       ws: 8.21.3
-      zod: 3.25.76
+      zod: 4.6.2
 
   optionator@0.9.4:
     dependencies:
@@ -10324,7 +10324,7 @@ snapshots:
       '@jest/schemas': 30.4.1
       ansi-styles: 5.2.0
       react-is-18: react-is@18.3.1
-      react-is-19: react-is@19.2.8
+      react-is-19: react-is@19.3.0
 
   process-warning@5.1.0: {}
 
@@ -10395,7 +10395,7 @@ snapshots:
 
   react-is@18.3.1: {}
 
-  react-is@19.2.8: {}
+  react-is@19.3.0: {}
 
   react-markdown@9.1.0(@types/react@19.2.18)(react@19.2.8):
     dependencies:
@@ -11331,11 +11331,11 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@4.6.2):
     dependencies:
-      zod: 3.25.76
+      zod: 4.6.2
 
-  zod@3.25.76: {}
+  zod@4.6.2: {}
 
   zustand@4.5.7(@types/react@19.2.18)(react@19.2.8):
     dependencies:

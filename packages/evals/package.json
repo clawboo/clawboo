@@ -39,7 +39,7 @@
     "@clawboo/executor": "workspace:*",
     "@clawboo/governance": "workspace:*",
     "@clawboo/obs": "workspace:*",
-    "zod": "^3.25.0"
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
