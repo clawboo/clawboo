@@ -46,8 +46,28 @@ class FakeGateway implements OpenClawClientLike {
   onEvent(): () => void {
     return () => {}
   }
-  call<T = unknown>(): Promise<T> {
+  approvalsDoc: Record<string, unknown> = { version: 1, agents: {} }
+  approvalsCalls: Array<{ method: string; params?: unknown }> = []
+  /** Set to make the policy write fail, as a disconnected Gateway would. */
+  approvalsFail = false
+
+  call<T = unknown>(method?: string, params?: unknown): Promise<T> {
+    if (method === 'exec.approvals.get' || method === 'exec.approvals.set') {
+      this.approvalsCalls.push({ method, params })
+      if (this.approvalsFail) return Promise.reject(new Error('gateway is down'))
+      if (method === 'exec.approvals.set') {
+        this.approvalsDoc = (params as { file: Record<string, unknown> }).file
+        return Promise.resolve({ exists: true, hash: 'h2', file: this.approvalsDoc } as T)
+      }
+      return Promise.resolve({ exists: true, hash: 'h1', file: this.approvalsDoc } as T)
+    }
     return Promise.resolve(undefined as T)
+  }
+
+  /** The posture the Gateway ended up holding for an agent. */
+  askFor(agentId: string): string | undefined {
+    const agents = this.approvalsDoc['agents'] as Record<string, { ask?: string }> | undefined
+    return agents?.[agentId]?.ask
   }
   emitStatus(s: string): void {
     this.statusCb?.(s)
@@ -602,5 +622,59 @@ describe('OpenClawAgentSource', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // ─── What a brand new Boo is allowed to do ─────────────────────────────────
+  //
+  // An OpenClaw agent with no entry in the Gateway's policy resolves to
+  // `security: full, ask: off`, which is unrestricted shell access on the user's
+  // own machine. That was the shipped default for every Boo ever created, and 46
+  // of 57 agents on the development machine had no entry at all.
+  describe('the default approval gate', () => {
+    it('asks before running an unknown command', async () => {
+      const fake = new FakeGateway()
+      const src = makeSource(fake)
+      await src.start()
+
+      const record = await src.createAgent({ name: 'Fresh' })
+
+      // Applied at the GATEWAY, which is the only thing that gates anything.
+      expect(fake.askFor(record.id)).toBe('on-miss')
+      // And recorded locally, so the Permissions tab draws what is actually in force.
+      expect(record.execConfig).toEqual({ execAsk: 'on-miss' })
+      await src.stop()
+    })
+
+    it('does NOT claim a gate the Gateway refused', async () => {
+      // The honesty property. `execConfig` is what the Permissions tab reads, so
+      // stamping 'on-miss' after a failed policy write would put "Ask for Unknown"
+      // on screen over an agent that asks nothing. Null renders "Run Freely", which
+      // is the truth, and the operator can set it themselves and be told if that
+      // fails too.
+      const fake = new FakeGateway()
+      fake.approvalsFail = true
+      const src = makeSource(fake)
+      await src.start()
+
+      const record = await src.createAgent({ name: 'Ungated' })
+      expect(record.execConfig).toBeNull()
+      // The agent still exists: it was already created at the Gateway before the
+      // policy write, and destroying it over a failed default would be worse.
+      expect(await src.getAgent(record.id)).not.toBeNull()
+      await src.stop()
+    })
+
+    it('never overrides a posture the caller asked for', async () => {
+      const fake = new FakeGateway()
+      const src = makeSource(fake)
+      await src.start()
+
+      const record = await src.createAgent({ name: 'Explicit', execConfig: { execAsk: 'always' } })
+
+      expect(record.execConfig).toEqual({ execAsk: 'always' })
+      // No default write went out at all.
+      expect(fake.approvalsCalls).toHaveLength(0)
+      await src.stop()
+    })
   })
 })

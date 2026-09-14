@@ -35,7 +35,10 @@ import type {
 } from '@clawboo/agent-registry'
 import type { OpenClawGatewayClient } from '@clawboo/adapter-openclaw'
 import { authRetryAfterMs, isAuthConnectError } from '@clawboo/gateway-client'
+import { createLogger } from '@clawboo/logger'
 import { mcpHttpUrl } from '@clawboo/mcp'
+
+import { applyExecApprovalPolicy, type ExecAsk } from './execApprovalPolicy'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 // ── The subset of GatewayClient this source uses (the real client satisfies it;
@@ -158,6 +161,19 @@ function parseJson(value: string | null): unknown | null {
     return null
   }
 }
+
+/**
+ * What a Boo asks about before it has been configured.
+ *
+ * 'on-miss' means a command that is not already trusted raises an approval
+ * rather than running. The alternative, and what shipped before this, is that
+ * a brand new agent runs anything at all on the user's own machine without
+ * asking once, because an agent with no Gateway policy resolves to
+ * `security: full, ask: off`.
+ */
+const DEFAULT_EXEC_ASK: ExecAsk = 'on-miss'
+
+const log = createLogger('openclaw-agents')
 
 export class OpenClawAgentSource implements AgentSource {
   readonly id = 'openclaw'
@@ -865,6 +881,28 @@ export class OpenClawAgentSource implements AgentSource {
       }
     }
 
+    // A NEW BOO ASKS BEFORE RUNNING AN UNKNOWN COMMAND, and the gate is applied
+    // here for the same reason the browsing guidance above is: there is no single
+    // template for a created agent, so a default set in one caller reads as a
+    // fleet rule while part of the fleet never receives it.
+    //
+    // The Gateway is the only thing that gates anything. With no entry in its
+    // policy, field resolution falls through to the document defaults and then to
+    // `security: full, ask: off`, which is unrestricted shell access on the user's
+    // own machine. That was the shipped default for every Boo.
+    //
+    // STAMPED LOCALLY ONLY IF THE GATEWAY TOOK IT. `execConfig` is what the
+    // Permissions tab reads to draw the posture, so writing 'on-miss' after a
+    // failed policy write would put "Ask for Unknown" on screen over an agent that
+    // asks nothing. Leaving it null instead renders "Run Freely", which is the
+    // truth, and the operator can set it themselves and be told if that fails too.
+    let execConfig = input.execConfig ?? null
+    if (execConfig == null) {
+      const applied = await applyExecApprovalPolicy(this, agentId, DEFAULT_EXEC_ASK)
+      if (applied.ok) execConfig = { execAsk: DEFAULT_EXEC_ASK }
+      else log.warn({ agentId, err: applied.error }, 'new agent left without an approval gate')
+    }
+
     const db = this.db()
     const now = Date.now()
     db.insert(agents)
@@ -880,7 +918,7 @@ export class OpenClawAgentSource implements AgentSource {
         teamId: input.teamId ?? null,
         personalityConfig:
           input.personalityConfig != null ? JSON.stringify(input.personalityConfig) : null,
-        execConfig: input.execConfig != null ? JSON.stringify(input.execConfig) : null,
+        execConfig: execConfig != null ? JSON.stringify(execConfig) : null,
         avatarSeed: input.avatarSeed ?? null,
         // Insert-branch only — the conflict `set` is Gateway-owned columns ONLY, so a
         // re-create never re-stamps an existing row's tenant (mirrors upsertFromList).
