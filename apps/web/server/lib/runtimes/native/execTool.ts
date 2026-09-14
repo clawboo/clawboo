@@ -29,8 +29,9 @@
 import { createApproval, getApproval, toolCallApprovals, type ClawbooDb } from '@clawboo/db'
 import { and, eq } from 'drizzle-orm'
 import { createLogger } from '@clawboo/logger'
+import { connectorChildEnv } from '@clawboo/mcp'
 
-import { classifyArgv } from './execPolicy'
+import { classifyArgv, classifyResolvedProgram, resolveProgramPath } from './execPolicy'
 import { runApprovedCommand } from './execRun'
 import type { NativeLocalTool, NativeToolOutcome } from './fileTools'
 
@@ -68,6 +69,11 @@ export interface ExecToolDeps {
   enabled: boolean
   /** Injected in tests. */
   now?: () => number
+}
+
+/** The PATH the child will actually get, so resolution matches execution. */
+function childPath(): string | undefined {
+  return connectorChildEnv()['PATH']
 }
 
 const deny = (message: string, code: string): NativeToolOutcome => ({
@@ -171,6 +177,22 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
           return { output: verdict.message, isError: true }
         }
 
+        // RESOLVE BEFORE ASKING, and spawn what was resolved. A symlink named
+        // anything at all passes the basename denylist and then executes its
+        // target, so the check has to see the real binary, and the approval has
+        // to be for that same path. Doing this before the approval row exists
+        // also means a command that cannot run never reaches a person.
+        const resolved = await resolveProgramPath(verdict.program, childPath())
+        if (!resolved) {
+          return {
+            output: `"${verdict.program}" was not found, or is not executable, in this Boo's PATH.`,
+            isError: true,
+          }
+        }
+        const afterResolve = classifyResolvedProgram(resolved)
+        if (!afterResolve.ok) return { output: afterResolve.message, isError: true }
+
+        const finalArgv = [resolved, ...verdict.argv.slice(1)]
         const why = typeof args['why'] === 'string' ? args['why'].slice(0, 200) : null
         asked += 1
 
@@ -179,7 +201,13 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
           // branch on the tool name, so this string is load-bearing UI.
           toolName: 'run_command',
           agentId: deps.agentId,
-          args: { command: verdict.argv.join(' '), cwd, argv: verdict.argv },
+          // BOTH forms. `argv` is what the card should render, because joining
+          // with spaces loses the argument boundaries that `spawn` will honour:
+          // `["echo","a b"]` and `["echo","a","b"]` flatten to the same string
+          // and are not the same command. `command` stays for readers that
+          // predate `argv`, and names the RESOLVED program so the card and the
+          // execution agree.
+          args: { command: finalArgv.join(' '), cwd, argv: finalArgv },
           reason: why ?? 'this Boo wants to run a command',
           ttlMs: APPROVAL_TTL_MS,
           taskId: deps.taskId ?? null,
@@ -219,7 +247,7 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
         }
 
         try {
-          const res = await runApprovedCommand({ argv: verdict.argv, cwd, signal })
+          const res = await runApprovedCommand({ argv: finalArgv, cwd, signal })
           return { output: describe(res), isError: res.exitCode !== 0 }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)

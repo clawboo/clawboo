@@ -80,6 +80,14 @@ export async function runApprovedCommand(opts: ExecRunOptions): Promise<ExecRunR
   const timeoutMs = opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS
   const [program, ...args] = opts.argv
 
+  // CHECKED BEFORE THE SPAWN, not after. Spawning and then killing lets a fast
+  // command complete its side effect before the kill lands, so an aborted run
+  // could still delete a file. The post-spawn check below stays as well, for an
+  // abort that arrives during the spawn itself.
+  if (opts.signal.aborted) {
+    return { output: '', exitCode: null, signal: null, truncated: false, stoppedBy: 'abort' }
+  }
+
   return await new Promise<ExecRunResult>((resolve, reject) => {
     let child: ChildProcess
     try {

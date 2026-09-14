@@ -6,9 +6,19 @@
 // command wrongly refused merely annoys a model, which is told what to do
 // instead.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { classifyArgv, programBasename, SHELL_ESCAPING_PROGRAMS } from '../execPolicy'
+import { mkdtemp, rm, symlink, writeFile, chmod } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
+import {
+  classifyArgv,
+  classifyResolvedProgram,
+  programBasename,
+  resolveProgramPath,
+  SHELL_ESCAPING_PROGRAMS,
+} from '../execPolicy'
 
 const refusal = (argv: unknown) => {
   const r = classifyArgv(argv)
@@ -131,5 +141,52 @@ describe('the honest limits of the list', () => {
     expect(classifyArgv(['find', '.', '-exec', 'rm', '{}', ';']).ok).toBe(true)
     expect(classifyArgv(['awk', 'BEGIN{system("id")}']).ok).toBe(true)
     expect(SHELL_ESCAPING_PROGRAMS.has('git')).toBe(false)
+  })
+})
+
+// ─── The gap a basename denylist leaves open ───────────────────────────────
+//
+// `classifyArgv` sees the text the model wrote; `spawn` runs what that text
+// resolves to. A symlink is the difference: one named `tool` pointing at
+// /bin/bash passes the basename check and then executes bash, which defeats the
+// single property this tier promises. So resolution happens first, the denylist
+// is applied to the resolved target, and the resolved path is what runs.
+describe.skipIf(process.platform === 'win32')('resolving before deciding', () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-resolve-'))
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('follows a symlink and refuses the interpreter behind an innocent name', async () => {
+    const link = path.join(dir, 'helper')
+    await symlink('/bin/sh', link)
+    // The first check passes: "helper" is in no denylist.
+    expect(classifyArgv([link, 'script.sh']).ok).toBe(true)
+    // The second one, on the resolved target, is the one that matters.
+    const resolved = await resolveProgramPath(link, dir)
+    expect(resolved).toBeTruthy()
+    const verdict = classifyResolvedProgram(resolved as string)
+    expect(verdict.ok).toBe(false)
+    if (!verdict.ok) expect(verdict.code).toBe('interpreter')
+  })
+
+  it('resolves a bare name against the PATH it is given', async () => {
+    const resolved = await resolveProgramPath('echo', '/bin:/usr/bin')
+    expect(resolved).toMatch(/\/echo$/)
+    expect(classifyResolvedProgram(resolved as string).ok).toBe(true)
+  })
+
+  it('returns null when nothing executable matches', async () => {
+    expect(await resolveProgramPath('definitely-not-here-xyz', '/bin:/usr/bin')).toBeNull()
+  })
+
+  it('will not resolve a file that is not executable', async () => {
+    const f = path.join(dir, 'notexec')
+    await writeFile(f, 'x')
+    await chmod(f, 0o644)
+    expect(await resolveProgramPath(f, dir)).toBeNull()
   })
 })

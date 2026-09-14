@@ -224,3 +224,35 @@ describe("clawboo's own native shell", () => {
     expect(screen.getByText('echo hello')).toBeInTheDocument()
   })
 })
+
+describe('the card and the argument boundaries', () => {
+  it('does not flatten argv into an ambiguous string', () => {
+    // `spawn` honours the original boundaries, so a card that joins on spaces
+    // shows a different command from the one that runs: ["echo","a b"] and
+    // ["echo","a","b"] flatten identically and are not the same call.
+    const onResolve = vi.fn()
+    render(
+      <ToolApprovalCard
+        approval={mirrored({
+          kind: 'tool',
+          toolName: 'run_command',
+          toolSummary: null,
+          argsSummary: JSON.stringify({
+            command: '/bin/echo hello world',
+            cwd: '/tmp',
+            argv: ['/bin/echo', 'hello world'],
+          }),
+        })}
+        onResolve={onResolve}
+      />,
+    )
+    // One argument, visibly one argument.
+    expect(screen.getByText("/bin/echo 'hello world'")).toBeInTheDocument()
+  })
+
+  it('still renders the Gateway mirror, which sends no argv', () => {
+    const onResolve = vi.fn()
+    render(<ToolApprovalCard approval={mirrored()} onResolve={onResolve} />)
+    expect(screen.getByText('echo hello')).toBeInTheDocument()
+  })
+})

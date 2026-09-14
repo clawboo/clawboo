@@ -45,7 +45,7 @@ const MARKER = {
 
 let revokeBodies: unknown[] = []
 
-const serve = (body: unknown, status = 200) =>
+const serve = (body: Record<string, unknown>, status = 200) =>
   server.use(
     http.get('/api/exec-allowlist', () => HttpResponse.json(body, { status })),
     http.post('/api/exec-allowlist/revoke', async ({ request }) => {

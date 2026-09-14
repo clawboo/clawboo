@@ -5,15 +5,30 @@
 // output survives, whether a killed child leaves grandchildren behind, and
 // whether a chatty command that SUCCEEDED is reported as a failure.
 
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { OUTPUT_CAP_BYTES, runApprovedCommand } from '../execRun'
+
+/**
+ * POSIX ONLY, because the thing under test is POSIX only.
+ *
+ * `buildExecTool` returns nothing on Windows, so this runner is never reached
+ * there. The commands below are also POSIX (`seq`, `printenv`, `pwd`, `/tmp`),
+ * and making them portable would be dressing up coverage for a code path that
+ * does not exist on that platform. The absence is asserted in execTool.test.ts,
+ * where it belongs.
+ */
+const describePosix = describe.skipIf(process.platform === 'win32')
 
 const never = () => new AbortController().signal
 const run = (argv: string[], over: Partial<Parameters<typeof runApprovedCommand>[0]> = {}) =>
   runApprovedCommand({ argv, cwd: process.cwd(), signal: never(), ...over })
 
-describe('runApprovedCommand', () => {
+describePosix('runApprovedCommand', () => {
   it('returns output and a zero exit for an ordinary command', async () => {
     const res = await run(['echo', 'hello'])
     expect(res.output.trim()).toBe('hello')
@@ -109,8 +124,15 @@ describe('runApprovedCommand', () => {
   })
 
   it('runs in the directory it was given, not the server’s', async () => {
-    const res = await run(['pwd'], { cwd: '/tmp' })
-    expect(res.output.trim()).toMatch(/tmp$/)
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-exec-'))
+    try {
+      const res = await run(['pwd'], { cwd: dir })
+      // realpath: macOS reports /private/var for /var, so comparing the raw
+      // string would fail for a reason that has nothing to do with cwd.
+      expect(await realpath(res.output.trim())).toBe(await realpath(dir))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('hands the child an ALLOWLISTED environment, not the server’s', async () => {

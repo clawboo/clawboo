@@ -30,6 +30,10 @@ const EXEC_OPTIONS: ExecOption[] = [
 
 export function ExecSettings({ agentId }: { agentId: string }) {
   const [execAsk, setExecAsk] = useState('off')
+  // ONE CHANGE AT A TIME. Two selections in flight can settle out of order,
+  // and a late failure would then restore a stale value over a newer one that
+  // succeeded, leaving the control and the Gateway disagreeing.
+  const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const updateExecConfig = useFleetStore((s) => s.updateExecConfig)
   const client = useConnectionStore((s) => s.client)
@@ -66,6 +70,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
   // report and toasted success, which is the same lie one layer up.
   const persist = useCallback(
     async (newAsk: string, prevAsk: string) => {
+      setSaving(true)
       updateExecConfig(agentId, { execAsk: newAsk })
 
       let failure: string | null = null
@@ -90,6 +95,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
         setExecAsk(prevAsk)
         updateExecConfig(agentId, { execAsk: prevAsk })
         addToast({ message: `Not applied. ${failure}`, type: 'error' })
+        setSaving(false)
         return
       }
 
@@ -112,17 +118,19 @@ export function ExecSettings({ agentId }: { agentId: string }) {
       }
 
       addToast({ message: 'Execution permissions updated', type: 'success' })
+      setSaving(false)
     },
     [agentId, client, updateExecConfig, addToast],
   )
 
   const handleChange = useCallback(
     (value: string) => {
+      if (saving) return
       const prev = execAsk
       setExecAsk(value)
       void persist(value, prev)
     },
-    [persist, execAsk],
+    [persist, execAsk, saving],
   )
 
   const selected = EXEC_OPTIONS.find((o) => o.value === execAsk) ?? EXEC_OPTIONS[0]
@@ -154,6 +162,7 @@ export function ExecSettings({ agentId }: { agentId: string }) {
           <Select
             data-testid="exec-ask-select"
             value={execAsk}
+            disabled={saving}
             onChange={handleChange}
             options={EXEC_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
             style={{ width: '100%' }}

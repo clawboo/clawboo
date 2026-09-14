@@ -306,7 +306,19 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
   // arbitrary shell command genuinely can destroy. The words change, the rail
   // does not.
   if (bare === 'exec' || bare === 'run_command') {
+    // ARGV WHEN IT EXISTS, because joining on spaces destroys the only thing
+    // this card promises. `["echo","a b"]` and `["echo","a","b"]` flatten to the
+    // same string and are different commands, and `spawn` honours the original
+    // boundaries. An operator reading the flattened form could approve something
+    // other than what they saw. `command` remains the fallback for the Gateway's
+    // mirrored shell, which sends no argv.
+    const rawArgv = args?.['argv']
+    const argv =
+      Array.isArray(rawArgv) && rawArgv.every((a) => typeof a === 'string')
+        ? (rawArgv as string[])
+        : null
     const command =
+      (argv ? quoteArgv(argv) : null) ??
       (typeof args?.['command'] === 'string' ? args['command'] : null) ??
       input.toolSummary?.trim() ??
       ''
@@ -468,6 +480,20 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
     // keeps showing the raw request rather than a reassuring summary of it.
     confident: Boolean(input.toolClass),
   }
+}
+
+/**
+ * Render an argv so the boundaries survive the screen.
+ *
+ * Single-quoted POSIX form for anything that is not plainly safe, so a reader
+ * can see where one argument ends and the next begins. Not for re-execution:
+ * nothing here is ever passed back to a shell, and this tier exists precisely
+ * because that would be unsafe. It is for the eyes.
+ */
+function quoteArgv(argv: string[]): string {
+  return argv
+    .map((a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`))
+    .join(' ')
 }
 
 /** A readable name from a namespaced tool id: `browser_navigate` -> `Browser navigate`. */

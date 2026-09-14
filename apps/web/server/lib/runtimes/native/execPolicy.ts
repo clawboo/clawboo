@@ -37,6 +37,23 @@
 // run. A filter with that shape does not add safety on top of a human approval,
 // it subtracts working commands and adds false confidence.
 
+/**
+ * A SECOND CHECK AFTER RESOLUTION, because the first one can be walked past.
+ *
+ * `classifyArgv` sees the text the model wrote. `spawn` runs whatever that text
+ * resolves to, and those differ: a symlink named `tool` pointing at `/bin/bash`
+ * passes a basename denylist and then executes bash. Measured, not theorised.
+ *
+ * So the program is resolved to a real path FIRST, the denylist is applied to
+ * the resolved basename, and the RESOLVED PATH is what gets spawned. Spawning
+ * the original text after checking the resolved target would reintroduce the
+ * same gap between what was approved and what runs, one layer down.
+ */
+
+import { access, realpath, stat } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import path from 'node:path'
+
 /** Refusal codes, carried to the model so it can adapt rather than retry blindly. */
 export type ExecRefusalCode =
   | 'not-argv'
@@ -46,6 +63,7 @@ export type ExecRefusalCode =
   | 'control-character'
   | 'interpreter'
   | 'path-separator-in-program'
+  | 'not-found'
 
 export interface ExecRefusal {
   ok: false
@@ -227,4 +245,56 @@ export function classifyArgv(input: unknown): ExecAccepted | ExecRefusal {
   }
 
   return { ok: true, program, argv }
+}
+
+/**
+ * Find the real binary behind `program`, following symlinks.
+ *
+ * Returns the resolved absolute path, or null when nothing executable matches.
+ * A bare name is looked up on the CHILD's PATH rather than the server's, so the
+ * thing checked is the thing that will run.
+ */
+export async function resolveProgramPath(
+  program: string,
+  pathEnv: string | undefined,
+): Promise<string | null> {
+  const candidates = program.startsWith('/')
+    ? [program]
+    : (pathEnv ?? '')
+        .split(':')
+        .filter(Boolean)
+        .map((dir) => path.join(dir, program))
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK)
+      // realpath, not the candidate: the denylist has to see the target, and the
+      // spawn has to use the same path the denylist saw.
+      const real = await realpath(candidate)
+      const st = await stat(real)
+      if (st.isFile()) return real
+    } catch {
+      // Not here, or not executable. Try the next PATH entry.
+    }
+  }
+  return null
+}
+
+/**
+ * The check that actually protects the promise, applied to the resolved target.
+ *
+ * Separate from `classifyArgv` because it needs the filesystem, and because a
+ * refusal that depends on what happens to be installed should be visibly
+ * distinct from one that does not.
+ */
+export function classifyResolvedProgram(resolved: string): ExecAccepted | ExecRefusal {
+  const base = programBasename(resolved)
+  if (SHELL_ESCAPING_PROGRAMS.has(base)) {
+    return refuse(
+      'interpreter',
+      `that resolves to "${base}", which runs other commands, so the approval card ` +
+        'could not show what would actually run. Call the program you want directly.',
+    )
+  }
+  return { ok: true, program: resolved, argv: [resolved] }
 }

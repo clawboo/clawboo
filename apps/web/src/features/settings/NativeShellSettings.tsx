@@ -33,14 +33,20 @@ export function NativeShellSettings({ agentId }: Props) {
     let alive = true
     setEnabled(null)
     void apiFetch(`/api/agents/${encodeURIComponent(agentId)}/shell`)
-      .then(async (r) => (r.ok ? ((await r.json()) as { enabled?: boolean }) : null))
+      .then(async (r) => {
+        // THROW on a non-2xx rather than falling through. `apiFetch` resolves on
+        // any status, so the previous shape turned a transient server failure
+        // into `enabled: false`: a Boo that CAN ask to run commands, shown as
+        // one that cannot. An unreadable setting is not an off setting.
+        if (!r.ok) throw new Error(`could not read the shell setting (${r.status})`)
+        return (await r.json()) as { enabled?: boolean }
+      })
       .then((body) => {
         if (alive) setEnabled(body?.enabled === true)
       })
       .catch(() => {
-        // An unreadable setting is not an off setting, but there is nothing
-        // useful to render either, so the row stays in its loading state rather
-        // than showing a switch whose position would be a guess.
+        // Left in its loading state, which renders nothing, rather than showing
+        // a switch whose position would be a guess.
       })
     return () => {
       alive = false

@@ -43,7 +43,7 @@ import {
 const CLASS_LABEL: Record<ExecAllowlistRow['classification'], string> = {
   'bound-grant': 'One exact command, in one exact folder',
   'exact-command-grant': 'One exact command',
-  'node-marker': 'Part of the grant above',
+  'node-marker': 'Part of another grant on this computer',
   'path-rule': 'This program, any arguments, any folder',
   'arg-rule': 'This program, matching arguments',
   'catch-all': 'Any command at all',
@@ -113,6 +113,8 @@ function GrantRow({
   const { primary, companions } = group
   const dead = DEAD.has(primary.classification)
   const name = primary.lastResolvedPath ?? primary.pattern
+  /** A companion row that could not be attached to the grant it belongs to. */
+  const orphanMarker = primary.classification === 'node-marker'
 
   return (
     <li className="flex items-start justify-between gap-3 border-b border-border py-2.5 last:border-b-0">
@@ -138,16 +140,25 @@ function GrantRow({
           </span>
         )}
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="shrink-0 text-destructive"
-        disabled={busy || duplicated}
-        onClick={() => onRevoke(group)}
-        aria-label={`Revoke ${name}`}
-      >
-        <Trash2 size={13} aria-hidden="true" />
-      </Button>
+      {/* AN UNPAIRED MARKER IS NOT REVOCABLE. It is half of some grant, and
+          which one cannot be determined from the list: the marker hashes the
+          command text while the grant hashes the argv and the folder. Removing
+          it would break a grant still shown as working elsewhere on this screen,
+          so the row is diagnostic only. */}
+      {orphanMarker ? (
+        <span className="shrink-0 text-[10.5px] text-muted-foreground">Not removable here</span>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 text-destructive"
+          disabled={busy || duplicated}
+          onClick={() => onRevoke(group)}
+          aria-label={`Revoke ${name}`}
+        >
+          <Trash2 size={13} aria-hidden="true" />
+        </Button>
+      )}
     </li>
   )
 }

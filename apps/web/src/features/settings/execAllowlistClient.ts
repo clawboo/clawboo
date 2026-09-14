@@ -68,6 +68,19 @@ export async function fetchExecAllowlist(agentId: string): Promise<ExecAllowlist
     }
     if (state === 'absent') return { state: 'absent' }
     if (state === 'not-applicable') return { state: 'not-applicable' }
+
+    // VALIDATED, not cast. A 2xx whose shape this does not recognise was
+    // previously returned as `ok`, and the panel then called `.filter` on a
+    // missing `entries` and crashed, or rendered an empty list that reads as a
+    // safety claim. Anything unrecognised is unreadable, which is the honest
+    // answer and the one the UI already knows how to show.
+    if (state !== 'ok' || !Array.isArray(body?.['entries'])) {
+      return {
+        state: 'unreadable',
+        error: 'clawboo could not make sense of the permission list it was given',
+        knownAllowlistCount: 0,
+      }
+    }
     return { state: 'ok', snapshot: body as unknown as ExecAllowlistSnapshot }
   } catch (err) {
     // A transport failure is an unreadable policy, not an empty one.

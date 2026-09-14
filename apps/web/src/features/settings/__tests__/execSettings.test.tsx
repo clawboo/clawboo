@@ -36,7 +36,7 @@ const serveGet = (execAsk: string | null) =>
     http.get('/api/exec-allowlist', () => HttpResponse.json({ state: 'absent' })),
   )
 
-const servePost = (status: number, body: unknown) =>
+const servePost = (status: number, body: Record<string, unknown>) =>
   server.use(
     http.post('/api/exec-settings', async ({ request }) => {
       posts.push(await request.json())

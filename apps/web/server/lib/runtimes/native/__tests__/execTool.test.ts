@@ -46,6 +46,18 @@ async function answerWhenAsked(decision: 'allow_once' | 'deny'): Promise<void> {
 
 const never = new AbortController().signal
 
+/**
+ * The tool does not exist on Windows, so neither do its behaviours.
+ *
+ * `buildExecTool` returns nothing there: a Windows shim cannot be launched
+ * without a shell, and launching one is the property this tier refuses. The
+ * suites below therefore have no tool to drive, and running them there would be
+ * asserting about something that was never built. The absence itself IS tested,
+ * just below, so skipping is not the same as not checking.
+ */
+const isWindows = process.platform === 'win32'
+const onPosix = describe.skipIf(isWindows)
+
 beforeEach(() => {
   db = createDb(':memory:')
 })
@@ -60,14 +72,21 @@ describe('when the tool exists at all', () => {
     expect(buildExecTool({ db, agentId: 'a', cwd: null, enabled: true })).toEqual([])
   })
 
-  it('is ABSENT rather than present-and-refusing', () => {
+  it.skipIf(isWindows)('is ABSENT rather than present-and-refusing', () => {
     // A tool the model can see is a tool it will spend turns being told no by.
     expect(buildExecTool({ db, agentId: 'a', cwd: null, enabled: true })).toHaveLength(0)
     expect(buildExecTool({ db, agentId: 'a', cwd: '/tmp', enabled: true })).toHaveLength(1)
   })
+
+  it.runIf(isWindows)('is absent on Windows even when fully switched on', () => {
+    // The platform rule, asserted where it actually applies. A Windows shim
+    // cannot be spawned without a shell, so the tool is absent rather than
+    // degraded, and this is the only place that can prove it.
+    expect(buildExecTool({ db, agentId: 'a', cwd: 'C:\\tmp', enabled: true })).toEqual([])
+  })
 })
 
-describe('nothing runs without a human', () => {
+onPosix('nothing runs without a human', () => {
   it('raises a card and waits for it', async () => {
     const t = tool()
     const p = t?.run({ argv: ['echo', 'hi'] }, { signal: never })
@@ -118,7 +137,7 @@ describe('nothing runs without a human', () => {
   })
 })
 
-describe('a run that is stopped', () => {
+onPosix('a run that is stopped', () => {
   it('retires its card instead of recording a refusal nobody made', async () => {
     // Resolving the row to `deny` to unblock the abort would write a permanent
     // record that a human refused a command they were never asked about.
@@ -154,7 +173,7 @@ describe('a run that is stopped', () => {
   })
 })
 
-describe('what never reaches a person', () => {
+onPosix('what never reaches a person', () => {
   it('refuses an interpreter before any card is written', async () => {
     const t = tool()
     const out = await t?.run({ argv: ['bash', '-c', 'echo x'] }, { signal: never })
@@ -182,7 +201,7 @@ describe('what never reaches a person', () => {
   })
 })
 
-describe('the output handed back to the model', () => {
+onPosix('the output handed back to the model', () => {
   it('labels it as untrusted data rather than instructions', async () => {
     const t = tool()
     const p = t?.run({ argv: ['echo', 'hello'] }, { signal: never })
@@ -201,7 +220,7 @@ describe('the output handed back to the model', () => {
   })
 })
 
-describe('a card nobody answers', () => {
+onPosix('a card nobody answers', () => {
   it('does NOT run the command when the card expires', async () => {
     const t = tool()
     const p = t?.run({ argv: ['echo', 'must-not-appear'] }, { signal: never })
