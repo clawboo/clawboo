@@ -56,6 +56,16 @@ export interface HumanizedApproval {
   agentNote: string | null
   /** False when the request could not be read and raw detail must be shown. */
   confident: boolean
+  /**
+   * What the Allow button should say, when the class alone gets it wrong.
+   *
+   * The card derives a verb from the action class, which works for a tool whose
+   * class describes what it does. A shell command is classed destructive because
+   * clawboo cannot read shell text, not because THIS command deletes anything,
+   * so that derivation put "Delete it" over an `echo`. The seriousness is right
+   * and the verb is not, and only the verb is worth overriding.
+   */
+  allowLabel?: string
 }
 
 // VERBS ONLY, and matched as whole tokens.
@@ -274,6 +284,45 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
   const who = input.agentName ?? 'An agent'
   const args = parseArgs(input.argsSummary)
   const bare = bareName(input.toolName)
+
+  // ── A shell command, held by the OpenClaw Gateway ──
+  //
+  // This one is not a tool clawboo brokered and it has no descriptor, so the
+  // general path below describes it from its name and its stored class: `wants
+  // to run "Exec"`, chipped `Deletes your data`, under a button reading `Delete
+  // it`. Every one of those is wrong about an `echo`, and a card that cries
+  // delete over every command teaches an operator to stop reading the one signal
+  // that should mean something.
+  //
+  // WHAT IS HONEST HERE is narrow. clawboo does not read shell text, so it says
+  // nothing about what the command does; it shows the command, which is the only
+  // thing that decides anything, and keeps the serious weighting because an
+  // arbitrary shell command genuinely can destroy. The words change, the rail
+  // does not.
+  if (bare === 'exec') {
+    const command =
+      (typeof args?.['command'] === 'string' ? args['command'] : null) ??
+      input.toolSummary?.trim() ??
+      ''
+    if (command) {
+      const cwd = typeof args?.['cwd'] === 'string' ? args['cwd'] : null
+      return {
+        headline: `${who} wants to run a command on this computer.`,
+        // Not a safety claim in either direction. It states the kind of thing
+        // this is and leaves the judgement to the command printed below it.
+        chip: 'Runs a command',
+        actionClass: 'destroys',
+        decisive: [
+          { label: 'Command', value: command },
+          ...(cwd ? [{ label: 'Folder', value: cwd }] : []),
+        ],
+        remainder: [],
+        agentNote: null,
+        confident: true,
+        allowLabel: 'Run it',
+      }
+    }
+  }
 
   // ── The broker: the app and the operation live in the arguments ──
   const batch = args?.['tools']

@@ -163,6 +163,36 @@ export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<v
   // switched off to need switching back on.
 }
 
+/**
+ * Release an approval through clawboo's SERVER when this tab has no Gateway
+ * connection of its own.
+ *
+ * `handleApproval` used to open with `if (!client) return`, which is the shape
+ * of dead lever this area keeps producing: the button depresses, the card stays,
+ * and nothing tells the operator their answer went nowhere. It was harmless only
+ * while a card could not exist without a live socket. The server now mirrors exec
+ * approvals so they outlive a closed tab, so a card can be on screen in a tab
+ * that never connected, and the answer has to reach the Gateway some other way.
+ *
+ * The server holds a long-lived Gateway connection that survives reconnects, and
+ * its route answers the Gateway FIRST and only then marks the row, so a failure
+ * here is reported rather than papered over.
+ */
+async function resolveViaServer(id: string, decision: ApprovalDecision): Promise<boolean> {
+  const wire =
+    decision === 'deny' ? 'deny' : decision === 'allow-always' ? 'allow_always' : 'allow_once'
+  try {
+    const res = await apiFetch(`/api/tools/approvals/${id}/resolve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: wire }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 // ─── useApprovalActions hook ──────────────────────────────────────────────────
 
 export function useApprovalActions() {
@@ -172,10 +202,18 @@ export function useApprovalActions() {
 
   const handleApproval = useCallback(
     async (id: string, decision: ApprovalDecision) => {
-      if (!client) return
-
       const approval = pendingApprovals.get(id)
       setResolving(id, true, null)
+
+      // No socket in this tab: the server has one. Everything below needs the
+      // client for history and followup, none of which matters if the decision
+      // never reached the Gateway.
+      if (!client) {
+        const ok = await resolveViaServer(id, decision)
+        if (ok) removePending(id)
+        else setResolving(id, false, 'clawboo could not reach the Gateway to send that decision.')
+        return
+      }
 
       try {
         // Send decision to Gateway

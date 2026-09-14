@@ -24,6 +24,7 @@ let db: ClawbooDb
 vi.mock('../../db', () => ({ getDb: () => db }))
 
 const {
+  execDecisionStatus,
   expireStaleExecApprovals,
   parseExecApprovalRequest,
   resolveExecApproval,
@@ -61,13 +62,22 @@ const requestFrame = (id: string, command = 'rm -rf build') => ({
   },
 })
 
-const rows = (): { id: string; kind: string; status: string; agentId: string | null }[] =>
+const rows = (): {
+  id: string
+  kind: string
+  status: string
+  agentId: string | null
+  neverRemember: number
+  reason: string | null
+}[] =>
   db
     .select({
       id: toolCallApprovals.id,
       kind: toolCallApprovals.kind,
       status: toolCallApprovals.status,
       agentId: toolCallApprovals.agentId,
+      neverRemember: toolCallApprovals.neverRemember,
+      reason: toolCallApprovals.reason,
     })
     .from(toolCallApprovals)
     .all()
@@ -216,5 +226,100 @@ describe('resolveExecApproval', () => {
 
     const res = await resolveExecApproval(h.source, 'ap-8', 'allow-once')
     expect(res).toEqual({ ok: true, alreadyResolved: true })
+  })
+})
+
+// ─── Whether "Always" may be offered at all ────────────────────────────────
+//
+// OpenClaw refuses `allow-always` in two situations, and returns an error rather
+// than quietly downgrading to allow-once. So a button offered where it would be
+// refused does not merely under-deliver: it fails on exactly the commands an
+// operator is most tired of answering for. The request states both conditions,
+// which means clawboo never has to guess, and never should.
+describe('when Always may be offered', () => {
+  const withRequest = (extra: Record<string, unknown>) => ({
+    event: 'exec.approval.requested',
+    payload: {
+      id: 'ap-always',
+      expiresAtMs: Date.now() + 1_800_000,
+      request: { command: 'pnpm build', agentId: 'doc-writer-boo', ...extra },
+    },
+  })
+  const offered = (extra: Record<string, unknown>): boolean => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(withRequest(extra))
+    return rows()[0]?.neverRemember === 0
+  }
+
+  it('offers it on an ordinary ask-on-miss request', () => {
+    expect(offered({ ask: 'on-miss' })).toBe(true)
+  })
+
+  it('withholds it when the agent asks about EVERY command', () => {
+    // Nothing to remember: `ask: 'always'` means the next identical command is
+    // asked about too, so a rule minted here would never be consulted.
+    expect(offered({ ask: 'always' })).toBe(false)
+  })
+
+  it('withholds it when the Gateway says this command cannot be persisted', () => {
+    expect(offered({ ask: 'on-miss', unavailableDecisions: ['allow-always'] })).toBe(false)
+  })
+
+  it('offers it when the Gateway sent no restriction at all', () => {
+    // Absent means unrestricted, which is the vendor's own default decision list.
+    // Reading absence as a refusal would silently retire Always against an older
+    // Gateway that simply does not send these fields.
+    expect(offered({})).toBe(true)
+  })
+
+  it("prefers the Gateway's own warning to clawboo's generic sentence", () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(withRequest({ warningText: 'writes outside the workspace' }))
+    expect(rows()[0]?.reason).toBe('writes outside the workspace')
+  })
+})
+
+// ─── What the record says happened ─────────────────────────────────────────
+//
+// "Allowed once" and "allowed from now on" are different answers, and the row is
+// where someone looks to find out why a command stopped being asked about. The
+// resolve path folded everything that was not a denial into `allow_once`, so a
+// standing grant an operator had just minted read as a one-off, a record that
+// disagreed with the allowlist entry it had created.
+describe('execDecisionStatus', () => {
+  it("keeps a standing grant distinct from a one-off, in clawboo's spelling", () => {
+    expect(execDecisionStatus('allow-always')).toBe('allow_always')
+    expect(execDecisionStatus('allow_always')).toBe('allow_always')
+    expect(execDecisionStatus('allow-once')).toBe('allow_once')
+    expect(execDecisionStatus('deny')).toBe('deny')
+  })
+
+  it('files a word it does not know as the WEAKEST allow, never as a grant', () => {
+    // A decision clawboo cannot read must not be recorded as a standing grant:
+    // over-reporting permission is the direction that misleads.
+    expect(execDecisionStatus('something-new')).toBe('allow_once')
+  })
+})
+
+describe('resolveExecApproval, recording the answer', () => {
+  it('records a standing grant as one', async () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-always-rec'))
+    await resolveExecApproval(h.source, 'ap-always-rec', 'allow-always')
+    expect(rows()[0]?.status).toBe('allow_always')
+  })
+
+  it('records the same answer when it arrives from another surface instead', () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-fanout'))
+    h.frame({
+      event: 'exec.approval.resolved',
+      payload: { id: 'ap-fanout', decision: 'allow-always' },
+    })
+    expect(rows()[0]?.status).toBe('allow_always')
   })
 })

@@ -51,6 +51,18 @@ export interface ExecApprovalRequest {
   cwd: string | null
   reason: string | null
   expiresAtMs: number | null
+  /**
+   * Whether the Gateway would accept "Always" for THIS request.
+   *
+   * Not a guess. OpenClaw refuses `allow-always` in two cases and the request
+   * carries both: an agent set to ask on EVERY command has nothing to remember
+   * (`ask: 'always'`), and a command the Gateway will not persist arrives with
+   * `allow-always` in `unavailableDecisions`. Sending it anyway comes back
+   * "allow-always is unavailable for this command", so an ungated Always button
+   * is one that fails on exactly the commands an operator is most tired of
+   * being asked about.
+   */
+  allowAlways: boolean
 }
 
 /** The Gateway frame, read defensively; a shape we do not recognise is ignored. */
@@ -61,15 +73,42 @@ export function parseExecApprovalRequest(payload: unknown): ExecApprovalRequest 
   const req = (p['request'] ?? p) as Record<string, unknown>
   const command = typeof req['command'] === 'string' ? req['command'] : ''
   if (!id || !command) return null
+  const unavailable = Array.isArray(req['unavailableDecisions']) ? req['unavailableDecisions'] : []
 
   return {
     id,
     command,
     agentId: typeof req['agentId'] === 'string' ? req['agentId'] : null,
     cwd: typeof req['cwd'] === 'string' ? req['cwd'] : null,
-    reason: typeof req['reason'] === 'string' ? req['reason'] : null,
+    // The Gateway's own sentence about why it stopped, when it wrote one. It is
+    // more specific than anything clawboo can say about a command from outside.
+    reason:
+      typeof req['warningText'] === 'string' && req['warningText'].trim()
+        ? req['warningText'].trim()
+        : typeof req['reason'] === 'string'
+          ? req['reason']
+          : null,
     expiresAtMs: typeof p['expiresAtMs'] === 'number' ? p['expiresAtMs'] : null,
+    // An absent field means no restriction, which is the vendor's own default,
+    // so a frame from a Gateway that predates these fields still offers Always.
+    allowAlways: req['ask'] !== 'always' && !unavailable.includes('allow-always'),
   }
+}
+
+/**
+ * The Gateway's decision word in clawboo's own vocabulary.
+ *
+ * TWO SPELLINGS OF THE SAME DECISION, and the audit log has to settle on one:
+ * OpenClaw says `allow-always`, clawboo's own broker says `allow_always`, and
+ * both land in the same `status` column. Worse than the inconsistency, the
+ * resolve path used to fold anything that was not a denial into `allow_once`,
+ * so a standing grant an operator had just minted was recorded as a one-off.
+ * The record then disagreed with the allowlist it created, which is the one
+ * place someone would look to find out why a command stopped being asked about.
+ */
+export function execDecisionStatus(decision: string): string {
+  const normalized = decision.replace(/-/g, '_')
+  return normalized === 'deny' || normalized === 'allow_always' ? normalized : 'allow_once'
 }
 
 export interface ExecApprovalSource {
@@ -155,9 +194,11 @@ export function startExecApprovalSurface(
             // is in the command text rather than in a descriptor it owns.
             toolClass: 'destructive',
             toolSummary: req.command.slice(0, 200),
-            // "Always" is OpenClaw's to mint, into ITS allowlist. Offering it here
-            // without writing it there would be a button that appears to work.
-            neverRemember: 1,
+            // "Always" is OpenClaw's to mint, into ITS allowlist, and the resolve
+            // route now asks it to. So the question is no longer whether clawboo
+            // can honour the button, it is whether the GATEWAY would, and the
+            // request answers that itself.
+            neverRemember: req.allowAlways ? 0 : 1,
             createdAt: now,
             expiresAt: req.expiresAtMs ?? now + EXEC_APPROVAL_TTL_MS,
           })
@@ -172,11 +213,14 @@ export function startExecApprovalSurface(
       if (frame.event === 'exec.approval.resolved') {
         const p = frame.payload as Record<string, unknown> | undefined
         const id = typeof p?.['id'] === 'string' ? p['id'] : ''
-        const decision = typeof p?.['decision'] === 'string' ? p['decision'] : 'resolved'
+        const decision = typeof p?.['decision'] === 'string' ? p['decision'] : ''
         if (!id) return
         getDb()
           .update(toolCallApprovals)
-          .set({ status: decision, resolvedAt: Date.now() })
+          .set({
+            status: decision ? execDecisionStatus(decision) : 'resolved',
+            resolvedAt: Date.now(),
+          })
           .where(eq(toolCallApprovals.id, id))
           .run()
       }
@@ -234,7 +278,7 @@ export async function resolveExecApproval(
   }
   getDb()
     .update(toolCallApprovals)
-    .set({ status: decision === 'deny' ? 'deny' : 'allow_once', resolvedAt: Date.now() })
+    .set({ status: execDecisionStatus(decision), resolvedAt: Date.now() })
     .where(eq(toolCallApprovals.id, id))
     .run()
   return { ok: true }
