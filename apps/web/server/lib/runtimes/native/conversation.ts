@@ -359,7 +359,11 @@ export class Conversation {
       args: Record<string, unknown>,
     ): Promise<NativeToolOutcome> => {
       const localTool = local.get(name)
-      if (localTool) return localTool.run(args)
+      // THE RUN'S ABORT REACHES A LOCAL TOOL. `await dispatch(...)` is never raced
+      // against the signal (it is only polled either side of the call), so a tool
+      // that spawns a child had no way to learn the run was stopped, and the child
+      // would outlive it.
+      if (localTool) return localTool.run(args, { signal: this.controller.signal })
       if (mcp?.owns(name)) return mcp.callTool(name, args)
       return { output: `unknown tool: ${name}`, isError: true }
     }
