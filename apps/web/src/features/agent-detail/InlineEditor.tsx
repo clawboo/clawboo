@@ -18,6 +18,7 @@ import { clawbooEditorThemeDark, clawbooEditorThemeLight } from '@/features/edit
 import { useTheme } from '@/features/theme/useTheme'
 import { useAgentFiles, ALL_FILE_TABS } from '@/features/editor/useAgentFiles'
 import { PersonalitySliders } from '@/features/settings/PersonalitySliders'
+import { NativeShellSettings } from '@/features/settings/NativeShellSettings'
 import { ExecSettings } from '@/features/settings/ExecSettings'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
@@ -116,15 +117,24 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
       'activity',
       'workspace',
       'browser',
-      // Permissions is OpenClaw-only, because it is the only runtime that reads
-      // it. The tab writes exec-approval policy into the Gateway's own approvals
-      // store (`exec.approvals.set`), keyed by OpenClaw agent id. For a native
-      // agent that store is not consulted by anything, so the tab accepted a
-      // setting, reported success, and changed nothing, and it left evidence: the
-      // store still carries an entry for `native-boo-zero-3efff3`, an agent that
-      // no longer exists. Same rule as the file tabs above: do not show an editor
-      // whose bytes no driver will ever read.
-      ...(agentRuntime === 'openclaw' ? (['permissions'] as const) : []),
+      // Permissions is shown where something actually READS it, which is the same
+      // rule as the file tabs above: never show an editor whose bytes no driver
+      // will ever consult.
+      //
+      // For OpenClaw that is the Gateway's own approvals store, written by
+      // `exec.approvals.set` and keyed by OpenClaw agent id. That store is not
+      // consulted for any other runtime, and the tab used to be shown for native
+      // agents too: it accepted a setting, reported success, changed nothing, and
+      // left evidence behind, an entry for `native-boo-zero-3efff3`, an agent that
+      // no longer exists.
+      //
+      // A native Boo now has its own thing to govern, the `run_command` switch,
+      // which the native driver reads at run construction. Different control,
+      // different store, same tab, because to the person looking it is the same
+      // question: what is this Boo allowed to do.
+      ...(agentRuntime === 'openclaw' || agentRuntime === 'clawboo-native'
+        ? (['permissions'] as const)
+        : []),
       ...(isBooZero ? (['brief'] as const) : []),
       ...visibleFileTabs,
     ],
@@ -335,10 +345,14 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           </div>
         )}
 
-        {/* Permissions tab */}
+        {/* Permissions tab. Each runtime gets the control that governs IT: the
+            Gateway exec policy plus its standing grants for OpenClaw, the
+            run_command switch for a native Boo. Neither is rendered for the
+            other, because a control that cannot take effect is worse than none. */}
         {activeTab === 'permissions' && (
           <div style={{ height: '100%', overflowY: 'auto', padding: '12px 16px' }}>
-            <ExecSettings agentId={agentId} />
+            {agentRuntime === 'openclaw' && <ExecSettings agentId={agentId} />}
+            {agentRuntime === 'clawboo-native' && <NativeShellSettings agentId={agentId} />}
           </div>
         )}
 

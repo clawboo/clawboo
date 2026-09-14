@@ -205,3 +205,22 @@ describe('usePendingApprovals, with both sources live', () => {
     expect(result.current.tool.map((a) => a.id)).toEqual(['tc-9'])
   })
 })
+
+describe("clawboo's own native shell", () => {
+  it('describes run_command with the same card as the Gateway shell', () => {
+    // The two are named apart so the audit trail can tell them apart. To the
+    // person being asked they are the same question, and an unrecognised name
+    // would fall through to the generic renderer: "wants to run Run command",
+    // chipped from the stored class, under a button saying "Delete it".
+    const onResolve = vi.fn()
+    render(
+      <ToolApprovalCard
+        approval={mirrored({ kind: 'tool', toolName: 'run_command' })}
+        onResolve={onResolve}
+      />,
+    )
+    expect(screen.getByRole('heading')).toHaveTextContent(/wants to run a command/i)
+    expect(screen.getByRole('button', { name: 'Run it' })).toBeInTheDocument()
+    expect(screen.getByText('echo hello')).toBeInTheDocument()
+  })
+})

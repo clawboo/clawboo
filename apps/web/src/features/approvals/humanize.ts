@@ -285,7 +285,13 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
   const args = parseArgs(input.argsSummary)
   const bare = bareName(input.toolName)
 
-  // ── A shell command, held by the OpenClaw Gateway ──
+  // ── A shell command ──
+  //
+  // TWO TOOL NAMES, ONE CARD. `exec` is the OpenClaw Gateway's mirrored shell;
+  // `run_command` is clawboo's own native one. They are held open by different
+  // machinery and are deliberately named apart so the audit trail can tell them
+  // apart, but to the person being asked they are the same question, and a
+  // second renderer would be a second chance to word it worse.
   //
   // This one is not a tool clawboo brokered and it has no descriptor, so the
   // general path below describes it from its name and its stored class: `wants
@@ -299,7 +305,7 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
   // thing that decides anything, and keeps the serious weighting because an
   // arbitrary shell command genuinely can destroy. The words change, the rail
   // does not.
-  if (bare === 'exec') {
+  if (bare === 'exec' || bare === 'run_command') {
     const command =
       (typeof args?.['command'] === 'string' ? args['command'] : null) ??
       input.toolSummary?.trim() ??
