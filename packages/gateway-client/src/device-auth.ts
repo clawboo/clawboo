@@ -101,7 +101,7 @@ async function fingerprintPublicKey(publicKey: Uint8Array): Promise<string> {
 }
 
 async function generateIdentity(): Promise<DeviceIdentity> {
-  const privateKey = utils.randomPrivateKey()
+  const privateKey = utils.randomSecretKey()
   const publicKey = await getPublicKeyAsync(privateKey)
   const deviceId = await fingerprintPublicKey(publicKey)
   return {
