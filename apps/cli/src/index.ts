@@ -245,7 +245,11 @@ async function reconcileServerVersion(port: number, opts: LaunchOptions): Promis
   let restart = opts.yes
 
   if (!restart && interactive) {
-    let answer: boolean | symbol
+    // Infer from confirm() rather than widening to `symbol`. @clack/core 1.5
+    // narrowed isCancel from `value is symbol` to `value is typeof CANCEL_SYMBOL`,
+    // so excluding one unique symbol no longer removes a plain `symbol` and the
+    // guard below stopped narrowing.
+    let answer: Awaited<ReturnType<typeof p.confirm>>
     try {
       answer = await p.confirm({
         message: `Restart it on port ${port} to run v${VERSION}?`,
