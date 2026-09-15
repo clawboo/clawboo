@@ -1,0 +1,67 @@
+---
+/**
+ * A product screenshot that follows the site's theme.
+ *
+ * Every capture ships twice, light and dark, and this renders both as sibling
+ * <picture> elements tagged `data-shot-theme`. Which one is visible is decided
+ * in marketing.css off `:root.dark`, which is the class the no-FOUC script in
+ * BaseLayout sets and ThemeToggle keeps in sync. Keying off the class rather
+ * than a `prefers-color-scheme` media query is the whole point: the toggle
+ * cycles light -> dark -> system, so an explicit choice that disagrees with the
+ * OS is a supported state, and a media query cannot see it.
+ *
+ * Cost, because a two-element swap is not free:
+ *  - `loading="lazy"` (the five panels below the fold): the hidden variant has
+ *    no box, so it should never intersect the viewport and never be fetched.
+ *    The extra cost at runtime is then the markup, not the pixels.
+ *  - `loading="eager"` (the hero): BOTH are fetched, measured. `display: none`
+ *    cancels no eager fetch in any engine, so the hero pays for a second avif
+ *    it never paints.
+ * The numbers and the way out are in the `[data-shot-theme]` note in
+ * marketing.css. Read it before adding a seventh shot.
+ *
+ * `alt` is passed to both <img>s. Only one is in the accessibility tree at a
+ * time, because `display: none` removes the other, so nothing is announced
+ * twice.
+ */
+import { Picture } from 'astro:assets'
+import type { ImageMetadata } from 'astro'
+
+interface Props {
+  light: ImageMetadata
+  dark: ImageMetadata
+  alt: string
+  widths: number[]
+  sizes: string
+  /** Defaults to lazy. Only the hero should be eager. */
+  loading?: 'eager' | 'lazy'
+  fetchpriority?: 'high' | 'low' | 'auto'
+}
+
+const { light, dark, alt, widths, sizes, loading = 'lazy', fetchpriority } = Astro.props
+
+// Spread rather than pass `fetchpriority={undefined}`, so the attribute is
+// simply absent on the five panels that do not want a priority hint.
+const priority = fetchpriority ? { fetchpriority } : {}
+---
+
+<Picture
+  src={light}
+  alt={alt}
+  formats={['avif', 'webp']}
+  widths={widths}
+  sizes={sizes}
+  loading={loading}
+  pictureAttributes={{ 'data-shot-theme': 'light' }}
+  {...priority}
+/>
+<Picture
+  src={dark}
+  alt={alt}
+  formats={['avif', 'webp']}
+  widths={widths}
+  sizes={sizes}
+  loading={loading}
+  pictureAttributes={{ 'data-shot-theme': 'dark' }}
+  {...priority}
+/>

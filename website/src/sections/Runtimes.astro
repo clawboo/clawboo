@@ -21,10 +21,11 @@
  * rather than leaving its mark to speak for itself.
  */
 import RuntimeMarks from '../components/RuntimeMarks.astro'
-import { Picture } from 'astro:assets'
+import ThemedShot from '../components/ThemedShot.astro'
 import { links } from '../lib/site'
 import Icon from '../components/Icon.astro'
 import runtimesPanel from '../assets/screenshots/runtimes-panel.png'
+import runtimesPanelDark from '../assets/screenshots/runtimes-panel-dark.png'
 ---
 
 <section id="runtimes" class="section">
@@ -71,10 +72,14 @@ import runtimesPanel from '../assets/screenshots/runtimes-panel.png'
           </a>
         </div>
         <div class="panel-media">
-          <Picture
-            src={runtimesPanel}
-            alt="The Runtimes panel: Clawboo Native connected, Claude Code and Codex ready to connect, Hermes connected, and an OpenClaw Gateway."
-            formats={['avif', 'webp']}
+          <!-- The alt used to say "Claude Code and Codex ready to connect".
+               Nothing in the new capture is waiting to connect: four of the five
+               are green and offer Manage, and OpenClaw is the only one still
+               offering Set up. -->
+          <ThemedShot
+            light={runtimesPanel}
+            dark={runtimesPanelDark}
+            alt="The Runtimes panel in Clawboo's settings: Codex, Claude Code, Hermes and Clawboo Native each connected with a Manage button, and OpenClaw offering to set up a local Gateway."
             widths={[720, 1080, 1440, 1920]}
             sizes="(min-width: 900px) 680px, 94vw"
             loading="lazy"
