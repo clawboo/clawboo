@@ -32,7 +32,7 @@ These are the bottom nav buttons in `AgentListColumn`. Each switches the main co
 
 ## App-wide
 
-- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals plus the brokered tool-approval queue). Not a nav panel: it renders as the Board's **Needs approval** column and as an inline tray above the group-chat composer.
+- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals, native `run_command` requests, and the brokered tool-approval queue). Not a nav panel: it renders as the Board's **Needs approval** column and as an inline tray above the group-chat composer.
 - **[Theming](/using/theming)**: The light/dark/system theme toggle in the bottom-left of the sidebar (`ThemeToggle`); fresh installs default to light.
 
 ## Where things live (nav slots)

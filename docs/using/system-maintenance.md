@@ -43,7 +43,9 @@ There is no agent-coordination switch anywhere in the dashboard. Agent-to-agent 
 
 ### Set the default command approval
 
-The **Command Approval** section is one dropdown. It sets `tools.exec.ask` in `openclaw.json`, the default posture every OpenClaw agent inherits before running a shell command.
+The **Command Approval** section is one dropdown, and it renders only while a Gateway `client` is connected. It sets `tools.exec.ask` in `openclaw.json`, the fleet-wide default posture for OpenClaw agents before they run a shell command.
+
+It is a default, not an override. A Boo with its own per-agent entry in the Gateway's approvals store follows that entry instead, and Clawboo now writes one as it creates an OpenClaw Boo: **Ask for Unknown**, or whichever of the three postures below the caller asked for. So this dropdown no longer loosens a newly created Boo: set **Run Freely** here and a Boo created with that default still asks about a command it has not been allowed before, because its own entry says to. See [What a new Boo is allowed to run](/runtimes/openclaw#what-a-new-boo-is-allowed-to-run).
 
 | Option              | Written value | What it means                                         |
 | ------------------- | ------------- | ----------------------------------------------------- |
@@ -58,7 +60,7 @@ The **Command Approval** section is one dropdown. It sets `tools.exec.ask` in `o
 After a successful write the panel makes a best-effort `config.get()` call on the Gateway `client`. That call is advisory: it is wrapped in its own `try`/`catch`, so a disconnected Gateway changes nothing about the outcome, and the new value is already on disk in `openclaw.json` either way.
 
 <Tip>
-This is the fleet-wide default. A single agent overrides it in its detail view's **Permissions** tab, under **Execution Permissions**; that override is per-agent and takes effect on the agent's next message. See [Approvals](/using/approvals) for what happens when an agent does ask.
+This is the fleet-wide default, and it only decides for a Boo that has no entry of its own. Set or change one agent's entry in its detail view's **Permissions** tab, under **Execution Permissions**; that posture is per-agent, is written to the Gateway, and takes effect on the agent's next message. See [Approvals](/using/approvals) for what happens when an agent does ask.
 </Tip>
 
 ### Check version and updates

@@ -86,11 +86,13 @@ A cap hit is logged to the audit log below (event type `cap_hit`).
 
 ### 6. Resolve approvals
 
-The **Approval queue** section embeds the shared `ToolApprovalQueue`, the _same_ queue and resolve UX as the [Approvals panel](/using/approvals), so there is one resolve path. A pending tool-call or delegation approval shows the tool name, an expiry countdown, the reason, and an args summary, with three actions:
+The **Approval queue** section embeds the shared `ToolApprovalQueue`, the _same_ queue and resolve UX as the [Approvals panel](/using/approvals), so there is one resolve path. It is no longer only tool and delegation rows: Clawboo's server mirrors OpenClaw's exec approvals into this same queue as `kind='exec'` rows, and a native Boo's `run_command` request lands here too, so a command waiting on a human shows up on this screen as well.
 
-- **Allow Once**: approve this one call.
-- **Always**: allow-always for this scope.
-- **Deny**: reject it.
+A pending row shows the tool name or the command, an expiry countdown, and an args summary, and on a connector call it quotes the agent's own note where it gave one. A command row never shows a reason: it shows the command and the folder, even on a native `run_command` request, whose stated reason is stored but not displayed. It carries two buttons plus, when the decision can be remembered at all, an **Always** checkbox you tick before allowing:
+
+- **Allow** approves this one call. The button names what the call does, so on a command card it reads **Run it**.
+- **Always** remembers the decision. The checkbox is labelled **Always allow this command in this folder** on a mirrored exec row and **Do not ask again for this for 30 days** on a brokered tool call. It is absent on a native `run_command` request, which is never remembered, and on any request raised as unrememberable. [Approvals](/using/approvals) lists every case.
+- **Don't allow** rejects it.
 
 These `POST` to `/api/tools/approvals/:id/resolve`. The queue polls `/api/tools/approvals?status=pending` every 3 seconds; when empty it shows a "No pending approvals" empty state.
 

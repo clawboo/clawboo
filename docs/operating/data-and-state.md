@@ -40,12 +40,22 @@ The Express server (and the entire web app) reads and writes `~/.clawboo/clawboo
 
 ## OpenClaw interop (read-only)
 
-Clawboo reads two files from OpenClaw's state directory for interop and **never writes to `~/.openclaw`**. The directory resolves via `resolveStateDir()`; `OPENCLAW_STATE_DIR` overrides it; otherwise it is `~/.openclaw`.
+Clawboo reads three files from OpenClaw's state directory for interop and **never writes to `~/.openclaw`**. The directory resolves via `resolveStateDir()`, in this order:
 
-| Path (under `~/.openclaw/`) | Why Clawboo reads it                                                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `openclaw.json`             | Gateway URL + auth token defaults when Clawboo's own `settings.json` has no usable token                                                   |
-| `.env`                      | Lowest-priority fallback for a runtime provider key (e.g. an existing `ANTHROPIC_API_KEY` auto-satisfies `claude-code` / `clawboo-native`) |
+1. `OPENCLAW_STATE_DIR`, then `MOLTBOT_STATE_DIR`, then `CLAWDBOT_STATE_DIR`. The first one set wins (a leading `~` is expanded, and the result is made absolute).
+2. With none of them set: `~/.openclaw` if that directory exists.
+3. Otherwise the first of `~/.clawdbot`, `~/.moltbot` that exists (the two legacy names).
+4. Otherwise `~/.openclaw`, whether or not it exists.
+
+| Path (under `~/.openclaw/`) | Why Clawboo reads it                                                                                                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `openclaw.json`             | Gateway URL + auth token defaults when Clawboo's own `settings.json` has no usable token                                                                                                        |
+| `.env`                      | Lowest-priority fallback for a runtime provider key (e.g. an existing `ANTHROPIC_API_KEY` auto-satisfies `claude-code` / `clawboo-native`)                                                      |
+| `state/openclaw.sqlite`     | OpenClaw's own state database, opened **read-only** with `fileMustExist`: the standing grants shown on an OpenClaw Boo's Permissions tab, and which browser tab belongs to which OpenClaw agent |
+
+<Note>
+`state/openclaw.sqlite` is OpenClaw's database, and the Gateway is live against it, so Clawboo opens it read-only and never writes to it. Reading the grants this way is deliberate: the RPC that would return them, `exec.approvals.get`, is a write, and issuing it against a stored policy that cannot be parsed would replace the whole fleet's permissions with a fail-closed default. Anything Clawboo cannot read here is reported as unreadable, never as an empty list. See [Approvals](/using/approvals).
+</Note>
 
 Backing up or resetting `~/.clawboo` never touches OpenClaw's data. The two directories are independent.
 

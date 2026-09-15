@@ -1,11 +1,11 @@
 ---
 title: Clawboo Native runtime
-description: 'The clawboo-native in-process conversational harness: provider SDKs direct, no Gateway, jailed file tools, in-process MCP, and how to connect a key.'
+description: 'The clawboo-native in-process conversational harness: provider SDKs direct, no Gateway, jailed file tools, an approval-gated shell, in-process MCP, and how to connect a key.'
 ---
 
 `clawboo-native` is Clawboo's own [runtime](/appendices/glossary): an in-process conversational harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama, plus seven more OpenAI-compatible providers) with **no OpenClaw Gateway** in the loop. It is one of the five runtimes, a co-equal peer beside `openclaw`, `claude-code`, `codex`, and `hermes`; there is no conversion or export between a native agent and any other runtime's agent.
 
-Use this page to understand what the native runtime is, its capabilities and the shared MCP spine it consumes, its persistent per-identity home, its jailed file tools, how providers are routed and how fallback works, how a turn is priced, and how to connect it (paste a provider key; that is the entire setup, because nothing has to be installed).
+Use this page to understand what the native runtime is, its capabilities and the shared MCP spine it consumes, its persistent per-identity home, its jailed file tools, the approval-gated shell a board task can switch on, how providers are routed and how fallback works, how a turn is priced, and how to connect it (paste a provider key; that is the entire setup, because nothing has to be installed).
 
 ## What it is
 
@@ -60,6 +60,7 @@ interface AgentConfig {
     tools: boolean // Tools MCP / managed capability broker
     tasks: boolean | 'read' // Tasks MCP / the durable board; 'read' attaches only list_tasks + get_task
     teamchat: boolean // TeamChat MCP — post + listen as a named peer
+    shell?: boolean // the run_command tool; optional, and absent from the defaults, so absent means off
     custom?: string[] // reserved
   }
   participantKind: string // 'agent' today; open set
@@ -136,7 +137,7 @@ Some loop properties worth knowing:
 
 ## Built-in file tools
 
-When a native run has a working directory (a worktree), it gets three built-in file tools, the runtime's [private plane](/appendices/glossary), the way every coding runtime ships its own file primitives. The shared MCP spine carries coordination, not workspace edits.
+When a native run has a working directory (a worktree), it gets three built-in file tools, the runtime's [private plane](/appendices/glossary), the way every coding runtime ships its own file primitives. The shared MCP spine carries coordination, not workspace edits. A fourth local tool, `run_command`, joins them only when someone switched the shell on for that Boo; see [Running commands](#running-commands).
 
 | Tool         | Purpose                                                                                  |
 | ------------ | ---------------------------------------------------------------------------------------- |
@@ -147,6 +148,83 @@ When a native run has a working directory (a worktree), it gets three built-in f
 <Info>
 The file tools are **strictly jailed to the run's worktree**. Every path is resolved under the working directory and must stay inside it; an absolute path or any `..` escape is rejected. A run with **no working directory** (a research or review task) gets **no file tools at all**; there is nothing to edit.
 </Info>
+
+## Running commands
+
+`run_command` lets a native Boo propose running **one program** in its working folder. It is the only way a native Boo can run anything at all, and every single command is put in front of a person before it runs.
+
+### Every precondition for the tool to exist
+
+All four must hold, or `run_command` is simply **absent** from the model's tool list rather than present and refusing:
+
+1. **The shell is switched on for that Boo**, `AgentConfig.tools.shell === true`. The field is optional and deliberately absent from the default config, so absent reads as off and a shell never arrives switched on.
+2. **The run has a working directory.** In practice that means a **board task with a provisioned worktree**. A 1:1 chat, a team-room turn and a dispatch turn carry no working directory, so the tool is absent there. (The post-task verification critic does get one, but it runs under the default config with the switch off.)
+3. **The host is not Windows.** See [Windows has no shell at all](#windows-has-no-shell-at-all).
+4. **The run is a `clawboo-native` run.** `run_command` is a **local** tool, dispatched by the native conversation loop rather than registered with the capability broker, precisely so it cannot appear inside a `claude-code`, `codex`, `hermes` or `openclaw` agent. It is not an MCP tool and is not listed in [MCP tools](/reference/mcp-tools).
+
+### The switch
+
+Agent detail, the **Permissions** tab (which appears for native and OpenClaw Boos only), under **Running commands**.
+
+- The switch reads **"Let this Boo ask to run commands"**, with the helper line "You are asked before every command. Nothing is remembered, so a command you allowed once will ask again the next time."
+- Turning it on raises a confirm dialog titled **"Let this Boo ask to run commands?"**, with the body "It will be able to propose running programs on this computer. You are asked to approve every command before it runs, and nothing is remembered, so you will see each one." The confirm button reads **"Allow it to ask"**.
+- Once it is on, the card adds: "Commands run in this Boo's working folder, as you, with access to the network. One program at a time: it cannot use pipes, redirects, or a shell."
+
+The same setting over REST: `GET /api/agents/:agentId/shell` returns `{ enabled }`, and `POST /api/agents/:agentId/shell` with `{ enabled: boolean }` changes it. The POST is rate-limited, and it re-reads the stored config after writing, so the response is what is actually stored rather than what was asked for. Both routes answer `400` for a Boo on any other runtime: an OpenClaw Boo's shell is governed by its Gateway policy instead.
+
+<Note>
+The confirm dialog is **browser-side only**. `POST /api/agents/:agentId/shell` accepts `{ "enabled": true }` directly, and `POST /api/agents` with `sourceId: 'clawboo-native'` can set `execConfig.tools.shell` at creation. So: every native Boo created through clawboo's own screens starts with the shell off.
+</Note>
+
+### The tool contract
+
+- Input is `argv` (an array of strings, required) and `why` (a string, optional: "One short sentence on why this command is needed").
+- **argv only.** The program and each argument are separate array items, never one string, and the child is spawned with `shell: false`, always. There are no pipes, no redirects and no shell operators.
+- **A person is asked every single time, and nothing is remembered.** There is no allowlist at this tier, so the card never offers **Always**: an "Always" that behaved as an allow-once would be a control that lies.
+- **One run may ask about 10 commands.** The next call is refused without reaching anyone.
+- **The card stays answerable for 10 minutes.**
+- **Output is capped at 64 KiB**, stdout and stderr in arrival order, and the result says when the tail was dropped. A command is never killed merely for being chatty.
+- A **non-zero exit is returned as an error result with the output still attached**. A command stopped by a signal has no exit code, and the result then opens with `The command finished with exit code unknown.`
+- A command that runs past five minutes is stopped: SIGTERM to the process group, escalating to **SIGKILL after a 3 second** grace window. Stopping the run kills it the same way.
+
+What the approval card shows: the headline `<Boo> wants to run a command on this computer.`, the chip "Runs a command", the **Command** and the **Folder** inline (never behind the disclosure), and an allow button reading **"Run it"**. See [Approvals](/using/approvals) for answering one.
+
+### Refused before anyone is asked
+
+These never reach a person. They come back to the model as a plain error so it can rephrase, and are not recorded as a human refusal:
+
+- An `argv` that is not a non-empty array of strings, holds more than 64 items, or carries an item over 2048 bytes.
+- Any control character in an argument. A NUL would truncate the string at the syscall boundary, so what a person read on the card and what the kernel receives would differ.
+- An `argv[0]` carrying a path separator without being an absolute path: a bare program name or an absolute path, nothing in between.
+- A program that resolves to a denylisted name, or a script whose shebang names one.
+
+### Program resolution
+
+Before the approval row is written, clawboo resolves the program with `realpath` against the **child's** `PATH`, applies the denylist to the **resolved** basename, reads the file's first line and checks **both** of the first two shebang words (so `#!/usr/bin/env python3` cannot hide the interpreter in the second word), and records the file's identity (device, inode, size, and both timestamps). The **resolved path is what gets spawned**, so the program named on the card is the program that runs. That identity is re-checked immediately before the spawn, so a binary swapped while the card waits is not run. It narrows the window rather than closing it: the file can still change between that last check and the spawn.
+
+The denylist is 59 basenames in six groups: shells, run-another-program wrappers, interpreters, package runners, build tools whose job is running shell recipes, and anything that runs a command on another machine or in a container. Matching strips version suffixes, so `python3.11` and `node22` are caught alongside `python` and `node`.
+
+<Danger>
+**The denylist is a speed bump, not a sandbox.** `git -c core.pager=...`, `find -exec` and `awk 'BEGIN{system(...)}'` all reach a shell without appearing on it, and a test in the repo pins those shapes as **accepted** so that no future reader mistakes the list for a boundary. The list only removes the commands whose effect a person could not have read off the card. **The human answering the card is the boundary.** Nothing sandboxes an approved command: it runs on this computer, in the Boo's working folder, as the user running clawboo, with access to the network.
+</Danger>
+
+### The child process
+
+- The child gets an **allowlist** environment, not the server's ambient one. On a Unix host the names that pass through are `PATH`, `HOME`, `SHELL`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `TMPDIR`, `LOGNAME`, `TERM`, `USER`, and the proxy variables.
+- **Provider credentials are not forwarded**, so an approved `printenv` does not return your API keys.
+- It runs in the Boo's working folder, as the user running clawboo, with network access.
+
+### Windows has no shell at all
+
+On Windows the tool is **absent, not degraded**. A Windows shim cannot be launched without a shell, and launching a shell is the property this design refuses, so `run_command` is never offered on a Windows host. The switch and its routes still work there; the tool simply never appears in a run.
+
+### Honest limits
+
+- **The card does not show the Boo's stated reason.** `why` is stored on the approval row, but the shell card carries no agent note: what you see is the command and the folder, and nothing about why the Boo wants it.
+- **Declining can end the task, not just the command.** A refusal latches the tool for the rest of the run, and the next attempt is a second policy denial in a row, which trips the run's repeat-denial breaker and aborts the board task. An unanswered card sets the same latch, but the expiry itself is not recorded as a denial, so it takes two later attempts rather than one to trip the breaker.
+- **A card nobody answers blocks the run** for the full 10 minutes, and the run makes no other progress while it waits.
+- **The ceiling and the latch are per driver run, not per task.** A task that is re-driven starts again at zero asks, with the latch cleared.
+- **No audit row is written for a `run_command` execution**, so it never appears in `GET /api/tools/audit`. The approval itself is an ordinary row in the approvals queue.
 
 ## In-process MCP
 
@@ -244,6 +322,10 @@ curl -X POST http://localhost:18790/api/onboarding/seed-native-team \
 
 <Warning>
 **A run reports `costUsd: null`.** Native pricing is an exact-match table for the pinned models (`claude-haiku-4-5`, `claude-sonnet-4-6`, `gpt-4o-mini`, `gpt-4o`, plus the OpenRouter aliases for the Anthropic/OpenAI pins). Any other model is honestly reported as `costUsd: null, estimated: true` rather than priced as a fabricated default. A trailing `-YYYYMMDD` date suffix is normalized before lookup.
+</Warning>
+
+<Warning>
+**The Boo says it cannot run commands, or never proposes one.** `run_command` is absent unless all four preconditions hold, so walk them in order: the **Permissions** tab has *Let this Boo ask to run commands* switched on; the run has a working folder (a board task with a worktree, never a 1:1 chat, a team-room turn, or a dispatch turn); the server is not on Windows; and the Boo is a `clawboo-native` Boo, because this switch governs no other runtime. A Boo that reports being *refused* is a different case: the tool was there, and the command named a program that runs other programs, so it was refused before anyone was asked. See [Running commands](#running-commands).
 </Warning>
 
 <Danger>

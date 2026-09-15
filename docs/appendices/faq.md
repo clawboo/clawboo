@@ -65,6 +65,20 @@ Yes, with guardrails. **Routines** schedule recurring team-task work on a cron e
 
 Pair Routines with [governance](/concepts/governance) before leaving a fleet unattended: budgets (track-and-warn by default, hard-cap opt-in), tool-loop circuit breakers, depth/fan-out/cost caps, and approval gates are the controls that keep an unsupervised run from running away. Verification ([builder ≠ judge](/concepts/verification)) keeps "done" meaning _verified_ rather than merely claimed.
 
+## Can an agent run shell commands on my machine?
+
+Only where you allowed it, and the rules differ by runtime.
+
+An **OpenClaw** Boo has a command-execution posture you set per agent on its **Permissions** tab: **Run Freely**, **Ask for Unknown**, or **Always Ask**. On the two asking postures a command pauses and raises an approval card, and that card now survives a closed tab, a refresh, and a tab opened halfway through the window. Answering **Always** asks the Gateway to remember that command in that folder, and what it remembered is listed, and revocable, on the same tab. See [command permissions](/using/command-permissions).
+
+A **Clawboo Native** Boo has no shell unless you switch one on for it (**Permissions** tab → **Running commands**), and even then only on a run that has a working folder, which in practice means a board task. It asks before every single command and nothing is remembered, so a command you allowed once asks again the next time.
+
+Claude Code, Codex, and Hermes get no Clawboo-side command gate at all: the **Permissions** tab is shown only on OpenClaw and Clawboo Native Boos.
+
+<Warning>
+Approving a command is a decision about trust, not a sandboxed experiment. An approved command runs on your machine, in the Boo's working folder, as the user running Clawboo, with access to the network. Clawboo does refuse a list of program names before it raises a native card, but that list is a speed bump rather than a boundary: ordinary programs reach a shell without appearing on it. The person answering the card is the boundary.
+</Warning>
+
 ## How do I stop the Clawboo server?
 
 `clawboo stop`. The launcher starts the dashboard server **detached**, so it outlives the terminal you launched it from and there is usually no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it, and it is safe to run when nothing is running.

@@ -37,12 +37,14 @@ Every Boo is a real `AgentRecord`. There are no synthetic or decorative agents; 
 | `sessionKey`                       | `string \| null`     | Gateway-synced  | The agent's main session key.                                 |
 | `isDefault`                        | `boolean`            | Gateway-synced  | True when this is the source's default agent (Boo Zero).      |
 | `teamId`                           | `string \| null`     | SQLite-native   | Team membership; `null` = unassigned.                         |
-| `personalityConfig` / `execConfig` | `unknown \| null`    | SQLite-native   | Clawboo-native config preserved across re-sync.               |
+| `personalityConfig` / `execConfig` | `unknown \| null`    | SQLite-native   | Clawboo config preserved across re-sync; see below.           |
 | `participantKind`                  | `'agent' \| 'human'` | seam            | Who executes: `agent` today (see below).                      |
 | `runtime`                          | `RuntimeId`          | seam            | Which runtime backs this agent.                               |
 | `tenantId`                         | `string \| null`     | seam            | Dormant multi-tenant scope (`null` = single implicit tenant). |
 | `archivedAt`                       | `number \| null`     | SQLite-native   | Soft-delete tombstone (epoch ms); `null` = live.              |
 | `createdAt` / `updatedAt`          | `number`             | SQLite-native   | Lifecycle timestamps.                                         |
+
+`execConfig` is SQLite-native in the sense that a re-sync never overwrites it, but for an OpenClaw Boo it is not the setting itself. The command-approval posture it records is enforced by the Gateway, not by Clawboo, so Clawboo writes it there: once when the agent is created (a Gateway that refuses the write fails the creation: the agent is removed upstream and no row is written), and again whenever you change it in the **Permissions** tab. The two can still drift on that later change: a Gateway refusal is reported as an error, and the refused value stays in Clawboo's own record and is what the tab shows after a reload. On every other runtime there is no second copy, and the local record is the whole setting. See [What a new Boo is allowed to run](/runtimes/openclaw#what-a-new-boo-is-allowed-to-run).
 
 `RuntimeId` is an **open set**: `'openclaw' | 'claude-code' | 'codex' | 'hermes' | (string & {})`. The string-union escape hatch means the type is a list of autocomplete hints, not a closed enum; a sixth runtime is a new value, not a type change. `AgentRecordStatus` is a _superset_ of the runtime's own status, adding the `archived` tombstone that Clawboo owns.
 

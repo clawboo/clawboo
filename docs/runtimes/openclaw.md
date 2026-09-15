@@ -41,6 +41,8 @@ This is the runtime/execution path: the chat stream (`chat.send`, `chat.abort`),
 
 The Clawboo server opens its **own** Gateway connection, the `OpenClawAgentSource`. This is the _registry of record_ leg: it calls `agents.list()` and mirrors the result into SQLite so the fleet list, agent files, and team membership survive the Gateway being down. Reads (`listAgents`, `getAgent`, `listTeams`) come from SQLite and work offline; writes, file I/O, and live sessions delegate to the Gateway and require a live connection.
 
+It is also an **approval surface**. The server connection declares `caps: ['tool-events', 'exec-approvals']`, so when an agent's policy says to ask about a command, the Gateway can put that request to the server and not only to a browser tab. Clawboo mirrors each request into its own approvals queue, which is what lets a command waiting for your decision survive a closed tab or a refresh. See [Approvals](/using/approvals).
+
 A headless Node connection can't use the browser's `crypto.subtle` device-auth path, so the server reuses the **already-paired proxy device identity** (`~/.clawboo/proxy-device-identity.json`) to sign its connect frame via the gateway-client `signConnect` hook. Two details are load-bearing here, both confirmed against OpenClaw 2026.5.x:
 
 - The server connects with `client.id` = `cli` (the Gateway validates `client.id` against a fixed allowlist; a custom id like `clawboo-server` is rejected and the socket closes with code `1008`).
@@ -169,6 +171,28 @@ On success the SPA auto-retries the original connect with the same URL and token
 Power users can pair from a terminal instead: `openclaw devices approve --latest` to see the requestId, then `openclaw devices approve <UUID>`. The DevicePairingApproval card surfaces this manual fallback too.
 </Tip>
 
+## What a new Boo is allowed to run
+
+An OpenClaw agent runs commands on your computer, and the Gateway is the only thing that gates them. An agent with no entry in the Gateway's approvals store resolves to unrestricted: it runs commands without asking. That was the shipped default for every Boo created before this release.
+
+Clawboo now applies a posture at the Gateway as part of creating the agent. When the caller supplies no exec config, the posture is **Ask for Unknown** (`on-miss`), so the new Boo asks you before running a command it has not been allowed before. A caller that does supply a posture gets that one written to the Gateway too, so a Boo created with **Always Ask** is under that posture at the Gateway and not only in Clawboo's own record.
+
+One condition rides on this: the Gateway write happens only when the resolved exec config carries an `execAsk` of `off`, `on-miss`, or `always`. An exec config carrying anything else sends no posture at all, and that Boo is left with whatever the Gateway already resolves for it.
+
+<Warning>
+**A Gateway that refuses the policy fails the creation.** Clawboo deletes the agent it just created upstream and the call throws, with a message naming the permissions write (`Could not set this agent's command permissions on the Gateway, so it was not created: …`); **Create Boo** shows that message inline and no agent is left in your fleet. A Boo whose stated posture is not the one in force is worse than no Boo, so creation stops rather than degrading quietly. With the Gateway down you cannot create an OpenClaw Boo at all: `POST /api/agents` answers `503 { "error": "gateway_disconnected" }`. A tab that has no Gateway connection of its own never gets that far: the create dialog stops at **Not connected to Gateway** without sending the request.
+</Warning>
+
+A per-agent entry wins over the fleet-wide default, so the **Command Approval** dropdown in Settings → System no longer loosens a Boo created this way: that Boo carries its own explicit entry. See [System maintenance](/using/system-maintenance).
+
+Nothing re-asserts a posture afterwards. The two write sites are this one, at creation, and an explicit change in the Boo's **Permissions** tab (**Execution Permissions** → **Command Execution**). There is no reconciliation on connect, on sync, or on boot, so a posture changed outside Clawboo stays changed.
+
+### Seeing what a Boo has already been allowed
+
+Answering **Always** to a command prompt records a standing permission that outlives the run. The same **Permissions** tab lists them under **Commands this Boo can run without asking**, read from OpenClaw's own stored policy rather than from Clawboo's records. A row Clawboo can take back carries a revoke control; a row that is also granted to every Boo on the computer, or that is part of another grant, says so instead of offering a button you cannot use. Grants that apply fleet-wide appear only as a count in the footer and are set outside Clawboo.
+
+The list is read when the tab opens, on its **Refresh** button, and after a revoke attempt, so a permission minted by answering **Always** while the tab is open shows up once you refresh. If that policy cannot be read at all, the panel says so and names how many rules the document last held, rather than showing an empty list over rules that are still being enforced. See [Working with agents](/using/agents) for the tab, and [Approvals](/using/approvals) for answering a prompt in the first place.
+
 ## Why OpenClaw can't be run by the per-task executor
 
 The other four runtimes execute a board task by spawning a one-shot process: claim the task, provision a worktree, run the CLI/SDK, report up. OpenClaw is a **connected substrate**; its runs ride the live Gateway session over the server's long-lived connection, so the one-shot executor runner refuses it **by construction**, before any board mutation:
@@ -197,7 +221,7 @@ Two scoping facts follow from the Gateway config being process-wide:
 - `GET /api/agents/registry/health` (always `200`) reports the source `connection`; it should read `connected` with a recent `lastSyncedAt`.
 - `GET /api/agents` should return your OpenClaw agents with `stale: false`.
 - `GET /api/system/status` should show `gateway.running: true`.
-- Send a message in group chat; the send is an HTTP `POST /api/teams/:id/chat` and the reply streams back over SSE (`/api/teams/:id/chat/stream`), because team orchestration runs server-side. The same-origin WS proxy carries the 1:1 chat and exec approvals, not the team run.
+- Send a message in group chat; the send is an HTTP `POST /api/teams/:id/chat` and the reply streams back over SSE (`/api/teams/:id/chat/stream`), because team orchestration runs server-side. The same-origin WS proxy carries the 1:1 chat, not the team run. Exec approvals ride **both** Gateway connections: the browser's proxied socket and the server's own connection, so a command waiting on you is still there after you close the tab.
 
 ## Troubleshooting
 

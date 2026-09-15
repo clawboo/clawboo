@@ -9,18 +9,18 @@ This page explains the two paths in and out of the Gateway, the same-origin brow
 
 ## What it is, and what it isn't
 
-The Gateway is the OpenClaw **runtime**, not Clawboo's registry. It is the source of truth for _how OpenClaw agents run_: live sessions, the execution stream, exec approvals, runtime config, while the agent [registry of record](/appendices/glossary) (SQLite, fronted by the [AgentSource](/appendices/glossary)) is the source of truth for _who exists_. The two paths in this document are exactly that split: the **browser→proxy** connection rides the live runtime stream (chat, abort, approvals), and the **server-side connection** keeps the registry synced from the Gateway's agent list.
+The Gateway is the OpenClaw **runtime**, not Clawboo's registry. It is the source of truth for _how OpenClaw agents run_: live sessions, the execution stream, exec approvals, runtime config, while the agent [registry of record](/appendices/glossary) (SQLite, fronted by the [AgentSource](/appendices/glossary)) is the source of truth for _who exists_. The two paths in this document are exactly that split: the **browser→proxy** connection rides the live runtime stream (chat, abort, approvals), and the **server-side connection** keeps the registry synced from the Gateway's agent list, mirrors and answers exec approvals so a held shell command survives a closed tab, and watches session activity so work nobody started from Clawboo still lands in the event log.
 
 Two invariants shape everything below:
 
 - **The browser never talks to the Gateway directly.** It talks only to a same-origin WebSocket at `/api/gateway/ws`. The proxy injects the upstream auth token and signs the device-auth handshake server-side, so the browser never holds a credential and never needs a registered device key of its own.
-- **There is exactly one non-browser Gateway connection.** The server-side `OpenClawAgentSource` opens its own `GatewayClient` to keep SQLite in sync. Every other Gateway-touching surface in the codebase goes through one of these two paths.
+- **There is exactly one non-browser Gateway connection.** The server-side `OpenClawAgentSource` opens its own `GatewayClient` to keep SQLite in sync and to stay a surface the Gateway can reach when no tab is open. Every other Gateway-touching surface in the codebase goes through one of these two paths.
 
 The event pipeline is **OpenClaw-specific**. It maps OpenClaw's WS frames to Zustand store updates for the live fleet view. It is not the cross-runtime lifecycle stream; runtimes other than OpenClaw (clawboo-native, Claude Code, Codex, Hermes) emit a normalized `RuntimeEvent` union server-side instead of flowing through this browser bridge. See [the agent model](/concepts/agent-model).
 
 ## The model
 
-Two connections reach the Gateway. The browser path is a same-origin proxy hop; the server path is a single signed connection used for registry sync.
+Two connections reach the Gateway. The browser path is a same-origin proxy hop; the server path is a single signed connection used for registry sync, exec approvals, and session activity.
 
 ```mermaid
 flowchart LR
@@ -83,7 +83,7 @@ The browser resolves the proxy URL from its own origin; `resolveProxyGatewayUrl(
 
 ### The `connect` handshake and device pairing
 
-The browser's `GatewayClient.connect()` opens the socket, waits briefly for a `connect.challenge`, then sends a `connect` RPC. It advertises `minProtocol: 3, maxProtocol: 4` (OpenClaw bumped the connect protocol 3→4 in 2026.5.x; Clawboo supports both so old and new Gateways negotiate cleanly). It connects with `role: 'operator'` and scopes `operator.admin`, `operator.approvals`, `operator.pairing`, announces `client.id: 'webchat-ui'`, and declares the `exec-approvals` capability. Both of those last two are load-bearing. The id must NOT be `openclaw-control-ui`: that claims to be the Gateway's own bundled Control UI, and from OpenClaw 2026.9 a browser making the claim whose `client.buildId` does not match the Gateway's is refused with `protocol mismatch: Control UI updated; reload this page to continue`, a message that names a protocol and is not about protocols. The capability is what makes the socket an approval SURFACE: the Gateway registers an exec-approval route only for connections that declared it, and a run with no route is not queued for a human, it is denied as headless. Every browser caller passes `disableDeviceAuth: true` because the proxy owns device signing; the client's own `crypto.subtle` device path is skipped.
+The browser's `GatewayClient.connect()` opens the socket, waits briefly for a `connect.challenge`, then sends a `connect` RPC. It advertises `minProtocol: 3, maxProtocol: 4` (OpenClaw bumped the connect protocol 3→4 in 2026.5.x; Clawboo supports both so old and new Gateways negotiate cleanly). It connects with `role: 'operator'` and scopes `operator.admin`, `operator.approvals`, `operator.pairing`, announces `client.id: 'webchat-ui'`, and declares the `exec-approvals` capability. Both of those last two are load-bearing. The id must NOT be `openclaw-control-ui`: that claims to be the Gateway's own bundled Control UI, and from OpenClaw 2026.9 a browser making the claim whose `client.buildId` does not match the Gateway's is refused with `protocol mismatch: Control UI updated; reload this page to continue`, a message that names a protocol and is not about protocols. The capability is what makes the socket an approval SURFACE: the Gateway registers an exec-approval route only for connections that declared it, and a run with no route is not queued for a human, it is denied as headless. The browser is no longer the only connection that declares it: Clawboo's [server-side connection](#the-server-side-connection) declares `exec-approvals` too, which is what keeps a held command answerable with every tab closed. Every browser caller passes `disableDeviceAuth: true` because the proxy owns device signing; the client's own `crypto.subtle` device path is skipped.
 
 If a connect is rejected, the failure is parsed into a structured `GatewayResponseError` carrying a `code`. The one that matters for first-run is `NOT_PAIRED`: OpenClaw 2026.5.x dropped auto-pairing on first connect, so an unapproved device's connect returns `{ code: 'NOT_PAIRED', message: 'pairing required: device is not approved yet' }`. The SPA branches on that code (in `GatewayConnectScreen`, `GatewayBootstrap`, and `StartGatewayStep`) and renders a one-click approval flow.
 
@@ -93,15 +93,22 @@ That flow posts to `POST /api/system/approve-device`, which shells out to the `o
 The approve-device endpoint parses the CLI's stdout/stderr for the request id (`/openclaw devices approve\s+([a-f0-9-]{36})/i`). If a future OpenClaw release changes that wording, the parse fails and the endpoint returns `404`. The approval UI shows the manual CLI commands as a fallback so a power user is never stuck.
 </Warning>
 
-### The server-side connection (registry sync)
+### The server-side connection
 
-The `OpenClawAgentSource` opens the **only** non-browser Gateway connection, signed with the same shared proxy device identity (via the gateway-client `signConnect` hook). A headless Node connection can't use the browser's `crypto.subtle` path, so the source connects with three deliberate options:
+The `OpenClawAgentSource` opens the **only** non-browser Gateway connection, signed with the same shared proxy device identity (via the gateway-client `signConnect` hook). A headless Node connection can't use the browser's `crypto.subtle` path, so the source connects with four deliberate options:
 
 - `clientName: 'cli'`; the Gateway validates `client.id` against a fixed allowlist; a custom id like `clawboo-server` is rejected, and the control-ui ids additionally require a browser `Origin` header. `cli` is the first-class programmatic client type with no origin requirement.
 - `signConnect`: signs the `connect` params with the proxy device identity (`disableDeviceAuth: true` turns off the browser path so the signer never double-signs).
 - `origin` + `webSocketImpl`: the global undici WebSocket drops the `Origin` header, tripping `CONTROL_UI_ORIGIN_NOT_ALLOWED`. The source injects the `ws` package's WebSocket (which honors `{ origin }`) and presents the gateway-host origin, the same recipe the proxy uses for its upstream connection.
+- `caps: ['tool-events', 'exec-approvals']`: `tool-events` pulls full tool arguments, which a browser socket has no reader for. `exec-approvals` declares this connection an approval surface, and it is declared **last**, after the handler that answers exists. The Gateway counts any declaring connection as a real surface, so declaring it without answering would turn a fast, explicit refusal into a silent wait.
 
-This connection's job is to keep SQLite synced from the Gateway's `agents.list` and its event stream. Reads serve SQLite (so the fleet still renders when the Gateway is down); writes mirror back through the Gateway. See [AgentSource, registry of record](/internals/agent-source).
+This connection now does three jobs.
+
+**Registry sync.** It keeps SQLite synced from the Gateway's `agents.list` and its event stream. Reads serve SQLite (so the fleet still renders when the Gateway is down); writes mirror back through the Gateway. See [AgentSource, registry of record](/internals/agent-source).
+
+**Exec approvals.** Because it declares `exec-approvals`, the Gateway puts a held shell command to it even when no browser tab is open. It mirrors each request into Clawboo's own `tool_call_approvals` queue, keyed by the Gateway's own request id so a redelivery lands on the existing row, and relays the answer back over `exec.approval.resolve`. It decides nothing: the command stays held by the Gateway, and the policy saying which commands ask is OpenClaw's own, never a second copy here. Before this, a browser tab was the only connection declaring the capability, so with every tab closed a command was not queued for later, it was refused outright as a run that cannot wait for an interactive approval. See [Approvals](/using/approvals).
+
+**Session activity.** It calls `sessions.subscribe` once and reads the `session.message` stream, which fires on transcript commit rather than on who is watching. That is how work nobody started from Clawboo (a cron job the Boo owns, an incoming channel message, someone typing at OpenClaw's own terminal) still produces activity rows, and how an OpenClaw turn's real token counts reach the cost records instead of an estimate.
 
 ### Stage 1, Bridge: `classifyEvent`
 
@@ -162,7 +169,7 @@ The gate has one exemption: a **loopback** request to `/api/mcp/*` is let throug
 
 - **OpenClaw-only.** This pipeline maps OpenClaw WS frames. The other four runtimes emit a normalized `RuntimeEvent` union server-side and do not flow through `classifyEvent` / `derivePolicy`. See [the agent model](/concepts/agent-model).
 - **Not the team-orchestration engine.** Bridge→Policy→Handler keeps the live _fleet view_ in sync (an agent's status, streaming text, approvals). Turning delegation signals into durable work is the board orchestrator's job, not this pipeline's. See [delegation and orchestration](/concepts/delegation-and-orchestration).
-- **Token-count gap.** Gateway `chat` event payloads don't carry usage data, so the cost path estimates tokens (≈ 4 chars/token); the field is wired for real counts if the Gateway ever adds them. See [Known issues](/appendices/known-issues).
+- **Token-count gap, on the browser path.** Gateway `chat` event payloads still don't carry usage data, so the browser's estimator prices a turn at roughly 4 chars/token for the runtimes whose turns route as `chat` frames. OpenClaw's own turns no longer go through that estimator: they are billed server-side from `session.message`, which carries real token counts. See [Known issues](/appendices/known-issues).
 - **Device pairing depends on the CLI.** The approve-device endpoint shells out to `openclaw` and parses its output; it is a convenience over the manual `openclaw devices approve` flow, not a reimplementation of OpenClaw's pairing.
 
 <Note>

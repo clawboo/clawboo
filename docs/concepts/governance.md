@@ -1,17 +1,17 @@
 ---
 title: Governance
-description: USD budgets with an auto-pause kill-switch, tool-loop circuit breakers, depth/fan-out/cost caps, and the delegation approval handshake.
+description: USD budgets with an auto-pause kill-switch, tool-loop circuit breakers, depth/fan-out/cost caps, the delegation approval handshake, and the human gate on shell commands.
 ---
 
 Governance is the set of guardrails that make a runaway agent _impossible_, not merely visible. Where [observability](/concepts/observability) tells you what a run did, governance stops a run that has gone wrong: a [budget](/appendices/glossary) that has run out of dollars, a tool loop that thrashes without progress, a delegation tree that tries to grow too deep, or a destructive delegation that a human should sign off on first.
 
 Every governance signal is keyed on a typed [`RuntimeEvent`](/appendices/glossary): a `cost` event's dollar delta, a `tool-call` / `tool-result` pair, a typed error `code`, and never on rendered model prose. That is the same no-prose-as-control-signal discipline the whole [delegation and orchestration](/concepts/delegation-and-orchestration) layer follows: a control decision must come from a machine-readable field, because an LLM's free text is unparseable and adversarially manipulable.
 
-This page explains the four mechanisms: the budget **kill-switch** (cap vs warn mode, per agent / mission / team, auto-pause at 100%); the five **circuit breakers** (a cross-runtime backstop for stuck loops); the orchestrator-boundary **caps** (depth / fan-out / cost); and the **approval handshake** for risky delegations.
+This page explains the five mechanisms: the budget **kill-switch** (cap vs warn mode, per agent / mission / team, auto-pause at 100%); the five **circuit breakers** (a cross-runtime backstop for stuck loops); the orchestrator-boundary **caps** (depth / fan-out / cost); the **approval handshake** for risky delegations; and the **command-execution gate**, which decides whether an agent may run a shell command on your machine without asking you first.
 
 ## What it is, and what it isn't
 
-Governance is **enforcement in code, below the model**. The budget kill-switch aborts a live run; the breakers halt a thrashing loop; the caps refuse a delegation before it spawns; the approval gate blocks a risky delegation until a human resolves it. None of these ask the model to behave; they make misbehavior structurally impossible regardless of what the model decides.
+Governance is **enforcement in code, below the model**. The budget kill-switch aborts a live run; the breakers halt a thrashing loop; the caps refuse a delegation before it spawns; the approval gate blocks a risky delegation until a human resolves it; the command-execution gate holds a shell command until a human answers, or refuses it outright. None of these ask the model to behave; they make misbehavior structurally impossible regardless of what the model decides.
 
 Governance is **on by default and uncapped by default**. The breakers and caps always run with conservative defaults that a healthy run never trips. Budgets enforce _nothing_ until a user sets a limit, and the shipped posture is **track-and-warn**: a budget records spend and emits a warning at 80% and 100%, but a user must explicitly choose `cap` mode to get the auto-pause. There is no global feature flag; these are always-on parts of the [executor runner](/internals/executor-runner).
 
@@ -166,9 +166,51 @@ A client-side heuristic decides which delegations are risky (matching obviously 
 
 The poll loop is what makes a forgotten approval **time out rather than deadlock**: each approval carries an `expiresAt`, the waiter has its own deadline, and a durable TTL reaper atomically expires abandoned pending approvals on an interval (and unblocks the linked board task, unless a non-promotable verification verdict is what holds it `blocked`). Until a leader is identified, no approval is requested.
 
+<Note>
+A **mirrored OpenClaw exec** card runs on a different clock. Its row carries the deadline the Gateway sent with the request, or a thirty-minute hold when the request carried none, and its own 30-second sweep retires it to `expired` once that deadline passes, rather than the generic 24-hour reaper, whose age-based judgement would leave a card looking answerable for most of a day after the Gateway had already given up on the command behind it. An expiry is recorded as `expired` and never as `deny`, because it is a non-decision: nobody refused the command, nobody was asked in time, and writing a denial would claim a human had made a call they never made. The trade-off is that retiring an expired exec card writes no audit row and emits no observability event, so an exec timeout is absent from the audit trail where the reaper's expiries appear.
+</Note>
+
 <Info>
 The client REST call **fails closed**. If the approval endpoint is unreachable, the request maps to `timeout` (a non-approving resolution), never `allow_once`. The whole point of the gate is human sign-off for a destructive action, so an unreachable endpoint must not auto-approve. Only *risky* delegations reach this path, so the strictness can never deadlock ordinary team work.
 </Info>
+
+## The command-execution gate
+
+Budgets, breakers, and caps bound _spend and effort_, and the handshake above gates one risky delegation. This mechanism bounds _what an agent may run on your machine_, which makes it the most operator-visible of the five. It works differently per runtime, and the conditions matter more than the mechanism does.
+
+### An OpenClaw Boo's posture is held at the Gateway
+
+A Boo's **Permissions** tab carries a **Command Execution** control with three postures. Clawboo writes the chosen one into the [Gateway](/concepts/gateway-and-events)'s own policy for that agent, because the Gateway consults only its own policy when it decides whether to ask. Clawboo keeps the value in its own record too, and that copy gates nothing by itself:
+
+| Posture             | What the Boo does                    |
+| ------------------- | ------------------------------------ |
+| **Run Freely**      | Executes commands without asking.    |
+| **Ask for Unknown** | Asks approval for unlisted commands. |
+| **Always Ask**      | Asks approval for every command.     |
+
+**A newly created OpenClaw Boo now starts at "Ask for Unknown".** The old default was no gate at all: an agent with no entry in the Gateway's policy resolves to unrestricted, so every Boo ever created ran commands without asking. Creation now applies a posture at the Gateway, defaulting to "Ask for Unknown" when the caller supplied no exec config, and it writes one only when the resolved config carries an `execAsk` of `off`, `on-miss`, or `always`. Because a per-agent entry wins over the fleet-wide default, the fleet-wide Command Approval control in [System maintenance](/using/system-maintenance) no longer loosens a Boo created this way: that Boo carries its own explicit entry.
+
+<Warning>
+If the Gateway refuses that policy, **creation fails**. The upstream agent is deleted and the call throws, because a Boo whose stated posture is not the one in force is worse than no Boo. With the Gateway unreachable you cannot create an OpenClaw Boo at all. Changing a posture later is honest in the same way: a Gateway refusal answers `502` with `savedLocally: true` rather than `ok`. Note that on that refusal the value you chose does stay in Clawboo's own record, so the tab shows it again after a reload while the Gateway is still enforcing the old one.
+</Warning>
+
+**Nothing re-asserts a posture.** There are exactly two write sites, creating the Boo and changing the control in its Permissions tab. No reconciliation runs on connect, on sync, or at boot.
+
+### A standing grant is a decision you can take back
+
+Answering **Always** to an OpenClaw command prompt records a standing grant in OpenClaw's own list, and the same Permissions tab lists them under "Commands this Boo can run without asking", each with what it covers and a revoke button. Rows that grant a whole program or any command at all are flagged **Broad**; rows OpenClaw keeps on file but skips are flagged **Not in effect**.
+
+The screen is deliberately **revoke-only**: it cannot create, edit, or narrow a grant, and it cannot touch a grant made fleet-wide to every Boo on the computer (those appear only as a count). Revoking rewrites the whole permissions document under the Gateway's compare-and-swap and then re-reads the list before showing you a result, because the one thing the panel must not do is report a permission as revoked while the Gateway still honours it. The list does not update live: a grant minted by answering Always while the tab is open appears after a refresh.
+
+### The native shell asks every time, and remembers nothing
+
+A `clawboo-native` Boo's `run_command` tool is a per-command human gate with no allowlist behind it. It is **off until it is switched on for that Boo**, and even switched on it exists only on a run that has a working folder (in practice a board task) and only when the host is not Windows. Once it does exist, a human is asked before every command, so a command allowed once asks again the next time. "Always" is never offered there. A run may ask about at most **ten** commands.
+
+Declining is not only a decision about one command. A refusal latches the tool for the rest of that run, and the refusal itself is emitted as a typed `policy_denied` error, as is every later attempt the latch turns away. Two of those in a row trip the `repeat-policy-denied` breaker above, which tears the run down and releases the task back to `todo`, so a declined command can end the task rather than just the command. A card nobody answers holds the run for its full ten minutes, and the run makes no other progress while it waits. Both the latch and the ten-command ceiling are per driver run, not per task, so a task that is re-driven starts again at zero with the latch cleared.
+
+<Warning>
+No audit row is written for a `run_command` execution, so an approved native command never appears in the tools audit (`GET /api/tools/audit`). The only record that it was allowed is the approval row it came from, carrying your decision and the time you made it. And the gate bounds _what is asked_, never _what a command can do_ once you allow it: see [Security](/operating/security#commands-agents-run-on-this-machine) for that boundary, stated plainly.
+</Warning>
 
 ## Design rationale and trade-offs
 
@@ -186,7 +228,7 @@ The trade-off is that the defaults are _coarse_. A breaker tuned conservatively 
 
 ## Boundaries and non-goals
 
-- **Not a privilege boundary.** Budgets and breakers bound spend and effort, not blast radius. A run that stays under budget can still do anything its tools permit inside its worktree; the privilege boundary is the (documented, opt-in) container escalation, not governance.
+- **Not a privilege boundary.** Budgets and breakers bound spend and effort, not blast radius. A run that stays under budget can still do anything its tools permit inside its worktree, and a shell command you approve reaches past the worktree to the machine itself; the privilege boundary is the (documented, opt-in) container escalation, not governance.
 - **The OpenClaw path cannot auto-abort mid-run.** OpenClaw emits no incremental cost events (only a final cost on `done`), so there is no per-event crossing signal for the kill-switch to fire on during a run. Its budgets are enforced by a pre-flight gate on the _next_ dispatch, not a mid-run kill; a documented asymmetry with runtimes that stream per-turn cost (like the native runtime, which does abort mid-stream).
 - **Single implicit tenant today.** Budgets and the audit log carry a dormant `tenant_id` column and a reserved `tenant` budget scope, but no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
 - **Caps are coarse-grained, not per-tool quotas.** Depth, fan-out, and a per-run cost ceiling are the orchestrator-boundary caps, and a per-parent child count plus a root-creation rate bound direct **Tasks MCP** board writes (the REST board route is deliberately uncapped); there is no per-tool call quota or per-skill budget, that granularity, if needed, would be a new seam.

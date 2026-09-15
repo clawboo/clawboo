@@ -99,7 +99,11 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 **cap**: a hard ceiling enforced in code: delegation depth (default max 2), per-turn fan-out, per-parent live-child count on the board (default 24), a root-creation rate (default 30 per 5 min), and per-node cost. The depth cap is the single-reduce-point + report-up-by-default discipline. See [governance](/concepts/governance).
 
-**approval**: a human gate on a risky tool call or delegation, resolved via the Approvals queue (allow-once / always / deny). It is a Clawboo-native DB-mediated handshake, distinct from OpenClaw's own exec-approval flow. See [approvals](/using/approvals).
+**approval**: a human gate on something an agent wants to do, resolved from the Approvals queue. Three kinds share that queue. A **tool or delegation approval** is Clawboo's own database-mediated handshake for a risky brokered call. An **exec approval** is a shell command OpenClaw's Gateway is holding: the Gateway still owns the decision, but Clawboo now mirrors the request into the same `tool_call_approvals` table (`kind: 'exec'`) and answers it over the server's own Gateway connection, so the card survives a closed browser tab. A **`run_command` approval** is a native Boo asking to run one program. See [approvals](/using/approvals).
+
+**standing grant**: a command an OpenClaw Boo may run without asking again, written by the Gateway when someone answers **Always** to an exec approval. Clawboo lists a Boo's standing grants in its **Permissions** tab and is the only place in Clawboo they can be taken back. A grant is usually bound to both the exact command and the folder it ran in, so the same command run elsewhere asks again. See [command permissions](/using/command-permissions).
+
+**`run_command`**: the native runtime's shell tool. It is a local tool rather than a brokered one, so it exists only inside a `clawboo-native` run and never appears in any other runtime. It is off unless switched on per Boo, takes one program as an argument list rather than a shell string, asks a person before every command, and remembers nothing. See [Clawboo Native](/runtimes/native).
 
 ## Observability
 
