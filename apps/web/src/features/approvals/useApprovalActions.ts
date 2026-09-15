@@ -290,8 +290,12 @@ export function useApprovalActions() {
         }
       } catch (err) {
         // A Gateway "unknown approval id" means the approval already timed out
-        // server-side (the Gateway expires them after ~120s). The card is stale
-        // at that point — drop it quietly rather than surfacing an error for
+        // server-side. THE WINDOW IS THE GATEWAY'S, not ours: it rides on the
+        // request as `expiresAtMs`, and the server-side mirror falls back to
+        // EXEC_APPROVAL_TTL_MS (30 minutes, matched to OpenClaw's own) only when
+        // a frame carries none. This comment used to claim a flat ~120s, which
+        // is where three wrong numbers in the docs came from. The card is stale
+        // either way, so drop it quietly rather than surfacing an error for
         // something the user can no longer act on.
         const isStaleApproval =
           err instanceof GatewayResponseError && /unknown.*approval.*id|expired/i.test(err.message)
