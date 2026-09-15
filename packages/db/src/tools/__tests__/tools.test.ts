@@ -308,7 +308,7 @@ describe('provenance seam (real verify, off by default)', () => {
   })
 
   it('verifies a real Ed25519 signature when enforced and rejects tampering', async () => {
-    const priv = ed.utils.randomPrivateKey()
+    const priv = ed.utils.randomSecretKey()
     const pub = await ed.getPublicKeyAsync(priv)
     const signed: ToolDescriptor = {
       ...desc,
