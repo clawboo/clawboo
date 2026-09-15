@@ -5,7 +5,7 @@ description: How Clawboo authenticates, isolates secrets, and redacts output, an
 
 Clawboo is a local-first, single-user tool. A fresh install binds loopback only, holds no public credential, and runs every API route behind that boundary. The security model is built around that default: the network boundary is the primary control against other hosts, an always-on same-origin guard stops a malicious web page in your own browser from reaching the loopback API, the optional access gate is the opt-in second wall when you widen the bind, the secrets vault keeps provider keys off disk in plaintext, and a display-layer redaction pass keeps credentials out of responses and logs.
 
-This page explains the model end to end: the loopback bind, the same-origin guard, the access gate, server-side device authentication, the encrypted secrets vault, and redact-on-display, and then gives honest guidance for exposing Clawboo beyond `localhost`. It is deliberately candid about what each control does and does not protect against.
+This page explains the model end to end: the loopback bind, the same-origin guard, the access gate, server-side device authentication, the encrypted secrets vault, the commands agents can ask to run on this machine, and redact-on-display, and then gives honest guidance for exposing Clawboo beyond `localhost`. It is deliberately candid about what each control does and does not protect against.
 
 ## What it is, and what it isn't
 
@@ -144,7 +144,7 @@ The vault is **defense in depth, not targeted-attacker-proof.** It defeats commo
 
 ### Secrets never reach spawned runtimes
 
-A spawned runtime (a Codex or Hermes CLI, the Claude Agent SDK child, and the deterministic verify gate) executes an _untrusted_ agent that can read its own process environment with a single `env` dump. The child-environment builder scrubs two families of secrets before the child inherits them, then merges the caller's explicit provider-key grant on top:
+A spawned runtime (a Codex or Hermes CLI, the Claude Agent SDK child, and the deterministic verify gate) executes an _untrusted_ agent that can read its own process environment with a single `env` dump. A command you approve for a native Boo's `run_command` is a further spawned child with the same problem, and its environment is built from a stricter **allowlist** rather than from this scrub (see [Commands agents run on this machine](#commands-agents-run-on-this-machine)). The child-environment builder scrubs two families of secrets before the child inherits them, then merges the caller's explicit provider-key grant on top:
 
 - **Clawboo's own server secrets**, which must never leak: `GATEWAY_AUTH_TOKEN`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and any `BETTER_AUTH*` key.
 - **A curated set of the operator's third-party shell credentials** that no runtime uses for auth: cloud, CI, package-registry, and database tokens such as `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, `NPM_TOKEN`, `STRIPE_SECRET_KEY`, and `DATABASE_URL`. This keeps a prompt-injected task from dumping the credentials you happen to have exported into your shell, including env-only secrets (CI-injected session tokens) that never touch disk and so are reachable no other way.
@@ -156,6 +156,31 @@ This is defense in depth, **best-effort by name, not a sandbox.** The agent stil
 </Warning>
 
 Scrubbing `STUDIO_ACCESS_TOKEN` is also exactly why the loopback `/api/mcp/*` access-gate exemption exists: the runtime's env has been stripped of the token, so it _cannot_ present the gate cookie, and the loopback exemption is the controlled way to let only the server's own runtime through.
+
+## Commands agents run on this machine
+
+Two paths put a shell command in front of you before it runs on the machine Clawboo runs on. Neither is sandboxed: what stands in the way is a human answering a card, and on the OpenClaw path only while that Boo's posture says to ask. They are not the only way a command reaches this machine, either. A spawned CLI runtime (Claude Code, Codex, Hermes) drives its own commands inside its worktree and raises no card here, so the rule above still holds: treat a task you run as code you are choosing to execute locally.
+
+- **OpenClaw agents** run commands under a policy the [Gateway](/concepts/gateway-and-events) holds, not under Clawboo's own record of it. When that policy says to ask, the Gateway holds the command and puts the question only to connections that declared they can answer it. Clawboo's server-side connection is one of those, so it mirrors the request into its own approvals queue and relays your answer back; the card therefore survives a closed browser tab. Answering "Always" mints a standing grant in OpenClaw's own list, which you can review and take back from the Boo's Permissions tab. See [Approvals](/using/approvals).
+- **Native (`clawboo-native`) Boos** have a `run_command` tool, and it is **off until it is switched on for that Boo**. The switch is on the agent's Permissions tab, labelled "Let this Boo ask to run commands". The underlying field is absent from the native defaults, so every native Boo created through Clawboo's screens starts with it off. Even with the switch on, the tool exists only when the run has a working folder (in practice a board task with a provisioned worktree) and the host is not Windows. It is absent from 1:1 chat, team-room and dispatch turns, absent on Windows rather than degraded, and absent from every other runtime: it is a local native-loop tool, never registered with the tool broker, so it cannot appear inside a Claude Code, Codex, Hermes, or OpenClaw agent.
+
+<Warning>
+**The human answering the card is the boundary.** The native shell has no allowlist and remembers nothing, so you are asked before every command and a command you allowed once asks again the next time. "Always" is never offered there, because an Always that behaved as an allow-once would be a control that lies.
+</Warning>
+
+**What the native tool checks before it asks you.** A `run_command` call takes an `argv` array, never a command string, and the child is spawned with `shell: false`, so there are no pipes, redirects, or shell operators. Before an approval card is written, Clawboo resolves the program with `realpath`, applies its denylist to the **resolved** target, reads both words of a shebang so `#!/usr/bin/env python3` cannot hide the interpreter in the second, and then **spawns the resolved path**, so what the card shows is what runs. The denylist is 59 basenames (shells, run-another-program wrappers, interpreters, package runners, build tools, and remote-execution commands), matched with version suffixes stripped so `python3.11` and `node22` are caught alongside `python` and `node`.
+
+<Danger>
+**That denylist is a speed bump, not a sandbox, and must not be read as one.** A basename list cannot be complete: `git -c core.pager=…`, `find -exec`, and `awk 'BEGIN{system(…)}'` all reach a shell without appearing on it, and a test in the repo asserts that those are accepted, so no future reader mistakes the list for a boundary. What the list removes is the commands whose effect a person could not have read off the card. What stands between a model and this machine is your answer to every single prompt.
+</Danger>
+
+**The child environment is an allowlist, not the ambient one.** An approved command inherits only a fixed set of names, on a Unix host `PATH`, `HOME`, `SHELL`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `TMPDIR`, `LOGNAME`, `TERM`, `USER`, and the proxy variables. Provider credentials are not forwarded, so an approved `printenv` does not return your API keys. The command then runs in that Boo's working folder, as the user running Clawboo, with network access.
+
+<Warning>
+**Approving a command means trusting it with the rest of that run.** An approved command runs on this host with network access, and Clawboo's API listens on loopback, so it can reach the approval-resolve route and answer the **next** card in the same run. It cannot answer its own, which does not exist until that command was allowed, and the ceiling of ten commands per run bounds how far this can go, but inside one run your approval is not confined to the one command you read. Closing this properly means authenticating the resolve route, a change to a surface older than this tool and not part of it.
+</Warning>
+
+**A mirrored OpenClaw command is on disk in clear text.** The `tool_call_approvals` row Clawboo writes for a Gateway exec request stores the command and folder in `argsSummary` **unscrubbed**: it is a direct insert that does not pass through the storage-layer scrub every broker approval goes through. [Redact-on-display](#redact-on-display) masks it only when the row is read back over REST. So a command that carries a secret on its own command line is sitting in plain text in Clawboo's SQLite file, whatever the API response shows you.
 
 ## Redact-on-display
 

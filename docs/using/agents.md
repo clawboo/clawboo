@@ -110,11 +110,17 @@ The footer's **Preview SOUL.md** toggle shows the merged result (role descriptio
 
 ## The other editor tabs
 
-| Tab             | What it shows                                                                                                                                        |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Permissions** | Per-agent exec settings (`ExecSettings`): the runtime's tool/exec permission knobs.                                                                  |
-| **Activity**    | The live observability terminal scoped to this agent: tool calls, results, and errors as they stream.                                                |
-| **Brief**       | Boo Zero only. Holds Boo Zero's display name override and Global Brief (its load-bearing identity surface). The tab is hidden for every other agent. |
+| Tab             | What it shows                                                                                                                                                                                                                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Permissions** | `openclaw` and `clawboo-native` Boos only. An OpenClaw Boo gets **Execution Permissions** (the **Command Execution** posture, applied at the Gateway) plus **Commands this Boo can run without asking**, its standing permissions and their revoke controls. A native Boo gets the **Running commands** switch instead. |
+| **Workspace**   | A read-only view of this Boo's task worktree: the file tree with change badges, the now line (the file or command it most recently touched), and the selected file's diff or content.                                                                                                                                   |
+| **Browser**     | The newest screenshot this Boo captured, re-fetched on a short interval. With no frame yet, the empty state says whether nothing has been captured or no browser connector is granted to this Boo.                                                                                                                      |
+| **Activity**    | The live observability terminal scoped to this agent: tool calls, results, and errors as they stream.                                                                                                                                                                                                                   |
+| **Brief**       | Boo Zero only. Holds Boo Zero's display name override and Global Brief (its load-bearing identity surface). The tab is hidden for every other agent.                                                                                                                                                                    |
+
+<Note>
+The **Permissions** tab is runtime-gated, and the two runtimes that get it get different controls, because the thing that enforces them is different. An OpenClaw Boo's **Command Execution** posture is written to the Gateway, which is what actually gates its commands, and the standing-permission list below it is read from OpenClaw's own stored policy rather than from clawboo's records, so it shows what is in force. A native Boo has no Gateway, so it gets the **Running commands** switch: with that on you are asked before every command and nothing is remembered. The tab is not offered on `claude-code`, `codex`, or `hermes`, where neither control would be read by anything. A Boo created through clawboo's screens already carries a posture of its own; see [What a new Boo is allowed to run](/runtimes/openclaw#what-a-new-boo-is-allowed-to-run).
+</Note>
 
 ## Start a fresh conversation
 

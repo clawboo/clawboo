@@ -78,6 +78,8 @@ curl http://localhost:18790/api/tools
 
 Returns the pending tool-approval queue, the `tool_call_approvals` rows with `status = 'pending'` that have not passed their `expiresAt`, newest first. Each row's `argsSummary` (scrubbed JSON written by the broker) is masked again at this boundary via `redactJsonString`. This is the queue the Approvals panel and the Governance dashboard render through the shared tool-approval queue UI; the broker (in either the Express process or an MCP stdio bin) polls the same rows for resolution.
 
+The queue holds **two kinds of row**, told apart by `kind`. A `tool` row is held inside this process, either by the broker blocked in `waitForApproval` or by the native shell polling the row it just wrote; a `run_command` card is the second kind. An `exec` row is a shell command an OpenClaw agent asked to run: the **Gateway** is holding it, and clawboo mirrors the request into a row so the card survives a closed tab, a refresh, and a tab opened halfway through the window. A mirrored row carries `toolName: 'exec'`, `toolClass: 'destructive'`, and the command's first 200 characters as `toolSummary`.
+
 - **Path/query params**: none.
 - **Request body**: none.
 
@@ -90,6 +92,7 @@ Returns the pending tool-approval queue, the `tool_call_approvals` rows with `st
   ok: true
   approvals: Array<{
     id: string
+    kind: 'tool' | 'exec' // who holds the call: clawboo's broker, or the Gateway
     toolName: string
     agentId: string | null
     argsSummary: string | null // scrubbed + re-masked JSON
@@ -103,6 +106,10 @@ Returns the pending tool-approval queue, the `tool_call_approvals` rows with `st
   }>
 }
 ```
+
+<Note>
+The row is returned whole, so it also carries the columns this shape leaves out, among them `toolClass`, `toolSummary`, `neverRemember`, `grantId`, `connectorId` and `ruleReason`.
+</Note>
 
 **`500 Internal Server Error`**:
 
@@ -120,7 +127,15 @@ curl http://localhost:18790/api/tools/approvals
 
 ## `POST /api/tools/approvals/:id/resolve`
 
-Resolves a still-pending approval. The decision is validated by a Zod schema; an unknown decision returns **400**. The `UPDATE` is guarded `status = 'pending'`, so resolving an already-resolved (or expired-but-still-present) row is a **no-op UPDATE**; but the handler still returns **200** with the existing row unchanged, because `resolveApproval` returns `getApproval(db, id)`, which has no status or expiry filter and is truthy for any row that exists. The **404** (`approval not found`) fires only when **no row with that id exists** at all. A blocking broker waiter sees the new status on its next poll.
+Resolves a still-pending approval. The decision is validated by a Zod schema; an unknown decision returns **400**. The handler then loads the row and **dispatches on its `kind`**, because the two kinds are held by different things and released by different means. The **404** (`approval not found`) fires only when **no row with that id exists** at all; an already-answered row is not a 404.
+
+**A `kind: 'tool'` row** is released here. The `UPDATE` is guarded `status = 'pending'`, so resolving an already-resolved (or expired-but-still-present) row is a **no-op UPDATE**; but the handler still returns **200** with the existing row unchanged, because `resolveApproval` returns `getApproval(db, id)`, which has no status or expiry filter and is truthy for any row that exists. A blocking broker waiter sees the new status on its next poll.
+
+**A `kind: 'exec'` row** is held by the Gateway, and clawboo's mirrored row is not the thing that releases the command, so the decision is sent on as `exec.approval.resolve` in OpenClaw's own vocabulary (`allow_once` becomes `allow-once`, `allow_always` becomes `allow-always`, `deny` stays `deny`). Only once the Gateway has taken it does clawboo mark the mirrored row. Resolving one of these down the local path would mark the card answered while the Gateway went on holding the command, with nothing on screen to reveal it. This branch answers a **different 200 body** and is the only one that can answer **502**.
+
+<Note>
+clawboo does not mint a durable rule of its own for an exec row. An `allow_always` is passed on as `allow-always` and any standing grant it produces is written into OpenClaw's own allowlist, which clawboo can then read and revoke through [`/api/exec-allowlist`](/reference/rest-api/misc).
+</Note>
 
 - **Path params**: `id` (approval id).
 - **Request body**: validated by `resolveApprovalBody`:
@@ -148,7 +163,7 @@ Resolves a still-pending approval. The decision is validated by a Zod schema; an
 { "error": "approval not found" }
 ```
 
-**`200 OK`**: the approval was resolved; the updated row is returned:
+**`200 OK`** (`kind: 'tool'`): the approval was resolved; the updated row is returned:
 
 ```ts
 {
@@ -172,6 +187,24 @@ Resolves a still-pending approval. The decision is validated by a Zod schema; an
 <Note>
 The response `approval.argsSummary` here is the stored (scrubbed-at-write) value; unlike `GET /api/tools/approvals`, the resolve response is not re-masked at the boundary.
 </Note>
+
+**`200 OK`** (`kind: 'exec'`): the Gateway took the decision. There is **no `approval` object** on this branch:
+
+```ts
+{
+  ok: true
+  kind: 'exec'
+  alreadyResolved: boolean
+}
+```
+
+`alreadyResolved: true` means the Gateway reported the card as already answered. That is a normal race rather than a failure, because the same card is deliberately open in any browser tab holding its own Gateway socket. On that path this call leaves the mirrored row as it stands; clawboo settles it from the Gateway's `exec.approval.resolved` broadcast instead, which is also how a card answered here clears from the tab.
+
+**`502 Bad Gateway`** (`kind: 'exec'` only): the Gateway did not take the decision, so the command is still held and the card is still open:
+
+```json
+{ "error": "the Gateway did not accept that decision" }
+```
 
 **`500 Internal Server Error`**:
 

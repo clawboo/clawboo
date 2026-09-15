@@ -17,7 +17,7 @@ The Cost view is global on purpose; it shows every team's usage, not just the se
 ## Prerequisites
 
 - Clawboo is running and you can reach the dashboard.
-- For the Cost view to show anything, at least one cost record must exist. Records are written by `POST /api/cost-records` (`{ agentId, model, inputTokens, outputTokens, runId? }`) as runs complete; a fresh install shows the empty state until your Boos have done some work.
+- For the Cost view to show anything, at least one cost record must exist, and which path writes one depends on the runtime (see [Where the numbers come from](#where-the-numbers-come-from)). An OpenClaw Boo is billed server-side, one record per turn. An agent whose turns arrive on the Gateway's chat stream is recorded by the browser through `POST /api/cost-records` (`{ agentId, model, inputTokens, outputTokens, runId? }`). A `clawboo-native` Boo writes no cost records at all. A fresh install shows the empty state until your Boos have done some work.
 - Budgets enforce USD, but token usage on the Cost view is never gated by a budget; they are independent.
 
 ## The Cost dashboard (Tokens Used)
@@ -41,6 +41,25 @@ A line chart of daily token totals over the trailing 30 days. The series is dens
 <Note>
 The dashboard is token-first. The underlying records also carry a `costUsd` value (computed from a per-model price table when each record is written), and the summary endpoint returns per-period USD totals (`totalToday` / `totalWeek` / `totalMonth`) and a per-agent `totalCost`, but the current UI surfaces tokens. To enforce a dollar ceiling, use a budget (below).
 </Note>
+
+### Where the numbers come from
+
+Rows in the ledger are not all measured the same way, and the dashboard does not label them, so it is worth knowing which runtime produced which kind of number.
+
+| Runtime                                 | Where the record comes from                                                   | The numbers in it                                                      |
+| --------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `openclaw`                              | Written server-side, one record per turn, from the session snapshot           | Metered: the real model, the real input and output counts              |
+| Other agents on the Gateway chat stream | Posted by the browser through `POST /api/cost-records` as each turn completes | Metered when the Gateway sent a usage block, estimated when it did not |
+| `clawboo-native`                        | Nothing is written at all                                                     | None: a native Boo contributes zero to every number on this page       |
+
+For an **OpenClaw** Boo the record is written from the session snapshot that arrives with each turn, which carries the model the provider actually billed and the counts it actually charged. The browser's estimator is skipped for that runtime, so a turn you typed into webchat is charged once rather than twice. For an agent on the estimated path, a turn that arrives without a usage block has its output count taken as the response length divided by four, and its input count estimated the same way from the agent's last user message when the open tab still holds that transcript, or recorded as zero when it does not. The model is a separate question from the counts: the turn is recorded under whatever model name it carried, and under the literal `unknown` only when it carried none.
+
+Four consequences worth carrying with those numbers:
+
+- **An OpenClaw turn is billed only when Clawboo can tell whose turn it was.** The session key has to read `agent:<openclaw agent id>:<rest>`, and that OpenClaw id has to match an agent in your fleet. If either fails the turn is dropped silently: no record, no error, nothing on the dashboard. An OpenClaw agent that exists on the Gateway but was never added to Clawboo is never billed.
+- **A native Boo reading zero is not evidence that it did nothing.** Every fleet agent appears in the breakdown, so a `clawboo-native` Boo that worked all day still shows zero tokens here. Its spend is metered on another path: a board run emits `cost` events into the [Observability](/using/observability-dashboard) event log and counts against any budget covering it.
+- **Cached prompt tokens are priced as full input.** There is no cached-token accounting on either path, so a long conversation whose prompt is mostly a cache hit is costed as though every token were sent fresh. Read the dollar figure as an upper bound, not as a bill.
+- **Prices are matched on the model name.** The table is checked for an exact name, then for a case-insensitive substring match against the same keys, and a name matching neither is priced at a default rate. A record whose model is the literal `unknown` therefore gets that default rate, so both its count and its price are guesses.
 
 ## Setting a USD budget
 
@@ -125,7 +144,7 @@ A cap hit is logged to the audit feed below the caps (a `cap_hit` event).
 </Warning>
 
 <Warning>
-**The Cost dashboard is empty even though agents have run.** Cost records are written per completed run via `POST /api/cost-records`. If you see "No token records yet," no records have been logged for the period yet; token usage is not retroactively backfilled.
+**The Cost dashboard is empty even though agents have run.** Check which runtime ran before you suspect the ledger. A **`clawboo-native`** Boo writes no cost records at all, so a fleet of native Boos reads "No token records yet" however much work it did; read that spend from [Observability](/using/observability-dashboard) or from a budget instead. An **OpenClaw** Boo is billed server-side per turn, but only for the turns Clawboo's server both sees and can attribute: a turn that commits while the server is disconnected from the Gateway, and a turn whose OpenClaw agent id matches no agent in your fleet, are each dropped without an error. Nothing here is backfilled, so records only start once the runs do.
 </Warning>
 
 <Danger>

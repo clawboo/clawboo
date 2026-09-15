@@ -1,6 +1,6 @@
 ---
 title: Agents API
-description: 'REST reference for the agent registry-of-record: list, create, sync, per-agent reads, files, sessions, delete, and ghost cleanup.'
+description: 'REST reference for the agent registry-of-record: list, create, sync, per-agent reads, files, sessions, delete, ghost cleanup, and the native shell switch.'
 ---
 
 REST surface for the [agent registry-of-record](/appendices/glossary). SQLite is the source of truth for who exists; an `AgentSource` syncs each upstream (the OpenClaw Gateway, the in-process native runtime) INTO SQLite. Reads serve SQLite, so the agent list, an agent record, and an agent's files keep answering even when the Gateway connection is down; a `stale` flag marks that case. Writes (create), file PUTs, and live session lists delegate to the owning source and return **503** when the source needs a live upstream that is disconnected.
@@ -26,6 +26,8 @@ Per-agent routes are multi-source: each operation routes to the source that OWNS
 | PUT    | `/api/agents/:agentId/files/:name` | Write one agent file                                       | No      |
 | GET    | `/api/agents/:agentId/sessions`    | List the agent's live sessions                             | No      |
 | GET    | `/api/agents/:agentId/workspaces`  | The task worktrees assigned to this agent                  | No      |
+| GET    | `/api/agents/:agentId/shell`       | Whether a native Boo may ask to run commands               | No      |
+| POST   | `/api/agents/:agentId/shell`       | Turn that switch on or off (native only)                   | No      |
 | PATCH  | `/api/agents/:agentId/model`       | Change a native/hermes agent's model + provider (404 else) | No      |
 | POST   | `/api/agents/:agentId/chat`        | Drive one 1:1 turn on a native agent (detached, 202)       | No      |
 | POST   | `/api/agents/:agentId/chat/stop`   | Abort the agent's in-flight 1:1 turn                       | No      |
@@ -801,9 +803,129 @@ curl -N 'http://localhost:18790/api/agents/<agent-id>/chat/stream?since=4187'
 
 ---
 
+## `GET /api/agents/:agentId/shell`
+
+Reports whether a **clawboo-native** Boo may ask to run commands. The value is the `tools.shell` field of that Boo's stored `AgentConfig`, and it decides whether the `run_command` tool is offered to the model at all. It does not decide whether a command may run: `run_command` puts every single command in front of a person, remembers nothing, and has no allowlist, so a command allowed once asks again the next time.
+
+Absent reads as off. The field is optional and is deliberately not in the native defaults, so a Boo never arrives with a shell already switched on.
+
+This switch is separate from [`/api/exec-settings`](/reference/rest-api/misc), which writes OpenClaw's Gateway policy. Nothing consults that policy for a native Boo, so the two are not interchangeable and this route refuses any other runtime by name.
+
+- **Path params**: `agentId`.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**:
+
+```json
+{ "ok": true, "enabled": false }
+```
+
+**`400 Bad Request`**: the agent is not on the `clawboo-native` runtime. The response names the runtime it found:
+
+```json
+{ "error": "only a clawboo-native Boo has this switch", "runtime": "openclaw" }
+```
+
+**`404 Not Found`**: no agent with that id, or a native agent with no stored config:
+
+```json
+{ "error": "agent not found" }
+```
+
+```json
+{ "error": "native agent config not found" }
+```
+
+**`500 Internal Server Error`**: any other failure, redacted:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl http://localhost:18790/api/agents/<agent-id>/shell
+```
+
+---
+
+## `POST /api/agents/:agentId/shell`
+
+Turns the switch on or off. Changing what a Boo may ask to run is a permissions change, so this route sits on the **sensitive** rate-limit tier, 60 requests a minute per client address, rather than the router-wide general one.
+
+The handler writes the whole `tools` record back with `shell` replaced, so the Boo's other tool flags (memory, tasks, teamchat, and the reserved custom list) survive the write. It then **reads the config back** and answers with what is stored rather than echoing what you sent.
+
+- **Path params**: `agentId`.
+- **Request body**:
+
+```ts
+{
+  enabled: boolean // required; anything other than a boolean is a 400
+}
+```
+
+<Note>
+The confirmation dialog the dashboard shows before switching this on is browser-side only. This route accepts `{ "enabled": true }` directly, and `POST /api/agents` with `sourceId: 'clawboo-native'` can carry `execConfig.tools.shell` at creation time. What holds is that every native Boo created through clawboo's own screens starts with the shell off, not that one cannot be created with it on.
+</Note>
+
+<Warning>
+Switching this on is necessary for `run_command` to exist, and not sufficient. The tool is also absent unless the run has a working directory, which in practice means a board task with a provisioned worktree (a 1:1 chat, a team-room turn and a dispatch turn all carry none), and it is absent on Windows, where launching a shim would require the shell this tier refuses to start.
+</Warning>
+
+### Responses
+
+**`200 OK`**: the stored value after the write:
+
+```json
+{ "ok": true, "enabled": true }
+```
+
+**`400 Bad Request`**: `enabled` is missing or is not a boolean:
+
+```json
+{ "error": "enabled must be true or false" }
+```
+
+**`400 Bad Request`**: the agent is not on the `clawboo-native` runtime:
+
+```json
+{ "error": "only a clawboo-native Boo has this switch", "runtime": "openclaw" }
+```
+
+**`404 Not Found`**: no agent with that id, or a native agent with no stored config:
+
+```json
+{ "error": "agent not found" }
+```
+
+**`429 Too Many Requests`**: the sensitive ceiling:
+
+```json
+{ "error": "Too many requests for this operation. Wait a moment and retry." }
+```
+
+**`500 Internal Server Error`**: any other failure, redacted:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/agents/<agent-id>/shell \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":true}'
+```
+
+---
+
 ## Error envelope
 
-Every error response on these routes is the standard `{ error: string }` envelope, except the SSE route (`GET /api/agents/:agentId/chat/stream`), whose only pre-stream failure is a bare **400** with no body. The disconnect case is a **503** with the literal `{ "error": "gateway_disconnected" }` on the write/file/session routes; the read routes (`GET /api/agents`, `GET /api/agents/:agentId`) keep serving SQLite instead.
+Every error response on these routes is the standard `{ error: string }` envelope, except the SSE route (`GET /api/agents/:agentId/chat/stream`), whose only pre-stream failure is a bare **400** with no body. The disconnect case is a **503** with the literal `{ "error": "gateway_disconnected" }` on the write/file/session routes; the read routes (`GET /api/agents`, `GET /api/agents/:agentId`) keep serving SQLite instead. The two `/api/agents/:agentId/shell` routes add one field to the envelope on their wrong-runtime **400**, `runtime`, so a caller can say which runtime it actually found.
 
 ## See also
 

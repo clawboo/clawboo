@@ -144,10 +144,24 @@ This is the keystone source. It holds a server-side `GatewayClient`, opens its _
 
 Reads (`listAgents`, `getAgent`, `listTeams`) select straight from SQLite, scoped to `sourceId = 'openclaw'`, and map each row through `mapRow` into an `AgentRecord` (parsing the stored `identityJson` for the display name, emoji, and avatar; synthesizing the `sessionKey` as `agent:<sourceAgentId>:<mainKey>`). They work whether or not the Gateway is up.
 
-Writes go the other way. `createAgent` asks the Gateway for its config path, derives a per-agent workspace dir, calls `agents.create`, writes the supplied agent files via `agents.files.set`, and _then_ mirrors a row into SQLite. `updateAgent` patches the SQLite-native columns. `archiveAgent` is a **hard delete**: it deletes the agent upstream (requiring a live Gateway), then removes the SQLite row and its FK children (cost records, approval history, and the per-agent `boo-zero:display-name:` setting). `readFile` / `writeFile` delegate to `agents.files.read` / `agents.files.set`. Every one of these guards on a live connection through `requireClient()`, which throws `Error('gateway_disconnected')` when down; the REST layer maps that message to a `503`.
+Writes go the other way. `createAgent` asks the Gateway for its config path, derives a per-agent workspace dir, calls `agents.create`, writes the supplied agent files via `agents.files.set`, **applies the agent's exec-approval posture at the Gateway**, and _then_ mirrors a row into SQLite. `updateAgent` patches the SQLite-native columns. `archiveAgent` is a **hard delete**: it deletes the agent upstream (requiring a live Gateway), then removes the SQLite row and its FK children (cost records, approval history, and the per-agent `boo-zero:display-name:` setting). `readFile` / `writeFile` delegate to `agents.files.read` / `agents.files.set`. Every one of these guards on a live connection through `requireClient()`, which throws `Error('gateway_disconnected')` when down; the REST layer maps that message to a `503`.
 
 <Note>
 The reversible `archivedAt` tombstone and the hard `archiveAgent` delete are *different paths*. The tombstone is set by `sync` when an agent disappears upstream (reversible; it's revived if the agent reappears). `archiveAgent` is the explicit user-initiated delete.
+</Note>
+
+### The create step that can abort the call
+
+The posture write sits between the file writes and the SQLite insert, and it is the one step in `createAgent` that can fail the whole call.
+
+- **What is written.** `input.execConfig.execAsk` when the caller supplied one, `DEFAULT_EXEC_ASK` (`'on-miss'`) when it did not. It goes through `applyExecApprovalPolicy` → `upsertExecApprovalPolicy` (`exec.approvals.set`, under the Gateway's compare-and-swap; on a base-hash conflict the change is re-run against a fresh read, up to three attempts in all), keyed by **OpenClaw's** agent id rather than Clawboo's row id: the Gateway keys its policy by its own ids, and a policy written for an id that does not exist is simply never consulted.
+- **When it is skipped.** Only when the resolved value fails `isExecAsk`, meaning it is not one of `'off' | 'on-miss' | 'always'`. Such an agent is created with no posture sent at all.
+- **What a refusal does.** The source deletes the agent it just created upstream (`client.agents.delete`, best-effort; a failure there is logged, because the throw below will not mention it) and throws `Could not set this agent's command permissions on the Gateway, so it was not created: <error>`. The SQLite insert is never reached, so there is no half-created row. `POST /api/agents` surfaces this as a `500` with that message; a Gateway that is merely down never gets this far, because `requireClient()` at the top of `createAgent` throws `gateway_disconnected` and the route answers `503`.
+
+The reason the failure is loud: an agent persisted after a refused policy write is an agent whose stated posture is not the one in force, which is the exact defect (a local record telling a different story than the Gateway) that the server-side policy writer exists to remove.
+
+<Note>
+Nothing re-asserts a posture later. The only two write sites are this one and `POST /api/exec-settings`; `sync()` does not touch the approvals store, and there is no reconciliation on connect or boot. Note also the asymmetry with creation: on a later change, a Gateway refusal answers `502 { ok: false, savedLocally: true }` and the refused value stays in Clawboo's `exec_config`.
 </Note>
 
 ### The idempotent sync

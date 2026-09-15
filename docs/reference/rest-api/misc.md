@@ -1,14 +1,14 @@
 ---
 title: Misc resources API
-description: REST reference for cost records, chat history, graph layout, personality, skills, the marketplace catalog, exec settings, fleet summary, and Boo Zero context.
+description: REST reference for cost records, chat history, graph layout, personality, skills, the marketplace catalog, exec settings, standing exec grants, fleet summary, and Boo Zero context.
 ---
 
-REST surface for the remaining resources that do not warrant their own group: per-run cost records and the cost summary, persisted chat transcripts, Ghost Graph node positions, per-agent personality and execution settings, skill installs (with a supply-chain injection scan), the marketplace catalog, the read-only fleet-health summary, and Boo Zero's per-team / global briefs and display-name override.
+REST surface for the remaining resources that do not warrant their own group: per-run cost records and the cost summary, persisted chat transcripts, Ghost Graph node positions, per-agent personality and execution settings, the standing exec grants an OpenClaw Boo has accumulated, skill installs (with a supply-chain injection scan), the marketplace catalog, the read-only fleet-health summary, and Boo Zero's per-team / global briefs and display-name override.
 
-Almost every handler in this group opens the SQLite database at `<CLAWBOO_HOME>/clawboo.db` (default `~/.clawboo/clawboo.db`); these routes serve and mutate local state and do not require the Gateway to be up. The three `/api/catalog/*` routes are the exception: they touch no database at all. All POST/PUT bodies are parsed by `express.json({ limit: '2mb' })`.
+Almost every handler in this group opens the SQLite database at `<CLAWBOO_HOME>/clawboo.db` (default `~/.clawboo/clawboo.db`); those routes serve and mutate local state and do not require the Gateway to be up. There are exceptions. The three `/api/catalog/*` routes touch no database at all. `POST /api/exec-settings` writes clawboo's own row and then, for an OpenClaw agent only, writes the Gateway's policy as well, so on that one runtime it needs the Gateway up. `GET /api/exec-allowlist` reads OpenClaw's state database rather than clawboo's, and `POST /api/exec-allowlist/revoke` goes to the Gateway for every runtime it accepts. All POST/PUT bodies are parsed by `express.json({ limit: '2mb' })`.
 
 <Note>
-The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-settings/all` are registered before their shorter prefixes so the two-segment paths are not swallowed.
+The order in `api/index.ts` matters: `/api/cost-records/summary`, `/api/exec-settings/all` and `/api/exec-allowlist/revoke` are registered before their shorter prefixes so the two-segment paths are not swallowed.
 </Note>
 
 ## Routes
@@ -35,6 +35,8 @@ The order in `api/index.ts` matters: `/api/cost-records/summary` and `/api/exec-
 | GET    | `/api/exec-settings`                            | Load an agent's execution settings                            | No      |
 | GET    | `/api/exec-settings/all`                        | Map of all agents' `execAsk` settings                         | No      |
 | POST   | `/api/exec-settings`                            | Upsert an agent's execution settings                          | No      |
+| GET    | `/api/exec-allowlist`                           | An OpenClaw Boo's standing exec grants                        | No      |
+| POST   | `/api/exec-allowlist/revoke`                    | Take standing exec grants back                                | No      |
 | GET    | `/api/fleet/summary`                            | Read-only fleet-health aggregation                            | No      |
 | GET    | `/api/boo-zero/team-briefs/:teamId`             | Load a team's Boo Zero brief                                  | No      |
 | PUT    | `/api/boo-zero/team-briefs/:teamId`             | Upsert a team's Boo Zero brief                                | No      |
@@ -851,7 +853,7 @@ format and the verification rules.
 
 ## Exec settings: `/api/exec-settings`
 
-Stores per-agent execution permission settings in the `agents.exec_config` column as JSON. Read per agent, read all agents at once during fleet hydration, or upsert one agent.
+Stores per-agent execution permission settings in the `agents.exec_config` column as JSON. Read per agent, read all agents at once during fleet hydration, or upsert one agent. The two GETs report clawboo's own record only. The POST also writes the Gateway's policy for an OpenClaw agent, because that is the copy that decides whether a command is asked about.
 
 ### `GET /api/exec-settings`
 
@@ -917,7 +919,9 @@ curl http://localhost:18790/api/exec-settings/all
 
 ### `POST /api/exec-settings`
 
-Upserts one agent's execution settings. The handler ensures a placeholder `agents` row exists, then stores `JSON.stringify(values)` in `exec_config`.
+Upserts one agent's execution settings, and for an **OpenClaw** agent applies the same posture to the Gateway. The handler ensures a placeholder `agents` row exists and stores `JSON.stringify(values)` in `exec_config`, then reads that row's runtime back and, when it is `openclaw` and the row carries an OpenClaw agent id, writes the Gateway's exec-approval policy under **OpenClaw's** id rather than clawboo's. The local write always runs first, so a Gateway refusal never loses what you typed.
+
+The Gateway half used to run in the browser, behind a connection check with the success message shown either way, so a tab with no Gateway connection reported success while the Boo went on running every command unasked. Doing it in the server takes the tab out of the path and reports a refusal instead of swallowing it.
 
 - **Request body**:
 
@@ -927,6 +931,8 @@ Upserts one agent's execution settings. The handler ensures a placeholder `agent
   values: { execAsk: string; execSecurity?: string }
 }
 ```
+
+On the OpenClaw path `execAsk` must be `'off'` (Run Freely), `'on-miss'` (Ask for Unknown) or `'always'` (Always Ask). `execSecurity` is stored in `exec_config` and is not sent to the Gateway by this route.
 
 #### Responses
 
@@ -942,11 +948,37 @@ Upserts one agent's execution settings. The handler ensures a placeholder `agent
 { "error": "agentId and values required" }
 ```
 
-**`200 OK`**: upserted:
+**`200 OK`**: stored locally, and the Gateway accepted the posture:
 
 ```json
-{ "ok": true }
+{ "ok": true, "gateway": "applied" }
 ```
+
+**`200 OK`**: stored locally, with no Gateway policy to write. This is the answer for every non-OpenClaw runtime, and also for an `openclaw` row with no `sourceAgentId` recorded. For those the local record is the whole setting:
+
+```json
+{ "ok": true, "gateway": "not-applicable" }
+```
+
+**`400 Bad Request`**: an `execAsk` value the Gateway has no meaning for. This check sits **after** the runtime branch, so it fires on the OpenClaw path only: the same unrecognised string on a native, claude-code, codex or hermes agent is stored verbatim and answered `200` with `gateway: "not-applicable"`:
+
+```json
+{ "error": "unknown execAsk: <value>" }
+```
+
+**`502 Bad Gateway`**: the value is in clawboo's record and the Gateway refused it, so what the Boo is actually under did not change. Note the shape: `ok` is `false` and there is a `savedLocally` flag, because a partial write is neither a success nor a no-op:
+
+```json
+{
+  "ok": false,
+  "savedLocally": true,
+  "error": "saved in clawboo, but the Gateway did not accept it: <reason>"
+}
+```
+
+<Warning>
+A `502` leaves the refused value in `exec_config`, and `GET /api/exec-settings` goes on returning it, so after a reload the screen shows the posture you asked for rather than the one in force. Retry the POST until it answers `200`. To see what OpenClaw itself holds, read `storedAsk` from [`GET /api/exec-allowlist`](#get-apiexec-allowlist) below, which comes from OpenClaw's own stored policy rather than from clawboo's copy.
+</Warning>
 
 **`500 Internal Server Error`**: a DB failure:
 
@@ -960,6 +992,221 @@ Upserts one agent's execution settings. The handler ensures a placeholder `agent
 curl -X POST http://localhost:18790/api/exec-settings \
   -H 'Content-Type: application/json' \
   -d '{"agentId":"<agent-id>","values":{"execAsk":"always","execSecurity":"sandbox"}}'
+```
+
+---
+
+## Standing exec grants: `/api/exec-allowlist`
+
+What an OpenClaw Boo may already run without being asked, and the one way to take it back. A grant of this kind is minted by an operator answering **Always** to a command prompt, and these two routes are the read and the revoke behind the **Permissions** tab's "Commands this Boo can run without asking" card.
+
+Both routes are OpenClaw-only. No other runtime keeps a standing-grant store, and answering an empty list for a runtime that has no store would imply one exists and happens to be empty.
+
+The read never calls the Gateway. clawboo treats `exec.approvals.get` as a **write** rather than a read: on clawboo's reading of OpenClaw, that call re-serialises the stored policy and writes it back, so issuing it against a document that cannot be parsed would replace the whole fleet's policy with a fail-closed default. Opening a permissions panel must not be able to destroy a policy. So clawboo instead opens OpenClaw's state database **read-only** at `<state dir>/state/openclaw.sqlite` and reads the stored policy row. The state directory is `OPENCLAW_STATE_DIR`, then `MOLTBOT_STATE_DIR`, then `CLAWDBOT_STATE_DIR`; with none of those set it is `~/.openclaw` when that directory exists, otherwise the first of `~/.clawdbot` and `~/.moltbot` that does, otherwise `~/.openclaw`. Only the revoke talks to the Gateway.
+
+<Warning>
+An empty list is a safety claim, so these routes never produce one by accident. A Boo with genuinely no grants, a policy document that is not on this machine at all, and a document that exists and could not be read are three different answers carrying three different `state` values. Do not collapse them, and in particular never render `unreadable` as an empty list: those grants are still on disk and still being enforced.
+</Warning>
+
+### `GET /api/exec-allowlist`
+
+Reads one Boo's standing grants out of OpenClaw's stored policy, plus the fleet-wide `agents['*']` bucket, which clawboo treats as live for this Boo and as belonging to every other one too. The two buckets are returned separately and are never merged: wildcard rows count against this Boo and are not this Boo's to revoke.
+
+`socket.token` sits in the same stored blob and is never returned.
+
+- **Query params**: `agentId` (required, clawboo's row id; the handler resolves it to OpenClaw's id itself).
+- **Request body**: none.
+
+#### Responses
+
+**`400 Bad Request`**: no `agentId`:
+
+```json
+{ "error": "agentId required" }
+```
+
+**`404 Not Found`**: no agents row with that id:
+
+```json
+{ "error": "agent not found" }
+```
+
+**`200 OK`**, `state: 'ok'`: the policy was read. `entries` is this Boo's own bucket, the only rows a revoke may touch:
+
+```ts
+{
+  state: 'ok'
+  sourceAgentId: string // OpenClaw's id for this Boo
+  entries: ExecAllowlistRow[] // this Boo's bucket
+  wildcard: ExecAllowlistRow[] // agents['*'], live here, not revocable here
+  duplicatedInWildcard: string[] // keys present in BOTH buckets
+  storedSecurity: string | null // what OpenClaw holds for this Boo
+  storedAsk: string | null
+  defaultSecurity: string | null // document-level defaults an absent field falls through to
+  defaultAsk: string | null
+  updatedAtMs: number
+}
+
+interface ExecAllowlistRow {
+  key: string // content fingerprint, and the handle a revoke uses
+  pattern: string
+  argPattern: string | null
+  source: string | null
+  classification:
+    | 'bound-grant' // one exact command, in one exact folder
+    | 'exact-command-grant' // one exact command, any folder
+    | 'path-rule' // this program, any arguments, any folder
+    | 'arg-rule' // this program, matching arguments
+    | 'catch-all' // any command at all
+    | 'node-marker' // the companion row a mint produces; grants nothing alone
+    | 'inert-allow-always' // an Always the engine skips
+    | 'inert' // malformed or unreachable
+  bucket: 'agent' | 'wildcard'
+  lastUsedCommand: string | null // never present for an operator-minted grant
+  lastResolvedPath: string | null
+  lastUsedAt: number | null
+}
+```
+
+**`200 OK`**, `state: 'absent'`: there is no policy document on this machine at all, so nothing is granted to anyone:
+
+```json
+{ "state": "absent", "sourceAgentId": "<openclaw-agent-id>" }
+```
+
+**`200 OK`**, `state: 'not-applicable'`: the agent is not on the `openclaw` runtime, or its row carries no OpenClaw id, so there is no standing-grant store to read:
+
+```json
+{ "state": "not-applicable", "runtime": "clawboo-native" }
+```
+
+**`502 Bad Gateway`**, `state: 'unreadable'`: the document exists and could not be read. The counts come from the last successful save and are **document-wide**, covering every agent in the file rather than this Boo:
+
+```ts
+{
+  state: 'unreadable'
+  sourceAgentId: string
+  error: string // redacted reason
+  knownAgentCount: number
+  knownAllowlistCount: number
+}
+```
+
+<Note>
+This branch carries **no `entries` key at all**, deliberately. A client that destructures a default of `[]` would otherwise paint an empty list over a document whose grants are still being enforced. "Could not read" also covers a clawboo server that is simply down, an unrecognised response shape, and any other transport failure, so it is not on its own proof of a corrupt database.
+</Note>
+
+**`500 Internal Server Error`**: any other failure, redacted:
+
+```json
+{ "error": "<message>" }
+```
+
+#### Example
+
+```bash
+curl "http://localhost:18790/api/exec-allowlist?agentId=<agent-id>"
+```
+
+### `POST /api/exec-allowlist/revoke`
+
+Removes named rows from one Boo's own bucket. There is no revoke call to make: the two methods clawboo has are `exec.approvals.get` and `exec.approvals.set`, so removing one row means rewriting the fleet's entire permissions document under a compare-and-swap, with every other agent's policy riding along in the same payload. Rows are filtered rather than rebuilt, the Boo's own `security` and `ask` survive the rewrite, and an emptied bucket is kept rather than deleted so the Boo does not fall back to the document defaults.
+
+Success is proved against the Gateway's own post-write reply rather than against what clawboo sent. Re-reading to confirm is not an option here, for the reason above: `exec.approvals.get` is itself a write.
+
+This route sits on the sensitive rate-limit tier, 60 requests a minute per client address, rather than the router-wide general one.
+
+- **Request body**:
+
+```ts
+{
+  agentId: string // clawboo's row id
+  keys: string[] // 1 to 200 entries, each the `key` from a GET row
+}
+```
+
+Pass the `key` values back exactly as the GET returned them. A key is a content fingerprint built from the row's `pattern`, `argPattern` and `source` joined by NUL characters, not an id, so it should be echoed rather than constructed. A mint that produced a `node-marker` companion should be revoked with **both** rows in the same call: clawboo reads that companion as load-bearing for the node-host path, so leaving it behind leaves a row that grants nothing on its own.
+
+#### Responses
+
+**`400 Bad Request`**: no `agentId`, a `keys` array that is missing, empty, longer than 200, or containing a non-string or empty entry:
+
+```json
+{ "error": "agentId and a non-empty keys array are required" }
+```
+
+**`404 Not Found`**: no agents row with that id:
+
+```json
+{ "error": "agent not found" }
+```
+
+**`400 Bad Request`**: the agent is not on the `openclaw` runtime, or its row carries no OpenClaw id:
+
+```json
+{ "error": "this runtime keeps no standing exec grants" }
+```
+
+**`200 OK`**, outcome `revoked`: the rows are gone, confirmed against the Gateway's post-write document. `remaining` is how many rows this Boo's bucket still holds:
+
+```json
+{ "outcome": "revoked", "removed": 2, "remaining": 3 }
+```
+
+**`409 Conflict`**, outcome `already-absent`: nothing matched, so nothing was written. Not an error, and specifically not a success:
+
+```json
+{ "outcome": "already-absent", "error": "those grants were already gone" }
+```
+
+**`409 Conflict`**, outcome `blocked-wildcard`: at least one key also lives in the fleet-wide `agents['*']` bucket, which clawboo expects enforcement to union ahead of this Boo's own, so removing the per-Boo copy would leave the command granted while reporting a clean revoke. Nothing was written, and the refusal is all-or-nothing: one duplicated key aborts every key in the same call. `keys` names the offenders:
+
+```json
+{
+  "outcome": "blocked-wildcard",
+  "keys": ["<key>"],
+  "error": "that grant is set for every Boo, not just this one, so it cannot be removed here"
+}
+```
+
+**`409 Conflict`**, outcome `no-such-agent`: the document has no bucket for this Boo at all, so there was nothing to change:
+
+```json
+{ "outcome": "no-such-agent", "error": "this Boo has no policy to change" }
+```
+
+**`502 Bad Gateway`**, outcome `not-verified`: the write went through and the Gateway's reply still lists those rows, or came back with no post-state to check against:
+
+```json
+{
+  "outcome": "not-verified",
+  "keys": ["<key>"],
+  "error": "the Gateway accepted the change and still lists those grants"
+}
+```
+
+<Warning>
+`not-verified` is the one outcome that is **not** a no-op. The write landed and could not be confirmed, so re-read `GET /api/exec-allowlist` before deciding what to do next, and do not tell anyone the grant is gone.
+</Warning>
+
+**`429 Too Many Requests`**: the sensitive ceiling:
+
+```json
+{ "error": "Too many requests for this operation. Wait a moment and retry." }
+```
+
+**`502 Bad Gateway`**: the call to the Gateway threw. Its own words are passed through, redacted:
+
+```json
+{ "state": "failed", "error": "<message>" }
+```
+
+#### Example
+
+```bash
+curl -X POST http://localhost:18790/api/exec-allowlist/revoke \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"<agent-id>","keys":["<key-from-the-GET>"]}'
 ```
 
 ---
@@ -2571,7 +2818,7 @@ curl -X POST "http://localhost:18790/api/grants/8f1c2d34-5e6f-4a7b-9c8d-0e1f2a3b
 
 ## Error envelope
 
-Every error response in this group is the standard envelope `{ error: string }`, except the skills routes (and the graph-layout POST), which use `{ ok: false, error: string }`. The skills GET 500 additionally carries `skills: []`, and the skills POST 422 carries `findings: InjectionFinding[]`. The graph-layout GET never returns an error status; a miss or a thrown error both yield `{ positions: {} }` (HTTP 200).
+Every error response in this group is the standard envelope `{ error: string }`, except the skills routes (and the graph-layout POST), which use `{ ok: false, error: string }`. The skills GET 500 additionally carries `skills: []`, and the skills POST 422 carries `findings: InjectionFinding[]`. The graph-layout GET never returns an error status; a miss or a thrown error both yield `{ positions: {} }` (HTTP 200). The two exec-permission surfaces carry more than the envelope on purpose, because a half-applied permission change is neither a success nor a no-op: `POST /api/exec-settings` answers a Gateway refusal with `{ ok: false, savedLocally: true, error }`, `GET /api/exec-allowlist` answers its 502 with a `state` of `unreadable` plus the document-wide counts and no `entries` key, and `POST /api/exec-allowlist/revoke` returns its `outcome` (and, where there is one, the offending `keys`) alongside `error` on every non-200.
 
 ## See also
 

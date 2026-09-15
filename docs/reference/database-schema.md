@@ -36,7 +36,7 @@ There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureS
 | `memory_procedures`    | memory       | `id` (text)                     | Versioned procedures                                             |
 | `tool_registry`        | tools        | `name` (text)                   | Brokered tool descriptors + provenance + enabled flag            |
 | `tool_call_audit`      | tools        | `id` (text)                     | Append-only before/after tool-call audit (secrets scrubbed)      |
-| `tool_call_approvals`  | tools        | `id` (text)                     | DB-mediated tool-approval handshake records                      |
+| `tool_call_approvals`  | tools        | `id` (text)                     | Tool-approval handshake, plus mirrored OpenClaw exec approvals   |
 | `budgets`              | governance   | `id` (text)                     | Scoped USD budgets (cap/warn) with cent-exact spend              |
 | `governance_audit`     | governance   | `id` (text)                     | Append-only forensic governance audit                            |
 | `orchestration_events` | obs          | `seq` (autoinc)                 | Append-only orchestration event log (trace + graph source)       |
@@ -83,6 +83,7 @@ erDiagram
   }
   tool_call_approvals {
     text id PK
+    text kind "tool|exec"
     text task_id "soft ref → tasks"
   }
 
@@ -149,8 +150,10 @@ A dormant seam plus the live session-rotation lineage. For OpenClaw, sessions st
 
 Per-agent token and USD cost ledger.
 
-- **Columns**: `id` (PK, autoinc), `agent_id` (**FK → `agents.id`**), `model`, `input_tokens`, `output_tokens`, `cost_usd` (`REAL`), `run_id`, `created_at`.
-- **Indexes**: `idx_cost_records_agent_id`, `idx_cost_records_run_id`, `idx_cost_records_created_at`.
+- **Columns**: `id` (PK, autoinc), `agent_id` (**FK → `agents.id`**), `model`, `input_tokens`, `output_tokens`, `cost_usd` (`REAL`), `run_id`, `session_key` (nullable), `created_at`.
+- **Indexes**: `idx_cost_records_agent_id`, `idx_cost_records_session` on `(session_key, created_at)`, `idx_cost_records_run_id`, `idx_cost_records_created_at`.
+
+`session_key` names the conversation a row's spend belongs to. Billing is seeded from the last recorded spend so a restart does not re-bill a live turn, and without the key that lookup could pick up a different session of the same agent. It is nullable: rows written before the column existed have no answer to give, and `POST /api/cost-records`, the route the browser estimator posts to, does not send one either. The column and its index are additive, so an existing database gains them from the same DDL with no migration.
 
 ### `graph_layouts`
 
@@ -278,8 +281,14 @@ Append-only before/after audit of every brokered call. `args_summary` / `result_
 
 The DB-mediated approval handshake, uniform across both MCP transports and cross-process. `task_id` lets the TTL reaper unblock a gated board task on expiry; it is nullable because a bare tool-call approval carries no task.
 
-- **Columns**: `id` (PK, text), `tool_name`, `agent_id`, `args_summary` (scrubbed JSON), `reason`, `status` (default `pending`; `pending`|`allow_once`|`allow_always`|`deny`|`expired`), `task_id` (soft ref → `tasks`), `tenant_id`, `created_at`, `expires_at` (not null), `resolved_at`.
-- **Indexes**: `idx_tool_approvals_status`, `idx_tool_approvals_created`.
+- **Columns**: `id` (PK, text), `tool_name`, `agent_id`, `args_summary` (scrubbed JSON), `reason`, `status` (default `pending`; `pending`|`allow_once`|`allow_always`|`deny`|`expired`), `task_id` (soft ref → `tasks`), `tenant_id`, `grant_id`, `connector_id`, `never_remember` (`0`/`1`, default `0`), `rule_reason`, `tool_class` (`read`|`write`|`destructive`), `tool_summary`, `kind` (not null, default `tool`; `tool`|`exec`), `created_at`, `expires_at` (not null), `resolved_at`.
+- **Indexes**: `idx_tool_approvals_status`, `idx_tool_approvals_created`, `idx_tool_approvals_grant` on `(grant_id, status)`.
+
+`kind` says who is holding the call while the human decides. `tool` is a call Clawboo is holding in its own process, the broker blocked inside `waitForApproval` or the native shell waiting on the row it just wrote; `exec` is an OpenClaw shell command held by the Gateway, which Clawboo mirrors into a row here and answers over `exec.approval.resolve`. The two are released by different means, so the resolver is told which it is rather than left to infer it from a null `connector_id` or a tool named `exec`.
+
+A mirrored exec row is keyed by the Gateway's own request id, which is what makes a redelivered request idempotent, and it carries `tool_name` `exec`, `tool_class` `destructive`, `tool_summary` set to the first 200 characters of the command, and `args_summary` set to `{command, cwd}`. See [Approvals](/using/approvals).
+
+`never_remember` is `1` when "Always" must not be offered for this prompt. It is persisted at prompt time rather than recomputed, so the resolve path cannot mint a durable rule the prompt never offered. `grant_id` and `connector_id` name the connector grant the call was decided against, and `rule_reason` is why that decision asked rather than allowed (`policy-always`, `policy-writes`, `risk-destructive`, `risk-external`, `lethal-trifecta`, `tainted-run`, `never-remembered`). `tool_class` and `tool_summary` carry the server's own reading of the tool, so the card never has to guess a risk level from the tool's name.
 
 ---
 
