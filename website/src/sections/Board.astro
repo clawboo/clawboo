@@ -21,36 +21,54 @@
  *  - one memory tier every runtime reads and writes
  *  - capabilities and spend visible per agent
  */
-import { Picture } from 'astro:assets'
+import ThemedShot from '../components/ThemedShot.astro'
 import sharedMemory from '../assets/screenshots/shared-memory.png'
 import capabilities from '../assets/screenshots/capabilities-panel.png'
 import agentDetail from '../assets/screenshots/agent-detail.png'
 import ghostGraph from '../assets/screenshots/ghost-graph.png'
+// All four are `loading="lazy"`, so the hidden variant has no box and should
+// never be fetched. That is the cheap half of the theme swap; the hero is the
+// half that pays. See the `[data-shot-theme]` note in marketing.css.
+import sharedMemoryDark from '../assets/screenshots/shared-memory-dark.png'
+import capabilitiesDark from '../assets/screenshots/capabilities-panel-dark.png'
+import agentDetailDark from '../assets/screenshots/agent-detail-dark.png'
+import ghostGraphDark from '../assets/screenshots/ghost-graph-dark.png'
 
 const panels = [
   {
     src: sharedMemory,
+    dark: sharedMemoryDark,
     title: 'One memory, shared',
     body: 'Facts and procedures every runtime on the team can read and write, instead of a private context window per runtime.',
-    alt: 'The shared memory panel, listing facts and versioned procedures.',
+    // The old capture of this panel was empty, so "listing facts and versioned
+    // procedures" described a list that was not there. The new one is full and
+    // the alt can name what is in it.
+    alt: 'The Memory panel: a shared store of 17 facts and 7 procedures, with two team-shared pricing facts above the start of the versioned procedure list.',
   },
   {
     src: capabilities,
+    dark: capabilitiesDark,
     title: 'Every capability, in one place',
-    body: 'Skills and connectors across all five runtimes, in one inventory you can actually audit.',
-    alt: 'The capabilities panel, listing skills and connectors across runtimes.',
+    body: 'Skills and connectors across every runtime you have connected, in one inventory you can actually audit.',
+    alt: 'The Capabilities panel: 56 capabilities inventoried and grouped by runtime, each row marked ready and labelled with which runtime manages it.',
   },
   {
     src: agentDetail,
+    dark: agentDetailDark,
     title: 'Agents you can open up',
-    body: 'Model, prompt, tools, budget and history for each teammate, editable in place.',
-    alt: 'An agent detail view with its model, prompt, tools and budget.',
+    body: 'Model, prompt, tools and history for each teammate, editable in place.',
+    // No budget is on screen in the new capture, so the alt no longer claims
+    // one. See the note on this card's body copy below.
+    alt: 'An agent opened up: a one to one chat with Ada on the left, her model chip and a map of her skills and connectors on the right, and her editable SOUL prompt on the tab strip beneath.',
   },
   {
     src: ghostGraph,
+    dark: ghostGraphDark,
     title: 'See the whole team at once',
     body: 'Who delegated what to whom, live, across every team you are running.',
-    alt: 'The team graph, showing a leader delegating to specialist agents.',
+    // Was "a leader delegating to specialist agents", which described a single
+    // team. The new capture is Atlas, across all three.
+    alt: 'The Atlas graph across every team: 12 agents under one lead, drawn as three outlined clusters named Growth, Support and Platform, each with its own running and idle count.',
   },
 ]
 ---
@@ -72,10 +90,10 @@ const panels = [
         panels.map((p) => (
           <div class="shot-card">
             <figure>
-              <Picture
-                src={p.src}
+              <ThemedShot
+                light={p.src}
+                dark={p.dark}
                 alt={p.alt}
-                formats={['avif', 'webp']}
                 widths={[560, 840, 1120]}
                 sizes="(min-width: 640px) 520px, 92vw"
                 loading="lazy"

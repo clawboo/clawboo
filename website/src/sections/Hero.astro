@@ -5,7 +5,8 @@
  * Positioning: this is NOT a coding tool. The catalogue is 436 agents across
  * categories like agency-agents, growth-marketing, lifecycle-commerce,
  * google-ads-analytics, creator-studio, business-desk and product-craft, and
- * the screenshot below shows a marketing squad, not engineers. The headline
+ * the screenshot below shows a team shipping a pricing page across research,
+ * copy, analysis and code, not a room of engineers. The headline
  * used to say "your coding agents", which fought both the product and its own
  * picture. Claude Code, Codex and Hermes are the ENGINES; the agents built on
  * them do any kind of work, so the runtimes are named further down the page
@@ -20,13 +21,19 @@
  * buttons used to be. The runtime marks moved out of this section entirely and
  * now head the Runtimes section, in place of its eyebrow text.
  */
-import { Picture } from 'astro:assets'
+import ThemedShot from '../components/ThemedShot.astro'
 import GitHubStars from '../components/GitHubStars.astro'
 import Button from '../components/Button.astro'
 import SignatureSky from '../components/atmosphere/SignatureSky.astro'
 import { BooSquad } from '../components/atmosphere/BooSquad.tsx'
 import { links } from '../lib/site'
 import teamSpace from '../assets/screenshots/team-space.png'
+// Two distinct files from here on, which is when the hero starts paying for the
+// swap: it is the one `loading="eager"` shot on the page, `display: none`
+// cancels no eager fetch in any engine, and the two <picture>s no longer point
+// at the same URL for the browser's cache to collapse. Measured cost and the
+// single-<picture> way out are in the `[data-shot-theme]` note in marketing.css.
+import teamSpaceDark from '../assets/screenshots/team-space-dark.png'
 ---
 
 <section id="hero" class="relative overflow-hidden on-sky">
@@ -63,14 +70,21 @@ import teamSpace from '../assets/screenshots/team-space.png'
       <BooSquad client:visible />
     </div>
 
-    <!-- The dashboard, at full content width and actually readable. The source
-         is 2720x1720, so it carries this size; it used to render at 300px
-         inside a drawn browser window, 900px down the page. -->
+    <!-- The team space, at full content width and actually readable. The
+         capture is wide enough to carry this size; it used to render at 300px
+         inside a drawn browser window, 900px down the page.
+
+         The alt text used to describe a board and a group chat in one view.
+         That view is not built yet, so the sentence was selling unshipped
+         software from the top of the homepage. It now names the three things
+         the capture actually contains, in the order they read: the roster, the
+         delegation graph, the chat. Nothing about a board, and no task status
+         either, because tasks are not what this surface shows. -->
     <figure class="shot mt-10 sm:mt-12">
-      <Picture
-        src={teamSpace}
-        alt="The Clawboo board: a marketing squad of agents with tasks moving across todo, in progress and done, and the group chat alongside."
-        formats={['avif', 'webp']}
+      <ThemedShot
+        light={teamSpace}
+        dark={teamSpaceDark}
+        alt="The Growth team's space in Clawboo: five agents down the left column with their live status, the delegation graph above showing who handed work to whom, and the group chat below where the lead says where the pricing page stands."
         widths={[720, 1080, 1440, 1920, 2400]}
         sizes="(min-width: 1280px) 1200px, 94vw"
         loading="eager"

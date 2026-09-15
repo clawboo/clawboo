@@ -138,6 +138,69 @@
   text-align: center;
 }
 
+/* Theme-paired screenshots. Every product shot ships twice, light and dark, as
+   two sibling <picture> elements inside the same figure (see ThemedShot.astro),
+   and this is the only place that decides which one is visible.
+
+   It keys off `:root.dark` rather than `prefers-color-scheme` on purpose. That
+   class is what the no-FOUC script in BaseLayout writes from
+   localStorage['clawboo.theme'] and what ThemeToggle keeps in sync, and the
+   toggle cycles light -> dark -> system, so "explicitly light on a dark
+   machine" is a state this site supports. A media query cannot see it, and
+   would hand that visitor the wrong screenshots on every page load.
+
+   One rule, and no `display` on the winner, so the visible <picture> keeps its
+   UA default in every combination and the two variants can never lay out
+   differently from each other.
+
+   WHAT THE SWAP COSTS. These numbers were re-measured against the twelve real
+   captures, which is what the last paragraph of this note asked for. They
+   replace an earlier estimate taken against placeholder darks, and they came
+   out worse than it: the captures are denser than the stand-ins were.
+
+   Build output grew from 8,136 KB to 17,645 KB. Almost none of that reaches a
+   browser: 13,472 KB of it is the PNG fallback ladders Astro emits because
+   `fallbackFormat` defaults to png for a png source, and no engine that
+   understands avif or webp has requested one since about 2020. The avif and
+   webp ladders that visitors actually download total 2,155 KB for all twelve
+   images, and no visitor downloads more than a handful of those.
+
+   At runtime the five lazy panels are the cheap case and the eager hero is not.
+   `display: none` cancels no eager fetch in any engine, so the hero downloads
+   BOTH variants and paints one. Confirmed in Chromium against this build, at
+   1440 CSS px: both hero <picture>s resolve a candidate and both decode. The
+   painted half costs 27.8 KB at 1x and 50.3 KB at 2x, which is slightly LESS
+   than the single hero cost before the swap, because the new capture compresses
+   better. The waste is the other half, in full: 27.6 KB at 1x, 50.3 KB at 2x,
+   on the one image that is the LCP element. A cold load is worse again, because
+   the preload scanner claims a 720w candidate of each variant before `sizes`
+   resolves and then upgrades: four requests, 122.8 KB, for one visible picture.
+
+   The five panels are `loading="lazy"`, and a lazy image inside `display: none`
+   has no box, never intersects the viewport, and should never be fetched at
+   all. VERIFIED in Chromium against this build: after scrolling the whole page
+   in dark mode, all five dark panels had fetched and all five light panels had
+   no currentSrc at all. Gecko behaves the same way. Safari's lazy
+   implementation is looser and was NOT verified here, so treat the panels as
+   somewhere between 0 KB and a worst case of 47 KB at 1x / 127 KB at 2x.
+
+   IF THE HERO'S LCP MATTERS MORE THAN THE SIMPLICITY OF THIS RULE, the fix is
+   to stop making the hero two elements: build its <picture> by hand with
+   getImage(), give the dark <source>s media="(prefers-color-scheme: dark)" and
+   the light ones the light query, and keep a light <img> fallback. The preload
+   scanner then resolves exactly one candidate and eager LCP bytes go back to
+   the painted half alone. The visitors that breaks are the ones whose stored
+   choice disagrees with their OS, and the theme script already knows when that
+   is true: it can set `media="not all"` on the losing sources, which costs that
+   minority one extra fetch and nobody else anything. The captures have landed
+   and the hero avif has been measured, so the condition this was parked behind
+   is met; it is now a judgement call about 50 KB on the LCP element against one
+   more mechanism. */
+:root:not(.dark) [data-shot-theme='dark'],
+:root.dark [data-shot-theme='light'] {
+  display: none;
+}
+
 /* Sky band. A light, illustrated gradient rather than a photograph, pale where
    the headline sits so nothing needs a text-shadow to survive it. */
 :root {
