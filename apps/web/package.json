@@ -75,7 +75,7 @@
     "express-rate-limit": "^8.7.0",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.468.0",
-    "openai": "6.42.0",
+    "openai": "7.15.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^9.0.0",
