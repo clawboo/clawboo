@@ -586,6 +586,10 @@ async function runTaskInner(
         scope: { teamId: task.teamId, agentId: assigneeAgentId },
         maxChars: DEFAULTS.memoryAutoInjectMaxChars,
         topK: DEFAULTS.memoryAutoInjectTopK,
+        // Citation provenance: the 'cited' rows this injection writes dedupe on
+        // (factId, taskId), so rotations/retries never inflate usage counts.
+        taskId,
+        runtime: runtimeId,
       })
 
   // Assemble the prompt: stable task brief → context (resume handoff + MCP note +
@@ -705,6 +709,7 @@ async function runTaskInner(
   // touches it — it holds the runtime's private memory/transcripts, which must
   // not land world-readable on a multi-user host (matches the Hermes home mode).
   if (homeDir) await mkdir(homeDir, { recursive: true, mode: 0o700 }).catch(() => {})
+  const baseSessionKey = `runtime:${runtimeId}:task:${taskId}`
   const ctx: RuntimeRunContext = {
     cwd,
     model: input.model ?? null,
@@ -715,16 +720,20 @@ async function runTaskInner(
     mcpBaseUrl: input.mcpBaseUrl ?? null,
     // The run's authoritative memory scope — bound onto the shared Memory MCP so
     // saves are team-shared + reads team-limited (matches the injection scope).
+    // runtime/taskId/sessionKey ride along as PROVENANCE stamps only (prov*
+    // attach params) — they never widen visibility.
     memoryScope: {
       teamId: task.teamId ?? null,
       agentId: assigneeAgentId,
       attachSecret: getMcpAttachSecret(db),
+      runtime: runtimeId,
+      taskId,
+      sessionKey: baseSessionKey,
     },
     homeDir,
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),
   }
   const adapter = input.makeAdapter(ctx)
-  const baseSessionKey = `runtime:${runtimeId}:task:${taskId}`
   const startRun = (sessionKey: string, context: string): Promise<RunHandle> =>
     adapter.start(
       { taskId, teamId: task.teamId },

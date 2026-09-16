@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
 import { getMcpAttachSecret, resetMcpAttachSecretCache } from '../../lib/mcpAttachSecret'
-import { parseBoundScope } from '../mcp'
+import { parseBoundProvenance, parseBoundScope } from '../mcp'
 
 const req = (url: string): IncomingMessage => ({ url }) as IncomingMessage
 
@@ -87,5 +87,44 @@ describe('parseBoundScope — everything else serves unbound', () => {
       'scopeSig=not-hex-at-all',
     )
     expect(parseBoundScope(req(url))).toBeUndefined()
+  })
+})
+
+describe('parseBoundProvenance', () => {
+  it('parses agent + prov* stamps from the URL query', () => {
+    expect(
+      parseBoundProvenance(
+        req(
+          '/api/mcp/memory?scopeAgentId=agent-1&provRuntime=claude-code&provTaskId=task-9&provSessionKey=sess-1',
+        ),
+      ),
+    ).toEqual({
+      agentId: 'agent-1',
+      runtime: 'claude-code',
+      taskId: 'task-9',
+      sessionKey: 'sess-1',
+    })
+    // Partial stamps: only what is present.
+    expect(parseBoundProvenance(req('/api/mcp/memory?provRuntime=codex'))).toEqual({
+      runtime: 'codex',
+    })
+    expect(parseBoundProvenance(req('/api/mcp/memory?scopeAgentId=agent-1'))).toEqual({
+      agentId: 'agent-1',
+    })
+  })
+
+  it('returns undefined when no provenance params are present', () => {
+    expect(parseBoundProvenance(req('/api/mcp/memory'))).toBeUndefined()
+    expect(parseBoundProvenance(req('/api/mcp/memory?scopeTeamId=T'))).toBeUndefined()
+    expect(parseBoundProvenance(undefined)).toBeUndefined()
+    expect(parseBoundProvenance(req(''))).toBeUndefined()
+  })
+
+  it('is provenance-only: an unsigned scoped URL still parses stamps here while parseBoundScope refuses it', () => {
+    // prov* params ride OUTSIDE the scopeSig HMAC — parseBoundProvenance stays a
+    // pure parser, and the memory handler gates it on a VERIFIED bound scope.
+    const url = '/api/mcp/memory?scopeTeamId=T&scopeAgentId=A&provTaskId=task-1'
+    expect(parseBoundScope(req(url))).toBeUndefined()
+    expect(parseBoundProvenance(req(url))).toEqual({ agentId: 'A', taskId: 'task-1' })
   })
 })

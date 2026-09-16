@@ -37,6 +37,9 @@ export function buildMemoryGuidance(runtimeId: string, hasMcp: boolean): string 
     'Shared team memory: save durable team/project facts with the clawboo memory tool ' +
     '(`memory_save`) — that is the one place every teammate, across all runtimes, can read them. ' +
     `${priv} is private scratch for your own cognition only; teammates cannot see it, so never rely ` +
-    'on it for anything the team needs.'
+    'on it for anything the team needs. ' +
+    'When a recalled fact (from memory_search or the auto-memory block — cited by id) proves ' +
+    'right or wrong, report it with memory_feedback (useful | dead_end | corrected) so the whole ' +
+    'team learns.'
   )
 }

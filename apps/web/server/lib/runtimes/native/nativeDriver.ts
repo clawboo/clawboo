@@ -128,7 +128,18 @@ export function createNativeDriver(
                 tools: config.tools.tools,
                 teamchat: config.tools.teamchat,
               },
-              ...(ctx.memoryScope ? { memoryScope: ctx.memoryScope } : {}),
+              ...(ctx.memoryScope
+                ? {
+                    memoryScope: ctx.memoryScope,
+                    // The native analog of the HTTP attach URL's prov* params.
+                    memoryProvenance: {
+                      agentId: ctx.memoryScope.agentId ?? null,
+                      runtime: 'clawboo-native',
+                      taskId: ctx.memoryScope.taskId ?? null,
+                      sessionKey: ctx.memoryScope.sessionKey ?? null,
+                    },
+                  }
+                : {}),
             })
       conversation = new Conversation({
         config,

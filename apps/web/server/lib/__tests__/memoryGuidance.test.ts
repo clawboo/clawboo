@@ -20,6 +20,10 @@ describe('buildMemoryGuidance', () => {
     expect(buildMemoryGuidance('clawboo-native', true)).toContain('private memory store')
   })
 
+  it('primes the feedback loop (memory_feedback, hasMcp-gated)', () => {
+    expect(buildMemoryGuidance('claude-code', true)).toContain('memory_feedback')
+  })
+
   it('returns empty when there is no shared memory surface (no MCP base URL)', () => {
     expect(buildMemoryGuidance('hermes', false)).toBe('')
   })

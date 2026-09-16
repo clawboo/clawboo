@@ -12,6 +12,7 @@ import {
   resolveRoomForTeam,
   type DbTeamChat,
   type EmbeddingProvider,
+  type MemoryProvenance,
   type MemoryScope,
 } from '@clawboo/db'
 import {
@@ -111,6 +112,36 @@ export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined 
   }
 }
 
+/** Read the run's provenance stamps from the Memory attach URL query params
+ *  (`scopeAgentId` + `provRuntime`/`provTaskId`/`provSessionKey`). Provenance-only:
+ *  recorded on saves/outcome reports, NEVER part of visibility scoping (that
+ *  stays parseBoundScope's job). A pure parser by design — the `prov*` params
+ *  ride OUTSIDE the scopeSig HMAC (informational stamps, not authority), so the
+ *  handler gates this on parseBoundScope returning a VERIFIED scope: agentId
+ *  comes from the signed `scopeAgentId`, while runtime/taskId/sessionKey are
+ *  self-reported by the (clawboo-written) attach config. Absent ⇒ undefined.
+ *  Exported for unit testing. */
+export function parseBoundProvenance(req?: IncomingMessage): MemoryProvenance | undefined {
+  if (!req?.url) return undefined
+  let params: URLSearchParams
+  try {
+    params = new URL(req.url, 'http://localhost').searchParams
+  } catch {
+    return undefined
+  }
+  const agentId = params.get('scopeAgentId')
+  const runtime = params.get('provRuntime')
+  const taskId = params.get('provTaskId')
+  const sessionKey = params.get('provSessionKey')
+  if (!agentId && !runtime && !taskId && !sessionKey) return undefined
+  return {
+    ...(agentId ? { agentId } : {}),
+    ...(runtime ? { runtime } : {}),
+    ...(taskId ? { taskId } : {}),
+    ...(sessionKey ? { sessionKey } : {}),
+  }
+}
+
 /** Read the run's authoritative TeamChat binding from the attach URL query params
  *  (`roomTeamId` / `postAuthorAgentId`). The URL is clawboo-written config, so this
  *  identity cannot be spoofed via tool args (the anti-spoof property). Absent ⇒
@@ -173,6 +204,10 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
       return createMemoryServer(getDb(), cachedEmbed, {
         boundScope: scope,
         unverifiedCaller: scope === undefined,
+        // Provenance rides the same verified-identity rule: the agent half
+        // (scopeAgentId) is covered by scopeSig, so an unverified attach gets
+        // no stamps at all rather than self-reported ones.
+        ...(scope ? { provenance: parseBoundProvenance(req) } : {}),
       })
     }),
     // `req` was previously dropped here, alone among the four handlers, so the

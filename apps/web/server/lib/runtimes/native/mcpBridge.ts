@@ -15,6 +15,7 @@ import {
   type ClawbooDb,
   type DbTeamChat,
   type EmbeddingProvider,
+  type MemoryProvenance,
   type MemoryScope,
 } from '@clawboo/db'
 import {
@@ -50,6 +51,12 @@ export interface McpBridgeOptions {
    * author identity (anti-spoof). Omitted ⇒ unbound (the model's args, if any).
    */
   memoryScope?: MemoryScope
+  /**
+   * Server-authored provenance (agent/runtime/task/session) stamped on native
+   * memory saves + feedback — honored only alongside a bound memoryScope,
+   * matching the HTTP-attached runtimes' prov* params. Never widens visibility.
+   */
+  memoryProvenance?: MemoryProvenance
   /** Best-effort obs hook for a native proactive `team_chat_post`. */
   onTeamChatPost?: (post: DbTeamChat) => void
   /**
@@ -113,7 +120,10 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
     const embed = opts.embed !== undefined ? opts.embed : await getEmbedProvider()
     clients.push(
       await connectInMemoryClient(
-        createMemoryServer(db, embed, { boundScope: opts.memoryScope }),
+        createMemoryServer(db, embed, {
+          boundScope: opts.memoryScope,
+          provenance: opts.memoryProvenance,
+        }),
         'clawboo-native',
       ),
     )
