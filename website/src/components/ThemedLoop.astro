@@ -1,0 +1,56 @@
+---
+/**
+ * A looping product capture that follows the site's theme.
+ *
+ * The sibling of ThemedShot, for the two Board cards that animate. It renders
+ * both themes and lets marketing.css pick, exactly as ThemedShot does, so the
+ * four cards in that grid stay one set: a dark-mode reader must never get two
+ * light loops beside two dark stills.
+ *
+ * WHY GIF AND NOT VIDEO, and what it costs.
+ * A looping <video> would be a third of the bytes and could carry the pause
+ * control SeeItWork.astro already uses. The decision to ship GIFs here was
+ * deliberate and it is a real tradeoff, so it is written down rather than
+ * rediscovered:
+ *  - GIF cannot be paused. WCAG 2.2.2 asks for a way to stop motion that loops
+ *    automatically, and an <img> gives the reader no handle at all.
+ *  - The mitigation is the `reduce` source below: a reader who has asked their
+ *    OS for less motion gets a still frame taken from the loop's own last
+ *    frame, so the card is legible and stationary. That covers the people the
+ *    criterion exists to protect. It does NOT satisfy 2.2.2 for someone who
+ *    has not set that preference but still wants the movement to stop.
+ * If these cards ever grow a third sibling, revisit the video route.
+ *
+ * The <picture> ordering matters: `prefers-reduced-motion: reduce` is listed
+ * first so it wins over the animated fallback in every engine that supports
+ * the query, and browsers that do not support it simply fall through to the
+ * <img> and get the loop.
+ *
+ * Files live in public/ rather than src/assets because astro:assets does not
+ * process GIFs: routing them through <Picture> would strip the animation.
+ * That means no automatic hashing, so the paths here are the paths on disk.
+ */
+interface Props {
+  /** Basename under /loops, e.g. "memory-search" -> memory-search.gif + -dark.gif */
+  name: string
+  alt: string
+}
+const { name, alt } = Astro.props
+const base = `/loops/${name}`
+---
+
+<picture data-shot-theme="light">
+  <source srcset={`${base}-poster.webp`} media="(prefers-reduced-motion: reduce)" />
+  <img src={`${base}.gif`} alt={alt} width="960" height="600" loading="lazy" decoding="async" />
+</picture>
+<picture data-shot-theme="dark">
+  <source srcset={`${base}-dark-poster.webp`} media="(prefers-reduced-motion: reduce)" />
+  <img
+    src={`${base}-dark.gif`}
+    alt={alt}
+    width="960"
+    height="600"
+    loading="lazy"
+    decoding="async"
+  />
+</picture>

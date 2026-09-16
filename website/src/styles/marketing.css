@@ -497,3 +497,13 @@
 .text-brand {
   color: var(--brand-text);
 }
+
+/* Animated Board cards. ThemedLoop renders <picture> rather than the <img>
+   astro:assets emits, so the sizing rules that already govern .shot-card
+   figure img have to reach the picture element too, or the loop sits at its
+   intrinsic size and the card stops matching the two stills beside it. */
+.shot-card figure picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
