@@ -22,35 +22,32 @@
  *  - capabilities and spend visible per agent
  */
 import ThemedShot from '../components/ThemedShot.astro'
+import ThemedLoop from '../components/ThemedLoop.astro'
 import sharedMemory from '../assets/screenshots/shared-memory.png'
-import capabilities from '../assets/screenshots/capabilities-panel.png'
 import agentDetail from '../assets/screenshots/agent-detail.png'
 import ghostGraph from '../assets/screenshots/ghost-graph.png'
 // All four are `loading="lazy"`, so the hidden variant has no box and should
 // never be fetched. That is the cheap half of the theme swap; the hero is the
 // half that pays. See the `[data-shot-theme]` note in marketing.css.
 import sharedMemoryDark from '../assets/screenshots/shared-memory-dark.png'
-import capabilitiesDark from '../assets/screenshots/capabilities-panel-dark.png'
 import agentDetailDark from '../assets/screenshots/agent-detail-dark.png'
 import ghostGraphDark from '../assets/screenshots/ghost-graph-dark.png'
 
 const panels = [
   {
-    src: sharedMemory,
-    dark: sharedMemoryDark,
+    loop: 'memory-search',
     title: 'One memory, shared',
     body: 'Facts and procedures every runtime on the team can read and write, instead of a private context window per runtime.',
     // The old capture of this panel was empty, so "listing facts and versioned
     // procedures" described a list that was not there. The new one is full and
     // the alt can name what is in it.
-    alt: 'The Memory panel: a shared store of 17 facts and 7 procedures, with two team-shared pricing facts above the start of the versioned procedure list.',
+    alt: 'The Memory panel being searched: a question is typed, and the shared store ranks the facts that answer it by relevance.',
   },
   {
-    src: capabilities,
-    dark: capabilitiesDark,
-    title: 'Every capability, in one place',
-    body: 'Skills and connectors across every runtime you have connected, in one inventory you can actually audit.',
-    alt: 'The Capabilities panel: 56 capabilities inventoried and grouped by runtime, each row marked ready and labelled with which runtime manages it.',
+    loop: 'board-scope',
+    title: 'One board, every team',
+    body: 'Work moves from backlog to done in columns you can see, scoped to one team or to all of them at once.',
+    alt: 'The board scoped to the Growth team with seven tasks, then widened to every team at eighteen, then scrolled to the blocked and done columns.',
   },
   {
     src: agentDetail,
@@ -90,14 +87,20 @@ const panels = [
         panels.map((p) => (
           <div class="shot-card">
             <figure>
-              <ThemedShot
-                light={p.src}
-                dark={p.dark}
-                alt={p.alt}
-                widths={[560, 840, 1120]}
-                sizes="(min-width: 640px) 520px, 92vw"
-                loading="lazy"
-              />
+              {
+                p.loop ? (
+                  <ThemedLoop name={p.loop} alt={p.alt} />
+                ) : (
+                  <ThemedShot
+                    light={p.src}
+                    dark={p.dark}
+                    alt={p.alt}
+                    widths={[560, 840, 1120]}
+                    sizes="(min-width: 640px) 520px, 92vw"
+                    loading="lazy"
+                  />
+                )
+              }
             </figure>
             <h3 class="d3">{p.title}</h3>
             <p>{p.body}</p>

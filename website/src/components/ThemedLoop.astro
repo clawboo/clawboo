@@ -1,0 +1,115 @@
+---
+/**
+ * A looping product capture that follows the site's theme, and can be stopped.
+ *
+ * The sibling of ThemedShot, for the two Board cards that animate. It renders
+ * both themes and lets marketing.css pick, exactly as ThemedShot does, so the
+ * four cards in that grid stay one set: a dark-mode reader must never get two
+ * light loops beside two dark stills.
+ *
+ * WHY GIF, AND WHAT IT TAKES TO MAKE THAT HONEST.
+ * A looping <video> would be a third of the bytes and would carry a pause
+ * control for free. The decision to ship GIFs here was deliberate, and the
+ * price is that an <img> gives the reader no handle at all: WCAG 2.2.2 asks for
+ * a way to stop motion that loops automatically, and these loops run about
+ * seven seconds before repeating, next to text someone is trying to read.
+ *
+ * Two mechanisms cover that, and they are not the same mechanism:
+ *  - The `reduce` <source> below serves a still frame to anyone whose OS says
+ *    they want less motion. That is passive and needs no interaction.
+ *  - The button swaps every frame in this card between its loop and its poster.
+ *    That is for the much larger group who have set no preference but still
+ *    want the movement to stop. Without it the reduced-motion source alone does
+ *    NOT satisfy 2.2.2, which is what a review caught on the first cut.
+ *
+ * The swap is a `src` change rather than a CSS toggle because a hidden GIF keeps
+ * animating: display:none does not stop decoding in every engine, and the point
+ * is to stop the motion, not to hide it.
+ *
+ * The <picture> ordering matters: `prefers-reduced-motion: reduce` is listed
+ * first so it wins over the animated fallback wherever the query is supported,
+ * and engines without it fall through to the <img> and get the loop. Note this
+ * also means the button cannot un-pause a reduced-motion reader: the <source>
+ * outranks any src we set, which is the correct precedence.
+ *
+ * Files live in public/ rather than src/assets because astro:assets does not
+ * process GIFs: routing them through <Picture> would strip the animation. No
+ * hashing, so the paths here are the paths on disk.
+ */
+interface Props {
+  /** Basename under /loops, e.g. "memory-search" -> memory-search.gif + -dark.gif */
+  name: string
+  alt: string
+}
+const { name, alt } = Astro.props
+const base = `/loops/${name}`
+---
+
+<div class="loop" data-loop>
+  <picture data-shot-theme="light">
+    <source srcset={`${base}-poster.webp`} media="(prefers-reduced-motion: reduce)" />
+    <img
+      src={`${base}.gif`}
+      data-motion={`${base}.gif`}
+      data-still={`${base}-poster.webp`}
+      alt={alt}
+      width="960"
+      height="600"
+      loading="lazy"
+      decoding="async"
+    />
+  </picture>
+  <picture data-shot-theme="dark">
+    <source srcset={`${base}-dark-poster.webp`} media="(prefers-reduced-motion: reduce)" />
+    <img
+      src={`${base}-dark.gif`}
+      data-motion={`${base}-dark.gif`}
+      data-still={`${base}-dark-poster.webp`}
+      alt={alt}
+      width="960"
+      height="600"
+      loading="lazy"
+      decoding="async"
+    />
+  </picture>
+  <button type="button" class="loop-btn" data-loop-toggle aria-label="Pause this animation">
+    <span class="loop-pause" aria-hidden="true"></span>
+    <svg class="loop-play" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path d="M8 5.5v13l11-6.5z" fill="currentColor"></path>
+    </svg>
+  </button>
+</div>
+
+<script is:inline>
+  ;(function () {
+    // Astro inlines this script once per component instance, so a global
+    // "already bound" flag would wire the FIRST card and silently skip every
+    // one after it: its button would render, focus, and do nothing. Guard per
+    // card instead, which is idempotent however many times this runs.
+    var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    document.querySelectorAll('[data-loop]').forEach(function (card) {
+      if (card.dataset.loopBound === '1') return
+      var btn = card.querySelector('[data-loop-toggle]')
+      if (!btn) return
+      card.dataset.loopBound = '1'
+      var imgs = card.querySelectorAll('img[data-motion]')
+      // A reduced-motion reader is already on the still via the <source>, which
+      // outranks src. Reflect that in the control rather than offering a pause
+      // for something that is not moving.
+      var paused = calm
+      function apply() {
+        imgs.forEach(function (img) {
+          var want = paused ? img.dataset.still : img.dataset.motion
+          if (img.getAttribute('src') !== want) img.setAttribute('src', want)
+        })
+        btn.classList.toggle('is-playing', !paused)
+        btn.setAttribute('aria-label', paused ? 'Play this animation' : 'Pause this animation')
+      }
+      btn.addEventListener('click', function () {
+        paused = !paused
+        apply()
+      })
+      apply()
+    })
+  })()
+</script>
