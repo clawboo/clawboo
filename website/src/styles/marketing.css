@@ -502,8 +502,62 @@
    astro:assets emits, so the sizing rules that already govern .shot-card
    figure img have to reach the picture element too, or the loop sits at its
    intrinsic size and the card stops matching the two stills beside it. */
+.shot-card figure .loop,
 .shot-card figure picture {
   display: block;
   width: 100%;
   height: 100%;
+}
+.shot-card figure .loop {
+  position: relative;
+}
+
+/* The stop control for an animated card. Same shape and behaviour as the demo
+   video's button in SeeItWork.astro, deliberately: a reader who learns the
+   affordance once should find it in the same place on every moving thing here.
+   Present on hover and on focus, and always on touch, where there is no hover
+   to reveal it. */
+.loop-btn {
+  position: absolute;
+  right: 0.625rem;
+  bottom: 0.625rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  color: #fff;
+  background: rgb(9 14 26 / 0.55);
+  backdrop-filter: blur(8px) saturate(140%);
+  border: 1px solid rgb(255 255 255 / 0.22);
+  opacity: 0;
+  transition:
+    opacity 150ms ease,
+    background 150ms ease;
+}
+.loop:hover .loop-btn,
+.loop-btn:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .loop-btn {
+    opacity: 1;
+  }
+}
+.loop-btn:hover {
+  background: rgb(9 14 26 / 0.72);
+}
+.loop-pause {
+  display: none;
+  width: 10px;
+  height: 11px;
+  border-left: 3px solid currentColor;
+  border-right: 3px solid currentColor;
+}
+.loop-btn.is-playing .loop-pause {
+  display: block;
+}
+.loop-btn.is-playing .loop-play {
+  display: none;
 }
