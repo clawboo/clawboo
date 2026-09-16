@@ -139,6 +139,11 @@ export default defineConfig({
       // Keep corepack off the sandbox HOME — see the COREPACK_HOME note above.
       COREPACK_HOME,
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
+      // Force FTS-only so the memory-graph e2e is deterministic: with no
+      // embedding provider the graph has only tag/version edges, so community
+      // structure (and the legend-filter assertions) can't vary with whatever
+      // Ollama/OpenAI happens to be reachable on the test host.
+      CLAWBOO_DISABLE_EMBEDDINGS: '1',
     },
   },
 })
