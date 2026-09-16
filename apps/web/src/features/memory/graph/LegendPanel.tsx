@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useMemoryGraphStore } from './store'
-import { communityColor } from './types'
+import { communityColor, countLabel } from './types'
 
 // ─── LegendPanel — community legend + edge-kind key (bottom-left dock) ───────
 //
@@ -171,7 +171,8 @@ export function LegendPanel() {
           color: muted(0.45),
         }}
       >
-        {factCount} facts · {procCount} procedures · {communities.length} clusters
+        {countLabel(factCount, 'fact')} · {countLabel(procCount, 'procedure')} ·{' '}
+        {countLabel(communities.length, 'cluster')}
       </div>
     </div>
   )

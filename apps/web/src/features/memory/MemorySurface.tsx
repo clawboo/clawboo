@@ -9,6 +9,7 @@ import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useViewStore } from '@/stores/view'
 import { MemoryGraphView } from './graph/MemoryGraphView'
 import { useMemoryGraphStore } from './graph/store'
+import { countLabel } from './graph/types'
 import { MemoryPanel } from './MemoryPanel'
 
 // ─── MemorySurface — the NAV_PANELS['memory'] renderer ───────────────────────
@@ -95,7 +96,7 @@ export function MemorySurface() {
   }
 
   const subtitle = payload
-    ? `${payload.totalFacts} facts · ${payload.totalProcedures} procedures`
+    ? `${countLabel(payload.totalFacts, 'fact')} · ${countLabel(payload.totalProcedures, 'procedure')}`
     : 'The team’s shared knowledge'
 
   return (

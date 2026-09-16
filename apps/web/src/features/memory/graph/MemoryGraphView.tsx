@@ -58,6 +58,7 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
   const error = useMemoryGraphStore((s) => s.error)
   const showHulls = useMemoryGraphStore((s) => s.showHulls)
   const scopeFilter = useMemoryGraphStore((s) => s.scopeFilter)
+  const selectedNodeId = useMemoryGraphStore((s) => s.selectedNodeId)
   const timeFilter = useMemoryGraphStore((s) => s.timeFilter)
   const locked = useMemoryGraphStore((s) => s.locked)
   const showMinimap = useMemoryGraphStore((s) => s.showMinimap)
@@ -148,131 +149,152 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
       <MemoryGraphCanvas />
 
-      {/* ── Top-left search bar ── */}
+      {/* ── Top chrome: search + commands share ONE wrapping row, honesty pills
+           sit beneath them. A single flow container rather than three separate
+           absolutes, which used to overlap each other (and the inspector) as
+           the canvas narrowed, leaving the search box unclickable. ── */}
       <div
-        className="surface-floating-tier"
         style={{
           position: 'absolute',
           top: 12,
           left: 12,
+          // Reserve the inspector rail so the controls stay reachable while a
+          // node is selected.
+          right: selectedNodeId ? INSPECT_RAIL + 24 : 12,
           zIndex: 20,
           display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: 4,
-          borderRadius: 12,
-        }}
-      >
-        <div style={{ width: 220 }}>
-          <SearchInput
-            value={query}
-            onChange={onQueryChange}
-            onKeyDown={onSearchKeyDown}
-            placeholder="Search memory…"
-            size="sm"
-            aria-label="Search memory graph"
-            data-testid="memory-graph-search"
-          />
-        </div>
-        {/* Mode segment hidden when no provider — degrade honestly to FTS. */}
-        {provider != null && (
-          <SegmentedControl<SearchMode>
-            options={MODES.map((m) => ({ id: m, label: m }))}
-            value={mode}
-            onChange={setMode}
-            size="sm"
-            aria-label="Search mode"
-          />
-        )}
-      </div>
-
-      {/* ── Top-right command bar ── */}
-      <div
-        role="toolbar"
-        aria-label="Memory graph controls"
-        className="surface-floating-tier"
-        style={{
-          position: 'absolute',
-          top: 12,
-          right: 12,
-          zIndex: 20,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          padding: 4,
-          borderRadius: 12,
-        }}
-      >
-        <BarBtn
-          icon={RefreshCw}
-          label="Re-layout (refresh)"
-          onClick={() => useMemoryGraphStore.getState().bumpRefresh()}
-        />
-        <BarDivider />
-        <BarBtn
-          icon={Pin}
-          label="Community hulls"
-          tint="mint"
-          active={showHulls}
-          onClick={() => useMemoryGraphStore.getState().setShowHulls(!showHulls)}
-        />
-        <BarDivider />
-        <SegmentedControl<MemScopeFilter>
-          options={SCOPE_OPTIONS}
-          value={scopeFilter}
-          onChange={(v) => useMemoryGraphStore.getState().setScopeFilter(v)}
-          size="sm"
-          aria-label="Scope filter"
-        />
-        <SegmentedControl<MemTimeFilter>
-          options={TIME_OPTIONS}
-          value={timeFilter}
-          onChange={(v) => useMemoryGraphStore.getState().setTimeFilter(v)}
-          size="sm"
-          aria-label="Time filter"
-        />
-      </div>
-
-      {/* ── Honesty pills (top-center) — no silent caps, no fake similarity ── */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 14,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 18,
-          display: 'flex',
-          gap: 6,
+          flexDirection: 'column',
+          gap: 8,
           pointerEvents: 'none',
         }}
       >
-        {/* Truncation is per-kind — the OR'd payload.truncated flag would mislabel
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}
+        >
+          {/* ── Search ── */}
+          <div
+            className="surface-floating-tier"
+            style={{
+              pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: 4,
+              borderRadius: 12,
+            }}
+          >
+            <div style={{ width: 220 }}>
+              <SearchInput
+                value={query}
+                onChange={onQueryChange}
+                onKeyDown={onSearchKeyDown}
+                placeholder="Search memory…"
+                size="sm"
+                aria-label="Search memory graph"
+                data-testid="memory-graph-search"
+              />
+            </div>
+            {/* Mode segment hidden when no provider — degrade honestly to FTS. */}
+            {provider != null && (
+              <SegmentedControl<SearchMode>
+                options={MODES.map((m) => ({ id: m, label: m }))}
+                value={mode}
+                onChange={setMode}
+                size="sm"
+                aria-label="Search mode"
+              />
+            )}
+          </div>
+
+          {/* ── Commands ── */}
+          <div
+            role="toolbar"
+            aria-label="Memory graph controls"
+            className="surface-floating-tier"
+            style={{
+              pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              padding: 4,
+              borderRadius: 12,
+            }}
+          >
+            <BarBtn
+              icon={RefreshCw}
+              label="Re-layout (refresh)"
+              onClick={() => useMemoryGraphStore.getState().bumpRefresh()}
+            />
+            <BarDivider />
+            <BarBtn
+              icon={Pin}
+              label="Community hulls"
+              tint="mint"
+              active={showHulls}
+              onClick={() => useMemoryGraphStore.getState().setShowHulls(!showHulls)}
+            />
+            <BarDivider />
+            <SegmentedControl<MemScopeFilter>
+              options={SCOPE_OPTIONS}
+              value={scopeFilter}
+              onChange={(v) => useMemoryGraphStore.getState().setScopeFilter(v)}
+              size="sm"
+              aria-label="Scope filter"
+            />
+            <SegmentedControl<MemTimeFilter>
+              options={TIME_OPTIONS}
+              value={timeFilter}
+              onChange={(v) => useMemoryGraphStore.getState().setTimeFilter(v)}
+              size="sm"
+              aria-label="Time filter"
+            />
+          </div>
+        </div>
+
+        {/* ── Honesty pills: no silent caps, no fake similarity ── */}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+            gap: 6,
+            pointerEvents: 'none',
+          }}
+        >
+          {/* Truncation is per-kind — the OR'd payload.truncated flag would mislabel
             a procedure-only cap as "facts". */}
-        {payload != null && payload.totalFacts > factNodeCount && (
-          <StatusPill
-            tone="warning"
-            label={`Showing newest ${factNodeCount} of ${payload.totalFacts} facts`}
-          />
-        )}
-        {payload != null && payload.totalProcedures > procNodeCount && (
-          <StatusPill
-            tone="warning"
-            label={`Showing newest ${procNodeCount} of ${payload.totalProcedures} procedures`}
-          />
-        )}
-        {noMatch && <StatusPill tone="idle" label="No matches" />}
-        {/* Surface the computed honesty field (not just provider == null), so a
+          {payload != null && payload.totalFacts > factNodeCount && (
+            <StatusPill
+              tone="warning"
+              label={`Showing newest ${factNodeCount} of ${payload.totalFacts} facts`}
+            />
+          )}
+          {payload != null && payload.totalProcedures > procNodeCount && (
+            <StatusPill
+              tone="warning"
+              label={`Showing newest ${procNodeCount} of ${payload.totalProcedures} procedures`}
+            />
+          )}
+          {noMatch && <StatusPill tone="idle" label="No matches" />}
+          {/* Surface the computed honesty field (not just provider == null), so a
             provider-present-but-no-comparable-embeddings store degrades honestly. */}
-        {payload != null && payload.nodes.length > 0 && !payload.similarityAvailable && (
-          <StatusPill
-            tone="idle"
-            label={
-              provider == null
-                ? 'No embedding provider — similarity links unavailable'
-                : 'No comparable embeddings yet — similarity links unavailable'
-            }
-          />
-        )}
+          {payload != null && payload.nodes.length > 0 && !payload.similarityAvailable && (
+            <StatusPill
+              tone="idle"
+              label={
+                provider == null
+                  ? 'Similarity links unavailable: no embedding provider'
+                  : 'Similarity links unavailable: no comparable embeddings yet'
+              }
+            />
+          )}
+        </div>
       </div>
 
       {/* ── Bottom-right viewport bar ── */}
@@ -376,6 +398,10 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
     </div>
   )
 }
+
+/** Inspector rail width (InspectPanel), reserved by the top chrome so its
+ *  controls stay reachable while a node is selected. */
+const INSPECT_RAIL = 320
 
 export function MemoryGraphView({ onOpenList }: { onOpenList?: () => void }) {
   return (

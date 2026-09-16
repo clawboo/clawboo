@@ -71,7 +71,7 @@ test.describe('Memory Graph', () => {
     // Honesty pill — conditional on whether the sandbox resolved a provider.
     const providerResp = await request.get(`${API_BASE}/api/memory/provider`)
     const provider = ((await providerResp.json()) as { provider: unknown }).provider
-    const providerPill = page.getByText('No embedding provider — similarity links unavailable')
+    const providerPill = page.getByText('Similarity links unavailable: no embedding provider')
     if (provider == null) await expect(providerPill).toBeVisible()
     else await expect(providerPill).not.toBeVisible()
 

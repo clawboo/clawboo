@@ -32,6 +32,11 @@ export type MemFlowEdge = Edge<MemEdgeData>
 export const PROC_WIDTH = 150
 export const PROC_HEIGHT = 44
 
+/** "1 fact" / "2 facts": a count with its noun agreeing in number. */
+export function countLabel(n: number, singular: string, plural = `${singular}s`): string {
+  return `${n} ${n === 1 ? singular : plural}`
+}
+
 /** Community → palette var (8-color cycle; both themes define --mem-c0..c7). */
 export function communityColor(community: number): string {
   return `var(--mem-c${((community % 8) + 8) % 8})`
