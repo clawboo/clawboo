@@ -313,6 +313,10 @@ const SCHEMA_DDL = `
       scope_agent_id  TEXT,
       scope_team_id   TEXT,
       tenant_id       TEXT,
+      created_by_agent_id  TEXT,
+      created_by_runtime   TEXT,
+      source_task_id       TEXT,
+      source_session_key   TEXT,
       created_at      INTEGER NOT NULL,
       updated_at      INTEGER NOT NULL
     );
@@ -328,10 +332,32 @@ const SCHEMA_DDL = `
       scope_agent_id TEXT,
       scope_team_id  TEXT,
       tenant_id      TEXT,
+      created_by_agent_id  TEXT,
+      created_by_runtime   TEXT,
+      source_task_id       TEXT,
+      source_session_key   TEXT,
       created_at     INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_memory_procedures_name ON memory_procedures (name);
     CREATE INDEX IF NOT EXISTS idx_memory_procedures_team ON memory_procedures (scope_team_id);
+
+    -- Outcome events over facts (the learning overlay's substrate): explicit
+    -- feedback (useful | dead_end | corrected) from agents/users plus internal
+    -- 'cited' rows written by run-start injection. fact_id is a SOFT reference
+    -- (no FK) matching the memory posture; rows are append-only events.
+    CREATE TABLE IF NOT EXISTS memory_outcomes (
+      id         TEXT    PRIMARY KEY,
+      fact_id    TEXT    NOT NULL,
+      outcome    TEXT    NOT NULL,
+      note       TEXT,
+      agent_id   TEXT,
+      team_id    TEXT,
+      task_id    TEXT,
+      runtime    TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_outcomes_fact    ON memory_outcomes (fact_id);
+    CREATE INDEX IF NOT EXISTS idx_memory_outcomes_created ON memory_outcomes (created_at);
 
     -- FTS5 over facts (standalone copy of title/content keyed by fact_id), kept
     -- in sync by triggers. Raw DDL — Drizzle cannot model a virtual table.

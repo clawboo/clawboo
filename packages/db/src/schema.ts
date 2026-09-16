@@ -479,6 +479,12 @@ export const memoryFacts = sqliteTable(
     scopeAgentId: text('scope_agent_id'),
     scopeTeamId: text('scope_team_id'),
     tenantId: text('tenant_id'),
+    // Provenance (who/what produced this row) — nullable, write-time only,
+    // never affects visibility scoping. 'user' runtime = saved from the UI.
+    createdByAgentId: text('created_by_agent_id'),
+    createdByRuntime: text('created_by_runtime'),
+    sourceTaskId: text('source_task_id'),
+    sourceSessionKey: text('source_session_key'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
@@ -502,6 +508,10 @@ export const memoryProcedures = sqliteTable(
     scopeAgentId: text('scope_agent_id'),
     scopeTeamId: text('scope_team_id'),
     tenantId: text('tenant_id'),
+    createdByAgentId: text('created_by_agent_id'),
+    createdByRuntime: text('created_by_runtime'),
+    sourceTaskId: text('source_task_id'),
+    sourceSessionKey: text('source_session_key'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [
@@ -512,6 +522,33 @@ export const memoryProcedures = sqliteTable(
 
 export type DbMemoryProcedure = typeof memoryProcedures.$inferSelect
 export type DbMemoryProcedureInsert = typeof memoryProcedures.$inferInsert
+
+// Outcome signals against facts — the substrate of the derived learning overlay
+// (packages/db/src/memory/learning.ts). One table for explicit feedback
+// (useful/dead_end/corrected) AND internal citation events ('cited', written
+// only by the auto-injection path — external zod enums exclude it, so usage
+// counts cannot be forged). fact_id is a soft ref (no FK — memory posture).
+export const memoryOutcomes = sqliteTable(
+  'memory_outcomes',
+  {
+    id: text('id').primaryKey(),
+    factId: text('fact_id').notNull(),
+    outcome: text('outcome').notNull(), // 'useful' | 'dead_end' | 'corrected' | 'cited'
+    note: text('note'),
+    agentId: text('agent_id'),
+    teamId: text('team_id'),
+    taskId: text('task_id'),
+    runtime: text('runtime'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    index('idx_memory_outcomes_fact').on(t.factId),
+    index('idx_memory_outcomes_created').on(t.createdAt),
+  ],
+)
+
+export type DbMemoryOutcome = typeof memoryOutcomes.$inferSelect
+export type DbMemoryOutcomeInsert = typeof memoryOutcomes.$inferInsert
 
 // ─── MCP trifecta — Tools broker ──────────────────────────────────
 // The brokered tool layer that supersedes the markdown-bullet skill model. The

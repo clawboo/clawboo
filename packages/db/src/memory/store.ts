@@ -13,20 +13,31 @@ import { scrubSecrets } from '../tools/scrub'
 import type { ClawbooDb } from '../db'
 import {
   memoryFacts,
+  memoryOutcomes,
   memoryProcedures,
   type DbMemoryFact,
   type DbMemoryFactInsert,
+  type DbMemoryOutcome,
   type DbMemoryProcedure,
 } from '../schema'
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from './embedding'
+import {
+  projectMemoryGraph,
+  type FactVectorRow,
+  type MemoryGraphPayload,
+  type ProjectMemoryGraphOpts,
+} from './graph'
+import { computeLearningOverlay, type LearningEntry } from './learning'
 import type {
   BrowseOpts,
   EmbeddingProvider,
   Fact,
+  MemoryOutcome,
   MemoryScope,
   MemorySearchResult,
   MemoryStore,
   Procedure,
+  RecordOutcomeInput,
   SaveFactInput,
   SaveProcedureInput,
   SearchMode,
@@ -35,6 +46,9 @@ import type {
 
 const DEFAULT_LIMIT = 10
 const FTS_CANDIDATE_CAP = 200 // vector candidate pool / fts match cap
+const MAX_GRAPH_FACTS = 500 // newest-first cap on the graph payload (honest: truncated flag)
+const MAX_GRAPH_PROCEDURES = 200 // raw procedure rows loaded pre-collapse
+const LEARNING_OUTCOMES_PER_FACT_CAP = 200 // per-fact window in learningForFacts (explicit feedback ranks first)
 
 function eqOrNull<T>(col: Parameters<typeof eq>[0], val: T | null | undefined) {
   return val == null ? isNull(col) : eq(col, val as never)
@@ -89,6 +103,10 @@ function rowToFact(row: DbMemoryFact): Fact {
     scopeAgentId: row.scopeAgentId,
     scopeTeamId: row.scopeTeamId,
     tenantId: row.tenantId,
+    createdByAgentId: row.createdByAgentId,
+    createdByRuntime: row.createdByRuntime,
+    sourceTaskId: row.sourceTaskId,
+    sourceSessionKey: row.sourceSessionKey,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -103,9 +121,31 @@ function rowToProcedure(row: DbMemoryProcedure): Procedure {
     scopeAgentId: row.scopeAgentId,
     scopeTeamId: row.scopeTeamId,
     tenantId: row.tenantId,
+    createdByAgentId: row.createdByAgentId,
+    createdByRuntime: row.createdByRuntime,
+    sourceTaskId: row.sourceTaskId,
+    sourceSessionKey: row.sourceSessionKey,
     createdAt: row.createdAt,
   }
 }
+
+function rowToOutcome(row: DbMemoryOutcome): MemoryOutcome {
+  return {
+    id: row.id,
+    factId: row.factId,
+    outcome: row.outcome as MemoryOutcome['outcome'],
+    note: row.note,
+    agentId: row.agentId,
+    teamId: row.teamId,
+    taskId: row.taskId,
+    runtime: row.runtime,
+    createdAt: row.createdAt,
+  }
+}
+
+/** Fact ids are UUIDs — a prefix lookup only accepts hex/hyphen chars so a
+ *  user-supplied prefix can never smuggle LIKE wildcards. */
+const SAFE_ID_PREFIX = /^[0-9a-fA-F-]{8,}$/
 
 export class SqliteMemoryStore implements MemoryStore {
   constructor(
@@ -163,6 +203,7 @@ export class SqliteMemoryStore implements MemoryStore {
       }
     }
 
+    const prov = input.provenance ?? {}
     const row: DbMemoryFactInsert = {
       id,
       title,
@@ -173,6 +214,10 @@ export class SqliteMemoryStore implements MemoryStore {
       scopeAgentId: scope.agentId ?? null,
       scopeTeamId: scope.teamId ?? null,
       tenantId: scope.tenantId ?? null,
+      createdByAgentId: prov.agentId ?? null,
+      createdByRuntime: prov.runtime ?? null,
+      sourceTaskId: prov.taskId ?? null,
+      sourceSessionKey: prov.sessionKey ?? null,
       createdAt: now,
       updatedAt: now,
     }
@@ -186,6 +231,10 @@ export class SqliteMemoryStore implements MemoryStore {
       scopeAgentId: scope.agentId ?? null,
       scopeTeamId: scope.teamId ?? null,
       tenantId: scope.tenantId ?? null,
+      createdByAgentId: prov.agentId ?? null,
+      createdByRuntime: prov.runtime ?? null,
+      sourceTaskId: prov.taskId ?? null,
+      sourceSessionKey: prov.sessionKey ?? null,
       createdAt: now,
       updatedAt: now,
     }
@@ -309,6 +358,7 @@ export class SqliteMemoryStore implements MemoryStore {
       .orderBy(desc(memoryProcedures.version))
       .get() as { version: number } | undefined
     const version = (prior?.version ?? 0) + 1
+    const prov = input.provenance ?? {}
     const row: Procedure = {
       id: randomUUID(),
       name: input.name,
@@ -317,6 +367,10 @@ export class SqliteMemoryStore implements MemoryStore {
       scopeAgentId: agentId,
       scopeTeamId: teamId,
       tenantId: scope.tenantId ?? null,
+      createdByAgentId: prov.agentId ?? null,
+      createdByRuntime: prov.runtime ?? null,
+      sourceTaskId: prov.taskId ?? null,
+      sourceSessionKey: prov.sessionKey ?? null,
       createdAt: now,
     }
     withWriteRetry(() => this.db.insert(memoryProcedures).values(row).run())
@@ -355,5 +409,235 @@ export class SqliteMemoryStore implements MemoryStore {
       .limit(opts.limit ?? DEFAULT_LIMIT)
       .all() as DbMemoryProcedure[]
     return Promise.resolve(rows.map(rowToProcedure))
+  }
+
+  /** Exact-id lookup, falling back to a unique 8+ char prefix. Scope-filtered:
+   *  a fact invisible to the caller's scope resolves to null, so feedback can't
+   *  be used as a cross-team existence oracle. */
+  getFact(idOrPrefix: string, scope?: MemoryScope): Promise<Fact | null> {
+    const exact = this.db
+      .select()
+      .from(memoryFacts)
+      .where(and(eq(memoryFacts.id, idOrPrefix), ...this.factScopeConds(scope)))
+      .get() as DbMemoryFact | undefined
+    if (exact) return Promise.resolve(rowToFact(exact))
+    if (!SAFE_ID_PREFIX.test(idOrPrefix)) return Promise.resolve(null)
+    const rows = this.db
+      .select()
+      .from(memoryFacts)
+      .where(and(sql`${memoryFacts.id} LIKE ${idOrPrefix + '%'}`, ...this.factScopeConds(scope)))
+      .limit(2)
+      .all() as DbMemoryFact[]
+    return Promise.resolve(rows.length === 1 ? rowToFact(rows[0]!) : null)
+  }
+
+  /** Record an explicit outcome (or internal citation) against a fact. The fact
+   *  must exist by exact id — callers resolve prefixes via getFact first. */
+  recordOutcome(input: RecordOutcomeInput): Promise<MemoryOutcome> {
+    const exists = this.db
+      .select({ id: memoryFacts.id })
+      .from(memoryFacts)
+      .where(eq(memoryFacts.id, input.factId))
+      .get()
+    if (!exists) return Promise.reject(new Error(`unknown fact: ${input.factId}`))
+    if (input.outcome === 'corrected' && !input.note?.trim())
+      return Promise.reject(new Error('corrected requires a note'))
+    const row: MemoryOutcome = {
+      id: randomUUID(),
+      factId: input.factId,
+      outcome: input.outcome,
+      // A correction could paste a secret — same scrub-on-write discipline.
+      note: input.note != null ? scrubText(input.note) : null,
+      agentId: input.agentId ?? null,
+      teamId: input.teamId ?? null,
+      taskId: input.taskId ?? null,
+      runtime: input.runtime ?? null,
+      createdAt: Date.now(),
+    }
+    withWriteRetry(() => this.db.insert(memoryOutcomes).values(row).run())
+    return Promise.resolve(row)
+  }
+
+  /** The injection write path: one 'cited' row per fact used in a run's prompt.
+   *  Deduped on (factId, taskId) so task retries/rotations never inflate usage. */
+  recordCitations(
+    factIds: string[],
+    meta: {
+      agentId?: string | null
+      teamId?: string | null
+      taskId?: string | null
+      runtime?: string | null
+    },
+  ): Promise<void> {
+    if (factIds.length === 0) return Promise.resolve()
+    let toInsert = [...new Set(factIds)]
+    if (meta.taskId != null) {
+      const existing = this.db
+        .select({ factId: memoryOutcomes.factId })
+        .from(memoryOutcomes)
+        .where(
+          and(
+            eq(memoryOutcomes.outcome, 'cited'),
+            eq(memoryOutcomes.taskId, meta.taskId),
+            inArray(memoryOutcomes.factId, toInsert),
+          ),
+        )
+        .all() as { factId: string }[]
+      const seen = new Set(existing.map((r) => r.factId))
+      toInsert = toInsert.filter((id) => !seen.has(id))
+    }
+    if (toInsert.length === 0) return Promise.resolve()
+    const now = Date.now()
+    const rows: MemoryOutcome[] = toInsert.map((factId) => ({
+      id: randomUUID(),
+      factId,
+      outcome: 'cited',
+      note: null,
+      agentId: meta.agentId ?? null,
+      teamId: meta.teamId ?? null,
+      taskId: meta.taskId ?? null,
+      runtime: meta.runtime ?? null,
+      createdAt: now,
+    }))
+    withWriteRetry(() => this.db.insert(memoryOutcomes).values(rows).run())
+    return Promise.resolve()
+  }
+
+  listOutcomes(opts: { factIds?: string[]; limit?: number } = {}): Promise<MemoryOutcome[]> {
+    if (opts.factIds && opts.factIds.length === 0) return Promise.resolve([])
+    const limit = Math.min(opts.limit ?? 200, 1000)
+    const rows = this.db
+      .select()
+      .from(memoryOutcomes)
+      .where(opts.factIds ? inArray(memoryOutcomes.factId, opts.factIds) : undefined)
+      .orderBy(desc(memoryOutcomes.createdAt), desc(memoryOutcomes.id))
+      .limit(limit)
+      .all() as DbMemoryOutcome[]
+    return Promise.resolve(rows.map(rowToOutcome))
+  }
+
+  /** The one decoration call every read surface shares, so learning statuses
+   *  are identical across REST browse/search/graph, MCP, and injection.
+   *
+   *  Windows outcomes PER FACT (not a single global cap): a fact's explicit
+   *  feedback (useful/dead_end/corrected) is always retained — the partition
+   *  orders explicit rows ahead of the high-volume 'cited' events, so a busy
+   *  neighbour fact's citations can never evict this fact's negatives (which
+   *  would break learning.ts's "negativeCount never decays away" invariant).
+   *  'cited' rows fill the remainder newest-first, bounding cost per fact. */
+  async learningForFacts(factIds: string[], now: number): Promise<Record<string, LearningEntry>> {
+    if (factIds.length === 0) return {}
+    const idList = sql.join(
+      factIds.map((id) => sql`${id}`),
+      sql`, `,
+    )
+    const rows = this.db.all(
+      sql`SELECT id, fact_id, outcome, note, agent_id, team_id, task_id, runtime, created_at FROM (
+            SELECT *, ROW_NUMBER() OVER (
+              PARTITION BY fact_id
+              ORDER BY (outcome = 'cited') ASC, created_at DESC, id DESC
+            ) AS rn
+            FROM memory_outcomes
+            WHERE fact_id IN (${idList})
+          ) WHERE rn <= ${LEARNING_OUTCOMES_PER_FACT_CAP}`,
+    ) as {
+      id: string
+      fact_id: string
+      outcome: string
+      note: string | null
+      agent_id: string | null
+      team_id: string | null
+      task_id: string | null
+      runtime: string | null
+      created_at: number
+    }[]
+    const outcomes: MemoryOutcome[] = rows.map((r) => ({
+      id: r.id,
+      factId: r.fact_id,
+      outcome: r.outcome as MemoryOutcome['outcome'],
+      note: r.note,
+      agentId: r.agent_id,
+      teamId: r.team_id,
+      taskId: r.task_id,
+      runtime: r.runtime,
+      createdAt: r.created_at,
+    }))
+    return Object.fromEntries(computeLearningOverlay(outcomes, now))
+  }
+
+  /** Scoped facts with deserialized vectors — the graph projection's raw
+   *  material. Embeddings stay in-process; they are never exposed over REST. */
+  browseFactsWithVectors(opts: BrowseOpts = {}): Promise<FactVectorRow[]> {
+    const rows = this.loadScopedFacts(opts.scope, opts.limit ?? FTS_CANDIDATE_CAP)
+    return Promise.resolve(
+      rows.map((row) => ({
+        ...rowToFact(row),
+        vector: deserializeEmbedding(row.embedding as Buffer | null),
+        embeddingModel: row.embeddingModel,
+      })),
+    )
+  }
+
+  /** The full memory-graph payload for GET /api/memory/graph: newest-first
+   *  capped rows → pure projection, decorated with the learning overlay. */
+  async getMemoryGraph(
+    opts: { scope?: MemoryScope; factLimit?: number; procedureLimit?: number } & Pick<
+      ProjectMemoryGraphOpts,
+      'simThreshold' | 'simTopK' | 'tagTopK' | 'providerId'
+    > = {},
+  ): Promise<MemoryGraphPayload> {
+    const factLimit = Math.min(opts.factLimit ?? MAX_GRAPH_FACTS, MAX_GRAPH_FACTS)
+    const procedureLimit = Math.min(
+      opts.procedureLimit ?? MAX_GRAPH_PROCEDURES,
+      MAX_GRAPH_PROCEDURES,
+    )
+
+    const factConds = this.factScopeConds(opts.scope)
+    const totalFacts =
+      (this.db
+        .select({ c: sql<number>`count(*)` })
+        .from(memoryFacts)
+        .where(factConds.length ? and(...factConds) : undefined)
+        .get()?.c as number | undefined) ?? 0
+
+    const facts = await this.browseFactsWithVectors({ scope: opts.scope, limit: factLimit })
+
+    // Procedures: team-inclusive + tenant-strict scope (mirrors listProcedures);
+    // totalProcedures counts DISTINCT (name, scope) — the collapsed-node count —
+    // in SQL, so the count never materializes every version row on the request path.
+    const procConds = []
+    if (provided(opts.scope?.teamId))
+      procConds.push(
+        sql`(${memoryProcedures.scopeTeamId} = ${opts.scope.teamId} OR ${memoryProcedures.scopeTeamId} IS NULL)`,
+      )
+    if (provided(opts.scope?.tenantId))
+      procConds.push(eq(memoryProcedures.tenantId, opts.scope.tenantId))
+    const procWhere = procConds.length ? sql` WHERE ${sql.join(procConds, sql` AND `)}` : sql``
+    const totalProcedures =
+      (
+        this.db.get(
+          sql`SELECT count(DISTINCT name || ' ' || COALESCE(scope_team_id, '') || ' ' || COALESCE(scope_agent_id, '')) AS c FROM memory_procedures${procWhere}`,
+        ) as { c: number } | undefined
+      )?.c ?? 0
+
+    const procedures = await this.listProcedures({ scope: opts.scope, limit: procedureLimit })
+
+    const learningRecord = await this.learningForFacts(
+      facts.map((f) => f.id),
+      Date.now(),
+    )
+
+    return projectMemoryGraph(
+      facts,
+      procedures,
+      { totalFacts, totalProcedures },
+      {
+        simThreshold: opts.simThreshold,
+        simTopK: opts.simTopK,
+        tagTopK: opts.tagTopK,
+        providerId: opts.providerId,
+        learning: new Map(Object.entries(learningRecord)),
+      },
+    )
   }
 }

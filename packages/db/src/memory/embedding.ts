@@ -179,6 +179,10 @@ export async function resolveEmbeddingProvider(
   opts: ResolveEmbeddingOpts = {},
 ): Promise<EmbeddingProvider | null> {
   if (opts.provider) return opts.provider
+  // Escape hatch: force FTS-only (no vector/hybrid) regardless of what's
+  // reachable. Lets an operator opt out of embeddings, and gives the e2e a
+  // deterministic graph (tag/version edges only, no similarity-driven clustering).
+  if (process.env['CLAWBOO_DISABLE_EMBEDDINGS'] === '1') return null
   const ollamaUrl = opts.ollamaUrl ?? OLLAMA_DEFAULT_URL
   if (await ollamaReachable(ollamaUrl, opts.probeTimeoutMs ?? 1500)) {
     return new OllamaEmbeddingProvider({ baseUrl: ollamaUrl, model: opts.ollamaModel })
