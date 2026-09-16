@@ -921,8 +921,9 @@ Clawboo's architecture and design were informed by prior art in the open-source
 agent-orchestration space, among them Paperclip (https://github.com/paperclipai/paperclip)
 and vibe-kanban (https://github.com/BloopAI/vibe-kanban). Nous Research's
 hermes-paperclip-adapter (https://github.com/NousResearch/hermes-paperclip-adapter, MIT)
-was a useful reference for running Hermes Agent as a managed worker. These projects are
-credited here as design inspiration.
+was a useful reference for running Hermes Agent as a managed worker, and Graphify
+(https://github.com/Graphify-Labs/graphify, MIT) for presenting a knowledge store as a
+navigable graph. These projects are credited here as design inspiration.
 
 ---
 
