@@ -32,8 +32,10 @@ const governancePanel = vi.fn<() => ReactElement>()
 vi.mock('@/features/health', () => ({
   SystemHealthPanel: () => <div data-testid="stub-health">system health</div>,
 }))
-vi.mock('@/features/memory/MemoryPanel', () => ({
-  MemoryPanel: () => <div data-testid="stub-memory">memory</div>,
+// The memory view now loads MemorySurface (graph hero + list) — stub it here so
+// the Suspense test never pulls the real React Flow chunk into jsdom.
+vi.mock('@/features/memory/MemorySurface', () => ({
+  MemorySurface: () => <div data-testid="stub-memory">memory</div>,
 }))
 vi.mock('@/features/governance/GovernancePanel', () => ({
   GovernancePanel: () => governancePanel(),

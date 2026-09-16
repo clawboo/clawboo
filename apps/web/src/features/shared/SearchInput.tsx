@@ -12,6 +12,8 @@ export interface SearchInputProps {
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
   className?: string
   'aria-label'?: string
+  /** Forwarded to the <input> so tests can target the field itself. */
+  'data-testid'?: string
 }
 
 const DIMS = {
@@ -29,6 +31,7 @@ export function SearchInput({
   onKeyDown,
   className = '',
   'aria-label': ariaLabel,
+  'data-testid': dataTestId,
 }: SearchInputProps) {
   const d = DIMS[size]
   return (
@@ -49,6 +52,7 @@ export function SearchInput({
         placeholder={placeholder}
         aria-label={ariaLabel ?? placeholder}
         autoFocus={autoFocus}
+        data-testid={dataTestId}
         spellCheck={false}
         className={[
           'w-full border border-border bg-surface text-foreground outline-none transition',

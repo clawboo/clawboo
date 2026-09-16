@@ -6,6 +6,11 @@ import type { NavView } from './view'
 // marketplace, board, approvals) stay in the sidebar and are NOT settings
 // views — matching how Linear / Claude / Notion keep primary navigation out of
 // the settings sheet.
+//
+// EXCEPTION: 'memory' deliberately lives in BOTH — the sidebar hosts the full
+// surface (graph hero + list) while this modal keeps a compact list-only pane
+// with an "Open full view" escape hatch (MemorySurface branches on
+// useInSettingsModal()). The modal never hosts the canvas.
 export type SettingsView = Extract<
   NavView,
   | 'runtimes'

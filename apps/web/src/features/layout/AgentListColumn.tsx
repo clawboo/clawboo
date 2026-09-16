@@ -3,6 +3,7 @@ import { agentRecordToFleetState } from '@/lib/agentSourceClient'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
+  Brain,
   ChevronRight,
   Gauge,
   Ghost,
@@ -244,7 +245,13 @@ const PRIMARY_NAV: NavItem[] = [
 // System Health) so the sidebar stays short.
 // Approvals moved into the Board (a collapsible "Needs approval" column) + inline
 // above the chat composer, so the sidebar no longer carries a separate item.
-const SECONDARY_NAV: NavItem[] = [{ id: 'fleet', icon: Gauge, subtitle: '(Overview)' }]
+const SECONDARY_NAV: NavItem[] = [
+  { id: 'fleet', icon: Gauge, subtitle: '(Overview)' },
+  // Memory is DELIBERATELY in both the sidebar (graph hero + list) and the
+  // Settings modal (list-only, with an "Open full view" escape hatch) — see
+  // the note in stores/settingsModal.ts.
+  { id: 'memory', icon: Brain, subtitle: '(Team Knowledge)' },
+]
 
 // One consistent nav row — neutral active surface + a brand-red active icon
 // (the premium sidebar pattern). Used for both nav sections.

@@ -3,7 +3,15 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { browseMemory, getProvider, saveFact, searchMemory } from '../memoryClient'
+import {
+  browseMemory,
+  fetchMemoryGraph,
+  getOutcomes,
+  getProvider,
+  recordFeedback,
+  saveFact,
+  searchMemory,
+} from '../memoryClient'
 
 function stubFetch(impl: (url: string, init?: RequestInit) => Promise<Response> | Response) {
   vi.stubGlobal('fetch', vi.fn(impl) as unknown as typeof fetch)
@@ -59,10 +67,97 @@ describe('memoryClient', () => {
     const r = await browseMemory()
     expect(r.facts).toHaveLength(1)
     expect(r.procedures).toHaveLength(1)
+    expect(r.learning).toEqual({}) // additive map defaults to {} when absent
     expect(r.ok).toBe(true)
 
     stubFetch(() => fail())
-    expect(await browseMemory()).toEqual({ facts: [], procedures: [], ok: false })
+    expect(await browseMemory()).toEqual({ facts: [], procedures: [], learning: {}, ok: false })
+  })
+
+  it('browseMemory parses the sibling learning map', async () => {
+    stubFetch(() =>
+      ok({ facts: [{ id: 'f' }], procedures: [], learning: { f: { status: 'preferred' } } }),
+    )
+    const r = await browseMemory()
+    expect(r.learning['f']?.status).toBe('preferred')
+  })
+
+  it('searchMemory merges the sibling learning map into results client-side', async () => {
+    stubFetch(() =>
+      ok({
+        results: [
+          { id: 'a', title: 'x', content: 'y', tags: [], score: 0.5, matchedVia: 'fts' },
+          { id: 'b', title: 'x', content: 'y', tags: [], score: 0.4, matchedVia: 'fts' },
+        ],
+        learning: { a: { status: 'tentative' } },
+      }),
+    )
+    const r = await searchMemory('q', 'fts')
+    expect(r[0]?.learning?.status).toBe('tentative')
+    expect(r[1]?.learning).toBeUndefined()
+  })
+
+  it('fetchMemoryGraph returns { graph, provider } and null on failure/absent graph', async () => {
+    const graph = {
+      nodes: [],
+      edges: [],
+      communities: [],
+      totalFacts: 0,
+      totalProcedures: 0,
+      truncated: false,
+      similarityAvailable: false,
+    }
+    let seen = ''
+    stubFetch((url) => {
+      seen = url
+      return ok({ ok: true, graph, provider: { id: 'ollama', dimensions: 768 } })
+    })
+    const r = await fetchMemoryGraph({ limit: 100 })
+    expect(seen).toContain('/api/memory/graph')
+    expect(seen).toContain('limit=100')
+    expect(r?.graph).toEqual(graph)
+    expect(r?.provider).toEqual({ id: 'ollama', dimensions: 768 })
+
+    stubFetch(() => ok({ ok: true })) // graph missing → null (defensive)
+    expect(await fetchMemoryGraph()).toBeNull()
+    stubFetch(() => fail())
+    expect(await fetchMemoryGraph()).toBeNull()
+  })
+
+  it('recordFeedback posts factId/outcome(/note) and returns the entry (null on failure)', async () => {
+    let bodyStr = ''
+    stubFetch((_url, init) => {
+      bodyStr = String(init?.body ?? '')
+      return ok({ ok: true, learning: { status: 'tentative' } })
+    })
+    const entry = await recordFeedback('fact-1234', 'useful')
+    expect(entry?.status).toBe('tentative')
+    expect(JSON.parse(bodyStr)).toEqual({ factId: 'fact-1234', outcome: 'useful' })
+
+    await recordFeedback('fact-1234', 'corrected', 'actually X')
+    expect(JSON.parse(bodyStr)).toEqual({
+      factId: 'fact-1234',
+      outcome: 'corrected',
+      note: 'actually X',
+    })
+
+    stubFetch(() => fail())
+    expect(await recordFeedback('fact-1234', 'dead_end')).toBeNull()
+  })
+
+  it('getOutcomes builds the factId query and returns [] on failure', async () => {
+    let seen = ''
+    stubFetch((url) => {
+      seen = url
+      return ok({ ok: true, outcomes: [{ id: 'o1', outcome: 'useful' }] })
+    })
+    const r = await getOutcomes('fact-1234')
+    expect(seen).toContain('/api/memory/outcomes')
+    expect(seen).toContain('factId=fact-1234')
+    expect(r).toHaveLength(1)
+
+    stubFetch(() => fail())
+    expect(await getOutcomes('fact-1234')).toEqual([])
   })
 
   it('getProvider parses the provider (null when absent/failed)', async () => {

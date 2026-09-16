@@ -192,6 +192,20 @@
   --category-web: #9333ea; /* purple-600 */
   --category-other: #64748b; /* slate-500 */
 
+  /* Memory-graph community palette. c0–c3 anchor to the existing accent hue
+     families (mint / violet / amber / primary) so communities inherit the
+     brand language; c4–c7 add theme-tuned hues (teal / blue / rose / slate).
+     Light values deepened one step for AA on white, like mint/amber above.
+     Community → color resolves as var(--mem-c${community % 8}). */
+  --mem-c0: #059669; /* mint family */
+  --mem-c1: #7c3aed; /* violet family */
+  --mem-c2: #d97706; /* amber family */
+  --mem-c3: #dc2a48; /* primary family */
+  --mem-c4: #0d9488; /* teal-600 */
+  --mem-c5: #2563eb; /* blue-600 */
+  --mem-c6: #db2777; /* rose-600 */
+  --mem-c7: #64748b; /* slate-500 */
+
   --canvas: #fafbfc;
   --canvas-rgb: 250 251 252;
   --canvas-dot: rgb(15 23 42 / 0.07);
@@ -332,6 +346,17 @@
   --category-file: var(--amber); /* amber */
   --category-web: #a855f7; /* purple-500 */
   --category-other: #6b7280; /* gray-500 */
+
+  /* Memory-graph community palette — dark-tuned counterparts of the light
+     values (see the :root block for the hue-family mapping). */
+  --mem-c0: #34d399; /* mint family */
+  --mem-c1: #a78bfa; /* violet family */
+  --mem-c2: #fbbf24; /* amber family */
+  --mem-c3: #e94560; /* primary family */
+  --mem-c4: #2dd4bf; /* teal-400 */
+  --mem-c5: #60a5fa; /* blue-400 */
+  --mem-c6: #f472b6; /* rose-400 */
+  --mem-c7: #94a3b8; /* slate-400 */
 
   --canvas: #0a0e1a;
   --canvas-rgb: 10 14 26;

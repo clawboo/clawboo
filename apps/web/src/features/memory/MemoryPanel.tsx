@@ -2,11 +2,25 @@
 // (fts / vector / hybrid), save a declarative fact, and browse the two tiers
 // (facts + versioned procedures). The active embedding provider is shown so the
 // user knows whether vector/hybrid are backed (they degrade to FTS when null).
+// Fact cards surface the learning overlay (status pill + outcome trail +
+// Helpful/Outdated feedback) and the provenance caption.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { motion } from 'framer-motion'
-import { Brain, Cpu, ListChecks, Lock, RefreshCw, Search, SearchX, Users } from 'lucide-react'
+import {
+  Brain,
+  Cpu,
+  History,
+  ListChecks,
+  Lock,
+  RefreshCw,
+  Search,
+  SearchX,
+  ThumbsDown,
+  ThumbsUp,
+  Users,
+} from 'lucide-react'
 
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -16,19 +30,25 @@ import { PanelHeader } from '@/features/shared/PanelHeader'
 import { SegmentedControl } from '@/features/shared/SegmentedControl'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { StatusPill } from '@/features/shared/StatusPill'
+import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
 import {
   browseMemory,
+  getOutcomes,
   getProvider,
+  recordFeedback,
   saveFact,
   searchMemory,
   type EmbeddingProviderInfo,
+  type LearningEntry,
   type MemoryFact,
+  type MemoryOutcome,
   type MemoryProcedure,
   type MemorySearchResult,
   type SearchMode,
 } from '@/lib/memoryClient'
+import { LearningPill, OutcomeTrail, provenanceCaption } from './learningUi'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 const MODES: SearchMode[] = ['fts', 'vector', 'hybrid']
@@ -63,8 +83,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 const INPUT_CLASS =
   'w-full rounded-xl border border-border bg-input px-4 py-2.5 text-[14px] text-foreground outline-none transition placeholder:text-foreground/35 focus:border-primary focus:ring-4 focus:ring-primary/15'
 
-export function MemoryPanel() {
+export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
   const addToast = useToastStore((s) => s.addToast)
+  const agents = useFleetStore((s) => s.agents)
   const [mode, setMode] = useState<SearchMode>('hybrid')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<MemorySearchResult[]>([])
@@ -78,9 +99,20 @@ export function MemoryPanel() {
 
   const [facts, setFacts] = useState<MemoryFact[]>([])
   const [procedures, setProcedures] = useState<MemoryProcedure[]>([])
+  const [learning, setLearning] = useState<Record<string, LearningEntry>>({})
   const [provider, setProvider] = useState<EmbeddingProviderInfo | null>(null)
   const [loadingBrowse, setLoadingBrowse] = useState(true)
   const [browseOk, setBrowseOk] = useState(true) // false when the browse load failed → error/retry
+
+  // Outcome-trail expansion (one card at a time) + lazily-fetched full history.
+  const [expandedFactId, setExpandedFactId] = useState<string | null>(null)
+  const [history, setHistory] = useState<MemoryOutcome[] | null>(null)
+
+  const agentName = useCallback(
+    (agentId: string | null) =>
+      agentId ? (agents.find((a) => a.id === agentId)?.name ?? agentId.slice(0, 8)) : null,
+    [agents],
+  )
 
   const refreshBrowse = useCallback(async () => {
     setLoadingBrowse(true)
@@ -89,10 +121,23 @@ export function MemoryPanel() {
       setBrowseOk(b.ok)
       setFacts(b.facts)
       setProcedures(b.procedures)
+      setLearning(b.learning)
       setProvider(p)
     } finally {
       setLoadingBrowse(false)
     }
+  }, [])
+
+  // Helpful/Outdated → POST feedback → patch the local learning map from the
+  // returned entry (no full refetch; the pill updates in place).
+  const sendFeedback = useCallback(async (factId: string, outcome: 'useful' | 'dead_end') => {
+    const entry = await recordFeedback(factId, outcome)
+    if (entry) setLearning((prev) => ({ ...prev, [factId]: entry }))
+  }, [])
+
+  const toggleExpanded = useCallback((factId: string) => {
+    setHistory(null)
+    setExpandedFactId((prev) => (prev === factId ? null : factId))
   }, [])
 
   useEffect(() => {
@@ -134,15 +179,33 @@ export function MemoryPanel() {
   const saveDisabled = saving || !title.trim() || !content.trim()
   const firstLoad = loadingBrowse && facts.length === 0 && procedures.length === 0
 
+  // Collapse to the latest version per (name, scope) — the SAME semantic the
+  // graph view uses for its procedure count, so the Graph/List toggle never
+  // shows two different procedure numbers for the same data.
+  const collapsedProcedures = useMemo(() => {
+    const groups = new Map<string, { latest: MemoryProcedure; versionCount: number }>()
+    for (const p of procedures) {
+      const key = `${p.name} ${p.scopeTeamId ?? ''} ${p.scopeAgentId ?? ''}`
+      const g = groups.get(key)
+      if (!g) groups.set(key, { latest: p, versionCount: 1 })
+      else {
+        g.versionCount += 1
+        if (p.version > g.latest.version) g.latest = p
+      }
+    }
+    return [...groups.values()]
+  }, [procedures])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PanelHeader
         title="Memory"
-        subtitle={`${facts.length} facts · ${procedures.length} procedures`}
+        subtitle={`${facts.length} facts · ${collapsedProcedures.length} procedures`}
         icon={Brain}
         border
         actions={
           <>
+            {headerExtra}
             <Button
               variant="secondary"
               size="sm"
@@ -313,6 +376,7 @@ export function MemoryPanel() {
                         {r.title}
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <LearningPill learning={r.learning} />
                         <StatusPill tone="done" label={r.matchedVia} />
                         <span className="font-data" style={{ fontSize: 10, color: muted(0.45) }}>
                           {r.score.toFixed(2)}
@@ -393,66 +457,181 @@ export function MemoryPanel() {
                 paddingTop={28}
               />
             ) : (
-              facts.map((f, i) => (
-                <motion.div
-                  key={f.id}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
-                >
-                  <Card>
+              facts.map((f, i) => {
+                const entry = learning[f.id] ?? null
+                const caption = provenanceCaption(f, agentName(f.createdByAgentId))
+                const expanded = expandedFactId === f.id
+                return (
+                  <motion.div
+                    key={f.id}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
+                  >
+                    {/* Card click toggles the outcome trail; the feedback
+                        buttons stopPropagation so they never flip it. */}
                     <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                      }}
+                      data-testid="memory-fact-card"
+                      onClick={() => toggleExpanded(f.id)}
+                      style={{ cursor: 'pointer' }}
                     >
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>
-                        {f.title}
-                      </span>
-                      <ScopeBadge agentId={f.scopeAgentId} teamId={f.scopeTeamId} />
-                    </div>
-                    <div style={{ fontSize: 11, color: muted(0.6), lineHeight: 1.5 }}>
-                      {f.content.slice(0, 200)}
-                      {f.content.length > 200 ? '…' : ''}
-                    </div>
-                    {f.tags.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {f.tags.map((t) => (
+                      <Card>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                          }}
+                        >
                           <span
-                            key={t}
-                            className="font-data"
-                            style={{
-                              fontSize: 10.5,
-                              padding: '2px 8px',
-                              borderRadius: 6,
-                              background: muted(0.06),
-                              color: muted(0.6),
+                            style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}
+                          >
+                            {f.title}
+                          </span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <LearningPill learning={entry} />
+                            <ScopeBadge agentId={f.scopeAgentId} teamId={f.scopeTeamId} />
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: muted(0.6), lineHeight: 1.5 }}>
+                          {f.content.slice(0, 200)}
+                          {f.content.length > 200 ? '…' : ''}
+                        </div>
+                        {f.tags.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {f.tags.map((t) => (
+                              <span
+                                key={t}
+                                className="font-data"
+                                style={{
+                                  fontSize: 10.5,
+                                  padding: '2px 8px',
+                                  borderRadius: 6,
+                                  background: muted(0.06),
+                                  color: muted(0.6),
+                                }}
+                              >
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          {caption && (
+                            <span
+                              data-testid="memory-provenance"
+                              className="font-data"
+                              style={{ fontSize: 10, color: muted(0.4) }}
+                            >
+                              {caption}
+                            </span>
+                          )}
+                          <span style={{ flex: 1 }} />
+                          <Button
+                            data-testid="memory-fact-helpful"
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void sendFeedback(f.id, 'useful')
                             }}
                           >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </Card>
-                </motion.div>
-              ))
+                            <ThumbsUp size={12} strokeWidth={2} style={{ color: 'var(--mint)' }} />{' '}
+                            Helpful
+                          </Button>
+                          <Button
+                            data-testid="memory-fact-outdated"
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void sendFeedback(f.id, 'dead_end')
+                            }}
+                          >
+                            <ThumbsDown
+                              size={12}
+                              strokeWidth={2}
+                              style={{ color: 'var(--amber)' }}
+                            />{' '}
+                            Outdated
+                          </Button>
+                        </div>
+                        {expanded && (
+                          <div
+                            data-testid="memory-fact-trail"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 6,
+                              paddingTop: 8,
+                              borderTop: `1px solid ${muted(0.07)}`,
+                              cursor: 'default',
+                            }}
+                          >
+                            <OutcomeTrail items={entry?.recentTrail ?? []} />
+                            {history && history.length > 0 && (
+                              <div
+                                data-testid="memory-fact-history"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                              >
+                                <div className={KICKER}>Full history</div>
+                                <OutcomeTrail
+                                  items={history.map((o) => ({
+                                    kind: o.outcome,
+                                    createdAt: o.createdAt,
+                                    agentId: o.agentId,
+                                    taskId: o.taskId,
+                                    runtime: o.runtime,
+                                    note: o.note,
+                                  }))}
+                                />
+                              </div>
+                            )}
+                            {(entry?.uses ?? 0) > 0 && history === null && (
+                              <div>
+                                <Button
+                                  data-testid="memory-fact-full-history"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void getOutcomes(f.id).then(setHistory)
+                                  }}
+                                >
+                                  <History size={12} strokeWidth={2} /> Full history
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </Card>
+                    </div>
+                  </motion.div>
+                )
+              })
             )}
           </div>
 
-          {/* Browse — procedures */}
+          {/* Browse — procedures (collapsed to latest version per name+scope,
+              matching the graph; older versions summarised by a "+N" badge). */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <SectionLabel>Procedures ({procedures.length})</SectionLabel>
+            <SectionLabel>Procedures ({collapsedProcedures.length})</SectionLabel>
             {firstLoad ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {[0, 1].map((i) => (
                   <Skeleton key={i} height={62} radius={10} />
                 ))}
               </div>
-            ) : procedures.length === 0 ? (
+            ) : collapsedProcedures.length === 0 ? (
               <EmptyState
                 icon={ListChecks}
                 title="No procedures yet"
@@ -460,7 +639,7 @@ export function MemoryPanel() {
                 paddingTop={28}
               />
             ) : (
-              procedures.map((p, i) => (
+              collapsedProcedures.map(({ latest: p, versionCount }, i) => (
                 <motion.div
                   key={p.id}
                   initial={{ opacity: 0, y: 4 }}
@@ -482,6 +661,7 @@ export function MemoryPanel() {
                         <ScopeBadge agentId={p.scopeAgentId} teamId={p.scopeTeamId} />
                         <span className="font-data" style={{ fontSize: 10, color: muted(0.45) }}>
                           v{p.version}
+                          {versionCount > 1 ? ` +${versionCount - 1}` : ''}
                         </span>
                       </span>
                     </div>
