@@ -42,6 +42,16 @@ export interface AttachScope {
    * secret; production producers always pass it.
    */
   attachSecret?: string | null
+  /**
+   * Provenance-only fields — stamped on the run's saves/outcome reports as
+   * `provRuntime`/`provTaskId`/`provSessionKey` on the Memory URL. They NEVER
+   * widen visibility (scoping stays teamId/agentId/tenantId alone) and ride
+   * OUTSIDE the `scopeSig` HMAC (`canonical()` ignores them): informational
+   * stamps, not authority.
+   */
+  runtime?: string | null
+  taskId?: string | null
+  sessionKey?: string | null
 }
 
 export interface AttachConfigInput {
@@ -75,10 +85,16 @@ export function mcpHttpUrl(
   if (!scope) return base
   const p = new URLSearchParams()
   if (server === 'memory') {
-    // Memory: the run's VISIBILITY scope.
+    // Memory: the run's VISIBILITY scope + provenance-only stamps (see
+    // AttachScope — prov* never widen visibility).
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
     if (scope.tenantId) p.set('scopeTenantId', scope.tenantId)
+    // Provenance stamps (memory only): outside the signature by design —
+    // `canonical()` ignores them, so their presence never perturbs `scopeSig`.
+    if (scope.runtime) p.set('provRuntime', scope.runtime)
+    if (scope.taskId) p.set('provTaskId', scope.taskId)
+    if (scope.sessionKey) p.set('provSessionKey', scope.sessionKey)
     // The signature covers what THIS URL claims. Memory never carries a
     // `delegate` param, so it signs delegate:false even for an orchestrated run —
     // otherwise the verifier, reconstructing scope from the params, could never
