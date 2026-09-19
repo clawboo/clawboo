@@ -125,8 +125,11 @@ export const NewAgentMark = memo(function NewAgentMark({ tint }: { tint: string 
   return (
     <Tile tint={tint}>
       {/* A fixed seed, because this Boo is a picture of the idea of an agent
-          rather than any particular one, and it should not change per render. */}
-      <BooAvatar seed="new-agent" size={21} tint={tint} />
+          rather than any particular one, and it should not change per render.
+          No tint: the tile's tint is a CSS variable, and the generator needs a
+          hex it can darken for the body gradient, so the Boo keeps its own
+          seeded colour while the tile carries the canvas accent. */}
+      <BooAvatar seed="new-agent" size={21} />
       <span
         className="absolute bottom-[3px] right-[3px] flex size-[11px] items-center justify-center rounded-full text-surface"
         style={{ background: tint }}

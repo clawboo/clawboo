@@ -385,8 +385,12 @@ export function CreateTeamModal({
 
   // Live preview of each teammate's avatar color for the chosen collection,
   // seeded by the pending team id so the rotated palette matches what the team
-  // will actually look like once deployed. (Classic ignores the seed and shows
-  // its fixed legacy tints, exactly as before.)
+  // will actually look like once deployed.
+  //
+  // CLASSIC IS THE EXCEPTION: it cycles its fixed legacy tints by slot here,
+  // while a deployed Boo on classic takes resolveBooTint(agentId) instead
+  // (resolveTeamBooColor.ts), and the agent ids do not exist yet at this point.
+  // So on classic these preview colors are representative, not the actual ones.
   const previewColors = useMemo(
     () =>
       resolvedSelected.length

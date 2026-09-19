@@ -77,6 +77,20 @@ function createRng(seed: number): () => number {
 
 // ─── Color helpers ───────────────────────────────────────────────
 
+/**
+ * Accept `#rgb` or `#rrggbb` (expanding the short form) and reject anything else.
+ *
+ * `darkenHex` slices fixed offsets out of the string, so a CSS variable or a named colour would
+ * parse to NaN channels and emit a gradient stop like `#06NaNNaN`. Callers do pass such values
+ * (a canvas accent that is a `var(--…)`), so an unusable tint falls back to the seed's own colour
+ * rather than painting a broken gradient.
+ */
+function normalizeTint(tint: string): string | null {
+  const short = tint.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i)
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`
+  return /^#[0-9a-f]{6}$/i.test(tint) ? tint : null
+}
+
 function darkenHex(hex: string, factor: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -184,13 +198,17 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   const h = fnv1a(seed)
   const rng = createRng(h)
 
-  // Unique gradient IDs to prevent SVG collisions
-  const uid = (h >>> 0).toString(16).padStart(8, '0')
-  const gidBody = `boo-body-${uid}`
-
   // Resolve tint — Boo Zero always gets OpenClaw Red; others skip index 0
-  const tint = params.tint ?? resolveBooTint(seed, params.isBooZero)
+  const tint =
+    (params.tint ? normalizeTint(params.tint) : null) ?? resolveBooTint(seed, params.isBooZero)
   const tintDark = darkenHex(tint, 0.6)
+
+  // Unique gradient IDs to prevent SVG collisions. The tint is part of the id because avatars are
+  // inlined into the page: the same agent rendered twice with different tints (a team palette in
+  // one place, the seed's own colour in another) would otherwise share an id, and every url(#id)
+  // on the page resolves to whichever gradient the document holds first.
+  const uid = (h >>> 0).toString(16).padStart(8, '0')
+  const gidBody = `boo-body-${uid}-${(fnv1a(tint) >>> 0).toString(16).padStart(8, '0').slice(0, 4)}`
 
   // Per-seed variations
   const clawScale = (0.9 + rng() * 0.15).toFixed(2)
@@ -223,7 +241,8 @@ export function generateBooAvatar(params: BooAvatarParams): string {
     params.accessory ?? (params.isBooZero ? 'none' : accList[Math.abs(h >> 16) % accList.length])
 
   // Pupil color — cyan for OpenClaw red, white for all other tints
-  const pupilColor = tint === '#ff4d4d' ? '#00e5cc' : '#ffffff'
+  // Case-insensitive: '#FF4D4D' is the same colour as TINTS[0] and should look the same.
+  const pupilColor = tint.toLowerCase() === '#ff4d4d' ? '#00e5cc' : '#ffffff'
 
   // ── Build SVG ──
 
