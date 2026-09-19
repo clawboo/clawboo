@@ -741,6 +741,10 @@ export const DelegationCard = memo(function DelegationCard({
           teamMembersSig ? teamMembersSig.split('|') : [],
           targetAgentId,
           resolvedTheme,
+          // The team id rotates the palette per team. Without it a generative
+          // collection resolves at rotation 0, so this card painted the same
+          // agent a different colour than its avatar everywhere else.
+          teamId,
         )
       : undefined
   const tint =

@@ -23,8 +23,9 @@ const PREVIEW_COUNT = 8
  * Collection picker — users choose a generative *collection*, not individual
  * colors. Each option is a compact swatch-strip chip laid out in a single row;
  * the preview shows the colors a team of {@link PREVIEW_COUNT} Boos would get
- * (theme-adapted, so the preview matches the deploy). Dusty Pastel Pro is
- * pre-selected by the caller.
+ * (theme-adapted). The strip is a sample of the collection, not the deployed
+ * colors: it passes no hue rotation, and classic assigns per agent rather than
+ * per slot. The default is 'classic' (DEFAULT_COLLECTION_ID).
  */
 export function TeamColorCollectionPicker({ value, onChange }: TeamColorCollectionPickerProps) {
   const { resolvedTheme } = useTheme()

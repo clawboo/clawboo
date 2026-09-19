@@ -71,6 +71,14 @@ function createRng(seed: number): () => number {
 
 // ─── Color helpers ───────────────────────────────────────────────
 
+/** Accept `#rgb` or `#rrggbb` and reject anything else, so a CSS variable cannot reach
+ *  darkenHex and emit a gradient stop like `#06NaNNaN`. */
+function normalizeTint(tint: string): string | null {
+  const short = tint.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i)
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`
+  return /^#[0-9a-f]{6}$/i.test(tint) ? tint : null
+}
+
 function darkenHex(hex: string, factor: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -178,11 +186,12 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   const h = fnv1a(seed)
   const rng = createRng(h)
 
-  const uid = (h >>> 0).toString(16).padStart(8, '0')
-  const gidBody = `boo-body-${uid}`
-
-  const tint = params.tint ?? resolveBooTint(seed, params.isBooZero)
+  const tint =
+    (params.tint ? normalizeTint(params.tint) : null) ?? resolveBooTint(seed, params.isBooZero)
   const tintDark = darkenHex(tint, 0.6)
+
+  const uid = (h >>> 0).toString(16).padStart(8, '0')
+  const gidBody = `boo-body-${uid}-${tint.slice(1).toLowerCase()}`
 
   const clawScale = (0.9 + rng() * 0.15).toFixed(2)
   const antennaTipLX = (24 + rng() * 4).toFixed(1)
@@ -193,13 +202,14 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   const pupilOffsetY = (rng() - 0.5) * 0.8
   const bodyOpacity = (0.96 + rng() * 0.04).toFixed(2)
 
-  const eyeShape: EyeShape = params.eyeShape ?? ((Math.abs(h >> 8) % 5) as EyeShape)
+  const eyeShape: EyeShape =
+    params.eyeShape ?? (params.isBooZero ? 0 : ((Math.abs(h >> 8) % 5) as EyeShape))
 
   const accList: Accessory[] = ['none', 'glasses', 'hat', 'headphones', 'crown']
   const accessory: Accessory =
     params.accessory ?? (params.isBooZero ? 'none' : accList[Math.abs(h >> 16) % accList.length])
 
-  const pupilColor = tint === '#ff4d4d' ? '#00e5cc' : '#ffffff'
+  const pupilColor = tint.toLowerCase() === '#ff4d4d' ? '#00e5cc' : '#ffffff'
 
   const defs =
     `<defs>` +
