@@ -57,7 +57,7 @@ describe('generateBooAvatar', () => {
 
   it('contains unique gradient ID based on seed', () => {
     const svg = generateBooAvatar({ seed: 'gradient-test' })
-    expect(svg).toMatch(/id="boo-body-[0-9a-f]{8}-[0-9a-f]{4}"/)
+    expect(svg).toMatch(/id="boo-body-[0-9a-f]{8}-[0-9a-f]{6}"/)
   })
 
   it('gives the same seed a different gradient ID per tint', () => {
@@ -67,6 +67,18 @@ describe('generateBooAvatar', () => {
     const idOf = (svg: string) => svg.match(/id="(boo-body-[0-9a-f-]+)"/)?.[1]
     expect(idOf(a)).toBeDefined()
     expect(idOf(a)).not.toBe(idOf(b))
+  })
+
+  it('never collides two tints onto one gradient ID', () => {
+    // The id carries the tint itself. A truncated hash of it would not: #000059 and #00028b
+    // share the first four hex digits of their FNV-1a hash, and there are only 65536 such
+    // prefixes for 16.7 million colours.
+    const idOf = (tint: string) =>
+      generateBooAvatar({ seed: 'collision-seed', tint }).match(/id="(boo-body-[0-9a-f-]+)"/)?.[1]
+    expect(idOf('#000059')).not.toBe(idOf('#00028b'))
+    // Case and short form normalize to the same colour, so they share an id on purpose.
+    expect(idOf('#34D399')).toBe(idOf('#34d399'))
+    expect(idOf('#0f0')).toBe(idOf('#00FF00'))
   })
 
   it('falls back to the seed tint when the tint is not a hex colour', () => {

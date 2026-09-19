@@ -191,7 +191,7 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   const tintDark = darkenHex(tint, 0.6)
 
   const uid = (h >>> 0).toString(16).padStart(8, '0')
-  const gidBody = `boo-body-${uid}-${(fnv1a(tint) >>> 0).toString(16).padStart(8, '0').slice(0, 4)}`
+  const gidBody = `boo-body-${uid}-${tint.slice(1).toLowerCase()}`
 
   const clawScale = (0.9 + rng() * 0.15).toFixed(2)
   const antennaTipLX = (24 + rng() * 4).toFixed(1)

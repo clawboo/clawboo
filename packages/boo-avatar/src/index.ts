@@ -206,9 +206,11 @@ export function generateBooAvatar(params: BooAvatarParams): string {
   // Unique gradient IDs to prevent SVG collisions. The tint is part of the id because avatars are
   // inlined into the page: the same agent rendered twice with different tints (a team palette in
   // one place, the seed's own colour in another) would otherwise share an id, and every url(#id)
-  // on the page resolves to whichever gradient the document holds first.
+  // on the page resolves to whichever gradient the document holds first. The tint goes in
+  // verbatim rather than hashed: a truncated hash has far fewer values than there are colours,
+  // so distinct tints would collide and reintroduce the very bug this prevents.
   const uid = (h >>> 0).toString(16).padStart(8, '0')
-  const gidBody = `boo-body-${uid}-${(fnv1a(tint) >>> 0).toString(16).padStart(8, '0').slice(0, 4)}`
+  const gidBody = `boo-body-${uid}-${tint.slice(1).toLowerCase()}`
 
   // Per-seed variations
   const clawScale = (0.9 + rng() * 0.15).toFixed(2)
