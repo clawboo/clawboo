@@ -103,6 +103,6 @@
     "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "vite": "^8.3.0",
-    "vite-tsconfig-paths": "^5.1.0"
+    "vite-tsconfig-paths": "^6.1.1"
   }
 }
