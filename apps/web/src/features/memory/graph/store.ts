@@ -195,11 +195,15 @@ export const useMemoryGraphStore = create<MemoryGraphState>((set) => ({
       provider,
       error: null,
       payloadVersion: s.payloadVersion + 1,
-      // A fresh dataset invalidates id-keyed interaction state.
+      // A fresh dataset invalidates id-keyed interaction state. The community
+      // filter counts: a community id is its POSITION in the size-sorted
+      // component list, so a save that reorders components would leave the
+      // filter hiding a different cluster than the one the user picked.
       selectedNodeId: null,
       hoveredNodeId: null,
       highlightedNodeIds: null,
       egoHits: null,
+      hiddenCommunities: new Set<number>(),
     })),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),

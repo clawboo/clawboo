@@ -91,6 +91,18 @@ describe('useMemoryGraphStore', () => {
     expect(s.egoHits).toBeNull()
   })
 
+  it('setPayload clears the community filter (ids are positional, not stable)', () => {
+    // A community id is its index in the size-sorted component list, so a save
+    // that reorders components repoints a held index at a different cluster.
+    // Carrying the filter over would hide a group the user never picked.
+    const store = useMemoryGraphStore.getState()
+    store.setPayload(PAYLOAD, null)
+    useMemoryGraphStore.getState().toggleCommunity(0)
+    expect(useMemoryGraphStore.getState().hiddenCommunities.has(0)).toBe(true)
+    useMemoryGraphStore.getState().setPayload(payloadOf([factNode('z')], []), null)
+    expect(useMemoryGraphStore.getState().hiddenCommunities.size).toBe(0)
+  })
+
   it('setNodeLearning patches one node WITHOUT bumping payloadVersion (no re-layout)', () => {
     const store = useMemoryGraphStore.getState()
     store.setPayload(PAYLOAD, null)
