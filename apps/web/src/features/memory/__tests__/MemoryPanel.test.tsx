@@ -248,6 +248,11 @@ describe('MemoryPanel', () => {
     render(<MemoryPanel />)
 
     await screen.findByTestId('memory-panel')
+    // The composer is disclosed, not three empty inputs parked above the
+    // content on every visit: writing a fact by hand is the rare case.
+    expect(screen.queryByTestId('memory-fact-title')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('memory-add-fact'))
+
     await user.type(screen.getByTestId('memory-fact-title'), 'A title')
     await user.type(screen.getByTestId('memory-fact-content'), 'Some content')
     await user.click(screen.getByTestId('memory-save-fact'))

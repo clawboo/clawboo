@@ -12,7 +12,6 @@ import {
 } from '@/lib/memoryClient'
 import { LearningPill, OutcomeTrail, provenanceCaption } from '../learningUi'
 import { adjacencyOf, useMemoryGraphStore } from './store'
-import { communityColor } from './types'
 
 // ─── InspectPanel — click-to-inspect right dock ─────────────────────────────
 //
@@ -232,7 +231,9 @@ export function InspectPanel() {
                 />
               </div>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Wraps: the three ghost buttons overflow a 320px dock by ~19px,
+              which clipped "Full history" against the panel edge. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <Button
                 data-testid="memory-feedback-useful"
                 variant="ghost"
@@ -284,8 +285,8 @@ export function InspectPanel() {
                     padding: '3px 8px',
                     borderRadius: 8,
                     cursor: 'pointer',
-                    border: `1px solid color-mix(in srgb, ${communityColor(n!.community)} 45%, transparent)`,
-                    background: `color-mix(in srgb, ${communityColor(n!.community)} 10%, transparent)`,
+                    border: '1px solid var(--graph-node-border)',
+                    background: 'var(--graph-node-bg)',
                     color: 'var(--foreground)',
                     maxWidth: '100%',
                   }}
@@ -293,7 +294,7 @@ export function InspectPanel() {
                   <span
                     className="font-data"
                     aria-hidden
-                    style={{ color: communityColor(n!.community), fontSize: 10 }}
+                    style={{ color: 'var(--muted-foreground)', fontSize: 10 }}
                   >
                     {EDGE_KIND_GLYPH[edge?.kind ?? 'tag']}
                   </span>

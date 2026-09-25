@@ -6,11 +6,14 @@ import type { MemEdgeData } from '../types'
 
 // ─── MemoryEdge — one component, `data.kind` switches the style ──────────────
 //
-//   similarity — solid bezier, width/opacity scale with cosine weight
-//   tag        — dashed 4 4 (a shared-vocabulary link, weaker than similarity)
-//   version    — dotted (procedure lineage decoration)
+//   similarity: solid, width/opacity scale with cosine weight
+//   tag:        dashed (a shared-vocabulary link, weaker than similarity)
+//   version:    dotted (procedure lineage)
 //
-// Endpoint hover/selection raises opacity so the inspect loop reads.
+// ACHROMATIC, like the nodes: kind reads from the dash pattern and strength
+// from opacity. Edges are structure, not subject: they should sit under the
+// labels, never compete with them. A cross-cluster link recedes further still,
+// so cluster shape is legible from the linework alone.
 
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
 
@@ -37,6 +40,7 @@ export const MemoryEdge = memo(function MemoryEdge({
   const d = data as MemEdgeData | undefined
   const kind = d?.kind ?? 'tag'
   const weight = d?.weight ?? 0
+  const sameCluster = d?.sameCluster ?? false
 
   // Endpoint-active: raised opacity when either end is hovered/selected.
   const active = useMemoryGraphStore(
@@ -45,38 +49,34 @@ export const MemoryEdge = memo(function MemoryEdge({
       (s.selectedNodeId != null && (s.selectedNodeId === source || s.selectedNodeId === target)),
   )
 
-  // Shared-community edges tint toward the community color; cross-community
-  // links stay neutral foreground.
-  const stroke = d?.communityColor
-    ? `color-mix(in srgb, ${d.communityColor} 55%, transparent)`
-    : 'rgb(var(--foreground-rgb) / 0.4)'
-
   let strokeWidth: number
   let opacity: number
   let dash: string | undefined
   if (kind === 'similarity') {
     const w = clamp01((weight - 0.6) / 0.4)
-    strokeWidth = 1 + 1.5 * w
-    opacity = 0.25 + 0.5 * w
+    strokeWidth = 1 + 0.5 * w
+    opacity = 0.62 + 0.38 * w
     dash = undefined
   } else if (kind === 'tag') {
     strokeWidth = 1
-    opacity = 0.18 + 0.3 * clamp01(weight)
-    dash = '4 4'
+    opacity = 0.5 + 0.3 * clamp01(weight)
+    dash = '3 4'
   } else {
     strokeWidth = 1
-    opacity = 0.3
-    dash = '2 3'
+    opacity = 0.6
+    dash = '1.5 3'
   }
-  if (active) opacity = Math.max(opacity, 0.9)
+  if (!sameCluster) opacity *= 0.7
+  if (active) opacity = 1
 
   return (
     <BaseEdge
       id={id}
       path={edgePath}
       style={{
-        stroke: kind === 'version' ? 'rgb(var(--foreground-rgb) / 0.35)' : stroke,
+        stroke: 'var(--graph-edge)',
         strokeWidth,
+        strokeLinecap: 'round',
         strokeDasharray: dash,
         opacity,
         transition: 'opacity 150ms ease',

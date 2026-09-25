@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { MemoryGraphNode, MemoryGraphPayload } from '@/lib/memoryClient'
+import { PROC_HEIGHT, PROC_WIDTH } from '../graph/types'
 import { buildMemoryFlowElements, factDiameter } from '../graph/useMemoryGraphData'
 
 function factNode(id: string, overrides: Partial<MemoryGraphNode> = {}): MemoryGraphNode {
@@ -59,8 +60,8 @@ describe('buildMemoryFlowElements', () => {
     const byId = new Map(nodes.map((n) => [n.id, n]))
     expect(byId.get('a')!.type).toBe('memFact')
     expect(byId.get('p1')!.type).toBe('memProc')
-    expect(byId.get('p1')!.width).toBe(150)
-    expect(byId.get('p1')!.height).toBe(44)
+    expect(byId.get('p1')!.width).toBe(PROC_WIDTH)
+    expect(byId.get('p1')!.height).toBe(PROC_HEIGHT)
     // Highest-degree fact carries the largest disc.
     expect(byId.get('a')!.width).toBe(factDiameter(2, 2))
     expect(byId.get('b')!.width).toBe(factDiameter(1, 2))
@@ -104,10 +105,12 @@ describe('buildMemoryFlowElements', () => {
     expect(filtered.edges.map((e) => e.id)).toEqual(all.edges.map((e) => e.id))
   })
 
-  it('threads the shared community color onto same-community edges only', () => {
+  it('marks an edge as intra-cluster only when both endpoints share a cluster', () => {
     const { edges } = buildMemoryFlowElements(PAYLOAD, NO_FILTERS)
     const edgeById = new Map(edges.map((e) => [e.id, e]))
-    expect(edgeById.get('tag:a:b')!.data!.communityColor).toBe('var(--mem-c0)')
-    expect(edgeById.get('sim:a:c')!.data!.communityColor).toBeNull()
+    // Drives opacity only. A cross-cluster link recedes so cluster shape reads
+    // from the linework. Nothing on this canvas encodes a cluster as a hue.
+    expect(edgeById.get('tag:a:b')!.data!.sameCluster).toBe(true)
+    expect(edgeById.get('sim:a:c')!.data!.sameCluster).toBe(false)
   })
 })

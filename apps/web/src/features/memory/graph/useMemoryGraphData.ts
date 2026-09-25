@@ -10,23 +10,19 @@
 import { useEffect } from 'react'
 import { fetchMemoryGraph, type MemoryGraphPayload } from '@/lib/memoryClient'
 import { useMemoryGraphStore, type MemScopeFilter } from './store'
-import {
-  communityColor,
-  PROC_HEIGHT,
-  PROC_WIDTH,
-  type MemFlowEdge,
-  type MemFlowNode,
-} from './types'
+import { PROC_HEIGHT, PROC_WIDTH, type MemFlowEdge, type MemFlowNode } from './types'
 
 export interface MemoryFlowFilters {
   hiddenCommunities: Set<number>
   scopeFilter: MemScopeFilter
 }
 
-/** Degree-scaled disc diameter, so hub facts read bigger at a glance. */
+/** Degree-scaled disc diameter. Deliberately small: the dot anchors the label
+ *  rather than competing with it, which is what keeps a dense canvas readable
+ *  (the label is the content; the dot is punctuation). */
 export function factDiameter(degree: number, maxDegree: number): number {
   const ratio = maxDegree > 0 ? degree / maxDegree : 0
-  return Math.round(34 + 26 * Math.sqrt(ratio))
+  return Math.round(14 + 16 * Math.sqrt(ratio))
 }
 
 export function buildMemoryFlowElements(
@@ -82,7 +78,7 @@ export function buildMemoryFlowElements(
         kind: e.kind,
         weight: e.weight,
         sharedTags: e.sharedTags,
-        communityColor: cs != null && cs === ct ? communityColor(cs) : null,
+        sameCluster: cs != null && cs === ct,
       },
     }
   })

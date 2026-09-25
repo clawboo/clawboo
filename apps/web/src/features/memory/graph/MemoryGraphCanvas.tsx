@@ -17,7 +17,7 @@ import { computeMemoryLayout, type LayoutPositions } from './memoryGraphLayout'
 import { memoryNodeTypes } from './nodes/nodeTypes'
 import { useMemoryGraphStore } from './store'
 import { buildMemoryFlowElements, useMemoryGraphData } from './useMemoryGraphData'
-import { communityColor, type MemFlowEdge, type MemFlowNode, type MemNodeData } from './types'
+import type { MemFlowEdge, MemFlowNode, MemNodeData } from './types'
 
 // ─── MemoryGraphCanvas — the React Flow surface ──────────────────────────────
 //
@@ -27,6 +27,13 @@ import { communityColor, type MemFlowEdge, type MemFlowNode, type MemNodeData } 
 // fallback) runs only when payloadVersion bumps; community/scope filter flips
 // rebuild the hidden flags from cached positions without re-running ELK, and
 // a generation ref guards stale async results.
+
+// The canvas sits UNDER floating chrome (search + filters above, viewport bar
+// below), so a symmetric fit clips whatever lands beneath them. Cluster labels
+// ride the top edge of their container, so they are what such a fit hides
+// first. Reserve the chrome's height in px so "fit" means "fit what you can
+// actually see".
+const FIT_PADDING = { top: '96px', right: '28px', bottom: '76px', left: '28px' } as const
 
 export function MemoryGraphCanvas() {
   useMemoryGraphData()
@@ -86,7 +93,7 @@ export function MemoryGraphCanvas() {
       setEdges(built.edges)
       setHasLaidOut(true)
       requestAnimationFrame(() => {
-        void fitView({ padding: 0.2, duration: 500 })
+        void fitView({ padding: FIT_PADDING, duration: 500 })
       })
     })
   }, [payload, payloadVersion, hiddenCommunities, scopeFilter, fitView])
@@ -146,6 +153,7 @@ export function MemoryGraphCanvas() {
         nodeTypes={memoryNodeTypes}
         edgeTypes={memoryEdgeTypes}
         fitView
+        fitViewOptions={{ padding: FIT_PADDING }}
         proOptions={{ hideAttribution: true }}
         style={{ background: 'transparent' }}
         minZoom={0.15}
@@ -168,8 +176,11 @@ export function MemoryGraphCanvas() {
               margin: 0,
             }}
             nodeColor={(node) => {
+              // Achromatic, like the canvas: hue never encodes identity anywhere
+              // in the graph, so the minimap shows where things are, not what
+              // kind they are.
               const data = node.data as MemNodeData | undefined
-              return data?.node ? communityColor(data.node.community) : 'var(--canvas-dot)'
+              return data?.node ? 'var(--graph-node-border-strong)' : 'var(--canvas-dot)'
             }}
             maskColor="var(--canvas-mask)"
           />

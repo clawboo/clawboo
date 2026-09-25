@@ -57,7 +57,12 @@ describe('LegendPanel', () => {
     expect(screen.getByText('deploy')).toBeInTheDocument()
     expect(screen.getByText('auth')).toBeInTheDocument()
     expect(screen.getByTestId('legend-community-0')).toBeChecked()
-    expect(screen.getByText('3 facts · 0 procedures · 2 clusters')).toBeInTheDocument()
+    expect(screen.getByText('3 facts · 0 procedures')).toBeInTheDocument()
+    // The cluster count rides its own section header, in the same right-hand
+    // column as every per-cluster count, rather than repeating in the footer.
+    expect(screen.getByTestId('legend-select-all').closest('label')).toHaveTextContent(
+      /Clusters\s*2/,
+    )
   })
 
   it('unticking a community hides it in the store; re-ticking shows it', async () => {
