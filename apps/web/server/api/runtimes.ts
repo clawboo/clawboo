@@ -43,6 +43,7 @@ import {
   setRuntimeDisconnected,
   setRuntimeSecret,
 } from '../lib/secretsVault'
+import { onEmbeddingKeysChanged } from '../lib/memoryEmbedding'
 
 /** Validate the :id param against the runtime set; 404s + returns null on miss. */
 function requireRuntimeId(req: Request, res: Response): NonOpenClawRuntimeId | null {
@@ -469,6 +470,8 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
     return
   }
   setRuntimeSecret(targetEnvVar, apiKey)
+  // A new key may change which provider embeds memory.
+  onEmbeddingKeysChanged()
   // A reconnect lifts the explicit-disconnect override — ambient key reuse
   // (process env / OpenClaw's .env) applies again for this runtime.
   setRuntimeDisconnected(id, false)
@@ -636,10 +639,16 @@ export function runtimesDisconnectPOST(req: Request, res: Response): void {
   const id = requireRuntimeId(req, res)
   if (!id) return
   const d = getDescriptor(id)
+  const removed: string[] = []
   for (const envVar of [d.envVar, ...(d.altEnvVars ?? [])]) {
-    if (envVar) deleteRuntimeSecret(envVar)
+    if (envVar) {
+      deleteRuntimeSecret(envVar)
+      removed.push(envVar)
+    }
   }
   setRuntimeDisconnected(id, true)
+  // Stop embedding memory with a key the user just removed.
+  onEmbeddingKeysChanged({ removed })
   res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
 }
 

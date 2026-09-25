@@ -186,7 +186,7 @@ Do not work around the cycle refusal by re-linking in the other direction. A cyc
 
 ## Memory server
 
-`createMemoryServer(db, embed?, opts?)` → `clawboo-memory`. Three tools over the shared `SqliteMemoryStore`: declarative facts plus versioned procedures, with FTS / vector / hybrid search. The store scrubs secrets on write.
+`createMemoryServer(db, embed?, opts?)` → `clawboo-memory`. `embed` is a fixed `EmbeddingProvider`, `null`, or a function asked on every tool call; the dashboard passes a function, so a long-lived session follows the current provider. The stdio bin's function is `createStdioEmbedSource(db)`, also exported, which applies the local-first rules below. Three tools over the shared `SqliteMemoryStore`: declarative facts plus versioned procedures, with FTS / vector / hybrid search. The store scrubs secrets on write.
 
 <Info>
 **The `boundScope` binding (anti-spoof).** When the server is constructed with `opts.boundScope`, the run's scope is authoritative and the model's `scopeTeamId` / `scopeAgentId` args are ignored:
@@ -325,7 +325,7 @@ A consuming runtime spawns one bin per server; the runtime owns the process life
 | `clawboo-mcp-tools`    | tools    |
 | `clawboo-mcp-teamchat` | teamchat |
 
-Each bin opens the shared clawboo DB. The default DB path is the bins' own default; set `CLAWBOO_DB_PATH` so a spawned bin reaches the same board the API server uses (the attach snippets embed it for you). The Memory bin also resolves an embedding provider once at boot (Ollama → OpenAI → none; vector/hybrid degrades to FTS when none is available). The TeamChat bin runs unbound by default; an external attach passes `authorAgentId` + `teamId` in the tool args.
+Each bin opens the shared clawboo DB. The default DB path is the bins' own default; set `CLAWBOO_DB_PATH` so a spawned bin reaches the same board the API server uses (the attach snippets embed it for you). The Memory bin also resolves an embedding provider, and re-resolves it once a minute (an Ollama with `nomic-embed-text` installed → `OPENAI_API_KEY` from its environment → none; vector/hybrid degrades to FTS when none is available). A store that has ever had Ollama vectors never gets OpenAI from the bin unless the dashboard's user chose OpenAI for the current outage, and the bin withdraws that choice itself as soon as it finds Ollama serving. With `CLAWBOO_DB_PATH` pointing it at the dashboard's database, facts it saves without a vector are indexed by the dashboard server, which checks for waiting facts on its own every few minutes. The TeamChat bin runs unbound by default; an external attach passes `authorAgentId` + `teamId` in the tool args.
 
 ### Streamable HTTP
 

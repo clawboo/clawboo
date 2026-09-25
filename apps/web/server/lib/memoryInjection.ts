@@ -23,7 +23,6 @@ import {
   computeFactEdges,
   evaluateInjection,
   neighborsOf,
-  resolveEmbeddingProvider,
   scrubSecrets,
   type ClawbooDb,
   type EmbeddingProvider,
@@ -31,23 +30,24 @@ import {
   type MemoryScope,
 } from '@clawboo/db'
 
-// Resolve the embedding provider once (a network probe) and reuse — mirrors the
-// /api/memory caching. Null → FTS-only (hybrid search degrades gracefully).
-let embedProviderPromise: Promise<EmbeddingProvider | null> | null = null
-function getEmbedProvider(): Promise<EmbeddingProvider | null> {
-  if (!embedProviderPromise) embedProviderPromise = resolveEmbeddingProvider().catch(() => null)
-  return embedProviderPromise
-}
+import {
+  __pinEmbeddingForTests,
+  __resetEmbeddingForTests,
+  getEmbedProvider,
+} from './memoryEmbedding'
 
-/** Test-only: reset the cached provider promise between cases. */
+// The provider comes from the one cache every memory surface shares, so a run
+// sees the same provider (and the same re-probing) as /api/memory.
+
+/** Test-only: forget any pinned or cached provider between cases. */
 export function __resetEmbedProviderCacheForTests(): void {
-  embedProviderPromise = null
+  __resetEmbeddingForTests()
 }
 
 /** Test-only: pin the provider (bypasses the network probe) — lets the suite
  *  drive the similarity-edge expansion path with a deterministic provider. */
 export function __setEmbedProviderForTests(provider: EmbeddingProvider | null): void {
-  embedProviderPromise = Promise.resolve(provider)
+  __pinEmbeddingForTests(provider)
 }
 
 export interface BuildMemoryInjectionInput {

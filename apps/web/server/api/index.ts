@@ -110,6 +110,8 @@ import {
   memoryGraphGET,
   memoryOutcomesGET,
   memoryProviderGET,
+  memoryEmbeddingInstallPOST,
+  memoryEmbeddingReindexPOST,
 } from './memory'
 import { capabilitiesListGET, capabilitiesActionPOST } from './capabilities'
 import {
@@ -396,6 +398,9 @@ router.get('/api/memory/graph', memoryGraphGET)
 router.post('/api/memory/feedback', memoryFeedbackPOST)
 router.get('/api/memory/outcomes', memoryOutcomesGET)
 router.get('/api/memory/provider', memoryProviderGET)
+router.post('/api/memory/embedding/reindex', sensitiveLimiter, memoryEmbeddingReindexPOST)
+// Downloads a model over the network, so it sits on the sensitive tier.
+router.post('/api/memory/embedding/install', sensitiveLimiter, memoryEmbeddingInstallPOST)
 router.get('/api/tools', toolsListGET)
 router.get('/api/tools/approvals', toolsApprovalsGET)
 router.post('/api/tools/approvals/:id/resolve', toolsApprovalResolvePOST)

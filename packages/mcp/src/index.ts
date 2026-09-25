@@ -3,7 +3,8 @@
 // stdio (a consuming runtime spawns a bin) and in-process Streamable HTTP.
 
 export { createTasksServer } from './tasks/server'
-export { createMemoryServer } from './memory/server'
+export { createMemoryServer, type MemoryEmbedSource } from './memory/server'
+export { createStdioEmbedSource, type StdioEmbedSourceDeps } from './memory/stdioEmbedSource'
 export { createToolsServer, type ToolsServerOptions } from './tools/server'
 export {
   createTeamChatServer,

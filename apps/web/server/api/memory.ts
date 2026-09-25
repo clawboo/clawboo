@@ -9,22 +9,20 @@ import {
   feedbackBody,
   memoryGraphQuery,
   outcomesQuery,
-  resolveEmbeddingProvider,
   saveMemoryBody,
   searchMemoryBody,
-  type EmbeddingProvider,
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
 import { getDb } from '../lib/db'
-
-// Resolve the embedding provider once (a network probe), then reuse. Null →
-// FTS-only (vector/hybrid gracefully degrade).
-let embedProviderPromise: Promise<EmbeddingProvider | null> | null = null
-function getEmbedProvider(): Promise<EmbeddingProvider | null> {
-  if (!embedProviderPromise) embedProviderPromise = resolveEmbeddingProvider().catch(() => null)
-  return embedProviderPromise
-}
+import {
+  PullInProgressError,
+  getEmbedProvider,
+  getEmbeddingStatus,
+  pullEmbeddingModel,
+  reindexEmbeddings,
+  skippedFactIds,
+} from '../lib/memoryEmbedding'
 
 function storeFor(): Promise<SqliteMemoryStore> {
   return getEmbedProvider().then((embed) => new SqliteMemoryStore(getDb(), embed))
@@ -154,6 +152,16 @@ export async function memoryGraphGET(req: Request, res: Response): Promise<void>
       scope: parsed.data.scope,
       factLimit: parsed.data.limit,
     })
+    // Say which facts lack a vector because the provider turned them down, so
+    // the view can tell "not indexed yet" from "never will be".
+    const skipped = await skippedFactIds()
+    if (skipped.size > 0) {
+      for (const node of graph.nodes) {
+        if (node.kind === 'fact' && !node.hasEmbedding && skipped.has(node.id)) {
+          node.embedSkipped = true
+        }
+      }
+    }
     res.json({
       ok: true,
       graph,
@@ -230,9 +238,77 @@ export async function memoryOutcomesGET(req: Request, res: Response): Promise<vo
 // the shape is just { id, dimensions }, independent of which provider resolved.
 export async function memoryProviderGET(_req: Request, res: Response): Promise<void> {
   try {
-    const provider = await getEmbedProvider()
-    res.json({ provider: provider ? { id: provider.id, dimensions: provider.dimensions } : null })
+    // `provider` keeps its original shape; `status` says why it is what it is
+    // and whether the store is still being indexed.
+    const status = await getEmbeddingStatus()
+    res.json({ provider: status.provider, status })
   } catch (err) {
     res.status(500).json({ error: String(err) })
+  }
+}
+
+// POST /api/memory/embedding/reindex: re-probe the provider and index every
+// fact it has no vector for. Returns at once; the status line reports progress.
+// Body (all optional): `allowRemote` records the user's choice to use OpenAI
+// even though the store was indexed locally; `reembedAll` also replaces vectors
+// another provider produced.
+export async function memoryEmbeddingReindexPOST(req: Request, res: Response): Promise<void> {
+  try {
+    const body = (req.body ?? {}) as { allowRemote?: unknown; reembedAll?: unknown }
+    await reindexEmbeddings({
+      allowRemote: body.allowRemote === true,
+      reembedAll: body.reembedAll === true,
+    })
+    res.status(202).json({ status: await getEmbeddingStatus() })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// POST /api/memory/embedding/install (SSE): pulls the embedding model through
+// the local Ollama, streaming its progress, then re-probes (which indexes the
+// store). The model is fixed server-side; the request body is ignored.
+export async function memoryEmbeddingInstallPOST(_req: Request, res: Response): Promise<void> {
+  const status = await getEmbeddingStatus().catch(() => null)
+  if (!status?.missingModel) {
+    res.status(409).json({
+      error: 'nothing to install',
+      detail: 'Ollama is not running, or already has the embedding model',
+      state: status?.state ?? 'unknown',
+    })
+    return
+  }
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+  const send = (data: Record<string, unknown>): void => {
+    if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(data)}\n\n`)
+  }
+  // Closing the connection cancels the download; Ollama keeps what it fetched.
+  const ctrl = new AbortController()
+  res.on('close', () => ctrl.abort())
+  try {
+    await pullEmbeddingModel((p) => {
+      send({
+        type: 'progress',
+        message: p.message,
+        ...(p.total ? { completed: p.completed ?? 0, total: p.total } : {}),
+      })
+    }, ctrl.signal)
+    send({ type: 'complete', status: await getEmbeddingStatus() })
+  } catch (err) {
+    send({
+      type: 'error',
+      code:
+        err instanceof PullInProgressError
+          ? 'IN_PROGRESS'
+          : ctrl.signal.aborted
+            ? 'CANCELLED'
+            : 'PULL_FAILED',
+      message: err instanceof Error ? err.message : String(err),
+    })
+  } finally {
+    res.end()
   }
 }

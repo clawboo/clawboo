@@ -1,7 +1,7 @@
 // Memory REST: the provider read + procedures in browse, plus the search/save
 // happy path. Sandbox HOME so the sqlite db lands in a throwaway dir; the
-// embedding provider resolves to null (FTS-only) in CI (no Ollama / OpenAI key),
-// so vector backing is absent but search still works via FTS.
+// embedding provider is pinned to FTS-only, so vector backing is absent but
+// search still works via FTS. Resolution itself is covered in memoryEmbedding.test.ts.
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
@@ -19,6 +19,7 @@ import {
   memorySavePOST,
   memorySearchGET,
 } from '../memory'
+import { __pinEmbeddingForTests, __resetEmbeddingForTests } from '../../lib/memoryEmbedding'
 
 function mockRes(): { res: Response; status: () => number; body: () => unknown } {
   let code = 200
@@ -47,8 +48,12 @@ describe('memory REST', () => {
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
+    // FTS-only everywhere, not only in CI: a dev box with Ollama or an OpenAI key
+    // would otherwise run a different branch of every assertion below.
+    __pinEmbeddingForTests(null)
   })
   afterEach(async () => {
+    __resetEmbeddingForTests()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true }).catch(() => {})

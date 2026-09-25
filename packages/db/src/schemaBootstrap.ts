@@ -323,6 +323,7 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_memory_facts_team    ON memory_facts (scope_team_id);
     CREATE INDEX IF NOT EXISTS idx_memory_facts_agent   ON memory_facts (scope_agent_id);
     CREATE INDEX IF NOT EXISTS idx_memory_facts_created ON memory_facts (created_at);
+    CREATE INDEX IF NOT EXISTS idx_memory_facts_model_created ON memory_facts (embedding_model, created_at, id);
 
     CREATE TABLE IF NOT EXISTS memory_procedures (
       id             TEXT    PRIMARY KEY,

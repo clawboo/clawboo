@@ -14,6 +14,7 @@ import {
 import { envVarForOpenclawProvider } from '../lib/openclawEnv'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { fetchNativeModelsForKey, hasLiveModels } from '../lib/providerModels'
+import { onEmbeddingKeysChanged } from '../lib/memoryEmbedding'
 
 // GET /api/providers → { providers: [{ id, connected, poweredRuntimes }] }
 export function providersListGET(_req: Request, res: Response): void {
@@ -34,6 +35,8 @@ export function providerConnectPOST(req: Request, res: Response): void {
     return
   }
   connectProviderKey(id, apiKey)
+  // A new key may change which provider embeds memory.
+  onEmbeddingKeysChanged()
   res.json({ ok: true, providers: providerStatus() })
 }
 
@@ -45,6 +48,8 @@ export function providerDisconnectPOST(req: Request, res: Response): void {
     return
   }
   disconnectProviderKey(id)
+  // Stop embedding memory with a key the user just removed.
+  onEmbeddingKeysChanged({ removed: [envVarForOpenclawProvider(id)] })
   res.json({ ok: true, providers: providerStatus() })
 }
 

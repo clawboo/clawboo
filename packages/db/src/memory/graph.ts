@@ -58,6 +58,9 @@ export interface MemoryGraphNode {
   degree: number
   community: number
   hasEmbedding: boolean
+  /** No vector because the current provider turned this fact down. Set by the
+   *  dashboard, which holds the skip list; never by the projection. */
+  embedSkipped?: boolean
   version?: number
   versionCount?: number
   versions?: { id: string; version: number; createdAt: number }[]

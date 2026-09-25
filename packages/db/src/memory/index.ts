@@ -17,7 +17,17 @@ export type {
   SearchOpts,
 } from './types'
 
-export { SqliteMemoryStore } from './store'
+export {
+  SqliteMemoryStore,
+  EMBED_TEXT_MAX_CHARS,
+  EMBED_TEXT_RETRY_CHARS,
+  factEmbeddingText,
+  noteEmbeddingProviderServing,
+  storeAllowsRemoteEmbedding,
+  storeIsLocalFirst,
+  type BackfillEmbeddingsOpts,
+  type BackfillEmbeddingsResult,
+} from './store'
 
 export {
   computeLearningOverlay,
@@ -51,7 +61,19 @@ export {
   DeterministicEmbeddingProvider,
   OllamaEmbeddingProvider,
   OpenAiEmbeddingProvider,
+  EmbeddingHttpError,
+  embeddingsDisabled,
+  isRemoteEmbeddingProvider,
+  isRequestShapedEmbeddingError,
+  OLLAMA_DEFAULT_MODEL,
+  OLLAMA_DEFAULT_URL,
+  ollamaHasModel,
+  LOCAL_FIRST_SETTING,
+  probeEmbeddingProvider,
+  REEMBED_REQUEST_SETTING,
+  REMOTE_EMBEDDING_CONSENT_SETTING,
   resolveEmbeddingProvider,
+  type EmbeddingResolution,
   type ResolveEmbeddingOpts,
 } from './embedding'
 

@@ -10,7 +10,6 @@
 // stays unambiguous.
 
 import {
-  resolveEmbeddingProvider,
   resolveRoomForTeam,
   type ClawbooDb,
   type DbTeamChat,
@@ -29,6 +28,7 @@ import {
 } from '@clawboo/mcp'
 
 import { connectorToolsForServer, onConnectorsChanged } from '../../connectors/supervisor'
+import { getEmbedProvider } from '../../memoryEmbedding'
 import type { NativeToolOutcome } from './fileTools'
 import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
 import { connectedAppsNow } from '../../connectors/composio'
@@ -69,14 +69,6 @@ export interface McpBridgeOptions {
   embed?: EmbeddingProvider | null
 }
 
-// Resolve the embedding provider once per process (a reachability probe) and
-// reuse — mirrors the /api/memory + auto-injection caching. Null → FTS-only.
-let embedProviderPromise: Promise<EmbeddingProvider | null> | null = null
-function getEmbedProvider(): Promise<EmbeddingProvider | null> {
-  if (!embedProviderPromise) embedProviderPromise = resolveEmbeddingProvider().catch(() => null)
-  return embedProviderPromise
-}
-
 export interface McpBridge {
   /** Provider-neutral defs (name + description + JSON-Schema args), sorted by name. */
   listTools(): Promise<McpToolInfo[]>
@@ -115,9 +107,10 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
       ),
     )
   if (enable.memory) {
-    // A real provider (not null) so native-authored facts store vectors and
-    // native interactive search is hybrid — matching every other runtime.
-    const embed = opts.embed !== undefined ? opts.embed : await getEmbedProvider()
+    // The shared provider, asked on each call, so native-authored facts store
+    // vectors and native search is hybrid, as on every other runtime, and a
+    // long run follows the provider if it changes.
+    const embed = opts.embed !== undefined ? opts.embed : getEmbedProvider
     clients.push(
       await connectInMemoryClient(
         createMemoryServer(db, embed, {

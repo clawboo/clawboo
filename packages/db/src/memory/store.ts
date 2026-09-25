@@ -6,11 +6,11 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
 
-import { withWriteRetry } from '../board/contention'
+import { immediateWrite, withWriteRetry } from '../board/contention'
 import { scrubSecrets } from '../tools/scrub'
-import type { ClawbooDb } from '../db'
+import { getSetting, setSetting, type ClawbooDb } from '../db'
 import {
   memoryFacts,
   memoryOutcomes,
@@ -20,7 +20,14 @@ import {
   type DbMemoryOutcome,
   type DbMemoryProcedure,
 } from '../schema'
-import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from './embedding'
+import {
+  cosineSimilarity,
+  deserializeEmbedding,
+  isRequestShapedEmbeddingError,
+  LOCAL_FIRST_SETTING,
+  REMOTE_EMBEDDING_CONSENT_SETTING,
+  serializeEmbedding,
+} from './embedding'
 import {
   projectMemoryGraph,
   type FactVectorRow,
@@ -49,6 +56,71 @@ const FTS_CANDIDATE_CAP = 200 // vector candidate pool / fts match cap
 const MAX_GRAPH_FACTS = 500 // newest-first cap on the graph payload (honest: truncated flag)
 const MAX_GRAPH_PROCEDURES = 200 // raw procedure rows loaded pre-collapse
 const LEARNING_OUTCOMES_PER_FACT_CAP = 200 // per-fact window in learningForFacts (explicit feedback ranks first)
+
+/** Longest text sent for one fact. OpenAI rejects a whole request when any
+ *  input passes 8192 tokens, and the REST save allows 50,000 characters (the
+ *  MCP save has no limit). A fact's opening 8000 characters carry its meaning;
+ *  the full text is still stored and still matched by keyword. */
+export const EMBED_TEXT_MAX_CHARS = 8000
+
+/** The shorter prefix tried when a provider turns one fact down. Characters are
+ *  only a proxy for tokens: CJK text runs about a token per character and some
+ *  scripts several, so 8000 characters can still pass OpenAI's limit. */
+export const EMBED_TEXT_RETRY_CHARS = 2000
+
+/** The text a fact is embedded from. Save and backfill must agree on it, or a
+ *  backfilled vector would not be comparable with a freshly saved one. */
+export function factEmbeddingText(title: string, content: string): string {
+  const text = `${title}\n${content}`
+  return text.length > EMBED_TEXT_MAX_CHARS ? text.slice(0, EMBED_TEXT_MAX_CHARS) : text
+}
+
+/** What one backfill pass did. `remaining` is re-counted after the pass, so it
+ *  also reflects facts saved concurrently by another writer. */
+export interface BackfillEmbeddingsResult {
+  embedded: number
+  /** Facts the provider rejected on their own. The caller should exclude them
+   *  from later passes, or the same rejection is paid for every time. */
+  skipped: string[]
+  remaining: number
+  /** Why the pass stopped early, or null when it ran out of work. */
+  error: string | null
+}
+
+export interface BackfillEmbeddingsOpts {
+  batchSize?: number
+  maxFacts?: number
+  signal?: AbortSignal
+  /**
+   * Also replace vectors a different provider produced. Default true. The
+   * server passes false for a remote provider: indexing a fact that has no
+   * vector is what the user asked for by connecting one, but silently shipping
+   * every already-indexed fact to a cloud API is not.
+   */
+  reembedOtherModels?: boolean
+  /** Facts to leave alone this pass, typically ones an earlier pass skipped. */
+  skipIds?: readonly string[]
+}
+
+const BACKFILL_BATCH = 32
+
+interface BackfillRow {
+  id: string
+  title: string
+  content: string
+  createdAt: number
+}
+
+// A fact needs a vector when it has none, or (optionally) one from a provider
+// other than the current one: cosine across models is meaningless. Every writer
+// sets `embedding` and `embedding_model` together (both or neither), so the
+// model column alone says whether a vector exists, and its index serves this.
+function needsEmbedding(providerId: string, includeOtherModels: boolean) {
+  const missing = sql`${memoryFacts.embeddingModel} IS NULL`
+  return includeOtherModels
+    ? sql`(${missing} OR ${memoryFacts.embeddingModel} != ${providerId})`
+    : missing
+}
 
 function eqOrNull<T>(col: Parameters<typeof eq>[0], val: T | null | undefined) {
   return val == null ? isNull(col) : eq(col, val as never)
@@ -193,7 +265,7 @@ export class SqliteMemoryStore implements MemoryStore {
     let embeddingModel: string | null = null
     if (this.embed) {
       try {
-        const [vec] = await this.embed.embed([`${title}\n${content}`])
+        const [vec] = await this.embed.embed([factEmbeddingText(title, content)])
         if (vec && vec.length > 0) {
           embedding = serializeEmbedding(vec)
           embeddingModel = this.embed.id
@@ -222,6 +294,7 @@ export class SqliteMemoryStore implements MemoryStore {
       updatedAt: now,
     }
     withWriteRetry(() => this.db.insert(memoryFacts).values(row).run())
+    if (embeddingModel) markLocalFirstIfLocal(this.db, embeddingModel)
 
     return {
       id,
@@ -238,6 +311,214 @@ export class SqliteMemoryStore implements MemoryStore {
       createdAt: now,
       updatedAt: now,
     }
+  }
+
+  /** How many facts the backfill would index for `providerId`. Process-wide,
+   *  not scoped: the backfill owns the whole store. */
+  countFactsNeedingEmbedding(
+    providerId: string,
+    opts: { includeOtherModels?: boolean; excludeIds?: readonly string[] } = {},
+  ): number {
+    const excluded = opts.excludeIds ?? []
+    const row = this.db
+      .select({ n: sql<number>`count(*)` })
+      .from(memoryFacts)
+      .where(
+        and(
+          needsEmbedding(providerId, opts.includeOtherModels ?? true),
+          excluded.length > 0 ? notInArray(memoryFacts.id, [...excluded]) : undefined,
+        ),
+      )
+      .get()
+    return row?.n ?? 0
+  }
+
+  /** Every fact in the store, of any scope. */
+  countFacts(): number {
+    const row = this.db
+      .select({ n: sql<number>`count(*)` })
+      .from(memoryFacts)
+      .get()
+    return row?.n ?? 0
+  }
+
+  /** Whether any fact carries a vector from a provider whose id starts with
+   *  `prefix` (e.g. 'ollama:'): the store's record of which provider it uses.
+   *  A range rather than LIKE, so the model index answers it with one seek. */
+  hasFactsEmbeddedBy(prefix: string): boolean {
+    const upper =
+      prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)
+    const row = this.db
+      .select({ id: memoryFacts.id })
+      .from(memoryFacts)
+      .where(
+        and(
+          sql`${memoryFacts.embeddingModel} >= ${prefix}`,
+          sql`${memoryFacts.embeddingModel} < ${upper}`,
+        ),
+      )
+      .limit(1)
+      .get()
+    return row != null
+  }
+
+  /**
+   * Give facts a vector from the current provider, newest first, in bounded
+   * batches.
+   *
+   * Save-time embedding is best-effort, so a fact saved while the provider was
+   * down, missing its model, or not yet configured is stored with no vector.
+   * A provider switch leaves every earlier vector in another model's space.
+   * This pass indexes both.
+   *
+   * It never touches `updated_at`: that column drives the graph's recency fade,
+   * and indexing a fact is not the fact changing. Pages walk a (created_at, id)
+   * cursor written as a range the created_at index can seek, so a whole-store
+   * pass reads each row about once. A batch the provider rejects as a request
+   * (one input too large) is retried a fact at a time; a fact rejected on its
+   * own is tried once more with a shorter prefix, then skipped rather than
+   * blocking every older one. A provider-level failure (auth, quota, missing
+   * model, outage) stops the pass. The write re-checks the need condition, so
+   * a fact another writer embedded mid-pass is left alone.
+   */
+  async backfillEmbeddings(opts: BackfillEmbeddingsOpts = {}): Promise<BackfillEmbeddingsResult> {
+    const embed = this.embed
+    if (!embed) return { embedded: 0, skipped: [], remaining: 0, error: 'no embedding provider' }
+    const batchSize = Math.max(1, Math.min(opts.batchSize ?? BACKFILL_BATCH, 256))
+    const maxFacts = opts.maxFacts ?? Number.POSITIVE_INFINITY
+    const includeOther = opts.reembedOtherModels ?? true
+    // About to replace local vectors with a remote provider's: record that the
+    // store was local first, while the vectors that say so still exist.
+    if (includeOther && !embed.id.startsWith('ollama:')) storeIsLocalFirst(this.db)
+    const need = needsEmbedding(embed.id, includeOther)
+    const skipped: string[] = []
+    const excluded = new Set(opts.skipIds ?? [])
+    let embedded = 0
+    let error: string | null = null
+    let cursor: { createdAt: number; id: string } | null = null
+
+    // Embed one fact on its own: a vector, a skip, or a provider-level failure.
+    // `triedFull` skips re-sending the exact request that was just refused.
+    const embedAlone = async (text: string, triedFull: boolean): Promise<number[] | 'skip'> => {
+      const attempts = triedFull ? [] : [text]
+      if (text.length > EMBED_TEXT_RETRY_CHARS) attempts.push(text.slice(0, EMBED_TEXT_RETRY_CHARS))
+      for (const t of attempts) {
+        try {
+          const [v] = await embed.embed([t])
+          return v && v.length > 0 ? v : 'skip'
+        } catch (err) {
+          if (!isRequestShapedEmbeddingError(err)) throw err
+        }
+      }
+      return 'skip'
+    }
+
+    // Reads and writes can fail too (a damaged file, a full disk). The pass then
+    // stops like it does on a provider error and still reports the vectors it
+    // committed before the failure: a caller counting writes must see them.
+    const failMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+    while (embedded < maxFacts && !opts.signal?.aborted) {
+      let page: BackfillRow[]
+      try {
+        page = this.db
+          .select({
+            id: memoryFacts.id,
+            title: memoryFacts.title,
+            content: memoryFacts.content,
+            createdAt: memoryFacts.createdAt,
+          })
+          .from(memoryFacts)
+          .where(
+            and(
+              need,
+              // "After the cursor" in (created_at DESC, id ASC) order, as a range
+              // on created_at plus an exclusion: an OR here would force a scan.
+              cursor
+                ? sql`${memoryFacts.createdAt} <= ${cursor.createdAt} AND NOT (${memoryFacts.createdAt} = ${cursor.createdAt} AND ${memoryFacts.id} <= ${cursor.id})`
+                : undefined,
+            ),
+          )
+          .orderBy(desc(memoryFacts.createdAt), memoryFacts.id)
+          .limit(Math.min(batchSize, maxFacts - embedded))
+          .all()
+      } catch (err) {
+        error = failMessage(err)
+        break
+      }
+      if (page.length === 0) break
+      const last = page[page.length - 1]!
+      cursor = { createdAt: last.createdAt, id: last.id }
+      const rows = page.filter((r) => !excluded.has(r.id))
+      if (rows.length === 0) continue
+
+      const texts = rows.map((r) => factEmbeddingText(r.title, r.content))
+      const vecs: (number[] | null)[] = []
+      try {
+        let batch: number[][]
+        try {
+          batch = await embed.embed(texts)
+        } catch (err) {
+          if (!isRequestShapedEmbeddingError(err)) throw err
+          // One input sank the request: find it rather than give up on the page.
+          batch = []
+          for (const t of texts) {
+            const v = await embedAlone(t, texts.length === 1)
+            batch.push(v === 'skip' ? [] : v)
+          }
+        }
+        if (batch.length !== rows.length) {
+          error = `provider returned ${batch.length} vectors for ${rows.length} facts`
+          break
+        }
+        batch.forEach((v, i) => {
+          if (v && v.length > 0) vecs.push(v)
+          else {
+            vecs.push(null)
+            skipped.push(rows[i]!.id)
+          }
+        })
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err)
+        break
+      }
+      if (opts.signal?.aborted) break
+
+      let written: number
+      try {
+        written = immediateWrite(this.db, (tx) => {
+          let n = 0
+          rows.forEach((r, i) => {
+            const v = vecs[i]
+            if (!v) return
+            const res = tx
+              .update(memoryFacts)
+              .set({ embedding: serializeEmbedding(v), embeddingModel: embed.id })
+              .where(and(eq(memoryFacts.id, r.id), need))
+              .run()
+            n += res.changes
+          })
+          return n
+        })
+      } catch (err) {
+        error = failMessage(err)
+        break
+      }
+      embedded += written
+      if (written > 0) markLocalFirstIfLocal(this.db, embed.id)
+    }
+
+    const excludeIds = [...excluded, ...skipped]
+    let remaining = 0
+    try {
+      remaining = this.countFactsNeedingEmbedding(embed.id, {
+        includeOtherModels: includeOther,
+        excludeIds,
+      })
+    } catch (err) {
+      error ??= failMessage(err)
+    }
+    return { embedded, skipped, remaining, error }
   }
 
   async searchMemory(query: string, opts: SearchOpts = {}): Promise<MemorySearchResult[]> {
@@ -640,4 +921,56 @@ export class SqliteMemoryStore implements MemoryStore {
       },
     )
   }
+}
+
+/** Record that the store has local vectors, once. A no-op for a remote
+ *  provider, and never allowed to fail the write that prompted it. */
+function markLocalFirstIfLocal(db: ClawbooDb, providerId: string): void {
+  if (!providerId.startsWith('ollama:')) return
+  try {
+    if (getSetting(db, LOCAL_FIRST_SETTING) !== '1') setSetting(db, LOCAL_FIRST_SETTING, '1')
+  } catch {
+    /* hasFactsEmbeddedBy still answers from the vectors themselves */
+  }
+}
+
+/**
+ * Whether resolving a provider for this store may pick a remote one. Once any
+ * fact has had a local vector the store is local-first: a cloud provider is
+ * used only while the user's explicit choice for the current Ollama outage
+ * stands. Every process that embeds for the store (the dashboard server and
+ * the stdio Memory bin) applies this, so a key in some process's environment
+ * cannot move a locally indexed store to the cloud.
+ */
+export function storeAllowsRemoteEmbedding(db: ClawbooDb): boolean {
+  if (!storeIsLocalFirst(db)) return true
+  return getSetting(db, REMOTE_EMBEDDING_CONSENT_SETTING) === '1'
+}
+
+/**
+ * Whether the store has ever had a local vector. A store indexed before the
+ * flag existed is recognised by its vectors, and the flag is written then, so
+ * a later switch that replaces every local vector cannot erase the fact.
+ */
+export function storeIsLocalFirst(db: ClawbooDb): boolean {
+  if (getSetting(db, LOCAL_FIRST_SETTING) === '1') return true
+  if (!new SqliteMemoryStore(db).hasFactsEmbeddedBy('ollama:')) return false
+  try {
+    setSetting(db, LOCAL_FIRST_SETTING, '1')
+  } catch {
+    /* the vectors still answer until the write succeeds */
+  }
+  return true
+}
+
+/**
+ * Called by any process after it resolves a provider. A local one serving
+ * means the outage a choice of OpenAI answered is over, so the choice lapses
+ * and the next outage asks again. Returns whether a choice was withdrawn.
+ */
+export function noteEmbeddingProviderServing(db: ClawbooDb, providerId: string): boolean {
+  if (!providerId.startsWith('ollama:')) return false
+  if (getSetting(db, REMOTE_EMBEDDING_CONSENT_SETTING) !== '1') return false
+  setSetting(db, REMOTE_EMBEDDING_CONSENT_SETTING, '0')
+  return true
 }

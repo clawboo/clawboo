@@ -211,6 +211,20 @@ export function hasRuntimeSecret(name: string): boolean {
   return Boolean(readVault()[name])
 }
 
+/**
+ * Whether the vault could be read just now: absent counts as readable (it
+ * simply holds nothing), any other failure does not. Lets a caller tell "the
+ * key was removed" from "the key could not be read this once".
+ */
+export function isVaultReadable(): boolean {
+  try {
+    JSON.parse(readFileSync(vaultPath(), 'utf8'))
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'ENOENT'
+  }
+}
+
 /** Remove a runtime secret. No-op if absent. */
 export function deleteRuntimeSecret(name: string): void {
   const vault = readVault()

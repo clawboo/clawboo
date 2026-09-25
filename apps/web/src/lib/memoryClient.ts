@@ -4,7 +4,7 @@
 // never throwing to the caller. The SPA never imports server packages, so the
 // shapes are mirrored locally here.
 
-import { apiFetch } from '@clawboo/control-client'
+import { apiFetch, consumeApiSSE, type SSEEvent } from '@clawboo/control-client'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const
 
@@ -106,6 +106,8 @@ export interface MemoryGraphNode {
   degree: number
   community: number
   hasEmbedding: boolean
+  /** No vector because the provider turned this fact down. */
+  embedSkipped?: boolean
   version?: number
   versionCount?: number
   versions?: { id: string; version: number; createdAt: number }[]
@@ -254,6 +256,148 @@ export async function getProvider(): Promise<EmbeddingProviderInfo | null> {
   } catch {
     return null
   }
+}
+
+/** Why embeddings are, or are not, working. Mirrors the server's EmbeddingStatus. */
+export interface EmbeddingStatus {
+  /** `ready` is the only state with a provider. `ollama-model-missing`: Ollama
+   *  runs without the model. `ollama-unreachable`: the store is indexed locally
+   *  and Ollama is not answering, so nothing falls back to a cloud provider. */
+  state: 'ready' | 'disabled' | 'ollama-model-missing' | 'ollama-unreachable' | 'none'
+  provider: EmbeddingProviderInfo | null
+  /** The provider sends fact text off this machine. */
+  remote: boolean
+  /** A model whose install is a real fix: nothing can embed without it, or it
+   *  would move embeddings from a remote provider onto this machine. */
+  missingModel: string | null
+  /** An OpenAI key exists that local-first is deliberately not using. */
+  remoteAvailable: boolean
+  /** Facts waiting to be indexed; null with no provider. */
+  pending: number | null
+  /** Every fact in the store: the scale of what switching to OpenAI sends. */
+  factCount: number
+  /** The store has had local vectors, so a remote provider serving means the
+   *  user chose it for an Ollama outage. */
+  localFirst: boolean
+  /** Vectors written by indexing since the server started; only grows. */
+  vectorsWritten: number
+  /** Facts the provider turned down (they still match by keyword). */
+  skipped: number
+  indexing: boolean
+  installing: boolean
+  lastError: string | null
+}
+
+/** Fields a server from before they existed leaves out. */
+function normalizeStatus(s: EmbeddingStatus): EmbeddingStatus {
+  return {
+    ...s,
+    factCount: s.factCount ?? 0,
+    localFirst: s.localFirst ?? false,
+    vectorsWritten: s.vectorsWritten ?? 0,
+  }
+}
+
+/** GET /api/memory/provider's `status`. Null when the request fails, which the
+ *  UI treats as "unknown", never as "no provider". */
+export async function getEmbeddingStatus(): Promise<EmbeddingStatus | null> {
+  try {
+    const r = await apiFetch('/api/memory/provider')
+    if (!r.ok) return null
+    const body = (await r.json()) as {
+      provider?: EmbeddingProviderInfo | null
+      status?: EmbeddingStatus
+    }
+    if (body.status) return normalizeStatus(body.status)
+    // A server from before `status` existed reports only the provider.
+    if (body.provider === undefined) return null
+    return {
+      state: body.provider ? 'ready' : 'none',
+      provider: body.provider,
+      remote: body.provider?.id.startsWith('openai:') ?? false,
+      missingModel: null,
+      remoteAvailable: false,
+      pending: null,
+      factCount: 0,
+      localFirst: false,
+      vectorsWritten: 0,
+      skipped: 0,
+      indexing: false,
+      installing: false,
+      lastError: null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** POST /api/memory/embedding/reindex: re-probe, check the provider, and index
+ *  what is missing. `allowRemote` records the choice to use OpenAI while a
+ *  locally indexed store's Ollama is down (it lasts until Ollama serves again);
+ *  `reembedAll` also replaces vectors another provider produced. */
+export async function reindexEmbeddings(
+  opts: { allowRemote?: boolean; reembedAll?: boolean } = {},
+): Promise<EmbeddingStatus | null> {
+  try {
+    const r = await apiFetch('/api/memory/embedding/reindex', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(opts),
+    })
+    if (!r.ok) return null
+    const body = (await r.json()) as { status?: EmbeddingStatus }
+    return body.status ? normalizeStatus(body.status) : null
+  } catch {
+    return null
+  }
+}
+
+export interface InstallProgress {
+  message: string
+  /** 0..1, present only while the model itself is downloading. */
+  fraction: number | null
+}
+
+/** POST /api/memory/embedding/install (SSE). Returns the stream's controller so
+ *  the caller can cancel. `onDone` also fires when there turned out to be
+ *  nothing to install (another window finished it), which is not a failure. */
+export function installEmbeddingModel(handlers: {
+  onProgress: (p: InstallProgress) => void
+  onDone: (status: EmbeddingStatus | null) => void
+  /** Another install is already running; wait for it. */
+  onBusy: () => void
+  onError: (message: string) => void
+}): AbortController {
+  let settled = false
+  const settle = (fn: () => void) => {
+    if (settled) return
+    settled = true
+    fn()
+  }
+  return consumeApiSSE(
+    '/api/memory/embedding/install',
+    { method: 'POST' },
+    {
+      onProgress: (e: SSEEvent) => {
+        const total = typeof e['total'] === 'number' ? e['total'] : null
+        const completed = typeof e['completed'] === 'number' ? e['completed'] : null
+        handlers.onProgress({
+          message: typeof e.message === 'string' ? e.message : '',
+          fraction: total && completed != null ? Math.min(1, completed / total) : null,
+        })
+      },
+      onComplete: (e: SSEEvent) =>
+        settle(() => handlers.onDone((e['status'] as EmbeddingStatus | undefined) ?? null)),
+      onError: (e: SSEEvent) =>
+        settle(() => {
+          if (e.code === 'HTTP_409') handlers.onDone(null)
+          else if (e.code === 'IN_PROGRESS') handlers.onBusy()
+          else if (e.code === 'HTTP_429')
+            handlers.onError('Too many attempts. Try again in a minute.')
+          else handlers.onError(typeof e.message === 'string' ? e.message : 'install failed')
+        }),
+    },
+  )
 }
 
 export interface MemoryGraphResult {

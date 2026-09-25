@@ -21,9 +21,11 @@ import { SearchInput } from '@/features/shared/SearchInput'
 import { SegmentedControl } from '@/features/shared/SegmentedControl'
 import { StatusPill } from '@/features/shared/StatusPill'
 import { searchMemory, type SearchMode } from '@/lib/memoryClient'
+import { useEmbeddingUiStore } from '../useEmbeddingStatus'
 import { InspectPanel } from './InspectPanel'
 import { LegendPanel } from './LegendPanel'
 import { MemoryGraphCanvas } from './MemoryGraphCanvas'
+import { useNewLinksRefresh } from './useNewLinksRefresh'
 import { useMemoryGraphStore, type MemScopeFilter, type MemTimeFilter } from './store'
 
 // ─── MemoryGraphView — the hero shell (canvas + docked chrome) ───────────────
@@ -53,7 +55,11 @@ const TIME_OPTIONS: { id: MemTimeFilter; label: string }[] = [
 
 function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | undefined }) {
   const payload = useMemoryGraphStore((s) => s.payload)
-  const provider = useMemoryGraphStore((s) => s.provider)
+  // The live status, not the payload's: the provider can come and go without
+  // the graph (whose links do not depend on it) being fetched again.
+  const payloadProvider = useMemoryGraphStore((s) => s.provider)
+  const liveEmbedding = useEmbeddingUiStore((s) => s.status)
+  const provider = liveEmbedding ? liveEmbedding.provider : payloadProvider
   const loading = useMemoryGraphStore((s) => s.loading)
   const error = useMemoryGraphStore((s) => s.error)
   const showHulls = useMemoryGraphStore((s) => s.showHulls)
@@ -67,6 +73,9 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
 
   // Stale selections must never leak across visits.
   useEffect(() => () => useMemoryGraphStore.getState().reset(), [])
+
+  // Similarity edges appear when indexing lands; see useNewLinksRefresh.
+  const { linksReady, refreshNow } = useNewLinksRefresh()
 
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<SearchMode>('hybrid')
@@ -150,9 +159,8 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
       <MemoryGraphCanvas />
 
       {/* ── Top chrome: search + commands share ONE wrapping row, honesty pills
-           sit beneath them. A single flow container rather than three separate
-           absolutes, which used to overlap each other (and the inspector) as
-           the canvas narrowed, leaving the search box unclickable. ── */}
+           sit beneath them. One flow container, so the pieces wrap rather than
+           overlap each other (or the inspector) as the canvas narrows. ── */}
       <div
         style={{
           position: 'absolute',
@@ -282,18 +290,32 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
             />
           )}
           {noMatch && <StatusPill tone="idle" label="No matches" />}
-          {/* Surface the computed honesty field (not just provider == null), so a
-            provider-present-but-no-comparable-embeddings store degrades honestly. */}
-          {payload != null && payload.nodes.length > 0 && !payload.similarityAvailable && (
-            <StatusPill
-              tone="idle"
-              label={
-                provider == null
-                  ? 'Similarity links unavailable: no embedding provider'
-                  : 'Similarity links unavailable: no comparable embeddings yet'
-              }
-            />
+          {error && payload && !loading && (
+            // The graph on screen is the last one that loaded; say so.
+            <div
+              style={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}
+              data-testid="memory-graph-refresh-failed"
+            >
+              <StatusPill tone="warning" label="Could not refresh" />
+              <Button size="sm" variant="ghost" onClick={refreshNow}>
+                Try again
+              </Button>
+            </div>
           )}
+          {linksReady && (
+            <div style={{ pointerEvents: 'auto' }}>
+              <Button
+                size="sm"
+                variant="secondary"
+                data-testid="memory-graph-new-links"
+                onClick={refreshNow}
+              >
+                Show new similarity links
+              </Button>
+            </div>
+          )}
+          {/* The "no similarity links" notice lives in LegendPanel, beside the
+            link key it explains, rather than over the canvas. */}
         </div>
       </div>
 

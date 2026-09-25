@@ -1,24 +1,29 @@
 ---
 title: Memory API
-description: 'REST reference for the memory resource group: search, save facts and procedures, browse, and inspect the active embedding provider.'
+description: 'REST reference for the memory resource group: search, save, browse, the graph, feedback, and embeddings (status, reindexing, installing the model).'
 ---
 
-REST surface for the shared [memory](/concepts/memory) tier: search the 2-tier store (declarative **facts** + versioned **procedures**), save a fact or a procedure, browse what is stored, and inspect which embedding provider backs vector/hybrid search. This is the UI-facing half of the memory dual surface; the model-facing half is the [Memory MCP server](/reference/rest-api/tools-and-mcp). Both halves share one `SqliteMemoryStore` over the same SQLite file, so a fact saved here is searchable from a runtime's Memory tool and vice versa.
+REST surface for the shared [memory](/concepts/memory) tier: search the 2-tier store (declarative **facts** + versioned **procedures**), save a fact or a procedure, browse what is stored, read the graph and record feedback, and inspect and repair the embeddings behind vector/hybrid search and similarity links. This is the UI-facing half of the memory dual surface; the model-facing half is the [Memory MCP server](/reference/rest-api/tools-and-mcp). Both halves share one `SqliteMemoryStore` over the same SQLite file, so a fact saved here is searchable from a runtime's Memory tool and vice versa.
 
 <Note>
 Memory is always on; these routes are not flag-gated. The store is FTS5 (full-text) plus an optional vector index. Vector and hybrid search require a reachable embedding provider; when none resolves, they degrade to FTS automatically. See [`GET /api/memory/provider`](#get-apimemoryprovider) to inspect the active provider.
 </Note>
 
-The save route (`POST /api/memory`) reads a JSON body parsed by `express.json({ limit: '2mb' })`. The two GET routes read their inputs from the query string, then validate them against the same zod schemas the save body uses, so an out-of-range `limit` or empty `query` is a **400**.
+The POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`. The GET routes read their inputs from the query string, then validate them against the same zod schemas the save body uses, so an out-of-range `limit` or empty `query` is a **400**.
 
 ## Routes
 
-| Method | Path                   | Summary                                              | Stream? |
-| ------ | ---------------------- | ---------------------------------------------------- | ------- |
-| GET    | `/api/memory`          | Search facts (fts / vector / hybrid), scoped         | No      |
-| POST   | `/api/memory`          | Save a fact (default) or a procedure (discriminated) | No      |
-| GET    | `/api/memory/browse`   | List recent facts + procedures, scoped               | No      |
-| GET    | `/api/memory/provider` | The active embedding provider (or `null` = FTS-only) | No      |
+| Method | Path                            | Summary                                                              | Stream? |
+| ------ | ------------------------------- | -------------------------------------------------------------------- | ------- |
+| GET    | `/api/memory`                   | Search facts (fts / vector / hybrid), scoped                         | No      |
+| POST   | `/api/memory`                   | Save a fact (default) or a procedure (discriminated)                 | No      |
+| GET    | `/api/memory/browse`            | List recent facts + procedures, scoped                               | No      |
+| GET    | `/api/memory/graph`             | The graph: nodes, edges and communities (`?limit=` 1 to 500, scoped) | No      |
+| POST   | `/api/memory/feedback`          | Record an outcome on a fact: `useful`, `dead_end` or `corrected`     | No      |
+| GET    | `/api/memory/outcomes`          | A fact's outcome trail (`?factId=&limit=` up to 200)                 | No      |
+| GET    | `/api/memory/provider`          | The embedding provider, and why it is or is not usable               | No      |
+| POST   | `/api/memory/embedding/reindex` | Re-check the provider and index facts it has no vector for           | No      |
+| POST   | `/api/memory/embedding/install` | Install the embedding model through the local Ollama                 | SSE     |
 
 <Info>
 Save scrubs secrets at the write boundary: a fact's `title`/`content` and a procedure's `content` are passed through a secret scrubber before they are embedded and inserted. A credential can never land in a durable, searchable, or auto-injectable fact regardless of who wrote it.
@@ -61,11 +66,16 @@ Searches stored facts. The handler reads `query`, `mode`, `limit`, `teamId`, and
     scopeAgentId: string | null
     scopeTeamId: string | null
     tenantId: string | null
+    createdByAgentId: string | null // provenance: who saved it, when recorded
+    createdByRuntime: string | null
+    sourceTaskId: string | null
+    sourceSessionKey: string | null
     createdAt: number // epoch ms
     updatedAt: number // epoch ms
     score: number // 0..1, higher = more relevant
     matchedVia: 'fts' | 'vector' | 'hybrid'
   }>
+  learning: Record<string, LearningEntry> // by fact id: how each result has fared in runs
 }
 ```
 
@@ -225,6 +235,10 @@ Lists the most recent facts and procedures (facts newest-first by `updatedAt`), 
     scopeAgentId: string | null
     scopeTeamId: string | null
     tenantId: string | null
+    createdByAgentId: string | null
+    createdByRuntime: string | null
+    sourceTaskId: string | null
+    sourceSessionKey: string | null
     createdAt: number
     updatedAt: number
   }>
@@ -236,8 +250,13 @@ Lists the most recent facts and procedures (facts newest-first by `updatedAt`), 
     scopeAgentId: string | null
     scopeTeamId: string | null
     tenantId: string | null
+    createdByAgentId: string | null
+    createdByRuntime: string | null
+    sourceTaskId: string | null
+    sourceSessionKey: string | null
     createdAt: number
   }>
+  learning: Record<string, LearningEntry> // by fact id
 }
 ```
 
@@ -261,33 +280,106 @@ curl 'http://localhost:18790/api/memory/browse?teamId=<team-uuid>&limit=50'
 
 ---
 
+## `GET /api/memory/graph`
+
+The store projected as a graph: facts and procedures as nodes, with similarity, shared-tag and version edges, grouped into communities. Every edge maps to something in the store.
+
+- **Query params**: `limit` (1 to 500 facts, newest first), `teamId`, `agentId` (scope, as for search).
+
+**`200 OK`**:
+
+```ts
+{
+  ok: true
+  graph: {
+    nodes: MemoryGraphNode[] // facts and procedures; a procedure is one node however many versions.
+    // A fact with hasEmbedding false carries embedSkipped: true when the provider turned it down,
+    // so a client can tell "not indexed yet" from "never will be".
+    edges: Array<{ id: string; source: string; target: string; kind: 'similarity' | 'tag' | 'version'; weight: number; sharedTags: string[] }>
+    communities: Array<{ id: number; label: string; size: number }> // id is positional: not stable across payloads
+    totalFacts: number
+    totalProcedures: number
+    truncated: boolean
+    similarityAvailable: boolean // some same-model bucket has two or more embedded facts
+  }
+  provider: { id: string; dimensions: number } | null
+}
+```
+
+**`400 Bad Request`**: `{ "error": "invalid query", "details": { … } }`.
+
+---
+
+## `POST /api/memory/feedback`
+
+Record how a fact fared, the signal behind the learning pills.
+
+- **Body**: `{ factId: string; outcome: 'useful' | 'dead_end' | 'corrected'; note?: string; scope?: { teamId?, agentId? } }`. `corrected` requires a `note`.
+
+**`200 OK`**: `{ ok: true, outcome: MemoryOutcome, learning: LearningEntry }`, the recorded outcome and the fact's updated learning entry.
+
+**`400 Bad Request`**: `{ "error": "invalid body", "details": { … } }`, or `{ "error": "corrected requires a note" }`.
+
+**`404 Not Found`**: `{ "error": "unknown fact" }`.
+
+---
+
+## `GET /api/memory/outcomes`
+
+A fact's full outcome trail, newest first.
+
+- **Query params**: `factId` (required), `limit` (1 to 200).
+
+**`200 OK`**: `{ ok: true, factId: string, outcomes: MemoryOutcome[] }`, where each outcome is `{ id, factId, outcome, note, agentId, teamId, taskId, runtime, createdAt }`.
+
+**`400 Bad Request`**: `{ "error": "invalid query", "details": { … } }`. **`404 Not Found`**: `{ "error": "unknown fact" }`.
+
+---
+
 ## `GET /api/memory/provider`
 
-Reports the embedding provider that backs vector/hybrid search, resolved once at boot (a one-time network probe) and reused. The resolution order is: a reachable Ollama instance (the offline-first default, probed at `http://localhost:11434`), then an OpenAI key (`OPENAI_API_KEY`), then `null`. A `null` provider means the store is FTS-only; vector and hybrid search silently fall back to FTS. The response shape is provider-independent (`{ id, dimensions }`) so the UI can warn when vector search is degraded.
+Reports the embedding provider behind vector/hybrid search and the graph's similarity links, and **why** it is what it is. The resolution order is: an Ollama at `http://localhost:11434` that has `nomic-embed-text` installed, then an OpenAI key (`OPENAI_API_KEY` in the server's environment, or one stored through **Providers**; OpenClaw's `~/.openclaw/.env` is deliberately not consulted), then none.
+
+Two rules sit on top of that order:
+
+- A reachable Ollama is not enough on its own: without the model every embedding call fails. With no OpenAI key that is reported as `ollama-model-missing`; with one, OpenAI serves and `missingModel` says a local install would move embeddings onto this machine.
+- Once any fact holds an Ollama vector, the store is local-first: an OpenAI key is not used automatically, and an Ollama that stops answering is reported as `ollama-unreachable` rather than silently replaced. `POST /api/memory/embedding/reindex` with `allowRemote: true` records the choice to use OpenAI for the current outage. It is withdrawn the next time any clawboo process (the dashboard, or the stdio Memory bin) finds Ollama serving, when the OpenAI key is disconnected under Providers or Runtimes, and when a resolution finds no OpenAI key at all (a vault that merely failed to read does not count); a switch still owed is dropped with it.
+
+`CLAWBOO_DISABLE_EMBEDDINGS=1` turns embeddings off: `provider` is `null` and `status.state` is `disabled`.
+
+The server re-checks the answer on its own timer, whether or not anything reads this route: every 30 seconds while no provider can serve or OpenAI is standing in, every 10 minutes while Ollama serves, and straight away after an embedding call fails or a provider key is connected or disconnected. A key that is disconnected stops being used at once, including by MCP sessions that were already open: a Memory session asks for the current provider on every call. Reading this route while facts are waiting to be indexed also starts indexing them, unless the previous attempt failed within the last minute.
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: a provider resolved:
+**`200 OK`**: `provider` keeps its original shape (and is `null` whenever `status.state` is not `ready`); `status` explains it:
 
 ```ts
 {
-  provider: {
-    id: string // e.g. 'ollama:nomic-embed-text', 'openai:text-embedding-3-small', 'deterministic'
-    dimensions: number // declared embedding dimensionality
+  provider: { id: string; dimensions: number } | null // e.g. 'ollama:nomic-embed-text', 'openai:text-embedding-3-small'
+  status: {
+    state: 'ready' | 'ollama-model-missing' | 'ollama-unreachable' | 'none' | 'disabled'
+    provider: { id: string; dimensions: number } | null
+    remote: boolean // the provider sends fact text off this machine
+    missingModel: string | null // a model whose install is a fix: none can embed without it, or it would move embeddings local
+    remoteAvailable: boolean // an OpenAI key exists that local-first is deliberately not using
+    pending: number | null // facts the running pass (else an automatic one) would index; null with no provider
+    factCount: number // every fact in the store: the scale of what switching to OpenAI sends
+    localFirst: boolean // the store has had local vectors; a remote provider serving is the user's choice
+    vectorsWritten: number // vectors written by indexing since the server started; only grows
+    skipped: number // facts the provider turned down (they still match by keyword)
+    indexing: boolean // a background indexing pass is running
+    installing: boolean // a model install is running
+    lastError: string | null // the most recent embedding or indexing failure
   }
 }
 ```
 
-**`200 OK`**: no provider reachable (FTS-only):
+With a remote provider, `pending` counts only facts that have no vector at all: an automatic pass never re-uploads facts another provider already indexed. The exception is a switch the user asked for (`reembedAll`) that has not finished: until it has, `pending` also counts the facts still carrying another provider's vectors, and automatic retries carry on with them.
 
-```json
-{ "provider": null }
-```
-
-**`500 Internal Server Error`**: an unexpected failure resolving the provider:
+**`500 Internal Server Error`**: an unexpected failure:
 
 ```json
 { "error": "<message>" }
@@ -301,9 +393,67 @@ curl http://localhost:18790/api/memory/provider
 
 ---
 
+## `POST /api/memory/embedding/reindex`
+
+Re-checks the provider straight away, sends it one short fixed string (never fact text) in the background to confirm it answers, so a provider that has recovered stops reporting its last failure on the next status read, and starts indexing every fact it has no vector for, including facts the provider turned down earlier. Indexing runs in the background, newest facts first, and never changes a fact's `updatedAt`. Rate-limited on the sensitive tier.
+
+- **Request body** (optional): `{ allowRemote?: boolean; reembedAll?: boolean }`. `allowRemote: true` records the choice to use an OpenAI key even though the store was indexed locally; the choice lasts until Ollama is found serving again, the key is disconnected, or no key is available. `reembedAll: true` also replaces vectors another provider produced, which an automatic pass does not do for a remote provider. It is owed to the provider this request resolved until that provider has converged the store: it survives a pass that fails partway and a server restart, and is dropped once another provider takes over.
+
+### Responses
+
+**`202 Accepted`**: indexing was started (or there was nothing to do); poll `GET /api/memory/provider` for progress:
+
+```ts
+{
+  status: EmbeddingStatus
+} // the same shape as GET /api/memory/provider's `status`
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/memory/embedding/reindex
+```
+
+---
+
+## `POST /api/memory/embedding/install`
+
+Installs the embedding model through the local Ollama's own `/api/pull` and streams its progress as server-sent events. The model is fixed server-side (`nomic-embed-text`); any request body is ignored. On success the provider is re-checked, which starts indexing the store. Closing the connection cancels the download. Rate-limited on the sensitive tier, since it downloads over the network.
+
+- **Request body**: none.
+
+### Responses
+
+**`409 Conflict`** (JSON, not a stream): there is nothing to install, because `status.missingModel` is `null` (Ollama is not running, or already has the model):
+
+```json
+{
+  "error": "nothing to install",
+  "detail": "Ollama is not running, or already has the embedding model",
+  "state": "ready"
+}
+```
+
+**`200 OK`** (`text/event-stream`): one `data:` frame per event:
+
+```ts
+{ type: 'progress'; message: string; completed?: number; total?: number } // bytes of the model layer only
+{ type: 'complete'; status: EmbeddingStatus } // installed and re-checked
+{ type: 'error'; code: 'PULL_FAILED' | 'IN_PROGRESS' | 'CANCELLED'; message: string }
+```
+
+`message` is a plain phrase (`Preparing the download`, `Downloading`, `Verifying`, `Finishing`). Byte counts follow the largest layer only, so the percentage does not restart for each small file after the model. A stream that ends without Ollama reporting success is an `error`, never a `complete`. `IN_PROGRESS` means another install is already running.
+
+### Example
+
+```bash
+curl -N -X POST http://localhost:18790/api/memory/embedding/install
+```
+
 ## Error envelope
 
-Errors on these routes use the standard envelope `{ error: string }`. The two validating GET routes (`/api/memory`, `/api/memory/browse`) and the save route add a `details` field carrying the zod `flatten()` output on a 400, e.g. `{ "error": "invalid query", "details": { … } }`.
+Errors on these routes use the standard envelope `{ error: string }`. The validating routes (search, save, browse, graph, feedback, outcomes) add a `details` field carrying the zod `flatten()` output on a 400, e.g. `{ "error": "invalid query", "details": { … } }`. The install route's 409 carries `detail` and `state` instead, since nothing was malformed.
 
 ## See also
 

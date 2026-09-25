@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// Memory MCP server over stdio. Resolves an embedding provider once at boot
-// (Ollama → OpenAI → none); vector/hybrid search degrades to FTS when none.
-import { createDb, defaultDbPath, resolveEmbeddingProvider } from '@clawboo/db'
+// Memory MCP server over stdio. The embedding provider follows the dashboard's
+// rules and is re-resolved once a minute (see createStdioEmbedSource); with no
+// provider, vector and hybrid search degrade to keyword search.
+import { createDb, defaultDbPath } from '@clawboo/db'
 
 import { createMemoryServer } from '../memory/server'
+import { createStdioEmbedSource } from '../memory/stdioEmbedSource'
 import { runStdioServer } from '../stdio'
 
 void (async () => {
   const db = createDb(defaultDbPath())
-  const embed = await resolveEmbeddingProvider().catch(() => null)
-  await runStdioServer(createMemoryServer(db, embed))
+  await runStdioServer(createMemoryServer(db, createStdioEmbedSource(db)))
 })()

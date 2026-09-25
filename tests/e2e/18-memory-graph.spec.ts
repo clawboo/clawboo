@@ -4,8 +4,8 @@ import { startMockGateway, type MockGateway } from './helpers/mockGateway'
 // The Memory Graph view (features/memory/graph/) — sidebar nav, empty state,
 // synthesized tag edges over seeded facts, search → ego-graph → inspect loop,
 // neighbor-chip refocus, and legend community filtering. Runs deterministically
-// with or without a local embedding provider (the similarity honesty pill is
-// asserted CONDITIONALLY on the live /api/memory/provider response).
+// with or without a local embedding provider (the legend's embedding note is
+// asserted CONDITIONALLY on the live /api/memory/provider status).
 //
 // This spec starts its OWN mock gateway instead of using the worker-scoped
 // `gateway` fixture: 15-live-reconnect deliberately calls `gateway.close()` on
@@ -68,12 +68,22 @@ test.describe('Memory Graph', () => {
       canvas.locator('[data-testid^="mem-node-"]', { hasText: 'release-checklist' }),
     ).toHaveCount(1)
 
-    // Honesty pill — conditional on whether the sandbox resolved a provider.
+    // The legend's embedding note names the actual cause. playwright.config.ts
+    // sets CLAWBOO_DISABLE_EMBEDDINGS=1, so a spawned server reports 'disabled';
+    // a hand-started one on a machine running Ollama without the model reports
+    // 'ollama-model-missing'. `provider` is null in both, so branch on the state.
     const providerResp = await request.get(`${API_BASE}/api/memory/provider`)
-    const provider = ((await providerResp.json()) as { provider: unknown }).provider
-    const providerPill = page.getByText('Similarity links unavailable: no embedding provider')
-    if (provider == null) await expect(providerPill).toBeVisible()
-    else await expect(providerPill).not.toBeVisible()
+    const { status } = (await providerResp.json()) as { status: { state: string } }
+    const noProvider = page.getByText('Similarity links unavailable: no embedding provider')
+    if (status.state === 'disabled' || status.state === 'none') {
+      await expect(noProvider).toBeVisible()
+    } else if (status.state === 'ollama-model-missing') {
+      await expect(
+        page.getByText('Similarity links unavailable: embedding model not installed'),
+      ).toBeVisible()
+    } else {
+      await expect(noProvider).not.toBeVisible()
+    }
 
     // ── Search → Enter → ego-graph auto-selects the top hit → inspector. ──
     await page.locator('[data-testid="memory-graph-search"]').fill('rollback')

@@ -492,6 +492,7 @@ export const memoryFacts = sqliteTable(
     index('idx_memory_facts_team').on(t.scopeTeamId),
     index('idx_memory_facts_agent').on(t.scopeAgentId),
     index('idx_memory_facts_created').on(t.createdAt),
+    index('idx_memory_facts_model_created').on(t.embeddingModel, t.createdAt, t.id),
   ],
 )
 

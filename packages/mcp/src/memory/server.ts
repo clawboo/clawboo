@@ -72,12 +72,24 @@ export interface MemoryServerOptions {
   provenance?: MemoryProvenance
 }
 
+/**
+ * The embedding provider for a server: a fixed one, or a function asked on
+ * every tool call. A long-lived session (an MCP connection the Gateway keeps
+ * for days) passes a function, so it follows the provider as it comes and goes
+ * instead of keeping whichever one existed when it connected.
+ */
+export type MemoryEmbedSource =
+  EmbeddingProvider | null | (() => EmbeddingProvider | null | Promise<EmbeddingProvider | null>)
+
 export function createMemoryServer(
   db: ClawbooDb,
-  embed?: EmbeddingProvider | null,
+  embed?: MemoryEmbedSource,
   opts: MemoryServerOptions = {},
 ): Server {
-  const store = new SqliteMemoryStore(db, embed)
+  // One store per call, so the embed id and the embed call in it always come
+  // from the same provider.
+  const storeFor = async (): Promise<SqliteMemoryStore> =>
+    new SqliteMemoryStore(db, typeof embed === 'function' ? await embed() : embed)
   const bound = opts.boundScope
   // Only meaningful when there is no bound scope to prefer; see the field's doc.
   const unverified = opts.unverifiedCaller === true && !bound
@@ -120,6 +132,7 @@ export function createMemoryServer(
         scopeAgentId: z.string().optional(),
       }),
       handler: async (args) => {
+        const store = await storeFor()
         const content = String(args['content'] ?? '')
         // The store scrubs secrets on write; if the CONTENT reduces ENTIRELY to the
         // redaction sentinel there is nothing worth recalling, so the save is
@@ -170,6 +183,7 @@ export function createMemoryServer(
         scopeAgentId: z.string().optional(),
       }),
       handler: async (args) => {
+        const store = await storeFor()
         const results = await store.searchMemory(String(args['query'] ?? ''), {
           mode: optStr(args['mode']) as SearchMode | undefined,
           limit: typeof args['limit'] === 'number' ? args['limit'] : undefined,
@@ -191,6 +205,7 @@ export function createMemoryServer(
         scopeAgentId: z.string().optional(),
       }),
       handler: async (args) => {
+        const store = await storeFor()
         const facts = await store.browseMemory({
           limit: typeof args['limit'] === 'number' ? args['limit'] : undefined,
           scope: readScope(args),
@@ -214,6 +229,7 @@ export function createMemoryServer(
         scopeAgentId: z.string().optional(),
       }),
       handler: async (args) => {
+        const store = await storeFor()
         // Scope-resolved lookup: an invisible fact and a nonexistent one yield
         // the SAME error — feedback is not a cross-team existence oracle.
         const fact = await store.getFact(String(args['factId'] ?? ''), readScope(args))

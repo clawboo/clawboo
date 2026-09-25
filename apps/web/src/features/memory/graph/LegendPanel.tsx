@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+
+import { EmbeddingStatusNote } from '../EmbeddingStatusNote'
 import { useMemoryGraphStore } from './store'
 import { countLabel } from './types'
 
@@ -8,6 +10,10 @@ import { countLabel } from './types'
 // tabular counts, then the link key. No cluster swatches: clusters are named
 // on the canvas and achromatic by design, so a colour chip here would be the
 // one place hue implied identity.
+//
+// The embedding note lives HERE rather than as a floating banner: it answers a
+// question the reader only has while looking at the link key, and it carries
+// the fix when there is one (install the model, retry indexing).
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -56,6 +62,7 @@ export function LegendPanel() {
 
   const factCount = payload.nodes.filter((n) => n.kind === 'fact').length
   const procCount = payload.nodes.filter((n) => n.kind === 'procedure').length
+  const noSimilarity = payload.nodes.length > 0 && !payload.similarityAvailable
 
   return (
     <div
@@ -181,6 +188,7 @@ export function LegendPanel() {
             <EdgeSwatch dash={dash} /> {label}
           </span>
         ))}
+        <EmbeddingStatusNote variant="legend" noSimilarity={noSimilarity} />
       </div>
 
       <div

@@ -4,12 +4,13 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { useToastStore } from '@/stores/toast'
 
 import { server } from '../../../__vitest__/mswServer'
 import { MemoryPanel } from '../MemoryPanel'
+import { __resetEmbeddingUiForTests } from '../useEmbeddingStatus'
 
 function fact(id: string, title: string) {
   return {
@@ -42,6 +43,8 @@ function learningEntry(status: string | null, extra: Record<string, unknown> = {
   }
 }
 
+// The embedding status is a shared store: one case's provider must not leak into the next.
+beforeEach(() => __resetEmbeddingUiForTests())
 afterEach(() => cleanup())
 
 describe('MemoryPanel', () => {

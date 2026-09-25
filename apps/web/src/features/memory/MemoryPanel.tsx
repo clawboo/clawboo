@@ -42,11 +42,9 @@ import { ENTER_SPRING, listDelay } from '@/lib/motion'
 import {
   browseMemory,
   getOutcomes,
-  getProvider,
   recordFeedback,
   saveFact,
   searchMemory,
-  type EmbeddingProviderInfo,
   type LearningEntry,
   type MemoryFact,
   type MemoryOutcome,
@@ -54,7 +52,14 @@ import {
   type MemorySearchResult,
   type SearchMode,
 } from '@/lib/memoryClient'
+import {
+  describeEmbeddingProvider,
+  embeddingFailing,
+  EmbeddingStatusNote,
+  REMOTE_DISCLOSURE,
+} from './EmbeddingStatusNote'
 import { LearningPill, OutcomeTrail, provenanceCaption } from './learningUi'
+import { useEmbeddingPoller } from './useEmbeddingStatus'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 const MODES: SearchMode[] = ['fts', 'vector', 'hybrid']
@@ -112,7 +117,10 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
   const [facts, setFacts] = useState<MemoryFact[]>([])
   const [procedures, setProcedures] = useState<MemoryProcedure[]>([])
   const [learning, setLearning] = useState<Record<string, LearningEntry>>({})
-  const [provider, setProvider] = useState<EmbeddingProviderInfo | null>(null)
+  // The panel owns the embedding-status poll while it is on screen. Search
+  // results do not depend on it, so there is nothing to refetch when it settles.
+  const embedding = useEmbeddingPoller()
+  const provider = embedding?.provider ?? null
   const [loadingBrowse, setLoadingBrowse] = useState(true)
   const [browseOk, setBrowseOk] = useState(true) // false when the browse load failed → error/retry
 
@@ -161,7 +169,6 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
 
   useEffect(() => {
     void refreshBrowse()
-    void getProvider().then(setProvider)
   }, [refreshBrowse])
 
   const runSearch = useCallback(async () => {
@@ -287,8 +294,9 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
 
             {/* The mode picker is only honest when an embedding provider backs
                 it. With none, vector and hybrid both fall through to keyword,
-                so offering three equal choices would be a lie; the note says
-                why instead. */}
+                so offering three equal choices would be a lie. The note says
+                why, and also shows under the chips when a provider exists but
+                is failing, since this list is the only view in Settings. */}
             {provider && (
               <div style={{ display: 'flex', gap: 6 }}>
                 {MODES.map((m) => (
@@ -298,11 +306,7 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                 ))}
               </div>
             )}
-            {!provider && (
-              <p className="text-[11.5px]" style={{ color: 'var(--muted-foreground)' }}>
-                No embedding provider, so search matches on keywords only.
-              </p>
-            )}
+            <EmbeddingStatusNote variant="search" />
 
             {results.length > 0 && (
               <RowGroup>
@@ -661,12 +665,34 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                   <dd className="flex flex-1 flex-col gap-1">
                     <span
                       data-testid="memory-embedding-provider"
-                      className="font-data text-[12px] text-foreground"
+                      className="font-data flex items-center gap-2 text-[12px] text-foreground"
                     >
-                      {provider
-                        ? `${provider.id} · ${provider.dimensions}d`
-                        : 'None, keyword search only'}
+                      {embedding &&
+                        (embedding.state !== 'ready' || embeddingFailing(embedding)) && (
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 5,
+                              height: 5,
+                              borderRadius: 999,
+                              background: embeddingFailing(embedding)
+                                ? 'var(--destructive)'
+                                : 'var(--amber)',
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
+                      {describeEmbeddingProvider(embedding)}
                     </span>
+                    {embedding?.remote && (
+                      <span
+                        data-testid="memory-embedding-disclosure"
+                        className="text-[11.5px]"
+                        style={{ color: 'var(--muted-foreground)' }}
+                      >
+                        {REMOTE_DISCLOSURE}
+                      </span>
+                    )}
                   </dd>
                 </div>
                 <div className="flex items-baseline gap-4 px-3.5 py-2.5">

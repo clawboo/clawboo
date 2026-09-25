@@ -8,10 +8,8 @@ import { putScreenshot } from '../lib/screenshotBus'
 import path from 'node:path'
 
 import {
-  resolveEmbeddingProvider,
   resolveRoomForTeam,
   type DbTeamChat,
-  type EmbeddingProvider,
   type MemoryProvenance,
   type MemoryScope,
 } from '@clawboo/db'
@@ -35,6 +33,11 @@ import type { Request, Response } from 'express'
 
 import { connectorToolsForServer, onConnectorsChanged } from '../lib/connectors/supervisor'
 import { getDb, getDbPath } from '../lib/db'
+import {
+  getEmbedProvider,
+  invalidateEmbedProvider,
+  warmEmbedProvider,
+} from '../lib/memoryEmbedding'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getMcpAttachSecret } from '../lib/mcpAttachSecret'
 import { createLogger } from '@clawboo/logger'
@@ -43,22 +46,6 @@ const log = createLogger('mcp-attach')
 import { emitEvent } from '../lib/obs/emit'
 import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
 import { connectedAppsNow } from '../lib/connectors/composio'
-
-// The memory server wants an embedding provider; resolve once (a network probe)
-// and let the factory read the cached value. First HTTP session may be FTS-only.
-let cachedEmbed: EmbeddingProvider | null = null
-let embedKicked = false
-function kickEmbedResolve(): void {
-  if (embedKicked) return
-  embedKicked = true
-  void resolveEmbeddingProvider()
-    .then((p) => {
-      cachedEmbed = p
-    })
-    .catch(() => {
-      cachedEmbed = null
-    })
-}
 
 /**
  * Is this URL's claimed scope actually one clawboo issued?
@@ -173,7 +160,7 @@ export function parseTeamChatBinding(req?: IncomingMessage): TeamChatBoundIdenti
 let handlers: Record<McpServerName, McpHttpHandlers> | null = null
 function getHandlers(): Record<McpServerName, McpHttpHandlers> {
   if (handlers) return handlers
-  kickEmbedResolve()
+  warmEmbedProvider()
   handlers = {
     // Tasks binds the run's TEAM (same `scopeTeamId` param the Memory server
     // reads) so board READS are team-scoped — an agent is never told its own
@@ -201,7 +188,9 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     }),
     memory: createStreamableHttpHandlers((req) => {
       const scope = parseBoundScope(req)
-      return createMemoryServer(getDb(), cachedEmbed, {
+      // A function, not a provider: the session outlives any one provider
+      // (an OpenClaw Gateway keeps it for days), so each call asks afresh.
+      return createMemoryServer(getDb(), getEmbedProvider, {
         boundScope: scope,
         unverifiedCaller: scope === undefined,
         // Provenance rides the same verified-identity rule: the agent half
@@ -277,8 +266,7 @@ export function prewarmMcp(): void {
  *  the supervisor's recovery action when a server health-probe fails. */
 export function resetMcpHandlers(): void {
   handlers = null
-  embedKicked = false
-  cachedEmbed = null
+  invalidateEmbedProvider()
 }
 
 function makePost(server: McpServerName) {
