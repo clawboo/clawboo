@@ -922,7 +922,7 @@ agent-orchestration space, among them Paperclip (https://github.com/paperclipai/
 and vibe-kanban (https://github.com/BloopAI/vibe-kanban). Nous Research's
 hermes-paperclip-adapter (https://github.com/NousResearch/hermes-paperclip-adapter, MIT)
 was a useful reference for running Hermes Agent as a managed worker, and Graphify
-(https://github.com/Graphify-Labs/graphify, MIT) for presenting a knowledge store as a
+(https://github.com/Graphify-Labs/graphify, Apache-2.0) for presenting a knowledge store as a
 navigable graph. These projects are credited here as design inspiration.
 
 ---
