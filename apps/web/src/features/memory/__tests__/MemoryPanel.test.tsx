@@ -266,4 +266,130 @@ describe('MemoryPanel', () => {
       ).toBe(true),
     )
   })
+
+  it('a double-click on Helpful records ONE outcome and does not open the trail', async () => {
+    let posts = 0
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({ facts: [fact('f1', 'Fact one')], procedures: [], learning: {} }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+      http.post('/api/memory/feedback', async () => {
+        posts += 1
+        await held
+        return HttpResponse.json({ ok: true, learning: learningEntry('tentative') })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    await user.dblClick(screen.getByTestId('memory-fact-helpful'))
+    expect(screen.getByTestId('memory-fact-helpful')).toBeDisabled()
+    // A disabled button is pointer-events-none, so in a browser the next click
+    // lands on its parent. jsdom has no hit-testing: click the parent directly.
+    await user.click(screen.getByTestId('memory-fact-helpful').parentElement!)
+    expect(screen.queryByTestId('memory-fact-trail')).not.toBeInTheDocument()
+    release()
+    expect(await screen.findByText('tentative')).toBeInTheDocument()
+    expect(posts).toBe(1)
+    expect(screen.queryByTestId('memory-fact-trail')).not.toBeInTheDocument()
+    expect(screen.getByTestId('memory-fact-helpful')).toBeEnabled()
+  })
+
+  it('a failed feedback request says so instead of failing silently', async () => {
+    useToastStore.setState({ toasts: [] })
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({ facts: [fact('f1', 'Fact one')], procedures: [], learning: {} }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+      http.post('/api/memory/feedback', () => new HttpResponse(null, { status: 500 })),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    await user.click(screen.getByTestId('memory-fact-outdated'))
+    await waitFor(() =>
+      expect(
+        useToastStore
+          .getState()
+          .toasts.some((t) => t.type === 'error' && /feedback/i.test(t.message)),
+      ).toBe(true),
+    )
+  })
+
+  it('opens the outcome trail from the keyboard', async () => {
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [fact('f1', 'Fact one')],
+          procedures: [],
+          learning: { f1: learningEntry('tentative') },
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    const toggle = await screen.findByTestId('memory-fact-toggle')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    toggle.focus()
+    await user.keyboard('{Enter}')
+    expect(await screen.findByTestId('memory-fact-trail')).toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.keyboard(' ')
+    expect(screen.queryByTestId('memory-fact-trail')).not.toBeInTheDocument()
+  })
+
+  it('a slow full history does not appear under the fact opened after it', async () => {
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [fact('f1', 'Fact one'), fact('f2', 'Fact two')],
+          procedures: [],
+          learning: { f1: learningEntry('tentative'), f2: learningEntry('tentative') },
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+      http.get('/api/memory/outcomes', async ({ request }) => {
+        const factId = new URL(request.url).searchParams.get('factId')
+        if (factId === 'f1') await held
+        return HttpResponse.json({
+          outcomes: [
+            {
+              id: `o-${factId}`,
+              factId,
+              outcome: 'useful',
+              note: `from ${factId}`,
+              agentId: null,
+              teamId: null,
+              taskId: null,
+              runtime: 'user',
+              createdAt: Date.now(),
+            },
+          ],
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    const [first, second] = screen.getAllByTestId('memory-fact-card')
+    await user.click(first!)
+    await user.click(await screen.findByTestId('memory-fact-full-history'))
+    await user.click(second!)
+    release()
+    // f2 is open and offers its own history; f1's answer landed and was not shown.
+    expect(await screen.findByTestId('memory-fact-full-history')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByTestId('memory-fact-history')).not.toBeInTheDocument()
+  })
 })

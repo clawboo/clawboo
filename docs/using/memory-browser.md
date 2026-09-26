@@ -68,7 +68,7 @@ The form saves **facts**. The save endpoint also accepts `{ kind: 'procedure', n
 
 Both tiers load when Memory opens (and on **Refresh**) via `browseMemory({ limit: 50 })`.
 
-- **Facts**: each row shows the title and the first 200 characters, then a line with its scope, its tags, and who saved it (agent, runtime, task) when that was recorded. A learning pill (**preferred**, **tentative**, **contested · verify**, **dead end**) or a quiet **used N×** shows how the fact has fared in real runs. The thumbs-up and thumbs-down buttons record **Helpful** or **Outdated**; clicking the row opens its recent outcomes, with a **Full history** link once the fact has been used.
+- **Facts**: each row shows the title and the first 200 characters, then a line with its scope, its tags, and who saved it (agent, runtime, task) when that was recorded. A learning pill (**preferred**, **tentative**, **contested · verify**, **dead end**) or a quiet **used N×** shows how the fact has fared in real runs. The thumbs-up and thumbs-down buttons record **Helpful** or **Outdated**; clicking the row (or pressing Enter on its title) opens its recent outcomes, with a **Full history** link once the fact has been used.
 - **Procedures**: each row shows the name, its scope, a `v<version>` chip, and the first 200 characters. Procedures are the versioned, reusable tier and are not editable here.
 
 If the load fails, a **"Couldn't load the memory store"** strip with **Retry** appears, which is distinct from a store that is genuinely empty.

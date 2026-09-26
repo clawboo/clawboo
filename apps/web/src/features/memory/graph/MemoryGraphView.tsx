@@ -84,9 +84,13 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
   // Debounced live substring dim (150ms — fast enough to feel live, slow
   // enough to skip intermediate keystrokes).
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The latest Enter-search; an older one resolving late is discarded, and so
+  // is one the user typed past.
+  const searchSeq = useRef(0)
   const onQueryChange = useCallback((v: string) => {
     setQuery(v)
     setNoMatch(false)
+    searchSeq.current += 1
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       const store = useMemoryGraphStore.getState()
@@ -112,10 +116,14 @@ function MemoryGraphViewInner({ onOpenList }: { onOpenList?: (() => void) | unde
   const runEgoSearch = useCallback(async () => {
     // Cancel a pending substring-dim so it can't race this ego set to null.
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    const store = useMemoryGraphStore.getState()
     const q = query.trim()
-    if (!q || !store.payload) return
+    if (!q || !useMemoryGraphStore.getState().payload) return
+    const seq = ++searchSeq.current
     const results = await searchMemory(q, mode, { limit: 25 })
+    if (seq !== searchSeq.current) return
+    // Read after the await: a refresh may have replaced the payload meanwhile.
+    const store = useMemoryGraphStore.getState()
+    if (!store.payload) return
     const nodeIds = new Set(store.payload.nodes.map((n) => n.id))
     const hits = new Map<string, number>()
     for (const r of results) {

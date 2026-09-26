@@ -12,7 +12,7 @@
 // and the learning pills. Nothing else is tinted. Rows live in ONE hairline
 // container per section rather than one bordered, shadowed card apiece.
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { motion } from 'framer-motion'
 import {
@@ -126,7 +126,13 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
 
   // Outcome-trail expansion (one card at a time) + lazily-fetched full history.
   const [expandedFactId, setExpandedFactId] = useState<string | null>(null)
-  const [history, setHistory] = useState<MemoryOutcome[] | null>(null)
+  // Keyed by fact: a response that lands after the user opened another fact
+  // must not render under it.
+  const [history, setHistory] = useState<{ factId: string; items: MemoryOutcome[] } | null>(null)
+  // Facts with a feedback request in flight: a second click would record a
+  // second outcome.
+  const [feedbackPending, setFeedbackPending] = useState<ReadonlySet<string>>(new Set())
+  const feedbackInFlight = useRef(new Set<string>())
 
   const agentName = useCallback(
     (agentId: string | null) =>
@@ -157,10 +163,19 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
 
   // Helpful/Outdated → POST feedback → patch the local learning map from the
   // returned entry (no full refetch; the pill updates in place).
-  const sendFeedback = useCallback(async (factId: string, outcome: 'useful' | 'dead_end') => {
-    const entry = await recordFeedback(factId, outcome)
-    if (entry) setLearning((prev) => ({ ...prev, [factId]: entry }))
-  }, [])
+  const sendFeedback = useCallback(
+    async (factId: string, outcome: 'useful' | 'dead_end') => {
+      if (feedbackInFlight.current.has(factId)) return
+      feedbackInFlight.current.add(factId)
+      setFeedbackPending(new Set(feedbackInFlight.current))
+      const entry = await recordFeedback(factId, outcome)
+      feedbackInFlight.current.delete(factId)
+      setFeedbackPending(new Set(feedbackInFlight.current))
+      if (entry) setLearning((prev) => ({ ...prev, [factId]: entry }))
+      else addToast({ type: 'error', message: 'Could not record feedback. Please try again.' })
+    },
+    [addToast],
+  )
 
   const toggleExpanded = useCallback((factId: string) => {
     setHistory(null)
@@ -439,6 +454,7 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                   const entry = learning[f.id] ?? null
                   const caption = provenanceCaption(f, agentName(f.createdByAgentId))
                   const expanded = expandedFactId === f.id
+                  const factHistory = history?.factId === f.id ? history.items : null
                   return (
                     <motion.div
                       key={f.id}
@@ -454,9 +470,20 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                         className="cursor-pointer px-3.5 py-3 transition-colors hover:bg-foreground/[0.02]"
                       >
                         <div className="flex items-baseline justify-between gap-3">
-                          <span className="text-[13px] font-semibold text-foreground">
+                          {/* The row is clickable for the mouse; this is the
+                              same toggle for the keyboard and screen readers. */}
+                          <button
+                            type="button"
+                            data-testid="memory-fact-toggle"
+                            aria-expanded={expanded}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleExpanded(f.id)
+                            }}
+                            className="rounded-sm text-left text-[13px] font-semibold text-foreground"
+                          >
                             {f.title}
-                          </span>
+                          </button>
                           <span className="shrink-0">
                             <LearningPill learning={entry} />
                           </span>
@@ -496,12 +523,18 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                           </div>
                           {/* Icon-only: a per-row action repeated down a list
                               must not carry the same weight as the titles. */}
-                          <div className="flex shrink-0 items-center gap-0.5">
+                          {/* Stops here too: a disabled button lets the click
+                              through, and it must not flip the trail. */}
+                          <div
+                            className="flex shrink-0 items-center gap-0.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <IconButton
                               data-testid="memory-fact-helpful"
                               label="Helpful"
                               variant="ghost"
                               size="sm"
+                              disabled={feedbackPending.has(f.id)}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 void sendFeedback(f.id, 'useful')
@@ -514,6 +547,7 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                               label="Outdated"
                               variant="ghost"
                               size="sm"
+                              disabled={feedbackPending.has(f.id)}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 void sendFeedback(f.id, 'dead_end')
@@ -539,14 +573,14 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                             }}
                           >
                             <OutcomeTrail items={entry?.recentTrail ?? []} />
-                            {history && history.length > 0 && (
+                            {factHistory && factHistory.length > 0 && (
                               <div
                                 data-testid="memory-fact-history"
                                 style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
                               >
                                 <div className={KICKER}>Full history</div>
                                 <OutcomeTrail
-                                  items={history.map((o) => ({
+                                  items={factHistory.map((o) => ({
                                     kind: o.outcome,
                                     createdAt: o.createdAt,
                                     agentId: o.agentId,
@@ -557,7 +591,7 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                                 />
                               </div>
                             )}
-                            {(entry?.uses ?? 0) > 0 && history === null && (
+                            {(entry?.uses ?? 0) > 0 && factHistory === null && (
                               <div>
                                 <Button
                                   data-testid="memory-fact-full-history"
@@ -565,7 +599,9 @@ export function MemoryPanel({ headerExtra }: { headerExtra?: ReactNode } = {}) {
                                   size="sm"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    void getOutcomes(f.id).then(setHistory)
+                                    void getOutcomes(f.id).then((items) =>
+                                      setHistory({ factId: f.id, items }),
+                                    )
                                   }}
                                 >
                                   <History size={12} strokeWidth={2} /> Full history

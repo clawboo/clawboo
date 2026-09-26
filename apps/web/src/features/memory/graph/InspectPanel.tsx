@@ -4,6 +4,7 @@ import { History, ThumbsDown, ThumbsUp, X } from 'lucide-react'
 import { Button, IconButton } from '@/features/shared/Button'
 import { StatusPill } from '@/features/shared/StatusPill'
 import { formatRelative } from '@/lib/formatRelative'
+import { useToastStore } from '@/stores/toast'
 import {
   getOutcomes,
   recordFeedback,
@@ -44,6 +45,7 @@ export function InspectPanel() {
 
   const [outcomes, setOutcomes] = useState<MemoryOutcome[] | null>(null)
   const [sending, setSending] = useState(false)
+  const addToast = useToastStore((s) => s.addToast)
 
   // Full-history state is per-selection.
   useEffect(() => {
@@ -75,8 +77,9 @@ export function InspectPanel() {
       const entry = await recordFeedback(node.id, outcome)
       setSending(false)
       if (entry) useMemoryGraphStore.getState().setNodeLearning(node.id, entry)
+      else addToast({ type: 'error', message: 'Could not record feedback. Please try again.' })
     },
-    [node],
+    [node, addToast],
   )
 
   if (!node) return null
@@ -257,7 +260,13 @@ export function InspectPanel() {
                   data-testid="memory-inspect-full-history"
                   variant="ghost"
                   size="sm"
-                  onClick={() => void getOutcomes(node.id).then(setOutcomes)}
+                  onClick={() => {
+                    const id = node.id
+                    void getOutcomes(id).then((items) => {
+                      // Selection may have moved on while this loaded.
+                      if (useMemoryGraphStore.getState().selectedNodeId === id) setOutcomes(items)
+                    })
+                  }}
                 >
                   <History size={13} strokeWidth={2} /> Full history
                 </Button>

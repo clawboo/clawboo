@@ -2,12 +2,14 @@
 // the feedback loop (Helpful → POST → learning patched into the store).
 
 import { ReactFlowProvider } from '@xyflow/react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { MemoryGraphNode, MemoryGraphPayload } from '@/lib/memoryClient'
+import { useToastStore } from '@/stores/toast'
+
 import { server } from '../../../__vitest__/mswServer'
 import { InspectPanel } from '../graph/InspectPanel'
 import { useMemoryGraphStore } from '../graph/store'
@@ -133,5 +135,73 @@ describe('InspectPanel', () => {
     renderPanel()
     await user.click(screen.getByRole('button', { name: 'deploy' }))
     expect(useMemoryGraphStore.getState().searchText).toBe('deploy')
+  })
+
+  it('a failed feedback request says so instead of failing silently', async () => {
+    useToastStore.setState({ toasts: [] })
+    server.use(http.post('/api/memory/feedback', () => new HttpResponse(null, { status: 500 })))
+    useMemoryGraphStore.getState().select('f1')
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByTestId('memory-feedback-deadend'))
+    await waitFor(() =>
+      expect(
+        useToastStore
+          .getState()
+          .toasts.some((t) => t.type === 'error' && /feedback/i.test(t.message)),
+      ).toBe(true),
+    )
+  })
+
+  it('a slow full history does not appear under the node selected after it', async () => {
+    const used = {
+      status: 'tentative' as const,
+      score: 1,
+      uses: 1,
+      usefulCount: 1,
+      negativeCount: 0,
+      lastUsedAt: 1,
+      recentTrail: [],
+    }
+    useMemoryGraphStore.getState().setPayload(
+      {
+        ...PAYLOAD,
+        nodes: [factNode('f1', { learning: used }), factNode('f2', { learning: used })],
+      },
+      null,
+    )
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/memory/outcomes', async ({ request }) => {
+        const factId = new URL(request.url).searchParams.get('factId')
+        if (factId === 'f1') await held
+        return HttpResponse.json({
+          outcomes: [
+            {
+              id: `o-${factId}`,
+              factId,
+              outcome: 'useful',
+              note: null,
+              agentId: null,
+              teamId: null,
+              taskId: null,
+              runtime: 'user',
+              createdAt: 1,
+            },
+          ],
+        })
+      }),
+    )
+    useMemoryGraphStore.getState().select('f1')
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByTestId('memory-inspect-full-history'))
+    act(() => useMemoryGraphStore.getState().select('f2'))
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByText('Fact f2')).toBeInTheDocument()
+    expect(screen.queryByTestId('memory-inspect-history')).not.toBeInTheDocument()
+    expect(screen.getByTestId('memory-inspect-full-history')).toBeInTheDocument()
   })
 })
