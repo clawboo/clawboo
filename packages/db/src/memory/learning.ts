@@ -27,7 +27,8 @@ export interface LearningEntry {
   status: LearningStatus | null
   /** Present ONLY when status === 'contested' — the recency-decides verdict. */
   verdict?: 'useful' | 'avoid'
-  /** Time-decayed signed sum (useful +w, dead_end/corrected −w, cited 0), 6dp. */
+  /** Time-decayed signed sum (useful +w, dead_end/corrected −w, cited 0), 6dp.
+   *  One vote per reporter per direction, weighted by its newest report. */
   score: number
   /** ALL signals including 'cited' — honest usage frequency, not endorsement. */
   uses: number
@@ -62,6 +63,10 @@ const round6 = (x: number): number => Math.round(x * 1e6) / 1e6
  * Corroboration = distinct `(agentId, taskId)` pairs over 'useful' rows, so a
  * UI user double-clicking "helpful" collapses to ONE corroborator and can never
  * mint 'preferred' alone; two agents (or one agent across two tasks) can.
+ *
+ * The score counts each reporter once per direction too, at the weight of its
+ * newest report. Otherwise repeating a report would decide a contested verdict:
+ * one reporter's ten dead_ends outweighing two agents who found it useful.
  */
 export function computeLearningOverlay(
   outcomes: MemoryOutcome[],
@@ -84,23 +89,30 @@ export function computeLearningOverlay(
     // regardless of input order.
     const sorted = [...rows].sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))
 
-    let score = 0
+    // Signed weight per (direction, reporter); ascending order leaves the
+    // newest report's weight in place.
+    const votes = new Map<string, number>()
     const corroborators = new Set<string>()
     let negativeCount = 0
     let lastUsedAt: number | null = null
     for (const o of sorted) {
       // Future timestamps clamp to weight 1 — a bad clock never amplifies.
       const w = 0.5 ** (Math.max(0, now - o.createdAt) / halfLifeMs)
+      const reporter = `${o.agentId ?? ''}::${o.taskId ?? ''}`
       if (o.outcome === 'useful') {
-        score += w
-        corroborators.add(`${o.agentId ?? ''}::${o.taskId ?? ''}`)
+        votes.set(`+${reporter}`, w)
+        corroborators.add(reporter)
       } else if (o.outcome === 'dead_end' || o.outcome === 'corrected') {
-        score -= w
+        votes.set(`-${reporter}`, -w)
         negativeCount += 1
       }
       // 'cited' contributes 0 to score — usage is data, not endorsement.
       if (lastUsedAt === null || o.createdAt > lastUsedAt) lastUsedAt = o.createdAt
     }
+    // Map iteration is first-insertion order, itself fixed by the sort, so the
+    // floating-point sum stays byte-stable.
+    let score = 0
+    for (const v of votes.values()) score += v
 
     const usefulCount = corroborators.size
     let status: LearningStatus | null

@@ -109,7 +109,7 @@ function installFakeNet(): FakeNet {
         if (net.pullStream) return new Response(net.pullStream(init?.signal ?? undefined))
         return new Response(net.pullFrames.join('\n') + '\n')
       }
-      if (url.includes('api.openai.com')) {
+      if (new URL(url).hostname === 'api.openai.com') {
         net.calls.openai += 1
         const auth = new Headers(init?.headers).get('authorization') ?? ''
         net.openaiKeys.push(auth.replace(/^Bearer /, ''))

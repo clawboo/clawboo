@@ -11,7 +11,14 @@ export {
   type TeamChatServerOptions,
   type TeamChatBoundIdentity,
 } from './teamchat/server'
-export { signAttachScope, verifyAttachScope, type SignableScope } from './attachAuth'
+export {
+  signAttachProvenance,
+  signAttachScope,
+  verifyAttachProvenance,
+  verifyAttachScope,
+  type SignableProvenance,
+  type SignableScope,
+} from './attachAuth'
 export { formatPeerPost, type PeerPostLike } from './teamchat/format'
 
 export { runStdioServer } from './stdio'

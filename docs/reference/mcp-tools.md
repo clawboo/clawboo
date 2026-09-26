@@ -186,7 +186,7 @@ Do not work around the cycle refusal by re-linking in the other direction. A cyc
 
 ## Memory server
 
-`createMemoryServer(db, embed?, opts?)` → `clawboo-memory`. `embed` is a fixed `EmbeddingProvider`, `null`, or a function asked on every tool call; the dashboard passes a function, so a long-lived session follows the current provider. The stdio bin's function is `createStdioEmbedSource(db)`, also exported, which applies the local-first rules below. Three tools over the shared `SqliteMemoryStore`: declarative facts plus versioned procedures, with FTS / vector / hybrid search. The store scrubs secrets on write.
+`createMemoryServer(db, embed?, opts?)` → `clawboo-memory`. `embed` is a fixed `EmbeddingProvider`, `null`, or a function asked on every tool call; the dashboard passes a function, so a long-lived session follows the current provider. The stdio bin's function is `createStdioEmbedSource(db)`, also exported, which applies the local-first rules below. Four tools over the shared `SqliteMemoryStore`: declarative facts plus versioned procedures, with FTS / vector / hybrid search. The store scrubs secrets on write.
 
 <Info>
 **The `boundScope` binding (anti-spoof).** When the server is constructed with `opts.boundScope`, the run's scope is authoritative and the model's `scopeTeamId` / `scopeAgentId` args are ignored:
@@ -234,6 +234,22 @@ List recent saved facts (scoped). `limit` is `1`–`200`.
   limit?: number            // integer, 1..200
   scopeTeamId?: string      // ignored when bound
   scopeAgentId?: string     // ignored when bound
+}
+```
+
+### `memory_feedback`
+
+Report whether a recalled fact helped: `useful`, `dead_end` (it misled or wasted effort) or `corrected` (it was wrong, and `note` carries the correction). Cite the id from `memory_search` or the `(id …)` prefix in the auto-memory block; an 8+ character prefix is accepted. A fact the caller cannot see gets the same error as one that does not exist. Returns `{ recorded, learning }`.
+
+The reporter comes from the binding when there is one. An unidentified HTTP caller is recorded as no one, because two distinct reporters (an agent and task pair) make a fact **preferred** in every team's recall, and a caller that could name itself could do that alone. Each reporter counts once per direction in the score, at the weight of its newest report, so repeating a report adds nothing.
+
+```ts
+{
+  factId: string
+  outcome: 'useful' | 'dead_end' | 'corrected'
+  note?: string             // required for 'corrected'
+  scopeTeamId?: string      // ignored when bound, and for an unidentified HTTP caller
+  scopeAgentId?: string     // same
 }
 ```
 
@@ -345,7 +361,7 @@ A POST without a valid session that is not an `initialize` request returns a JSO
 
 Over HTTP, the authoritative bindings ride query params on the attach URL the server itself writes (the model never controls the URL):
 
-- **Memory**: `scopeTeamId` / `scopeAgentId` / `scopeTenantId` set the run's visibility scope (`boundScope`).
+- **Memory**: `scopeTeamId` / `scopeAgentId` / `scopeTenantId` set the run's visibility scope (`boundScope`). `provRuntime` / `provTaskId` / `provSessionKey` record which run saved a fact or reported an outcome; they carry their own `provSig` and are dropped when it does not verify, since the task id decides whether two reports count as independent.
 - **TeamChat**: `roomTeamId` / `postAuthorAgentId` set the room and post author (`boundIdentity`); an added `delegate=1` marks the session orchestrator-driven and exposes [`team_delegate`](#team_delegate). Clawboo writes that param on orchestrator-driven team runs and nowhere else: an external attach must not add it, because nothing is observing the tool-call there and the delegation would silently no-op.
 - **Tasks**: `scopeTeamId` / `scopeAgentId` bind the run's board reads to its team (`boundScope`); `scopeAgentId` also carries the mid-run inbox piggyback.
 - **Tools**: no scope params; the URL stays bare.

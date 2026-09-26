@@ -113,6 +113,8 @@ export function createMemoryServer(
   // the visibility scope (team-shared recall) but records who saved it here.
   // Unbound AND unverified sessions record NOTHING — spoofable model-supplied
   // ids are worse than null.
+  const reporterId = (boundId: string | null | undefined, arg: unknown): string | null =>
+    bound ? (boundId ?? null) : unverified ? null : (optStr(arg) ?? null)
   const saveProvenance = (): MemoryProvenance | undefined =>
     bound
       ? { ...opts.provenance, agentId: opts.provenance?.agentId ?? bound.agentId ?? null }
@@ -244,8 +246,11 @@ export function createMemoryServer(
           factId: fact.id,
           outcome: args['outcome'] as 'useful' | 'dead_end' | 'corrected',
           note: optStr(args['note']) ?? null,
-          agentId: bound ? (bound.agentId ?? null) : (optStr(args['scopeAgentId']) ?? null),
-          teamId: bound ? (bound.teamId ?? null) : (optStr(args['scopeTeamId']) ?? null),
+          // Same rule as saveProvenance: an unverified caller's ids are the
+          // model's own arguments, and distinct agent ids count as distinct
+          // corroborators, so one session could promote a fact by itself.
+          agentId: reporterId(bound?.agentId, args['scopeAgentId']),
+          teamId: reporterId(bound?.teamId, args['scopeTeamId']),
           taskId: opts.provenance?.taskId ?? null,
           runtime: opts.provenance?.runtime ?? null,
         })

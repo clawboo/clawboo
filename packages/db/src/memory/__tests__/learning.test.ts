@@ -90,6 +90,32 @@ describe('computeLearningOverlay — corroboration + status', () => {
     expect(e.status).toBe('preferred')
   })
 
+  it('repeating a report does not add weight: one reporter, one vote per direction', () => {
+    // Two agents found it useful; a third says dead_end five times.
+    const e = computeLearningOverlay(
+      [
+        outcome('f', 'useful', 0, { agentId: 'a1', taskId: 't1' }),
+        outcome('f', 'useful', 0, { agentId: 'a2', taskId: 't2' }),
+        ...[0, 1, 2, 3, 4].map(() => outcome('f', 'dead_end', 0, { agentId: 'a3', taskId: 't3' })),
+      ],
+      NOW,
+    ).get('f')!
+    expect(e.status).toBe('contested')
+    expect(e.score).toBe(1)
+    expect(e.verdict).toBe('useful')
+    // The trail and counts still show every report.
+    expect(e.negativeCount).toBe(5)
+    expect(e.uses).toBe(7)
+  })
+
+  it("a reporter's newest report sets its weight", () => {
+    const e = computeLearningOverlay(
+      [outcome('f', 'useful', LEARNING_HALF_LIFE_MS), outcome('f', 'useful', 0)],
+      NOW,
+    ).get('f')!
+    expect(e.score).toBe(1)
+  })
+
   it('negatives only → dead_end; corrected counts as a negative', () => {
     const e = computeLearningOverlay(
       [outcome('f', 'corrected', 0, { note: 'actually port 18790' })],

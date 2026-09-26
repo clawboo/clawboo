@@ -19,8 +19,6 @@
 //   - indexing facts saved without a vector, whenever a usable provider
 //     appears or changes.
 
-import { createHash } from 'node:crypto'
-
 import {
   OLLAMA_DEFAULT_MODEL,
   OLLAMA_DEFAULT_URL,
@@ -104,6 +102,10 @@ let current: { provider: TrackedProvider; fingerprint: string | null } | null = 
 let lastReadyId: string | null = null
 /** Provider id plus key fingerprint: a replaced OpenAI key is a new provider. */
 let lastReadyKey: string | null = null
+/** The last OpenAI key seen and how many times it has changed. Only equality
+ *  matters, so nothing derived from the key is ever computed or stored. */
+let lastKey: string | null = null
+let keyEpoch = 0
 let lastEmbedError: string | null = null
 let lastLoggedError: { message: string; at: number } | null = null
 let ticker: ReturnType<typeof setInterval> | null = null
@@ -228,7 +230,7 @@ async function resolveFresh(): Promise<Resolved> {
   const res = await probeEmbeddingProvider({ openaiApiKey, allowRemote })
   const fingerprint =
     res.state === 'ready' && isRemoteEmbeddingProvider(res.provider.id) && openaiApiKey
-      ? createHash('sha256').update(openaiApiKey).digest('hex').slice(0, 16)
+      ? keyIdentity(openaiApiKey)
       : null
   return {
     res,
@@ -275,6 +277,14 @@ export async function getEmbeddingResolution(): Promise<EmbeddingResolution> {
     inflight = { gen, promise }
   }
   return inflight.promise
+}
+
+function keyIdentity(key: string): string {
+  if (key !== lastKey) {
+    lastKey = key
+    keyEpoch += 1
+  }
+  return `key-${keyEpoch}`
 }
 
 function onResolved(
@@ -739,6 +749,8 @@ export function __resetEmbeddingForTests(): void {
   current = null
   lastReadyId = null
   lastReadyKey = null
+  lastKey = null
+  keyEpoch = 0
   lastEmbedError = null
   lastLoggedError = null
   lastBackfill = null

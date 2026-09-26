@@ -26,6 +26,7 @@ import {
   type McpServerName,
   type McpTransport,
   type TeamChatBoundIdentity,
+  verifyAttachProvenance,
   verifyAttachScope,
   type SignableScope,
 } from '@clawboo/mcp'
@@ -102,12 +103,12 @@ export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined 
 /** Read the run's provenance stamps from the Memory attach URL query params
  *  (`scopeAgentId` + `provRuntime`/`provTaskId`/`provSessionKey`). Provenance-only:
  *  recorded on saves/outcome reports, NEVER part of visibility scoping (that
- *  stays parseBoundScope's job). A pure parser by design — the `prov*` params
- *  ride OUTSIDE the scopeSig HMAC (informational stamps, not authority), so the
- *  handler gates this on parseBoundScope returning a VERIFIED scope: agentId
- *  comes from the signed `scopeAgentId`, while runtime/taskId/sessionKey are
- *  self-reported by the (clawboo-written) attach config. Absent ⇒ undefined.
- *  Exported for unit testing. */
+ *  stays parseBoundScope's job). The agent half comes from `scopeAgentId`, which
+ *  `scopeSig` covers, and the handler passes provenance only once parseBoundScope
+ *  has verified it. The `prov*` stamps carry their own `provSig`: the task id
+ *  decides whether two outcome reports count as independent corroborators, so
+ *  a stamp the runtime edited in its own config is dropped, not recorded.
+ *  Absent ⇒ undefined. Exported for unit testing. */
 export function parseBoundProvenance(req?: IncomingMessage): MemoryProvenance | undefined {
   if (!req?.url) return undefined
   let params: URLSearchParams
@@ -120,12 +121,25 @@ export function parseBoundProvenance(req?: IncomingMessage): MemoryProvenance | 
   const runtime = params.get('provRuntime')
   const taskId = params.get('provTaskId')
   const sessionKey = params.get('provSessionKey')
-  if (!agentId && !runtime && !taskId && !sessionKey) return undefined
+  const sig = params.get('provSig')
+  const stamped = Boolean(runtime || taskId || sessionKey)
+  const trusted =
+    stamped &&
+    sig !== null &&
+    verifyAttachProvenance(
+      getMcpAttachSecret(getDb()),
+      { agentId, runtime, taskId, sessionKey },
+      sig,
+    )
+  if (stamped && !trusted) {
+    log.warn({ agentId, runtime, taskId }, 'mcp provenance stamps unsigned or INVALID — dropped')
+  }
+  if (!agentId && !trusted) return undefined
   return {
     ...(agentId ? { agentId } : {}),
-    ...(runtime ? { runtime } : {}),
-    ...(taskId ? { taskId } : {}),
-    ...(sessionKey ? { sessionKey } : {}),
+    ...(trusted && runtime ? { runtime } : {}),
+    ...(trusted && taskId ? { taskId } : {}),
+    ...(trusted && sessionKey ? { sessionKey } : {}),
   }
 }
 
@@ -195,7 +209,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
         unverifiedCaller: scope === undefined,
         // Provenance rides the same verified-identity rule: the agent half
         // (scopeAgentId) is covered by scopeSig, so an unverified attach gets
-        // no stamps at all rather than self-reported ones.
+        // no stamps at all rather than self-reported ones; the rest by provSig.
         ...(scope ? { provenance: parseBoundProvenance(req) } : {}),
       })
     }),
