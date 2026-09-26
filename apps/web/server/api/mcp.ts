@@ -8,10 +8,9 @@ import { putScreenshot } from '../lib/screenshotBus'
 import path from 'node:path'
 
 import {
-  resolveEmbeddingProvider,
   resolveRoomForTeam,
   type DbTeamChat,
-  type EmbeddingProvider,
+  type MemoryProvenance,
   type MemoryScope,
 } from '@clawboo/db'
 import {
@@ -27,6 +26,7 @@ import {
   type McpServerName,
   type McpTransport,
   type TeamChatBoundIdentity,
+  verifyAttachProvenance,
   verifyAttachScope,
   type SignableScope,
 } from '@clawboo/mcp'
@@ -34,6 +34,11 @@ import type { Request, Response } from 'express'
 
 import { connectorToolsForServer, onConnectorsChanged } from '../lib/connectors/supervisor'
 import { getDb, getDbPath } from '../lib/db'
+import {
+  getEmbedProvider,
+  invalidateEmbedProvider,
+  warmEmbedProvider,
+} from '../lib/memoryEmbedding'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getMcpAttachSecret } from '../lib/mcpAttachSecret'
 import { createLogger } from '@clawboo/logger'
@@ -42,22 +47,6 @@ const log = createLogger('mcp-attach')
 import { emitEvent } from '../lib/obs/emit'
 import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
 import { connectedAppsNow } from '../lib/connectors/composio'
-
-// The memory server wants an embedding provider; resolve once (a network probe)
-// and let the factory read the cached value. First HTTP session may be FTS-only.
-let cachedEmbed: EmbeddingProvider | null = null
-let embedKicked = false
-function kickEmbedResolve(): void {
-  if (embedKicked) return
-  embedKicked = true
-  void resolveEmbeddingProvider()
-    .then((p) => {
-      cachedEmbed = p
-    })
-    .catch(() => {
-      cachedEmbed = null
-    })
-}
 
 /**
  * Is this URL's claimed scope actually one clawboo issued?
@@ -111,6 +100,49 @@ export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined 
   }
 }
 
+/** Read the run's provenance stamps from the Memory attach URL query params
+ *  (`scopeAgentId` + `provRuntime`/`provTaskId`/`provSessionKey`). Provenance-only:
+ *  recorded on saves/outcome reports, NEVER part of visibility scoping (that
+ *  stays parseBoundScope's job). The agent half comes from `scopeAgentId`, which
+ *  `scopeSig` covers, and the handler passes provenance only once parseBoundScope
+ *  has verified it. The `prov*` stamps carry their own `provSig`: the task id
+ *  decides whether two outcome reports count as independent corroborators, so
+ *  a stamp the runtime edited in its own config is dropped, not recorded.
+ *  Absent ⇒ undefined. Exported for unit testing. */
+export function parseBoundProvenance(req?: IncomingMessage): MemoryProvenance | undefined {
+  if (!req?.url) return undefined
+  let params: URLSearchParams
+  try {
+    params = new URL(req.url, 'http://localhost').searchParams
+  } catch {
+    return undefined
+  }
+  const agentId = params.get('scopeAgentId')
+  const runtime = params.get('provRuntime')
+  const taskId = params.get('provTaskId')
+  const sessionKey = params.get('provSessionKey')
+  const sig = params.get('provSig')
+  const stamped = Boolean(runtime || taskId || sessionKey)
+  const trusted =
+    stamped &&
+    sig !== null &&
+    verifyAttachProvenance(
+      getMcpAttachSecret(getDb()),
+      { agentId, runtime, taskId, sessionKey },
+      sig,
+    )
+  if (stamped && !trusted) {
+    log.warn({ agentId, runtime, taskId }, 'mcp provenance stamps unsigned or INVALID — dropped')
+  }
+  if (!agentId && !trusted) return undefined
+  return {
+    ...(agentId ? { agentId } : {}),
+    ...(trusted && runtime ? { runtime } : {}),
+    ...(trusted && taskId ? { taskId } : {}),
+    ...(trusted && sessionKey ? { sessionKey } : {}),
+  }
+}
+
 /** Read the run's authoritative TeamChat binding from the attach URL query params
  *  (`roomTeamId` / `postAuthorAgentId`). The URL is clawboo-written config, so this
  *  identity cannot be spoofed via tool args (the anti-spoof property). Absent ⇒
@@ -142,7 +174,7 @@ export function parseTeamChatBinding(req?: IncomingMessage): TeamChatBoundIdenti
 let handlers: Record<McpServerName, McpHttpHandlers> | null = null
 function getHandlers(): Record<McpServerName, McpHttpHandlers> {
   if (handlers) return handlers
-  kickEmbedResolve()
+  warmEmbedProvider()
   handlers = {
     // Tasks binds the run's TEAM (same `scopeTeamId` param the Memory server
     // reads) so board READS are team-scoped — an agent is never told its own
@@ -170,9 +202,15 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     }),
     memory: createStreamableHttpHandlers((req) => {
       const scope = parseBoundScope(req)
-      return createMemoryServer(getDb(), cachedEmbed, {
+      // A function, not a provider: the session outlives any one provider
+      // (an OpenClaw Gateway keeps it for days), so each call asks afresh.
+      return createMemoryServer(getDb(), getEmbedProvider, {
         boundScope: scope,
         unverifiedCaller: scope === undefined,
+        // Provenance rides the same verified-identity rule: the agent half
+        // (scopeAgentId) is covered by scopeSig, so an unverified attach gets
+        // no stamps at all rather than self-reported ones; the rest by provSig.
+        ...(scope ? { provenance: parseBoundProvenance(req) } : {}),
       })
     }),
     // `req` was previously dropped here, alone among the four handlers, so the
@@ -242,8 +280,7 @@ export function prewarmMcp(): void {
  *  the supervisor's recovery action when a server health-probe fails. */
 export function resetMcpHandlers(): void {
   handlers = null
-  embedKicked = false
-  cachedEmbed = null
+  invalidateEmbedProvider()
 }
 
 function makePost(server: McpServerName) {

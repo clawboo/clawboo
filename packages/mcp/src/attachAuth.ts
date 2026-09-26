@@ -52,7 +52,40 @@ export function signAttachScope(secret: string, scope: SignableScope): string {
 /** Verify a scope against the signature its URL carried. Constant-time; a
  *  malformed or truncated signature is simply false, never a throw. */
 export function verifyAttachScope(secret: string, scope: SignableScope, sig: string): boolean {
-  const expected = Buffer.from(signAttachScope(secret, scope), 'hex')
+  return sameHex(signAttachScope(secret, scope), sig)
+}
+
+/** The Memory URL's provenance stamps. They never widen what a session can see,
+ *  but the learning overlay counts distinct (agent, task) reporters as
+ *  corroborators, so a task id a runtime could edit would let one agent mint
+ *  independent-looking evidence for a fact. `agentId` is included so a stamp
+ *  signed for one agent cannot be replayed onto another's URL. */
+export interface SignableProvenance {
+  agentId?: string | null
+  runtime?: string | null
+  taskId?: string | null
+  sessionKey?: string | null
+}
+
+/** A different leading tag from `canonical()`, so a scope signature can never
+ *  verify as a provenance signature or the reverse. */
+const canonicalProvenance = (p: SignableProvenance): string =>
+  ['prov-v1', p.agentId ?? '', p.runtime ?? '', p.taskId ?? '', p.sessionKey ?? ''].join('\x1f')
+
+export function signAttachProvenance(secret: string, prov: SignableProvenance): string {
+  return createHmac('sha256', secret).update(canonicalProvenance(prov)).digest('hex')
+}
+
+export function verifyAttachProvenance(
+  secret: string,
+  prov: SignableProvenance,
+  sig: string,
+): boolean {
+  return sameHex(signAttachProvenance(secret, prov), sig)
+}
+
+function sameHex(expectedHex: string, sig: string): boolean {
+  const expected = Buffer.from(expectedHex, 'hex')
   let given: Buffer
   try {
     given = Buffer.from(sig, 'hex')

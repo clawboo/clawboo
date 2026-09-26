@@ -13,6 +13,17 @@ export interface MemoryScope {
   tenantId?: string | null
 }
 
+/** Who/what produced a memory row. Server-authored only — never model-supplied.
+ *  Distinct from the visibility scope: a bound MCP save drops agentId from the
+ *  SCOPE (team-shared recall) but records it here, so "who saved this" is
+ *  legible without narrowing who can recall it. */
+export interface MemoryProvenance {
+  agentId?: string | null
+  runtime?: string | null // runtime id, or 'user' for UI saves
+  taskId?: string | null
+  sessionKey?: string | null
+}
+
 /** A durable declarative fact ("User prefers concise responses"). */
 export interface Fact {
   id: string
@@ -22,6 +33,10 @@ export interface Fact {
   scopeAgentId: string | null
   scopeTeamId: string | null
   tenantId: string | null
+  createdByAgentId: string | null
+  createdByRuntime: string | null
+  sourceTaskId: string | null
+  sourceSessionKey: string | null
   createdAt: number
   updatedAt: number
 }
@@ -35,7 +50,40 @@ export interface Procedure {
   scopeAgentId: string | null
   scopeTeamId: string | null
   tenantId: string | null
+  createdByAgentId: string | null
+  createdByRuntime: string | null
+  sourceTaskId: string | null
+  sourceSessionKey: string | null
   createdAt: number
+}
+
+/** An outcome signal against a fact. 'useful'/'dead_end'/'corrected' are
+ *  explicit feedback (agents via memory_feedback, users via the UI); 'cited' is
+ *  INTERNAL-ONLY — written by the auto-injection path when a fact enters a run's
+ *  prompt, so usage frequency is real data without fake endorsement semantics.
+ *  External write surfaces (REST/MCP zod enums) deliberately exclude 'cited'. */
+export type OutcomeKind = 'useful' | 'dead_end' | 'corrected' | 'cited'
+
+export interface MemoryOutcome {
+  id: string
+  factId: string
+  outcome: OutcomeKind
+  note: string | null
+  agentId: string | null
+  teamId: string | null
+  taskId: string | null
+  runtime: string | null
+  createdAt: number
+}
+
+export interface RecordOutcomeInput {
+  factId: string // FULL id (callers resolve prefixes via getFact first)
+  outcome: OutcomeKind
+  note?: string | null
+  agentId?: string | null
+  teamId?: string | null
+  taskId?: string | null
+  runtime?: string | null
 }
 
 export type SearchMode = 'fts' | 'vector' | 'hybrid'
@@ -51,12 +99,14 @@ export interface SaveFactInput {
   content: string
   tags?: string[]
   scope?: MemoryScope
+  provenance?: MemoryProvenance
 }
 
 export interface SaveProcedureInput {
   name: string
   content: string
   scope?: MemoryScope
+  provenance?: MemoryProvenance
 }
 
 export interface SearchOpts {
@@ -83,6 +133,12 @@ export interface MemoryStore {
   saveProcedure(input: SaveProcedureInput): Promise<Procedure>
   getProcedure(name: string, scope?: MemoryScope): Promise<Procedure | null>
   listProcedures(opts?: BrowseOpts): Promise<Procedure[]>
+  /** Exact-id lookup, falling back to an 8+ char hex/hyphen prefix (unique match
+   *  only). Scope-filtered — a fact invisible to the caller's scope resolves to
+   *  null, so feedback cannot probe cross-team existence. */
+  getFact(idOrPrefix: string, scope?: MemoryScope): Promise<Fact | null>
+  recordOutcome(input: RecordOutcomeInput): Promise<MemoryOutcome>
+  listOutcomes(opts?: { factIds?: string[]; limit?: number }): Promise<MemoryOutcome[]>
 }
 
 /**

@@ -150,6 +150,32 @@ describe('scoped attach URL helpers', () => {
     expect(mcpHttpUrl('http://h:1', 'memory')).toBe('http://h:1/api/mcp/memory')
   })
 
+  it('mcpHttpUrl carries prov* provenance params on the Memory URL only (scope params unchanged)', () => {
+    const mem = mcpHttpUrl('http://h:1', 'memory', {
+      teamId: 'T',
+      agentId: 'A',
+      runtime: 'claude-code',
+      taskId: 'task-1',
+      sessionKey: 'runtime:claude-code:task:task-1',
+    })
+    expect(mem).toContain('scopeTeamId=T')
+    expect(mem).toContain('scopeAgentId=A')
+    expect(mem).toContain('provRuntime=claude-code')
+    expect(mem).toContain('provTaskId=task-1')
+    expect(mem).toContain(`provSessionKey=${encodeURIComponent('runtime:claude-code:task:task-1')}`)
+    // Tasks ignores prov*-only scope (no team/agent ⇒ bare) and never carries
+    // prov* even when scoped; teamchat never carries prov*.
+    expect(mcpHttpUrl('http://h:1', 'tasks', { runtime: 'r', taskId: 't' })).toBe(
+      'http://h:1/api/mcp/tasks',
+    )
+    expect(mcpHttpUrl('http://h:1', 'tasks', { teamId: 'T', runtime: 'r' })).not.toContain(
+      'provRuntime',
+    )
+    expect(mcpHttpUrl('http://h:1', 'teamchat', { teamId: 'T', runtime: 'r' })).not.toContain(
+      'provRuntime',
+    )
+  })
+
   it('buildAttachConfig carries the run scope onto the Memory and Tasks URLs', () => {
     const cfg = buildAttachConfig({
       runtime: 'claude-code',

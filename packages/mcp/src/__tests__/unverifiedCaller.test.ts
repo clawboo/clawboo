@@ -78,6 +78,35 @@ describe('memory — unverified caller', () => {
     expect(hits).toHaveLength(1)
   })
 
+  it('CANNOT promote a fact by reporting it useful under invented agent ids', async () => {
+    // Distinct agent ids are distinct corroborators, and two make a fact
+    // "preferred" in every team's recall. The names come from the model here.
+    const client = await connectInMemory(createMemoryServer(db, null, { unverifiedCaller: true }))
+    const { fact } = JSON.parse(
+      (await callText(client, 'memory_save', { title: 'Port', content: 'the api is on 18790' }))
+        .text,
+    ) as { fact: { id: string } }
+    let last: {
+      recorded: { agentId: string | null; teamId: string | null }
+      learning: { status: string }
+    } | null = null
+    for (const scopeAgentId of ['agent-x', 'agent-y', 'agent-z']) {
+      last = JSON.parse(
+        (
+          await callText(client, 'memory_feedback', {
+            factId: fact.id,
+            outcome: 'useful',
+            scopeAgentId,
+            scopeTeamId: 'team-A',
+          })
+        ).text,
+      ) as typeof last
+    }
+    expect(last!.recorded.agentId).toBeNull()
+    expect(last!.recorded.teamId).toBeNull()
+    expect(last!.learning.status).toBe('tentative')
+  })
+
   it("leaves the stdio bin UNCHANGED: no flag ⇒ the model's scope args still steer", async () => {
     const client = await connectInMemory(createMemoryServer(db, null))
     const saved = JSON.parse(

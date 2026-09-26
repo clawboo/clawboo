@@ -3,7 +3,7 @@
 // own config. This generates the exact snippet per runtime + transport, so a
 // user (or the live smoke) can copy-paste a working attachment. Pure — no SDK.
 
-import { signAttachScope } from './attachAuth'
+import { signAttachProvenance, signAttachScope } from './attachAuth'
 
 export type McpRuntime = 'claude-code' | 'codex' | 'openclaw'
 export type McpServerName = 'tasks' | 'memory' | 'tools' | 'teamchat'
@@ -42,6 +42,16 @@ export interface AttachScope {
    * secret; production producers always pass it.
    */
   attachSecret?: string | null
+  /**
+   * Provenance-only fields — stamped on the run's saves/outcome reports as
+   * `provRuntime`/`provTaskId`/`provSessionKey` on the Memory URL. They NEVER
+   * widen visibility (scoping stays teamId/agentId/tenantId alone), so they
+   * stay out of `scopeSig`. They carry their own `provSig` instead: the task id
+   * decides whether two outcome reports count as independent corroboration.
+   */
+  runtime?: string | null
+  taskId?: string | null
+  sessionKey?: string | null
 }
 
 export interface AttachConfigInput {
@@ -75,10 +85,18 @@ export function mcpHttpUrl(
   if (!scope) return base
   const p = new URLSearchParams()
   if (server === 'memory') {
-    // Memory: the run's VISIBILITY scope.
+    // Memory: the run's VISIBILITY scope + provenance-only stamps (see
+    // AttachScope — prov* never widen visibility).
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
     if (scope.tenantId) p.set('scopeTenantId', scope.tenantId)
+    // Provenance stamps (memory only), signed apart from the scope so their
+    // presence never perturbs `scopeSig`.
+    if (scope.runtime) p.set('provRuntime', scope.runtime)
+    if (scope.taskId) p.set('provTaskId', scope.taskId)
+    if (scope.sessionKey) p.set('provSessionKey', scope.sessionKey)
+    if (scope.attachSecret && (scope.runtime || scope.taskId || scope.sessionKey))
+      p.set('provSig', signAttachProvenance(scope.attachSecret, scope))
     // The signature covers what THIS URL claims. Memory never carries a
     // `delegate` param, so it signs delegate:false even for an orchestrated run —
     // otherwise the verifier, reconstructing scope from the params, could never

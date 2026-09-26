@@ -8,6 +8,7 @@ import {
   SqliteMemoryStore,
   type ClawbooDb,
   type EmbeddingProvider,
+  type MemoryProvenance,
   type MemoryScope,
   type SearchMode,
 } from '@clawboo/db'
@@ -63,14 +64,32 @@ export interface MemoryServerOptions {
    * scope came from the model. This flag makes the code do what that comment says.
    */
   unverifiedCaller?: boolean
+  /**
+   * Server-authored provenance (runtime/task/session) stamped on saves and
+   * outcome reports. Only honored on a BOUND session — unbound sessions record
+   * no provenance at all (model-supplied ids are spoofable; worse than null).
+   */
+  provenance?: MemoryProvenance
 }
+
+/**
+ * The embedding provider for a server: a fixed one, or a function asked on
+ * every tool call. A long-lived session (an MCP connection the Gateway keeps
+ * for days) passes a function, so it follows the provider as it comes and goes
+ * instead of keeping whichever one existed when it connected.
+ */
+export type MemoryEmbedSource =
+  EmbeddingProvider | null | (() => EmbeddingProvider | null | Promise<EmbeddingProvider | null>)
 
 export function createMemoryServer(
   db: ClawbooDb,
-  embed?: EmbeddingProvider | null,
+  embed?: MemoryEmbedSource,
   opts: MemoryServerOptions = {},
 ): Server {
-  const store = new SqliteMemoryStore(db, embed)
+  // One store per call, so the embed id and the embed call in it always come
+  // from the same provider.
+  const storeFor = async (): Promise<SqliteMemoryStore> =>
+    new SqliteMemoryStore(db, typeof embed === 'function' ? await embed() : embed)
   const bound = opts.boundScope
   // Only meaningful when there is no bound scope to prefer; see the field's doc.
   const unverified = opts.unverifiedCaller === true && !bound
@@ -90,6 +109,16 @@ export function createMemoryServer(
   // An unverified caller gets that same global-only sentinel, for the same reason.
   const readScope = (args: Record<string, unknown>): MemoryScope =>
     bound ? { ...bound, teamId: bound.teamId ?? '' } : unverified ? { teamId: '' } : scopeOf(args)
+  // Provenance is the ASYMMETRY vs saveScope: a bound save drops agentId from
+  // the visibility scope (team-shared recall) but records who saved it here.
+  // Unbound AND unverified sessions record NOTHING — spoofable model-supplied
+  // ids are worse than null.
+  const reporterId = (boundId: string | null | undefined, arg: unknown): string | null =>
+    bound ? (boundId ?? null) : unverified ? null : (optStr(arg) ?? null)
+  const saveProvenance = (): MemoryProvenance | undefined =>
+    bound
+      ? { ...opts.provenance, agentId: opts.provenance?.agentId ?? bound.agentId ?? null }
+      : undefined
 
   const tools: ToolDef[] = [
     {
@@ -105,6 +134,7 @@ export function createMemoryServer(
         scopeAgentId: z.string().optional(),
       }),
       handler: async (args) => {
+        const store = await storeFor()
         const content = String(args['content'] ?? '')
         // The store scrubs secrets on write; if the CONTENT reduces ENTIRELY to the
         // redaction sentinel there is nothing worth recalling, so the save is
@@ -125,6 +155,7 @@ export function createMemoryServer(
             name: procedureName,
             content,
             scope: saveScope(args),
+            provenance: saveProvenance(),
           })
           return jsonResult({ saved: 'procedure', procedure: proc })
         }
@@ -132,14 +163,20 @@ export function createMemoryServer(
         if (!title)
           return textResult('a fact requires a title (or set procedureName for a procedure)', true)
         const tags = Array.isArray(args['tags']) ? (args['tags'] as string[]) : undefined
-        const fact = await store.saveFact({ title, content, tags, scope: saveScope(args) })
+        const fact = await store.saveFact({
+          title,
+          content,
+          tags,
+          scope: saveScope(args),
+          provenance: saveProvenance(),
+        })
         return jsonResult({ saved: 'fact', fact })
       },
     },
     {
       name: 'memory_search',
       description:
-        'Search saved facts. mode: fts (default) | vector | hybrid. Results cite a fact id.',
+        'Search saved facts. mode: fts (default) | vector | hybrid. Results cite a fact id and may carry a learning status (preferred/tentative/contested/dead_end) from teammate feedback.',
       inputSchema: z.object({
         query: z.string(),
         mode: z.enum(['fts', 'vector', 'hybrid']).optional(),
@@ -147,14 +184,19 @@ export function createMemoryServer(
         scopeTeamId: z.string().optional(),
         scopeAgentId: z.string().optional(),
       }),
-      handler: async (args) =>
-        jsonResult(
-          await store.searchMemory(String(args['query'] ?? ''), {
-            mode: optStr(args['mode']) as SearchMode | undefined,
-            limit: typeof args['limit'] === 'number' ? args['limit'] : undefined,
-            scope: readScope(args),
-          }),
-        ),
+      handler: async (args) => {
+        const store = await storeFor()
+        const results = await store.searchMemory(String(args['query'] ?? ''), {
+          mode: optStr(args['mode']) as SearchMode | undefined,
+          limit: typeof args['limit'] === 'number' ? args['limit'] : undefined,
+          scope: readScope(args),
+        })
+        const learning = await store.learningForFacts(
+          results.map((r) => r.id),
+          Date.now(),
+        )
+        return jsonResult(results.map((r) => ({ ...r, learning: learning[r.id] ?? null })))
+      },
     },
     {
       name: 'memory_browse',
@@ -164,13 +206,57 @@ export function createMemoryServer(
         scopeTeamId: z.string().optional(),
         scopeAgentId: z.string().optional(),
       }),
-      handler: async (args) =>
-        jsonResult(
-          await store.browseMemory({
-            limit: typeof args['limit'] === 'number' ? args['limit'] : undefined,
-            scope: readScope(args),
-          }),
-        ),
+      handler: async (args) => {
+        const store = await storeFor()
+        const facts = await store.browseMemory({
+          limit: typeof args['limit'] === 'number' ? args['limit'] : undefined,
+          scope: readScope(args),
+        })
+        const learning = await store.learningForFacts(
+          facts.map((f) => f.id),
+          Date.now(),
+        )
+        return jsonResult(facts.map((f) => ({ ...f, learning: learning[f.id] ?? null })))
+      },
+    },
+    {
+      name: 'memory_feedback',
+      description:
+        'Report whether a recalled fact helped. outcome: useful (it was right and helped) | dead_end (it misled or wasted effort) | corrected (it was wrong — supply the correction in note). Cite the fact id from memory_search results or the (id ...) prefix in the auto-memory block; an 8+ char prefix is accepted.',
+      inputSchema: z.object({
+        factId: z.string(),
+        outcome: z.enum(['useful', 'dead_end', 'corrected']),
+        note: z.string().optional(),
+        scopeTeamId: z.string().optional(),
+        scopeAgentId: z.string().optional(),
+      }),
+      handler: async (args) => {
+        const store = await storeFor()
+        // Scope-resolved lookup: an invisible fact and a nonexistent one yield
+        // the SAME error — feedback is not a cross-team existence oracle.
+        const fact = await store.getFact(String(args['factId'] ?? ''), readScope(args))
+        if (!fact)
+          return textResult(
+            'unknown fact id (or ambiguous prefix) — cite the id from memory_search',
+            true,
+          )
+        if (args['outcome'] === 'corrected' && !optStr(args['note'])?.trim())
+          return textResult('corrected requires a note with the correction', true)
+        const recorded = await store.recordOutcome({
+          factId: fact.id,
+          outcome: args['outcome'] as 'useful' | 'dead_end' | 'corrected',
+          note: optStr(args['note']) ?? null,
+          // Same rule as saveProvenance: an unverified caller's ids are the
+          // model's own arguments, and distinct agent ids count as distinct
+          // corroborators, so one session could promote a fact by itself.
+          agentId: reporterId(bound?.agentId, args['scopeAgentId']),
+          teamId: reporterId(bound?.teamId, args['scopeTeamId']),
+          taskId: opts.provenance?.taskId ?? null,
+          runtime: opts.provenance?.runtime ?? null,
+        })
+        const learning = await store.learningForFacts([fact.id], Date.now())
+        return jsonResult({ recorded, learning: learning[fact.id] ?? null })
+      },
     },
   ]
 

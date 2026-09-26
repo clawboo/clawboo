@@ -49,6 +49,11 @@ export interface RuntimeRunContext {
      *  `@clawboo/mcp` attachAuth. Without it the server refuses the claimed
      *  identity and serves the session unbound. */
     attachSecret?: string | null
+    /** Provenance-only stamps (who/what produced a save) — carried onto the
+     *  Memory attach as `prov*` params; NEVER widen visibility. */
+    runtime?: string | null
+    taskId?: string | null
+    sessionKey?: string | null
   } | null
   /** Extra env for a spawned subprocess (provider API keys, isolated HOME, …). */
   apiKeyEnv?: Record<string, string>

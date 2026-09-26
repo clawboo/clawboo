@@ -57,7 +57,10 @@ export default defineConfig({
           // suites that sandbox `process.env.HOME` actually land in their temp dir on
           // Windows too (Node reads %USERPROFILE% there). A no-op on POSIX. See the
           // file's header for why this is one seam rather than an env var per suite.
-          setupFiles: ['./server/__vitest__/setupHomedir.ts'],
+          setupFiles: [
+            './server/__vitest__/setupHomedir.ts',
+            './server/__vitest__/setupEmbeddings.ts',
+          ],
           // The server suite has real-git + real-sqlite integration tests that run
           // a few seconds each in isolation. When the jsdom project's heavier
           // component transforms run concurrently in the same `vitest run`, those

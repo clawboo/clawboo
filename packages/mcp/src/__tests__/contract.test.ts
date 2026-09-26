@@ -317,6 +317,15 @@ describe('Tasks MCP creation caps', () => {
 })
 
 describe('Memory MCP', () => {
+  it('lists tools including memory_feedback (SDK round-trip)', async () => {
+    const client = await connectInMemory(createMemoryServer(db))
+    const names = await listToolNames(client)
+    expect(names).toContain('memory_save')
+    expect(names).toContain('memory_search')
+    expect(names).toContain('memory_browse')
+    expect(names).toContain('memory_feedback')
+  })
+
   it('saves a fact and a second client retrieves it over the same DB', async () => {
     const writer = await connectInMemory(createMemoryServer(db))
     const saved = await callText(writer, 'memory_save', {

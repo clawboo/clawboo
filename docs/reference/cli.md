@@ -244,7 +244,7 @@ All four open the **shared** Clawboo SQLite database via `createDb(defaultDbPath
 | Bin                    | MCP server    | Notes                                                                                                                                                                                                  |
 | ---------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `clawboo-mcp-tasks`    | Tasks (board) | Serves the durable board.                                                                                                                                                                              |
-| `clawboo-mcp-memory`   | Memory        | Resolves an embedding provider once at boot (Ollama → OpenAI → none); vector/hybrid search degrades to FTS when no provider is available.                                                              |
+| `clawboo-mcp-memory`   | Memory        | Resolves an embedding provider, again each minute (an Ollama with `nomic-embed-text` → `OPENAI_API_KEY` → none), and keeps a locally indexed store local. Without one, search is keyword-only.         |
 | `clawboo-mcp-tools`    | Tools broker  | Availability is evaluated from the bin's own env at boot; only satisfied tools register. Calls run the full broker pipeline (inspector chain → DB-mediated approval → execute → compact → audit).      |
 | `clawboo-mcp-teamchat` | TeamChat      | Unbound by default; an external attach passes `authorAgentId` + `teamId` in the tool args. Clawboo's own per-runtime attach binds the identity authoritatively via the HTTP URL (the anti-spoof path). |
 
@@ -264,7 +264,7 @@ You normally do not invoke these by hand. The server's `GET /api/mcp/config?runt
 | ----------------- | ----------------------------------------------------------------------------------------- |
 | `CLAWBOO_DB_PATH` | Override the shared SQLite path the bins open (default `~/.openclaw/clawboo/clawboo.db`). |
 
-The memory bin additionally consults embedding-provider env vars at boot; those are documented under [Environment variables](/reference/environment-variables), not here.
+The memory bin additionally consults embedding-provider env vars, re-reading them each time it re-resolves; those are documented under [Environment variables](/reference/environment-variables), not here.
 
 ### Example
 

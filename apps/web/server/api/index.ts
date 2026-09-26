@@ -102,7 +102,17 @@ import {
   boardWorkspaceStatusGET,
   agentWorkspacesGET,
 } from './board'
-import { memorySearchGET, memorySavePOST, memoryBrowseGET, memoryProviderGET } from './memory'
+import {
+  memorySearchGET,
+  memorySavePOST,
+  memoryBrowseGET,
+  memoryFeedbackPOST,
+  memoryGraphGET,
+  memoryOutcomesGET,
+  memoryProviderGET,
+  memoryEmbeddingInstallPOST,
+  memoryEmbeddingReindexPOST,
+} from './memory'
 import { capabilitiesListGET, capabilitiesActionPOST } from './capabilities'
 import {
   connectorAuthorizeAwaitPOST,
@@ -384,7 +394,13 @@ router.patch('/api/board/:taskId/workspace', boardWorkspaceActionPATCH)
 router.get('/api/memory', memorySearchGET)
 router.post('/api/memory', memorySavePOST)
 router.get('/api/memory/browse', memoryBrowseGET)
+router.get('/api/memory/graph', memoryGraphGET)
+router.post('/api/memory/feedback', memoryFeedbackPOST)
+router.get('/api/memory/outcomes', memoryOutcomesGET)
 router.get('/api/memory/provider', memoryProviderGET)
+router.post('/api/memory/embedding/reindex', sensitiveLimiter, memoryEmbeddingReindexPOST)
+// Downloads a model over the network, so it sits on the sensitive tier.
+router.post('/api/memory/embedding/install', sensitiveLimiter, memoryEmbeddingInstallPOST)
 router.get('/api/tools', toolsListGET)
 router.get('/api/tools/approvals', toolsApprovalsGET)
 router.post('/api/tools/approvals/:id/resolve', toolsApprovalResolvePOST)

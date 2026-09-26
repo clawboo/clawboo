@@ -48,3 +48,27 @@ export const browseMemoryBody = z.object({
   scope: memoryScopeSchema.optional(),
 })
 export type BrowseMemoryBody = z.infer<typeof browseMemoryBody>
+
+/** Explicit feedback outcomes only — 'cited' is internal (the injection write
+ *  path) and deliberately absent so usage counts cannot be forged externally. */
+export const feedbackOutcomeSchema = z.enum(['useful', 'dead_end', 'corrected'])
+
+export const feedbackBody = z.object({
+  factId: z.string().min(8).max(64),
+  outcome: feedbackOutcomeSchema,
+  note: z.string().max(2_000).optional(),
+  scope: memoryScopeSchema.optional(),
+})
+export type FeedbackBody = z.infer<typeof feedbackBody>
+
+export const outcomesQuery = z.object({
+  factId: z.string().min(8).max(64),
+  limit: z.number().int().min(1).max(200).optional(),
+})
+export type OutcomesQuery = z.infer<typeof outcomesQuery>
+
+export const memoryGraphQuery = z.object({
+  limit: z.number().int().min(1).max(500).optional(),
+  scope: memoryScopeSchema.optional(),
+})
+export type MemoryGraphQuery = z.infer<typeof memoryGraphQuery>

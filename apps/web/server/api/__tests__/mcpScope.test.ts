@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
 import { getMcpAttachSecret, resetMcpAttachSecretCache } from '../../lib/mcpAttachSecret'
-import { parseBoundScope } from '../mcp'
+import { parseBoundProvenance, parseBoundScope } from '../mcp'
 
 const req = (url: string): IncomingMessage => ({ url }) as IncomingMessage
 
@@ -87,5 +87,77 @@ describe('parseBoundScope — everything else serves unbound', () => {
       'scopeSig=not-hex-at-all',
     )
     expect(parseBoundScope(req(url))).toBeUndefined()
+  })
+})
+
+/** A Memory URL carrying provenance, signed exactly as clawboo's producers sign it. */
+const signedProvUrl = (prov: {
+  agentId?: string
+  runtime?: string
+  taskId?: string
+  sessionKey?: string
+}): string =>
+  mcpHttpUrl('http://127.0.0.1:1', 'memory', {
+    teamId: 'T',
+    ...prov,
+    attachSecret: getMcpAttachSecret(getDb()),
+  }).replace('http://127.0.0.1:1', '')
+
+describe('parseBoundProvenance', () => {
+  it('honours clawboo-signed stamps end to end (producer → parser)', () => {
+    const url = signedProvUrl({
+      agentId: 'agent-1',
+      runtime: 'claude-code',
+      taskId: 'task-9',
+      sessionKey: 'sess-1',
+    })
+    expect(url).toContain('provSig=')
+    expect(parseBoundProvenance(req(url))).toEqual({
+      agentId: 'agent-1',
+      runtime: 'claude-code',
+      taskId: 'task-9',
+      sessionKey: 'sess-1',
+    })
+    // Partial stamps: only what is present.
+    expect(parseBoundProvenance(req(signedProvUrl({ agentId: 'a', runtime: 'codex' })))).toEqual({
+      agentId: 'a',
+      runtime: 'codex',
+    })
+  })
+
+  it('returns undefined when no provenance params are present', () => {
+    expect(parseBoundProvenance(req('/api/mcp/memory'))).toBeUndefined()
+    expect(parseBoundProvenance(req('/api/mcp/memory?scopeTeamId=T'))).toBeUndefined()
+    expect(parseBoundProvenance(undefined)).toBeUndefined()
+    expect(parseBoundProvenance(req(''))).toBeUndefined()
+  })
+
+  it('keeps the agent (scopeSig covers it) but drops UNSIGNED stamps', () => {
+    const url =
+      '/api/mcp/memory?scopeAgentId=agent-1&provRuntime=claude-code&provTaskId=task-9&provSessionKey=s'
+    expect(parseBoundProvenance(req(url))).toEqual({ agentId: 'agent-1' })
+    expect(parseBoundProvenance(req('/api/mcp/memory?provRuntime=codex'))).toBeUndefined()
+  })
+
+  it('an EDITED task id breaks the stamp signature (the corroboration forgery)', () => {
+    // One agent re-attaching under a new task id would count as a second,
+    // independent corroborator and promote a fact on its own.
+    const url = signedProvUrl({ agentId: 'agent-1', taskId: 'task-1' })
+    const forged = url.replace('provTaskId=task-1', 'provTaskId=task-2')
+    expect(forged).toContain('task-2')
+    expect(parseBoundProvenance(req(forged))).toEqual({ agentId: 'agent-1' })
+  })
+
+  it("a stamp signed for one agent does not verify on another agent's URL", () => {
+    const url = signedProvUrl({ agentId: 'agent-1', taskId: 'task-1' })
+    const moved = url.replace('scopeAgentId=agent-1', 'scopeAgentId=agent-2')
+    expect(parseBoundProvenance(req(moved))).toEqual({ agentId: 'agent-2' })
+  })
+
+  it('a scope signature is not accepted as a stamp signature', () => {
+    const url = signedProvUrl({ agentId: 'agent-1', taskId: 'task-1' })
+    const scopeSig = /scopeSig=([0-9a-f]+)/.exec(url)![1]!
+    const swapped = url.replace(/provSig=[0-9a-f]+/, `provSig=${scopeSig}`)
+    expect(parseBoundProvenance(req(swapped))).toEqual({ agentId: 'agent-1' })
   })
 })

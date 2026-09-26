@@ -192,6 +192,25 @@
   --category-web: #9333ea; /* purple-600 */
   --category-other: #64748b; /* slate-500 */
 
+  /* Memory-graph surface system. Deliberately ACHROMATIC: a node is a paper
+     surface with a hairline edge, a cluster is a faint container, an edge is a
+     quiet rule. Colour on this canvas is reserved for LEARNING STATE (mint /
+     amber / muted), so when something is tinted it always means something.
+     An earlier 8-hue community palette coloured every node, hull and edge,
+     which read as decoration and drowned the one signal that mattered. */
+  --graph-node-bg: #ffffff;
+  --graph-node-border: rgb(15 23 42 / 0.13);
+  --graph-node-border-strong: rgb(15 23 42 / 0.3);
+  --graph-node-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 6px 16px -8px rgb(15 23 42 / 0.16);
+  --graph-edge: rgb(15 23 42 / 0.24);
+  --graph-cluster-bg: rgb(15 23 42 / 0.02);
+  --graph-cluster-border: rgb(15 23 42 / 0.065);
+  --graph-cluster-label: rgb(15 23 42 / 0.38);
+  /* A node label IS the content, so it outranks --muted-foreground; the disc is
+     only punctuation. Stops short of full --foreground so a dense field of
+     labels still recedes behind the one the reader has selected. */
+  --graph-label: rgb(15 23 42 / 0.76);
+
   --canvas: #fafbfc;
   --canvas-rgb: 250 251 252;
   --canvas-dot: rgb(15 23 42 / 0.07);
@@ -332,6 +351,19 @@
   --category-file: var(--amber); /* amber */
   --category-web: #a855f7; /* purple-500 */
   --category-other: #6b7280; /* gray-500 */
+
+  /* Memory-graph surface system: dark counterparts (see :root for the rule).
+     The node sits one step ABOVE --surface so it lifts off the canvas without
+     a glow: elevation, not a coloured halo, separates it. */
+  --graph-node-bg: #171f2e;
+  --graph-node-border: rgb(255 255 255 / 0.13);
+  --graph-node-border-strong: rgb(255 255 255 / 0.32);
+  --graph-node-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 20px -10px rgb(0 0 0 / 0.6);
+  --graph-edge: rgb(255 255 255 / 0.22);
+  --graph-cluster-bg: rgb(255 255 255 / 0.022);
+  --graph-cluster-border: rgb(255 255 255 / 0.065);
+  --graph-cluster-label: rgb(255 255 255 / 0.34);
+  --graph-label: rgb(255 255 255 / 0.72);
 
   --canvas: #0a0e1a;
   --canvas-rgb: 10 14 26;

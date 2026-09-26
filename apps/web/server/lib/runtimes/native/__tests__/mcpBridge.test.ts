@@ -23,13 +23,20 @@ describe('native MCP bridge (in-process)', () => {
   let sandbox: string
   let dbPath: string
   let db: ClawbooDb
+  let prevHome: string | undefined
 
   beforeEach(async () => {
     sandbox = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-mcp-'))
     dbPath = path.join(sandbox, 'test.db')
     db = createDb(dbPath) // bootstrap the schema
+    // Anything that reaches the shared server state lands in the sandbox, never
+    // in the developer's own ~/.clawboo.
+    prevHome = process.env['CLAWBOO_HOME']
+    process.env['CLAWBOO_HOME'] = sandbox
   })
   afterEach(async () => {
+    if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevHome
     db.$client.close()
     await rm(sandbox, { recursive: true, force: true })
   })
@@ -47,6 +54,7 @@ describe('native MCP bridge (in-process)', () => {
       db,
       agentId: 'native-bridge-test',
       enable: { tasks: true, memory: true, tools: false },
+      embed: null,
     })
     expect(bridge).not.toBeNull()
     const tools = await bridge!.listTools()

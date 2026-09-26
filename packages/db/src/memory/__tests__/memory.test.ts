@@ -199,3 +199,143 @@ describe('buildStructuredSummary', () => {
     expect(s).not.toContain('### Blocked')
   })
 })
+
+describe('SqliteMemoryStore — provenance', () => {
+  it('persists provenance on facts + procedures and round-trips it', async () => {
+    const store = new SqliteMemoryStore(db)
+    const prov = {
+      agentId: 'agent-1',
+      runtime: 'claude-code',
+      taskId: 'task-9',
+      sessionKey: 'runtime:claude-code:task:task-9',
+    }
+    const fact = await store.saveFact({ title: 'f', content: 'c', provenance: prov })
+    expect(fact.createdByAgentId).toBe('agent-1')
+    const [reloaded] = await store.browseMemory({ limit: 1 })
+    expect(reloaded).toMatchObject({
+      createdByAgentId: 'agent-1',
+      createdByRuntime: 'claude-code',
+      sourceTaskId: 'task-9',
+      sourceSessionKey: 'runtime:claude-code:task:task-9',
+    })
+    const proc = await store.saveProcedure({ name: 'p', content: 'steps', provenance: prov })
+    expect(proc.createdByRuntime).toBe('claude-code')
+  })
+
+  it('defaults provenance to all-null (back-compat writers)', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c' })
+    expect(fact.createdByAgentId).toBeNull()
+    expect(fact.sourceTaskId).toBeNull()
+  })
+})
+
+describe('SqliteMemoryStore — getFact (exact + prefix, scope-filtered)', () => {
+  it('resolves an exact id and a unique 8+ char prefix', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c' })
+    expect((await store.getFact(fact.id))?.id).toBe(fact.id)
+    expect((await store.getFact(fact.id.slice(0, 8)))?.id).toBe(fact.id)
+  })
+
+  it('returns null for an ambiguous prefix, a short prefix, or wildcard chars', async () => {
+    const store = new SqliteMemoryStore(db)
+    await store.saveFact({ title: 'a', content: 'c' })
+    expect(await store.getFact('short')).toBeNull()
+    expect(await store.getFact('%%%%%%%%')).toBeNull()
+  })
+
+  it('a fact invisible to the caller scope resolves to null (no cross-team oracle)', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c', scope: { teamId: 'team-a' } })
+    expect(await store.getFact(fact.id, { teamId: 'team-b' })).toBeNull()
+    expect((await store.getFact(fact.id, { teamId: 'team-a' }))?.id).toBe(fact.id)
+  })
+})
+
+describe('SqliteMemoryStore — outcomes + learning', () => {
+  it('records outcomes, rejects unknown facts and note-less corrections, scrubs notes', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c' })
+    await expect(store.recordOutcome({ factId: 'nope', outcome: 'useful' })).rejects.toThrow(
+      /unknown fact/,
+    )
+    await expect(store.recordOutcome({ factId: fact.id, outcome: 'corrected' })).rejects.toThrow(
+      /requires a note/,
+    )
+    const rec = await store.recordOutcome({
+      factId: fact.id,
+      outcome: 'corrected',
+      note: 'use OPENAI_API_KEY=sk-proj-abcdefghijklmnop1234 instead',
+    })
+    expect(rec.note).not.toContain('sk-proj-abcdefghijklmnop1234')
+  })
+
+  it('learningForFacts folds outcomes into statuses (2 distinct useful → preferred)', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c' })
+    await store.recordOutcome({ factId: fact.id, outcome: 'useful', agentId: 'a1', taskId: 't1' })
+    await store.recordOutcome({ factId: fact.id, outcome: 'useful', agentId: 'a2', taskId: 't2' })
+    const learning = await store.learningForFacts([fact.id], Date.now())
+    expect(learning[fact.id]?.status).toBe('preferred')
+  })
+
+  it('recordCitations dedupes on (factId, taskId) across rebuilds', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c' })
+    await store.recordCitations([fact.id], { taskId: 't1', runtime: 'codex' })
+    await store.recordCitations([fact.id], { taskId: 't1', runtime: 'codex' })
+    await store.recordCitations([fact.id], { taskId: 't2', runtime: 'codex' })
+    const outcomes = await store.listOutcomes({ factIds: [fact.id] })
+    expect(outcomes.filter((o) => o.outcome === 'cited')).toHaveLength(2)
+  })
+
+  it('listOutcomes returns newest-first', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c' })
+    await store.recordOutcome({ factId: fact.id, outcome: 'useful' })
+    await store.recordOutcome({ factId: fact.id, outcome: 'dead_end' })
+    const outcomes = await store.listOutcomes({ factIds: [fact.id] })
+    expect(outcomes.length).toBe(2)
+    expect(outcomes[0]!.createdAt).toBeGreaterThanOrEqual(outcomes[1]!.createdAt)
+  })
+})
+
+describe('SqliteMemoryStore — getMemoryGraph', () => {
+  it('projects facts + collapsed procedures with tag edges and honest totals', async () => {
+    const store = new SqliteMemoryStore(db)
+    await store.saveFact({ title: 'f1', content: 'c1', tags: ['deploy'] })
+    await store.saveFact({ title: 'f2', content: 'c2', tags: ['deploy'] })
+    await store.saveFact({ title: 'f3', content: 'c3', tags: ['auth'] })
+    await store.saveProcedure({ name: 'release', content: 'v1 steps' })
+    await store.saveProcedure({ name: 'release', content: 'v2 steps' })
+    const graph = await store.getMemoryGraph()
+    expect(graph.totalFacts).toBe(3)
+    expect(graph.totalProcedures).toBe(1)
+    expect(graph.nodes).toHaveLength(4)
+    const proc = graph.nodes.find((n) => n.kind === 'procedure')!
+    expect(proc.versionCount).toBe(2)
+    expect(graph.edges.some((e) => e.kind === 'tag' && e.sharedTags.includes('deploy'))).toBe(true)
+    expect(graph.truncated).toBe(false)
+    expect(graph.similarityAvailable).toBe(false) // no embedder wired in this test
+  })
+
+  it('decorates graph nodes with the learning overlay', async () => {
+    const store = new SqliteMemoryStore(db)
+    const fact = await store.saveFact({ title: 'f', content: 'c' })
+    await store.recordOutcome({ factId: fact.id, outcome: 'useful', agentId: 'a1', taskId: 't1' })
+    await store.recordOutcome({ factId: fact.id, outcome: 'useful', agentId: 'a2', taskId: 't2' })
+    const graph = await store.getMemoryGraph()
+    expect(graph.nodes.find((n) => n.id === fact.id)?.learning?.status).toBe('preferred')
+  })
+
+  it('a scoped graph excludes other teams', async () => {
+    const store = new SqliteMemoryStore(db)
+    await store.saveFact({ title: 'ours', content: 'c', scope: { teamId: 'team-a' } })
+    await store.saveFact({ title: 'theirs', content: 'c', scope: { teamId: 'team-b' } })
+    await store.saveFact({ title: 'global', content: 'c' })
+    const graph = await store.getMemoryGraph({ scope: { teamId: 'team-a' } })
+    expect(graph.nodes.map((n) => n.title).sort()).toEqual(['global', 'ours'])
+    expect(graph.totalFacts).toBe(2)
+  })
+})

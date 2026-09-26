@@ -25,6 +25,7 @@ import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/s
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
+import { startMemoryEmbedding } from './lib/memoryEmbedding'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
@@ -446,6 +447,9 @@ async function main() {
   // Pre-warm the in-process MCP servers + health-probe them (rebuild-on-failure
   // with backoff). Best-effort, never blocks boot.
   safeStart('mcp-supervisor', () => startMcpSupervisor({ log }))
+  // Probe the embedding provider now, and index any facts it has no vector
+  // for, rather than on whichever request happens to arrive first.
+  safeStart('memory-embedding', () => startMemoryEmbedding())
 
   // ── Approval-TTL reaper ─────────────────────────────────────────────────────
   // Expire abandoned pending approvals after the TTL (default 24h) + unblock any

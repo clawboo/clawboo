@@ -1,14 +1,16 @@
-// Memory browser: render of browse/provider on mount + a search round-trip.
+// Memory browser: render of browse/provider on mount + a search round-trip,
+// plus the learning overlay surfacing (pills, feedback loop, provenance).
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { useToastStore } from '@/stores/toast'
 
 import { server } from '../../../__vitest__/mswServer'
 import { MemoryPanel } from '../MemoryPanel'
+import { __resetEmbeddingUiForTests } from '../useEmbeddingStatus'
 
 function fact(id: string, title: string) {
   return {
@@ -19,11 +21,30 @@ function fact(id: string, title: string) {
     scopeAgentId: null,
     scopeTeamId: null,
     tenantId: null,
+    createdByAgentId: null,
+    createdByRuntime: null,
+    sourceTaskId: null,
+    sourceSessionKey: null,
     createdAt: 0,
     updatedAt: 0,
   }
 }
 
+function learningEntry(status: string | null, extra: Record<string, unknown> = {}) {
+  return {
+    status,
+    score: 0.5,
+    uses: 1,
+    usefulCount: 1,
+    negativeCount: 0,
+    lastUsedAt: 1,
+    recentTrail: [],
+    ...extra,
+  }
+}
+
+// The embedding status is a shared store: one case's provider must not leak into the next.
+beforeEach(() => __resetEmbeddingUiForTests())
 afterEach(() => cleanup())
 
 describe('MemoryPanel', () => {
@@ -97,6 +118,128 @@ describe('MemoryPanel', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 
+  it('renders learning pills from the browse learning map (contested carries the verify nudge)', async () => {
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [fact('f1', 'Preferred fact'), fact('f2', 'Contested fact')],
+          procedures: [],
+          learning: {
+            f1: learningEntry('preferred', { usefulCount: 2 }),
+            f2: learningEntry('contested', { verdict: 'avoid', negativeCount: 1 }),
+          },
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+    )
+    render(<MemoryPanel />)
+
+    expect(await screen.findByText('preferred')).toBeInTheDocument()
+    expect(screen.getByText('contested · verify')).toBeInTheDocument()
+  })
+
+  it('cited-only facts show a subtle usage count instead of a pill', async () => {
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [fact('f1', 'Cited fact')],
+          procedures: [],
+          learning: { f1: learningEntry(null, { uses: 4, usefulCount: 0 }) },
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+    )
+    render(<MemoryPanel />)
+    expect(await screen.findByText('used 4×')).toBeInTheDocument()
+  })
+
+  it('Helpful POSTs /api/memory/feedback and updates the pill from the returned entry', async () => {
+    let postedBody: unknown = null
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({ facts: [fact('f1', 'Fact one')], procedures: [], learning: {} }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+      http.post('/api/memory/feedback', async ({ request }) => {
+        postedBody = await request.json()
+        return HttpResponse.json({ ok: true, learning: learningEntry('tentative') })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    expect(screen.queryByText('tentative')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('memory-fact-helpful'))
+
+    expect(await screen.findByText('tentative')).toBeInTheDocument()
+    expect(postedBody).toMatchObject({ factId: 'f1', outcome: 'useful' })
+  })
+
+  it('provenance caption renders non-null segments and omits nulls (old rows show nothing)', async () => {
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [
+            { ...fact('f1', 'User fact'), createdByRuntime: 'user' },
+            {
+              ...fact('f2', 'Run fact'),
+              createdByAgentId: 'agent-1234567890',
+              createdByRuntime: 'clawboo-native',
+              sourceTaskId: 'task-abcdef-123456',
+            },
+            fact('f3', 'Old fact'), // all-null provenance → no caption
+          ],
+          procedures: [],
+          learning: {},
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+    )
+    render(<MemoryPanel />)
+
+    await screen.findByText('User fact')
+    const captions = screen.getAllByTestId('memory-provenance').map((el) => el.textContent)
+    expect(captions).toHaveLength(2)
+    expect(captions[0]).toBe('by user · user')
+    // No fleet entry for the agent id → 8-char id fallback; task id sliced to 8.
+    expect(captions[1]).toBe('by agent-12 · clawboo-native · task task-abc')
+  })
+
+  it('clicking a fact card expands its outcome trail', async () => {
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [fact('f1', 'Fact one')],
+          procedures: [],
+          learning: {
+            f1: learningEntry('tentative', {
+              recentTrail: [
+                {
+                  kind: 'useful',
+                  createdAt: Date.now(),
+                  agentId: 'scout',
+                  taskId: null,
+                  runtime: 'hermes',
+                  note: null,
+                },
+              ],
+            }),
+          },
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    expect(screen.queryByTestId('memory-fact-trail')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('memory-fact-card'))
+    expect(await screen.findByTestId('memory-fact-trail')).toBeInTheDocument()
+    expect(screen.getByTestId('memory-outcome-trail-item')).toHaveTextContent('useful')
+  })
+
   it('surfaces an error toast when Save Fact fails (not a silent no-op)', async () => {
     useToastStore.setState({ toasts: [] })
     server.use(
@@ -108,6 +251,11 @@ describe('MemoryPanel', () => {
     render(<MemoryPanel />)
 
     await screen.findByTestId('memory-panel')
+    // The composer is disclosed, not three empty inputs parked above the
+    // content on every visit: writing a fact by hand is the rare case.
+    expect(screen.queryByTestId('memory-fact-title')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('memory-add-fact'))
+
     await user.type(screen.getByTestId('memory-fact-title'), 'A title')
     await user.type(screen.getByTestId('memory-fact-content'), 'Some content')
     await user.click(screen.getByTestId('memory-save-fact'))
@@ -117,5 +265,131 @@ describe('MemoryPanel', () => {
         useToastStore.getState().toasts.some((t) => t.type === 'error' && /save/i.test(t.message)),
       ).toBe(true),
     )
+  })
+
+  it('a double-click on Helpful records ONE outcome and does not open the trail', async () => {
+    let posts = 0
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({ facts: [fact('f1', 'Fact one')], procedures: [], learning: {} }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+      http.post('/api/memory/feedback', async () => {
+        posts += 1
+        await held
+        return HttpResponse.json({ ok: true, learning: learningEntry('tentative') })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    await user.dblClick(screen.getByTestId('memory-fact-helpful'))
+    expect(screen.getByTestId('memory-fact-helpful')).toBeDisabled()
+    // A disabled button is pointer-events-none, so in a browser the next click
+    // lands on its parent. jsdom has no hit-testing: click the parent directly.
+    await user.click(screen.getByTestId('memory-fact-helpful').parentElement!)
+    expect(screen.queryByTestId('memory-fact-trail')).not.toBeInTheDocument()
+    release()
+    expect(await screen.findByText('tentative')).toBeInTheDocument()
+    expect(posts).toBe(1)
+    expect(screen.queryByTestId('memory-fact-trail')).not.toBeInTheDocument()
+    expect(screen.getByTestId('memory-fact-helpful')).toBeEnabled()
+  })
+
+  it('a failed feedback request says so instead of failing silently', async () => {
+    useToastStore.setState({ toasts: [] })
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({ facts: [fact('f1', 'Fact one')], procedures: [], learning: {} }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+      http.post('/api/memory/feedback', () => new HttpResponse(null, { status: 500 })),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    await user.click(screen.getByTestId('memory-fact-outdated'))
+    await waitFor(() =>
+      expect(
+        useToastStore
+          .getState()
+          .toasts.some((t) => t.type === 'error' && /feedback/i.test(t.message)),
+      ).toBe(true),
+    )
+  })
+
+  it('opens the outcome trail from the keyboard', async () => {
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [fact('f1', 'Fact one')],
+          procedures: [],
+          learning: { f1: learningEntry('tentative') },
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    const toggle = await screen.findByTestId('memory-fact-toggle')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    toggle.focus()
+    await user.keyboard('{Enter}')
+    expect(await screen.findByTestId('memory-fact-trail')).toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.keyboard(' ')
+    expect(screen.queryByTestId('memory-fact-trail')).not.toBeInTheDocument()
+  })
+
+  it('a slow full history does not appear under the fact opened after it', async () => {
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/memory/browse', () =>
+        HttpResponse.json({
+          facts: [fact('f1', 'Fact one'), fact('f2', 'Fact two')],
+          procedures: [],
+          learning: { f1: learningEntry('tentative'), f2: learningEntry('tentative') },
+        }),
+      ),
+      http.get('/api/memory/provider', () => HttpResponse.json({ provider: null })),
+      http.get('/api/memory/outcomes', async ({ request }) => {
+        const factId = new URL(request.url).searchParams.get('factId')
+        if (factId === 'f1') await held
+        return HttpResponse.json({
+          outcomes: [
+            {
+              id: `o-${factId}`,
+              factId,
+              outcome: 'useful',
+              note: `from ${factId}`,
+              agentId: null,
+              teamId: null,
+              taskId: null,
+              runtime: 'user',
+              createdAt: Date.now(),
+            },
+          ],
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<MemoryPanel />)
+
+    await screen.findByText('Fact one')
+    const [first, second] = screen.getAllByTestId('memory-fact-card')
+    await user.click(first!)
+    await user.click(await screen.findByTestId('memory-fact-full-history'))
+    await user.click(second!)
+    release()
+    // f2 is open and offers its own history; f1's answer landed and was not shown.
+    expect(await screen.findByTestId('memory-fact-full-history')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByTestId('memory-fact-history')).not.toBeInTheDocument()
   })
 })

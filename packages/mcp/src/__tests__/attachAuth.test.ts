@@ -4,7 +4,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { signAttachScope, verifyAttachScope } from '../attachAuth'
+import {
+  signAttachProvenance,
+  signAttachScope,
+  verifyAttachProvenance,
+  verifyAttachScope,
+} from '../attachAuth'
 import { mcpHttpUrl } from '../config'
 
 const SECRET = 'a'.repeat(64)
@@ -81,5 +86,44 @@ describe('mcpHttpUrl signing', () => {
   it('an unscoped URL carries no signature at all', () => {
     expect(mcpHttpUrl('http://x', 'tools')).not.toContain('scopeSig')
     expect(mcpHttpUrl('http://x', 'tasks')).not.toContain('scopeSig')
+  })
+})
+
+describe('signAttachProvenance / verifyAttachProvenance', () => {
+  const prov = { agentId: 'A', runtime: 'codex', taskId: 't1', sessionKey: 's' }
+
+  it('round-trips, and any changed stamp breaks it', () => {
+    const sig = signAttachProvenance(SECRET, prov)
+    expect(verifyAttachProvenance(SECRET, prov, sig)).toBe(true)
+    expect(verifyAttachProvenance(SECRET, { ...prov, taskId: 't2' }, sig)).toBe(false)
+    expect(verifyAttachProvenance(SECRET, { ...prov, agentId: 'B' }, sig)).toBe(false)
+    expect(verifyAttachProvenance(SECRET, { ...prov, runtime: 'hermes' }, sig)).toBe(false)
+  })
+
+  it('is a different domain from the scope signature', () => {
+    // Same id in the same position must not produce the same bytes.
+    const scopeSig = signAttachScope(SECRET, { agentId: 'A' })
+    expect(verifyAttachProvenance(SECRET, { agentId: 'A' }, scopeSig)).toBe(false)
+    expect(
+      verifyAttachScope(SECRET, { agentId: 'A' }, signAttachProvenance(SECRET, { agentId: 'A' })),
+    ).toBe(false)
+  })
+
+  it('the Memory URL signs its stamps only when there are stamps and a secret', () => {
+    const signed = mcpHttpUrl('http://x', 'memory', {
+      agentId: 'A',
+      taskId: 't1',
+      attachSecret: SECRET,
+    })
+    expect(signed).toContain('provSig=')
+    expect(mcpHttpUrl('http://x', 'memory', { agentId: 'A', attachSecret: SECRET })).not.toContain(
+      'provSig',
+    )
+    expect(mcpHttpUrl('http://x', 'memory', { agentId: 'A', taskId: 't1' })).not.toContain(
+      'provSig',
+    )
+    expect(
+      mcpHttpUrl('http://x', 'tasks', { agentId: 'A', taskId: 't1', attachSecret: SECRET }),
+    ).not.toContain('provSig')
   })
 })
