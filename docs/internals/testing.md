@@ -160,7 +160,9 @@ A `filter` job runs before all of them and gates every one. A pull request that 
 
 <Warning>
 `catalog-ci.yml` must never be a branch-protection required check. It is paths-filtered, so on a pull request that touches no catalog file it never runs and therefore never reports, and GitHub treats a required check that never reports as pending forever. The `catalog-verify` job in `ci.yml` runs the same command on every code PR; that is the one to require.
-</Warning> The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first.
+</Warning>
+
+The Turbo task graph makes `test`, `lint`, and `typecheck` depend on `^build` so every package's workspace dependencies are built first.
 
 `smoke-test-bundle` also downloads Chromium (`playwright install --with-deps chromium`) before it assembles, for the browser assertion above; Playwright has no postinstall hook, so `pnpm install` alone never fetches the binary.
 
