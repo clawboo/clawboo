@@ -29,10 +29,31 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./variants/codex": {
+      "types": "./dist/variants/codex.d.ts",
+      "import": "./dist/variants/codex.mjs",
+      "require": "./dist/variants/codex.js"
+    },
+    "./variants/claude": {
+      "types": "./dist/variants/claude.d.ts",
+      "import": "./dist/variants/claude.mjs",
+      "require": "./dist/variants/claude.js"
+    },
+    "./variants/hermes-light": {
+      "types": "./dist/variants/hermes-light.d.ts",
+      "import": "./dist/variants/hermes-light.mjs",
+      "require": "./dist/variants/hermes-light.js"
+    },
+    "./variants/hermes-dark": {
+      "types": "./dist/variants/hermes-dark.d.ts",
+      "import": "./dist/variants/hermes-dark.mjs",
+      "require": "./dist/variants/hermes-dark.js"
     }
   },
   "scripts": {
     "build": "tsup",
+    "generate:artwork": "node scripts/generate-variant-artwork.mjs",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
