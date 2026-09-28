@@ -57,6 +57,10 @@ export interface ThreadPickerProps {
   onPick: (option: ThreadOption) => void
   onCreateAgent: (name: string) => void
   onClose: () => void
+  /** What the dialog is called. A thread connects; the + button adds. */
+  label?: string
+  /** The New agent row's sub-line: what happens to an agent made from here. */
+  agentHint?: string
 }
 
 const PANEL_W = 300
@@ -78,6 +82,8 @@ export function ThreadPicker({
   onPick,
   onCreateAgent,
   onClose,
+  label = 'Connect to',
+  agentHint = 'Name one and route this thread to it',
 }: ThreadPickerProps) {
   const [kind, setKind] = useState<ThreadKind | null>(null)
   const [query, setQuery] = useState('')
@@ -237,7 +243,7 @@ export function ThreadPicker({
     <div
       ref={panelRef}
       role="dialog"
-      aria-label="Connect to"
+      aria-label={label}
       className="fixed z-50 overflow-hidden rounded-xl border border-border bg-surface"
       style={{
         left: Math.max(8, left),
@@ -298,7 +304,7 @@ export function ThreadPicker({
               ref={listRef}
               id={listId}
               role="listbox"
-              aria-label="Connect to"
+              aria-label={label}
               className="max-h-[320px] overflow-y-auto py-1"
             >
               {sections.map((s) => (
@@ -319,6 +325,7 @@ export function ThreadPicker({
                         active={i === activeIndex}
                         counts={counts}
                         markSlugs={markSlugs}
+                        agentHint={agentHint}
                         onHover={() => rowEnabled(row) && setActiveIndex(i)}
                         onCommit={() => commit(row)}
                       />
@@ -351,6 +358,7 @@ function RowView({
   active,
   counts,
   markSlugs,
+  agentHint,
   onHover,
   onCommit,
 }: {
@@ -360,6 +368,7 @@ function RowView({
   counts: { connector: number; connectorReady: number; skill: number }
   /** Connectors to preview on the chooser's connector tile. */
   markSlugs: readonly string[]
+  agentHint: string
   onHover: () => void
   onCommit: () => void
 }) {
@@ -376,7 +385,7 @@ function RowView({
           : `${counts.connector} to add`
         : row.kind === 'skill'
           ? `${counts.skill} to add`
-          : 'Name one and route this thread to it'
+          : agentHint
     return (
       <button
         type="button"

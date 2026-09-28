@@ -4,9 +4,11 @@
 // marker per-edge. Marker IDs are global to the document, so a single
 // mount is sufficient.
 //
-// The marker is intentionally kept compact (8×8) and inset slightly from
-// the target node (`refX=9` on a 0–10 viewBox) so the arrow tip sits at
-// the edge of the target Boo without overlapping its body.
+// The marker is sized in stroke widths (the default `markerUnits`), so it
+// grows with the edge, including when the edge is floored to stay legible at a
+// low zoom. 5 stroke widths keeps the head in proportion to the 2px stroke. It
+// is inset slightly from the target node (`refX=9` on a 0–10 viewBox) so the
+// arrow tip sits at the edge of the target Boo without overlapping its body.
 
 export function EdgeMarkers() {
   return (
@@ -22,8 +24,8 @@ export function EdgeMarkers() {
           viewBox="0 0 10 10"
           refX="9"
           refY="5"
-          markerWidth="6"
-          markerHeight="6"
+          markerWidth="5"
+          markerHeight="5"
           orient="auto-start-reverse"
         >
           <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(var(--primary-rgb) / 0.85)" />

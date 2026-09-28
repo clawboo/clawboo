@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { BarChart3, Globe, Loader2, ShoppingCart, type LucideIcon } from 'lucide-react'
+import { BarChart3, Loader2, Network, ShoppingCart, type LucideIcon } from 'lucide-react'
 import { useTeamStore } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
 import { useSettingsModalStore } from '@/stores/settingsModal'
@@ -268,7 +268,7 @@ export function WelcomeState() {
         <div className="relative z-10 mt-1 flex gap-2">
           {(
             [
-              { label: 'Atlas', icon: Globe, view: 'graph' as const },
+              { label: 'Atlas', icon: Network, view: 'graph' as const },
               { label: 'Marketplace', icon: ShoppingCart, view: 'marketplace' as const },
               { label: 'Cost', icon: BarChart3, view: 'cost' as const },
             ] as { label: string; icon: LucideIcon; view: 'graph' | 'marketplace' | 'cost' }[]

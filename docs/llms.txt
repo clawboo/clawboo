@@ -58,7 +58,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Capabilities dashboard](using/capabilities-dashboard.md): Use the Capabilities dashboard to browse the unified capability inventory and enable or disable the rows your runtimes let you manage.
 - [Connect an MCP server](using/connectors.md): Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
 - [Cost and budgets](using/cost-and-budgets.md): Track token usage on the Cost dashboard and set USD budgets (warn or cap) per agent, mission, or team from Governance.
-- [Using the Ghost Graph and Atlas](using/ghost-graph.md): Read and edit your fleet's org graph — dual-shape Boo nodes, peacock skill expand, team halos, connect mode, and the Atlas global view.
+- [Using the Ghost Graph and Atlas](using/ghost-graph.md): Read and edit your fleet's org graph: the Boo port and its docking rings, the + button, peacock skill expand, team halos and junction badges, the activity dock, and the Atlas global view.
 - [Use the Governance dashboard](using/governance-dashboard.md): Set budgets, raise caps, resume paused scopes, review the enforced-in-code caps, the approval queue, and the forensic audit log.
 - [Using group chat](using/group-chat.md): Open a team's Group Chat, pass the Know-Your-Team gate, send messages, route with @mentions, and watch delegations land on the board.
 - [Browse and deploy from the Marketplace](using/marketplace.md): Search, inspect, and deploy single agents or whole teams from Clawboo's 436-agent / 85-team / 44-skill / 19-connector catalog.

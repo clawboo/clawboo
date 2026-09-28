@@ -5,11 +5,12 @@ import { useGraphStore } from '../store'
 // Install a curated skill onto an agent through the unified capability pipeline
 // (POST /api/capabilities/install → the native managed source's tool-broker-audited
 // write into the skills table). Supersedes the legacy markdown skill-file write.
+/** Resolves true once the agent has the skill, false when the install failed. */
 export async function installSkillForAgent(
   skillName: string,
   agentId: string,
   agentName: string,
-): Promise<void> {
+): Promise<boolean> {
   // The `runtime` field is a placeholder — the server resolves the OWNING runtime
   // authoritatively from the agent row before the write, so the audit + the
   // returned record reflect the agent's actual runtime regardless of what we send
@@ -27,7 +28,7 @@ export async function installSkillForAgent(
       message: `Failed to install skill: ${result.error ?? 'unknown'}`,
       type: 'error',
     })
-    return
+    return false
   }
 
   useGraphStore.getState().triggerRefresh()
@@ -35,4 +36,5 @@ export async function installSkillForAgent(
     message: `Installed "${skillName}" on ${agentName}`,
     type: 'success',
   })
+  return true
 }

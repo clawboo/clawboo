@@ -17,30 +17,12 @@ describe('useGraphStore', () => {
       isLoadingFiles: false,
       filesError: null,
       refreshKey: 0,
-      connectMode: false,
       showTeamHalos: false,
       expandedBooNodeIds: new Set(),
       hoveredNodeId: null,
       highlightedNodeIds: null,
       highlightedEdgeIds: null,
       _physicsWakeCallback: null,
-    })
-  })
-
-  describe('connectMode', () => {
-    it('defaults to false', () => {
-      expect(useGraphStore.getState().connectMode).toBe(false)
-    })
-
-    it('setConnectMode(true) enables', () => {
-      useGraphStore.getState().setConnectMode(true)
-      expect(useGraphStore.getState().connectMode).toBe(true)
-    })
-
-    it('setConnectMode(false) disables', () => {
-      useGraphStore.getState().setConnectMode(true)
-      useGraphStore.getState().setConnectMode(false)
-      expect(useGraphStore.getState().connectMode).toBe(false)
     })
   })
 

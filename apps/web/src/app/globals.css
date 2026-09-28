@@ -476,6 +476,203 @@ samp {
 .react-flow__node-boo .group {
   pointer-events: auto !important;
 }
+/* A hovered Boo or loose tile draws above its neighbours, so its port hint is
+   never tucked under the next node along. `!important` because React Flow
+   writes each node's z-index inline. */
+.react-flow__node-boo:hover,
+.react-flow__node-loose:hover {
+  z-index: 1001 !important;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   The Boo's port and dock (nodes/BooPort.tsx)
+
+   Every state below is a class React Flow puts on the handle itself:
+   `connectionindicator` while a thread may start or end there,
+   `connectingfrom` on the thread's origin, `connectingto` + `valid` on the
+   handle the thread is over. `.react-flow` is in each selector to out-rank
+   React Flow's own handle rules, which load after this file.
+   ──────────────────────────────────────────────────────────────── */
+
+/* THE PORT: a raised disc with a plus, where a thread starts. It shows while
+   the pointer is on the Boo, so a canvas of idle Boos is not covered in plus
+   signs. It sits inside the Boo's hover area (a descendant of `.group`), so
+   reaching for it keeps it up, and an invisible port is never grabbed blind.
+   A touch screen cannot hover, so there it stays visible. */
+.react-flow .boo-port {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1.5px solid rgb(var(--primary-rgb) / 0.45);
+  color: var(--primary);
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.16),
+    0 0 0 3px rgb(var(--primary-rgb) / 0.08);
+  transition:
+    opacity 0.16s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    scale 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (hover: hover) {
+  .react-flow .boo-port {
+    opacity: 0;
+    scale: 0.7;
+  }
+}
+.react-flow .boo-port.connectionindicator {
+  cursor: grab;
+}
+.react-flow .boo-port__glyph {
+  pointer-events: none;
+}
+/* The Boo is hovered: the port comes forward. */
+.react-flow .group:hover .boo-port {
+  opacity: 1;
+  scale: 1;
+  border-color: var(--primary);
+  box-shadow:
+    0 2px 6px rgb(var(--primary-rgb) / 0.22),
+    0 0 0 4px rgb(var(--primary-rgb) / 0.12);
+}
+/* A thread is already out: the Boos it crosses on the way to a target keep
+   their ports down. Its own port is exempt. */
+.react-flow .group:hover .boo-port--quiet:not(.connectingfrom):not(.clickconnecting) {
+  opacity: 0;
+  scale: 0.7;
+}
+/* The port itself is under the pointer, or a thread is out of it. The origin
+   stays up after the pointer leaves its Boo. */
+.react-flow .group:hover .boo-port:hover,
+.react-flow .boo-port.connectingfrom,
+.react-flow .boo-port.clickconnecting {
+  opacity: 1;
+  scale: 1;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.react-flow .group:hover .boo-port:hover {
+  scale: 1.12;
+}
+.react-flow .boo-port.connectingfrom,
+.react-flow .group:hover .boo-port.connectingfrom {
+  cursor: grabbing;
+  box-shadow:
+    0 2px 8px rgb(var(--primary-rgb) / 0.3),
+    0 0 0 6px rgb(var(--primary-rgb) / 0.16);
+}
+
+/* The hint that slides out of the port. Text-sized at any zoom (the inline
+   scale undoes the canvas zoom), and shown only while the Boo is hovered and
+   no thread is out (dragged or click-armed), so crossing other Boos with a
+   thread does not light up theirs. */
+.boo-port__label {
+  pointer-events: none;
+}
+.boo-port__label-inner {
+  display: block;
+  white-space: nowrap;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-floating);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+  opacity: 0;
+  translate: -6px 0;
+  transition:
+    opacity 0.16s ease,
+    translate 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.react-flow .group:hover .boo-port__label-inner {
+  opacity: 1;
+  translate: 0 0;
+}
+.react-flow .group:hover .boo-port__label--quiet .boo-port__label-inner {
+  opacity: 0;
+}
+
+/* THE DOCK: where a thread lands. Nothing shows until a thread is out.
+   `--thread` is the colour of the thread in flight, so a connector's violet
+   thread docks into violet rings. */
+.react-flow .boo-dock {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--thread, var(--primary));
+  opacity: 0;
+  transition:
+    opacity 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+/* The ring, and the drop target: the whole ring, not the dot on top of it.
+   Sized only while a thread is dragged, never while a click-to-connect is
+   armed, so a stray click on a Boo body can never complete a route. */
+.react-flow .boo-dock::before {
+  content: '';
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--dock-w);
+  height: var(--dock-h);
+  transform: translate(-50%, calc(-50% + var(--dock-dy)));
+  border-radius: 50%;
+  border: var(--dock-stroke, 1.5px) dashed
+    color-mix(in srgb, var(--thread, var(--primary)) 60%, transparent);
+  transition:
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.react-flow .boo-dock--drag::before {
+  display: block;
+}
+.react-flow .boo-dock--drag.connectionindicator {
+  opacity: 1;
+}
+/* The thread is over this Boo and may land: docked. */
+.react-flow .boo-dock--drag.connectingto.valid {
+  background: var(--thread, var(--primary));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--thread, var(--primary)) 25%, transparent);
+}
+.react-flow .boo-dock--drag.connectingto.valid::before {
+  border-style: solid;
+  background: color-mix(in srgb, var(--thread, var(--primary)) 7%, transparent);
+  box-shadow: 0 0 0 calc(var(--dock-stroke, 1.5px) * 3)
+    color-mix(in srgb, var(--thread, var(--primary)) 14%, transparent);
+}
+/* Click-to-connect armed: the dot shows on the hovered Boo, as it always has. */
+.react-flow .group:hover > .boo-dock.connectionindicator {
+  opacity: 1;
+}
+/* A ring breathes while it waits, so a far-off Boo still catches the eye.
+   Neutralised by the reduced-motion guard below. */
+.react-flow .boo-dock--drag.connectionindicator:not(.connectingto)::before {
+  animation: boo-dock-breathe 1.6s ease-in-out infinite;
+}
+@keyframes boo-dock-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 
 /* ────────────────────────────────────────────────────────────────
    Surface elevation tiers — bundle bg + border + shadow +

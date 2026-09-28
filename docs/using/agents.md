@@ -34,13 +34,15 @@ The view is a 3-panel resizable layout under one shared 44 px header (the agent'
 └─────────────────────┴──────────────────────────┘
 ```
 
-| Panel                                 | What it is                                                                                                                                                                                                            |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** (left, 45%)                  | A 1:1 chat with this Boo. The panel's own header is suppressed; identity lives in the shared row above. The transcript renders its most recent ~150 messages, with **Load earlier messages** at the top for the rest. |
-| **MiniGraph** (top-right, 55%)        | A compact React Flow canvas of this Boo plus its skills and resources, with drag-to-install.                                                                                                                          |
-| **Inline editor** (bottom-right, 45%) | The tabbed editor: personality, permissions, activity, and the agent files.                                                                                                                                           |
+| Panel                                 | What it is                                                                                                                                                                                                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** (left, 45%)                  | A 1:1 chat with this Boo. The panel's own header is suppressed; identity lives in the shared row above. The transcript renders its most recent ~150 messages, with **Load earlier messages** at the top for the rest.                                      |
+| **MiniGraph** (top-right, 55%)        | A compact React Flow canvas of this Boo plus its skills and resources, with drag-to-install. Hover the Boo for its port and pull a thread onto empty space to add a skill or connector, or place one first with the **+** button and drag it onto the Boo. |
+| **Inline editor** (bottom-right, 45%) | The tabbed editor: personality, permissions, activity, and the agent files.                                                                                                                                                                                |
 
 The panel split sizes persist to `localStorage` (the `Group` has an `id`), so your layout survives a reload. Drag a `ResizeHandle` to resize.
+
+Beside the model selector, an **Activity** button slides in this agent's live activity feed, the same dock Atlas and a team's graph carry (see [the activity dock](/using/ghost-graph#activity-dock)).
 
 The MiniGraph header fuses the agent's **runtime icon** with a **model selector** for changing this agent's model. A native (`clawboo-native`) agent picks from the native model catalog and the change is saved to its `AgentConfig` via `PATCH /api/agents/:agentId/model` (no Gateway needed); an OpenClaw agent picks from the OpenClaw catalog and the change is written as a per-agent override in `openclaw.json`; a **Hermes** agent picks from the live OpenRouter catalog (stored in `execConfig`, routed through OpenRouter). **Codex** and **Claude Code** run their account/SDK default, so they show a "runtime-managed model" note instead of a picker.
 

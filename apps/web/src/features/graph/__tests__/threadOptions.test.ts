@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ConnectorCost, ConnectorDefinition } from '@clawboo/connector-catalog'
 
+import { looseNodeId } from '../looseNodes'
 import { threadOptionsFor } from '../threadOptions'
 
 const base = {
@@ -96,5 +97,50 @@ describe('threadOptionsFor', () => {
     )
     expect(fewer.map((r) => r.slug)).not.toContain(first.slug)
     expect(fewer).toHaveLength(all.length - 1)
+  })
+})
+
+describe('threadOptionsFor, free mode (the + button)', () => {
+  const free = {
+    fromNodeType: null,
+    mode: 'free' as const,
+    ownedSkillNames: new Set<string>(),
+    liveConnectorSlugs: new Set<string>(),
+  }
+
+  it('offers rows with no agent behind them', () => {
+    const rows = threadOptionsFor({ ...free, costOf: priced('one-click') })
+    expect(rows.some((r) => r.kind === 'skill')).toBe(true)
+    expect(rows.some((r) => r.kind === 'connector')).toBe(true)
+  })
+
+  it('places a running connector rather than offering access to nobody', () => {
+    const rows = connectors(threadOptionsFor({ ...free, costOf: priced('on') }))
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((r) => r.action === 'Add')).toBe(true)
+  })
+
+  it('never offers a second copy of what is already on the canvas', () => {
+    const all = threadOptionsFor({ ...free, costOf: priced('on') })
+    const skill = all.find((r) => r.kind === 'skill')!
+    const connector = all.find((r) => r.kind === 'connector')!
+    const onCanvas = new Set([
+      looseNodeId('skill', skill.id.slice('skill:'.length)),
+      looseNodeId('connector', connector.id.slice('connector:'.length)),
+    ])
+    const rows = threadOptionsFor({ ...free, costOf: priced('on'), onCanvas })
+    expect(rows.some((r) => r.id === skill.id)).toBe(false)
+    expect(rows.some((r) => r.id === connector.id)).toBe(false)
+  })
+
+  it('ignores what an agent already holds, since no agent is named', () => {
+    const all = threadOptionsFor({ ...free, costOf: priced('on') })
+    const skill = all.find((r) => r.kind === 'skill')!
+    const rows = threadOptionsFor({
+      ...free,
+      costOf: priced('on'),
+      ownedSkillNames: new Set([skill.label]),
+    })
+    expect(rows.some((r) => r.id === skill.id)).toBe(true)
   })
 })

@@ -7,8 +7,8 @@ import {
   ChevronRight,
   Gauge,
   Ghost,
-  Globe,
   KanbanSquare,
+  Network,
   Plus,
   Settings,
   Plug,
@@ -230,7 +230,7 @@ const PRIMARY_NAV: NavItem[] = [
   // team-scoped Ghost Graph still lives inside Group Chat; this slot is
   // now specifically the org-wide map. Subtitle clarifies that Atlas is
   // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
-  { id: 'graph', icon: Globe, subtitle: '(All Teams)' },
+  { id: 'graph', icon: Network, subtitle: '(All Teams)' },
   { id: 'board', icon: KanbanSquare },
   { id: 'marketplace', icon: ShoppingCart },
   // Its own destination rather than a Marketplace tab: connecting a tool the

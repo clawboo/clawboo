@@ -33,11 +33,19 @@ export function connectionRefusal(
   // the drift was silent. Narrowing here keeps one implementation and one set
   // of reasons, and the reason is what a refused drag can actually say.
   if (scope === 'single-agent') {
-    if (sourceType === 'boo') return 'There is only one agent here to route from.'
+    // The Boo's port still works here: let go on empty space and it opens the
+    // skill and connector picker. Only a landing on something is refused.
+    if (sourceType === 'boo') {
+      return 'Only one agent is here. Let go on empty space to add a skill or connector.'
+    }
     if (sourceType === 'resource') return 'Share a connector from the full graph.'
   }
   if (sourceType === 'skill' && targetType === 'boo') return null
   if (sourceType === 'resource' && targetType === 'boo') return null
+  // A loose node (the + button's skill or connector, held by nobody yet) is
+  // given to whichever agent it lands on, on every canvas, the single-agent
+  // one included: that is the only thing it can do.
+  if (sourceType === 'loose' && targetType === 'boo') return null
   if (sourceType === 'boo' && targetType === 'boo') {
     return same ? 'An agent cannot route to itself.' : null
   }

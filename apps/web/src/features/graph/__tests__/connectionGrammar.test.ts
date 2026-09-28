@@ -56,6 +56,12 @@ describe('connectionGrammar: the single-agent surface', () => {
     expect(isConnectionAllowed('boo', 'boo', false, 'single-agent')).toBe(false)
   })
 
+  it('points a refused Boo thread at what the port CAN do there', () => {
+    // Letting go on empty space opens the picker on this surface too, so the
+    // refusal names that instead of leaving the port looking inert.
+    expect(connectionRefusal('boo', 'skill', false, 'single-agent')).toMatch(/empty space/i)
+  })
+
   it('refuses sharing there, and points at the surface that can do it', () => {
     expect(connectionRefusal('resource', 'boo', false, 'single-agent')).toMatch(/full graph/i)
   })
@@ -67,5 +73,17 @@ describe('connectionGrammar: the single-agent surface', () => {
   it('leaves the full canvas unnarrowed', () => {
     expect(connectionRefusal('boo', 'boo', false, 'canvas')).toBeNull()
     expect(connectionRefusal('resource', 'boo', false, 'canvas')).toBeNull()
+  })
+})
+
+describe('connectionGrammar, loose nodes', () => {
+  it('gives a loose node to the agent it lands on, on every canvas', () => {
+    expect(connectionRefusal('loose', 'boo', false)).toBeNull()
+    expect(connectionRefusal('loose', 'boo', false, 'single-agent')).toBeNull()
+  })
+
+  it('refuses a loose node onto anything but an agent', () => {
+    expect(connectionRefusal('loose', 'skill', false)).toMatch(/on an agent/i)
+    expect(connectionRefusal('loose', 'loose', false)).toMatch(/on an agent/i)
   })
 })

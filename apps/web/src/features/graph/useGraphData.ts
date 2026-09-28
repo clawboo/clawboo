@@ -1001,6 +1001,9 @@ export function buildGraphElements(
   const synthesizeTeamScopeEdges = (bz: AgentState, teamId: string, teamLeadId: string | null) => {
     const teamMemberIds = agents.filter((a) => a.teamId === teamId).map((a) => a.id)
     if (teamMemberIds.length === 0) return // skip empty teams
+    // `teamJunction` marks the edges that hang this team off Boo Zero, so the
+    // edge can wear the team's badge where it splits into the team (the same
+    // badge Atlas draws on each team's junction node).
     if (teamLeadId && teamMemberIds.includes(teamLeadId)) {
       depEdges.push({
         id: `dep-syn-${bz.id}-${teamLeadId}`,
@@ -1009,7 +1012,7 @@ export function buildGraphElements(
         sourceHandle: 'center',
         target: `boo-${teamLeadId}`,
         targetHandle: 'center-target',
-        data: { isSynthetic: true },
+        data: { isSynthetic: true, teamJunction: teamId },
       })
       for (const memberId of teamMemberIds) {
         if (memberId === teamLeadId) continue
@@ -1032,7 +1035,7 @@ export function buildGraphElements(
           sourceHandle: 'center',
           target: `boo-${memberId}`,
           targetHandle: 'center-target',
-          data: { isSynthetic: true },
+          data: { isSynthetic: true, teamJunction: teamId },
         })
       }
     }

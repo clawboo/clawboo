@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import {
   BaseEdge,
+  EdgeLabelRenderer,
   getBezierPath,
   getSmoothStepPath,
   getStraightPath,
@@ -8,6 +9,8 @@ import {
 } from '@xyflow/react'
 import type { EdgeProps } from '@xyflow/react'
 import { useGraphStore } from '../store'
+import { minScreenSize, useZoomStep } from '../useMinScreenSize'
+import { TeamBadge } from '../nodes/TeamBadge'
 
 // ─── DependencyEdge — Boo → Boo flow-chart connector ─────────────────────────
 //
@@ -60,12 +63,46 @@ interface DependencyEdgeData extends Record<string, unknown> {
   siblingTargetIds?: string[]
   /** When 'radial', skip trunk-and-branches and render a bezier. */
   layoutMode?: 'top-down' | 'radial'
+  /**
+   * Set on the edges that hang a team off Boo Zero in that team's own graph.
+   * The edge wears the team's badge where it splits into the team: the same
+   * mark Atlas draws on each team's junction node.
+   */
+  teamJunction?: string
+}
+
+/** The team's badge, centred on a point of the edge. */
+function JunctionBadge({ teamId, x, y }: { teamId: string; x: number; y: number }) {
+  return (
+    <EdgeLabelRenderer>
+      <div
+        style={{
+          position: 'absolute',
+          width: 0,
+          height: 0,
+          transform: `translate(${x}px, ${y}px)`,
+          // The label layer ignores the pointer; the badge takes it back so its
+          // `title` names the team on hover.
+          pointerEvents: 'all',
+        }}
+      >
+        <TeamBadge teamId={teamId} />
+      </div>
+    </EdgeLabelRenderer>
+  )
 }
 
 const STROKE = 'rgb(var(--primary-rgb) / 0.65)'
 const STROKE_SELECTED = 'var(--primary)'
-const STROKE_WIDTH = 1.5
-const STROKE_WIDTH_SELECTED = 2.5
+const STROKE_WIDTH = 2
+const STROKE_WIDTH_SELECTED = 3
+// On-screen floors, in CSS pixels. The canvas spends most of its life zoomed out
+// (about 0.25 in Atlas, 0.3 in a team graph), where the graph-space width alone
+// draws a sub-pixel hairline. See useMinScreenSize.ts.
+const MIN_SCREEN_STROKE = 1.4
+const MIN_SCREEN_STROKE_SELECTED = 2.2
+/** The hover under-glow's width, as a multiple of the stroke it sits under. */
+const GLOW_WIDTH_RATIO = 3.5
 const TRUNK_CORNER_RADIUS = 12
 
 // Trunk-and-branches assumes all siblings sit on ONE ELK row. When their Y
@@ -178,6 +215,7 @@ export const DependencyEdge = memo(function DependencyEdge({
   const hoveredNodeId = useGraphStore((s) => s.hoveredNodeId)
   const isConnectedToHovered =
     hoveredNodeId !== null && (hoveredNodeId === source || hoveredNodeId === target)
+  const zoom = useZoomStep()
 
   let opacity: number
   if (isPrimary) {
@@ -187,7 +225,9 @@ export const DependencyEdge = memo(function DependencyEdge({
   }
 
   const stroke = selected ? STROKE_SELECTED : STROKE
-  const strokeWidth = selected ? STROKE_WIDTH_SELECTED : STROKE_WIDTH
+  const strokeWidth = selected
+    ? minScreenSize(STROKE_WIDTH_SELECTED, MIN_SCREEN_STROKE_SELECTED, zoom)
+    : minScreenSize(STROKE_WIDTH, MIN_SCREEN_STROKE, zoom)
   const baseStyle = {
     stroke,
     strokeWidth,
@@ -207,7 +247,7 @@ export const DependencyEdge = memo(function DependencyEdge({
   const glowOpacity = isConnectedToHovered ? 0.1 : 0
   const glowStyle = {
     stroke: 'var(--primary)',
-    strokeWidth: 7,
+    strokeWidth: strokeWidth * GLOW_WIDTH_RATIO,
     fill: 'none',
     strokeLinecap: 'round' as const,
     opacity: glowOpacity,
@@ -233,7 +273,9 @@ export const DependencyEdge = memo(function DependencyEdge({
         id={id}
         path={bezier}
         markerEnd={markerEnd}
-        style={{ ...baseStyle, strokeDasharray: '4 4' }}
+        // Dashes track the stroke, or a floored stroke at low zoom closes its
+        // own gaps and the dashed line reads as solid.
+        style={{ ...baseStyle, strokeDasharray: `${strokeWidth * 2.5} ${strokeWidth * 2.5}` }}
       />
     )
   }
@@ -285,6 +327,10 @@ export const DependencyEdge = memo(function DependencyEdge({
             style={baseStyle}
           />
         ) : null}
+        {/* Where the single line down from the parent splits into the team. */}
+        {edgeData?.teamJunction ? (
+          <JunctionBadge teamId={edgeData.teamJunction} x={sourceX} y={elbowY} />
+        ) : null}
       </>
     )
   }
@@ -329,7 +375,7 @@ export const DependencyEdge = memo(function DependencyEdge({
 
   // ── Branch: single-child primary edge — standard smooth-step (no
   // trunk-and-branches needed because there's nothing to fork).
-  const [smooth] = getSmoothStepPath({
+  const [smooth, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
     targetX,
@@ -338,10 +384,15 @@ export const DependencyEdge = memo(function DependencyEdge({
     targetPosition,
     borderRadius: TRUNK_CORNER_RADIUS,
   })
+  // A team hung off Boo Zero by ONE edge (its lead, or a lone member) has no
+  // split, so its badge sits halfway down the line. A trunk participant that
+  // fell back here (siblings off one row) has no single split point to mark.
+  const soloJunction = edgeData?.teamJunction && !isTrunkParticipant ? edgeData.teamJunction : null
   return (
     <>
       {glowPath(smooth, `${id}-glow`)}
       <BaseEdge id={id} path={smooth} markerEnd={markerEnd} style={baseStyle} />
+      {soloJunction ? <JunctionBadge teamId={soloJunction} x={labelX} y={labelY} /> : null}
     </>
   )
 })

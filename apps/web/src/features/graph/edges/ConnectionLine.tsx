@@ -1,5 +1,10 @@
 import { getSmoothStepPath, getBezierPath } from '@xyflow/react'
 import type { ConnectionLineComponentProps } from '@xyflow/react'
+import { minScreenSize, useZoomStep } from '../useMinScreenSize'
+
+const STROKE_WIDTH = 2
+/** On-screen floor, in CSS pixels, so the thread stays visible at a low zoom. */
+const MIN_SCREEN_STROKE = 1.75
 
 // Color the in-progress connection line based on source node type:
 //   boo   → accent red (var(--primary)) — boo-to-boo routing
@@ -21,7 +26,7 @@ const NODE_TYPE_COLOR: Record<string, string> = {
  * previewed mint and then settled grey, so the line changed colour the instant you
  * let go.
  */
-function previewColor(fromNode: ConnectionLineComponentProps['fromNode']): string {
+export function previewColor(fromNode: ConnectionLineComponentProps['fromNode'] | null): string {
   const accent = (fromNode?.data as { accent?: unknown } | undefined)?.accent
   if (typeof accent === 'string' && accent) return accent
   return NODE_TYPE_COLOR[fromNode?.type ?? ''] ?? 'rgb(var(--foreground-rgb) / 0.5)'
@@ -59,11 +64,20 @@ export function ConnectionLine({
         targetPosition: toPosition,
       })
 
+  const zoom = useZoomStep()
   const color = previewColor(fromNode)
+  const strokeWidth = minScreenSize(STROKE_WIDTH, MIN_SCREEN_STROKE, zoom)
 
   return (
     <g>
-      <path d={path} fill="none" stroke={color} strokeWidth={2} strokeDasharray="6 4" />
+      <path
+        d={path}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeDasharray={`${strokeWidth * 3} ${strokeWidth * 2}`}
+        strokeLinecap="round"
+      />
     </g>
   )
 }

@@ -23,6 +23,7 @@ import {
 } from '@clawboo/connector-catalog'
 
 import { BUILTIN_SKILLS } from '@/features/marketplace/catalog'
+import { looseNodeId } from './looseNodes'
 import type { ThreadOption } from './threadPickerRows'
 
 /** One app reachable through a broker, as the picker needs it. */
@@ -38,6 +39,17 @@ export interface BrokeredAppOption {
 export interface ThreadOptionsInput {
   /** The node the thread came from. Only a Boo can spawn today. */
   fromNodeType: string | null
+  /**
+   * `thread` (the default): a thread pulled off a Boo, so every row gives that
+   * agent something and the rows it already has are left out.
+   *
+   * `free`: the canvas's + button. No agent is named, so nothing is left out
+   * for being held already, and what a row does is put the thing on the canvas,
+   * unattached, for a later drag onto whichever agent should have it.
+   */
+  mode?: 'thread' | 'free'
+  /** Free mode: loose node ids already on this canvas, never offered twice. */
+  onCanvas?: ReadonlySet<string>
   /** Skills this agent already has, so the list never offers a duplicate. */
   ownedSkillNames: ReadonlySet<string>
   /** Connector slugs already live, likewise. */
@@ -63,11 +75,13 @@ export interface ThreadOptionsInput {
  * picker entirely rather than open one with nothing in it.
  */
 export function threadOptionsFor(input: ThreadOptionsInput): ThreadOption[] {
+  const free = input.mode === 'free'
   // ONLY FROM A BOO. A skill or connector tile dragged to empty canvas has no
   // meaningful thing to create: its own existence is owned by the agent it
-  // orbits, and "create a second copy of this skill, attached to nothing" is
-  // not a state the model has.
-  if (input.fromNodeType !== 'boo') return []
+  // orbits. The + button is the one way to put something on a canvas unheld,
+  // and it says so by asking in free mode.
+  if (!free && input.fromNodeType !== 'boo') return []
+  const placed = (id: string): boolean => free && (input.onCanvas?.has(id) ?? false)
 
   const options: ThreadOption[] = []
 
@@ -77,7 +91,8 @@ export function threadOptionsFor(input: ThreadOptionsInput): ThreadOption[] {
   // is inert here because it needs a key. Leading with what can be finished in
   // one click is the same ordering the shelf already uses.
   for (const def of byCost(searchConnectors(''), input.costOf)) {
-    if (input.liveConnectorSlugs.has(def.slug)) continue
+    if (!free && input.liveConnectorSlugs.has(def.slug)) continue
+    if (placed(looseNodeId('connector', def.slug))) continue
     const cost = input.costOf(def)
     const copy = COST_COPY[cost]
     options.push({
@@ -92,7 +107,8 @@ export function threadOptionsFor(input: ThreadOptionsInput): ThreadOption[] {
       // connector (the live-slug check above just proved it), and what the press
       // does is give it to them. Reusing the shelf's verb would offer to switch
       // off a connection the operator is trying to share.
-      action: cost === 'on' ? 'Give access' : copy?.action,
+      // Free mode names nobody, so a connector already on only needs placing.
+      action: cost === 'on' ? (free ? 'Add' : 'Give access') : copy?.action,
       // Listed but inert. The reason is the same sentence the shelf uses, so a
       // reader who has seen one surface recognises the other.
       ...(isImmediate(cost)
@@ -105,19 +121,21 @@ export function threadOptionsFor(input: ThreadOptionsInput): ThreadOption[] {
   // is one press away from being this agent's, which is the ordering the whole
   // list already uses.
   for (const app of input.brokeredApps ?? []) {
-    if (input.agentToolkits?.has(app.toolkit)) continue
+    if (!free && input.agentToolkits?.has(app.toolkit)) continue
+    if (placed(looseNodeId('app', app.toolkit))) continue
     options.push({
       id: `brokered:${app.toolkit}`,
       kind: 'connector',
       label: app.name,
       hint: app.description,
       slug: app.slug,
-      action: 'Give access',
+      action: free ? 'Add' : 'Give access',
     })
   }
 
   for (const skill of BUILTIN_SKILLS) {
-    if (input.ownedSkillNames.has(skill.name)) continue
+    if (!free && input.ownedSkillNames.has(skill.name)) continue
+    if (placed(looseNodeId('skill', skill.id))) continue
     options.push({
       id: `skill:${skill.id}`,
       kind: 'skill',
