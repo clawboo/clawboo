@@ -17,7 +17,7 @@ System Health is always available. It is the one liveness surface that answers e
 
 ## Open the panel
 
-In the left sidebar, the secondary nav lists **System Health** (heart-pulse icon). Selecting it switches the view to the `health` nav slot, which renders `SystemHealthPanel`.
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **System Health** under the System group (heart-pulse icon). Selecting it switches the view to the `health` nav slot, which renders `SystemHealthPanel`.
 
 On open, the panel calls `GET /api/health` and renders the report. It also re-fetches every 30 seconds while the view is mounted, so a long-lived dashboard stays current without a manual refresh.
 

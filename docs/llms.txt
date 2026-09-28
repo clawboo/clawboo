@@ -32,7 +32,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Memory](concepts/memory.md): Clawboo's two memory tiers — one shared Memory-MCP store every runtime reads and writes, plus each runtime's preserved private native memory.
 - [Observability](concepts/observability.md): Clawboo's always-on orchestration event log, the projections it feeds, the error taxonomy, and the lazy OpenTelemetry bridge.
 - [Peer chat](concepts/peer-chat.md): The mixed-runtime team room where every runtime is a named peer, with bounded speaker selection and isUser=false evidence tagging.
-- [Scheduling](concepts/scheduling.md): Routines — Clawboo's durable team-task scheduler, its rebuildable ticker, the two cron domains, the one-firing-owner invariant, and the error-halts policy.
+- [Scheduling](concepts/scheduling.md): Routines: Clawboo's durable scheduler for team and agent work, its rebuildable ticker, the two cron domains, the one-firing-owner invariant, and the error-halts policy.
 - [Teams and planes](concepts/teams-and-planes.md): How teams group agents, and the split between the shared coordination plane and each runtime's private plane.
 - [The board](concepts/the-board.md): Clawboo's durable, transactional task-coordination substrate — state machine, atomic claim, dependencies, and crash recovery.
 - [Verification](concepts/verification.md): Builder≠judge — a deterministic gate plus an independent read-only critic that make "done" mean verified, with an exhausted fix loop routed to blocked for a human.
@@ -64,7 +64,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Browse and deploy from the Marketplace](using/marketplace.md): Search, inspect, and deploy single agents or whole teams from Clawboo's 436-agent / 85-team / 44-skill / 19-connector catalog.
 - [Browse and search shared memory](using/memory-browser.md): Use the Memory panel to search, save, and browse the facts and procedures your team's runtimes share.
 - [Using the Observability dashboard](using/observability-dashboard.md): Read traces, error taxonomy, fleet health, the delegation graph, and run the smoke evals from the Observability panel.
-- [Schedule recurring team work](using/scheduler.md): Use the Scheduler tab to create, pause, run, and delete Routines and OpenClaw cron from one unified surface.
+- [Routines](using/routines.md): Schedule recurring work for a team or one agent from the Routines view, then open, edit, pause, run, or delete any routine.
 - [Check System Health](using/system-health.md): Read the boot-probe checklist, the degraded/fatal banner, resolved runtime state, and re-run the probe from the System Health panel.
 - [System maintenance](using/system-maintenance.md): Manage OpenClaw from the System panel — gateway control, default model, API keys, agent coordination, and updates.
 - [Create and manage teams](using/teams.md): Create a team from a marketplace template or empty, set leaders and rules, pick color collections, and archive or delete it.
@@ -101,7 +101,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Misc resources API](reference/rest-api/misc.md): REST reference for cost records, chat history, graph layout, personality, skills, exec settings, fleet summary, and Boo Zero context.
 - [Observability API](reference/rest-api/observability.md): REST reference for the orchestration event log — feed, traces, errors, fleet health, graph projection, SSE live-tail, client mirror, and eval smoke run.
 - [Runtimes API](reference/rest-api/runtimes.md): REST reference for the runtimes resource group — list, install, connect, healthcheck, run, and seed a native team.
-- [Schedules API](reference/rest-api/schedules.md): REST reference for the unified scheduler — list, create, update, pause/resume, delete, and force-run schedules across two sources.
+- [Schedules API](reference/rest-api/schedules.md): REST reference for the unified scheduler: list, create, update, pause/resume, delete, and force-run schedules across two sources, and read a routine's run history.
 - [Settings & Health API](reference/rest-api/settings.md): REST reference for /api/settings (gateway URL + token) and /api/health (the boot probe / System Health surface).
 - [System API](reference/rest-api/system.md): REST reference for /api/system/* — OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.
 - [Teams API](reference/rest-api/teams.md): REST reference for teams and their sub-resources — CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.

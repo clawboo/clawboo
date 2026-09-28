@@ -1,7 +1,7 @@
 // Reusable status pill primitive.
 //
 // Renders the canonical mono / uppercase / tracking-widest status indicator
-// used across Approvals / Scheduler / Marketplace / chat cards.
+// used across Approvals / Routines / Marketplace / chat cards.
 //
 // API: `tone` selects the semantic role (working / done / idle / warning /
 // success / error); `label` is optional — when omitted, idle / working tones

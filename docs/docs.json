@@ -127,7 +127,7 @@
               "using/marketplace",
               "using/memory-browser",
               "using/observability-dashboard",
-              "using/scheduler",
+              "using/routines",
               "using/system-health",
               "using/system-maintenance",
               "using/teams",
@@ -318,5 +318,6 @@
   },
   "metadata": {
     "timestamp": true
-  }
+  },
+  "redirects": [{ "source": "/using/scheduler", "destination": "/using/routines" }]
 }

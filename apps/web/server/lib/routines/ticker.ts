@@ -3,12 +3,14 @@
 // ZERO durable state: kill the process, restart, and bootResume() reconstructs
 // every active Routine from SQLite alone.
 //
-// Topology: ONE timer armed at min(max(minNextRunAt - now, 0), 60s), .unref()'d.
-// The 60s clamp doubles as a periodic rescan that picks up rows written by
-// other processes and recovers from laptop sleep; spurious wakes are harmless
-// because dueness is decided in SQL (next_run_at <= now). Per fire: due-pass →
-// THE atomic claim (a null claim = another ticker won = drop, never retry) →
-// dispatch → record the outcome + re-arm from the cron spec.
+// Topology: ONE timer armed at min(max(minNextRunAt - now, 0), 60s), .unref()'d,
+// or at once while a row is already queued (a Run now). The 60s clamp doubles as
+// a periodic rescan that picks up rows written by other processes and recovers
+// from laptop sleep; spurious wakes are harmless because dueness is decided in
+// SQL (next_run_at <= now). Per fire: due-pass → THE atomic claim (a null claim
+// = another ticker won = drop, never retry) → dispatch → record the outcome +
+// re-arm from the cron spec. Only the claim pass is serialized: a dispatch still
+// in flight never holds up the next due routine.
 
 import {
   claimScheduledRun,
@@ -68,15 +70,22 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
   let timer: ReturnType<typeof setTimeout> | null = null
   let running = false
   let stopped = true
-  let ticking = false
+  let claiming = false
 
   const arm = (): void => {
     if (stopped) return
     if (timer) clearTimeout(timer)
     const next = minNextRunAt(db)
     const nowMs = now()
+    // A queued row (Run now, or a fire a restart re-queued) is due this instant.
+    // minNextRunAt only sees idle rows, so without this a Run now waited out the
+    // whole rescan interval.
     const delay =
-      next == null ? MAX_ARM_DELAY_MS : Math.min(Math.max(next - nowMs, 0), MAX_ARM_DELAY_MS)
+      listQueuedRuns(db).length > 0
+        ? 0
+        : next == null
+          ? MAX_ARM_DELAY_MS
+          : Math.min(Math.max(next - nowMs, 0), MAX_ARM_DELAY_MS)
     timer = setTimeout(() => {
       void tick()
     }, delay)
@@ -84,11 +93,11 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
   }
 
   // Dispatch one claimed fire and record its outcome. Runs CONCURRENTLY with the
-  // other due fires this tick (a slow connected/OpenClaw fire — bounded only by
-  // its 10-min watchdog — must not head-of-line-block the others nor defer the
-  // next arm()). Same-identity overlap is prevented one layer down by the
-  // per-home dispatch mutex in the executor runner; cross-identity fires are
-  // independent.
+  // other due fires (a slow fire must not head-of-line-block the others nor defer
+  // the next arm()). Same-identity overlap is prevented one layer down: the
+  // per-home dispatch mutex in the executor runner, the per-agent connected mutex
+  // for OpenClaw, and the team chat's delivery queue for a team routine;
+  // cross-identity fires are independent.
   const dispatchAndRecord = async (claimed: DbScheduledRun): Promise<void> => {
     let outcome: RoutineDispatchOutcome
     try {
@@ -115,7 +124,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     if (outcome.ok) {
       emitEvent(db, {
         kind: 'routine_completed',
-        agentId: claimed.agentId,
+        agentId: claimed.agentId || null,
         teamId: claimed.teamId,
         taskId: outcome.taskId ?? null,
         tenantId: claimed.tenantId,
@@ -129,7 +138,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     } else {
       emitEvent(db, {
         kind: 'routine_error',
-        agentId: claimed.agentId,
+        agentId: claimed.agentId || null,
         teamId: claimed.teamId,
         taskId: outcome.taskId ?? null,
         tenantId: claimed.tenantId,
@@ -140,25 +149,29 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
         'Routines: fire failed — routine parked in error until resumed',
       )
     }
+    // The outcome set this routine's next run, which may be sooner than the
+    // timer armed while it was in flight.
+    arm()
   }
 
   const tick = async (): Promise<{ fired: number }> => {
-    // A tick re-entered while a fire is in flight would double-scan; the claim
-    // makes that harmless, but serializing keeps the logs sane.
-    if (ticking) return { fired: 0 }
-    ticking = true
+    // Claims are serialized: a claim pass re-entered mid-pass would double-scan.
+    // The atomic claim makes that harmless, but one pass at a time keeps the
+    // `routine_fired` log in order.
+    if (claiming) return { fired: 0 }
+    claiming = true
+    const claimedRuns: DbScheduledRun[] = []
     try {
       const nowMs = now()
       queueDueRuns(db, nowMs)
       // Claim phase (sequential — preserves the atomic-claim race semantics +
       // ordered `routine_fired` logs). A lost claim = another ticker won → drop.
-      const claimedRuns: DbScheduledRun[] = []
       for (const queued of listQueuedRuns(db)) {
         const claimed = claimScheduledRun(db, queued.id, nowMs)
         if (!claimed) continue
         emitEvent(db, {
           kind: 'routine_fired',
-          agentId: claimed.agentId,
+          agentId: claimed.agentId || null,
           teamId: claimed.teamId,
           tenantId: claimed.tenantId,
           data: {
@@ -170,41 +183,19 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
         markRunRunning(db, claimed.id, nowMs)
         claimedRuns.push(claimed)
       }
-      // Dispatch phase (concurrent — wall-clock is the slowest single fire, not
-      // the sum). allSettled so one failing fire never aborts the others. The
-      // await is DEADLINE-BOUNDED: one wedged dispatch must not hold `ticking`
-      // hostage (it used to freeze EVERY routine for EVERY agent until restart).
-      // On expiry the tick moves on — a late dispatch still settles and records
-      // its own outcome, and its row stays `running` so no tick re-claims it.
-      const settledAll = Promise.allSettled(
-        claimedRuns.map((claimed) => dispatchAndRecord(claimed)),
-      )
-      if (claimedRuns.length > 0) {
-        const deadlineMs =
-          Number(process.env['CLAWBOO_ROUTINE_DISPATCH_DEADLINE_MS']) || 15 * 60_000
-        // The handle lives OUTSIDE the promise so the winner can clear it:
-        // unref() keeps the process exitable but does not release the timer, so
-        // every settled batch retained one for up to the full deadline.
-        let deadlineTimer: ReturnType<typeof setTimeout> | undefined
-        const outcome = await Promise.race([
-          settledAll.then(() => 'settled' as const),
-          new Promise<'deadline'>((resolve) => {
-            deadlineTimer = setTimeout(() => resolve('deadline'), deadlineMs)
-            ;(deadlineTimer as { unref?: () => void }).unref?.()
-          }),
-        ])
-        clearTimeout(deadlineTimer)
-        if (outcome === 'deadline')
-          deps.log.warn(
-            { claimed: claimedRuns.length, deadlineMs },
-            'Routines: dispatch deadline exceeded — releasing the tick; late fires record their own outcomes',
-          )
-      }
-      return { fired: claimedRuns.length }
     } finally {
-      ticking = false
+      claiming = false
+      // Re-arm BEFORE dispatching. A dispatch can run for minutes (an agent
+      // routine is a whole task run), and the next due routine must not wait for
+      // it. Each fire's row stays `running` until its outcome lands, so no pass
+      // can claim it twice.
       arm()
     }
+    // Dispatch phase, concurrent: the wall-clock is the slowest single fire, not
+    // the sum. allSettled so one failing fire never aborts the others. Each fire
+    // records its own outcome and re-arms as it lands.
+    await Promise.allSettled(claimedRuns.map((claimed) => dispatchAndRecord(claimed)))
+    return { fired: claimedRuns.length }
   }
 
   return {

@@ -412,6 +412,54 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(JSON.stringify(comments)).toContain('[REDACTED]')
   })
 
+  it('a stream that ends on a fatal error with no terminal reports that error', async () => {
+    const taskId = newCodeTask('Compile the weekly report')
+    // A runtime that dies mid-run: a fatal error event, then the stream ends.
+    const dying: RuntimeAdapter = {
+      id: 'clawboo-native',
+      participantKind: 'agent',
+      capabilities: () => ({ ...FULL_CAPS, worktrees: false }),
+      health: async () => ({ ok: true }),
+      start: async (_t: TaskHandle, opts: StartOpts): Promise<RunHandle> => ({
+        adapterId: 'clawboo-native',
+        sessionKey: opts.sessionKey,
+        runId: null,
+      }),
+      events: (run: RunHandle): AsyncIterable<RuntimeEvent> =>
+        (async function* () {
+          yield {
+            runId: run.sessionKey,
+            sessionId: run.sessionKey,
+            ts: 1,
+            seq: 1,
+            kind: 'error',
+            code: 'provider',
+            message: 'model provider returned 503',
+            fatal: true,
+          } as RuntimeEvent
+        })(),
+      abort: async () => {},
+      setModel: async () => {},
+      writeContext: async () => {},
+    }
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => dying,
+      taskId,
+      assigneeAgentId: 'native-1',
+      kind: 'research',
+      mcpBaseUrl: null,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.doneReason).toBe('error')
+    expect(result.summary).toBe('model provider returned 503')
+    expect(getComments(getDb(), taskId).map((c) => c.body)).toContain(
+      'Run error: model provider returned 503',
+    )
+    expect(getTask(getDb(), taskId)?.status).toBe('todo')
+  })
+
   it('cross-runtime handoff: Claude Code pauses, Codex resumes from the worktree alone', async () => {
     const taskId = newCodeTask('Wire the CLI flag and parser')
     // Run 1 — Claude Code does partial work and PAUSES (keepForResume): writes

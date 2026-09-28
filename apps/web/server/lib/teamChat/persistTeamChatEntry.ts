@@ -23,7 +23,12 @@ import { randomUUID } from 'node:crypto'
 
 import { chatMessages, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
-import type { TranscriptEntry, TranscriptEntryKind, TranscriptEntryRole } from '@clawboo/protocol'
+import type {
+  TranscriptEntry,
+  TranscriptEntryKind,
+  TranscriptEntryOrigin,
+  TranscriptEntryRole,
+} from '@clawboo/protocol'
 import { buildTeamSessionKey, shouldDropAssistantTurn } from '@clawboo/team-orchestration'
 
 const log = createLogger('team-chat-persist')
@@ -46,6 +51,8 @@ export interface PersistTeamChatEntryInput {
   /** Stable id for idempotency across a logical re-drive (ON CONFLICT DO NOTHING).
    *  Omitted → a fresh uuid, so each call is a distinct row. */
   entryId?: string
+  /** Who posted it on the person's behalf (a routine), when they did not type it. */
+  origin?: TranscriptEntryOrigin
 }
 
 /** Build + insert one team-chat TranscriptEntry. Best-effort (chat persistence is
@@ -79,6 +86,7 @@ export function persistTeamChatEntry(db: ClawbooDb, input: PersistTeamChatEntryI
     sequenceKey: nextServerSeq(),
     confirmed: true,
     fingerprint: randomUUID(),
+    ...(input.origin ? { origin: input.origin } : {}),
   }
   try {
     db.insert(chatMessages)

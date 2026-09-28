@@ -40,6 +40,21 @@ export function canRoutineTransition(from: ScheduledRunStatus, to: ScheduledRunS
   return LEGAL[from]?.includes(to) ?? false
 }
 
+// What a person may do, a narrower set than LEGAL: that table also holds the
+// engine's own moves, and `running → idle` there is a fire's outcome landing. A
+// person pausing or resuming a fire still in flight would re-arm the row under
+// it, so the next due-pass fires it again while the first run is still going.
+const USER_LEGAL: Record<'paused' | 'idle', readonly ScheduledRunStatus[]> = {
+  paused: ['idle', 'queued', 'error'],
+  idle: ['paused', 'error'],
+}
+
+/** A person's pause (→ paused) or resume (→ idle). Same-status is a no-op. */
+export function canUserSetRoutineStatus(from: ScheduledRunStatus, to: 'paused' | 'idle'): boolean {
+  if (from === to) return true
+  return USER_LEGAL[to].includes(from)
+}
+
 /** Only `idle` rows with a non-null next_run_at are eligible for the due-pass. */
 export function isAutoFireable(status: ScheduledRunStatus): boolean {
   return status === 'idle'

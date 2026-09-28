@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
 import { createTask, getTask } from '../../board/repository'
+import { appendEvent } from '../../events/appendEvent'
+import { listRoutineFires } from '../history'
 import {
   claimScheduledRun,
   deleteScheduledRun,
@@ -27,7 +29,7 @@ import {
   setScheduledRunStatus,
   updateScheduledRun,
 } from '../repository'
-import { canRoutineTransition, isAutoFireable } from '../state-machine'
+import { canRoutineTransition, canUserSetRoutineStatus, isAutoFireable } from '../state-machine'
 
 let dir: string
 let db: ClawbooDb
@@ -231,12 +233,145 @@ describe('user-driven transitions + updates', () => {
     })
   })
 
+  it('a person cannot resume a routine whose fire is queued or in flight', () => {
+    const run = register({ nextRunAt: 1_000 })
+    queueDueRuns(db, 2_000)
+    expect(setScheduledRunStatus(db, run.id, 'idle').ok).toBe(false)
+    claimScheduledRun(db, run.id)
+    expect(setScheduledRunStatus(db, run.id, 'idle').ok).toBe(false)
+    markRunRunning(db, run.id)
+    // running → idle is the fire's outcome landing, never a person's resume: a
+    // resume here would re-arm the row and let the next due-pass fire it again.
+    expect(setScheduledRunStatus(db, run.id, 'idle')).toEqual({
+      ok: false,
+      reason: 'illegal_transition',
+    })
+    expect(canRoutineTransition('running', 'idle')).toBe(true)
+    expect(canUserSetRoutineStatus('running', 'idle')).toBe(false)
+    expect(canUserSetRoutineStatus('error', 'idle')).toBe(true)
+    expect(canUserSetRoutineStatus('queued', 'paused')).toBe(true)
+  })
+
+  it('an outcome lands only on a row still running', () => {
+    const run = register({ nextRunAt: 1_000 })
+    recordRunOutcome(db, run.id, { ok: false, error: 'late' }, null, 2_000)
+    expect(getScheduledRun(db, run.id)).toMatchObject({
+      status: 'idle',
+      lastError: null,
+      nextRunAt: 1_000,
+    })
+    expect(setScheduledRunStatus(db, run.id, 'paused').ok).toBe(true)
+    recordRunOutcome(db, run.id, { ok: true }, 9_000, 2_000)
+    expect(getScheduledRun(db, run.id)).toMatchObject({ status: 'paused', lastRunAt: null })
+  })
+
   it('updateScheduledRun patches spec/template/nextRunAt', () => {
     const run = register()
     const updated = updateScheduledRun(db, run.id, { cronSpec: '*/5 * * * *', nextRunAt: 7_000 })
     expect(updated).toMatchObject({ cronSpec: '*/5 * * * *', nextRunAt: 7_000 })
     deleteScheduledRun(db, run.id)
     expect(getScheduledRun(db, run.id)).toBeNull()
+  })
+
+  it('updateScheduledRun re-points the agent and team, and leaves them alone when omitted', () => {
+    const run = register()
+    expect(updateScheduledRun(db, run.id, { agentId: '', teamId: 'team-2' })).toMatchObject({
+      agentId: '',
+      teamId: 'team-2',
+    })
+    expect(updateScheduledRun(db, run.id, { cronSpec: '0 8 * * *' })).toMatchObject({
+      agentId: '',
+      teamId: 'team-2',
+      cronSpec: '0 8 * * *',
+    })
+    expect(updateScheduledRun(db, run.id, { agentId: 'agent-9', teamId: null })).toMatchObject({
+      agentId: 'agent-9',
+      teamId: null,
+    })
+  })
+})
+
+describe('run history (folded from the event log)', () => {
+  function emit(kind: string, data: Record<string, unknown>, ts: number, taskId?: string): void {
+    appendEvent(db, {
+      kind: kind as Parameters<typeof appendEvent>[1]['kind'],
+      ts,
+      taskId: taskId ?? null,
+      data,
+    })
+  }
+
+  it('folds each fire into one record, newest first', () => {
+    const id = 'run-a'
+    emit('routine_fired', { scheduledRunId: id, cronSpec: '0 9 * * *', scheduledBy: 'clawboo' }, 1)
+    emit('routine_dispatched', { scheduledRunId: id, taskId: 't1', dispatchPath: 'one-shot' }, 2)
+    emit('routine_completed', { scheduledRunId: id, taskId: 't1', status: 'idle' }, 3, 't1')
+    emit('routine_fired', { scheduledRunId: id, cronSpec: '0 9 * * *', scheduledBy: 'clawboo' }, 10)
+    emit('routine_dispatched', { scheduledRunId: id, taskId: 't2', dispatchPath: 'one-shot' }, 11)
+    emit('routine_error', { scheduledRunId: id, message: 'provider down' }, 12, 't2')
+
+    const fires = listRoutineFires(db, id)
+    expect(fires).toHaveLength(2)
+    expect(fires[0]).toMatchObject({
+      firedAt: 10,
+      finishedAt: 12,
+      status: 'failed',
+      error: 'provider down',
+      taskId: 't2',
+      dispatchPath: 'one-shot',
+    })
+    expect(fires[1]).toMatchObject({ firedAt: 1, finishedAt: 3, status: 'succeeded', taskId: 't1' })
+  })
+
+  it('keeps a team routine fire, which has no task, and records who it went to', () => {
+    const id = 'run-team'
+    emit('routine_fired', { scheduledRunId: id, cronSpec: '0 9 * * *', scheduledBy: 'clawboo' }, 1)
+    emit(
+      'routine_dispatched',
+      { scheduledRunId: id, taskId: null, dispatchPath: 'team-chat', targetAgentId: 'bz' },
+      2,
+    )
+    emit('routine_completed', { scheduledRunId: id, taskId: null, status: 'idle' }, 3)
+    expect(listRoutineFires(db, id)).toEqual([
+      {
+        firedAt: 1,
+        finishedAt: 3,
+        status: 'succeeded',
+        error: null,
+        taskId: null,
+        dispatchPath: 'team-chat',
+        targetAgentId: 'bz',
+      },
+    ])
+  })
+
+  it('marks a fire that never finished before the next one began as interrupted', () => {
+    const id = 'run-b'
+    emit('routine_fired', { scheduledRunId: id }, 1)
+    emit('routine_dispatched', { scheduledRunId: id, taskId: 't1', dispatchPath: 'connected' }, 2)
+    emit('routine_fired', { scheduledRunId: id }, 5)
+    const fires = listRoutineFires(db, id)
+    expect(fires.map((f) => f.status)).toEqual(['running', 'interrupted'])
+  })
+
+  it('reads only the requested routine, and honours the limit', () => {
+    for (let i = 0; i < 5; i++) {
+      emit('routine_fired', { scheduledRunId: 'mine' }, 100 + i * 10)
+      emit('routine_completed', { scheduledRunId: 'mine', status: 'idle' }, 101 + i * 10)
+      emit('routine_fired', { scheduledRunId: 'other' }, 102 + i * 10)
+    }
+    const fires = listRoutineFires(db, 'mine', { limit: 3 })
+    expect(fires.map((f) => f.firedAt)).toEqual([140, 130, 120])
+    expect(fires.every((f) => f.status === 'succeeded')).toBe(true)
+    expect(listRoutineFires(db, 'nobody')).toEqual([])
+  })
+
+  it('drops a leading fragment whose start fell outside the window', () => {
+    const id = 'run-c'
+    emit('routine_dispatched', { scheduledRunId: id, taskId: 't0', dispatchPath: 'one-shot' }, 1)
+    emit('routine_completed', { scheduledRunId: id, taskId: 't0', status: 'idle' }, 2)
+    emit('routine_fired', { scheduledRunId: id }, 3)
+    expect(listRoutineFires(db, id)).toHaveLength(1)
   })
 })
 

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
 import { useConfirmStore } from '@/stores/confirm'
@@ -19,7 +19,19 @@ export function ConfirmDialog() {
   // behind it. Being the most recently pushed layer is what does that now; it
   // used to rely on document-capture + stopPropagation, which could not suppress
   // a same-phase sibling (issue #95).
-  useDismissableLayer({ active: open, level: 'dialog', onEscape: () => settle(false) })
+  //
+  // Presses go through the same stack, and this dialog has to claim them too.
+  // Otherwise a press on it (Cancel included) reaches the dialog that asked for
+  // the confirmation as a press outside that dialog, and closes it. The whole
+  // scrim counts as inside: a press on it cancels through its own handler below.
+  const scrimRef = useRef<HTMLDivElement | null>(null)
+  useDismissableLayer({
+    active: open,
+    level: 'dialog',
+    onEscape: () => settle(false),
+    contains: (target) => !!scrimRef.current?.contains(target),
+    onPressOutside: () => undefined,
+  })
 
   // Enter keeps a listener of its own: the stack arbitrates dismissal, not
   // confirmation. preventDefault stops the focused button's native activation
@@ -49,6 +61,7 @@ export function ConfirmDialog() {
       {open && options && (
         <motion.div
           key="confirm-scrim"
+          ref={scrimRef}
           className="fixed inset-0 z-[90] flex items-center justify-center p-4"
           style={{ background: 'var(--overlay-scrim)' }}
           initial={{ opacity: 0 }}

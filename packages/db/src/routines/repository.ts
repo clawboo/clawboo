@@ -13,7 +13,7 @@ import { and, asc, desc, eq, inArray, isNotNull, lte } from 'drizzle-orm'
 import type { ClawbooDb } from '../db'
 import { scheduledRuns, tasks, type DbScheduledRun, type DbTask } from '../schema'
 import { immediateWrite, withWriteRetry } from '../board/contention'
-import { canRoutineTransition, type ScheduledRunStatus } from './state-machine'
+import { canUserSetRoutineStatus, type ScheduledRunStatus } from './state-machine'
 
 export interface RoutineScope {
   tenantId?: string | null
@@ -208,6 +208,8 @@ export type RunOutcome = { ok: true } | { ok: false; error: string }
  * Record a fire's outcome. Success: → idle, lastRunAt stamped, re-armed at
  * `nextRunAt` (null for a spent once@ — self-disabled). Failure: → error,
  * disarmed (next_run_at NULL) until a human resumes — no silent retry-burn.
+ * Only a row still `running` takes it: one that moved on while the fire was in
+ * flight (healed by another process's boot-resume, or deleted) keeps its state.
  */
 export function recordRunOutcome(
   db: ClawbooDb,
@@ -230,7 +232,7 @@ export function recordRunOutcome(
               updatedAt: now,
             },
       )
-      .where(eq(scheduledRuns.id, id))
+      .where(and(eq(scheduledRuns.id, id), eq(scheduledRuns.status, 'running')))
       .run(),
   )
 }
@@ -252,7 +254,7 @@ export function setScheduledRunStatus(
     const row = tx.select().from(scheduledRuns).where(eq(scheduledRuns.id, id)).get() as
       DbScheduledRun | undefined
     if (!row) return { ok: false as const, reason: 'not_found' as const }
-    if (!canRoutineTransition(row.status as ScheduledRunStatus, to)) {
+    if (!canUserSetRoutineStatus(row.status as ScheduledRunStatus, to)) {
       return { ok: false as const, reason: 'illegal_transition' as const }
     }
     const updated = tx
@@ -288,6 +290,9 @@ export interface UpdateScheduledRunPatch {
   taskTemplate?: string
   /** Recomputed by the caller when cronSpec changes. */
   nextRunAt?: number | null
+  /** Re-point the routine. Validated by the caller ('' = a team routine). */
+  agentId?: string
+  teamId?: string | null
 }
 
 export function updateScheduledRun(
@@ -303,6 +308,8 @@ export function updateScheduledRun(
         ...(patch.cronSpec !== undefined ? { cronSpec: patch.cronSpec } : {}),
         ...(patch.taskTemplate !== undefined ? { taskTemplate: patch.taskTemplate } : {}),
         ...(patch.nextRunAt !== undefined ? { nextRunAt: patch.nextRunAt } : {}),
+        ...(patch.agentId !== undefined ? { agentId: patch.agentId } : {}),
+        ...(patch.teamId !== undefined ? { teamId: patch.teamId } : {}),
         updatedAt: now,
       })
       .where(eq(scheduledRuns.id, id))

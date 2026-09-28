@@ -34,7 +34,11 @@ import {
 import { createAsyncQueue } from '@clawboo/executor'
 import type { TaskTemplate } from '@clawboo/scheduler'
 
-import { dispatchConnectedSubstrate, type OperatorClientLike } from '../openclawDispatch'
+import {
+  dispatchConnectedSubstrate,
+  ROUTINE_OPENCLAW_EXECUTOR,
+  type OperatorClientLike,
+} from '../openclawDispatch'
 
 // ── Local clone of the adapter package's unpublished FakeGatewayClient ──────
 class FakeOperatorClient {
@@ -183,11 +187,14 @@ describe('dispatchConnectedSubstrate', () => {
     expect(outcome).toMatchObject({ ok: true, taskId })
     expect(getTask(db, taskId)?.status).toBe('done')
     const execs = listExecutions(db, taskId)
+    // Not 'openclaw': on the board ledger that marks a run the team engine started
+    // itself, which its resume() would attach an idle watchdog to.
     expect(execs[0]).toMatchObject({
       status: 'succeeded',
-      executorType: 'openclaw',
+      executorType: ROUTINE_OPENCLAW_EXECUTOR,
       runReason: 'routine',
     })
+    expect(ROUTINE_OPENCLAW_EXECUTOR).not.toBe('openclaw')
     expect(getComments(db, taskId).some((c) => c.body.includes('swept the queue'))).toBe(true)
     // The event subscription was released.
     expect(client.subscriberCount()).toBe(0)
@@ -215,6 +222,42 @@ describe('dispatchConnectedSubstrate', () => {
     expect(outcome.ok).toBe(false)
     expect(getTask(db, taskId)?.status).toBe('todo') // released, retryable
     expect(listExecutions(db, taskId)[0]?.status).toBe('failed')
+  })
+
+  it('a stream that throws mid-run fails the exec, aborts the run and hands the task back', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const client = new FakeOperatorClient()
+    let aborted = 0
+
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: client as unknown as OperatorClientLike,
+      makeAdapter: () => ({
+        start: async () => ({ adapterId: 'openclaw', sessionKey: 'sk', runId: 'run-1' }),
+        events: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () => Promise.reject(new Error('operator socket closed')),
+          }),
+        }),
+        abort: async () => {
+          aborted += 1
+        },
+      }),
+    })
+
+    expect(outcome).toEqual({ ok: false, taskId, error: 'run failed: operator socket closed' })
+    expect(aborted).toBe(1)
+    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId)[0]).toMatchObject({
+      status: 'failed',
+      error: 'run failed: operator socket closed',
+    })
   })
 
   it('the WATCHDOG aborts a silent run: exec timed_out, task released, session aborted', async () => {

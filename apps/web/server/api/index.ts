@@ -186,6 +186,7 @@ import {
   schedulesDELETE,
   schedulesListGET,
   schedulesRunPOST,
+  schedulesRunsGET,
   schedulesUpdatePATCH,
 } from './schedules'
 
@@ -506,10 +507,11 @@ router.post('/api/governance/budgets', budgetsSetPOST)
 router.post('/api/governance/budgets/:scope/:scopeId/resume', budgetsResumePOST)
 
 // Unified Scheduler surface — merged read over clawboo Routines + the OpenClaw
-// Gateway cron (operator WS-RPC); writes routed by owner. The Scheduler tab's backend.
+// Gateway cron (operator WS-RPC); writes routed by owner. The Routines view's backend.
 router.get('/api/schedules', schedulesListGET)
 router.post('/api/schedules', schedulesCreatePOST)
 router.post('/api/schedules/:id/run', schedulesRunPOST)
+router.get('/api/schedules/:id/runs', schedulesRunsGET)
 router.patch('/api/schedules/:id', schedulesUpdatePATCH)
 router.delete('/api/schedules/:id', schedulesDELETE)
 router.get('/api/governance/audit', governanceAuditGET)

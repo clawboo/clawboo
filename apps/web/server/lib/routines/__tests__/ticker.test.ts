@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createDb,
@@ -17,6 +17,7 @@ import {
   markRunRunning,
   claimScheduledRun,
   queueDueRuns,
+  queueRunNow,
   registerScheduledRun,
   setScheduledRunStatus,
   type ClawbooDb,
@@ -227,5 +228,51 @@ describe('routines ticker', () => {
     const { fired } = await tickPromise
     expect(fired).toBe(2)
     expect(completed).toEqual(['fast', 'slow']) // fast finished first
+  })
+
+  it('a fire still in flight does not hold up the next due routine', async () => {
+    const slow = register({ agentId: 'agent-slow', nextRunAt: 1_000 })
+    let releaseSlow: (() => void) | null = null
+    const slowGate = new Promise<void>((r) => {
+      releaseSlow = r
+    })
+    const started: string[] = []
+    let now = 2_000
+    const { ticker } = makeTicker({
+      now: () => now,
+      dispatch: async (run) => {
+        started.push(run.agentId)
+        if (run.id === slow.id) await slowGate
+        return { ok: true as const, taskId: 't' }
+      },
+    })
+
+    const first = ticker.tick()
+    // Another routine comes due while the first is still running.
+    register({ agentId: 'agent-late', nextRunAt: 2_500 })
+    now = 3_000
+    expect((await ticker.tick()).fired).toBe(1)
+    expect(started).toEqual(['agent-slow', 'agent-late'])
+
+    releaseSlow!()
+    expect((await first).fired).toBe(1)
+    expect(getScheduledRun(db, slow.id)?.status).toBe('idle')
+  })
+
+  it('a Run now is picked up at once, not at the next rescan', async () => {
+    vi.useFakeTimers()
+    try {
+      // Next due far in the future, so only the queued row can explain a fire.
+      const run = register({ nextRunAt: 4_000_000_000_000 })
+      const { ticker, dispatched } = makeTicker({ now: () => 1_000_000 })
+      ticker.start()
+      expect(queueRunNow(db, run.id)).toBe(true)
+      ticker.requestRescan()
+      await vi.advanceTimersByTimeAsync(5)
+      expect(dispatched.map((r) => r.id)).toEqual([run.id])
+      ticker.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

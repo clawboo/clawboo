@@ -3,6 +3,8 @@
 // honest: runtime-own-life rows (a runtime's own standalone cron) and
 // team-task rows (clawboo Routines) are visible together, never conflated.
 
+import type { RoutineTarget } from './template'
+
 export type ScheduleSourceId = 'clawboo-routine' | 'openclaw-gateway-cron'
 
 export type ScheduleDomain = 'team-task' | 'runtime-own-life'
@@ -29,10 +31,23 @@ export interface ScheduleRecord {
   /** = scheduledBy: which engine FIRES this ('clawboo' | 'openclaw' | …). */
   owner: string
   source: ScheduleSourceId
+  /** The agent a fire runs on. Empty for a team routine: its fire goes to
+   *  whoever leads the team at that moment. */
   agentId: string
+  /** Routine rows: who a fire goes to. Gateway rows always target one agent. */
+  target?: RoutineTarget
+  /** Routine rows: the team whose chat (team routine) or board (agent routine)
+   *  receives a fire. */
+  teamId?: string | null
+  /** Display names resolved at read time, so a client needs no second lookup.
+   *  For a team routine, `agentName` is the team's current lead. */
+  teamName?: string
+  agentName?: string
   /** Set only for team-task rows bound to an existing board task. */
   teamTaskId?: string
   label?: string
+  /** Routine rows: the instructions each fire carries. */
+  description?: string
   /**
    * Canonical spec string: a bare cron expression (optionally `@tz:<tz>`
    * suffixed), `once@<iso>`, `every:<ms>[@anchor:<ms>]`, or `at:<iso>`.

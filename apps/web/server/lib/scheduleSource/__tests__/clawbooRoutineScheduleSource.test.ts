@@ -15,6 +15,7 @@ import {
   createTask,
   getScheduledRun,
   listScheduledRuns,
+  teams,
   type ClawbooDb,
 } from '@clawboo/db'
 import {
@@ -22,6 +23,7 @@ import {
   DuplicateFiringOwnerError,
   IllegalScheduleTransitionError,
   InvalidCronSpecError,
+  InvalidRoutineTargetError,
   UnknownScheduleError,
 } from '@clawboo/scheduler'
 
@@ -37,16 +39,34 @@ beforeEach(() => {
   dbPath = path.join(dir, 'test.db')
   db = createDb(dbPath)
   const now = Date.now()
-  db.insert(agents)
-    .values({
-      id: 'agent-1',
-      name: 'A1',
-      gatewayId: 'a1',
-      runtime: 'clawboo-native',
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run()
+  for (const [id, name, isArchived] of [
+    ['team-1', 'Research', 0],
+    ['team-2', 'Growth', 0],
+    ['team-old', 'Retired', 1],
+  ] as const) {
+    db.insert(teams)
+      .values({ id, name, icon: 'T', color: '#123456', isArchived, createdAt: now, updatedAt: now })
+      .run()
+  }
+  for (const [id, name, teamId, archivedAt] of [
+    ['agent-1', 'A1', 'team-1', null],
+    ['agent-2', 'A2', 'team-2', null],
+    ['solo', 'Solo', null, null],
+    ['gone', 'Gone', 'team-1', now],
+  ] as const) {
+    db.insert(agents)
+      .values({
+        id,
+        name,
+        gatewayId: id,
+        runtime: 'clawboo-native',
+        teamId,
+        archivedAt,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+  }
   source = new ClawbooRoutineScheduleSource({ getDb: () => db })
 })
 
@@ -81,6 +101,8 @@ describe('ClawbooRoutineScheduleSource', () => {
       owner: 'clawboo',
       runtime: 'clawboo-native',
       agentId: 'agent-1',
+      target: 'agent',
+      teamId: 'team-1',
       label: 'Weekly report',
       cronSpec: '0 9 * * 1',
       status: 'idle',
@@ -94,6 +116,7 @@ describe('ClawbooRoutineScheduleSource', () => {
       title: 'Weekly report',
       kind: 'research',
       priority: 2,
+      target: 'agent',
     })
 
     const { records, status } = await source.read()
@@ -239,5 +262,248 @@ describe('ClawbooRoutineScheduleSource', () => {
     })
     expect(record?.teamTaskId).toBe(task.id)
     expect(listScheduledRuns(db)).toHaveLength(1)
+  })
+
+  describe('routine targets', () => {
+    it('a TEAM routine stores the team, keeps no agent, and reads back its instructions', async () => {
+      const record = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          target: 'team',
+          teamId: 'team-2',
+          cronSpec: '0 9 * * 1-5',
+          label: 'Standup',
+          taskTemplate: { description: 'Post a standup summary.' },
+        },
+      })
+      expect(record).toMatchObject({
+        target: 'team',
+        agentId: '',
+        teamId: 'team-2',
+        label: 'Standup',
+        description: 'Post a standup summary.',
+      })
+      const row = listScheduledRuns(db)[0]!
+      expect(row).toMatchObject({ agentId: '', teamId: 'team-2' })
+      expect(JSON.parse(row.taskTemplate)).toMatchObject({
+        target: 'team',
+        title: 'Standup',
+        description: 'Post a standup summary.',
+      })
+    })
+
+    it("an AGENT routine is filed on the agent's own team, and a teamless agent on none", async () => {
+      const onTeam = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          target: 'agent',
+          agentId: 'agent-2',
+          cronSpec: '0 9 * * *',
+          label: 'Inbox',
+        },
+      })
+      expect(onTeam).toMatchObject({ target: 'agent', agentId: 'agent-2', teamId: 'team-2' })
+
+      const solo = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          agentId: 'solo',
+          teamId: null,
+          cronSpec: '0 9 * * *',
+          label: 'Solo chore',
+        },
+      })
+      expect(solo).toMatchObject({ target: 'agent', agentId: 'solo', teamId: null })
+    })
+
+    it.each([
+      ['a team routine with no team', { target: 'team' as const }],
+      ['a team that does not exist', { target: 'team' as const, teamId: 'team-nope' }],
+      ['an archived team', { target: 'team' as const, teamId: 'team-old' }],
+      ['an agent routine with no agent', { target: 'agent' as const }],
+      ['an agent that does not exist', { agentId: 'agent-nope' }],
+      ['an agent that was removed', { agentId: 'gone' }],
+      ['an agent paired with another team', { agentId: 'agent-1', teamId: 'team-2' }],
+      ['a teamless agent paired with a team', { agentId: 'solo', teamId: 'team-1' }],
+    ])('refuses %s, and writes nothing', async (_label, target) => {
+      await expect(
+        source.write({
+          kind: 'create',
+          spec: {
+            source: 'clawboo-routine',
+            domain: 'team-task',
+            cronSpec: '0 9 * * *',
+            label: 'x',
+            ...target,
+          },
+        }),
+      ).rejects.toBeInstanceOf(InvalidRoutineTargetError)
+      expect(listScheduledRuns(db)).toHaveLength(0)
+    })
+
+    it('refuses a team routine bound to a board task', async () => {
+      const task = createTask(db, { title: 'Bound', status: 'todo' })
+      await expect(
+        source.write({
+          kind: 'create',
+          spec: {
+            source: 'clawboo-routine',
+            domain: 'team-task',
+            target: 'team',
+            teamId: 'team-1',
+            cronSpec: 'once@2099-01-01T00:00:00.000Z',
+            teamTaskId: task.id,
+          },
+        }),
+      ).rejects.toBeInstanceOf(InvalidRoutineTargetError)
+    })
+
+    it('update re-points an agent routine at a team and back', async () => {
+      const created = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          agentId: 'agent-1',
+          cronSpec: '0 9 * * *',
+          label: 'Digest',
+        },
+      })
+      const id = created!.id
+
+      const asTeam = await source.write({
+        kind: 'update',
+        id,
+        patch: { target: 'team', teamId: 'team-2', agentId: null },
+      })
+      expect(asTeam).toMatchObject({ target: 'team', agentId: '', teamId: 'team-2' })
+
+      const asAgent = await source.write({
+        kind: 'update',
+        id,
+        patch: {
+          target: 'agent',
+          agentId: 'agent-1',
+          teamId: 'team-1',
+          label: 'Digest v2',
+          taskTemplate: { description: 'Write the digest.' },
+        },
+      })
+      expect(asAgent).toMatchObject({
+        target: 'agent',
+        agentId: 'agent-1',
+        teamId: 'team-1',
+        label: 'Digest v2',
+        description: 'Write the digest.',
+      })
+    })
+
+    it('an invalid re-point is refused and leaves the routine as it was', async () => {
+      const created = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          agentId: 'agent-1',
+          cronSpec: '0 9 * * *',
+          label: 'Digest',
+        },
+      })
+      await expect(
+        source.write({
+          kind: 'update',
+          id: created!.id,
+          patch: { agentId: 'agent-1', teamId: 'team-2' },
+        }),
+      ).rejects.toBeInstanceOf(InvalidRoutineTargetError)
+      expect(getScheduledRun(db, created!.sourceScheduleId)).toMatchObject({
+        agentId: 'agent-1',
+        teamId: 'team-1',
+      })
+    })
+
+    it('a target inside the template patch is validated like any re-point', async () => {
+      const created = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          agentId: 'agent-1',
+          cronSpec: '0 9 * * *',
+          label: 'Digest',
+        },
+      })
+      // 'team' with the routine's own team (team-1) is a valid re-point.
+      const moved = await source.write({
+        kind: 'update',
+        id: created!.id,
+        patch: { taskTemplate: { target: 'team' } },
+      })
+      expect(moved).toMatchObject({ target: 'team', agentId: '', teamId: 'team-1' })
+      await expect(
+        source.write({
+          kind: 'update',
+          id: created!.id,
+          patch: { taskTemplate: { target: 'everyone' } },
+        }),
+      ).rejects.toBeInstanceOf(InvalidRoutineTargetError)
+    })
+
+    it('an unknown top-level target is refused, not read as an agent routine', async () => {
+      const created = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          agentId: 'agent-1',
+          cronSpec: '0 9 * * *',
+          label: 'Digest',
+        },
+      })
+      await expect(
+        source.write({
+          kind: 'update',
+          id: created!.id,
+          patch: { target: 'Team' as never, teamId: 'team-1' },
+        }),
+      ).rejects.toBeInstanceOf(InvalidRoutineTargetError)
+      expect(getScheduledRun(db, created!.sourceScheduleId)).toMatchObject({
+        agentId: 'agent-1',
+        teamId: 'team-1',
+      })
+    })
+
+    it('a template patch cannot bind a board task after registration', async () => {
+      const task = createTask(db, {
+        title: 'Someone else',
+        status: 'todo',
+        scheduledBy: 'openclaw',
+      })
+      const created = await source.write({
+        kind: 'create',
+        spec: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          agentId: 'agent-1',
+          cronSpec: '0 9 * * *',
+          label: 'Digest',
+        },
+      })
+      const updated = await source.write({
+        kind: 'update',
+        id: created!.id,
+        patch: { taskTemplate: { teamTaskId: task.id } },
+      })
+      expect(updated?.teamTaskId).toBeUndefined()
+      expect(
+        JSON.parse(getScheduledRun(db, created!.sourceScheduleId)!.taskTemplate),
+      ).not.toHaveProperty('teamTaskId')
+    })
   })
 })

@@ -17,7 +17,7 @@ export type SettingsView = Extract<
   | 'providers'
   | 'memory'
   | 'capabilities'
-  | 'scheduler'
+  | 'routines'
   | 'cost'
   | 'obs'
   | 'governance'
@@ -36,7 +36,7 @@ export const SETTINGS_VIEWS: readonly SettingsView[] = [
   'providers',
   'memory',
   'capabilities',
-  'scheduler',
+  'routines',
   'cost',
   'obs',
   'governance',

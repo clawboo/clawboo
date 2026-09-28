@@ -19,7 +19,7 @@ export const NAV_VIEW_LABELS: Record<NavView, string> = {
   cost: 'Tokens Used',
   marketplace: 'Marketplace',
   connectors: 'Connectors',
-  scheduler: 'Scheduler',
+  routines: 'Routines',
   system: 'System',
   obs: 'Observability',
   board: 'Board',

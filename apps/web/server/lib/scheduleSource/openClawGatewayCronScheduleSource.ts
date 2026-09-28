@@ -11,12 +11,15 @@
 // admin). The agent-side Tier-3 cron gate is irrelevant to these operator
 // methods and is never touched.
 //
-// Verified method names: read = cron.list {includeDisabled} / cron.get;
-// write = cron.add / cron.update (incl. {id, enabled} — no separate
-// enable/disable method) / cron.remove / cron.run {id, mode:'force'}
-// (enqueue-style ack). Live updates ride the broadcast `cron` event family.
+// Verified method names (against OpenClaw 2026.9): read = cron.list
+// {includeDisabled} / cron.get {id}; write = cron.add / cron.update {id, patch}
+// (the fields sit under `patch`, a closed object, and `patch.enabled` is how a
+// job is enabled or disabled: there is no separate method) / cron.remove {id} /
+// cron.run {id, mode:'force'} (enqueue-style ack). Live updates ride the
+// broadcast `cron` event family.
 
 import {
+  InvalidRoutineTargetError,
   ScheduleSourceUnavailableError,
   TeamTaskDomainViolationError,
   UnknownScheduleError,
@@ -32,6 +35,18 @@ import {
 } from '@clawboo/scheduler'
 
 const REFRESH_DEBOUNCE_MS = 750
+
+/**
+ * The Gateway session a cron job runs in, which is fixed by its payload kind: a
+ * `systemEvent` is queued into the agent's main session, and an `agentTurn` runs
+ * as its own isolated turn. The Gateway accepts a mismatched pair at `cron.add`
+ * and then skips every fire of it ("main job requires payload.kind=systemEvent").
+ */
+export function sessionTargetFor(payload: unknown): 'main' | 'isolated' {
+  const kind =
+    payload && typeof payload === 'object' ? (payload as { kind?: unknown }).kind : undefined
+  return kind === 'systemEvent' ? 'main' : 'isolated'
+}
 
 /** The operator slice this source needs (the OpenClawAgentSource satisfies it). */
 export interface OperatorCronClientLike {
@@ -167,17 +182,21 @@ export class OpenClawGatewayCronScheduleSource implements ScheduleSource {
       case 'create': {
         // clawboo must NEVER register a team task into the Gateway cron.
         if (action.spec.domain === 'team-task') throw new TeamTaskDomainViolationError(this.id)
+        if (!action.spec.agentId) {
+          throw new InvalidRoutineTargetError('A Gateway cron job needs an agent.')
+        }
+        const payload = action.spec.payload ?? {
+          kind: 'agentTurn',
+          message: action.spec.label ?? 'Scheduled wake',
+        }
         const job = await this.client.operatorCall<GatewayCronJobSummary>('cron.add', {
           name: action.spec.label ?? 'clawboo schedule',
           agentId: action.spec.agentId,
           enabled: true,
           schedule: decodeCronSpec(action.spec.cronSpec),
-          sessionTarget: 'main',
+          sessionTarget: sessionTargetFor(payload),
           wakeMode: 'now',
-          payload: action.spec.payload ?? {
-            kind: 'agentTurn',
-            message: action.spec.label ?? 'Scheduled wake',
-          },
+          payload,
         })
         return this.toRecord(job)
       }
@@ -185,19 +204,29 @@ export class OpenClawGatewayCronScheduleSource implements ScheduleSource {
         const id = this.rawId(action.id)
         await this.client.operatorCall('cron.update', {
           id,
-          ...(action.patch.label !== undefined ? { name: action.patch.label } : {}),
-          ...(action.patch.cronSpec !== undefined
-            ? { schedule: decodeCronSpec(action.patch.cronSpec) }
-            : {}),
-          ...(action.patch.payload !== undefined ? { payload: action.patch.payload } : {}),
+          patch: {
+            ...(action.patch.label !== undefined ? { name: action.patch.label } : {}),
+            ...(action.patch.cronSpec !== undefined
+              ? { schedule: decodeCronSpec(action.patch.cronSpec) }
+              : {}),
+            ...(action.patch.payload !== undefined
+              ? {
+                  payload: action.patch.payload,
+                  sessionTarget: sessionTargetFor(action.patch.payload),
+                }
+              : {}),
+          },
         })
         return this.readBack(id)
       }
       case 'pause':
       case 'resume': {
         const id = this.rawId(action.id)
-        // No separate enable/disable method — `cron.update {id, enabled}`.
-        await this.client.operatorCall('cron.update', { id, enabled: action.kind === 'resume' })
+        // No separate enable/disable method: `cron.update {id, patch: {enabled}}`.
+        await this.client.operatorCall('cron.update', {
+          id,
+          patch: { enabled: action.kind === 'resume' },
+        })
         return this.readBack(id)
       }
       case 'remove': {

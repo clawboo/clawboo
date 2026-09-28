@@ -152,12 +152,14 @@ describe('routines × governance (real ledger + real executor runner)', () => {
 
     // The budget auto-paused...
     expect(getBudget(db, 'agent', 'agent-cc')?.status).toBe('paused')
-    // ...the materialized board task was released to todo (retryable)...
+    // ...the materialized board task was set aside as blocked: a routine retries
+    // by filing a fresh task when it is resumed, so this one is not left in todo
+    // looking like claimable work...
     const tasks = listTasks(db)
     expect(tasks).toHaveLength(1)
     expect(tasks[0]).toMatchObject({
       title: 'Expensive sweep',
-      status: 'todo',
+      status: 'blocked',
       scheduledBy: 'clawboo',
     })
     // ...and the routine parked in error (disarmed) with the budget reason.
