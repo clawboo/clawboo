@@ -23,6 +23,8 @@ export interface NudgeQueue {
   deliver(sessionKey: string, send: () => Promise<void>): Promise<void>
   /** Mark a session busy (call on any non-terminal event of a run). */
   markBusy(sessionKey: string): void
+  /** A run is in flight on this session, or a send is queued behind one. */
+  isBusy(sessionKey: string): boolean
   /** Mark a session idle (its run ended) and flush one queued send if any. */
   markIdle(sessionKey: string): void
   /**
@@ -126,6 +128,9 @@ export function createNudgeQueue(opts?: {
     markBusy(sessionKey) {
       busy.add(sessionKey)
       armWedge(sessionKey)
+    },
+    isBusy(sessionKey) {
+      return busy.has(sessionKey) || (queues.get(sessionKey)?.length ?? 0) > 0
     },
     markIdle,
     drain() {

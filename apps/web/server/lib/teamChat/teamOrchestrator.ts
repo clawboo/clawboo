@@ -22,6 +22,7 @@ import {
   createNudgeQueue,
   HUMAN_TURN,
   type BoardOrchestrator,
+  type DispatchOutcome,
   type KnownAgent,
   type TurnOrigin,
 } from '@clawboo/team-orchestration'
@@ -29,12 +30,12 @@ import { resolveDelegationApproval } from '../../api/delegationApproval'
 import { getRegistry } from '../agentSource/registry'
 import { getDb } from '../db'
 import { publishAgentStatus } from './agentStatusBus'
-import { publishBoardChange } from './boardChangeBus'
 import { booZeroForTeam, ensureNativeBooZero } from './booZero'
 import { auditCapHit } from './capHitAudit'
 import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
+import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { NATIVE_SIGNAL_CONTEXT_KEY } from '../runtimes/native/nativeDriver'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
@@ -103,6 +104,9 @@ export interface TeamOrchestrator {
    *  the ready-pump can re-fire the work and the idle watchdog stops owning a run
    *  nobody is driving. Refused while a live run still holds the session. */
   detachTask(taskId: string): boolean
+  /** A person asked for this task to run now (created for an agent from the
+   *  board, retried, or just assigned). See the engine's `dispatchTask`. */
+  dispatchTask(taskId: string): Promise<DispatchOutcome>
   /** Tear down timers + the engine (idle eviction / shutdown). */
   dispose(): void
 }
@@ -256,6 +260,10 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // terminal and the no-terminal paths, so it cannot strand a permanent busy
     // that would make `detachTask` refuse forever.
     isSessionBusy: (sk) => abortMap.has(sk),
+    // Any turn at all, running or queued (the nudge queue knows both): a task is
+    // never bound behind someone else's reply, which would otherwise complete it
+    // with that reply and let the task's own output surface in the chat.
+    isSessionOccupied: (sk) => nudge.isBusy(sk) || abortMap.has(sk),
     agentIdForSession: (sk) => agentIdFromSessionKey(sk),
     deliver: trackedDeliver,
     stopGen: () => serverStopGen,
@@ -322,8 +330,9 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       // Live-push each board mutation to the team's in-memory board bus; each open
       // team-chat SSE stream forwards it as a `board` event so the thin client's
       // BoardTaskCards update live during a cascade. SEPARATE from obs (which is fed
-      // by serverBoardClient's emitEvent) — no double-emit.
-      publishBoardChange(teamId, change)
+      // by serverBoardClient's emitEvent), so nothing is emitted twice. A status
+      // move carries the task's needs-you state, so a failed card says so at once.
+      publishBoardChangeWithAttention(db, teamId, change)
     },
     // Compact a child's report-up summary before it's recorded/relayed (pure,
     // pass-through-safe, failure-preserving). Mirrors the browser binding.
@@ -500,6 +509,11 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     },
     detachTask(taskId: string): boolean {
       return engine.detachTask(taskId)
+    },
+    async dispatchTask(taskId: string): Promise<DispatchOutcome> {
+      touch()
+      await ready // the Boo-Zero bootstrap and the first resume come first
+      return engine.dispatchTask(taskId)
     },
     signalAgent(agentId: string, text: string): void {
       const sk = buildTeamSessionKey(agentId, teamId)

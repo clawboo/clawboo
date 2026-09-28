@@ -7,6 +7,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
+import { taskAttentionOf } from '@/features/board/boardStatus'
 import { useBoardStore } from '@/stores/board'
 import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import { connectionStatusTone } from '@/features/connection/connectionStatusDisplay'
@@ -439,13 +440,17 @@ export function GroupChatPanel({
   useEffect(() => {
     if (!serverBusy) return
     const id = setInterval(() => {
-      // A cascade is in flight when the team has any non-terminal board task; then
-      // hold Stop through the (frame-quiet) reflect → synthesis gap. Otherwise it was
-      // a plain reply — clear promptly. Read live (getState) so the tick always sees
-      // the latest board projection without re-subscribing the interval.
+      // A cascade is in flight when the team has board work that is still MOVING;
+      // then hold Stop through the (frame-quiet) reflect → synthesis gap. Otherwise
+      // it was a plain reply, so clear promptly. A task waiting on a person (failed,
+      // stopped, unassigned) is not moving, so it must not keep every later reply
+      // on the long grace. Read live (getState) so the tick always sees the latest
+      // board projection without re-subscribing the interval.
       const tasks = useBoardStore.getState().tasksByTeam.get(teamId)
       const cascadeActive = tasks
-        ? [...tasks.values()].some((t) => t.status !== 'done' && t.status !== 'cancelled')
+        ? [...tasks.values()].some(
+            (t) => t.status !== 'done' && t.status !== 'cancelled' && !taskAttentionOf(t),
+          )
         : false
       const grace = cascadeActive ? SERVER_BUSY_GRACE_CASCADE_MS : SERVER_BUSY_GRACE_IDLE_MS
       if (Date.now() - lastActivityRef.current > grace && activeStreams.length === 0) {
@@ -729,7 +734,10 @@ export function GroupChatPanel({
 
   // No `client` requirement — the server owns the run (native mode runs client=null).
   const canSend = teamAgents.length > 0 && !serverBusy
-  const isEmpty = topLevelBlocks.length === 0 && activeStreams.length === 0
+  // A team whose only activity is board work (a task given to an agent from the
+  // board, before anyone has chatted) is not empty: its task cards belong here.
+  const isEmpty =
+    topLevelBlocks.length === 0 && activeStreams.length === 0 && boardTaskList.length === 0
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -866,7 +874,7 @@ export function GroupChatPanel({
                 if (item.kind === 'board-task') {
                   return (
                     <div key={`board-task-${item.task.id}`} className={idx === 0 ? '' : 'mt-3'}>
-                      <BoardTaskCard task={item.task} />
+                      <BoardTaskCard task={item.task} teamId={teamId} />
                     </div>
                   )
                 }

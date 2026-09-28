@@ -35,6 +35,12 @@ export function publishBoardChange(teamId: string, change: BoardChange): void {
   }
 }
 
+/** Is anyone listening to `teamId`'s board changes? Lets a publisher skip work
+ *  (a DB read to enrich the frame) that no one would receive. */
+export function hasBoardChangeSubscribers(teamId: string): boolean {
+  return (buses.get(teamId)?.size ?? 0) > 0
+}
+
 /** Subscribe to a team's board changes. Returns an idempotent unsubscribe fn that
  *  prunes the (now-empty) team bucket so the Map doesn't grow unbounded. */
 export function subscribeBoardChange(teamId: string, listener: Listener): () => void {

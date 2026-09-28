@@ -7,12 +7,50 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ThemeProvider } from '@/features/theme/ThemeProvider'
+import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
+import { useViewStore } from '@/stores/view'
 
 import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
 import { BoardPanel } from '../BoardPanel'
+
+/** One team with two agents: enough for the New task dialog to have a choice. */
+const ALPHA = {
+  id: 'team-1',
+  name: 'Alpha',
+  icon: '🐙',
+  color: '#e94560',
+  colorCollectionId: null,
+  templateId: null,
+  agentCount: 2,
+  leaderAgentId: null,
+  isArchived: false,
+  serverOrchestrated: true,
+}
+function seedTeamWithAgents(): void {
+  useTeamStore.setState({ teams: [ALPHA], selectedTeamId: null })
+  useFleetStore.setState({
+    agents: [
+      { id: 'coder', name: 'Coder', teamId: 'team-1' },
+      { id: 'writer', name: 'Writer', teamId: 'team-1' },
+    ] as never,
+  })
+}
+
+/** Fill in the New task dialog: the team is preselected (the only one), then the
+ *  agent, then the task. */
+async function fillNewTask(
+  user: ReturnType<typeof userEvent.setup>,
+  dialog: HTMLElement,
+  title: string,
+): Promise<void> {
+  await user.click(within(dialog).getByLabelText('Agent'))
+  await user.click(await screen.findByRole('option', { name: 'Coder' }))
+  await user.type(within(dialog).getByLabelText('Task'), title)
+}
 
 // dnd-kit's real pointer drag can't run in jsdom (no layout/rects), so we capture
 // the REAL onDragEnd handler by passing through DndContext (keeping the real provider
@@ -69,7 +107,7 @@ describe('BoardPanel', () => {
     render(<BoardPanel />)
     const hint = await screen.findByTestId('board-agent-hint')
     expect(hint).toHaveTextContent(/AI agents continuously create and move work/i)
-    expect(hint).toHaveTextContent(/manage tasks manually/i)
+    expect(hint).toHaveTextContent(/hand a task to an agent yourself/i)
   })
 
   it('offers a New task button in the header', async () => {
@@ -92,17 +130,18 @@ describe('BoardPanel', () => {
     expect(within(empty).getByRole('button', { name: /New task/i })).toBeInTheDocument()
   })
 
-  it('creates a task through the composer and posts it to /api/board', async () => {
-    let createdBody: { title?: string; status?: string } | null = null
+  it('creates a task FOR one agent: team, then agent, then the task', async () => {
+    seedTeamWithAgents()
+    let createdBody: Record<string, unknown> | null = null
     server.use(
       // Populated board → only the header "New task" button renders (no empty-state CTA).
       http.get('/api/board', () =>
         HttpResponse.json({ tasks: [{ id: 't1', title: 'Existing', status: 'todo' }] }),
       ),
       http.post('/api/board', async ({ request }) => {
-        createdBody = (await request.json()) as { title: string; status?: string }
+        createdBody = (await request.json()) as Record<string, unknown>
         return HttpResponse.json({
-          task: { id: 'new1', title: createdBody.title, status: createdBody.status ?? 'todo' },
+          task: { id: 'new1', title: createdBody['title'], status: 'todo', attention: null },
         })
       }),
     )
@@ -112,16 +151,55 @@ describe('BoardPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
-    await user.type(within(dialog).getByLabelText('Title'), 'Draft the changelog')
-    await user.click(within(dialog).getByRole('button', { name: /Create task/i }))
+    // Nothing can be sent until an agent is picked.
+    expect(within(dialog).getByRole('button', { name: /Create task/i })).toBeDisabled()
+    await fillNewTask(user, dialog, 'Draft the changelog')
+    await user.click(within(dialog).getByRole('button', { name: /Send to Coder/i }))
 
     await waitFor(() => expect(createdBody).not.toBeNull())
-    expect(createdBody).toMatchObject({ title: 'Draft the changelog', status: 'todo' })
+    expect(createdBody).toEqual({
+      title: 'Draft the changelog',
+      teamId: 'team-1',
+      assigneeAgentId: 'coder',
+    })
     // The dialog closes on success.
     await waitFor(() => expect(screen.queryByTestId('new-task-dialog')).toBeNull())
   })
 
-  it('moves focus into the composer (title field) when it opens', async () => {
+  it('lists only the chosen team’s agents, and asks for the team first', async () => {
+    useTeamStore.setState({
+      teams: [ALPHA, { ...ALPHA, id: 'team-2', name: 'Beta' }],
+      selectedTeamId: null,
+    })
+    useFleetStore.setState({
+      agents: [
+        { id: 'coder', name: 'Coder', teamId: 'team-1' },
+        { id: 'critic', name: 'Critic', teamId: 'team-2' },
+      ] as never,
+    })
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Existing', status: 'todo' }] }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await screen.findByTestId('board-card')
+    await user.click(screen.getByRole('button', { name: /New task/i }))
+    const dialog = await screen.findByTestId('new-task-dialog')
+
+    // Two teams, none filtered: no agent can be picked yet.
+    expect(within(dialog).getByLabelText('Agent')).toHaveTextContent(/Pick a team first/)
+    await user.click(within(dialog).getByLabelText('Team'))
+    await user.click(await screen.findByRole('option', { name: /Beta/ }))
+    // A one-agent team has nothing to choose: its agent is picked for you.
+    expect(within(dialog).getByLabelText('Agent')).toHaveTextContent('Critic')
+    await user.click(within(dialog).getByLabelText('Agent'))
+    expect(screen.queryByRole('option', { name: 'Coder' })).toBeNull()
+  })
+
+  it('moves focus into the composer (its first field, the team) when it opens', async () => {
+    seedTeamWithAgents()
     server.use(
       http.get('/api/board', () =>
         HttpResponse.json({ tasks: [{ id: 't1', title: 'Existing', status: 'todo' }] }),
@@ -133,13 +211,14 @@ describe('BoardPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
-    // useFocusTrap moves focus to the first focusable — the title input.
-    await waitFor(() => expect(within(dialog).getByLabelText('Title')).toHaveFocus())
+    // useFocusTrap moves focus to the first focusable: the team picker.
+    await waitFor(() => expect(within(dialog).getByLabelText('Team')).toHaveFocus())
   })
 
   it('Escape dismisses an open field dropdown without closing the composer', async () => {
     // Regression: the dialog's Escape handler must not co-fire with the Select's,
     // or dismissing a dropdown would tear down the whole form and lose typed input.
+    seedTeamWithAgents()
     server.use(
       http.get('/api/board', () =>
         HttpResponse.json({ tasks: [{ id: 't1', title: 'Existing', status: 'todo' }] }),
@@ -151,17 +230,17 @@ describe('BoardPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
-    await user.type(within(dialog).getByLabelText('Title'), 'Keep me')
+    await user.type(within(dialog).getByLabelText('Task'), 'Keep me')
 
-    // Open the Status dropdown, then press Escape to dismiss it.
-    await user.click(within(dialog).getByLabelText('Initial status'))
-    expect(await screen.findByRole('option', { name: 'Backlog' })).toBeInTheDocument()
+    // Open the Agent dropdown, then press Escape to dismiss it.
+    await user.click(within(dialog).getByLabelText('Agent'))
+    expect(await screen.findByRole('option', { name: 'Writer' })).toBeInTheDocument()
     await user.keyboard('{Escape}')
 
-    // The menu closes, but the dialog — and the typed title — survive.
-    await waitFor(() => expect(screen.queryByRole('option', { name: 'Backlog' })).toBeNull())
+    // The menu closes, but the dialog and the typed task survive.
+    await waitFor(() => expect(screen.queryByRole('option', { name: 'Writer' })).toBeNull())
     expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Title')).toHaveValue('Keep me')
+    expect(within(dialog).getByLabelText('Task')).toHaveValue('Keep me')
   })
 
   it('shows a skeleton on first mount, before the board fetch resolves', () => {
@@ -433,6 +512,7 @@ describe('BoardPanel', () => {
   })
 
   it('ignores a board response that was already in flight when a task was created', async () => {
+    seedTeamWithAgents()
     // Regression (#105), the create half: the composer prepends the new task
     // optimistically and kicks a reconcile read. A read issued BEFORE the POST
     // landed answers WITHOUT the new task, so applying it blanked the just-created
@@ -478,8 +558,8 @@ describe('BoardPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
-    await user.type(within(dialog).getByLabelText('Title'), 'Draft the changelog')
-    await user.click(within(dialog).getByRole('button', { name: /Create task/i }))
+    await fillNewTask(user, dialog, 'Draft the changelog')
+    await user.click(within(dialog).getByRole('button', { name: /Send to Coder/i }))
     expect(await screen.findByText('Draft the changelog')).toBeInTheDocument()
 
     // The stale read now lands, reporting a board without the new task.
@@ -820,5 +900,108 @@ describe('BoardPanel', () => {
     ).toBeNull()
     expect(screen.getAllByTestId('board-card')).toHaveLength(1)
     expect(boardGets).toBe(getsBeforeMove)
+  })
+  describe('columns: Needs you replaces Needs approval, In review and Blocked', () => {
+    const renderThemed = () =>
+      render(
+        <ThemeProvider>
+          <BoardPanel />
+        </ThemeProvider>,
+      )
+
+    it('routes a failed task into Needs you with its badge; there is no Blocked column', async () => {
+      server.use(
+        http.get('/api/board', () =>
+          HttpResponse.json({
+            tasks: [
+              {
+                id: 't1',
+                title: 'Draft the launch post',
+                status: 'blocked',
+                teamId: 'team-1',
+                sourceDelegationId: 'r:deleg:agent:coder:reflectTo:lead',
+                attention: { reason: 'failed', failedRuns: 1, detail: 'boom' },
+              },
+            ],
+          }),
+        ),
+      )
+      renderThemed()
+      const card = await screen.findByTestId('needs-you-task')
+      expect(within(screen.getByTestId('board-column-needs-you')).getByText('Failed')).toBeTruthy()
+      expect(card).toHaveTextContent('Draft the launch post')
+      expect(screen.queryByTestId('board-column-blocked')).toBeNull()
+    })
+
+    it('a stopped task leaves To do for Needs you, instead of looking queued forever', async () => {
+      server.use(
+        http.get('/api/board', () =>
+          HttpResponse.json({
+            tasks: [
+              {
+                id: 't1',
+                title: 'Stopped work',
+                status: 'todo',
+                attention: { reason: 'stopped', failedRuns: 0 },
+              },
+              { id: 't2', title: 'Queued work', status: 'todo', attention: null },
+            ],
+          }),
+        ),
+      )
+      renderThemed()
+      await screen.findByTestId('needs-you-task')
+      const todo = screen.getByTestId('board-column-todo')
+      expect(within(todo).getByText('Queued work')).toBeInTheDocument()
+      expect(within(todo).queryByText('Stopped work')).toBeNull()
+    })
+
+    it('an in-review task sits in In progress, badged Verifying; there is no In review column', async () => {
+      server.use(
+        http.get('/api/board', () =>
+          HttpResponse.json({ tasks: [{ id: 't1', title: 'Being checked', status: 'in_review' }] }),
+        ),
+      )
+      renderThemed()
+      await screen.findByTestId('board-card')
+      const inProgress = screen.getByTestId('board-column-in_progress')
+      expect(within(inProgress).getByText('Being checked')).toBeInTheDocument()
+      expect(within(inProgress).getByText('Verifying')).toBeInTheDocument()
+      expect(screen.queryByTestId('board-column-in_review')).toBeNull()
+    })
+
+    it('Needs you stays expanded when nothing needs you', async () => {
+      server.use(
+        http.get('/api/board', () =>
+          HttpResponse.json({ tasks: [{ id: 't1', title: 'Fine', status: 'todo' }] }),
+        ),
+      )
+      renderThemed()
+      await screen.findByTestId('board-card')
+      expect(screen.getByTestId('needs-you-empty')).toBeInTheDocument()
+    })
+  })
+
+  it('opens the task a chat card asked for ("Open on board")', async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({ tasks: [{ id: 't1', title: 'Ship it', status: 'in_progress' }] }),
+      ),
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'in_progress' },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    useViewStore.getState().openBoardTask('t1', null)
+    render(<BoardPanel />)
+    expect(await screen.findByTestId('task-detail-drawer')).toBeInTheDocument()
+    // The request is consumed: closing and re-rendering does not re-open it.
+    expect(useViewStore.getState().boardFocus).toBeNull()
   })
 })

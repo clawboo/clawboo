@@ -34,19 +34,24 @@ export function columnLabel(columnId: string): string {
 
 /** The payload `DraggableCard` attaches to `useDraggable({ data })`. */
 export interface BoardDragData {
-  /** The card's status at pickup. Board column droppable ids ARE statuses, so
-   *  this doubles as the source column id. Captured at pickup on purpose: if the
-   *  5 s poll lands mid-drag, the user should still hear the column they were
-   *  told they picked the card up from. */
+  /** The card's status at pickup: what the legality check reads. Captured at
+   *  pickup on purpose: if the 5 s poll lands mid-drag, the user should still hear
+   *  the column they were told they picked the card up from. */
   fromStatus: string
+  /** The column the card was drawn in at pickup: what the user is told. Usually
+   *  the status, except where a status shares a column (an `in_review` card sits
+   *  in In progress). Defaults to `fromStatus`. */
+  fromColumn: string
   /** Display title, already defaulted — `BoardTask.title` is optional. */
   title: string
 }
 
 function dragData(active: { data: { current?: Record<string, unknown> } }): BoardDragData {
   const d = active.data.current
+  const fromStatus = typeof d?.fromStatus === 'string' ? d.fromStatus : ''
   return {
-    fromStatus: typeof d?.fromStatus === 'string' ? d.fromStatus : '',
+    fromStatus,
+    fromColumn: typeof d?.fromColumn === 'string' ? d.fromColumn : fromStatus,
     title: typeof d?.title === 'string' ? d.title : 'this task',
   }
 }
@@ -59,54 +64,54 @@ function dragData(active: { data: { current?: Record<string, unknown> } }): Boar
  */
 export const boardAnnouncements: Announcements = {
   onDragStart({ active }) {
-    const { title, fromStatus } = dragData(active)
+    const { title, fromColumn } = dragData(active)
     // Movement instructions live in `screenReaderInstructions` below (read from
     // the handle's aria-describedby, i.e. only on the keyboard path) rather than
     // here, which also fires for pointer drags.
-    return `Picked up “${title}” from ${columnLabel(fromStatus)}.`
+    return `Picked up “${title}” from ${columnLabel(fromColumn)}.`
   },
 
   onDragOver({ active, over }) {
-    const { title, fromStatus } = dragData(active)
+    const { title, fromStatus, fromColumn } = dragData(active)
     // `over` is null for BOTH dead space and an illegal column: mid-drag,
     // `columnDropDisabled` turns illegal columns off as droppables, so they
     // report no hit rather than an illegal target. One sentence has to cover
     // both, so it names the consequence instead of guessing the cause.
     if (!over) {
-      return `“${title}” is not over a column that can accept it. Release to leave it in ${columnLabel(fromStatus)}.`
+      return `“${title}” is not over a column that can accept it. Release to leave it in ${columnLabel(fromColumn)}.`
     }
     const to = String(over.id)
-    if (to === fromStatus) return `Over ${columnLabel(to)}, where “${title}” already is.`
+    if (to === fromColumn) return `Over ${columnLabel(to)}, where “${title}” already is.`
     // Reachable in a narrow race: `columnDropDisabled` depends on the
     // `activeTask` state set in onDragStart, so a fast pointer move between the
     // dispatch and the re-render can still hit an illegal column (or `Other`).
     if (!canTransition(fromStatus, to)) {
       return `Over ${columnLabel(to)}. It can’t accept “${title}”.`
     }
-    return `Over ${columnLabel(to)}. Release to move “${title}” from ${columnLabel(fromStatus)} to ${columnLabel(to)}.`
+    return `Over ${columnLabel(to)}. Release to move “${title}” from ${columnLabel(fromColumn)} to ${columnLabel(to)}.`
   },
 
   onDragEnd({ active, over }) {
-    const { title, fromStatus } = dragData(active)
+    const { title, fromStatus, fromColumn } = dragData(active)
     if (!over) {
-      return `Dropped “${title}” outside the columns. It stays in ${columnLabel(fromStatus)}.`
+      return `Dropped “${title}” outside the columns. It stays in ${columnLabel(fromColumn)}.`
     }
     const to = String(over.id)
-    if (to === fromStatus) return `Dropped “${title}” back in ${columnLabel(to)}. Nothing changed.`
+    if (to === fromColumn) return `Dropped “${title}” back in ${columnLabel(to)}. Nothing changed.`
     if (!canTransition(fromStatus, to)) {
-      return `Dropped “${title}” on ${columnLabel(to)}, which can’t accept it. It stays in ${columnLabel(fromStatus)}.`
+      return `Dropped “${title}” on ${columnLabel(to)}, which can’t accept it. It stays in ${columnLabel(fromColumn)}.`
     }
     // HONESTY CONSTRAINT: this fires at drop time, before `useStatusMutation`
     // runs — which may still open a confirm dialog ("Unassign the agent?" on a
     // → To do move, "Complete anyway?" on a gated → Done) and may roll the move
     // back. So it announces the REQUEST, never the outcome. The outcome arrives
     // on the toast, which ToastContainer now puts in a live region.
-    return `Dropped “${title}” on ${columnLabel(to)}. Saving the move from ${columnLabel(fromStatus)} to ${columnLabel(to)}.`
+    return `Dropped “${title}” on ${columnLabel(to)}. Saving the move from ${columnLabel(fromColumn)} to ${columnLabel(to)}.`
   },
 
   onDragCancel({ active }) {
-    const { title, fromStatus } = dragData(active)
-    return `Cancelled. “${title}” stays in ${columnLabel(fromStatus)}.`
+    const { title, fromColumn } = dragData(active)
+    return `Cancelled. “${title}” stays in ${columnLabel(fromColumn)}.`
   },
 }
 

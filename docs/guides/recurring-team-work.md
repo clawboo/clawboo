@@ -147,7 +147,7 @@ When a fire fails, the routine **stops** itself: status goes to `error`, the fai
 
 This is deliberate, and it's the single most important behavior to internalize. Autonomous scheduled work that retries a broken fire on every tick would burn budget, churn the board, and bury the real problem. Stopping surfaces the failure. A successful fire, by contrast, re-arms cleanly at its next occurrence, and a one-shot self-disables.
 
-When an agent routine's run fails, the task it filed is set aside in **Blocked** with a note naming the agent and the error, so it does not sit in **To do** looking like work waiting to be picked up. The next run files a new task.
+When an agent routine's run fails, the task it filed is set aside in **Needs you** on the board, with a badge saying what went wrong (usually **Failed**) and a note naming the agent and the error, so it does not sit in **To do** looking like work waiting to be picked up. The next run files a new task.
 
 <Info>
 A stopped (`error`) routine and a paused routine both never auto-fire; the ticker only queues `idle` rows. To bring a stopped routine back, fix the underlying cause and **Resume** it (the `error → idle` transition re-arms it). A `once@` that ran successfully is *not* an error; it self-disabled on purpose.

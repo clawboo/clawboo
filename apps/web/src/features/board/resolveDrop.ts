@@ -20,6 +20,9 @@ export interface DropResolution {
  *                  so `overId` is the target status directly.
  * @param tasks     the current tasks (statuses should already reflect any optimistic
  *                  overrides, so a second drag mid-flight resolves from the live column).
+ * @param columnOf  which column a task is DRAWN in, when that is not simply its
+ *                  status (an `in_review` card sits in In progress). A drop back onto
+ *                  that column is a no-op, not a status change. Defaults to the status.
  * @returns the intended move, or `null` for: dropped outside a column, an unknown
  *          task, or a drop back onto the card's own column (no change).
  */
@@ -27,10 +30,11 @@ export function resolveDrop(
   activeId: string,
   overId: string | null,
   tasks: BoardTask[],
+  columnOf: (task: BoardTask) => string = (t) => t.status,
 ): DropResolution | null {
   if (!overId) return null
   const task = tasks.find((t) => t.id === activeId)
   if (!task) return null
-  if (overId === task.status) return null
+  if (overId === task.status || overId === columnOf(task)) return null
   return { taskId: activeId, from: task.status, to: overId }
 }

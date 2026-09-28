@@ -3,7 +3,8 @@
 // path the board's drag-and-drop uses, so the two stay in lock-step).
 //
 // It only offers the transitions the server will accept (statusOptions mirrors
-// the state machine), updates optimistically for a snappy feel, and rolls back +
+// the state machine), minus the automated verification step (see
+// manualStatusOptions), updates optimistically for a snappy feel, and rolls back +
 // toasts if the write is rejected. Terminal tasks (done / cancelled) have no legal
 // moves, so the control locks. The agent-release (`→ todo`) confirm gate lives in
 // `useStatusMutation`.
@@ -13,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { Select } from '@/features/shared/Select'
 import { Spinner } from '@/features/shared/Spinner'
 
-import { STATUS_LABEL, isTerminalStatus, statusLabel, statusOptions } from './boardStatus'
+import { STATUS_LABEL, isTerminalStatus, manualStatusOptions, statusLabel } from './boardStatus'
 import { useStatusMutation } from './useStatusMutation'
 
 export interface StatusSelectProps {
@@ -37,7 +38,7 @@ export function StatusSelect({ taskId, status, assigneeAgentId, onChange }: Stat
     if (!saving) setValue(status)
   }, [status, saving])
 
-  const options = statusOptions(value)
+  const options = manualStatusOptions(value)
 
   // Off-list status (nothing legal to offer) → read-only display, matching the
   // board's catch-all "Other" handling rather than a broken, empty dropdown.

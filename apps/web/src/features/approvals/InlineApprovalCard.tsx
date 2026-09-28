@@ -74,7 +74,7 @@ export function InlineApprovalCard({ approval, showAgentName = false }: InlineAp
         )}
 
         {/* Row 3: Action buttons — grid so all three split evenly even in a narrow
-            card (the in-chat tray + the Board's "Needs approval" column). */}
+            card (the in-chat tray + the Board's "Needs you" column). */}
         <div className="grid grid-cols-3 gap-1.5">
           <Button
             variant="primary"

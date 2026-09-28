@@ -32,8 +32,8 @@ import {
 import { createLogger } from '@clawboo/logger'
 
 import { getDb } from '../db'
-import { publishBoardChange } from './boardChangeBus'
 import { recipientFor } from './inboxNotices'
+import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { getTeamOrchestrator, hasTeamOrchestrator } from './teamOrchestrator'
 
 const log = createLogger('board-lifecycle')
@@ -94,7 +94,12 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
     // client patch, the documented convergence property).
     if (ev.teamId) {
       const patch = statusForSse(ev)
-      if (patch) publishBoardChange(ev.teamId, { id: ev.taskId, ...patch, updatedAt: Date.now() })
+      if (patch)
+        publishBoardChangeWithAttention(getDb(), ev.teamId, {
+          id: ev.taskId,
+          ...patch,
+          updatedAt: Date.now(),
+        })
     }
 
     // 2a. DETACH-ON-RELEASE — a task freed out of band (the stale sweep, an

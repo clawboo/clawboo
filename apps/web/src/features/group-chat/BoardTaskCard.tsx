@@ -7,27 +7,39 @@
 //
 // Visual anatomy (matches DelegationCard's tint-identity language):
 //   ┌ header band — assignee avatar + name + TASK micro-label, tinted with the
-//   │ assignee's team-palette color; time + StatusPill right-aligned
+//   │ assignee's team-palette color; time + StatusPill + "Open on board" right
 //   ├ brief — the delegated ask, quote-railed in the same tint
-//   └ output — the deliverable, markdown-rendered (MD_COMPONENTS, same pipeline
-//     as chat turns), clamped with a fade-out mask + Show more when it overflows
+//   ├ output — the deliverable, markdown-rendered (MD_COMPONENTS, same pipeline
+//   │ as chat turns), clamped with a fade-out mask + Show more when it overflows
+//   └ trail: the task's comments and live activity, folded away until asked for,
+//     so a failure (or a surprising result) can be traced without leaving chat
 
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { motion } from 'framer-motion'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, History, Maximize2 } from 'lucide-react'
 import { resolveBooTint } from '@clawboo/ui'
 
 import { AgentBooAvatar, useTeamBooColor } from '@/components/AgentBooAvatar'
-import { isTaskStatus, statusLabel, type TaskStatus } from '@/features/board/boardStatus'
+import { TaskComments, type TaskComment } from '@/features/board/TaskComments'
+import {
+  ATTENTION_META,
+  attentionLabel,
+  isTaskStatus,
+  statusLabel,
+  taskAttentionOf,
+  type TaskStatus,
+} from '@/features/board/boardStatus'
 import { formatTimestamp, MD_COMPONENTS } from '@/features/chat/chatComponents'
+import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
 import { boardClient } from '@/lib/boardClient'
 import type { BoardTaskView } from '@/stores/board'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
+import { useViewStore } from '@/stores/view'
 
 // Compact pill vocabulary for the chat timeline. Deliberately SHORTER than the
 // board's STATUS_LABEL ("Working", not "In progress") because this pill sits in a
@@ -41,24 +53,42 @@ const PILL: Record<TaskStatus, { tone: StatusTone; label: string }> = {
   backlog: { tone: 'idle', label: 'Queued' },
   todo: { tone: 'idle', label: 'Queued' },
   in_progress: { tone: 'working', label: 'Working' },
-  in_review: { tone: 'warning', label: 'Review' },
+  in_review: { tone: 'working', label: 'Verifying' },
   blocked: { tone: 'error', label: 'Blocked' },
   done: { tone: 'done', label: 'Done' },
   cancelled: { tone: 'error', label: 'Cancelled' },
 }
 
-function toneFor(status: string): { tone: StatusTone; label: string } {
+function toneFor(task: BoardTaskView): { tone: StatusTone; label: string } {
+  // A task that needs a person says WHY ("Failed", "Stopped", "Unassigned"),
+  // rather than reading as queued or plain blocked work.
+  const attention = taskAttentionOf(task)
+  if (attention)
+    return { tone: ATTENTION_META[attention.reason].tone, label: attentionLabel(attention) }
   // An off-list status (the board parks these in its catch-all "Other" column)
   // shows its raw name rather than being mislabelled as queued work.
-  return isTaskStatus(status) ? PILL[status] : { tone: 'idle', label: statusLabel(status) }
+  return isTaskStatus(task.status)
+    ? PILL[task.status]
+    : { tone: 'idle', label: statusLabel(task.status) }
 }
+
+type TrailTab = 'comments' | 'activity'
+const TRAIL_TOGGLE =
+  'flex cursor-pointer items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-foreground/50 transition-colors hover:text-foreground/80'
 
 // Collapsed output height (~6 rendered lines at 12.5px / 1.6, with headroom for
 // a markdown heading). A short deliverable fits under this and gets no toggle;
 // a long one is clamped behind a fade-out mask + expandable.
 const OUTPUT_COLLAPSED_MAX_PX = 128
 
-export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: BoardTaskView }) {
+export const BoardTaskCard = memo(function BoardTaskCard({
+  task,
+  teamId = null,
+}: {
+  task: BoardTaskView
+  /** The team whose chat shows this card; "Open on board" filters the board to it. */
+  teamId?: string | null
+}) {
   const assigneeName = useFleetStore((s) =>
     task.assigneeAgentId
       ? (s.agents.find((a) => a.id === task.assigneeAgentId)?.name ?? null)
@@ -131,8 +161,29 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
     }
   }, [task.id, hasSettledOutput, output])
 
-  const { tone, label } = toneFor(task.status)
+  const { tone, label } = toneFor(task)
+  const attention = taskAttentionOf(task)
   const showOutput = Boolean(output && output.trim().length > 0)
+
+  // The trail: the task's comment log and its live activity, folded away until
+  // asked for. The comments are re-read whenever the card's status moves while
+  // it is open, so a retry or a failure lands in the log as it happens. The
+  // activity feed subscribes only while its tab is showing.
+  const trailId = useId()
+  const [trailOpen, setTrailOpen] = useState(false)
+  const [trailTab, setTrailTab] = useState<TrailTab>('comments')
+  const [comments, setComments] = useState<TaskComment[] | null>(null)
+  useEffect(() => {
+    if (!trailOpen) return
+    let cancelled = false
+    void boardClient.getTask(task.id).then((detail) => {
+      if (!cancelled && detail) setComments(detail.comments as TaskComment[])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [trailOpen, task.id, task.status, task.updatedAt])
+  const openOnBoard = (): void => useViewStore.getState().openBoardTask(task.id, teamId)
 
   // Collapsible output — measure the rendered height so the "Show more" toggle only
   // appears when there is actually something hidden below the fold.
@@ -185,7 +236,19 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
             </span>
           </div>
         </div>
-        <StatusPill tone={tone} label={label} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <StatusPill tone={tone} label={label} />
+          <button
+            type="button"
+            onClick={openOnBoard}
+            aria-label="Open this task on the board"
+            title="Open on the board"
+            data-testid="board-task-open"
+            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-foreground/40 transition hover:bg-foreground/[0.08] hover:text-foreground/75 focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <Maximize2 size={13} strokeWidth={2} />
+          </button>
+        </div>
       </div>
 
       {/* Body — hairline-separated from the header (card-header / card-body
@@ -196,6 +259,16 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
         <p className="text-[12.5px] font-medium leading-relaxed tracking-[-0.005em] text-foreground/85">
           {task.title}
         </p>
+
+        {/* Why a stuck task needs a person, when no reason comment is shown below. */}
+        {attention && !showOutput && (
+          <p
+            className="mt-2 text-[12px] leading-relaxed text-foreground/60"
+            data-testid="board-task-attention"
+          >
+            {attention.detail ?? ATTENTION_META[attention.reason].hint}
+          </p>
+        )}
 
         {showOutput && (
           <div className="mt-3.5">
@@ -236,6 +309,73 @@ export const BoardTaskCard = memo(function BoardTaskCard({ task }: { task: Board
                   className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
                 />
               </button>
+            )}
+          </div>
+        )}
+
+        <div className="mt-3.5 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setTrailOpen((v) => !v)}
+            aria-expanded={trailOpen}
+            aria-controls={trailId}
+            data-testid="board-task-trail-toggle"
+            className={TRAIL_TOGGLE}
+          >
+            <History size={12} strokeWidth={2} />
+            Comments &amp; activity
+            <ChevronDown
+              size={12}
+              className={`transition-transform ${trailOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+          {attention && (
+            <button
+              type="button"
+              onClick={openOnBoard}
+              className="cursor-pointer font-mono text-[10px] uppercase tracking-wider text-primary/80 transition-colors hover:text-primary"
+            >
+              Resolve on board
+            </button>
+          )}
+        </div>
+
+        {trailOpen && (
+          <div id={trailId} className="mt-2.5" data-testid="board-task-trail">
+            <div role="tablist" aria-label="Task trail" className="mb-2.5 flex items-center gap-1">
+              {(
+                [
+                  ['comments', comments ? `Comments (${comments.length})` : 'Comments'],
+                  ['activity', 'Activity'],
+                ] as const
+              ).map(([id, text]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={trailTab === id}
+                  onClick={() => setTrailTab(id)}
+                  className={[
+                    'cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+                    trailTab === id
+                      ? 'bg-foreground/[0.07] text-foreground'
+                      : 'text-foreground/50 hover:text-foreground/80',
+                  ].join(' ')}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+            {trailTab === 'comments' ? (
+              comments === null ? (
+                <div className="text-[11.5px] text-muted-foreground">Loading…</div>
+              ) : (
+                <div className="max-h-[260px] overflow-y-auto pr-1">
+                  <TaskComments comments={comments} compact />
+                </div>
+              )
+            ) : (
+              <ActivityTerminal scope={{ taskId: task.id }} maxHeight={220} hideHeader />
             )}
           </div>
         )}

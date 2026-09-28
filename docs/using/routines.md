@@ -119,7 +119,7 @@ An agent task runs the way the agent works a task delegated in team chat: withou
 
 A routine whose run fails **stops**. Its pill reads `failed`, the row shows the error, and it does not run again until you resume it. This is deliberate: a routine that retried a broken run on every tick would spend budget and fill the board without getting anywhere. Opening it shows a "Stopped after a failed run" note with the error. Fix the cause, then click **Resume**.
 
-When an agent task's run fails, its task is moved to **Blocked** with a note naming the agent and the error, so it does not sit in **To do** looking like work waiting to be picked up. The routine files a new task on its next run.
+When an agent task's run fails, its task is moved to **Needs you** on the board, with a badge saying what went wrong (usually **Failed**) and a note naming the agent and the error, so it does not sit in **To do** looking like work waiting to be picked up. The routine files a new task on its next run, so you can dismiss the old one or give it to an agent yourself.
 
 An OpenClaw cron job is different: the Gateway owns it, so a failed run shows `failed` but the job stays enabled.
 

@@ -38,6 +38,14 @@ const LEADER: TurnFraming = { isLeader: true, isWorker: false, isUserFacing: tru
 const WORKER: TurnFraming = { isLeader: false, isWorker: true, isUserFacing: false }
 const MENTIONED: TurnFraming = { isLeader: false, isWorker: false, isUserFacing: true }
 const IDLE_SYSTEM: TurnFraming = { isLeader: false, isWorker: false, isUserFacing: false }
+// A task the user assigned from the board: still a worker (nobody can answer it
+// mid-task), but its report is read by the user, not a team lead.
+const USER_ASSIGNED: TurnFraming = {
+  isLeader: false,
+  isWorker: true,
+  isUserAssigned: true,
+  isUserFacing: false,
+}
 
 describe('buildServerTeamContext coordination blocks', () => {
   let home: string
@@ -161,6 +169,17 @@ describe('buildServerTeamContext coordination blocks', () => {
     expect(ctx).not.toContain(LEADER_BLOCK)
     // the roster is still present (the worker still sees teammate names)
     expect(ctx).toContain('Boo Zero')
+  })
+
+  it('a task the USER assigned: a worker guardrail that points the report at the user, not a lead', () => {
+    const ctx = buildServerTeamContext(db, 'T', 'nwork', USER_ASSIGNED) ?? ''
+    expect(ctx).toContain('the user assigned to you directly from the team board')
+    expect(ctx).toContain('posted on that task')
+    // Still a worker: it cannot ask the user anything mid-task, and it is not the lead.
+    expect(ctx).toContain('make a reasonable assumption and note it')
+    expect(ctx).not.toContain('delegated to you by your team lead')
+    expect(ctx).not.toContain(ABOUT_USER)
+    expect(ctx).not.toContain(LEADER_BLOCK)
   })
 
   it('OpenClaw LEADER turn: delegate-protocol block + [About the User], no worker guardrail', () => {

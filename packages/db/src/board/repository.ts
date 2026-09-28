@@ -6,7 +6,12 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { canTransition, isTerminal, type TaskStatus } from '@clawboo/board-core'
+import {
+  canTransition,
+  isTerminal,
+  ledgerAllowsAutoFire,
+  type TaskStatus,
+} from '@clawboo/board-core'
 import {
   checkDepthCap,
   checkFanoutCap,
@@ -400,30 +405,15 @@ export function claimTask(
  *  proving it is alive. The stale-sweep TTL must comfortably exceed this. */
 export const TASK_HEARTBEAT_MS = 30_000
 
-/** The scan-side mirror of the engine's `MAX_AUTO_FIRES` fire policy (the two
- *  MUST agree — @clawboo/team-orchestration cannot import this package's value
- *  because the engine package deliberately stays free of the db graph). */
-const AUTO_FIRE_LEDGER_CAP = 3
-
 /**
- * Scan-side mirror of the engine's ready-pump fire policy over an execution
- * ledger: fireable unless the last run was `cancelled` (user Stop — never
- * auto-refire) or the TRAILING run of consecutive non-succeeded rows reached
- * the cap (a permafailing task — stop feeding it; a success in between resets
- * the streak, so a task that failed twice long ago is not penalized forever).
+ * The ready-pump's fire policy over an execution ledger, as the server's pump
+ * scan reads it: fireable unless the last run was `cancelled` (user Stop, never
+ * auto-refired) or the trailing streak of unsuccessful runs reached the cap. The
+ * rule itself lives in @clawboo/board-core, shared with the engine's own pump, so
+ * the scan and the engine cannot disagree about what will run.
  */
-export function isLedgerAutoFireable(execs: Array<{ status: string }>): boolean {
-  if (execs.length === 0) return true
-  if (execs[execs.length - 1]!.status === 'running') return false // someone owns it
-  if (execs[execs.length - 1]!.status === 'cancelled') return false
-  let trailingFailures = 0
-  for (let i = execs.length - 1; i >= 0; i--) {
-    const s = execs[i]!.status
-    if (s === 'succeeded' || s === 'cancelled') break
-    trailingFailures += 1
-  }
-  return trailingFailures < AUTO_FIRE_LEDGER_CAP
-}
+export const isLedgerAutoFireable: (execs: ReadonlyArray<{ status: string }>) => boolean =
+  ledgerAllowsAutoFire
 
 /**
  * Teams that have at least one FIREABLE delegation: a READY (deps-satisfied,
@@ -678,6 +668,35 @@ export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFiel
   if (fields.assigneeRuntime !== undefined) patch.assigneeRuntime = fields.assigneeRuntime
   withWriteRetry(() => db.update(tasks).set(patch).where(eq(tasks.id, taskId)).run())
   return getTask(db, taskId)
+}
+
+/**
+ * Re-bind a task that is NOT running to the agent named in `sourceDelegationId`
+ * (a person assigning it from the board). Refused (null) while the task is being
+ * worked, finished, cancelled or dropped: re-binding a live run would leave its
+ * result reporting to an agent that no longer owns the task.
+ */
+export function rebindTaskDelegation(
+  db: ClawbooDb,
+  taskId: string,
+  sourceDelegationId: string,
+): DbTask | null {
+  const rows = withWriteRetry(
+    () =>
+      db
+        .update(tasks)
+        .set({ sourceDelegationId, updatedAt: Date.now() })
+        .where(
+          and(
+            eq(tasks.id, taskId),
+            inArray(tasks.status, ['todo', 'backlog', 'blocked']),
+            eq(tasks.dropped, 0),
+          ),
+        )
+        .returning()
+        .all() as DbTask[],
+  )
+  return rows[0] ?? null
 }
 
 export function blockTask(db: ClawbooDb, taskId: string): UpdateStatusResult {
@@ -1061,6 +1080,31 @@ export function listExecutions(db: ClawbooDb, taskId: string): DbExecutionProces
     .where(eq(executionProcesses.taskId, taskId))
     .orderBy(executionProcesses.createdAt)
     .all() as DbExecutionProcess[]
+}
+
+/**
+ * The run ledgers of many tasks in one read, each oldest first. A task with no
+ * runs maps to `[]`. Chunked so a large board never exceeds SQLite's bound
+ * parameter limit.
+ */
+export function listExecutionsForTasks(
+  db: ClawbooDb,
+  taskIds: readonly string[],
+): Map<string, DbExecutionProcess[]> {
+  const out = new Map<string, DbExecutionProcess[]>()
+  for (const id of taskIds) out.set(id, [])
+  const unique = [...out.keys()]
+  const CHUNK = 500
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const rows = db
+      .select()
+      .from(executionProcesses)
+      .where(inArray(executionProcesses.taskId, unique.slice(i, i + CHUNK)))
+      .orderBy(executionProcesses.createdAt)
+      .all() as DbExecutionProcess[]
+    for (const row of rows) out.get(row.taskId)?.push(row)
+  }
+  return out
 }
 
 // ─── Orphan reconciliation (startup recovery) ────────────────────────────────
