@@ -45,14 +45,14 @@
     "@clawboo/obs": "workspace:*",
     "@noble/ed25519": "^3.2.0",
     "better-sqlite3": "^12.11.1",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.3",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^26.5.1",
-    "drizzle-kit": "^0.31.10",
+    "@types/node": "^26.6.2",
+    "drizzle-kit": "^0.31.11",
     "tsup": "^8.4.0",
     "typescript": "^6.0.3"
   }
