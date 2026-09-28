@@ -90,9 +90,29 @@ describe('graphNodeAriaLabel', () => {
     )
   })
 
+  it('reads a capability by the name on its tile, not its raw key', () => {
+    expect(graphNodeAriaLabel(skill({ name: 'web_search', displayName: 'Web Search' }))).toBe(
+      'Capability Web Search',
+    )
+  })
+
+  it('names a group by what it holds', () => {
+    expect(
+      graphNodeAriaLabel(
+        skill({ name: '41 plugins', group: { cls: 'plugin', members: [], runtime: 'openclaw' } }),
+      ),
+    ).toBe('Group, 41 plugins')
+  })
+
   it('names a connector', () => {
     expect(graphNodeAriaLabel(resource())).toBe('Connector Memory')
     expect(graphNodeAriaLabel(resource({ enabled: false }))).toBe('Connector Memory, disabled')
+  })
+
+  it('does not call an OpenClaw plugin a connector', () => {
+    expect(graphNodeAriaLabel(resource({ name: 'Device Pair', serviceKind: 'plugin' }))).toBe(
+      'Plugin Device Pair',
+    )
   })
 
   // Team-root junctions are 1px and invisible; GhostGraph also marks them

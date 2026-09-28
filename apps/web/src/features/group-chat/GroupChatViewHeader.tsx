@@ -14,7 +14,8 @@
 import { useState } from 'react'
 import { Settings } from 'lucide-react'
 import { useGraphStore } from '@/features/graph/store'
-import { isCapabilitySkillNode } from '@/features/graph/types'
+import { countOf } from '@/features/graph/capabilityVocabulary'
+import { countGraphSkills } from '@/features/graph/types'
 import type { Team } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -28,7 +29,7 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
   // Two separate primitive selectors so we don't need shallow equality —
   // each returns a number and React's default reference check works.
   const booCount = useGraphStore((s) => s.nodes.filter((n) => n.type === 'boo').length)
-  const skillCount = useGraphStore((s) => s.nodes.filter(isCapabilitySkillNode).length)
+  const skillCount = useGraphStore((s) => countGraphSkills(s.nodes))
   // The graph store is shared across Atlas + every team graph. Only trust the
   // count once it has STRUCTURALLY rebuilt for THIS team — otherwise a stale
   // count from a previous scope flashes (e.g. "23 Boos" from Atlas before the
@@ -67,9 +68,9 @@ export function GroupChatViewHeader({ team }: GroupChatViewHeaderProps) {
           </h2>
           {/* Neutral count pill — Boos + skills (accent reserved for active state, not inert counts) */}
           {hasGraph ? (
-            <span className="font-data shrink-0 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-semibold leading-4 text-foreground/55">
+            <span className="font-data shrink-0 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-semibold leading-4 text-muted-foreground">
               {booCount} Boo{booCount !== 1 ? 's' : ''}
-              {skillCount > 0 && ` · ${skillCount} skill${skillCount !== 1 ? 's' : ''}`}
+              {skillCount > 0 && ` · ${countOf(skillCount, 'skill')}`}
             </span>
           ) : (
             <span className="shrink-0 rounded-full bg-foreground/[0.04] px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground">

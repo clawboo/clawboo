@@ -1237,8 +1237,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     async (edgeId: string) => {
       const edge = edges.find((e) => e.id === edgeId)
       if (!edge) return
-      const nameOf = (nodeId: string) =>
-        (getNode(nodeId)?.data as { name?: string } | undefined)?.name ?? 'it'
+      const nameOf = (nodeId: string) => {
+        const d = getNode(nodeId)?.data as { name?: string; displayName?: string } | undefined
+        return d?.displayName ?? d?.name ?? 'it'
+      }
       const removed = await removeEdge(edge, {
         sourceName: nameOf(edge.source),
         targetName: nameOf(edge.target),
@@ -1674,7 +1676,13 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
               // Skill / resource nodes inherit visibility from their parent
               // Boo via `data.isVisible` (set by the visibleNodes memo).
               const isVisible = (node.data as { isVisible?: boolean }).isVisible ?? true
-              if (node.type === 'skill') return isVisible ? 'var(--mint)' : 'transparent'
+              if (node.type === 'skill') {
+                if (!isVisible) return 'transparent'
+                // A group of plugins is violet on the canvas, so it is here too.
+                return (node.data as SkillNodeData).group?.cls === 'plugin'
+                  ? 'var(--violet)'
+                  : 'var(--mint)'
+              }
               // Violet = the MCP-connector type accent (matches ResourceNode).
               if (node.type === 'resource') return isVisible ? 'var(--violet)' : 'transparent'
               // A loose node wears its own type accent, and is always on screen.

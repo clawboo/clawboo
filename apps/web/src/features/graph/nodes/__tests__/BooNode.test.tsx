@@ -254,10 +254,47 @@ describe('BooNode — the status row stands down without taking the ring counts'
     // is the obvious-looking cleanup that must not happen.
     seed({ status: 'running' })
     const { container } = renderNode(
-      nodeProps({ status: 'running', ringCounts: { skills: 2, connectors: 1, routes: 0 } }),
+      nodeProps({
+        status: 'running',
+        ringCounts: { capabilities: 3, routes: 0, byClass: { skill: 2, connector: 1 } },
+      }),
     )
 
-    expect(container.textContent).toContain('2 skills')
+    expect(container.textContent).toContain('3 capabilities')
+  })
+
+  it('counts what the agent has, and names each kind in the tooltip', () => {
+    // The face used to count tiles, so an OpenClaw Boo carrying one skill read
+    // "5 skills · 44 connectors": its plugins counted as connectors, its tools and
+    // its model tile as skills.
+    seed({ status: 'idle' })
+    const { container } = renderNode(
+      nodeProps({
+        status: 'idle',
+        ringCounts: {
+          capabilities: 48,
+          routes: 1,
+          byClass: { skill: 1, tool: 2, connector: 3, plugin: 41, builtin: 1 },
+        },
+      }),
+    )
+
+    expect(container.textContent).toContain('48 capabilities · 1 route')
+    const label = [...container.querySelectorAll('[title]')].find((el) =>
+      el.textContent?.includes('48 capabilities'),
+    )
+    expect(label?.getAttribute('title')).toBe(
+      '1 skill, 2 tools, 3 connectors, 41 plugins, built-in tools; 1 route',
+    )
+  })
+
+  it('stays silent for a Boo that carries nothing yet', () => {
+    seed({ status: 'idle' })
+    const { container } = renderNode(
+      nodeProps({ status: 'idle', ringCounts: { capabilities: 0, routes: 0, byClass: {} } }),
+    )
+
+    expect(container.textContent).not.toContain('capabilit')
   })
 
   it('keeps the verb when the agent is idle', () => {

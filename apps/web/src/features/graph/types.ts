@@ -2,6 +2,7 @@ import type { Node, Edge } from '@xyflow/react'
 import type { AgentStatus } from '@clawboo/gateway-client'
 import type { CapabilityHealth } from '@clawboo/capability-registry'
 import type { ProviderId } from '@/features/onboarding/ProviderIcon'
+import type { CapabilityClass, ClassCounts } from './capabilityVocabulary'
 
 // ─── Skill category ───────────────────────────────────────────────────────────
 
@@ -46,8 +47,13 @@ export interface BooNodeData extends Record<string, unknown> {
    * badge and no count -- so a first-time user had no way to learn the ring was
    * there, and every authoring gesture starts inside it. Counting on the face
    * is what turns the node into a door.
+   *
+   * `capabilities` counts what the agent HAS, not the tiles drawn: a group tile
+   * stands for its members and the Atlas overflow tile for what it cut, so a
+   * count of tiles would undercount by exactly the amount the ring folds away.
+   * `byClass` splits the same total in the vocabulary's words.
    */
-  ringCounts?: { skills: number; connectors: number; routes: number }
+  ringCounts?: { capabilities: number; routes: number; byClass: ClassCounts }
   teamId: string | null
   teamName?: string
   teamColor?: string
@@ -62,10 +68,41 @@ export interface BooNodeData extends Record<string, unknown> {
 }
 
 /** Which clawboo MCP server a connector node represents — picks its glyph.
- *  `generic` = any non-clawboo / unknown MCP server. */
-export type ConnectorServiceKind = 'memory' | 'tasks' | 'tools' | 'teamchat' | 'generic'
+ *  `generic` = any non-clawboo / unknown MCP server. `plugin` = an OpenClaw
+ *  plugin, which the Gateway reports as a connector although it is not one. */
+export type ConnectorServiceKind = 'memory' | 'tasks' | 'tools' | 'teamchat' | 'plugin' | 'generic'
+
+/** One capability folded into a group tile, as its member list shows it. */
+export interface CapabilityGroupMember {
+  name: string
+  /** Why it would read differently from its siblings, when it would. */
+  state?: 'off' | 'unavailable'
+  /** A provider plugin wears its provider's mark in the list. */
+  providerId?: ProviderId | null
+}
+
+/**
+ * Set on a group tile, and only there: many read-only capabilities of one class
+ * folded into one tile. See `groupClassFor` in useGraphData for what may fold.
+ */
+export interface CapabilityGroup {
+  cls: CapabilityClass
+  members: CapabilityGroupMember[]
+  /** The runtime that owns every member, for the list's heading. */
+  runtime: string | null
+}
 
 export interface SkillNodeData extends Record<string, unknown> {
+  /**
+   * The name on the tile, when it differs from `name`.
+   *
+   * `name` stays the raw capability name because installs and lookups send it
+   * to the server ("web_search"); this is only what a person reads ("Web
+   * Search"). Absent means the raw name is already fit to show.
+   */
+  displayName?: string
+  /** Set on a group tile, and only there. See `CapabilityGroup`. */
+  group?: CapabilityGroup
   /**
    * Set on the "+N more" tile, and only there.
    *
@@ -167,6 +204,8 @@ export interface ResourceNodeData extends Record<string, unknown> {
   fullName?: string
   /** Which clawboo MCP server this is — picks the tile glyph. */
   serviceKind?: ConnectorServiceKind
+  /** A provider plugin's provider, whose mark the tile wears. */
+  providerId?: ProviderId | null
   /** False when the connector's status is 'disabled' (see SkillNodeData.enabled). */
   enabled?: boolean
   /**
@@ -242,14 +281,19 @@ export type TeamRootNode = Node<TeamRootNodeData, 'team-root'>
 export type GraphNode = BooNode | SkillNode | ResourceNode | TeamRootNode
 
 /**
- * A "real" capability skill node — a `'skill'` node that is NOT one of the
- * synthesized graph-layer orbitals (Leadership / Model). Used for the header
- * skill COUNT so those synthetic orbitals don't inflate it.
+ * How many skills the agents on a graph carry, for the header pill.
+ *
+ * Read from each Boo's ring counts, never by counting skill-shaped tiles: a tile
+ * is also a tool, the built-in tool set, a group of forty plugins or the Atlas
+ * overflow chip, and a header that called all of those skills counted three
+ * for every OpenClaw agent before anyone had given it one.
  */
-export function isCapabilitySkillNode(node: GraphNode): boolean {
-  if (node.type !== 'skill') return false
-  const d = node.data
-  return !d.isModel && !d.isLeadership
+export function countGraphSkills(nodes: readonly GraphNode[]): number {
+  let skills = 0
+  for (const node of nodes) {
+    if (node.type === 'boo') skills += node.data.ringCounts?.byClass.skill ?? 0
+  }
+  return skills
 }
 export type GraphEdge = Edge<Record<string, unknown>>
 

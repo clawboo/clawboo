@@ -44,11 +44,15 @@ export function graphNodeAriaLabel(node: GraphNode): string | undefined {
       // The two synthesized graph-layer orbitals aren't capabilities.
       if (d.isLeadership) return 'Leadership, reserved capability of Boo Zero'
       if (d.isModel) return `Model, ${d.name}`
-      return `Capability ${d.name}${availabilitySuffix(d.available, d.enabled)}`
+      // A group's name is already its count ("41 plugins").
+      if (d.group) return `Group, ${d.name}`
+      return `Capability ${d.displayName ?? d.name}${availabilitySuffix(d.available, d.enabled)}`
     }
     case 'resource': {
       const d = node.data
-      return `Connector ${d.name}${availabilitySuffix(d.available, d.enabled)}`
+      // The Gateway reports a plugin as a connector; it is not one.
+      const noun = d.serviceKind === 'plugin' ? 'Plugin' : 'Connector'
+      return `${noun} ${d.name}${availabilitySuffix(d.available, d.enabled)}`
     }
     case 'team-root':
       // A 1px invisible routing junction — never focusable, so it needs no name.

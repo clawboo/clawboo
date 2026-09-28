@@ -1,27 +1,30 @@
-import { memo, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { Handle, Position } from '@xyflow/react'
-import type { NodeProps, Node } from '@xyflow/react'
+import { Handle, NodeToolbar, Position, useStore } from '@xyflow/react'
+import type { NodeProps, Node, ReactFlowState } from '@xyflow/react'
 import {
   BarChart3,
   Blocks,
+  Cable,
   Compass,
   FileText,
   Globe,
   MessageSquare,
+  Puzzle,
   Sparkles,
   Wrench,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
-import { PROVIDER_BRAND, ProviderGlyph } from '@/features/onboarding/ProviderIcon'
-import { MarkGlyph, resolveRuntimeMark } from '@/features/runtimes/RuntimeBrand'
+import { PROVIDER_BRAND, ProviderGlyph, type ProviderId } from '@/features/onboarding/ProviderIcon'
+import { MarkGlyph, resolveRuntimeMark, runtimeLabel } from '@/features/runtimes/RuntimeBrand'
 import { AgentPickerDropdown } from '@/features/marketplace/AgentPickerDropdown'
+import type { CapabilityClass } from '../capabilityVocabulary'
 import { installSkillForAgent } from '../operations/installSkill'
 import { useGraphStore } from '../store'
 import { useFloatingMotion } from '../useFloatingMotion'
 import { usePeacockTransition } from '../usePeacockTransition'
-import type { SkillNodeData, SkillCategory } from '../types'
+import type { CapabilityGroup, SkillNodeData, SkillCategory } from '../types'
 
 // ─── Orbital tile system ──────────────────────────────────────────────────────
 //
@@ -31,13 +34,18 @@ import type { SkillNodeData, SkillCategory } from '../types'
 // glyph in full accent colour, and a theme-foreground label below. The tile
 // ACCENT is TYPE-coded so the fan reads at a glance:
 //
-//   provider brand → the LLM model      violet → MCP connectors (ResourceNode)
-//   mint           → skills / tools     slate  → the runtime built-ins rollup
+//   provider brand → the LLM model
+//   mint           → skills / tools
+//   violet         → MCP connectors (ResourceNode) and OpenClaw plugins
+//   slate          → the runtime built-ins rollup
 //   amber          → Leadership (Boo Zero)
 //
 // The category picks only the GLYPH for skill tiles (variety within the mint
 // family); the old per-category tile colours read as noise next to the
 // type-coded connectors/model.
+//
+// A GROUP tile keeps its members' accent and glyph and adds a stack of discs
+// behind it, so forty plugins read as one violet thing with more behind it.
 
 const CATEGORY_ICON: Record<SkillCategory, LucideIcon> = {
   data: BarChart3,
@@ -51,6 +59,15 @@ const CATEGORY_ICON: Record<SkillCategory, LucideIcon> = {
 // Compass picks up the "guides the team" metaphor; amber signals elevated
 // status while staying clearly distinct from the type accents above.
 const LEADERSHIP_VISUAL = { color: 'var(--amber)', Icon: Compass } as const
+
+// A group tile wears what its members would have worn one by one.
+const GROUP_VISUAL: Record<CapabilityClass, { color: string; Icon: LucideIcon }> = {
+  plugin: { color: 'var(--violet)', Icon: Puzzle },
+  connector: { color: 'var(--violet)', Icon: Cable },
+  tool: { color: 'var(--mint)', Icon: Wrench },
+  skill: { color: 'var(--mint)', Icon: FileText },
+  builtin: { color: 'var(--secondary)', Icon: Blocks },
+}
 
 const CIRCLE = 46 // regular orbital tile diameter (px)
 const MODEL_CIRCLE = 57 // the Model tile stays the biggest — the fan's anchor
@@ -86,11 +103,14 @@ export const SkillNode = memo(function SkillNode({
   id: nodeId,
   data,
   dragging,
+  selected,
   positionAbsoluteX,
   positionAbsoluteY,
 }: NodeProps<Node<SkillNodeData, 'skill'>>) {
   const {
     name,
+    displayName,
+    group,
     category,
     description,
     isVisible,
@@ -135,9 +155,13 @@ export const SkillNode = memo(function SkillNode({
     ? { color: modelColor, Icon: Sparkles }
     : isLeadership
       ? LEADERSHIP_VISUAL
-      : isBuiltinRollup
-        ? { color: 'var(--secondary)', Icon: Blocks }
-        : { color: 'var(--mint)', Icon: CATEGORY_ICON[category] ?? Wrench }
+      : group
+        ? GROUP_VISUAL[group.cls]
+        : isBuiltinRollup
+          ? { color: 'var(--secondary)', Icon: Blocks }
+          : { color: 'var(--mint)', Icon: CATEGORY_ICON[category] ?? Wrench }
+  // What a person reads. `name` stays raw because installs send it to the server.
+  const label = displayName ?? name
   // Install is offered ONLY for a genuinely installable capability (a
   // marketplace curated skill) — observed / inherited / synthesized orbitals
   // hide the button, its picker, AND the drag-to-install handles (dragging one
@@ -173,6 +197,11 @@ export const SkillNode = memo(function SkillNode({
     // center — the gentle idle bob and the peacock transform never detach
     // an edge endpoint from its node.
     <div style={{ width: circle, height: circle, position: 'relative' }}>
+      {/* A group's members, on selection. Mounted only while open, so a closed
+          group tile subscribes to nothing. */}
+      {group && selected && isVisible !== false && (
+        <GroupToolbar group={group} label={label} tileY={positionAbsoluteY} tileSize={circle} />
+      )}
       <motion.div
         initial={peacock.initial}
         animate={peacock.animate}
@@ -191,8 +220,8 @@ export const SkillNode = memo(function SkillNode({
           <div
             title={
               greyed
-                ? `${description ?? name} — ${enabled === false ? 'disabled' : 'unavailable'}`
-                : (description ?? name)
+                ? `${description ?? label} — ${enabled === false ? 'disabled' : 'unavailable'}`
+                : (description ?? label)
             }
             className="group"
             style={{
@@ -205,6 +234,23 @@ export const SkillNode = memo(function SkillNode({
               transition: 'opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1), filter 0.3s ease',
             }}
           >
+            {/* A group's stack: two discs behind the tile, offset up and to the
+              right, so "there is more behind this" reads before the label does. */}
+            {group &&
+              [5, 2.5].map((offset) => (
+                <span
+                  key={offset}
+                  aria-hidden
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: '50%',
+                    transform: `translate(${offset}px, -${offset}px)`,
+                    background: `color-mix(in srgb, ${color} ${offset > 3 ? 8 : 11}%, var(--surface))`,
+                    border: `1.5px solid color-mix(in srgb, ${color} ${offset > 3 ? 35 : 50}%, transparent)`,
+                  }}
+                />
+              ))}
             {/* The tile disc — ONE family for every orbital: an OPAQUE
               accent-tinted surface (never a transparent wash), a solid accent
               ring, and a soft accent shadow. The Model tile tints slightly
@@ -216,6 +262,8 @@ export const SkillNode = memo(function SkillNode({
               whileTap={reduceMotion ? undefined : { scale: 0.94 }}
               transition={{ type: 'spring', stiffness: 420, damping: 24 }}
               style={{
+                // Positioned, or the absolute stack discs would paint over it.
+                position: 'relative',
                 width: circle,
                 height: circle,
                 borderRadius: '50%',
@@ -307,7 +355,7 @@ export const SkillNode = memo(function SkillNode({
                 letterSpacing: '0.02em',
               }}
             >
-              {name}
+              {label}
             </div>
           </div>
         </div>
@@ -361,3 +409,124 @@ export const SkillNode = memo(function SkillNode({
     </div>
   )
 })
+
+// ─── GroupToolbar ────────────────────────────────────────────────────────────
+//
+// Portal-rendered by React Flow, the way the connector tile's toolbar is, so the
+// list is screen-sized at any zoom and never clipped by the ring.
+//
+// IT OPENS AWAY FROM THE NEARER EDGE of the canvas and is never taller than the
+// room on that side. Opened upward from a tile near the top, a list of forty
+// lost its heading and first rows off the top of the canvas.
+
+const LIST_GAP = 14 // between the tile and the list
+const LIST_MAX = 300
+const LIST_MIN = 120
+const LIST_STEP = 20 // re-render the list per 20px of room, not per pixel of pan
+
+function GroupToolbar({
+  group,
+  label,
+  tileY,
+  tileSize,
+}: {
+  group: CapabilityGroup
+  label: string
+  /** The tile's top, in graph units. */
+  tileY: number
+  tileSize: number
+}) {
+  // One string, so the list re-renders only when its side or its height changes.
+  const fit = useStore(
+    useCallback(
+      (s: ReactFlowState) => {
+        const [, ty, zoom] = s.transform
+        const top = tileY * zoom + ty
+        const above = top - LIST_GAP
+        const below = s.height - (top + tileSize * zoom) - LIST_GAP
+        const up = above >= below
+        const room = Math.floor(((up ? above : below) - 8) / LIST_STEP) * LIST_STEP
+        return `${up ? 'top' : 'bottom'}:${Math.min(LIST_MAX, Math.max(LIST_MIN, room))}`
+      },
+      [tileY, tileSize],
+    ),
+  )
+  const [side, height] = fit.split(':')
+  return (
+    <NodeToolbar
+      isVisible
+      position={side === 'top' ? Position.Top : Position.Bottom}
+      offset={LIST_GAP}
+    >
+      <GroupMemberList group={group} label={label} maxHeight={Number(height)} />
+    </NodeToolbar>
+  )
+}
+
+// ─── GroupMemberList ─────────────────────────────────────────────────────────
+//
+// What a group tile stands for, one line each. Read-only by construction: only
+// capabilities the canvas cannot act on ever fold (see `groupClassFor`), so a
+// row has nothing to offer but its name and whether it is on. A provider
+// plugin wears its provider's mark, which is how a list of forty stays
+// scannable.
+
+function GroupMemberList({
+  group,
+  label,
+  maxHeight,
+}: {
+  group: CapabilityGroup
+  label: string
+  maxHeight: number
+}) {
+  const { Icon } = GROUP_VISUAL[group.cls]
+  return (
+    <div
+      // nowheel: a wheel over the list scrolls it instead of zooming the canvas.
+      className="nowheel nodrag nopan surface-floating-tier flex w-[232px] flex-col rounded-xl"
+      style={{ maxHeight }}
+    >
+      <div className="border-b border-border px-3 pt-2.5 pb-2">
+        <div className="text-[12px] font-semibold text-foreground">{label}</div>
+        {group.runtime && (
+          <div className="text-[11px] text-muted-foreground">
+            From {runtimeLabel(group.runtime)}
+          </div>
+        )}
+      </div>
+      <ul className="m-0 min-h-0 list-none overflow-y-auto px-1.5 py-1" aria-label={label}>
+        {group.members.map((member, i) => (
+          <li
+            key={`${member.name}-${i}`}
+            className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
+          >
+            <span
+              aria-hidden
+              className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
+              style={member.providerId ? { color: providerInk(member.providerId) } : undefined}
+            >
+              {member.providerId ? (
+                <ProviderGlyph id={member.providerId} size={14} />
+              ) : (
+                <Icon size={13} strokeWidth={2} />
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-foreground">{member.name}</span>
+            {member.state && (
+              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                {member.state === 'off' ? 'Off' : 'Unavailable'}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** A provider mark's ink: its brand colour, or the theme's for monochrome brands. */
+function providerInk(id: ProviderId): string {
+  const brand = PROVIDER_BRAND[id].color
+  return brand === 'currentColor' ? 'var(--foreground)' : brand
+}

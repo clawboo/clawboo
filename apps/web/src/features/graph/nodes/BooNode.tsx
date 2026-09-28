@@ -4,6 +4,7 @@ import type { NodeProps, Node } from '@xyflow/react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { AgentBooAvatar, useAgentBooAspect } from '@/components/AgentBooAvatar'
 import type { BooNodeData } from '../types'
+import { capabilityCount, describeClassCounts } from '../capabilityVocabulary'
 import { useGraphStore } from '../store'
 import { useFloatingMotion } from '../useFloatingMotion'
 import { useApprovalsStore } from '@/stores/approvals'
@@ -484,9 +485,15 @@ export const BooNode = memo(function BooNode({
  * chevron, badge or count -- so nothing on screen said the ring existed, and
  * every authoring gesture starts inside it.
  *
- * Silent at zero: a Boo with nothing yet should read as empty, not as three
- * zeroes. Dimmed once the ring is open, because then the tiles themselves are
- * the answer and the summary would be repeating them.
+ * Silent at zero: a Boo with nothing yet should read as empty, not as zeroes.
+ * One total on the face, the breakdown in the tooltip: the face has room for a
+ * word or two beside the status, and a Boo carrying five kinds of thing would
+ * need five.
+ *
+ * Hidden, not dimmed, once the ring is open: the tiles are the answer then. It
+ * used to fade to 40%, and `--muted-foreground` is only readable at full
+ * strength, so the label sat below contrast at rest (85%) as well as open.
+ * `visibility` keeps its width, so the status beside it does not jump.
  */
 function RingCounts({
   counts,
@@ -496,23 +503,24 @@ function RingCounts({
   expanded: boolean
 }) {
   if (!counts) return null
-  const total = counts.skills + counts.connectors + counts.routes
-  if (total === 0) return null
-  const parts: string[] = []
-  if (counts.skills > 0) parts.push(`${counts.skills} skill${counts.skills === 1 ? '' : 's'}`)
-  if (counts.connectors > 0)
-    parts.push(`${counts.connectors} connector${counts.connectors === 1 ? '' : 's'}`)
-  if (counts.routes > 0) parts.push(`${counts.routes} route${counts.routes === 1 ? '' : 's'}`)
-  const label = parts.join(' · ')
+  const { capabilities, routes } = counts
+  if (capabilities + routes === 0) return null
+  const routePhrase = routes > 0 ? `${routes} route${routes === 1 ? '' : 's'}` : ''
+  const label = [capabilities > 0 ? capabilityCount(capabilities) : '', routePhrase]
+    .filter(Boolean)
+    .join(' · ')
+  // "1 skill, 2 tools, 41 plugins, built-in tools; 1 route"
+  const detail = [describeClassCounts(counts.byClass), routePhrase].filter(Boolean).join('; ')
   return (
     <span
-      title={label}
+      title={detail || label}
       style={{
         fontSize: 10,
         letterSpacing: '0.04em',
         color: 'var(--muted-foreground)',
-        opacity: expanded ? 0.4 : 0.85,
-        transition: 'opacity 0.18s',
+        opacity: expanded ? 0 : 1,
+        visibility: expanded ? 'hidden' : 'visible',
+        transition: 'opacity 0.18s, visibility 0.18s',
         whiteSpace: 'nowrap',
       }}
     >

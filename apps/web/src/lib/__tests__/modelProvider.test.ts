@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveModelProvider } from '../modelProvider'
+import { prettifyModelId, resolveModelProvider } from '../modelProvider'
 
 describe('resolveModelProvider', () => {
   it('resolves native provider-native ids by maker', () => {
@@ -62,7 +62,15 @@ describe('resolveModelProvider', () => {
   it('returns null provider (generic glyph) for a genuinely unknown model, keeping a usable label', () => {
     const r = resolveModelProvider('some-custom-model-xyz', 'openclaw')
     expect(r.providerId).toBeNull()
-    expect(r.label).toBe('some-custom-model-xyz')
+    expect(r.label).toBe('Some Custom Model Xyz')
+  })
+
+  it('names an uncatalogued model the way the catalog would, not by its raw id', () => {
+    // The model tile used to print the id itself, so an agent on a model clawboo
+    // had not catalogued read "minimax-m2.7" beside tiles reading "Claude Sonnet 4.6".
+    expect(resolveModelProvider('minimax/minimax-m2.7', 'clawboo-native').label).toBe(
+      'MiniMax M2.7',
+    )
   })
 
   it('always returns a non-empty label', () => {
@@ -74,5 +82,32 @@ describe('resolveModelProvider', () => {
     ] as const) {
       expect(resolveModelProvider(m, rt).label.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('prettifyModelId', () => {
+  it('joins a version the id spells as separate numbers', () => {
+    expect(prettifyModelId('anthropic/claude-sonnet-4-5')).toBe('Claude Sonnet 4.5')
+    expect(prettifyModelId('claude-opus-5')).toBe('Claude Opus 5')
+    expect(prettifyModelId('meta-llama/llama-3-1-405b')).toBe('Llama 3.1 405B')
+    // A snapshot number is not a minor version.
+    expect(prettifyModelId('gpt-4-1106-preview')).toBe('GPT 4 1106 Preview')
+  })
+
+  it('drops a snapshot date, which names a build rather than a model', () => {
+    expect(prettifyModelId('claude-3-5-sonnet-20241022')).toBe('Claude 3.5 Sonnet')
+    expect(prettifyModelId('gpt-4o-2024-08-06')).toBe('GPT 4o')
+  })
+
+  it("keeps each maker's own casing", () => {
+    expect(prettifyModelId('openai/gpt-4o-mini')).toBe('GPT 4o Mini')
+    expect(prettifyModelId('o3-mini')).toBe('o3 Mini')
+    expect(prettifyModelId('deepseek/deepseek-r1')).toBe('DeepSeek R1')
+    expect(prettifyModelId('meta-llama/llama-3.3-70b-instruct')).toBe('Llama 3.3 70B Instruct')
+    expect(prettifyModelId('z-ai/glm-4.5')).toBe('GLM 4.5')
+  })
+
+  it('leaves a spelling someone already chose alone', () => {
+    expect(prettifyModelId('minimax/MiniMax-M2.5')).toBe('MiniMax M2.5')
   })
 })
