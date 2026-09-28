@@ -5,8 +5,9 @@
  *
  *   First-time user (no 'clawboo.onboarded' in localStorage)
  *     → OnboardingWizard (native-first: welcome → configureNative → addRuntimes
- *       → nativeReady). ConfigureNative seeds a native team; the wizard finishes
- *       by landing the user in that team's group chat. Native completions arrive
+ *       → selectTeam → nativeReady). The user picks a team in the marketplace
+ *       and deploys it; the wizard finishes by landing them in that team's group
+ *       chat. Native completions arrive
  *       with a null client ('native' mode → enterNativeMode); the OpenClaw detour
  *       may hand back a live client ('gateway' mode).
  *
@@ -347,7 +348,7 @@ export async function enterNativeMode(teamId: string | null): Promise<{ ok: bool
   }
   conn.setStatus('connected')
 
-  // Land in the seeded team's group chat when we have one.
+  // Land in the group chat of the team deployed during onboarding, when there is one.
   if (teamId) {
     const exists = useTeamStore.getState().teams.some((t) => t.id === teamId)
     if (exists) {
@@ -627,8 +628,8 @@ export function GatewayBootstrap() {
 
       const resumeWizard = (): void => {
         markWizardActive() // idempotent — keep the marker through the resume
-        // Native-first: the only pre-seed resumable step is configureNative. Once
-        // a native team is seeded (or OpenClaw is configured), decideOnboardingView
+        // Native-first: the only resumable step is configureNative. Once a team
+        // is deployed (native agents exist) or OpenClaw is configured, decideOnboardingView
         // returns 'native'/'dashboard' instead of 'wizard-resume', so addRuntimes /
         // the OpenClaw detour / nativeReady are never resume targets.
         setWizardInitialStep('configureNative')
@@ -1122,7 +1123,7 @@ export function GatewayBootstrap() {
       mode: OnboardingMode,
     ) => {
       // Native path — no Gateway. Enter native mode (guarded REST hydrate, then
-      // status=connected, null client) and land in the seeded team.
+      // status=connected, null client) and land in the team deployed during onboarding.
       if (mode === 'native' || !newClient) {
         const r = await enterNativeMode(teamId)
         setShowWizard(false)

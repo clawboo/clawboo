@@ -1,6 +1,6 @@
 ---
 title: Runtimes API
-description: 'REST reference for the runtimes resource group: list, install, connect, healthcheck, run, seed a native team, and manage LLM provider keys.'
+description: 'REST reference for the runtimes resource group: list, install, connect, healthcheck, run, record the native leader model, and manage LLM provider keys.'
 ---
 
 REST surface for the four non-OpenClaw [runtimes](/appendices/glossary) (`claude-code`, `codex`, `hermes`, `clawboo-native`): list their capabilities and connection state, install a runtime CLI, connect or disconnect a provider key, verify a key before use, and drive a board task on a chosen runtime. This group also covers the `/api/onboarding/*` first-run routes and the `/api/providers*` group that backs the Settings → **Providers** panel.
@@ -9,7 +9,7 @@ REST surface for the four non-OpenClaw [runtimes](/appendices/glossary) (`claude
 OpenClaw is the fifth runtime but it is NOT in this group; it is a connected substrate driven over the Gateway, not a CLI you install or a key you paste. These routes 404 the `openclaw` id (it is not a member of `NonOpenClawRuntimeId`). See [System API](/reference/rest-api/system) for OpenClaw lifecycle and [Agents API](/reference/rest-api/agents) for the agent registry.
 </Note>
 
-The `:id` path segment is validated against the runtime set on every route except `seed-native-team`. An unknown id returns **404** `{ error: "unknown runtime '<id>'" }`. All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
+On the `/api/runtimes/:id/*` routes, `:id` is validated against the runtime set; an unknown id returns **404** `{ error: "unknown runtime '<id>'" }`. All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
 
 ## Routes
 
@@ -23,7 +23,6 @@ The `:id` path segment is validated against the runtime set on every route excep
 | POST   | `/api/runtimes/:id/healthcheck`       | Verify a pasted or stored provider key (no persistence)       | No      |
 | POST   | `/api/runtimes/:id/run`               | Drive a board task on the runtime end to end                  | No      |
 | GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog (Hermes model picker)             | No      |
-| POST   | `/api/onboarding/seed-native-team`    | Mint a default native leader + specialist team                | No      |
 | POST   | `/api/onboarding/native-leader-model` | Record the chosen leader provider + model                     | No      |
 | GET    | `/api/onboarding/native-leader-model` | The recorded leader provider + model (nulls when unset)       | No      |
 | GET    | `/api/onboarding/state`               | Aggregated first-run signals in one call                      | No      |
@@ -492,70 +491,13 @@ curl http://localhost:18790/api/runtimes/openrouter/models
 
 ---
 
-## `POST /api/onboarding/seed-native-team`
-
-Mints a default native team, a leader (capable model) and a specialist (cheap model), both with the Memory and Tools MCP, TeamChat, and read-only Tasks (board writes stay engine-owned), so a first-run user who just connected a provider key lands in a working team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). The team row is inserted first (the agents' `teamId` FK requires it), the agents are created with that `teamId`, the leader is recorded, and the "Know Your Team" onboarding flags are pre-satisfied so the user lands straight in chat.
-
-<Note>
-This route is not under `/api/runtimes` and takes no `:id` segment. It is grouped here because it is the native runtime's first-run seed step.
-</Note>
-
-- **Path/query params**: none.
-- **Request body**:
-
-```ts
-{
-  provider?: string  // 'anthropic' | 'openai' | 'openrouter' | 'ollama' |
-                     // 'google' | 'xai' | 'groq' | 'mistral' | 'together' |
-                     // 'cerebras' | 'moonshot'; resolved from the connected
-                     // provider when omitted (see below)
-  model?: string     // optional leader-model override (the specialist keeps its default)
-}
-```
-
-When `provider` is omitted, the seed resolves one from what is actually usable instead of assuming Anthropic: first the recorded leader-model pick (`POST /api/onboarding/native-leader-model`) when that provider can still run, then the first connected provider in `KNOWN_PROVIDERS` priority order, and only when nothing is connected at all does it fall back to `anthropic`. This keeps a bare `{}` seed from minting a team whose configured key slot is empty, which would pass health checks and then fail every run.
-
-The two Ollama rules differ on purpose, because it is keyless. Judging a pick the user already made asks whether it can run, and an Ollama pick always can (the runtime falls back to a local base URL), so a deliberate local-model choice is never swapped for a billed provider. Deriving a provider when the user chose none asks whether Ollama was actually set up, which takes a configured `OLLAMA_BASE_URL`; without that signal every install would look Ollama-ready.
-
-Per-provider model defaults (leader = a capable model, specialist = a cheap one) come from `MODEL_DEFAULTS` in `apps/web/server/lib/runtimes/native/nativeProviderDefaults.ts`, which is the drift-free source: `anthropic` → `claude-sonnet-5` / `claude-haiku-4-5`; `openai` → `gpt-5.4` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`; `google` → `gemini-2.0-flash` (both tiers); `xai` → `grok-2-latest` (both tiers); `groq` → `llama-3.3-70b-versatile` / `llama-3.1-8b-instant`; `mistral` → `mistral-large-latest` / `mistral-small-latest`; `together` → `meta-llama/Llama-3.3-70B-Instruct-Turbo` (both tiers); `cerebras` → `llama-3.3-70b` (both tiers); `moonshot` → `moonshot-v1-32k` / `moonshot-v1-8k`.
-
-### Responses
-
-**`400 Bad Request`**: `provider` is not one of the known native providers:
-
-```json
-{ "error": "unknown provider '<provider>'" }
-```
-
-**`201 Created`**: the team and its two agents were created:
-
-```ts
-{ teamId: string, leaderAgentId: string, specialistAgentId: string }
-```
-
-**`500 Internal Server Error`**: a failure creating the team or agents:
-
-```json
-{ "error": "<message>" }
-```
-
-### Example
-
-```bash
-curl -X POST http://localhost:18790/api/onboarding/seed-native-team \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"anthropic"}'
-```
-
----
-
 ## Onboarding
 
-The three remaining `/api/onboarding/*` routes. Like `seed-native-team`, they take no `:id` segment and are grouped here because they are the native runtime's first-run surface.
+The three `/api/onboarding/*` routes. They take no `:id` segment and are grouped here because they are the native runtime's first-run surface. Onboarding creates no team of its own: the user picks one in the marketplace and deploys it through the [Teams API](/reference/rest-api/teams).
 
 ### `POST /api/onboarding/native-leader-model`
 
-Records the provider + model the user picked when connecting a native key, so the lazily-created universal Boo Zero runs on it instead of the auto-resolved per-provider default. Body `{ provider, model }`. The pick is also retro-applied to an existing native Boo Zero, best-effort: on a fresh install there is no Boo Zero yet, which is the normal case and not an error. Returns `{ ok: true }`. **400** `{ error: "unknown provider '<provider>'" }` when `provider` is not a known native provider, or `{ error: "model is required" }` when `model` is missing or blank. **500** `{ error }` if the setting cannot be written.
+Records the provider + model the user picked when connecting a native key, so the lazily-created universal Boo Zero runs on it instead of the auto-resolved per-provider default. The team-deploy dialog reads it back as the default provider + model for a team's native agents. Body `{ provider, model }`. The pick is also retro-applied to an existing native Boo Zero, best-effort: on a fresh install there is no Boo Zero yet, which is the normal case and not an error. Returns `{ ok: true }`. **400** `{ error: "unknown provider '<provider>'" }` when `provider` is not a known native provider, or `{ error: "model is required" }` when `model` is missing or blank. **500** `{ error }` if the setting cannot be written.
 
 ### `GET /api/onboarding/native-leader-model`
 

@@ -100,7 +100,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Memory API](reference/rest-api/memory.md): REST reference for the memory resource group — search, save facts and procedures, browse, and inspect the active embedding provider.
 - [Misc resources API](reference/rest-api/misc.md): REST reference for cost records, chat history, graph layout, personality, skills, exec settings, fleet summary, and Boo Zero context.
 - [Observability API](reference/rest-api/observability.md): REST reference for the orchestration event log — feed, traces, errors, fleet health, graph projection, SSE live-tail, client mirror, and eval smoke run.
-- [Runtimes API](reference/rest-api/runtimes.md): REST reference for the runtimes resource group — list, install, connect, healthcheck, run, and seed a native team.
+- [Runtimes API](reference/rest-api/runtimes.md): REST reference for the runtimes resource group: list, install, connect, healthcheck, run, record the native leader model, and manage LLM provider keys.
 - [Schedules API](reference/rest-api/schedules.md): REST reference for the unified scheduler: list, create, update, pause/resume, delete, and force-run schedules across two sources, and read a routine's run history.
 - [Settings & Health API](reference/rest-api/settings.md): REST reference for /api/settings (gateway URL + token) and /api/health (the boot probe / System Health surface).
 - [System API](reference/rest-api/system.md): REST reference for /api/system/* — OpenClaw status, install, configure, gateway lifecycle, config, device pairing, and models.
