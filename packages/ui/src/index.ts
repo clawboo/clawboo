@@ -4,9 +4,25 @@
 
 export { BooAvatar } from './BooAvatar'
 export type { BooAvatarProps } from './BooAvatar'
-// Re-export so consumers can derive an agent's tint without adding a direct
-// `@clawboo/boo-avatar` dependency (the ui package already depends on it).
-export { resolveBooTint, TINTS } from '@clawboo/boo-avatar'
+export { BooVariantAvatar } from './BooVariantAvatar'
+export type { BooVariantAvatarProps } from './BooVariantAvatar'
+// Re-export so consumers can derive an agent's tint, or pick the variant a runtime asks for,
+// without adding a direct `@clawboo/boo-avatar` dependency (the ui package already depends on it).
+// Named re-exports, not `export *`: tsup keeps a workspace dep external, and a downstream bundler
+// cannot resolve a star re-export through it.
+export {
+  BOO_VARIANTS,
+  loadBooVariant,
+  resolveBooTint,
+  TINTS,
+  variantIdForRuntime,
+} from '@clawboo/boo-avatar'
+export type {
+  BooSurface,
+  BooVariantId,
+  BooVariantMeta,
+  BooVariantRenderer,
+} from '@clawboo/boo-avatar'
 export { cn } from './utils'
 export { cva } from 'class-variance-authority'
 export type { VariantProps } from 'class-variance-authority'

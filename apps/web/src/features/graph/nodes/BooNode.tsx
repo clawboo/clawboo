@@ -2,7 +2,7 @@ import { memo, useRef, type MutableRefObject } from 'react'
 import { Handle, Position, useConnection } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { AgentBooAvatar, useAgentBooAspect } from '@/components/AgentBooAvatar'
 import type { BooNodeData } from '../types'
 import { useGraphStore } from '../store'
 import { useFloatingMotion } from '../useFloatingMotion'
@@ -279,7 +279,10 @@ export const BooNode = memo(function BooNode({
   const edgeCount = data.edgeCount ?? 0
   const baseSize = data.isUniversalLeader ? 112 : 96
   const booW = Math.min(baseSize + edgeCount * 3, data.isUniversalLeader ? 140 : 124)
-  const booH = Math.round(booW * 0.92)
+  // The height follows whichever mark this agent actually draws. A runtime variant is square where
+  // the generated mascot is 0.92, so a fixed 0.92 leaves the variant overhanging its own box by
+  // about 8 percent, which is up to 11px here and reaches the name sitting at `booH + 8`.
+  const booH = Math.round(booW * useAgentBooAspect(agentId))
 
   const cardStatusColor = STATUS_DOT[status] ?? STATUS_DOT.idle
 

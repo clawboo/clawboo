@@ -290,3 +290,12 @@ export function booAvatarToDataUrl(params: BooAvatarParams): string {
   const svg = generateBooAvatar(params)
   return `data:image/svg+xml;base64,${btoa(svg)}`
 }
+
+// ─── Agent Boo variants ──────────────────────────────────────────
+// The generated mascot above draws a different Boo per agent seed. The variants are the opposite:
+// one approved drawing per runtime, shared by every agent on it. Only the registry is re-exported
+// here, and it carries metadata alone; the locked artwork is 188KB and stays behind
+// `loadBooVariant`'s dynamic imports so it never reaches this entry point.
+
+export { BOO_VARIANTS, variantIdForRuntime, loadBooVariant } from './variants/registry'
+export type { BooSurface, BooVariantId, BooVariantMeta, BooVariantRenderer } from './variants/types'
