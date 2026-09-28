@@ -3,6 +3,12 @@
 // team work for every runtime class (native + wrapped-oneshot + OpenClaw team
 // tasks). Writes go through the registration-time one-TEAM-TASK-firing-owner
 // guard; every successful write pokes the ticker so the next fire re-arms.
+//
+// A routine targets a TEAM (its fire is posted into the team chat for the team's
+// lead, so the row keeps no agent: `agent_id` is empty) or one AGENT (its fire is
+// a board task for that agent, on the agent's own team). The target is validated
+// on every write that sets it, so the ledger never holds a routine that points
+// at nothing.
 
 import {
   agents,
@@ -12,6 +18,7 @@ import {
   queueRunNow,
   registerScheduledRun,
   setScheduledRunStatus,
+  teams,
   updateScheduledRun,
   type ClawbooDb,
   type DbScheduledRun,
@@ -20,21 +27,24 @@ import {
   BoundRecurringScheduleError,
   DuplicateFiringOwnerError,
   IllegalScheduleTransitionError,
+  InvalidRoutineTargetError,
   UnknownScheduleError,
   isOnceSpec,
   makeScheduleId,
   nextOccurrence,
   parseTaskTemplate,
   probeCronSpec,
+  routineTargetOf,
   taskTemplateSchema,
   InvalidCronSpecError,
+  type RoutineTarget,
   type ScheduleReadResult,
   type ScheduleRecord,
   type ScheduleSource,
   type ScheduleStatus,
   type ScheduleWriteAction,
 } from '@clawboo/scheduler'
-import { inArray } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 
 import { getRoutinesTicker } from '../routines/ticker'
 
@@ -42,6 +52,70 @@ export interface ClawbooRoutineScheduleSourceDeps {
   /** The shared process connection (a thunk, so a sandbox swap is picked up
    *  per call — the registries are module singletons built once per test file). */
   getDb: () => ClawbooDb
+}
+
+function isRoutineTarget(value: unknown): value is RoutineTarget {
+  return value === 'team' || value === 'agent'
+}
+
+/** Where a routine's fires go, as stored on the ledger row. */
+interface ResolvedTarget {
+  target: RoutineTarget
+  /** Empty for a team routine. */
+  agentId: string
+  teamId: string | null
+}
+
+/**
+ * Check a routine's target against the registry and return what to store.
+ * A team routine needs a live team. An agent routine needs a live agent and is
+ * filed on that agent's own team: a `teamId` that names a different team is
+ * refused rather than silently corrected, since the caller asked for something
+ * that cannot happen.
+ */
+function resolveTarget(
+  db: ClawbooDb,
+  input: {
+    target: RoutineTarget
+    agentId: string | null | undefined
+    teamId: string | null | undefined
+    teamTaskId: string | null | undefined
+  },
+): ResolvedTarget {
+  if (input.target === 'team') {
+    if (!input.teamId) throw new InvalidRoutineTargetError('A team routine needs a team.')
+    const team = db
+      .select({ name: teams.name, isArchived: teams.isArchived })
+      .from(teams)
+      .where(eq(teams.id, input.teamId))
+      .get() as { name: string; isArchived: number } | undefined
+    if (!team) throw new InvalidRoutineTargetError(`There is no team "${input.teamId}".`)
+    if (team.isArchived) throw new InvalidRoutineTargetError(`The team "${team.name}" is archived.`)
+    if (input.teamTaskId) {
+      throw new InvalidRoutineTargetError(
+        'A team routine posts to the team chat, so it cannot be bound to a board task.',
+      )
+    }
+    return { target: 'team', agentId: '', teamId: input.teamId }
+  }
+  if (!input.agentId) throw new InvalidRoutineTargetError('An agent routine needs an agent.')
+  const agent = db
+    .select({ name: agents.name, teamId: agents.teamId, archivedAt: agents.archivedAt })
+    .from(agents)
+    .where(eq(agents.id, input.agentId))
+    .get() as { name: string; teamId: string | null; archivedAt: number | null } | undefined
+  if (!agent || agent.archivedAt) {
+    throw new InvalidRoutineTargetError(`There is no agent "${input.agentId}".`)
+  }
+  const agentTeamId = agent.teamId ?? null
+  if (input.teamId !== undefined && (input.teamId ?? null) !== agentTeamId) {
+    throw new InvalidRoutineTargetError(
+      agentTeamId
+        ? `"${agent.name}" is not on that team.`
+        : `"${agent.name}" is not on a team, so its routine cannot be filed on one.`,
+    )
+  }
+  return { target: 'agent', agentId: input.agentId, teamId: agentTeamId }
 }
 
 export class ClawbooRoutineScheduleSource implements ScheduleSource {
@@ -64,8 +138,11 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
       owner: row.scheduledBy,
       source: this.id,
       agentId: row.agentId,
+      target: template ? routineTargetOf(template) : 'agent',
+      teamId: row.teamId,
       ...(template?.teamTaskId ? { teamTaskId: template.teamTaskId } : {}),
       ...(template?.title ? { label: template.title } : {}),
+      ...(template?.description ? { description: template.description } : {}),
       cronSpec: row.cronSpec,
       nextRunAt: row.nextRunAt,
       ...(row.lastRunAt != null ? { lastRunAt: row.lastRunAt } : {}),
@@ -79,11 +156,12 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
 
   private runtimeLookup(db: ClawbooDb, agentIds: string[]): Map<string, string> {
     const map = new Map<string, string>()
-    if (agentIds.length === 0) return map
+    const ids = agentIds.filter(Boolean)
+    if (ids.length === 0) return map
     const rows = db
       .select({ id: agents.id, runtime: agents.runtime })
       .from(agents)
-      .where(inArray(agents.id, agentIds))
+      .where(inArray(agents.id, ids))
       .all() as Array<{ id: string; runtime: string }>
     for (const row of rows) map.set(row.id, row.runtime)
     return map
@@ -106,12 +184,21 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
         case 'create': {
           const spec = action.spec
           probeCronSpec(spec.cronSpec) // throws InvalidCronSpecError
+          const requested =
+            typeof spec.taskTemplate === 'object' && spec.taskTemplate !== null
+              ? (spec.taskTemplate as Record<string, unknown>)
+              : {}
           const template = taskTemplateSchema.parse({
             title: spec.label ?? 'Scheduled team task',
-            ...(typeof spec.taskTemplate === 'object' && spec.taskTemplate !== null
-              ? spec.taskTemplate
-              : {}),
+            ...requested,
+            ...(spec.target ? { target: spec.target } : {}),
             ...(spec.teamTaskId ? { teamTaskId: spec.teamTaskId } : {}),
+          })
+          const resolved = resolveTarget(db, {
+            target: routineTargetOf(template),
+            agentId: spec.agentId,
+            teamId: spec.teamId,
+            teamTaskId: template.teamTaskId,
           })
           // A bound team task is claimable exactly once (todo → done), so a
           // recurring schedule would fire once then park in error forever.
@@ -121,10 +208,10 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
             throw new BoundRecurringScheduleError(template.teamTaskId, spec.cronSpec)
           }
           const result = registerScheduledRun(db, {
-            agentId: spec.agentId,
-            teamId: spec.teamId ?? null,
+            agentId: resolved.agentId,
+            teamId: resolved.teamId,
             cronSpec: spec.cronSpec,
-            taskTemplate: JSON.stringify(template),
+            taskTemplate: JSON.stringify({ ...template, target: resolved.target }),
             teamTaskId: template.teamTaskId ?? null,
             nextRunAt: nextOccurrence(spec.cronSpec, Date.now()),
             tenantId: spec.tenantId ?? null,
@@ -143,7 +230,13 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
         case 'update': {
           const existing = getScheduledRun(db, this.rawId(action.id))
           if (!existing) throw new UnknownScheduleError(action.id)
-          const patch: { cronSpec?: string; taskTemplate?: string; nextRunAt?: number | null } = {}
+          const patch: {
+            cronSpec?: string
+            taskTemplate?: string
+            nextRunAt?: number | null
+            agentId?: string
+            teamId?: string | null
+          } = {}
           if (action.patch.cronSpec !== undefined) {
             probeCronSpec(action.patch.cronSpec)
             patch.cronSpec = action.patch.cronSpec
@@ -153,16 +246,49 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
             patch.nextRunAt =
               existing.status === 'idle' ? nextOccurrence(action.patch.cronSpec, Date.now()) : null
           }
-          if (action.patch.taskTemplate !== undefined || action.patch.label !== undefined) {
-            const current = parseTaskTemplate(existing.taskTemplate)
+          const current = parseTaskTemplate(existing.taskTemplate)
+          const templatePatch =
+            typeof action.patch.taskTemplate === 'object' && action.patch.taskTemplate !== null
+              ? { ...(action.patch.taskTemplate as Record<string, unknown>) }
+              : null
+          // A target named inside the template patch is a retarget like any
+          // other, so it goes through the same validation. A binding to a board
+          // task is made only at registration, where the firing-owner guard runs.
+          const templateTarget = templatePatch?.['target']
+          if (templatePatch) {
+            delete templatePatch['target']
+            delete templatePatch['teamTaskId']
+          }
+          for (const named of [action.patch.target, templateTarget]) {
+            if (named !== undefined && !isRoutineTarget(named)) {
+              throw new InvalidRoutineTargetError(`Unknown routine target "${String(named)}".`)
+            }
+          }
+          const requestedTarget =
+            action.patch.target ?? (isRoutineTarget(templateTarget) ? templateTarget : undefined)
+          const retargets =
+            requestedTarget !== undefined ||
+            action.patch.agentId !== undefined ||
+            action.patch.teamId !== undefined
+          let target: RoutineTarget | undefined
+          if (retargets) {
+            const resolved = resolveTarget(db, {
+              target: requestedTarget ?? (current ? routineTargetOf(current) : 'agent'),
+              agentId: action.patch.agentId !== undefined ? action.patch.agentId : existing.agentId,
+              teamId: action.patch.teamId !== undefined ? action.patch.teamId : existing.teamId,
+              teamTaskId: current?.teamTaskId,
+            })
+            target = resolved.target
+            patch.agentId = resolved.agentId
+            patch.teamId = resolved.teamId
+          }
+          if (templatePatch || action.patch.label !== undefined || target !== undefined) {
             patch.taskTemplate = JSON.stringify(
               taskTemplateSchema.parse({
                 ...(current ?? { title: 'Scheduled team task' }),
-                ...(typeof action.patch.taskTemplate === 'object' &&
-                action.patch.taskTemplate !== null
-                  ? action.patch.taskTemplate
-                  : {}),
+                ...(templatePatch ?? {}),
                 ...(action.patch.label !== undefined ? { title: action.patch.label } : {}),
+                ...(target !== undefined ? { target } : {}),
               }),
             )
           }

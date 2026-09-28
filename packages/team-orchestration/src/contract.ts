@@ -18,6 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { encodeHumanAssignment } from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 
 import {
@@ -173,6 +174,8 @@ interface HarnessOpts {
   deliverRejectsFor?: Set<string>
   /** Sessions the HOST reports as having a live run (the server's abortMap). */
   busySessions?: Set<string>
+  /** Sessions with ANY turn in flight or queued (the server's nudge queue). */
+  occupiedSessions?: Set<string>
 }
 
 type Delivered = { sessionKey: string; agentId: string; task: string; origin: TurnOrigin }
@@ -232,6 +235,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       },
       stopGen: opts?.stopGen ?? (() => 0),
       isSessionBusy: (sessionKey) => opts?.busySessions?.has(sessionKey) ?? false,
+      isSessionOccupied: (sessionKey) => opts?.occupiedSessions?.has(sessionKey) ?? false,
       onBoardChange: (c) => changes.push(c),
       narrate: (sessionKey, text) => narrations.push({ sessionKey, text }),
       ...(opts?.caps ? { caps: opts.caps } : {}),
@@ -1414,6 +1418,218 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       clock += DELEGATION_IDLE_TIMEOUT_MS + 1
       await orchestrator.sweepStaleSessions()
       expect(board.statusOf(t)).toBe('blocked')
+    })
+  })
+  // ─── A task a person assigned (the board's New task / Retry / Assign) ─────────
+  describe('createBoardOrchestrator: person-assigned tasks', () => {
+    const assigned = (board: CascadeBoard, agentId: string, title: string, details?: string) =>
+      board.createTask({
+        title,
+        ...(details ? { description: details } : {}),
+        teamId: 't1',
+        sourceDelegationId: encodeHumanAssignment(agentId, `n-${title}`),
+      })
+
+    /** Close `count` failed runs on a task, as a crashed or timed-out run would. */
+    const failRuns = async (board: CascadeBoard, taskId: string, count: number) => {
+      for (let i = 0; i < count; i++) {
+        const ex = await board.createExecution(taskId, 'openclaw')
+        await board.completeExecution(ex!.id, { status: 'failed', error: 'boom' })
+      }
+    }
+
+    it('dispatchTask hands the whole brief to the bound agent, framed as the person’s assignment', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const task = await assigned(board, 'a2', 'Draft the launch post', 'Keep it under 200 words.')
+      expect(await orchestrator.dispatchTask(task!.id)).toBe('started')
+      expect(board.statusOf(task!.id)).toBe('in_progress')
+      expect(board.execCount).toBe(1)
+      expect(delivered).toEqual([
+        {
+          sessionKey: sk('a2'),
+          agentId: 'a2',
+          task: 'Draft the launch post\n\nKeep it under 200 words.',
+          origin: { kind: 'assignment' },
+        },
+      ])
+    })
+
+    it('its result is recorded on the task and no agent is told', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const task = await assigned(board, 'a2', 'Draft the launch post')
+      await orchestrator.dispatchTask(task!.id)
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Here is the post.'))
+      expect(board.statusOf(task!.id)).toBe('done')
+      expect(
+        board.comments.some((c) => c.taskId === task!.id && c.body.includes('Here is the post.')),
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toEqual([])
+    })
+
+    it('its failure lands on blocked with the reason, and no agent is told', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const task = await assigned(board, 'a2', 'Draft the launch post')
+      await orchestrator.dispatchTask(task!.id)
+      await orchestrator.onEvent(
+        sk('a2'),
+        failedDoneEvent('r2', 'error', 'provider out of credits'),
+      )
+      expect(board.statusOf(task!.id)).toBe('blocked')
+      expect(
+        board.comments.some(
+          (c) => c.taskId === task!.id && c.body.includes('provider out of credits'),
+        ),
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toEqual([])
+    })
+
+    it('the pump fires a person-assigned task on its own, framed the same way', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const task = await assigned(board, 'a3', 'Sketch the empty state')
+      await orchestrator.resume()
+      expect(board.statusOf(task!.id)).toBe('in_progress')
+      expect(delivered.map((d) => d.origin)).toEqual([{ kind: 'assignment' }])
+    })
+
+    it('a person can re-run a task the automatic pump has parked', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const task = await board.createTask({
+        title: 'flaky delegation',
+        teamId: 't1',
+        sourceDelegationId: 'r0:deleg:agent:a3:reflectTo:leader',
+      })
+      await failRuns(board, task!.id, MAX_AUTO_FIRES)
+      await orchestrator.resume()
+      expect(delivered).toEqual([]) // parked: the pump leaves it alone
+      expect(await orchestrator.dispatchTask(task!.id)).toBe('started')
+      // A retried DELEGATION still reports to whoever delegated it.
+      expect(delivered).toEqual([
+        {
+          sessionKey: sk('a3'),
+          agentId: 'a3',
+          task: 'flaky delegation',
+          origin: { kind: 'delegation', fromAgentId: 'leader' },
+        },
+      ])
+    })
+
+    it('a re-run queued behind a busy agent still runs when that agent frees up', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix the parser</delegate>'),
+      )
+      const parked = await assigned(board, 'a2', 'Write the release notes')
+      await failRuns(board, parked!.id, MAX_AUTO_FIRES)
+      expect(await orchestrator.dispatchTask(parked!.id)).toBe('queued')
+      expect(deliveredTo(delivered, 'a2')).toEqual(['fix the parser'])
+
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'parser fixed'))
+      // Same-session follow-ups are deferred one macrotask out of the terminal.
+      await vi.advanceTimersByTimeAsync(0)
+      expect(board.statusOf(parked!.id)).toBe('in_progress')
+      expect(deliveredTo(delivered, 'a2')).toEqual(['fix the parser', 'Write the release notes'])
+    })
+
+    it('refuses what it cannot run: no bound agent, not todo, unknown', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const loose = await board.createTask({ title: 'nobody owns me', teamId: 't1' })
+      expect(await orchestrator.dispatchTask(loose!.id)).toBe('no_agent')
+      const running = await assigned(board, 'a2', 'already running')
+      await orchestrator.dispatchTask(running!.id)
+      expect(await orchestrator.dispatchTask(running!.id)).toBe('not_ready')
+      expect(await orchestrator.dispatchTask('missing')).toBe('not_found')
+      expect(deliveredTo(delivered, 'a2')).toEqual(['already running'])
+    })
+
+    it('a resumed person-assigned run still reports to no agent', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const t = board.seedInProgress({
+        title: 'resumed assignment',
+        sourceDelegationId: encodeHumanAssignment('a3', 'n-resume'),
+        assigneeAgentId: 'a3',
+      })
+      await orchestrator.resume()
+      await orchestrator.onEvent(sk('a3'), doneEvent('r3', 'all done'))
+      expect(board.statusOf(t)).toBe('done')
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toEqual([])
+    })
+
+    it('a reflection does not tell the delegator to wait on work the user stopped', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">fix the parser</delegate>' +
+            '<delegate to="@Design Boo">draft the empty state</delegate>',
+        ),
+      )
+      const [, design] = idsOf(board)
+      // The user stops Design Boo's run: its execution closes `cancelled` and the
+      // card is released to todo, where the pump will never touch it again.
+      const [run] = await ledgerOf(board, design!)
+      await board.completeExecution(run!.id, { status: 'cancelled' })
+      board.forceRelease(design!)
+      orchestrator.detachTask(design!)
+
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'parser fixed'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const refl = reflections(delivered).find((r) => r.sessionKey === sk('leader'))
+      expect(refl).toBeDefined()
+      expect(refl!.task).not.toMatch(/Still outstanding/)
+    })
+  })
+  // ─── An agent busy with a non-task turn (a user reply, a reflection) ──────────
+  describe('createBoardOrchestrator: work for an agent mid-turn', () => {
+    it('a delegation waits for the reply in flight, and is never completed with it', async () => {
+      const occupied = new Set([sk('a2')]) // Bug Boo is answering the user
+      const { board, delivered, orchestrator } = makeHarness({ occupiedSessions: occupied })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix the parser</delegate>'),
+      )
+      const [t] = idsOf(board)
+      expect(board.statusOf(t!)).toBe('todo')
+      expect(deliveredTo(delivered, 'a2')).toEqual([])
+
+      // Its reply to the user ends. That reply is NOT the task's output.
+      occupied.delete(sk('a2'))
+      await orchestrator.onEvent(sk('a2'), doneEvent('rU', 'Here is my answer to you.'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(board.comments.some((c) => c.body.includes('Here is my answer'))).toBe(false)
+      expect(board.statusOf(t!)).toBe('in_progress')
+      expect(deliveredTo(delivered, 'a2')).toEqual(['fix the parser'])
+
+      // And the task's own run is what completes it.
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'parser fixed'))
+      expect(board.statusOf(t!)).toBe('done')
+      expect(board.comments.some((c) => c.taskId === t && c.body.includes('parser fixed'))).toBe(
+        true,
+      )
+    })
+
+    it('a person’s task for an agent mid-reply is queued, then runs when the reply ends', async () => {
+      const occupied = new Set([sk('a2')])
+      const { board, delivered, orchestrator } = makeHarness({ occupiedSessions: occupied })
+      const task = await board.createTask({
+        title: 'Write the release notes',
+        teamId: 't1',
+        sourceDelegationId: encodeHumanAssignment('a2', 'n-busy'),
+      })
+      expect(await orchestrator.dispatchTask(task!.id)).toBe('queued')
+      expect(delivered).toEqual([])
+
+      occupied.delete(sk('a2'))
+      await orchestrator.onEvent(sk('a2'), doneEvent('rU', 'chat reply'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(board.statusOf(task!.id)).toBe('in_progress')
+      expect(delivered.map((d) => [d.agentId, d.task, d.origin])).toEqual([
+        ['a2', 'Write the release notes', { kind: 'assignment' }],
+      ])
     })
   })
 }

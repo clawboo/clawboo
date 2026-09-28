@@ -47,18 +47,20 @@ This column is **team-scoped**: it shows the agents of the selected team (or all
 - **Create Boo**: adds a new agent to the selected team (shown only when connected to a runtime that can create agents).
 - **The global nav**: anchored to the bottom of the column. It holds the work surfaces you switch between most, plus a **Settings** gear and the theme toggle.
 
-The sidebar nav is deliberately short, four work surfaces plus the Settings gear:
+The sidebar nav is deliberately short, six work surfaces plus the Settings gear:
 
-| Block     | Item                    | View it opens                        |
-| --------- | ----------------------- | ------------------------------------ |
-| Primary   | **Atlas** _(All Teams)_ | The global Ghost Graph               |
-| Primary   | **Board**               | The durable kanban board             |
-| Primary   | **Marketplace**         | Browse 436 agents and 85 teams       |
-| Secondary | **Fleet** _(Overview)_  | Fleet-health summary                 |
-| Footer    | **Settings** (gear)     | Opens the Settings modal (see below) |
+| Block     | Item                          | View it opens                                 |
+| --------- | ----------------------------- | --------------------------------------------- |
+| Primary   | **Atlas** _(All Teams)_       | The global Ghost Graph                        |
+| Primary   | **Board**                     | The durable kanban board                      |
+| Primary   | **Marketplace**               | Browse 436 agents and 85 teams                |
+| Primary   | **Connectors**                | Connect MCP servers and apps for your agents  |
+| Secondary | **Fleet** _(Overview)_        | Fleet-health summary                          |
+| Secondary | **Memory** _(Team Knowledge)_ | The shared memory, full-screen with its graph |
+| Footer    | **Settings** (gear)           | Opens the Settings modal (see below)          |
 
 <Note>
-There is no standalone **Approvals** nav item. Approvals surface where they are raised: a collapsible **Needs approval** column on the [board](/using/board) and an inline tray above the [group-chat](/using/group-chat) composer. See [Approvals](/using/approvals).
+There is no standalone **Approvals** nav item. Approvals surface where they are raised: the **Needs you** column on the [board](/using/board) and an inline tray above the [group-chat](/using/group-chat) composer. See [Approvals](/using/approvals).
 </Note>
 
 The theme toggle sits beside the Settings gear at the bottom.
@@ -69,15 +71,15 @@ The **Fleet** view is the read-only overview of the whole fleet: agent count, 24
 
 ### The Settings modal
 
-Everything for managing, configuring, and inspecting the dashboard lives in a **Settings modal**, opened from the gear at the bottom of the sidebar or with **`Cmd/Ctrl + ,`**. It groups ten surfaces:
+Everything for managing, configuring, and inspecting the dashboard lives in a **Settings modal**, opened from the gear at the bottom of the sidebar or with **`Cmd/Ctrl + ,`**. It groups ten surfaces. Memory is one of them and is also in the sidebar, on purpose: Settings shows its list, and the sidebar opens it full-screen with the graph.
 
 | Group     | Item              | What it shows                       |
 | --------- | ----------------- | ----------------------------------- |
-| Workspace | **Runtimes**      | Connect/manage runtimes             |
 | Workspace | **Providers**     | Connect/manage LLM provider keys    |
+| Workspace | **Runtimes**      | Connect/manage runtimes             |
 | Workspace | **Memory**        | Shared-memory browser               |
 | Workspace | **Capabilities**  | The capability inventory            |
-| Workspace | **Scheduler**     | Routines (scheduled team work)      |
+| Workspace | **Routines**      | Scheduled work for teams and agents |
 | Insights  | **Tokens Used**   | Cost dashboard                      |
 | Insights  | **Observability** | Traces, errors, fleet health, evals |
 | Insights  | **Governance**    | Budgets, caps, audit, approvals     |
@@ -92,21 +94,21 @@ The content area renders exactly one view at a time, chosen by the current **vie
 
 The dashboard's state is a single discriminated union, the `ViewMode`, and the content area is a `switch` over it. There are five shapes:
 
-| View mode   | What it shows                                                      | How you reach it                                 |
-| ----------- | ------------------------------------------------------------------ | ------------------------------------------------ |
-| `welcome`   | The welcome screen                                                 | `Escape` from a chat/agent view, or no selection |
-| `agent`     | An agent's three-panel detail view                                 | Click an agent row                               |
-| `booZero`   | Boo Zero's detail view (column 2 hidden)                           | Click the mascot                                 |
-| `groupChat` | A team's group chat (graph + chat split)                           | Click a team icon or the Group Chat row          |
-| `nav`       | One of the nav panels (4 in the sidebar, 10 in the Settings modal) | Click a nav item or a Settings item              |
+| View mode   | What it shows                                                                           | How you reach it                                 |
+| ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `welcome`   | The welcome screen                                                                      | `Escape` from a chat/agent view, or no selection |
+| `agent`     | An agent's three-panel detail view                                                      | Click an agent row                               |
+| `booZero`   | Boo Zero's detail view (column 2 hidden)                                                | Click the mascot                                 |
+| `groupChat` | A team's group chat (graph + chat split)                                                | Click a team icon or the Group Chat row          |
+| `nav`       | One of the nav panels (6 in the sidebar, 10 in the Settings modal, with Memory in both) | Click a nav item or a Settings item              |
 
-The `nav` mode carries a `view` field, one of the 14 `NAV_VIEWS`: `graph` (Atlas), `fleet`, `cost`, `marketplace`, `scheduler`, `system`, `obs`, `board`, `runtimes`, `providers`, `memory`, `governance`, `capabilities`, `health`. The dashboard opens on `nav: graph` (Atlas) by default, so a fresh launch lands you on the org-wide map.
+The `nav` mode carries a `view` field, one of the 15 `NAV_VIEWS`: `graph` (Atlas), `fleet`, `cost`, `marketplace`, `connectors`, `routines`, `system`, `obs`, `board`, `runtimes`, `providers`, `memory`, `governance`, `capabilities`, `health`. The dashboard opens on `nav: graph` (Atlas) by default, so a fresh launch lands you on the org-wide map.
 
 ### Keyboard navigation
 
 - `Escape`: leave an agent / Boo Zero / group-chat view back to the welcome screen. Ignored while you're typing, or while any overlay is open — an open dialog, drawer, menu or dropdown takes `Escape` first, innermost one first, so dismissing a dropdown inside a dialog leaves the dialog (and anything you typed into it) alone.
-- `Cmd/Ctrl + 1…4`: jump to a sidebar work surface, in this order: **1** Atlas, **2** Fleet, **3** Marketplace, **4** Board. (The shortcut order is the `NavView` order, which is not the visual order of the nav blocks.)
-- `Cmd/Ctrl + ,`: open the Settings modal (Runtimes, Providers, Memory, Capabilities, Scheduler, Tokens Used, Observability, Governance, System, System Health).
+- `Cmd/Ctrl + 1…4`: jump to one of four sidebar surfaces, in this order: **1** Atlas, **2** Fleet, **3** Marketplace, **4** Board. (The shortcut handler fixes this order; it is not the visual order of the nav blocks. Connectors and Memory have no shortcut.)
+- `Cmd/Ctrl + ,`: open the Settings modal (Providers, Runtimes, Memory, Capabilities, Routines, Tokens Used, Observability, Governance, System, System Health).
 
 ## Atlas vs the per-team Ghost Graph
 

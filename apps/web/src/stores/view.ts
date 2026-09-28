@@ -19,7 +19,7 @@ export const NAV_VIEWS = [
   'cost',
   'marketplace',
   'connectors',
-  'scheduler',
+  'routines',
   'system',
   'obs',
   'board',
@@ -40,14 +40,30 @@ export type ViewMode =
   | { type: 'booZero' }
   | { type: 'groupChat'; teamId: string }
 
+/** A task the Board should open in its detail drawer the next time it renders
+ *  (set by "Open on board" from a chat task card). `nonce` makes a second
+ *  request for the same task distinct, so it re-opens after being closed. */
+export interface BoardFocus {
+  taskId: string
+  teamId: string | null
+  nonce: number
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 interface ViewStore {
   viewMode: ViewMode
   setViewMode: (mode: ViewMode) => void
 
-  /** Navigate to a NavView (graph, board, cost, marketplace, scheduler, system). */
+  /** Navigate to a NavView (graph, board, cost, marketplace, routines, system). */
   navigateTo: (view: NavView) => void
+
+  /** Pending "open this task" request for the Board (consumed once). */
+  boardFocus: BoardFocus | null
+  /** Switch to the Board and open `taskId` in its full detail drawer. */
+  openBoardTask: (taskId: string, teamId?: string | null) => void
+  /** The Board took the request (it opened the drawer). */
+  clearBoardFocus: () => void
 
   /** Open an agent's chat / detail view. */
   openAgent: (agentId: string) => void
@@ -69,6 +85,14 @@ export const useViewStore = create<ViewStore>((set) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
 
   navigateTo: (view) => set({ viewMode: { type: 'nav', view } }),
+
+  boardFocus: null,
+  openBoardTask: (taskId, teamId = null) =>
+    set((s) => ({
+      viewMode: { type: 'nav', view: 'board' },
+      boardFocus: { taskId, teamId, nonce: (s.boardFocus?.nonce ?? 0) + 1 },
+    })),
+  clearBoardFocus: () => set({ boardFocus: null }),
 
   openAgent: (agentId) => set({ viewMode: { type: 'agent', agentId } }),
 

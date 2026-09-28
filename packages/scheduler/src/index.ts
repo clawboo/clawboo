@@ -8,10 +8,18 @@ export {
   UnknownScheduleError,
   DuplicateFiringOwnerError,
   BoundRecurringScheduleError,
+  InvalidRoutineTargetError,
 } from './errors'
 export { ONCE_PREFIX, parseCronSpec, isOnceSpec, type ParsedSpec } from './spec'
 export { nextOccurrence, probeCronSpec } from './occurrence'
-export { taskTemplateSchema, parseTaskTemplate, type TaskTemplate } from './template'
+export {
+  ROUTINE_TARGETS,
+  routineTargetOf,
+  taskTemplateSchema,
+  parseTaskTemplate,
+  type RoutineTarget,
+  type TaskTemplate,
+} from './template'
 export {
   encodeCronSpec,
   decodeCronSpec,

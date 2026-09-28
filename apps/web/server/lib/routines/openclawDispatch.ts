@@ -42,6 +42,15 @@ import type { RoutineDispatchOutcome } from './wakeBridge'
 
 const DEFAULT_WATCHDOG_MS = 10 * 60_000 // 10 min
 
+/**
+ * The executor type this dispatcher records on its execution rows. On the board
+ * ledger `'openclaw'` means a run the team orchestrator started itself: the
+ * engine's resume() attaches its idle watchdog to such a row, and the lifecycle
+ * bus leaves its completion for the engine to report. A routine run is neither,
+ * so it records its own type and the engine leaves it alone.
+ */
+export const ROUTINE_OPENCLAW_EXECUTOR = 'openclaw-routine'
+
 export type OperatorClientLike = OpenClawGatewayClient
 
 /** The slice of the adapter this dispatcher drives (a test seam — the budget
@@ -64,6 +73,10 @@ export interface ConnectedDispatchInput {
   watchdogMs?: number
   /** Test seam; defaults to the real OpenClawAdapter over `client`. */
   makeAdapter?: (client: OperatorClientLike) => ConnectedAdapterLike
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 function watchdogMs(override?: number): number {
@@ -144,6 +157,15 @@ async function dispatchConnectedSubstrateInner(
   const stopBeat = startTaskHeartbeat(db, taskId, { assigneeAgentId: run.agentId })
   try {
     return await drainClaimedRoutineRun(input, gatewayAgentId, missionId)
+  } catch (err) {
+    // Whatever the drain did not settle itself. The claim is ours, so hand the
+    // task back instead of leaving it in progress with nothing driving it.
+    try {
+      releaseTask(db, taskId)
+    } catch {
+      // The stale sweep releases it.
+    }
+    return { ok: false, taskId, error: `run failed: ${errorText(err)}` }
   } finally {
     stopBeat()
   }
@@ -164,7 +186,7 @@ async function drainClaimedRoutineRun(
 
   const exec = createExecutionProcess(db, {
     taskId,
-    executorType: 'openclaw',
+    executorType: ROUTINE_OPENCLAW_EXECUTOR,
     runReason: 'routine',
   })
   emitEvent(db, {
@@ -245,6 +267,9 @@ async function drainClaimedRoutineRun(
   // event already recorded spend so the terminal fallback can't double-count if a
   // future Gateway starts streaming cost.
   let recordedAnyCost = false
+  // A stream that throws (the operator connection dropped mid-run) ends the run
+  // as surely as a `done` does.
+  let streamError: string | null = null
 
   try {
     for (;;) {
@@ -254,14 +279,18 @@ async function drainClaimedRoutineRun(
         break
       }
       let timer: ReturnType<typeof setTimeout> | undefined
-      const raced = await Promise.race([
-        iterator.next(),
-        new Promise<'timeout'>((resolve) => {
-          timer = setTimeout(() => resolve('timeout'), remaining)
-          timer.unref?.()
-        }),
-      ])
-      if (timer) clearTimeout(timer)
+      let raced: IteratorResult<RuntimeEvent> | 'timeout'
+      try {
+        raced = await Promise.race([
+          iterator.next(),
+          new Promise<'timeout'>((resolve) => {
+            timer = setTimeout(() => resolve('timeout'), remaining)
+            timer.unref?.()
+          }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
       if (raced === 'timeout') {
         timedOut = true
         break
@@ -305,8 +334,18 @@ async function drainClaimedRoutineRun(
         break
       }
     }
+  } catch (err) {
+    streamError = errorText(err)
   } finally {
-    await iterator.return?.()
+    await Promise.resolve(iterator.return?.()).catch(() => undefined)
+  }
+
+  if (streamError !== null) {
+    await adapter.abort(runHandle).catch(() => undefined)
+    const error = `run failed: ${streamError}`
+    settleExec({ status: 'failed', error }, { status: 'failed', error })
+    releaseTask(db, taskId)
+    return { ok: false, taskId, error }
   }
 
   if (stopForBudget) {

@@ -11,6 +11,7 @@
 
 import { create } from 'zustand'
 
+import { taskAttentionOf, type TaskAttention } from '@/features/board/boardStatus'
 import type { BoardChange } from '@/features/group-chat/boardOrchestration'
 import { boardClient } from '@/lib/boardClient'
 
@@ -22,6 +23,10 @@ export interface BoardTaskView {
   parentTaskId: string | null
   /** Report-up summary (from the change-feed `done`); null until completed. */
   summary: string | null
+  /** Why the task needs a person, as the server last computed it. `undefined`
+   *  means not known for the current status (a status frame that carried no
+   *  verdict); readers fall back to the status via `taskAttentionOf`. */
+  attention?: TaskAttention | null
   createdAt: number
   updatedAt: number
 }
@@ -35,14 +40,23 @@ function mergeTask(existing: BoardTaskView | undefined, change: BoardChange): Bo
   // summary, so nothing additive is lost).
   if (existing && incomingUpdatedAt < existing.updatedAt) return existing
   const updatedAt = Math.max(incomingUpdatedAt, existing?.updatedAt ?? 0)
+  const status = change.status ?? existing?.status ?? 'todo'
   return {
     id: change.id,
     title: change.title ?? existing?.title ?? '',
-    status: change.status ?? existing?.status ?? 'todo',
+    status,
     assigneeAgentId: change.assigneeAgentId ?? existing?.assigneeAgentId ?? null,
     parentTaskId: change.parentTaskId ?? existing?.parentTaskId ?? null,
     // summary is additive — a later non-summary change must not erase it.
     summary: change.summary ?? existing?.summary ?? null,
+    // A verdict that came WITH this change wins. Otherwise the old one holds only
+    // while the status is unchanged: a card that moved has not been re-judged.
+    attention:
+      change.attention !== undefined
+        ? change.attention
+        : status === existing?.status
+          ? existing.attention
+          : undefined,
     createdAt: change.createdAt ?? existing?.createdAt ?? Date.now(),
     updatedAt,
   }
@@ -76,6 +90,7 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
             status: r.status,
             assigneeAgentId: r.assigneeAgentId ?? null,
             parentTaskId: r.parentTaskId ?? null,
+            attention: taskAttentionOf(r),
             createdAt: r.createdAt,
             updatedAt: r.updatedAt,
           }),

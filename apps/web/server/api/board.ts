@@ -5,11 +5,17 @@
 
 import type { Request, Response } from 'express'
 
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 
+import { delegationTargetOf, encodeHumanAssignment } from '@clawboo/board-core'
 import {
   addComment,
+  agents,
   appendAudit,
+  assignTaskDelegation,
+  attentionForTask,
+  attentionForTasks,
   claimBody,
   claimTask,
   commentBody,
@@ -35,12 +41,17 @@ import {
   updateTaskFields,
   workspaceActionBody,
   getWorkspaceForTask,
+  type ClawbooDb,
+  type DbTask,
   type TaskStatus,
 } from '@clawboo/db'
 import { agentHandoffSchema } from '@clawboo/worktrees'
+import { eq } from 'drizzle-orm'
 
 import { getDb } from '../lib/db'
+import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
+import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import {
   actOnTaskWorkspace,
@@ -72,7 +83,7 @@ export function boardListGET(req: Request, res: Response): void {
     const status =
       typeof req.query['status'] === 'string' ? (req.query['status'] as TaskStatus) : undefined
     const includeDropped = req.query['includeDropped'] === 'true'
-    res.json({ tasks: listTasks(db, { teamId, status, includeDropped }) })
+    res.json({ tasks: withAttention(db, listTasks(db, { teamId, status, includeDropped })) })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -89,13 +100,42 @@ export function boardGetGET(req: Request, res: Response): void {
       res.status(404).json({ error: 'task not found' })
       return
     }
-    res.json({ task, comments: getComments(db, taskId), ancestors: getAncestors(db, taskId) })
+    res.json({
+      task: { ...task, attention: attentionForTask(db, taskId) },
+      comments: getComments(db, taskId),
+      ancestors: getAncestors(db, taskId),
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
 }
 
+/** Each task with why it needs a person (`attention`, null when it does not), so
+ *  the board can route it into its needs-you column without a request per card. */
+function withAttention(db: ClawbooDb, rows: DbTask[]): Array<DbTask & { attention: unknown }> {
+  const byId = attentionForTasks(db, rows)
+  return rows.map((t) => ({ ...t, attention: byId.get(t.id) ?? null }))
+}
+
+/** An active (not archived) member of `teamId`, or null. A person can hand a task
+ *  only to someone on the team it belongs to: that team's orchestrator is the one
+ *  that runs it. */
+function teamMember(
+  db: ClawbooDb,
+  teamId: string,
+  agentId: string,
+): { id: string; name: string } | null {
+  const row = db.select().from(agents).where(eq(agents.id, agentId)).get() as
+    { id: string; name: string; teamId: string | null; archivedAt?: number | null } | undefined
+  if (!row || row.archivedAt || row.teamId !== teamId) return null
+  return { id: row.id, name: row.name }
+}
+
 // ─── POST /api/board ───────────────────────────────────────────────────────
+// With `assigneeAgentId`, the task is created FOR that agent: it is bound to the
+// agent (so the dispatcher can always find it again, after a restart too) and,
+// when it starts in `todo`, handed to the team's orchestrator to run now. Its
+// result reports to the person on its card; the team lead is not involved.
 export function boardCreatePOST(req: Request, res: Response): void {
   try {
     const parsed = createTaskBody.safeParse(req.body)
@@ -104,17 +144,152 @@ export function boardCreatePOST(req: Request, res: Response): void {
       return
     }
     const db = getDb()
-    const task = createTask(db, parsed.data)
+    const { assigneeAgentId, ...input } = parsed.data
+    if (assigneeAgentId) {
+      if (!input.teamId) {
+        res.status(400).json({ error: 'team_required' })
+        return
+      }
+      if (!teamMember(db, input.teamId, assigneeAgentId)) {
+        res.status(400).json({ error: 'agent_not_in_team' })
+        return
+      }
+      if (input.status && input.status !== 'todo' && input.status !== 'backlog') {
+        res.status(400).json({ error: 'invalid_status' })
+        return
+      }
+    }
+    const task = createTask(db, {
+      ...input,
+      ...(assigneeAgentId
+        ? {
+            status: input.status ?? 'todo',
+            sourceDelegationId: encodeHumanAssignment(assigneeAgentId, randomUUID().slice(0, 8)),
+          }
+        : {}),
+    })
     // Observability: emit self-gates → no-op when obs is off.
     emitEvent(db, {
       kind: 'task_created',
       taskId: task.id,
       teamId: task.teamId,
+      agentId: assigneeAgentId ?? null,
       data: { title: task.title, status: task.status, parentTaskId: task.parentTaskId },
     })
-    res.json({ task })
+    if (assigneeAgentId && task.teamId && task.status === 'todo') {
+      requestTaskDispatch(task.teamId, task.id, loopbackMcpBaseUrl(req))
+    }
+    res.json({ task: { ...task, attention: attentionForTask(db, task.id) } })
   } catch (err) {
     res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/board/:taskId/retry ──────────────────────────────────────────
+// Run a task again because a person asked: one that failed, timed out, was
+// stopped, or was parked after failing repeatedly. It goes back to `todo` (which
+// clears the old assignee and verdict) and straight to its bound agent, past the
+// automatic pump's "don't keep re-firing this" policy: that policy exists to stop
+// the MACHINE retrying forever, not to overrule the person.
+export function boardRetryPOST(req: Request, res: Response): void {
+  try {
+    const db = getDb()
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const task = getTask(db, taskId)
+    if (!task) {
+      res.status(404).json({ ok: false, error: 'task not found' })
+      return
+    }
+    if (task.status !== 'todo' && task.status !== 'blocked' && task.status !== 'backlog') {
+      res.status(409).json({ ok: false, error: 'not_retryable' })
+      return
+    }
+    if (!task.teamId) {
+      res.status(409).json({ ok: false, error: 'no_team' })
+      return
+    }
+    const agentId = delegationTargetOf(task.sourceDelegationId)
+    if (!agentId) {
+      res.status(409).json({ ok: false, error: 'unassigned' })
+      return
+    }
+    if (task.status !== 'todo') {
+      const moved = updateStatus(db, taskId, 'todo')
+      if (!moved.ok) {
+        res.status(409).json({ ok: false, error: moved.reason })
+        return
+      }
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId,
+        teamId: task.teamId,
+        data: { to: 'todo', reason: 'retry' },
+      })
+    }
+    addComment(db, taskId, 'Retry requested.', 'user')
+    requestTaskDispatch(task.teamId, taskId, loopbackMcpBaseUrl(req))
+    res.status(202).json({ ok: true, task: getTask(db, taskId) })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) })
+  }
+}
+
+// ─── POST /api/board/:taskId/assign ─────────────────────────────────────────
+// Hand a task nobody is working on to one agent on its team, and start it. For a
+// card no agent will ever pick up (created without one, or made by an agent's own
+// `create_task`), and for re-routing a failed task to someone else.
+export function boardAssignPOST(req: Request, res: Response): void {
+  try {
+    const db = getDb()
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const body = req.body as { agentId?: unknown } | undefined
+    const agentId = typeof body?.agentId === 'string' ? body.agentId.trim() : ''
+    if (!agentId) {
+      res.status(400).json({ ok: false, error: 'agentId required' })
+      return
+    }
+    const task = getTask(db, taskId)
+    if (!task) {
+      res.status(404).json({ ok: false, error: 'task not found' })
+      return
+    }
+    if (!task.teamId) {
+      res.status(409).json({ ok: false, error: 'no_team' })
+      return
+    }
+    const member = teamMember(db, task.teamId, agentId)
+    if (!member) {
+      res.status(400).json({ ok: false, error: 'agent_not_in_team' })
+      return
+    }
+    // The new binding and the release to `todo` commit together or not at all.
+    const assigned = assignTaskDelegation(
+      db,
+      taskId,
+      encodeHumanAssignment(agentId, randomUUID().slice(0, 8)),
+    )
+    if (!assigned.ok) {
+      if (assigned.reason === 'not_found') {
+        res.status(404).json({ ok: false, error: 'task not found' })
+        return
+      }
+      // Running, finished, cancelled or dropped: nothing to hand over.
+      res.status(409).json({ ok: false, error: 'not_assignable' })
+      return
+    }
+    if (assigned.from !== 'todo') {
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId,
+        teamId: task.teamId,
+        data: { to: 'todo', reason: 'assigned' },
+      })
+    }
+    addComment(db, taskId, `Assigned to ${member.name}.`, 'user')
+    requestTaskDispatch(task.teamId, taskId, loopbackMcpBaseUrl(req))
+    res.json({ ok: true, task: getTask(db, taskId) })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) })
   }
 }
 

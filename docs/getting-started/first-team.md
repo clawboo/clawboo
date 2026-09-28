@@ -16,7 +16,7 @@ These docs describe Clawboo **v0.3.1**, the current release.
 <Note>
 - A running Clawboo dashboard. If you haven't installed it yet, start with [Quickstart, native](/getting-started/quickstart-native) (no Gateway) or [Quickstart, OpenClaw](/getting-started/quickstart-openclaw).
 - At least one connected runtime. Either path in this tutorial works:
-  - **Native**: you pasted a provider key during native onboarding, and a starter team was already seeded for you.
+  - **Native**: you pasted a provider key during native onboarding, then picked a team from the marketplace and deployed it.
   - **OpenClaw**: your OpenClaw Gateway is connected, so you can deploy a marketplace-template team of OpenClaw agents.
 </Note>
 

@@ -13,7 +13,7 @@
 // loop breakers) are UNCHANGED — they live inside the ported engine.
 
 import { compactToolResultMarkdown } from '@clawboo/compaction'
-import { agents, enqueueInbox, teams, type ClawbooDb } from '@clawboo/db'
+import { enqueueInbox, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import {
   agentIdFromSessionKey,
@@ -22,24 +22,25 @@ import {
   createNudgeQueue,
   HUMAN_TURN,
   type BoardOrchestrator,
+  type DispatchOutcome,
   type KnownAgent,
+  type TurnOrigin,
 } from '@clawboo/team-orchestration'
-import { eq } from 'drizzle-orm'
-
 import { resolveDelegationApproval } from '../../api/delegationApproval'
 import { getRegistry } from '../agentSource/registry'
 import { getDb } from '../db'
 import { publishAgentStatus } from './agentStatusBus'
-import { publishBoardChange } from './boardChangeBus'
 import { booZeroForTeam, ensureNativeBooZero } from './booZero'
 import { auditCapHit } from './capHitAudit'
 import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
+import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { NATIVE_SIGNAL_CONTEXT_KEY } from '../runtimes/native/nativeDriver'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
 import { createServerDeliver, type RunEntry } from './serverDeliver'
+import { activeTeamAgents, resolveTeamLeadId } from './teamLead'
 
 const log = createLogger('team-orchestrator')
 
@@ -70,13 +71,22 @@ export interface EnqueueUserMessageInput {
   /** Optional client-provided entryId for the persisted user message, so the thin
    *  client's optimistic bubble and the SSE-replayed user entry dedup by entryId. */
   userEntryId?: string
+  /** Set when a scheduled routine posts the message on the person's behalf. The
+   *  transcript names the routine, and the turn is framed as scheduled (nobody
+   *  is necessarily watching, so it should finish without waiting on them). */
+  routine?: { id: string; name: string }
 }
+
+/** What became of an ingested message. `ok` means the target's turn started, or
+ *  was queued behind a run already in flight on that session. */
+export type EnqueueUserMessageResult =
+  { ok: true; targetAgentId: string } | { ok: false; error: string }
 
 export interface TeamOrchestrator {
   readonly teamId: string
   /** Ingest a user message (202-style fire-and-forget): resolve the target, persist
    *  the user message, then run the target's turn — the engine reacts to its events. */
-  enqueueUserMessage(input: EnqueueUserMessageInput): Promise<void>
+  enqueueUserMessage(input: EnqueueUserMessageInput): Promise<EnqueueUserMessageResult>
   /** User Stop: bump the stop generation + abort in-flight runs → clean release. */
   stop(): void
   /** Re-attach durable in-flight work + fire anything ready (the engine's
@@ -94,6 +104,9 @@ export interface TeamOrchestrator {
    *  the ready-pump can re-fire the work and the idle watchdog stops owning a run
    *  nobody is driving. Refused while a live run still holds the session. */
   detachTask(taskId: string): boolean
+  /** A person asked for this task to run now (created for an agent from the
+   *  board, retried, or just assigned). See the engine's `dispatchTask`. */
+  dispatchTask(taskId: string): Promise<DispatchOutcome>
   /** Tear down timers + the engine (idle eviction / shutdown). */
   dispose(): void
 }
@@ -110,18 +123,6 @@ interface Instance {
 
 const instances = new Map<string, Instance>()
 
-function activeTeamAgents(
-  db: ClawbooDb,
-  teamId: string,
-): Array<{ id: string; name: string; archivedAt?: number | null }> {
-  const rows = db.select().from(agents).where(eq(agents.teamId, teamId)).all() as Array<{
-    id: string
-    name: string
-    archivedAt?: number | null
-  }>
-  return rows.filter((a) => !a.archivedAt)
-}
-
 function knownAgents(db: ClawbooDb, teamId: string): KnownAgent[] {
   const members = activeTeamAgents(db, teamId).map((a) => ({ id: a.id, name: a.name }))
   const bz = booZeroForTeam(db, teamId)
@@ -129,19 +130,9 @@ function knownAgents(db: ClawbooDb, teamId: string): KnownAgent[] {
   return members
 }
 
-/** Resolve the team's reduce point: Boo Zero for an OpenClaw team (the universal
- *  leader, preserved from the browser path); else the explicit leader (when an active
- *  member), else the first active member. */
-function resolveLeaderId(db: ClawbooDb, teamId: string): string | null {
-  const bz = booZeroForTeam(db, teamId)
-  if (bz) return bz.id
-  const team = db.select().from(teams).where(eq(teams.id, teamId)).get() as
-    { leaderAgentId?: string | null } | undefined
-  const members = activeTeamAgents(db, teamId)
-  if (team?.leaderAgentId && members.some((a) => a.id === team.leaderAgentId))
-    return team.leaderAgentId
-  return members[0]?.id ?? null
-}
+/** The team's reduce point (see ./teamLead): Boo Zero, else the team's own lead
+ *  while an active member, else the first active member. */
+const resolveLeaderId = resolveTeamLeadId
 
 /** Server-side @mention resolution (longest-prefix match), replicating the
  *  browser's `parseMention` — which stays browser-only (it has several SPA-feature
@@ -269,6 +260,10 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // terminal and the no-terminal paths, so it cannot strand a permanent busy
     // that would make `detachTask` refuse forever.
     isSessionBusy: (sk) => abortMap.has(sk),
+    // Any turn at all, running or queued (the nudge queue knows both): a task is
+    // never bound behind someone else's reply, which would otherwise complete it
+    // with that reply and let the task's own output surface in the chat.
+    isSessionOccupied: (sk) => nudge.isBusy(sk) || abortMap.has(sk),
     agentIdForSession: (sk) => agentIdFromSessionKey(sk),
     deliver: trackedDeliver,
     stopGen: () => serverStopGen,
@@ -335,8 +330,9 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       // Live-push each board mutation to the team's in-memory board bus; each open
       // team-chat SSE stream forwards it as a `board` event so the thin client's
       // BoardTaskCards update live during a cascade. SEPARATE from obs (which is fed
-      // by serverBoardClient's emitEvent) — no double-emit.
-      publishBoardChange(teamId, change)
+      // by serverBoardClient's emitEvent), so nothing is emitted twice. A status
+      // move carries the task's needs-you state, so a failed card says so at once.
+      publishBoardChangeWithAttention(db, teamId, change)
     },
     // Compact a child's report-up summary before it's recorded/relayed (pure,
     // pass-through-safe, failure-preserving). Mirrors the browser binding.
@@ -389,7 +385,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
 
   const orchestrator: TeamOrchestrator = {
     teamId,
-    async enqueueUserMessage(input: EnqueueUserMessageInput): Promise<void> {
+    async enqueueUserMessage(input: EnqueueUserMessageInput): Promise<EnqueueUserMessageResult> {
       touch()
       // Ensure the DEFAULT-NATIVE Boo Zero exists BEFORE resolving the roster/leader.
       // `ready` runs `ensureNativeBooZero`, so `knownAgents` / `resolveLeaderId` see it
@@ -400,7 +396,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       await ready
       const stimulus = input.stimulus
       const roster = knownAgents(db, teamId)
-      if (roster.length === 0) return
+      if (roster.length === 0) return { ok: false, error: 'The team has no active members.' }
       // Target priority: explicit targetAgentId > @mention > leader > first member.
       // For an OpenClaw team the leader IS Boo Zero (the universal reduce-point,
       // injected into the roster by `knownAgents`); a native team routes to its own
@@ -411,6 +407,9 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
           : null
       const targetId =
         explicit ?? mentionTarget(stimulus, roster) ?? resolveLeaderId(db, teamId) ?? roster[0]!.id
+      const origin: TurnOrigin = input.routine
+        ? { kind: 'schedule', routineName: input.routine.name }
+        : HUMAN_TURN
       // Persist the user message under the target's team key (observability seed).
       persistTeamChatEntry(db, {
         teamId,
@@ -419,6 +418,15 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
         role: 'user',
         kind: 'user',
         entryId: input.userEntryId,
+        ...(input.routine
+          ? {
+              origin: {
+                kind: 'routine' as const,
+                routineId: input.routine.id,
+                routineName: input.routine.name,
+              },
+            }
+          : {}),
       })
       // Run the target's turn through the SAME deliver primitive: it streams the
       // agent's events into the engine, which reacts to any `<delegate>`/`<plan>`.
@@ -431,7 +439,14 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       // so a transient down-state is invisible to the user, not a dead send + a resend.
       const isOperatorDown = (err: unknown): boolean =>
         err instanceof Error && /operator client unavailable|OpenClaw operator/i.test(err.message)
-      const persistDeliverFailure = (operatorStillDown: boolean): void => {
+      const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+      // The reason handed back to the caller (a routine records it as its error).
+      // A holder rather than a `let`: it is written from inside the catch closures.
+      const delivery: { failure: string | null } = { failure: null }
+      const persistDeliverFailure = (operatorStillDown: boolean, err: unknown): void => {
+        delivery.failure = operatorStillDown
+          ? `Could not reach the OpenClaw Gateway: ${errorText(err)}`
+          : errorText(err)
         persistTeamChatEntry(db, {
           teamId,
           agentId: targetId,
@@ -442,7 +457,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
           kind: 'meta',
         })
       }
-      await deliver(sk, targetId, stimulus, HUMAN_TURN).catch(async (err: unknown) => {
+      await deliver(sk, targetId, stimulus, origin).catch(async (err: unknown) => {
         log.error({ err, teamId, targetId }, 'team-orchestrator user-turn delivery failed')
         if (isOperatorDown(err)) {
           const recovered = await getRegistry()
@@ -450,20 +465,23 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
             .catch(() => false)
           if (recovered) {
             // Operator is back — retry the SAME turn transparently.
-            await deliver(sk, targetId, stimulus, HUMAN_TURN).catch((retryErr: unknown) => {
+            await deliver(sk, targetId, stimulus, origin).catch((retryErr: unknown) => {
               log.error(
                 { err: retryErr, teamId, targetId },
                 'team-orchestrator retry after reconnect failed',
               )
-              persistDeliverFailure(isOperatorDown(retryErr))
+              persistDeliverFailure(isOperatorDown(retryErr), retryErr)
             })
             return
           }
-          persistDeliverFailure(true)
+          persistDeliverFailure(true, err)
           return
         }
-        persistDeliverFailure(false)
+        persistDeliverFailure(false, err)
       })
+      return delivery.failure
+        ? { ok: false, error: delivery.failure }
+        : { ok: true, targetAgentId: targetId }
     },
     stop(): void {
       // Bump the stop generation SYNCHRONOUSLY before any await — the engine's
@@ -491,6 +509,11 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     },
     detachTask(taskId: string): boolean {
       return engine.detachTask(taskId)
+    },
+    async dispatchTask(taskId: string): Promise<DispatchOutcome> {
+      touch()
+      await ready // the Boo-Zero bootstrap and the first resume come first
+      return engine.dispatchTask(taskId)
     },
     signalAgent(agentId: string, text: string): void {
       const sk = buildTeamSessionKey(agentId, teamId)

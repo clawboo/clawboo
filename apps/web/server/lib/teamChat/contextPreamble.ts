@@ -128,6 +128,14 @@ const WORKER_COORDINATION_BLOCK = `[Your task — read carefully]
 You are executing ONE scoped task delegated to you by your team lead. You CANNOT reach the user — your reply goes to your team lead, not the user. Do the work using your own knowledge and tools. If a detail is missing, make a reasonable assumption and note it — do NOT ask the user or "the boss" a question. When you're done, report a short, concrete result, not a question.
 [End Your task]`
 
+// The same guardrail for a task a PERSON assigned this agent from the board. The
+// lead-centric wording above would be false here: no lead is waiting, and the
+// reply is read by the person, on the task card. What stays true is that nobody
+// can answer a question mid-task, so the assume-and-note rule is kept verbatim.
+const USER_ASSIGNED_WORKER_BLOCK = `[Your task (read carefully)]
+You are executing ONE scoped task the user assigned to you directly from the team board. Your final reply is posted on that task's card for the user to read. They cannot answer questions while you work, so do the work using your own knowledge and tools, and if a detail is missing, make a reasonable assumption and note it. Do not hand the task to a teammate. When you're done, report a short, concrete result, not a question.
+[End Your task]`
+
 // The team room + board-read tools are attached to every orchestrator-driven run
 // (native via its in-process MCP bridge, the other runtimes over the loopback MCP
 // control plane) — but NOTHING told an agent they exist, so the room stayed empty
@@ -177,7 +185,7 @@ const CODING_RUNTIMES = new Set(['codex', 'claude-code', 'hermes'])
  *  it received. Both of those turns want the roster and the rules and NEITHER block. */
 function coordinationBlockFor(
   runtime: string | null,
-  framing: { isLeader: boolean; isWorker: boolean },
+  framing: { isLeader: boolean; isWorker: boolean; isUserAssigned?: boolean },
   awareness: string | null,
 ): string | null {
   const blocks: string[] = []
@@ -186,7 +194,8 @@ function coordinationBlockFor(
     blocks.push(NATIVE_LEADER_COORDINATION_BLOCK)
   else if (runtime && CODING_RUNTIMES.has(runtime) && framing.isLeader)
     blocks.push(CODING_LEADER_COORDINATION_BLOCK)
-  if (framing.isWorker) blocks.push(WORKER_COORDINATION_BLOCK)
+  if (framing.isWorker)
+    blocks.push(framing.isUserAssigned ? USER_ASSIGNED_WORKER_BLOCK : WORKER_COORDINATION_BLOCK)
   if (awareness) blocks.push(awareness)
   return blocks.length > 0 ? blocks.join('\n\n') : null
 }
@@ -220,6 +229,17 @@ function hasTeamRoom(db: ClawbooDb, agentId: string, runtime: string | null): bo
 function hasBoardRead(db: ClawbooDb, agentId: string, runtime: string | null): boolean {
   if (runtime !== 'clawboo-native') return true
   return loadAgentConfigOrDefault(db, agentId).tools.tasks !== false
+}
+
+/** The note a turn carries when a scheduled routine sent it. The routine posted
+ *  the person's own instructions, but they may be away, and a question back to
+ *  them would sit unanswered until they return. */
+export function buildScheduledRoutineBlock(routineName: string): string {
+  return [
+    '[Scheduled Routine]',
+    `This message was posted by "${routineName}", a routine the user scheduled. They may not be watching right now, so do not wait on them: carry it out, make reasonable assumptions instead of asking questions, and state those assumptions in your reply.`,
+    '[End Scheduled Routine]',
+  ].join('\n')
 }
 
 /** Compose the volatile team-context preamble for a team run. Returns null when
@@ -273,12 +293,17 @@ export function buildServerTeamContext(
     isUserFacing: framing.isUserFacing,
   })
 
+  const scheduledBlock = framing.scheduledRoutine
+    ? buildScheduledRoutineBlock(framing.scheduledRoutine)
+    : null
+
   const composed = [
     personaBlock,
     rulesBlock,
     aboutUserBlock,
     rosterBlock,
     coordinationBlock,
+    scheduledBlock,
     connectorsBlock,
   ]
     .filter(Boolean)

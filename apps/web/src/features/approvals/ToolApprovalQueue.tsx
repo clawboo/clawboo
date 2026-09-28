@@ -3,7 +3,7 @@
 // always / deny). The broker (and the governance delegation gate) writes a
 // pending row to the DB and long-polls for the decision; this is the human side.
 // Renders every pending tool approval (UNSCOPED) — the Governance dashboard's
-// "review everything" surface. The in-chat tray + the Board's "Needs approval"
+// "review everything" surface. The in-chat tray + the Board's "Needs you"
 // column render the SAME `ToolApprovalCard`, scoped, via `usePendingApprovals`.
 // Renders null when there are no pending approvals (unless `showEmpty` is set).
 

@@ -18,7 +18,8 @@ export {
   isTerminal,
   legalTargets,
 } from '@clawboo/board-core'
-export type { TaskStatus } from '@clawboo/board-core'
+export type { AttentionReason, TaskAttention, TaskStatus } from '@clawboo/board-core'
+export * from './attention'
 export * from './attempts'
 export * from './events'
 export * from './repository'

@@ -7,12 +7,15 @@
 // the gate to `isTerminal` (which reads like a tidy-up) fails loudly instead of
 // silently hiding every failure reason from the chat timeline.
 
-import { cleanup, render as rtlRender, screen, waitFor } from '@testing-library/react'
+import { cleanup, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import type { BoardTaskView } from '@/stores/board'
+import { useFleetStore } from '@/stores/fleet'
+import { useViewStore } from '@/stores/view'
 
 import { server } from '../../../__vitest__/mswServer'
 import { BoardTaskCard } from '../BoardTaskCard'
@@ -20,10 +23,10 @@ import { BoardTaskCard } from '../BoardTaskCard'
 afterEach(() => cleanup())
 
 // The card's tint resolution reads the theme (useTeamBooColor → useTheme).
-const render = (task: BoardTaskView) =>
+const render = (task: BoardTaskView, teamId?: string) =>
   rtlRender(
     <ThemeProvider>
-      <BoardTaskCard task={task} />
+      <BoardTaskCard task={task} teamId={teamId} />
     </ThemeProvider>,
   )
 
@@ -149,7 +152,7 @@ describe('the status pill', () => {
     ['backlog', 'Queued'],
     ['todo', 'Queued'],
     ['in_progress', 'Working'],
-    ['in_review', 'Review'],
+    ['in_review', 'Verifying'],
     ['blocked', 'Blocked'],
     ['done', 'Done'],
     ['cancelled', 'Cancelled'],
@@ -193,5 +196,113 @@ describe('rendering', () => {
 
     await screen.findByText('Summarise the changelog')
     expect(screen.queryByText('Output')).not.toBeInTheDocument()
+  })
+})
+
+describe('a task that needs a person', () => {
+  it('says why on the pill instead of reading as blocked or queued work', async () => {
+    reportUp('')
+    render(task({ status: 'blocked', attention: { reason: 'failed', failedRuns: 3 } }))
+    expect(await screen.findByText('Failed 3×')).toBeInTheDocument()
+    expect(screen.queryByText('Blocked')).not.toBeInTheDocument()
+  })
+
+  it('a stopped task no longer passes for queued work, and says what that means', async () => {
+    render(task({ status: 'todo', attention: { reason: 'stopped', failedRuns: 0 } }))
+    expect(await screen.findByText('Stopped')).toBeInTheDocument()
+    expect(screen.queryByText('Queued')).not.toBeInTheDocument()
+    expect(screen.getByTestId('board-task-attention')).toHaveTextContent(/will not restart/)
+  })
+})
+
+describe('the trail (comments + activity)', () => {
+  it('is folded away until asked for', async () => {
+    render(task({ status: 'in_progress' }))
+    await screen.findByText('Summarise the changelog')
+    expect(screen.getByTestId('board-task-trail-toggle')).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByTestId('board-task-trail')).toBeNull()
+  })
+
+  it('opens onto the task’s comments, each attributed the way a person would say it', async () => {
+    useFleetStore.setState({ agents: [{ id: 'a1', name: 'Coder', teamId: 'T' }] as never })
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Summarise the changelog' },
+          comments: [
+            { id: 'c1', body: 'Run failed: provider out of credits', authorType: 'system' },
+            { id: 'c2', body: 'Retry requested.', authorType: 'user' },
+            { id: 'c3', body: 'Here is the summary.', authorType: 'agent', authorAgentId: 'a1' },
+          ],
+          ancestors: [],
+        }),
+      ),
+    )
+    render(task({ status: 'in_progress', assigneeAgentId: 'a1' }))
+    await userEvent.click(await screen.findByTestId('board-task-trail-toggle'))
+    const trail = await screen.findByTestId('board-task-trail')
+    const log = await within(trail).findByTestId('task-comments')
+    expect(within(log).getByText('Clawboo')).toBeInTheDocument()
+    expect(within(log).getByText('You')).toBeInTheDocument()
+    expect(within(log).getByText('Coder')).toBeInTheDocument()
+    expect(within(log).getByText(/provider out of credits/)).toBeInTheDocument()
+    expect(within(trail).getByRole('tab', { name: 'Comments (3)' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+  })
+
+  it('says when the comments could not load, and Retry reads them again', async () => {
+    let available = false
+    server.use(
+      http.get('/api/board/t1', () =>
+        available
+          ? HttpResponse.json({
+              task: { id: 't1', title: 'Summarise the changelog' },
+              comments: [{ id: 'c1', body: 'Retry requested.', authorType: 'user' }],
+              ancestors: [],
+            })
+          : HttpResponse.json({ error: 'unavailable' }, { status: 500 }),
+      ),
+    )
+    render(task({ status: 'in_progress' }))
+    await userEvent.click(await screen.findByTestId('board-task-trail-toggle'))
+    const error = await screen.findByTestId('board-task-comments-error')
+    expect(error).toHaveTextContent('Couldn’t load the comments.')
+    expect(screen.queryByText('Loading…')).toBeNull()
+
+    available = true
+    await userEvent.click(within(error).getByRole('button', { name: 'Retry' }))
+    const log = await screen.findByTestId('task-comments')
+    expect(within(log).getByText('Retry requested.')).toBeInTheDocument()
+    expect(screen.queryByTestId('board-task-comments-error')).toBeNull()
+  })
+
+  it('switches to the live activity feed for the same task', async () => {
+    let scoped = ''
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({ task: { id: 't1' }, comments: [], ancestors: [] }),
+      ),
+      http.get('/api/obs/events', ({ request }) => {
+        scoped = new URL(request.url).searchParams.get('taskId') ?? ''
+        return HttpResponse.json({ events: [] })
+      }),
+    )
+    render(task({ status: 'in_progress' }))
+    await userEvent.click(await screen.findByTestId('board-task-trail-toggle'))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Activity' }))
+    await waitFor(() => expect(scoped).toBe('t1'))
+  })
+})
+
+describe('Open on board', () => {
+  it('switches to the Board and asks it to open this task, filtered to its team', async () => {
+    useViewStore.setState({ viewMode: { type: 'groupChat', teamId: 'T' }, boardFocus: null })
+    render(task({ status: 'in_progress' }), 'T')
+    await userEvent.click(await screen.findByTestId('board-task-open'))
+    const state = useViewStore.getState()
+    expect(state.viewMode).toEqual({ type: 'nav', view: 'board' })
+    expect(state.boardFocus).toMatchObject({ taskId: 't1', teamId: 'T' })
   })
 })

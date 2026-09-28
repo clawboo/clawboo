@@ -5,7 +5,7 @@ description: Run a verified MCP connector from Clawboo itself, sign in to a remo
 
 Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. Open **Connectors** in the sidebar, under Marketplace. It lists 20 popular MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
 
-This is the one Marketplace tab that is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
+Unlike the Marketplace above it, Connectors is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
 
 ## Prerequisites
 

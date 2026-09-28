@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 
 import { useTeamStore } from '@/stores/team'
+import { useViewStore } from '@/stores/view'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
 import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
@@ -41,9 +42,16 @@ import { Spinner } from '@/features/shared/Spinner'
 import { ENTER_SPRING, listDelay } from '@/lib/motion'
 
 import { TaskDetailDrawer } from './TaskDetailDrawer'
-import { ApprovalsColumn } from './ApprovalsColumn'
+import { NeedsYouColumn } from './NeedsYouColumn'
 import { NewTaskDialog } from './NewTaskDialog'
-import { STATUS_LABEL, TASK_STATUSES, canTransition, statusOptions } from './boardStatus'
+import {
+  BOARD_STATUS_COLUMNS,
+  NEEDS_YOU_COLUMN,
+  STATUS_LABEL,
+  boardColumnOf,
+  canTransition,
+  statusOptions,
+} from './boardStatus'
 import { BOARD_ACCESSIBILITY, OTHER_COLUMN } from './boardAnnouncements'
 import { useStatusMutation } from './useStatusMutation'
 import { resolveDrop } from './resolveDrop'
@@ -53,10 +61,12 @@ const SECTION_LABEL =
 const COUNT_PILL =
   'font-data rounded-full bg-foreground/[0.06] px-2.5 py-0.5 text-[11px] font-semibold text-foreground/55'
 
-// One column per canonical status, in lifecycle order. Derived from the shared
-// status metadata so the columns, the New-task composer, and the drawer's status
-// editor never drift on labels or ordering.
-const COLUMNS: { id: string; label: string }[] = TASK_STATUSES.map((id) => ({
+// The status columns, in lifecycle order, after the Needs you column. Derived from
+// the shared status metadata so the columns and the drawer's status editor never
+// drift on labels or ordering. `in_review` shares In progress (it is automated
+// verification, shown with a Verifying badge) and `blocked` always needs a person,
+// so neither has a column of its own.
+const COLUMNS: { id: string; label: string }[] = BOARD_STATUS_COLUMNS.map((id) => ({
   id,
   label: STATUS_LABEL[id],
 }))
@@ -119,6 +129,7 @@ function TaskCard({ task, onClick }: { task: BoardTask; onClick: () => void }) {
         {task.title ?? '(untitled)'}
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {task.status === 'in_review' && <StatusPill tone="working" label="Verifying" />}
         <StatusPill tone="idle" label={runtime} />
         {verdict && (
           <StatusPill tone={VERDICT_META[verdict].tone} label={VERDICT_META[verdict].label} />
@@ -161,7 +172,11 @@ function DraggableCard({
     // `title` rides along so the screen-reader announcements can name the card
     // without reaching back into `effectiveTasks` — see boardAnnouncements.ts
     // for why a closure over board state is unsafe at announcement time.
-    data: { fromStatus: task.status, title: task.title ?? '(untitled)' },
+    data: {
+      fromStatus: task.status,
+      fromColumn: boardColumnOf(task),
+      title: task.title ?? '(untitled)',
+    },
     disabled,
   })
   return (
@@ -239,6 +254,7 @@ function BoardColumn({
 export function BoardPanel() {
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  const boardFocus = useViewStore((s) => s.boardFocus)
 
   const [teamFilter, setTeamFilter] = useState<string>(selectedTeamId ?? 'all')
   const [tasks, setTasks] = useState<BoardTask[]>([])
@@ -317,6 +333,18 @@ export function BoardPanel() {
 
   useVisiblePolling(() => void refresh(), 5000)
 
+  // "Open on board" from a chat task card: open that task's drawer. A filter set to
+  // another team would hide the task's card behind the drawer, so it switches to
+  // the task's team; "All teams" already shows the card and stays as it is.
+  useEffect(() => {
+    if (!boardFocus) return
+    setTeamFilter((f) =>
+      f !== 'all' && boardFocus.teamId && boardFocus.teamId !== f ? boardFocus.teamId : f,
+    )
+    setOpenTaskId(boardFocus.taskId)
+    useViewStore.getState().clearBoardFocus()
+  }, [boardFocus])
+
   // A manually-created task: show it instantly (optimistic prepend) unless the
   // active team filter would exclude it, then reconcile against the server. The
   // authoritative `refresh` corrects any drift (e.g. server-assigned fields).
@@ -342,12 +370,15 @@ export function BoardPanel() {
     [tasks, overrides],
   )
 
-  const byStatus = useMemo(() => {
-    const map: Record<string, BoardTask[]> = {}
+  // Every task lands in exactly one column: Needs you when nothing will move it
+  // on its own, else the column for its status (off-list statuses go to Other).
+  const byColumn = useMemo(() => {
+    const map: Record<string, BoardTask[]> = { [NEEDS_YOU_COLUMN]: [] }
     for (const col of COLUMNS) map[col.id] = []
     const other: BoardTask[] = []
     for (const t of effectiveTasks) {
-      if (COLUMN_IDS.has(t.status)) (map[t.status] ??= []).push(t)
+      const col = boardColumnOf(t)
+      if (col === NEEDS_YOU_COLUMN || COLUMN_IDS.has(col)) (map[col] ??= []).push(t)
       else other.push(t)
     }
     if (other.length) map[OTHER_COLUMN.id] = other
@@ -356,8 +387,8 @@ export function BoardPanel() {
 
   // Append the catch-all "Other" column only when an off-list status appears.
   const columns = useMemo(
-    () => (byStatus[OTHER_COLUMN.id]?.length ? [...COLUMNS, OTHER_COLUMN] : COLUMNS),
-    [byStatus],
+    () => (byColumn[OTHER_COLUMN.id]?.length ? [...COLUMNS, OTHER_COLUMN] : COLUMNS),
+    [byColumn],
   )
 
   const onDragStart = useCallback(
@@ -407,6 +438,9 @@ export function BoardPanel() {
             ? {
                 ...t,
                 status: newStatus,
+                // The server's needs-you verdict was for the OLD status; drop it so the
+                // card lands in its new column now, and let the next poll re-judge it.
+                attention: undefined,
                 ...(newStatus === 'todo'
                   ? { assigneeAgentId: null, assigneeRuntime: null, verification: null }
                   : {}),
@@ -422,7 +456,12 @@ export function BoardPanel() {
   const onDragEnd = useCallback(
     async ({ active, over }: DragEndEvent) => {
       setActiveTask(null)
-      const move = resolveDrop(String(active.id), over ? String(over.id) : null, effectiveTasks)
+      const move = resolveDrop(
+        String(active.id),
+        over ? String(over.id) : null,
+        effectiveTasks,
+        boardColumnOf,
+      )
       if (!move) return
       const task = effectiveTasks.find((t) => t.id === move.taskId)
       const ok = await mutate({
@@ -446,13 +485,16 @@ export function BoardPanel() {
   const columnDropDisabled = useCallback(
     (columnId: string) =>
       activeTask != null &&
-      activeTask.status !== columnId &&
+      boardColumnOf(activeTask) !== columnId &&
       !canTransition(activeTask.status, columnId),
     [activeTask],
   )
 
   // Draggable only when the card has at least one legal target — so terminal
   // (done/cancelled) and off-list "Other" cards can't be dragged into illegal states.
+  // Needs-you cards are moved with their own actions (Retry, Assign, Dismiss), not
+  // by dragging: a stopped task is already `todo`, so a drop could not express
+  // "run it again".
   const cardDisabled = useCallback((task: BoardTask) => statusOptions(task.status).length <= 1, [])
 
   return (
@@ -508,7 +550,7 @@ export function BoardPanel() {
         <Bot size={13} strokeWidth={2} className="shrink-0 text-foreground/40" />
         <span>
           AI agents continuously create and move work.{' '}
-          <span className="text-foreground/35">You can also manage tasks manually.</span>
+          <span className="text-foreground/35">You can also hand a task to an agent yourself.</span>
         </span>
       </div>
 
@@ -525,11 +567,18 @@ export function BoardPanel() {
           onDragCancel={() => setActiveTask(null)}
         >
           <div className="flex min-h-full items-start gap-4">
-            {/* Approvals are decoupled from the board-task fetch (an exec store + a
-              /api/tools/approvals poll), so this column ALWAYS renders as the first
-              column — a /api/board outage never hides a pending, time-sensitive gate.
-              Scoped to the team filter; a rail when empty, auto-expands on a new gate. */}
-            <ApprovalsColumn teamFilter={teamFilter} />
+            {/* Needs you ALWAYS renders as the first column, outside the task-load
+              branch: its approvals are decoupled from the board-task fetch (an exec
+              store + a /api/tools/approvals poll), so a /api/board outage never hides
+              a pending, time-sensitive gate. Its tasks are the ones nothing will move
+              on its own (failed, timed out, stopped, blocked, unassigned). Scoped to
+              the team filter and always expanded, like every other column. */}
+            <NeedsYouColumn
+              teamFilter={teamFilter}
+              tasks={byColumn[NEEDS_YOU_COLUMN] ?? []}
+              onOpenTask={setOpenTaskId}
+              onTasksChanged={() => void refresh()}
+            />
             {!loaded ? (
               // Skeleton columns until the first fetch resolves (mirrors the
               // RuntimesPanel `!loaded` pattern — empty columns shouldn't flash first).
@@ -587,7 +636,7 @@ export function BoardPanel() {
                 <BoardColumn
                   key={col.id}
                   col={col}
-                  items={byStatus[col.id] ?? []}
+                  items={byColumn[col.id] ?? []}
                   dropDisabled={columnDropDisabled(col.id)}
                   cardDisabled={cardDisabled}
                   onCardOpen={setOpenTaskId}
@@ -613,6 +662,7 @@ export function BoardPanel() {
             taskId={openTaskId}
             onClose={() => setOpenTaskId(null)}
             onStatusCommitted={commitStatus}
+            onChanged={() => void refresh()}
           />
         )}
       </AnimatePresence>

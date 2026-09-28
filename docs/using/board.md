@@ -16,55 +16,83 @@ The Board panel is always available. Its subsystem is always on, so the panel re
 </Note>
 
 - A running Clawboo dashboard (`clawboo`).
-- Tasks on the board. Tasks appear when a team delegates work in group chat, when an agent claims work, or when you create one directly via `POST /api/board`. A fresh install with no team activity shows empty columns.
+- Tasks on the board. Tasks appear when a team delegates work in group chat, when an agent claims work, or when you give an agent a task yourself with **New task**. A fresh install with no team activity shows empty columns.
 
 ## Open the board
 
 Click **Board** (the kanban-square icon) in the primary nav of the left sidebar, or press **`Cmd/Ctrl + 4`**. The panel mounts in the main content area.
 
 <Note>
-The number shortcuts cover the four sidebar work surfaces only: `Cmd/Ctrl+1` Atlas, `+2` Fleet, `+3` Marketplace, `+4` Board. Everything else (Scheduler, Tokens Used, System, and the rest) lives in the Settings modal (`Cmd/Ctrl+,`).
+The number shortcuts cover four of the sidebar surfaces: `Cmd/Ctrl+1` Atlas, `+2` Fleet, `+3` Marketplace, `+4` Board. Connectors and Memory sit in the sidebar without one, and the rest (Routines, Tokens Used, System, and so on) live in the Settings modal (`Cmd/Ctrl+,`).
 </Note>
 
 ## The columns
 
-The board renders **seven status columns**, one per task status, in lifecycle order:
+The board renders a **Needs you** column first, then five status columns in lifecycle order:
 
-| Column      | Status        | What it means                                    |
-| ----------- | ------------- | ------------------------------------------------ |
-| Backlog     | `backlog`     | Triaged, not yet ready to work                   |
-| To do       | `todo`        | Ready and claimable                              |
-| In progress | `in_progress` | Actively owned by an assignee                    |
-| In review   | `in_review`   | Work landed, awaiting the verification gate      |
-| Blocked     | `blocked`     | Stalled (e.g. a failed blocker or red-gate debt) |
-| Done        | `done`        | Terminal, completed                              |
-| Cancelled   | `cancelled`   | Terminal, abandoned                              |
+| Column      | Holds                                                                    |
+| ----------- | ------------------------------------------------------------------------ |
+| Needs you   | Pending approvals, and every task that will not move until a person acts |
+| Backlog     | `backlog` tasks: triaged, not yet ready to work                          |
+| To do       | `todo` tasks that will run on their own: queued for their agent          |
+| In progress | `in_progress` tasks, plus `in_review` ones (badged **Verifying**)        |
+| Done        | `done` tasks                                                             |
+| Cancelled   | `cancelled` tasks                                                        |
 
-Ahead of those sits a **Needs approval** column, always the first column on the board. It is scoped to the team filter, collapses to a thin rail when there is nothing pending, and auto-expands the moment a request arrives. It is fed by its own poll rather than by `GET /api/board`, so a board outage never hides a pending, time-sensitive gate. See [Approvals](/using/approvals).
+There is no **In review** column and no **Blocked** column. `in_review` is the automated [verification](/concepts/verification) step: the builder's work is being checked by the deterministic gate and the critic, and nobody is waiting on you, so those cards stay in **In progress** under a **Verifying** badge. When a verdict does need a person, the task moves to `blocked`, and every `blocked` task needs a person, so it lives in **Needs you**. See [Things that need you](#things-that-need-you).
 
 Each column shows its label and a live count of the tasks in it. The panel header shows a total task count (`{N} tasks`) and polls `GET /api/board` every five seconds, so status changes and new tasks appear without a manual refresh. A **Refresh** button forces an immediate re-fetch.
 
 Those reads overlap on purpose (the poll, the Refresh button, and the reconcile that follows a manual create all share one path), so they are **sequenced**: a response may only update the board while it is still the newest read and no local change has been committed since it was issued. A read that resolves out of order is discarded and the next poll reconciles instead, so a card you just created or dragged is never briefly reverted by a request that was already in flight.
 
-Because the board is a live projection of agent activity — cards are created and moved by agents as they work — a one-line hint under the header (_"AI agents continuously create and move work. You can also manage tasks manually."_) sets that expectation up front. The manual path is real, though, and there are three ways to drive the board by hand: a **New task** button in the header opens a composer, each task's status is editable from its [detail drawer](#the-task-detail-drawer), and you can **drag a card between columns** (see below).
+Because the board is a live projection of agent activity (agents create and move cards as they work), a one-line hint under the header (_"AI agents continuously create and move work. You can also hand a task to an agent yourself."_) sets that expectation up front. The manual path is real, though: a **New task** button in the header gives one agent a task, each task's status is editable from its [detail drawer](#the-task-detail-drawer), you can **drag a card between columns** (see below), and every card in **Needs you** carries the action that gets it moving again.
 
-A task whose status falls outside the canonical seven is not silently dropped; an **Other** column is appended only when such a task exists, so off-list statuses stay visible and counted.
+A task whose status falls outside the canonical ones is not silently dropped; an **Other** column is appended only when such a task exists, so off-list statuses stay visible and counted.
 
 <Note>
 Until the first fetch resolves, the board shows skeleton columns. If that first fetch fails, the board shows a "Couldn't load the board" error with a **Retry** link (distinct from a genuinely empty board). A *transient* poll failure after a good load keeps the last good snapshot rather than blanking an actively-watched board.
 </Note>
 
-A genuinely empty board (loaded fine, zero tasks) shows one **"No tasks yet"** empty state — explaining that agents populate the board automatically as work is delegated, with a **New task** button to add the first one manually — instead of seven identical empty columns.
+A genuinely empty board (loaded fine, zero tasks) shows one **"No tasks yet"** empty state instead of a row of identical empty columns. It explains that agents populate the board as work is delegated, and offers a **New task** button to give an agent the first one yourself. **Needs you** still shows beside it, because approvals do not depend on the task list.
 
-## Creating a task manually
+## Giving an agent a task
 
-The header's **New task** button opens a small composer for adding work to the board by hand — the human counterpart to agent delegation. It collects a **title** (required), an optional **description**, a **team** (prefilled from the active team filter), and an initial **status** (**To do** by default, or **Backlog** for triage), then writes it through `POST /api/board`. On success the task appears on the board immediately (optimistically, then reconciled by the next poll) and a toast confirms it; a poll that was already in flight when the task was created is discarded rather than blanking the new card. A failed write keeps the composer open and toasts the error. Once on the board, a manually-created task is indistinguishable from a delegated one — an agent can claim and run it normally.
+The header's **New task** button hands one agent a task, the human counterpart to Boo Zero delegating. It asks, in order:
+
+1. **Team**, prefilled from the active team filter (or the only team, when there is one).
+2. **Agent**, a member of that team. A team with one agent picks it for you; otherwise you choose.
+3. **Task**, a short title, and optional **Details**: context, constraints, what done looks like.
+
+**Send to _agent_** writes it through `POST /api/board` with an `assigneeAgentId`. The server binds the task to that agent and starts it right away, so the card appears in **To do** and moves to **In progress** as soon as the agent picks it up. If the agent is busy with another task or still replying in chat, the task waits in **To do** and runs the moment the agent is free. The agent receives the title and the details together.
+
+Only that agent works on it. The task is not routed through Boo Zero, and when it finishes, its result is recorded on the task card (on the board and in the team's group chat) rather than handed to the team lead to act on. If the run fails, the card moves to **Needs you** with the reason. On success a toast confirms who got it; a poll that was already in flight when the task was created is discarded rather than blanking the new card. A failed write keeps the dialog open and toasts the error.
+
+## Things that need you
+
+**Needs you** is always the first column and always expanded, even when it is empty ("Nothing needs you right now"). It is scoped to the team filter and holds two kinds of item:
+
+- **Approval pending.** An agent wants to run a command, call a risky tool, or make a risky delegation. Each request renders as its approval card with **Allow once / Always / Deny**. These come from their own poll rather than `GET /api/board`, so a board outage never hides a time-sensitive gate. See [Approvals](/using/approvals).
+- **Tasks nothing will move by themselves.** Each carries a badge naming why, the agent it belongs to, and the reason when the run recorded one:
+
+| Badge        | What happened                                                                   | What you can do      |
+| ------------ | ------------------------------------------------------------------------------- | -------------------- |
+| Failed       | The last run ended in an error (a crash, a provider error, a killed run)        | Retry, open, dismiss |
+| Timed out    | The agent stopped responding and the run was ended                              | Retry, open, dismiss |
+| Failed 3×    | The task failed three times in a row, so Clawboo stopped retrying it on its own | Retry, open, dismiss |
+| Stopped      | You pressed Stop on its run; it will not restart on its own                     | Retry, open, dismiss |
+| Needs review | Verification could not pass it                                                  | Retry, open, dismiss |
+| Blocked      | An agent marked it blocked                                                      | Retry, open, dismiss |
+| Unassigned   | No agent is bound to it, so nobody will ever pick it up                         | Assign to an agent   |
+
+**Retry** puts the task back in **To do** and sends it straight to its agent, even one Clawboo had stopped retrying automatically: the automatic limit exists to stop the machine looping, not to overrule you. **Assign** gives the task to a member of its team and starts it. **Dismiss** asks first, then moves the task to **Cancelled**. Each action also writes a note on the task's comments (for example "Retry requested."), so the trail shows who did what.
+
+A stuck task does not hold anything else up. Its agent is free for other work, the tasks that depended on a failed one are cancelled so they do not wait forever, and a team lead waiting on results is told about the failure instead of being kept waiting. Why a task is stuck is computed by the server from the task's run history and returned as its `attention` field; see the [Board API](/reference/rest-api/board).
 
 ## Moving a task by drag-and-drop
 
 Each card has a **grip handle** (top-right, visible on hover or keyboard focus). Dragging a card to another column is a status change: it writes through the same `PATCH /api/board/:taskId` path as the drawer's status editor, so the server stays authoritative and the same rules apply.
 
-- **Only legal moves are offered.** Mid-drag, columns the card can't legally transition to (per the [state machine](/concepts/the-board)) are dimmed and won't accept a drop; terminal cards (`done` / `cancelled`) and off-list **Other** cards aren't draggable at all.
+- **Only legal moves are offered.** Mid-drag, columns the card can't legally transition to (per the [state machine](/concepts/the-board)) are dimmed and won't accept a drop; terminal cards (`done` / `cancelled`) and off-list **Other** cards aren't draggable at all. Cards in **Needs you** are moved with their own buttons (Retry, Assign, Dismiss) instead of by dragging.
 - **The agent-release guard still applies.** Dragging an _assigned_ task to **To do** — which unassigns its agent — asks for confirmation first, exactly as the drawer editor does.
 - **Optimistic + poll-safe.** The card moves instantly and is reconciled against the server; a rejected move (e.g. a `→ done` verification gate) rolls back with a toast. Neither an in-flight move nor a just-committed one is reverted by the five-second poll, including a poll already in flight when the move landed.
 - **Keyboard and touch.** Focus a card's handle and press **Space** to pick it up, **arrow keys** to choose a column, **Space** to drop, **Escape** to cancel; touch drag is supported too.
@@ -75,6 +103,7 @@ Clicking a card (rather than its handle) still opens the detail drawer — a cli
 
 Each task is a card showing its title plus a row of badges:
 
+- **Verifying**: shown on an `in_review` task while its verification runs.
 - **Runtime badge**: the task's `assigneeRuntime` (the [runtime](/appendices/glossary) that owns the work), defaulting to `openclaw` when unset.
 - **Verification badge**: present only once a [verification](/concepts/verification) verdict is stored. The card parses the task's `verification` JSON and renders the verdict: `pass` (green), `fail` (red), or `debt` for `completed_with_debt` (amber).
 - **Cost**: the task's `costUsd`, shown only when a cost is recorded. An exactly-zero cost reads `$0.000`; a sub-cent cost keeps four decimals (`$0.0004`) so a real charge is never rounded away; a cost of one cent or more shows cents (`$0.42`).
@@ -98,11 +127,19 @@ flowchart LR
 
 The drawer sections, top to bottom:
 
+### Needs you
+
+Shown only for a task in the **Needs you** column: its badge, the reason in full, and the same **Retry**, **Assign** and **Dismiss** actions.
+
+### Brief
+
+The task's description, when it says more than the title: for a task you gave an agent, the details you wrote.
+
 ### Overview
 
-The task's core fields: **Status**, **Assignee** (`assigneeAgentId`), **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (`costUsd` to four decimals), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
+The task's core fields: **Status**, **Agent** (by name: the one working it, or the one it is bound to while it waits), **Team**, **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (`costUsd` to four decimals), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
 
-**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically, rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). A committed change also moves the card to its new column on the board immediately rather than waiting for the five-second poll; it goes through the same shared commit path as [drag-and-drop](#moving-a-task-by-drag-and-drop), so a read already in flight can't snap the card back. Releasing a task to **To do** additionally clears its assignee, runtime, and stored verdict, so the card's verification badge disappears and its runtime badge falls back to `openclaw`, matching what the server writes. Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
+**Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (minus **In review**, the automated verification step, which is never a manual choice) (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically, rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). A committed change also moves the card to its new column on the board immediately rather than waiting for the five-second poll; it goes through the same shared commit path as [drag-and-drop](#moving-a-task-by-drag-and-drop), so a read already in flight can't snap the card back. Releasing a task to **To do** additionally clears its assignee, runtime, and stored verdict, so the card's verification badge disappears and its runtime badge falls back to `openclaw`, matching what the server writes. Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
 
 When a `→ done` is refused **specifically by the [verification](/concepts/verification) gate** (the task carries a non-promotable verdict), the editor doesn't dead-end: it offers a **"Complete anyway"** confirmation that re-submits with the server's `humanOverride`. That's the supported path for a human shipping despite a non-promotable verdict — and, like on the server, the override is **recorded in the audit log**. An _illegal_ transition can't be overridden this way (the override only bypasses the verification gate, not the state machine). This lives in the shared status-mutation path, so it works the same whether you change status from this drawer or by [dragging a card](#moving-a-task-by-drag-and-drop) to the Done column.
 
@@ -131,7 +168,7 @@ A live terminal (`ActivityTerminal`) scoped to this task, the streaming tool-cal
 
 ### Comments
 
-The task's comments (discussion and system notes), each prefixed by its `authorType`. The agent report-up summary that a child writes when it finishes a delegation lands here as a comment.
+The task's comment log, oldest first, each entry attributed the way you would say it: the agent by name, **You** for your own actions (a retry, an assignment), and **Clawboo** for the notes the orchestrator writes itself (a run failing, a result arriving late, a limit being hit). The agent's report when it finishes lands here too.
 
 ### Lineage / deps
 
@@ -160,7 +197,9 @@ How it works:
 
 - **Projection store.** `GroupChatPanel` renders cards from a read-only board projection store (`useBoardStore`), _not_ from the chat transcript. On opening a team it loads the authoritative snapshot via `boardClient.listTasks(teamId)` (a `GET /api/board?teamId=…` read), so the cards survive a page refresh. The orchestrator's client-derived change-feed then applies live mutations (`applyChange`) to the same store, merged last-write-wins by `updatedAt`.
 - **Interleaving by `createdAt`.** Each non-`cancelled` board task is placed into the timeline at its `createdAt` timestamp, alongside the chat blocks and any live streaming cards. So a task card appears in causal position, right where the delegation happened, and is not appended to the bottom.
-- **Live status.** The `BoardTaskCard` shows the task title, a status pill (Queued → Working → Review → Done / Blocked), and the assignee's avatar + name. As the board change-feed flips the task's status, the card's pill updates in place. A completed (`done`) card also shows the report-up summary; because the summary is a board _comment_ (not a task-row field), a card reloaded after a refresh fetches it lazily from `GET /api/board/:taskId`.
+- **Live status.** The `BoardTaskCard` shows the task title, a status pill (Queued, Working, Verifying, Done, Cancelled), and the assignee's avatar + name. A task that needs you says why instead (**Failed**, **Timed out**, **Stopped**, **Unassigned**), with a **Resolve on board** link. As the board change-feed flips the task's status, the card's pill updates in place. A completed (`done`) card also shows the report-up summary, and a failed one shows the reason; because both are board _comments_ (not task-row fields), a card reloaded after a refresh fetches them lazily from `GET /api/board/:taskId`.
+- **The trail.** **Comments & activity** at the foot of each card opens, inside the card, the task's comment log and its live activity feed (tool calls, results, errors). It is folded away by default so the timeline stays readable; open it to see how a task reached its result or why it failed. If the comments cannot be loaded, the trail says so and offers **Retry**.
+- **Open on board.** The expand icon beside the status pill switches to the Board with that task's detail drawer open. If the Board is filtered to a different team, the filter switches to the task's team so its card is not hidden. **All teams** already shows the card, so it stays as it is.
 
 <Info>
 The chat-fused board cards and the standalone Board panel read the same canonical board. The panel is the cross-team operator view; the inline cards are the per-team narration. Neither is a write path back to the board; a chat message describes a decision; the [board mutation](/concepts/the-board) *is* the decision.
@@ -168,7 +207,8 @@ The chat-fused board cards and the standalone Board panel read the same canonica
 
 ## Verify it worked
 
-- Open **Board**. The header shows `{N} tasks`, and tasks sit in the column matching their status. Click a card and confirm the drawer's **Overview** status matches the card's column.
+- Open **Board**. The header shows `{N} tasks`, and tasks sit in the column matching their status (a failed or stopped task sits in **Needs you**). Click a card and confirm the drawer's **Overview** status matches the card's column.
+- Click **New task**, pick a team and an agent, and send it. The card appears in **To do**, moves to **In progress** when the agent starts, and shows up in that team's group chat.
 - In a team's group chat, delegate a piece of work and watch a `BoardTaskCard` appear inline with a **Working** pill, then flip to **Done** with a summary when the run completes.
 - Refresh the page; the inline cards reload from `GET /api/board?teamId=…` (refresh-survival), and the panel re-polls. Both show the same task state.
 - For the raw data, fetch it directly:

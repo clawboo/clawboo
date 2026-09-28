@@ -71,6 +71,31 @@ describe('persistTeamChatEntry (the single team-chat writer)', () => {
     expect(typeof entries[0]!.entryId).toBe('string')
   })
 
+  it("records who posted an entry on the person's behalf, and nothing otherwise", () => {
+    persistTeamChatEntry(db, {
+      teamId: TEAM,
+      agentId: 'lead',
+      text: 'Summarize yesterday.',
+      role: 'user',
+      kind: 'user',
+      origin: { kind: 'routine', routineId: 'r1', routineName: 'Morning briefing' },
+    })
+    persistTeamChatEntry(db, {
+      teamId: TEAM,
+      agentId: 'lead',
+      text: 'hi',
+      role: 'user',
+      kind: 'user',
+    })
+    const [routine, typed] = rowsFor('lead')
+    expect(routine!.origin).toEqual({
+      kind: 'routine',
+      routineId: 'r1',
+      routineName: 'Morning briefing',
+    })
+    expect(typed).not.toHaveProperty('origin')
+  })
+
   it('is idempotent across a re-drive with the same entryId (ON CONFLICT DO NOTHING)', () => {
     const input = {
       teamId: TEAM,

@@ -133,8 +133,8 @@ The native adapter's `write()` is the seam's only genuinely durable managed writ
 
 The scheduler seam's invariant is captured by one field on `ScheduleRecord`: `domain`. There are exactly two cron _domains_, and conflating them is the mistake the seam exists to prevent.
 
-- **`team-task`**, Clawboo's own scheduler for team work, the `clawboo-routine` source over the `scheduled_runs` ledger. It is the single external wake for _every_ runtime class (native, the wrapped one-shots, and OpenClaw team tasks alike).
-- **`runtime-own-life`**, a runtime's _own_ standalone cron, the `openclaw-gateway-cron` source over the live Gateway. The Scheduler tab is an operator surface over these, not their owner.
+- **`team-task`**, Clawboo's own scheduler for team work, the `clawboo-routine` source over the `scheduled_runs` ledger. It is the single external wake for _every_ runtime class (native, the wrapped one-shots, and OpenClaw alike), whether a Routine posts to a team's chat or files a task for one agent.
+- **`runtime-own-life`**, a runtime's _own_ standalone cron, the `openclaw-gateway-cron` source over the live Gateway. The Routines view is an operator surface over these, not their owner.
 
 There are deliberately only two sources. Claude Code, Codex, Hermes, and native have no live native scheduler of their own; scheduling them _is_ a Clawboo Routine; and `hermes gateway` is never launched, so there is no third adapter to write.
 
@@ -146,7 +146,7 @@ flowchart TD
     end
     r -->|scheduled_runs ledger| ledger[(SQLite)]
     g -->|operator cron.* RPC| gw[OpenClaw Gateway]
-    mux -->|"GET /api/schedules\n{ schedules, sources }"| tab[Scheduler tab]
+    mux -->|"GET /api/schedules\n{ schedules, sources }"| tab[Routines view]
 ```
 
 The multiplexer's write gate enforces this domain split in order: unknown source → `UnknownScheduleError`; `observe-only` tier → `UnsupportedScheduleWriteError`; and a `team-task` _create_ aimed at a `runtime-own-life` source → `TeamTaskDomainViolationError`. The Gateway-cron source _also_ refuses a `team-task` create internally, so the domain rule is defended twice; Clawboo never registers a team task into a runtime's own scheduler.

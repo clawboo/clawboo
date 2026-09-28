@@ -4,10 +4,11 @@
 
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { confirm, useConfirmStore } from '@/stores/confirm'
 import { ConfirmDialog } from '../ConfirmDialog'
+import { Modal } from '../Modal'
 
 afterEach(() => {
   // Settle any dangling dialog so a leaked promise can't bleed into the next test.
@@ -58,6 +59,36 @@ describe('ConfirmDialog', () => {
     await screen.findByTestId('confirm-dialog')
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(result).toBe(false))
+  })
+
+  it('a press on it never reaches the dialog that asked for it', async () => {
+    const onClose = vi.fn()
+    render(
+      <>
+        <Modal open label="Routine" onClose={onClose} data-testid="asking-dialog">
+          <p>Asking</p>
+        </Modal>
+        <ConfirmDialog />
+      </>,
+    )
+    const user = userEvent.setup()
+    let result: boolean | undefined
+    act(() => {
+      void confirm({ message: 'Delete it?' }).then((v) => (result = v))
+    })
+    await screen.findByTestId('confirm-dialog')
+    await user.click(screen.getByTestId('confirm-cancel'))
+    await waitFor(() => expect(result).toBe(false))
+    expect(onClose).not.toHaveBeenCalled()
+
+    act(() => {
+      void confirm({ message: 'Delete it?' }).then((v) => (result = v))
+    })
+    await waitFor(() => expect(screen.getByTestId('confirm-ok')).toBeInTheDocument())
+    await user.click(screen.getByTestId('confirm-ok'))
+    await waitFor(() => expect(result).toBe(true))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('asking-dialog')).toBeInTheDocument()
   })
 
   it('uses custom button labels', async () => {

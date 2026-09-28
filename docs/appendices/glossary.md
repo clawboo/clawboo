@@ -123,9 +123,9 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 **AGENT_HANDOFF**: `AGENT_HANDOFF.json`, the structured, zod-validated clock-out artifact written into a worktree (done/broken/next-step, commands, evidence, native session id). It is the cross-runtime bridge: one runtime can pause and a different runtime can reconstruct state from this file. See [worktrees and handoff](/concepts/worktrees-and-handoff).
 
-**Routine**: a scheduled team-task. Routines are Clawboo's own cron for team work, distinct from a runtime's own-life cron; trying to register a team-task schedule into a runtime-own-life source is refused. See [scheduling](/concepts/scheduling) and [the scheduler](/using/scheduler).
+**Routine**: scheduled work for a team or one agent. A team routine posts its instructions into the team's group chat for the team's lead; an agent routine files a board task for one agent. Routines are Clawboo's own cron for team work, distinct from a runtime's own-life cron; trying to register a team-task schedule into a runtime-own-life source is refused. See [scheduling](/concepts/scheduling) and [Routines](/using/routines).
 
-**scheduler**: the engine that fires Routines: a durable `scheduled_runs` ledger as source of truth plus a rebuildable in-process ticker. A fire is dispatched through the standard executor pipeline. See [scheduling](/concepts/scheduling).
+**scheduler**: the engine that fires Routines: a durable `scheduled_runs` ledger as source of truth plus a rebuildable in-process ticker. A team routine's fire goes through the team chat to the team's lead; an agent routine's fire is dispatched through the standard executor pipeline. See [scheduling](/concepts/scheduling).
 
 ## Gateway and events
 

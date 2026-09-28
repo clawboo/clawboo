@@ -21,6 +21,7 @@ import {
   Check,
   ChevronRight,
   Clock,
+  Repeat,
   SendHorizontal,
   Square,
   Wrench,
@@ -650,6 +651,10 @@ export const UserMessageCard = memo(function UserMessageCard({
   /** Known agent names for @mention highlighting in group chat. */
   knownAgentNames?: string[]
 }) {
+  // A routine posts the person's own instructions on a schedule. Naming it keeps
+  // a message nobody typed just now from reading as a live "You".
+  const routine = entry.origin?.kind === 'routine' ? entry.origin : null
+  const author = routine ? `Routine · ${routine.routineName}` : 'You'
   return (
     <div className="flex justify-end">
       <div
@@ -660,8 +665,14 @@ export const UserMessageCard = memo(function UserMessageCard({
         }}
       >
         <div className="flex items-center justify-between gap-4 border-b border-border px-3.5 py-1.5">
-          <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-foreground/70">
-            {targetAgentName ? `You → ${targetAgentName}` : 'You'}
+          <span
+            className="inline-flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-foreground/70"
+            data-testid={routine ? 'user-message-routine' : undefined}
+          >
+            {routine ? <Repeat size={11} strokeWidth={2.2} aria-hidden /> : null}
+            <span className="truncate">
+              {targetAgentName ? `${author} → ${targetAgentName}` : author}
+            </span>
           </span>
           {entry.timestampMs && (
             <time className="font-data text-[10px] text-muted-foreground">

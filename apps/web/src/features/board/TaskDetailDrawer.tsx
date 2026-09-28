@@ -6,9 +6,12 @@ import {
   FileText,
   ListChecks,
   MessagesSquare,
+  RotateCcw,
+  ScrollText,
   Workflow,
   Terminal,
 } from 'lucide-react'
+import { delegationTargetOf } from '@clawboo/board-core'
 
 import {
   boardClient,
@@ -19,8 +22,9 @@ import {
   type WorkspaceDetail,
 } from '@/lib/boardClient'
 import { useFleetStore } from '@/stores/fleet'
+import { useTeamStore } from '@/stores/team'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
-import { IconButton } from '@/features/shared/Button'
+import { Button, IconButton } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
@@ -28,7 +32,11 @@ import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import { WorkspacePreview } from '@/features/workspace/WorkspacePreview'
 import { Modal } from '@/features/shared/Modal'
 
+import { AssignAgentSelect } from './AssignAgentSelect'
 import { StatusSelect } from './StatusSelect'
+import { TaskComments } from './TaskComments'
+import { ATTENTION_META, attentionLabel, taskAttentionOf, type TaskAttention } from './boardStatus'
+import { useTaskActions } from './useTaskActions'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 const SECTION_LABEL =
@@ -126,10 +134,81 @@ function kvControl(label: string, control: React.ReactNode) {
   )
 }
 
+/** Top-of-drawer notice for a task that needs a person: why, in plain words, and
+ *  the action that gets it moving again. */
+function NeedsYouBanner({
+  taskId,
+  teamId,
+  attention,
+  bound,
+  onChanged,
+}: {
+  taskId: string
+  teamId: string | null
+  attention: TaskAttention
+  /** The agent the task is bound to, if any. */
+  bound: string | null
+  onChanged: () => void
+}) {
+  // Retry hands it back to its agent; with no agent bound, someone has to be
+  // picked. A bound task can also be handed to someone else.
+  const canRetry = attention.reason !== 'unassigned' && !!teamId && !!bound
+  const { retry, dismiss } = useTaskActions()
+  const meta = ATTENTION_META[attention.reason]
+  const error = meta.tone === 'error'
+  return (
+    <div
+      data-testid="task-needs-you"
+      data-attention={attention.reason}
+      className={[
+        'mb-5 rounded-xl border p-3.5',
+        error ? 'border-primary/30 bg-primary/[0.05]' : 'border-amber/40 bg-amber/[0.06]',
+      ].join(' ')}
+    >
+      <div className="flex items-center gap-2">
+        <StatusPill tone={meta.tone} label={attentionLabel(attention)} />
+        <span className="text-[12px] font-semibold text-foreground/80">Needs you</span>
+      </div>
+      <p className="mt-2 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-foreground/75">
+        {attention.detail ?? meta.hint}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {canRetry && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void retry(taskId).then((ok) => ok && onChanged())}
+          >
+            <RotateCcw size={13} strokeWidth={2.2} />
+            Retry
+          </Button>
+        )}
+        {teamId && (
+          <AssignAgentSelect
+            taskId={taskId}
+            teamId={teamId}
+            onAssigned={onChanged}
+            label={bound ? 'Give to someone else…' : 'Assign to…'}
+          />
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void dismiss(taskId).then((ok) => ok && onChanged())}
+        >
+          Dismiss
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function TaskDetailDrawer({
   taskId,
   onClose,
   onStatusCommitted,
+  layer = 60,
+  onChanged,
 }: {
   taskId: string
   onClose: () => void
@@ -137,6 +216,11 @@ export function TaskDetailDrawer({
    *  the card to its new column immediately instead of waiting for the next ~5s
    *  reconciliation poll (#98). Mirrors the drawer's own optimistic `setDetail`. */
   onStatusCommitted?: (taskId: string, newStatus: string) => void
+  /** Stacking layer. Raise it when opening the drawer over another overlay. */
+  layer?: number
+  /** A needs-you action (retry, assign, dismiss) changed the task; the board should
+   *  refresh. The drawer reloads itself. */
+  onChanged?: () => void
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [executions, setExecutions] = useState<BoardExecution[]>([])
@@ -184,17 +268,42 @@ export function TaskDetailDrawer({
     (c) => c.authorType === 'agent' && typeof c.body === 'string' && c.body.trim().length > 0,
   )
   const assigneeId = (task?.['assigneeAgentId'] as string | null | undefined) ?? null
+  // The agent the task is bound to (kept while it waits in To do or needs you,
+  // when there is no live assignee).
+  const sdid =
+    typeof task?.['sourceDelegationId'] === 'string' ? (task['sourceDelegationId'] as string) : null
+  const boundId = delegationTargetOf(sdid)
   const reporterId = agentOutputs.find((c) => c.authorAgentId)?.authorAgentId ?? assigneeId
   const reporterName = useFleetStore(
     (st) => st.agents.find((a) => a.id === reporterId)?.name ?? null,
   )
+  const ownerId = assigneeId ?? boundId
+  const ownerName = useFleetStore((st) =>
+    ownerId ? (st.agents.find((a) => a.id === ownerId)?.name ?? null) : null,
+  )
+  const teamId = typeof task?.teamId === 'string' ? task.teamId : null
+  const teamName = useTeamStore((st) =>
+    teamId ? (st.teams.find((t) => t.id === teamId)?.name ?? null) : null,
+  )
   const outputTitle = reporterName ? `${reporterName}'s report` : 'Report'
+  const attention = task ? taskAttentionOf(task) : null
+  // What the person asked for, when it says more than the title does.
+  const brief =
+    typeof task?.description === 'string' &&
+    task.description.trim() &&
+    task.description.trim() !== (task.title ?? '').trim()
+      ? task.description.trim()
+      : null
+  const refreshAfterAction = (): void => {
+    void load()
+    onChanged?.()
+  }
 
   return (
     <Modal
       open
       variant="drawer"
-      layer={60}
+      layer={layer}
       labelledBy={headingId}
       onClose={onClose}
       data-testid="task-detail-drawer"
@@ -252,6 +361,27 @@ export function TaskDetailDrawer({
           />
         ) : (
           <>
+            {attention && (
+              <NeedsYouBanner
+                taskId={task.id}
+                teamId={teamId}
+                attention={attention}
+                bound={boundId}
+                onChanged={refreshAfterAction}
+              />
+            )}
+
+            {brief && (
+              <Section icon={<ScrollText size={13} />} title="Brief">
+                <div
+                  className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/80"
+                  data-testid="task-brief"
+                >
+                  {brief}
+                </div>
+              </Section>
+            )}
+
             {agentOutputs.length > 0 && (
               <Section icon={<FileText size={13} />} title={outputTitle}>
                 <div className="flex flex-col gap-2">
@@ -305,7 +435,8 @@ export function TaskDetailDrawer({
                   }}
                 />,
               )}
-              {kv('Assignee', String(task['assigneeAgentId'] ?? '—'))}
+              {kv('Agent', ownerName ?? ownerId ?? '—')}
+              {teamId ? kv('Team', teamName ?? teamId) : null}
               {kv('Runtime', String(task['assigneeRuntime'] ?? 'openclaw'))}
               {kv('Cost', cost != null ? `$${cost.toFixed(4)}` : '—')}
               {task['parentTaskId']
@@ -469,33 +600,7 @@ export function TaskDetailDrawer({
             </Section>
 
             <Section icon={<MessagesSquare size={13} />} title={`Comments (${comments.length})`}>
-              {comments.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>No comments.</div>
-              ) : (
-                comments.map((c, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      fontSize: 11.5,
-                      padding: '8px 0',
-                      borderTop: '1px solid var(--border)',
-                    }}
-                  >
-                    <span style={{ color: 'var(--muted-foreground)' }}>
-                      {c.authorType ?? 'system'}:{' '}
-                    </span>
-                    <span
-                      style={{
-                        color: muted(0.75),
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                      }}
-                    >
-                      {c.body}
-                    </span>
-                  </div>
-                ))
-              )}
+              <TaskComments comments={comments} emptyLabel="No comments." />
             </Section>
 
             <Section icon={<Workflow size={13} />} title="Lineage / deps">

@@ -214,11 +214,15 @@ export interface RoutineFiredData {
 }
 export interface RoutineDispatchedData {
   scheduledRunId: string
-  /** The board task the fire materialized (or the bound existing task). */
-  taskId: string
-  runtime: string
+  /** The board task the fire materialized (or the bound existing task). Null for
+   *  a team routine, which posts to the team chat instead of creating a task. */
+  taskId: string | null
+  /** The runtime that ran the fire; null when a team routine's lead had none. */
+  runtime: string | null
   /** Which wake-bridge branch carried the dispatch. */
-  dispatchPath: 'one-shot' | 'connected' | 'human'
+  dispatchPath: 'one-shot' | 'connected' | 'human' | 'team-chat'
+  /** Team routines: the agent the message went to (the team's lead). */
+  targetAgentId?: string | null
 }
 export interface RoutineCompletedData {
   scheduledRunId: string

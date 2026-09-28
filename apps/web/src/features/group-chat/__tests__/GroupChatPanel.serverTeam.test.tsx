@@ -10,7 +10,9 @@ import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { AgentState } from '@/stores/fleet'
+import { useBoardStore } from '@/stores/board'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
@@ -177,5 +179,41 @@ describe('GroupChatPanel — Boo Zero roster eligibility', () => {
     )
 
     expect(await screen.findByTitle('Tag @Boo Zero')).toBeInTheDocument()
+  })
+})
+
+describe('GroupChatPanel, a team whose only activity is board work', () => {
+  it('shows the task cards instead of the empty welcome', async () => {
+    server.use(
+      http.get('/api/chat-history', () => HttpResponse.json({ entries: [] })),
+      // A task given to Coder from the board, before anyone has chatted.
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            {
+              id: 'task-1',
+              title: 'Draft the launch post',
+              status: 'in_progress',
+              assigneeAgentId: 'a2',
+              createdAt: 1_700_000_000_000,
+              updatedAt: 1_700_000_000_000,
+            },
+          ],
+        }),
+      ),
+    )
+    seedNativeTeam()
+    // No chat at all: nothing left over from another test may make it non-empty.
+    useChatStore.setState({ transcripts: new Map() })
+    useBoardStore.getState().reset('t1')
+
+    render(
+      <ThemeProvider>
+        <GroupChatPanel teamId="t1" embedded />
+      </ThemeProvider>,
+    )
+
+    expect(await screen.findByTestId('board-task-card')).toHaveTextContent('Draft the launch post')
+    expect(screen.queryByText('Welcome to My First Team')).toBeNull()
   })
 })

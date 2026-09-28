@@ -1,16 +1,22 @@
 // The gateway-cron source against a fake operator client: field mapping
 // (own-life domain, owner 'openclaw', disabled→paused), the EXACT operator
-// methods + params for every write (cron.add / cron.update incl. the
-// {id, enabled} toggle / cron.remove / cron.run {id, mode:'force'}),
-// disconnected degradation (read = data, write = typed 503), the team-task
-// domain refusal, and the debounced refresh on broadcast `cron` frames.
+// methods + params for every write (cron.add with a session target that
+// matches its payload / cron.update {id, patch} incl. the patch.enabled toggle /
+// cron.remove / cron.run {id, mode:'force'}), disconnected degradation (read =
+// data, write = typed 503), the team-task domain refusal, and the debounced
+// refresh on broadcast `cron` frames.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ScheduleSourceUnavailableError, TeamTaskDomainViolationError } from '@clawboo/scheduler'
+import {
+  InvalidRoutineTargetError,
+  ScheduleSourceUnavailableError,
+  TeamTaskDomainViolationError,
+} from '@clawboo/scheduler'
 
 import {
   OpenClawGatewayCronScheduleSource,
+  sessionTargetFor,
   type OperatorCronClientLike,
 } from '../openClawGatewayCronScheduleSource'
 
@@ -147,7 +153,9 @@ describe('OpenClawGatewayCronScheduleSource', () => {
         agentId: 'gw-agent-1',
         enabled: true,
         schedule: { kind: 'cron', expr: '0 8 * * *' },
-        sessionTarget: 'main',
+        // An agentTurn payload runs as its own isolated turn; the Gateway skips
+        // every fire of a 'main' job that carries one.
+        sessionTarget: 'isolated',
         wakeMode: 'now',
         payload: { kind: 'agentTurn', message: 'Own-life wake' },
       },
@@ -161,7 +169,10 @@ describe('OpenClawGatewayCronScheduleSource', () => {
     })
     expect(client.calls[0]).toEqual({
       method: 'cron.update',
-      params: { id: 'job-1', name: 'renamed', schedule: { kind: 'every', everyMs: 60_000 } },
+      params: {
+        id: 'job-1',
+        patch: { name: 'renamed', schedule: { kind: 'every', everyMs: 60_000 } },
+      },
     })
     expect(client.calls[1]?.method).toBe('cron.get')
 
@@ -169,14 +180,14 @@ describe('OpenClawGatewayCronScheduleSource', () => {
     await source.write({ kind: 'pause', id: 'openclaw-gateway-cron:job-1' })
     expect(client.calls[0]).toEqual({
       method: 'cron.update',
-      params: { id: 'job-1', enabled: false },
+      params: { id: 'job-1', patch: { enabled: false } },
     })
 
     client.calls.length = 0
     await source.write({ kind: 'resume', id: 'openclaw-gateway-cron:job-1' })
     expect(client.calls[0]).toEqual({
       method: 'cron.update',
-      params: { id: 'job-1', enabled: true },
+      params: { id: 'job-1', patch: { enabled: true } },
     })
 
     client.calls.length = 0
@@ -186,6 +197,63 @@ describe('OpenClawGatewayCronScheduleSource', () => {
     client.calls.length = 0
     expect(await source.write({ kind: 'run', id: 'openclaw-gateway-cron:job-1' })).toBeNull()
     expect(client.calls[0]).toEqual({ method: 'cron.run', params: { id: 'job-1', mode: 'force' } })
+  })
+
+  it('pairs every payload kind with the session the Gateway will run it in', async () => {
+    expect(sessionTargetFor({ kind: 'agentTurn', message: 'hi' })).toBe('isolated')
+    expect(sessionTargetFor({ kind: 'systemEvent', text: 'hi' })).toBe('main')
+    expect(sessionTargetFor({ kind: 'command', argv: ['ls'] })).toBe('isolated')
+    expect(sessionTargetFor(undefined)).toBe('isolated')
+
+    const client = makeFakeClient()
+    const source = new OpenClawGatewayCronScheduleSource(client)
+    await source.write({
+      kind: 'create',
+      spec: {
+        source: 'openclaw-gateway-cron',
+        domain: 'runtime-own-life',
+        agentId: 'gw-agent-1',
+        cronSpec: '0 8 * * *',
+        payload: { kind: 'systemEvent', text: 'Check the calendar' },
+      },
+    })
+    expect(client.calls[0]?.params).toMatchObject({
+      sessionTarget: 'main',
+      payload: { kind: 'systemEvent', text: 'Check the calendar' },
+    })
+
+    client.calls.length = 0
+    await source.write({
+      kind: 'update',
+      id: 'openclaw-gateway-cron:job-1',
+      patch: { payload: { kind: 'agentTurn', message: 'Summarize the inbox' } },
+    })
+    expect(client.calls[0]).toEqual({
+      method: 'cron.update',
+      params: {
+        id: 'job-1',
+        patch: {
+          payload: { kind: 'agentTurn', message: 'Summarize the inbox' },
+          sessionTarget: 'isolated',
+        },
+      },
+    })
+  })
+
+  it('refuses a create with no agent before touching the Gateway', async () => {
+    const client = makeFakeClient()
+    const source = new OpenClawGatewayCronScheduleSource(client)
+    await expect(
+      source.write({
+        kind: 'create',
+        spec: {
+          source: 'openclaw-gateway-cron',
+          domain: 'runtime-own-life',
+          cronSpec: '0 9 * * *',
+        },
+      }),
+    ).rejects.toBeInstanceOf(InvalidRoutineTargetError)
+    expect(client.calls).toHaveLength(0)
   })
 
   it('REFUSES registering a team task into the Gateway cron', async () => {

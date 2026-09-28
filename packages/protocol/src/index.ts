@@ -253,6 +253,13 @@ export type TranscriptEntryRole = 'user' | 'assistant' | 'tool' | 'system' | 'ot
 export type TranscriptEntrySource =
   'local-send' | 'runtime-chat' | 'runtime-agent' | 'history' | 'legacy'
 
+/**
+ * Who posted a user-role entry when the person did not type it at that moment.
+ * A routine posts the person's own instructions on a schedule, so its message
+ * renders as theirs with the routine named rather than as a live "You".
+ */
+export type TranscriptEntryOrigin = { kind: 'routine'; routineId: string; routineName: string }
+
 export type TranscriptEntry = {
   entryId: string
   role: TranscriptEntryRole
@@ -271,6 +278,8 @@ export type TranscriptEntry = {
    * derives meaning from this field. Treat it as a spare slot, not an identity.
    */
   fingerprint: string
+  /** Set when something posted this entry on the person's behalf (a routine). */
+  origin?: TranscriptEntryOrigin
 }
 
 export const AGENT_FILE_NAMES = [
