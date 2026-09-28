@@ -6,12 +6,16 @@
  */
 import { HERMES_BOO_LIGHT_SVG } from './artwork/hermes-light'
 import { BOO_VARIANT_META } from './meta'
-import { tintHermes } from './tint/hermes'
+import { resolveTint } from './resolve'
+import { hermesLegibility, tintHermes } from './tint/hermes'
 import type { BooVariantRenderer } from './types'
+
+const legible = (hex: string): boolean => hermesLegibility(hex).ok
 
 export const booVariant: BooVariantRenderer = {
   meta: BOO_VARIANT_META.hermes,
   render(tint) {
-    return tint == null ? HERMES_BOO_LIGHT_SVG : tintHermes(HERMES_BOO_LIGHT_SVG, tint)
+    const { tint: use } = resolveTint(tint, legible)
+    return use == null ? HERMES_BOO_LIGHT_SVG : tintHermes(HERMES_BOO_LIGHT_SVG, use)
   },
 }

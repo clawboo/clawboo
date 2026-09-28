@@ -6,6 +6,9 @@ import { CLAUDE_BOO_SVG } from '../artwork/claude'
 import { CODEX_BOO_SVG } from '../artwork/codex'
 import { HERMES_BOO_DARK_SVG } from '../artwork/hermes-dark'
 import { HERMES_BOO_LIGHT_SVG } from '../artwork/hermes-light'
+import { claudeLegibility, tintClaude } from '../tint/claude'
+import { hermesLegibility, tintHermes } from '../tint/hermes'
+import { tintCodex } from '../tint/codex'
 import type { BooSurface, BooVariantId } from '../types'
 
 /** TINTS[0] is reserved for Boo Zero, which never takes a variant; teammates get 1..9. */
@@ -48,11 +51,15 @@ describe('render with a tint', () => {
     }
   })
 
-  it('refuses a tint that is not a six digit hex', async () => {
+  it('draws the locked artwork for a tint that is not a six digit hex', async () => {
+    // The tinters still refuse it. The renderer resolves first, because it is called during the
+    // React render pass and a throw there takes out the subtree holding the avatar.
     const codex = await loadBooVariant('codex')
-    expect(() => codex.render('rebeccapurple')).toThrow('expected a #rrggbb tint')
+    expect(() => tintCodex(codex.render(null), 'rebeccapurple')).toThrow('expected a #rrggbb tint')
+    expect(codex.render('rebeccapurple')).toBe(codex.render(null))
     const hermes = await loadBooVariant('hermes')
-    expect(() => hermes.render('#fff')).toThrow('tint must be #RRGGBB')
+    expect(() => tintHermes(hermes.render(null), '#fff')).toThrow('tint must be #RRGGBB')
+    expect(hermes.render('#fff')).toBe(hermes.render(null))
   })
 })
 
@@ -67,15 +74,29 @@ describe('the guards each variant carries', () => {
     }
   })
 
-  it('refuses a Claude tint that would lose the chevron eyes', async () => {
+  it('refuses a Claude tint that would lose the chevron eyes, then draws a legible shade', async () => {
     const claude = await loadBooVariant('claude')
-    expect(() => claude.render('#000000')).toThrow('under WCAG AA 4.5:1')
+    const locked = claude.render(null)
+    // The guard still refuses it outright at the tinting layer.
+    expect(() => tintClaude(locked, '#000000')).toThrow('under WCAG AA 4.5:1')
+    expect(claudeLegibility('#000000').ok).toBe(false)
+    // Pure black carries no hue to walk and no grey light enough to hold the eyes is close to it,
+    // so the Boo keeps its own terracotta rather than drawing something illegible. It must not
+    // throw: a real team colour lands on the adjusted path instead (see resolve.test.ts).
+    expect(claude.render('#000000')).toBe(locked)
   })
 
-  it('refuses a Hermes tint whose hem would sink into a dark page', async () => {
+  it('refuses a Hermes tint whose hem would sink into a dark page, then draws a legible shade', async () => {
     for (const surface of ['light', 'dark'] as BooSurface[]) {
       const hermes = await loadBooVariant('hermes', surface)
-      expect(() => hermes.render('#101010')).toThrow('under 3:1')
+      const locked = hermes.render(null)
+      expect(() => tintHermes(locked, '#101010')).toThrow('under 3:1')
+      expect(hermesLegibility('#101010').ok).toBe(false)
+      // Hermes only needs the hem to hold 3:1, a lower bar than Claude's 4.5:1 eyes, so a light
+      // enough shade of this hue exists and the renderer draws that instead of throwing.
+      const drawn = hermes.render('#101010')
+      expect(drawn).not.toBe(locked)
+      expect(drawn.startsWith('<svg')).toBe(true)
     }
   })
 

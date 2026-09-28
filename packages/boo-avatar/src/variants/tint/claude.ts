@@ -62,6 +62,18 @@ function recolour(svgText: string, tint: string): string {
   return svgText.replace(HEX, (m) => map.get(m.toUpperCase()) ?? m)
 }
 
+/**
+ * What a tint costs Claude's two locked marks: the chevron eyes against the body, and the hem
+ * against a dark page. `tintClaude` refuses below 4.5 and 3; the renderer uses this to find a
+ * legible shade instead of refusing.
+ */
+export function claudeLegibility(tintHex: string): { ok: boolean; eyes: number; hem: number } {
+  const tint = norm(tintHex)
+  const eyes = contrast(EYE_INK, shift(CLAUDE_ANCHOR, CLAUDE_ANCHOR, tint))
+  const hem = contrast(shift(HEM_LOCKED, CLAUDE_ANCHOR, tint), DARK_SURFACE)
+  return { ok: eyes >= 4.5 && hem >= 3, eyes, hem }
+}
+
 /** The locked SVG recoloured to `tintHex`. Feeding the anchor must return the input unchanged. */
 export function tintClaude(svgText: string, tintHex: string): string {
   assertCoverage(svgText)
@@ -70,14 +82,12 @@ export function tintClaude(svgText: string, tintHex: string): string {
    * The eyes stay locked, so a dark tint loses the face; the hem carries the silhouette on a dark
    * page. Both fail together on a deep tint, so neither check stands alone.
    */
-  const mid = shift(CLAUDE_ANCHOR, CLAUDE_ANCHOR, tint)
-  const eyes = contrast(EYE_INK, mid)
+  const { eyes, hem } = claudeLegibility(tint)
   if (eyes < 4.5) {
     throw new Error(
       `tintClaude: ${tint} leaves the chevron eyes at ${eyes}:1 on the body, under WCAG AA 4.5:1`,
     )
   }
-  const hem = contrast(shift(HEM_LOCKED, CLAUDE_ANCHOR, tint), DARK_SURFACE)
   if (hem < 3) {
     throw new Error(`tintClaude: ${tint} leaves the hem at ${hem}:1 on ${DARK_SURFACE}, under 3:1`)
   }

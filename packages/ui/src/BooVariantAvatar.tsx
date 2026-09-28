@@ -109,10 +109,19 @@ export const BooVariantAvatar = memo(function BooVariantAvatar({
   const aspect = renderer?.meta.aspect ?? BOO_VARIANTS[variantId].aspect
   const h = Math.round(size * aspect)
 
-  const svg = useMemo(
-    () => (renderer ? withSize(renderer.render(tint), w, h) : null),
-    [renderer, tint, w, h],
-  )
+  const svg = useMemo(() => {
+    if (!renderer) return null
+    /*
+     * The renderer already resolves a colour it cannot draw down to a legible shade, so this
+     * should never fire. It is a backstop because the call sits in the render pass: a throw here
+     * takes out whichever subtree holds the avatar, and an avatar is not worth a blank panel.
+     */
+    try {
+      return withSize(renderer.render(tint), w, h)
+    } catch {
+      return withSize(renderer.render(null), w, h)
+    }
+  }, [renderer, tint, w, h])
 
   return (
     <span

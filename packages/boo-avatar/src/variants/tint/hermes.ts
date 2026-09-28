@@ -218,6 +218,12 @@ export function darkSurfaceContrast(tint: string): { hem: number } {
   return { hem: contrast(ramp(tint)[4], DARK_SURFACE) }
 }
 
+/** Whether a tint keeps the hem readable on a dark page. See `nearestLegible`. */
+export function hermesLegibility(tintHex: string): { ok: boolean; hem: number } {
+  const { hem } = darkSurfaceContrast(tintHex.toUpperCase())
+  return { ok: hem >= 3, hem }
+}
+
 function assertDarkSurface(tint: string): void {
   const { hem } = darkSurfaceContrast(tint)
   if (hem < 3) {

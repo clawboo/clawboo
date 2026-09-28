@@ -106,3 +106,30 @@ export function contrast(a: string, b: string): number {
   const y = luminance(b)
   return +((Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)).toFixed(2)
 }
+
+/**
+ * The nearest colour of the same hue that `ok` accepts, or null if none does.
+ *
+ * A variant refuses a tint that would cost it its legibility: Claude's chevron eyes are locked
+ * dark, so a deep body loses the face, and Hermes's hem carries the silhouette on a dark page.
+ * The team palettes are generated, so about one colour in twenty lands there. Refusing outright
+ * would either crash the avatar or drop the team's colour entirely, so instead the tint walks its
+ * OKLCH lightness away from the requested colour in both directions and takes the first shade that
+ * passes. Hue and chroma are kept, so the Boo still reads as its team's colour.
+ */
+export function nearestLegible(
+  tint: string,
+  ok: (hex: string) => boolean,
+  step = 0.02,
+  maxSteps = 24,
+): string | null {
+  const o = toOklch(tint)
+  for (let i = 1; i <= maxSteps; i++) {
+    for (const L of [o.L + i * step, o.L - i * step]) {
+      if (L <= 0 || L >= 1) continue
+      const candidate = fromOklch({ ...o, L })
+      if (ok(candidate)) return candidate
+    }
+  }
+  return null
+}
