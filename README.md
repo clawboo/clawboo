@@ -1,83 +1,146 @@
 <p align="center">
-  <img src="docs/screenshots/hero-tight-final.webp" alt="Clawboo: a TypeScript orchestrator for heterogeneous AI agent runtimes. Native agents are built in; Claude Code, Codex, Hermes, and OpenClaw join as peer teammates in one chat." width="100%" />
+  <img src="docs/screenshots/hero-team.webp" alt="Clawboo. Put a whole team of AI agents on it: Boo Zero leads a team of Hermes, Codex, Claude Code, OpenClaw and built-in agents." width="100%" />
+</p>
+
+<h3 align="center">Put a whole team of AI agents on it.</h3>
+
+<p align="center">
+  Ask once. Boo Zero, your team lead, splits the work into jobs on one board<br/>
+  and hands each job to a teammate. Teammates can run on Claude Code, Codex, Hermes, OpenClaw or Clawboo's own built-in agents,<br/>
+  and you pick each one's tool when you deploy the team. You watch the team work live, then get it back done.
 </p>
 
 <p align="center">
-  A <strong>TypeScript orchestrator for heterogeneous AI agent runtimes</strong>. Native agents are built in: paste a key and go.
-  <br/>
-  Claude Code, Codex, Hermes, and OpenClaw join as <strong>peer teammates in one chat</strong>, sharing one board, one memory, and one capability dashboard, all governed, with autonomous file-mutating work independently verified before it counts as done.
+  <strong>Free and open source. Runs on your computer.</strong><br/>
+  <sub>Your agents use the AI you connect: an API key (Anthropic, OpenAI, OpenRouter or seven more), a free local model through Ollama, or your ChatGPT subscription through the Codex CLI. Clawboo is free; model usage is billed by the provider you connect.<br/>
+  Prompts go only to the providers and apps you connect. No Clawboo account, and Clawboo itself sends no telemetry.</sub>
+</p>
+
+```bash
+npx clawboo@latest
+```
+
+<p align="center">
+  <sub>Needs Node.js 22.12 or newer (OpenClaw teammates need 22.22.3+, 24.15+ or 25.9+). Clawboo opens in your browser and walks you through setup.<br/>
+  Want Claude Code teammates? Install globally instead: <code>npm install -g clawboo @anthropic-ai/claude-agent-sdk</code>, then run <code>clawboo</code>.</sub>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/v/clawboo?color=E94560&label=clawboo&style=flat-square" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/dm/clawboo?color=E94560&style=flat-square&label=downloads" alt="npm downloads" /></a>
-  <a href="https://github.com/clawboo/clawboo/actions/workflows/ci.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
-  <a href="https://github.com/clawboo/clawboo/stargazers"><img src="https://img.shields.io/github/stars/clawboo/clawboo?style=flat-square&color=FBBF24" alt="GitHub Stars" /></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square" alt="License: MIT" /></a>
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" /></a>
-</p>
-
-<p align="center">
+  <a href="#see-it-in-78-seconds"><strong>Watch the film</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://www.claw.boo">Website</a>
+  &nbsp;·&nbsp;
   <a href="#quickstart">Quickstart</a>
-  &nbsp;·&nbsp;
-  <a href="#what-it-is">What it is</a>
-  &nbsp;·&nbsp;
-  <a href="#how-it-works">How it works</a>
-  &nbsp;·&nbsp;
-  <a href="#runtimes">Runtimes</a>
-  &nbsp;·&nbsp;
-  <a href="#configuration">Configuration</a>
   &nbsp;·&nbsp;
   <a href="https://docs.claw.boo">Docs</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/clawboo/clawboo/discussions">Discussions</a>
 </p>
 
-<br/>
-
 <p align="center">
-  <img src="docs/screenshots/team-space.png" alt="A Clawboo team space: Boo Zero and three specialists in a live team graph, with delegated tasks completing as cards in the group chat below" width="94%" />
+  <a href="https://www.npmjs.com/package/clawboo"><img src="https://img.shields.io/npm/v/clawboo?color=E94560&label=npm&style=flat-square" alt="npm version" /></a>
+  <a href="https://github.com/clawboo/clawboo/actions/workflows/ci.yml"><img src="https://github.com/clawboo/clawboo/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square" alt="License: MIT" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-22.12%2B-3C873A?style=flat-square" alt="Node.js 22.12 or newer" /></a>
 </p>
 
-<p align="center">
-  <sub>One prompt, fanned out to specialists, tracked on the board, narrated in chat.</sub>
-</p>
+---
+
+## See it in 78 seconds
+
+https://github.com/user-attachments/assets/ee3d39f7-299e-4e98-9427-e82561f4ef4d
+
+<sub>An animated illustration of a Clawboo team at work, not a screen recording. In the app, a reviewer checks work when you add one to the team and ask for it. Sound on.</sub>
+
+---
+
+## How it works
+
+|        | Step                             | What happens                                                                                                                                                                                                 |
+| ------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **01** | **Ask once**                     | Tell your team what you need in the group chat, like "Plan our launch: write the announcement, draft three social posts and compare our prices with two competitors."                                        |
+| **02** | **Boo Zero splits it into jobs** | Each job becomes a card on the board, handed to the teammate Boo Zero picks for it, whichever AI tool that teammate runs on. You don't route anything.                                                       |
+| **03** | **Watch the team work**          | Follow the cards live on the board and in the group chat, and see what each Boo is doing on the team graph. Want a second look? Add a reviewer agent to the team and ask Boo Zero to have it check the work. |
+| **04** | **Get it back, done**            | Results come back to Boo Zero, which pulls them together and answers you in the chat.                                                                                                                        |
 
 ---
 
 ## Quickstart
 
-Install Clawboo, then run it:
+Try it with no install:
+
+```bash
+npx clawboo@latest
+```
+
+Or install it, which gives you a persistent `clawboo` command and one-click in-app updates:
 
 ```bash
 npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates. Just trying it out? `npx clawboo@latest` runs the current release with no install (the `@latest` matters: a bare `npx clawboo` can reuse a build already in npm's `_npx` cache).
+Use `@latest` with npx: a bare `npx clawboo` can reuse an older build already in npm's `_npx` cache.
 
-Node.js 22+ is the only prerequisite. The first run opens an onboarding wizard:
+Node.js 22.12 or newer is all you need for the default setup. The first run opens a setup wizard in your browser:
 
-1. Pick a runtime. **Clawboo Native** is the default: it runs agents in-process and talks to your provider directly.
-2. Paste one provider API key (Anthropic, OpenAI, OpenRouter, or a local Ollama, no key needed), or pick one of seven more under **More providers**.
-3. Clawboo seeds a starter team and drops you into the dashboard. Your team is ready in about a minute.
+1. **Connect a model.** Paste one API key (OpenAI, Anthropic, OpenRouter, or seven more under **More providers**), use a local Ollama with no key, or pick **Sign in with ChatGPT** to use your ChatGPT subscription through the Codex CLI.
+2. **Add your AI tools (optional).** Connect Claude Code, Codex, Hermes or OpenClaw now, or skip and do it later from **Settings → Runtimes**.
+3. **Pick a team.** Choose a ready-made team from the marketplace and deploy it. Boo Zero, the team lead, runs it, and you land in the team's group chat.
 
-The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `http://localhost:18790`, auto-fallback through `18809` if busy). No flags, no external CLI, no cloud account.
+The dashboard opens at the port written to `~/.clawboo/api-port.txt` (default `http://localhost:18790`, auto-fallback through `18809` if busy). No flags and no Clawboo account.
 
 The server keeps running after the CLI exits, so `clawboo stop` and `clawboo restart` are how you reach it again, and `clawboo backup` takes a single-file snapshot of the database while it runs. Re-running `clawboo` also compares the running server's version against its own and offers to restart an older one, so an upgrade actually takes effect. See the [CLI reference](https://docs.claw.boo/reference/cli).
 
-> Prefer a different runtime? Connect Claude Code, Codex, Hermes, or a local OpenClaw Gateway from the **Runtimes** panel at any time.
+---
+
+## Your AI tools, one team
+
+Every agent is a Boo, and Boo Zero, in red, is your team lead. It runs on Clawboo's built-in runtime by default (or on Codex if you set up with only a ChatGPT sign-in), and it hands jobs to teammates on any tool you have connected. Codex, Claude Code and Hermes agents wear their own Boo.
+
+| Teammate        | What it is                                                                                                          | How to add it                                                                                                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Built-in**    | Clawboo's own agents. They talk to 11 providers directly: Anthropic, OpenAI, OpenRouter, a local Ollama, seven more | Paste a key during setup. Nothing to install                                                                                                                                                  |
+| **Claude Code** | Anthropic's coding agent, through the Claude Agent SDK                                                              | Install Clawboo globally with the SDK (see below), then paste an Anthropic API key in **Settings → Runtimes**                                                                                 |
+| **Codex**       | OpenAI's coding agent CLI                                                                                           | Install it from **Runtimes**, then one-click **Sign in with ChatGPT** (or run `codex login` yourself)                                                                                         |
+| **Hermes**      | An open-source agent that keeps its own self-improvement and skills                                                 | Install it from **Runtimes** (needs Python 3.11 to 3.13; uses pipx if you have it, otherwise pip). Reuses your OpenRouter, Anthropic or OpenAI key, or a one-click ChatGPT sign-in of its own |
+| **OpenClaw**    | Your local OpenClaw Gateway, which keeps its own channels and always-on heartbeat                                   | **Settings → Runtimes** installs, configures and starts it for you, reusing a provider key you already connected or a one-click ChatGPT sign-in of its own                                    |
+
+To build a mixed team, connect the tools first, then pick which tool each teammate runs on when you deploy the team. Every job lands as a card on the same board, whichever tool does it.
+
+> **Claude Code on an npm install:** the published package deliberately does not bundle `@anthropic-ai/claude-agent-sdk` (its per-platform binary would add about 210 MB to every install). Install it alongside Clawboo with `npm install -g clawboo @anthropic-ai/claude-agent-sdk`, or run Clawboo from source. A one-off `npx` run cannot load it. [Details](https://docs.claw.boo/runtimes/claude-code)
+
+<sub>Claude Code, Codex, Hermes and OpenClaw are products of their respective owners. Clawboo is an independent open-source project, not affiliated with or endorsed by them.</sub>
 
 ---
 
-## What it is
+## What you get
 
-- **A durable kanban fused with a live group chat.** The board is the canonical source of truth for task state; chat is the narration. Tasks survive restarts, claims are race-free, and every delegation is a real board mutation.
-- **Mixed-runtime peer chat.** Native, Claude Code, Codex, Hermes, and OpenClaw agents are all named peers in one room, and any runtime can lead. Coordination flows over structured lifecycle events and MCP calls, never terminal-output scraping.
-- **Native agents built in, external runtimes one click away.** Paste a provider key and Clawboo runs agents itself, or install and connect a coding-agent CLI from the Runtimes panel. Each runtime keeps its own native powers (OpenClaw keeps its channels and always-on heartbeat; Hermes keeps its self-improvement and skills).
-- **One shared memory, one capability dashboard.** Every runtime reads and writes the same tiered memory store and shows up in one unified skills and connectors inventory, while its private self-model stays its own.
-- **Verified, governed, observable.** Built-in verification for autonomous file-mutating completions (builder is not the judge: a deterministic gate always, plus an independent read-only critic on a risky or large diff; read-only research carries no verdict), spend tracking and warnings, and depth and fan-out caps, plus OpenTelemetry traces, structured logs, and an error taxonomy, all on by default. Interactive tool approvals apply to the connected OpenClaw path; the spawned runtimes execute board tasks non-interactively inside a per-task worktree. Hard spend caps that auto-pause a run are opt-in.
+- **Ask once, get it back done.** Boo Zero splits your request into jobs, hands them out, and pulls the results together in the chat.
+- **One board and one group chat.** Every handoff is a real task on a durable board that survives restarts, and the team talks it through in one room.
+- **Shared team memory.** Memory lives in Clawboo itself, so a fact one teammate saves can be recalled by any teammate, whatever tool it runs on.
+- **For work and for life.** A marketplace of ready-made agents and teams, from launch plans and pricing pages to a morning brief, a family calendar and a trip desk.
+- **Your AI, your way.** Paste an API key, use a free local model through Ollama, or use your ChatGPT subscription with Codex, Hermes and OpenClaw teammates.
+- **See everything.** Watch your teams on a live graph, follow every task on the board, and check each agent's work, spend and health.
+
+---
+
+## New in 0.4.0
+
+<!-- If this README goes live before 0.4.0 is on npm, retitle this section "Coming in the next release"
+     and add: "Until it ships, `npx clawboo@latest` installs 0.3.1." -->
+
+- **Routines replace the Scheduler.** Put work on a clock. A team routine posts into the group chat for Boo Zero to pick up, and an agent routine hands one agent a task.
+- **Connectors.** A Connectors page starts or signs in to popular MCP servers for you (GitHub, Linear, Notion, Figma, Stripe, Playwright, a local folder and more; some ask for a key or token once). Gmail, Slack, Jira and 38 more apps connect through your Composio account: paste a Composio project key once, and Composio keeps those apps' sign-ins. Every connected app is its own node on the graph, and an agent can use it only after you share it with that agent.
+- **Team memory you can see.** Memory is now a graph you can browse and search. Agents report whether a fact helped, and search results show that verdict. When an agent routine or task run starts with recalled memory, facts two teammates found useful come first, and facts only ever reported as misleading are left out (they stay searchable). Similarity links need a local Ollama embedding model or an OpenAI key.
+- **Watch the work.** A running Boo shows what it is doing in a thought bubble on the graph. Share the Playwright or Chrome DevTools connector with an agent, and its Browser tab shows the latest screenshot from its browser. Each of those agents gets its own browser profile, so its logins stay its own. (Not yet for OpenClaw agents.)
+- **New Boos for Codex, Claude Code and Hermes.** Agents on those three runtimes now get their own Boo, so you can tell at a glance which tool each teammate runs on.
+- **Build the team on the graph.** Drag a thread from any Boo to a teammate, a skill or a connector, or onto empty canvas to add a new agent.
+- **For work and for life.** The marketplace now loads 400+ agents and 80+ teams from 19 packs, including a new Clawboo Life and Home pack (morning brief, family calendar, trip desk and more). Each agent and team's detail view says where it came from: the source repo and license, plus the pinned commit for community packs. Offline you still get the 15 built-in agents.
+- **OpenClaw 2026.9 support.** Clawboo now installs and targets OpenClaw 2026.9, which needs Node.js 22.22.3+ on the 22 line, 24.15+ on the 24 line, or 25.9+. OpenClaw shell-command approvals now wait up to 30 minutes for you, even after you close the tab.
+- **CLI.** New `clawboo stop`, `clawboo restart` and `clawboo backup` commands, and re-running `clawboo` offers to restart an older server. Needs Node.js 22.12 or newer.
+
+Full notes in the [CHANGELOG](./apps/cli/CHANGELOG.md).
 
 ---
 
@@ -86,18 +149,18 @@ The server keeps running after the CLI exits, so `clawboo stop` and `clawboo res
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/ghost-graph.png" alt="Atlas: an org graph of every team, with labeled team clusters arranged around Boo Zero" />
-      <p align="center"><sub><strong>Atlas</strong>: every team, one live org graph.</sub></p>
+      <img src="docs/screenshots/team-space.png" alt="A Clawboo team space: Boo Zero and three specialists in a live team graph, with delegated tasks completing as cards in the group chat below" />
+      <p align="center"><sub><strong>Team space</strong>: one ask, handed out to specialists, tracked on the board, narrated in chat.</sub></p>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/board-kanban.png" alt="The board: a durable kanban where every delegation is a real task carrying runtime and cost badges" />
-      <p align="center"><sub><strong>Board</strong>: durable kanban, every delegation is a real task.</sub></p>
+      <img src="docs/screenshots/ghost-graph.png" alt="Atlas: an org graph of every team, with labeled team clusters arranged around Boo Zero" />
+      <p align="center"><sub><strong>Atlas</strong>: every team, one live org graph.</sub></p>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/runtimes-panel.png" alt="The Runtimes panel: Clawboo Native and Hermes connected, Claude Code one click away, Codex awaiting sign-in, OpenClaw connected" />
-      <p align="center"><sub><strong>Runtimes</strong>: connect Native, OpenClaw, Claude Code, Codex, Hermes.</sub></p>
+      <img src="docs/screenshots/board-kanban.png" alt="The board: a durable kanban where every delegation is a real task carrying runtime and cost badges" />
+      <p align="center"><sub><strong>Board</strong>: every delegation is a real task.</sub></p>
     </td>
     <td width="50%">
       <img src="docs/screenshots/fleet-health.png" alt="The Fleet overview: agent count, task and verify pass rates, 24-hour spend, and per-runtime health" />
@@ -108,20 +171,35 @@ The server keeps running after the CLI exits, so `clawboo stop` and `clawboo res
 
 ---
 
-## How it works
+## Run it with confidence
+
+- **Spend.** Spend is tracked from the start. Set a budget for an agent, team or mission and it warns at 80% and 100% by default, or make it a hard cap that auto-pauses. Dollar costs are real only where the runtime reports them.
+- **Limits in code.** Delegation depth, fan-out and task creation are capped in code, not asked for in a prompt.
+- **Approvals.** Risky tool calls that go through Clawboo ask you first, on any runtime. A connected app is usable only by agents you share it with, and its calls that change something ask you first unless you chose Always (OpenClaw agents are asked on every app call). OpenClaw shell approvals wait up to 30 minutes, even if you close the tab. Claude Code, Codex and Hermes run their own built-in tools without prompting.
+- **Verified code tasks.** When an agent works a task in a git repo you point it at (through the task-run API, or a routine given a repo path), the task gets its own git worktree and must pass the repo's verify command, and delegated or large diffs also get a fresh read-only review on the same runtime before the task counts as done. Set `CLAWBOO_REVIEWER_MODEL` to review with a different model.
+- **Local.** Everything is stored on your computer: the board in SQLite at `~/.clawboo/clawboo.db`, and API keys in an AES-256-GCM encrypted vault at `~/.clawboo/secrets/`.
+
+---
+
+## Under the hood
+
+<details>
+<summary>How Clawboo fits the runtimes together (for developers)</summary>
+
+<br/>
 
 ```mermaid
 graph TD
     subgraph RT["Agent runtimes (peers)"]
       direction LR
-      Native["Clawboo Native<br/>(built-in)"]
+      Native["Clawboo built-in"]
       OC["OpenClaw"]
       CC["Claude Code"]
       CX["Codex"]
       HM["Hermes"]
     end
 
-    MCP["MCP spine<br/>Tasks · Memory · Tools · TeamChat"]
+    MCP["MCP<br/>Tasks · Memory · Tools"]
 
     subgraph CB["Clawboo, shared coordination plane"]
       direction LR
@@ -141,29 +219,13 @@ graph TD
     CB <--> Store
 ```
 
-Clawboo runs as a TypeScript control plane and integrates each runtime as a black box, so adding a runtime is configuration, not a rewrite. There is one architectural principle:
+Clawboo is a TypeScript control plane. Each runtime plugs in through its own adapter, and one principle keeps them working together:
 
-- **Clawboo owns the shared / coordination plane.** The registry, the durable board, team chat, the team-task scheduler, the shared memory, the managed tools and capability broker, verification, governance, the normalized event log, the per-task worktree system-of-record, and cross-runtime handoff and resume.
-- **Each runtime keeps its private / cognitive plane.** Its own messaging channels, its own heartbeat, its private memory and self-improvement, its built-in tools, its connectors and auth, and its native session resume. Clawboo observes these but does not take them over.
-- **MCP is the one common spine.** Every runtime consumes Clawboo's Tasks, Memory, Tools, and TeamChat servers over MCP, the single channel for both injection and observation.
+- **Clawboo owns the shared, coordination plane.** The registry, the durable board, team chat, Routines, the shared memory, the managed tools and capability broker, verification, governance, the event log, per-task worktrees, and cross-runtime handoff and resume.
+- **Each runtime keeps its private, cognitive plane.** Its own messaging channels, its own heartbeat, its private memory and self-improvement, its built-in tools, its connectors and auth, and its native session resume. Clawboo observes these but does not take them over.
+- **MCP is the common spine.** Every runtime reaches Clawboo's Tasks, Memory and Tools servers over MCP, and every runtime except OpenClaw also gets TeamChat. Clawboo follows each run through the runtime's own event stream.
 
-Everything is local-first: the board persists in SQLite at `~/.clawboo/clawboo.db`, and runtime API keys live in an AES-256-GCM encrypted vault at `~/.clawboo/secrets/`. No SaaS, no cloud, nothing uploaded.
-
----
-
-## Runtimes
-
-| Runtime            | What it is                                                                                                                      | How to connect                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Clawboo Native** | Built-in conversational runtime, talks to 11 providers directly: Anthropic / OpenAI / OpenRouter / local Ollama plus seven more | Paste a key in onboarding, no install                                    |
-| **OpenClaw**       | A local OpenClaw Gateway, keeps its own channels and always-on                                                                  | Start a Gateway and connect                                              |
-| **Claude Code**    | Anthropic's coding agent (Claude Agent SDK)                                                                                     | Install and connect from Runtimes; paste a key or use your logged-in CLI |
-| **Codex**          | OpenAI's coding agent CLI                                                                                                       | Install and connect; `codex login` once                                  |
-| **Hermes**         | Open-source agent runtime over OpenRouter, keeps its self-improvement and skills                                                | Install and connect; paste an OpenRouter key                             |
-
-Every runtime executes board tasks behind one interface, with a structured handoff artifact so work can move between runtimes. Each file-mutating task runs in its own git worktree, which buys concurrency isolation (no write races), not a sandbox. Read-only research skips the worktree, review runs detached at a commit, and OpenClaw runs on its live Gateway session with no host worktree.
-
-> **Claude Code on an npm install:** the published tarball deliberately does not bundle `@anthropic-ai/claude-agent-sdk` (its per-platform binary would add ~210 MB to every install). Install it alongside Clawboo — `npm i -g clawboo @anthropic-ai/claude-agent-sdk` — or run Clawboo from source. [Details](https://docs.claw.boo/runtimes/claude-code)
+</details>
 
 ---
 
@@ -171,16 +233,18 @@ Every runtime executes board tasks behind one interface, with a structured hando
 
 Clawboo stores everything under `~/.clawboo/` (auto-created). Nothing here is required for the happy path; these are the knobs.
 
-| Variable                      | Purpose                                                                                                |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `CLAWBOO_HOME`                | Clawboo's state directory (default `~/.clawboo`): SQLite DB, settings, secrets vault, worktrees        |
-| `CLAWBOO_API_PORT`            | Pin the dashboard API port (default `18790`, auto-fallback through `18809`)                            |
-| `CLAWBOO_DB_PATH`             | SQLite path for the out-of-process MCP stdio bins only (the server follows `CLAWBOO_HOME`)             |
-| `CLAWBOO_SECRETS_MASTER_KEY`  | Override the credential-vault master key (auto-generated at `~/.clawboo/secrets/master.key` otherwise) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Export traces to Jaeger / Zipkin (otherwise the local event log is the trace store)                    |
-| `LOG_LEVEL`                   | pino log level (default `info`)                                                                        |
+| Variable                      | Purpose                                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAWBOO_HOME`                | Clawboo's state directory (default `~/.clawboo`): SQLite DB, settings, secrets vault, worktrees                                           |
+| `CLAWBOO_API_PORT`            | Pin the dashboard API port (default `18790`, auto-fallback through `18809`)                                                               |
+| `CLAWBOO_DB_PATH`             | SQLite path for the out-of-process MCP stdio bins only (the server follows `CLAWBOO_HOME`)                                                |
+| `CLAWBOO_SECRETS_MASTER_KEY`  | Override the credential-vault master key (auto-generated at `~/.clawboo/secrets/master.key` otherwise)                                    |
+| `CLAWBOO_REVIEWER_MODEL`      | Review verified code tasks with a different model than the one that built them                                                            |
+| `STUDIO_ACCESS_TOKEN`         | Require a token to open the dashboard. Needed before you bind beyond localhost with `HOST`                                                |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Export traces to an OTLP collector such as Jaeger or Zipkin (from a source checkout; the npm package keeps traces in its local event log) |
+| `LOG_LEVEL`                   | pino log level (default `info`)                                                                                                           |
 
-When you use the OpenClaw runtime, Clawboo reads OpenClaw's own `OPENCLAW_STATE_DIR` and `GATEWAY_URL` for interop. There are no feature flags: every subsystem ships on.
+When you use the OpenClaw runtime, Clawboo reads OpenClaw's state directory (`OPENCLAW_STATE_DIR`, default `~/.openclaw`). You set the Gateway URL in **Settings**. There are no feature flags: every subsystem ships on.
 
 ---
 
@@ -190,7 +254,7 @@ When you use the OpenClaw runtime, Clawboo reads OpenClaw's own `OPENCLAW_STATE_
 git clone https://github.com/clawboo/clawboo.git
 cd clawboo
 pnpm install
-pnpm dev          # Express API on :18790 (auto-fallback) + Vite SPA on :5173
+pnpm --filter @clawboo/web dev   # Express API on :18790 (auto-fallback) + Vite SPA on :5173
 ```
 
 | Command                                    | What it does                                  |
@@ -205,7 +269,7 @@ pnpm dev          # Express API on :18790 (auto-fallback) + Vite SPA on :5173
 
 The marketplace agent and team content lives in `catalog/`, a plain content folder outside the pnpm workspace. It is not compiled into the app and not in the npm tarball: only the small built-in pack ships, so first-run works offline, and everything else is fetched at runtime. See [catalog/README.md](./catalog/README.md).
 
-Tech stack: Node.js 22+ and TypeScript 5 strict, TurboRepo + pnpm, Vite SPA + React 19 + Express, Tailwind CSS 4, Zustand, React Flow + ELK.js for the graph, CodeMirror 6, SQLite via better-sqlite3 + Drizzle ORM, the Model Context Protocol SDK, and Vitest + Playwright + MSW for tests. macOS, Linux, and Windows are all first-class.
+Tech stack: Node.js 22.12+ and TypeScript 6 strict, TurboRepo + pnpm, Vite 8 SPA + React 19 + Express, Tailwind CSS 4, Zustand, React Flow + ELK.js for the graph, CodeMirror 6, SQLite via better-sqlite3 + Drizzle ORM, the Model Context Protocol SDK, and Vitest + Playwright + MSW for tests. Supported on macOS, Linux and Windows.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for branching, the PR checklist, and code guidelines.
 
@@ -213,7 +277,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for branching, the PR checklist, and co
 
 ## Roadmap
 
-Clawboo ships [Changesets](https://github.com/changesets/changesets)-based releases as features land. On the horizon, not yet shipped:
+Clawboo ships [Changesets](https://github.com/changesets/changesets)-based releases. On the horizon, not yet shipped:
 
 - **Humans in the graph.** Humans as first-class participants on the board and in the room, picking up tasks behind the same interface as a runtime.
 - **Multi-tenant.** Hosted and organization deployments with per-tenant scoping.
@@ -226,12 +290,12 @@ See the [CHANGELOG](./apps/cli/CHANGELOG.md) for the full release history.
 
 Clawboo is brand new. The single best thing you can do:
 
-**Star this repo.** It's the strongest signal for new visitors deciding whether to give it a try.
+**Star this repo.** It's the strongest signal for new visitors deciding whether to give it a try. To hear about new releases, choose **Watch → Custom → Releases**.
 
 After that:
 
 - Ask questions or share team templates in [Discussions](https://github.com/clawboo/clawboo/discussions).
-- File [issues](https://github.com/clawboo/clawboo/issues) for bugs, repros, and regressions. macOS, Linux, and Windows are all first-class.
+- File [issues](https://github.com/clawboo/clawboo/issues) for bugs, repros, and regressions.
 - Send a PR. Small fixes very welcome, see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - Found a security issue? Report it privately, not as an issue, see [SECURITY.md](./SECURITY.md).
 
@@ -248,6 +312,8 @@ After that:
 ## License
 
 MIT, see [LICENSE](./LICENSE). Third-party attributions in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md). Contributing guide in [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+Claude Code, Codex, Hermes and OpenClaw are products of their respective owners. Clawboo is an independent open-source project, not affiliated with or endorsed by them.
 
 <p align="center">
   MIT © Sanreds
