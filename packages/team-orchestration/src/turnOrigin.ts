@@ -29,6 +29,10 @@ export type TurnOrigin =
   /** A peer delegated this task. `fromAgentId` is the delegator (the reduce point
    *  its result reports to), or null when the engine could not attribute one. */
   | { kind: 'delegation'; fromAgentId: string | null }
+  /** A person assigned this board task to the agent directly (the board's New
+   *  task dialog, an explicit assignment, a retry). Its result is posted on the
+   *  task card for that person; no teammate is waiting on it. */
+  | { kind: 'assignment' }
   /** Clawboo itself: a batched `[Task Update]` reflection, an alert, a pump
    *  re-fire. No human is waiting on the other end of this particular turn. */
   | { kind: 'system' }
@@ -37,14 +41,19 @@ export type TurnOrigin =
    *  necessarily watching when it runs. */
   | { kind: 'schedule'; routineName: string }
 
-/** Convenience singletons — these two variants carry no payload. */
+/** Convenience singletons: these variants carry no payload. */
 export const HUMAN_TURN: TurnOrigin = { kind: 'human' }
 export const SYSTEM_TURN: TurnOrigin = { kind: 'system' }
+export const ASSIGNMENT_TURN: TurnOrigin = { kind: 'assignment' }
 
 /** What a turn IS, decided once and read by everything that frames it. */
 export interface TurnFraming {
   /** Executing a board task delegated to it. Gets the worker guardrail. */
   isWorker: boolean
+  /** Present, and true, when a PERSON assigned this task (not a teammate's
+   *  delegation). Its report goes on the task card rather than back to the team
+   *  lead. Absent on every other turn. */
+  isUserAssigned?: boolean
   /** The team's reduce point, on a turn where it is not itself a worker. Gets the
    *  leader coordination block. */
   isLeader: boolean
@@ -79,7 +88,8 @@ export function classifyTurn(input: {
   leaderAgentId: string | null
   hasBoardTask: boolean
 }): TurnFraming {
-  const isWorker = input.origin.kind === 'delegation' || input.hasBoardTask
+  const isUserAssigned = input.origin.kind === 'assignment'
+  const isWorker = input.origin.kind === 'delegation' || isUserAssigned || input.hasBoardTask
   const isLeader =
     !isWorker && input.leaderAgentId !== null && input.targetAgentId === input.leaderAgentId
   const fromThePerson = input.origin.kind === 'human' || input.origin.kind === 'schedule'
@@ -87,9 +97,11 @@ export function classifyTurn(input: {
   // @mention a specialist mid-task, and framing that turn with both the worker
   // guardrail ("you CANNOT reach the user") and [About the User] is a
   // contradiction handed to the model. The guardrail wins; the message itself
-  // still arrives as content.
+  // still arrives as content. A person-assigned task is a worker turn too: its
+  // report is read on the card, but nobody can answer a question mid-task.
   return {
     isWorker,
+    ...(isUserAssigned ? { isUserAssigned: true } : {}),
     isLeader,
     isUserFacing: (fromThePerson && !isWorker) || isLeader,
     ...(input.origin.kind === 'schedule' && !isWorker

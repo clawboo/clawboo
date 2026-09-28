@@ -495,3 +495,77 @@ describe('TaskDetailDrawer', () => {
     })
   })
 })
+
+describe('TaskDetailDrawer: a task that needs you', () => {
+  function failedHandlers(onRetry: (id: string) => void) {
+    return [
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Draft the launch post',
+            description: 'Keep it under 200 words and mention the new board.',
+            status: 'blocked',
+            teamId: 'team-1',
+            assigneeAgentId: 'agent-7',
+            sourceDelegationId: 'assign:n1:agent:agent-7:origin:human',
+            attention: { reason: 'failed', failedRuns: 1, detail: 'provider out of credits' },
+          },
+          comments: [
+            { body: 'Run failed: provider out of credits', authorType: 'system' },
+            { body: 'Retry requested.', authorType: 'user' },
+          ],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.post('/api/board/:id/retry', ({ params }) => {
+        onRetry(params['id'] as string)
+        return HttpResponse.json({ ok: true }, { status: 202 })
+      }),
+    ]
+  }
+
+  it('leads with why it needs you, the reason, and a Retry that reports back to the board', async () => {
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder', teamId: 'team-1' } as AgentState],
+      selectedAgentId: null,
+    })
+    let retried = ''
+    server.use(...failedHandlers((id) => (retried = id)))
+    const onChanged = vi.fn()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} onChanged={onChanged} />)
+
+    const banner = await screen.findByTestId('task-needs-you')
+    expect(within(banner).getByText('Failed')).toBeInTheDocument()
+    expect(within(banner).getByText('provider out of credits')).toBeInTheDocument()
+    await userEvent.click(within(banner).getByRole('button', { name: /Retry/ }))
+    await waitFor(() => expect(retried).toBe('t1'))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('shows the brief the person wrote and names the agent instead of its id', async () => {
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder', teamId: 'team-1' } as AgentState],
+      selectedAgentId: null,
+    })
+    server.use(...failedHandlers(() => {}))
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    expect(await screen.findByTestId('task-brief')).toHaveTextContent(/under 200 words/)
+    expect(screen.getByText('Coder')).toBeInTheDocument()
+    expect(screen.queryByText('agent-7')).toBeNull()
+    // The comment log attributes each entry: Clawboo's own notes, and the person's.
+    const log = screen.getByTestId('task-comments')
+    expect(within(log).getByText('Clawboo')).toBeInTheDocument()
+    expect(within(log).getByText('You')).toBeInTheDocument()
+  })
+
+  it('shows no needs-you banner for a task that is moving on its own', async () => {
+    server.use(...detailHandlers())
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findByText('Ship it')
+    expect(screen.queryByTestId('task-needs-you')).toBeNull()
+  })
+})

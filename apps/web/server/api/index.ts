@@ -82,6 +82,8 @@ import {
   boardListGET,
   boardGetGET,
   boardCreatePOST,
+  boardRetryPOST,
+  boardAssignPOST,
   boardClaimPOST,
   boardUpdatePATCH,
   boardCancelDependentsPOST,
@@ -360,6 +362,9 @@ router.get('/api/board/:taskId', boardGetGET)
 router.post('/api/board/:taskId/claim', boardClaimPOST)
 router.patch('/api/board/:taskId', boardUpdatePATCH)
 router.post('/api/board/:taskId/comments', boardCommentPOST)
+// A person's direct hand-off: run a stuck task again, or give it to one agent.
+router.post('/api/board/:taskId/retry', boardRetryPOST)
+router.post('/api/board/:taskId/assign', boardAssignPOST)
 // Execution ledger (distinct two-segment paths — no collision with /:taskId).
 router.get('/api/board/:taskId/executions', boardExecutionsGET)
 router.post('/api/board/:taskId/executions', boardExecutionCreatePOST)

@@ -156,6 +156,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
         order.push('idle')
         real.markIdle(sk)
       },
+      isBusy: (sk) => real.isBusy(sk),
       drain: () => real.drain(),
       reset: () => real.reset(),
     }

@@ -19,7 +19,7 @@ import { catalogHandlers } from './catalogFixtures'
 // onUnhandledRequest:'error' can stay strict for same-origin /api/* calls.
 //
 // `/api/tools/approvals` is the one same-origin exception: it's a ubiquitous 3s
-// background poll now that the Board's "Needs approval" column + the in-chat tray
+// background poll now that the Board's "Needs you" column + the in-chat tray
 // (+ the Governance queue) all render it, so any test that mounts the board or a
 // chat would otherwise trip onUnhandledRequest into a flaky unhandled request. A
 // benign empty default keeps it silent; a test that asserts on approvals overrides

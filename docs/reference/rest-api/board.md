@@ -16,7 +16,9 @@ The atomic claim is the board's concurrency primitive. `POST /api/board/:taskId/
 | Method | Path                                     | Summary                                                     | Stream? |
 | ------ | ---------------------------------------- | ----------------------------------------------------------- | ------- |
 | GET    | `/api/board`                             | List tasks (or ready-to-work tasks) for a team              | No      |
-| POST   | `/api/board`                             | Create a task                                               | No      |
+| POST   | `/api/board`                             | Create a task (optionally for one agent, started at once)   | No      |
+| POST   | `/api/board/:taskId/retry`               | Run a stuck task again, straight to its agent               | No      |
+| POST   | `/api/board/:taskId/assign`              | Give an unowned task to one team member and start it        | No      |
 | GET    | `/api/board/:taskId`                     | One task + its comments + ancestor chain                    | No      |
 | POST   | `/api/board/:taskId/claim`               | Atomically claim a `todo` task (409 contract)               | No      |
 | PATCH  | `/api/board/:taskId`                     | Transition status (verification-gated) and/or edit metadata | No      |
@@ -87,9 +89,18 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
     createdAt: number
     updatedAt: number
     completedAt: number | null
+    // Why the task is waiting on a person; null when the board will move it on
+    // its own. Not returned by the `ready=true` variant.
+    attention: null | {
+      reason: 'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned'
+      failedRuns: number // consecutive unsuccessful runs at the end of the ledger
+      detail?: string // the last run's error, trimmed, for failed / timed_out
+    }
   }>
 }
 ```
+
+`attention` is computed from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its execution ledger, and its verification verdict, with the pure `taskAttention` rule from `@clawboo/board-core`. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). The board renders every task with an `attention` in its **Needs you** column.
 
 **`500 Internal Server Error`**: any DB failure:
 
@@ -127,18 +138,21 @@ Creates a task. `status` defaults to `todo` (immediately claimable); pass `backl
   parentTaskId?: string
   sourceDelegationId?: string
   tenantId?: string             // non-empty if present
+  assigneeAgentId?: string      // create the task FOR this agent (see below)
 }
 ```
 
+**With `assigneeAgentId`** (the board's New task dialog), the task is created for one agent: `teamId` is required, the agent must be an active member of that team, and `status` may only be `todo` (the default) or `backlog`. The server writes a `sourceDelegationId` that binds the task to the agent and marks it as assigned by a person, then, for a `todo` task, hands it to the team's orchestrator to run now (detached: the response does not wait for the run to start). The agent receives the title and description together. Its result is recorded on the task (the report comment) and is **not** delivered to the team lead as a task update: a person-assigned task reports to the person, on its card. If the agent is busy, the task waits in `todo` and runs when the agent is free.
+
 ### Responses
 
-**`400 Bad Request`**: body failed validation:
+**`400 Bad Request`**: body failed validation (`{ "error": "invalid body", ... }`), or, with `assigneeAgentId`: `team_required`, `agent_not_in_team` (unknown, archived, or on another team), or `invalid_status`:
 
 ```json
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`200 OK`**: the created task (full `DbTask`, shape as in `GET /api/board`):
+**`200 OK`**: the created task (full `DbTask` with `attention`, shape as in `GET /api/board`):
 
 ```ts
 { task: { id: string, title: string, status: 'todo', /* …full DbTask… */ } }
@@ -156,7 +170,48 @@ Creates a task. `status` defaults to `todo` (immediately claimable); pass `backl
 curl -X POST http://localhost:18790/api/board \
   -H 'Content-Type: application/json' \
   -d '{"title":"Implement /api/foo","teamId":"<team-id>","priority":1}'
+
+# Give one agent a task; it starts right away
+curl -X POST http://localhost:18790/api/board \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Draft the launch post","description":"Under 200 words.","teamId":"<team-id>","assigneeAgentId":"<agent-id>"}'
 ```
+
+---
+
+## `POST /api/board/:taskId/retry`
+
+Runs a stuck task again because a person asked: one that failed, timed out, was stopped, or was parked after failing three times in a row. A `blocked` or `backlog` task is moved back to `todo` first (which clears its assignee and verdict), a `user` comment `Retry requested.` is added to its trail, and the task is handed straight to its bound agent. The ready-pump's automatic re-fire limit is waived for this run: it stops the machine from retrying forever, not the person from asking again. Detached, like the create above.
+
+- **Path params**: `taskId`.
+- **Request body**: none.
+
+### Responses
+
+**`202 Accepted`**: `{ ok: true, task: DbTask }` (the task as it now stands, in `todo`).
+
+**`404 Not Found`**: unknown task.
+
+**`409 Conflict`**: `{ ok: false, error }` where `error` is `not_retryable` (the task is running, finished, or cancelled), `no_team`, or `unassigned` (no agent is bound to it; use `assign`).
+
+---
+
+## `POST /api/board/:taskId/assign`
+
+Gives a task that nobody is working on to one member of its team, and starts it. For a card no agent will ever pick up (created without one, or by an agent's own `create_task`), and for handing a failed task to someone else. The task is re-bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked` or `backlog`, noted on its trail (`Assigned to <name>.`), and dispatched.
+
+- **Path params**: `taskId`.
+- **Request body**: `{ agentId: string }`.
+
+### Responses
+
+**`200 OK`**: `{ ok: true, task: DbTask }`.
+
+**`400 Bad Request`**: `agentId required`, or `agent_not_in_team`.
+
+**`404 Not Found`**: unknown task.
+
+**`409 Conflict`**: `no_team`, or `not_assignable` (the task is being worked on, finished, cancelled, or dropped).
 
 ---
 
@@ -173,7 +228,7 @@ Returns one task plus its comments (oldest first) and its ancestor chain (the pa
 
 ```ts
 {
-  task: DbTask // shape as in GET /api/board
+  task: DbTask & { attention } // shape as in GET /api/board, including `attention`
   comments: Array<{
     id: string
     taskId: string

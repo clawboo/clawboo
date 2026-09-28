@@ -3,7 +3,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { classifyTurn, HUMAN_TURN, SYSTEM_TURN, type TurnOrigin } from '../turnOrigin'
+import {
+  ASSIGNMENT_TURN,
+  classifyTurn,
+  HUMAN_TURN,
+  SYSTEM_TURN,
+  type TurnOrigin,
+} from '../turnOrigin'
 
 const LEADER = 'boo-zero'
 const WORKER = 'bug-boo'
@@ -87,6 +93,40 @@ describe('classifyTurn, a busy worker mentioned by the user', () => {
       isLeader: false,
       isUserFacing: false,
     })
+  })
+})
+
+describe('classifyTurn: a task a person assigned', () => {
+  it('is a worker turn that knows its report goes to the person, not the lead', () => {
+    expect(frame(ASSIGNMENT_TURN, WORKER, true)).toEqual({
+      isWorker: true,
+      isUserAssigned: true,
+      isLeader: false,
+      isUserFacing: false,
+    })
+  })
+
+  it('stays a worker turn when the session map has already forgotten the task', () => {
+    expect(frame(ASSIGNMENT_TURN, WORKER, false)).toMatchObject({
+      isWorker: true,
+      isUserAssigned: true,
+    })
+  })
+
+  it('never frames the leader as leading when a person assigned it a task', () => {
+    expect(frame(ASSIGNMENT_TURN, LEADER, true)).toMatchObject({
+      isWorker: true,
+      isLeader: false,
+      isUserFacing: false,
+    })
+  })
+
+  it('no other origin is marked as assigned by a person', () => {
+    expect(frame(HUMAN_TURN, LEADER)).not.toHaveProperty('isUserAssigned')
+    expect(frame({ kind: 'delegation', fromAgentId: LEADER }, WORKER, true)).not.toHaveProperty(
+      'isUserAssigned',
+    )
+    expect(frame(SYSTEM_TURN, WORKER, true)).not.toHaveProperty('isUserAssigned')
   })
 })
 

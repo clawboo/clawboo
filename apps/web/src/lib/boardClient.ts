@@ -251,6 +251,64 @@ export async function updateStatusResult(
   }
 }
 
+// ── A person's direct hand-off (the New task dialog, Retry, Assign) ─────────
+
+export interface CreateTaskForAgentInput {
+  title: string
+  description?: string
+  teamId: string
+  /** The team member who does the work. The server binds the task to them and
+   *  starts it; its result is reported on the task card, not to the team lead. */
+  assigneeAgentId: string
+}
+
+/** Create a task for one agent on a team. Resolves null on any failure. */
+export async function createTaskForAgent(
+  input: CreateTaskForAgentInput,
+): Promise<BoardTask | null> {
+  try {
+    const r = await apiFetch('/api/board', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(input),
+    })
+    if (!r.ok) return null
+    const body = (await r.json()) as { task?: BoardTask }
+    return body.task ?? null
+  } catch {
+    return null
+  }
+}
+
+/** The outcome of a hand-off: ok, or the server's reason for refusing it. */
+export type HandOffResult = { ok: true } | { ok: false; reason: string }
+
+async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> {
+  try {
+    const r = await apiFetch(url, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body ?? {}),
+    })
+    if (r.ok) return { ok: true }
+    const payload = (await r.json().catch(() => null)) as { error?: string } | null
+    return { ok: false, reason: payload?.error ?? 'error' }
+  } catch {
+    return { ok: false, reason: 'error' }
+  }
+}
+
+/** Run a task again: one that failed, timed out, was stopped, or was parked
+ *  after failing repeatedly. It goes straight back to its agent. */
+export function retryTask(taskId: string): Promise<HandOffResult> {
+  return postHandOff(`/api/board/${encodeURIComponent(taskId)}/retry`)
+}
+
+/** Give a task nobody is working on to one agent on its team, and start it. */
+export function assignTask(taskId: string, agentId: string): Promise<HandOffResult> {
+  return postHandOff(`/api/board/${encodeURIComponent(taskId)}/assign`, { agentId })
+}
+
 export interface BoardExecution {
   id: string
   executorType?: string

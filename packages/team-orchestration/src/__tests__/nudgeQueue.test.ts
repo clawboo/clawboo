@@ -31,6 +31,19 @@ describe('createNudgeQueue', () => {
     expect(sent).toEqual(['a', 'b'])
   })
 
+  it('isBusy reports a run in flight and a send queued behind it, until both are done', async () => {
+    const nq = createNudgeQueue()
+    expect(nq.isBusy('s1')).toBe(false)
+    await nq.deliver('s1', async () => undefined)
+    expect(nq.isBusy('s1')).toBe(true) // the first run has not reported its boundary
+    await nq.deliver('s1', async () => undefined) // queued behind it
+    nq.markIdle('s1') // first run ends; the queued send starts
+    expect(nq.isBusy('s1')).toBe(true)
+    nq.markIdle('s1') // second run ends
+    expect(nq.isBusy('s1')).toBe(false)
+    expect(nq.isBusy('s2')).toBe(false)
+  })
+
   it('does not block delivery across different sessions', async () => {
     const nq = createNudgeQueue()
     const sent: string[] = []

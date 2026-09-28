@@ -20,7 +20,7 @@ There is **no standalone Approvals nav view**. Approvals surface where they were
 </Note>
 
 - Approvals appear in two places, both always available:
-  - The **Needs approval** column on the [board](/using/board), the first column. It collapses to a thin rail when empty and auto-expands the moment a request arrives.
+  - The **Needs you** column on the [board](/using/board), the first column, under **Approval pending**. The column is always expanded; it also holds tasks that failed or stalled and are waiting on you.
   - An **inline tray above the composer** in [group chat](/using/group-chat) and 1:1 [agent chat](/using/agents), scoped to that team or agent (capped at three cards, with a "view on the board" link for the rest).
 - For **exec approvals** to appear, the agent's command-execution policy must be set to ask. Open an OpenClaw agent, go to the **Permissions** tab → **Execution Permissions**, and set **Command Execution** to **Always Ask** or **Ask for Unknown**. Then ask the agent to run a command. It pauses and the request appears here. See [command permissions](/using/command-permissions) for what each posture means.
 - For **native `run_command` approvals** to appear, the Boo's shell must be switched on (**Permissions** tab → **Running commands**) and the run must have a working folder, which in practice means a board task. Every native Boo created through Clawboo's own screens starts with that switch off.
@@ -158,7 +158,7 @@ Under the queue, the panel lists every broker tool with an **Available** / **Una
 
 ## Verify it worked
 
-- The resolved card disappears from the board's **Needs approval** column (its amber count drops by one, and the column collapses back to a thin rail once the queue empties) and from any in-chat tray. For an exec approval, the Boo's amber ring also clears in the Ghost Graph.
+- The resolved card disappears from the board's **Needs you** column (its amber count drops by one, and the column reads "Nothing needs you right now" once nothing is left) and from any in-chat tray. For an exec approval, the Boo's amber ring also clears in the Ghost Graph.
 - For an exec **allow**, the agent resumes and (after the followup) reports the command's output back into the chat transcript.
 - For a tool/delegation approval, the waiting tool call / delegation proceeds (on allow) or is rejected (on deny) within a few seconds.
 - The decision history is queryable: `GET /api/approvals?agentId=<id>` returns the persisted exec-approval decisions for that agent (most recent first).

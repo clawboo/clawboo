@@ -243,7 +243,7 @@ const PRIMARY_NAV: NavItem[] = [
 // opens the modal that houses the management / config / insights surfaces (Runtimes,
 // Memory, Capabilities, Routines, Tokens Used, Observability, Governance, System,
 // System Health) so the sidebar stays short.
-// Approvals moved into the Board (a collapsible "Needs approval" column) + inline
+// Approvals moved into the Board (its "Needs you" column) + inline
 // above the chat composer, so the sidebar no longer carries a separate item.
 const SECONDARY_NAV: NavItem[] = [
   { id: 'fleet', icon: Gauge, subtitle: '(Overview)' },

@@ -22,6 +22,9 @@ export const createTaskBody = z.object({
   parentTaskId: z.string().optional(),
   sourceDelegationId: z.string().optional(),
   tenantId: z.string().min(1).optional(),
+  // Create the task FOR one agent on `teamId` (the board's New task dialog). The
+  // server binds it to that agent and starts it; see POST /api/board.
+  assigneeAgentId: z.string().min(1).optional(),
 })
 export type CreateTaskBody = z.infer<typeof createTaskBody>
 

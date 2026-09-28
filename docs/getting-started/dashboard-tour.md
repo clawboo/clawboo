@@ -60,7 +60,7 @@ The sidebar nav is deliberately short, six work surfaces plus the Settings gear:
 | Footer    | **Settings** (gear)           | Opens the Settings modal (see below)          |
 
 <Note>
-There is no standalone **Approvals** nav item. Approvals surface where they are raised: a collapsible **Needs approval** column on the [board](/using/board) and an inline tray above the [group-chat](/using/group-chat) composer. See [Approvals](/using/approvals).
+There is no standalone **Approvals** nav item. Approvals surface where they are raised: the **Needs you** column on the [board](/using/board) and an inline tray above the [group-chat](/using/group-chat) composer. See [Approvals](/using/approvals).
 </Note>
 
 The theme toggle sits beside the Settings gear at the bottom.

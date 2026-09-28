@@ -15,6 +15,13 @@
 // and a single reduce point. The NL-fallback / fan-out prose patterns are NOT
 // used (fan-out = ≥2 structured delegations → N parallel tasks).
 
+import {
+  delegationTargetOf,
+  isHumanAssignment,
+  ledgerAllowsAutoFire,
+  MAX_AUTO_FIRES,
+  type TaskAttention,
+} from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 
@@ -32,7 +39,7 @@ import {
   detectDelegationIntent,
   type SessionsSendParams,
 } from './delegationTags'
-import { SYSTEM_TURN, type TurnOrigin } from './turnOrigin'
+import { ASSIGNMENT_TURN, SYSTEM_TURN, type TurnOrigin } from './turnOrigin'
 
 /**
  * A source task at this ancestor-depth (or deeper) may not spawn children —
@@ -54,39 +61,25 @@ export const REFLECT_WINDOW_MS = 3000
  */
 export const DELEGATION_IDLE_TIMEOUT_MS = 8 * 60_000
 
-/** Durable auto-refire cap: the ready-pump re-fires a released delegation at most
- *  until its execution ledger holds this many rows. The ledger IS the counter —
- *  process-restart safe, unlike the in-memory failure breaker it complements. */
-export const MAX_AUTO_FIRES = 3
+// The durable auto-refire cap and the ready-pump's fire policy over a task's
+// execution ledger (a user Stop is never auto-refired; a task that keeps failing
+// is parked at MAX_AUTO_FIRES). Both live in @clawboo/board-core, where the
+// server's pump scan and the board's needs-you column read the same rule; they
+// are re-exported here because this engine's pump is their primary consumer.
+export { ledgerAllowsAutoFire, MAX_AUTO_FIRES }
 
 /**
- * The ledger side of the fire policy (mirrored by @clawboo/db's
- * `isLedgerAutoFireable` for the server pump's scan — the two MUST agree, and a
- * contract test asserts they do over one shared fixture table):
- *   • empty ledger → never delivered (fresh, deferred, MCP-created) → fire;
- *   • last run `running` → someone owns it → leave it;
- *   • last run `cancelled` → the user STOPPED it → never auto-refire
- *     (a human re-queues it deliberately);
- *   • TRAILING streak of consecutive non-succeeded runs ≥ MAX_AUTO_FIRES →
- *     permafailing → park (a success in between resets the streak);
- *   • otherwise (timed_out / failed / orphaned) → infra death, not intent →
- *     re-fire.
- *
- * Pure and module-scoped rather than a closure: it depends on nothing but its
- * argument, and the mirror can only be tested if both halves are reachable.
+ * What `dispatchTask` did with a task a person asked to run.
+ *  • `started`   claimed and delivered to its agent;
+ *  • `queued`    its agent is busy with another task, so it waits in `todo` and
+ *                runs the moment that agent frees up (even if its ledger would
+ *                otherwise park it: the person asked for this run);
+ *  • `not_found` no such task;
+ *  • `not_ready` not `todo` (already running, finished, cancelled) or waiting on
+ *                an unfinished dependency;
+ *  • `no_agent`  no agent is bound to it, so there is no one to run it.
  */
-export function ledgerAllowsAutoFire(execs: Array<{ status: string }>): boolean {
-  if (execs.length === 0) return true
-  const last = execs[execs.length - 1]!.status
-  if (last === 'running' || last === 'cancelled') return false
-  let trailing = 0
-  for (let i = execs.length - 1; i >= 0; i--) {
-    const s = execs[i]!.status
-    if (s === 'succeeded' || s === 'cancelled') break
-    trailing += 1
-  }
-  return trailing < MAX_AUTO_FIRES
-}
+export type DispatchOutcome = 'started' | 'queued' | 'not_found' | 'not_ready' | 'no_agent'
 
 /** The idle allowance while a delegate sits INSIDE one tool call (call seen, no
  *  result yet). A build/test/install can legitimately run silent far past the
@@ -171,6 +164,10 @@ export interface BoardChange {
   updatedAt?: number
   /** Report-up summary recorded on done (shown on the projection card). */
   summary?: string
+  /** Why the task now needs a person (null: it does not). Never set by this
+   *  engine, which cannot see the execution ledger's verdicts; a host that can
+   *  read the board attaches it when a change moves a task's status. */
+  attention?: TaskAttention | null
 }
 
 /**
@@ -342,6 +339,17 @@ export interface BoardOrchestratorDeps {
    * would make detach refuse forever. Omitted ⇒ never busy.
    */
   isSessionBusy?: (sessionKey: string) => boolean
+  /**
+   * Is ANY run (a user turn, a reflection, a task) in flight or queued on this
+   * session? A task must not be bound to a session in that state. The engine maps
+   * a session to at most one task and completes that task on the session's next
+   * successful terminal, so binding a task behind someone else's turn makes THAT
+   * turn's reply the task's output, and the task's own run then executes unmapped,
+   * where its reply lands in the team chat as if the agent had spoken unprompted.
+   * An occupied session's work is deferred instead and fired when the session's
+   * current turn ends. Omitted ⇒ only a session running a task counts as occupied.
+   */
+  isSessionOccupied?: (sessionKey: string) => boolean
   /** A board mutation the orchestrator made (projection-store feed). Optional. */
   onBoardChange?: (change: BoardChange) => void
   /** Append a visible narration entry to a session's transcript. Optional. */
@@ -443,6 +451,20 @@ export interface BoardOrchestrator {
    * itself says the work is no longer owned.
    */
   detachTask(taskId: string): boolean
+  /**
+   * Run one specific `todo` task now, because a PERSON asked for it: a task they
+   * created for an agent from the board, a retry of one that failed, a card they
+   * just assigned. Resolves the agent from the task's durable binding and fires it
+   * through the same claim → execution → deliver path the ready-pump uses, with
+   * one difference: the execution-ledger fire policy is waived for this run. That
+   * policy stops the AUTOMATIC pump from re-firing work the user stopped or that
+   * keeps failing; it is not meant to overrule the user asking again.
+   *
+   * A person-assigned task (see `isHumanAssignment`) reports to that person on its
+   * card: its result is recorded on the board and is not delivered to the team
+   * lead as a `[Task Update]`.
+   */
+  dispatchTask(taskId: string): Promise<DispatchOutcome>
   /** Drop all in-memory tracking + timers (team switch / teardown). */
   reset(): void
 }
@@ -466,6 +488,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const openToolCall = new Set<string>() // sessions currently inside a tool call (longer idle allowance)
   const recentlyTerminated = new Map<string, number>() // child session → terminal ts (late-replay guard)
   const failureCounts = new Map<string, number>() // `${target}:${task}` → consecutive failures (loop breaker)
+  const humanTasks = new Set<string>() // task ids a PERSON assigned: they report to the card, not an agent
+  const waitingOnTurn = new Set<string>() // sessions with work deferred behind a non-task turn (pump on its terminal)
+  const forceFire = new Set<string>() // task ids a person asked to run: waive the auto-fire ledger policy once
 
   // Reflection batch state — closure-owned so reset() collects it (no leak).
   // `toAgentId` is the recipient: a sub-task reports to its IMMEDIATE delegator
@@ -521,9 +546,27 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   // enforced where the distinction actually lives: the ready-pump's fire policy
   // reads the task's execution ledger, and a `cancelled` last run (the user-Stop
   // outcome `releaseClaimed` records) is never auto-refired.
-  const sdidAgent = (sdid: string): string | null => sdid.match(/:agent:([^:]+)/)?.[1] ?? null
+  //
+  // A task a PERSON assigned carries `:agent:` but no `:reflectTo:` and an
+  // `:origin:human` marker (`encodeHumanAssignment` in @clawboo/board-core): its
+  // result is for that person, read on the card, so no agent is resolved to
+  // report it to. `humanTasks` mirrors the marker for the tasks this engine fires.
+  const sdidAgent = (sdid: string): string | null => delegationTargetOf(sdid)
   const sdidReflectTo = (sdid: string): string | null =>
     sdid.match(/:reflectTo:([^:]+)/)?.[1] ?? null
+  const sdidOf = (task: BoardTask): string =>
+    typeof task['sourceDelegationId'] === 'string' ? (task['sourceDelegationId'] as string) : ''
+
+  /** The brief an agent receives for a task. An engine delegation stores the whole
+   *  ask as its description (its title is a prefix of it); a task a person wrote
+   *  has a short title plus optional details, and the agent needs both. */
+  const briefFor = (task: BoardTask): string => {
+    const title = (task.title ?? '').trim()
+    const description = typeof task.description === 'string' ? task.description.trim() : ''
+    if (!description) return title
+    if (!title || description.startsWith(title)) return description
+    return `${title}\n\n${description}`
+  }
   const encodeSdid = (
     runId: string,
     opts: { agentId?: string; reflectTo: string | null },
@@ -547,6 +590,19 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  pause, never a chain-destroying failure.) */
   const stopChangedFor = (sessionKey: string): boolean =>
     sessionStartGen.has(sessionKey) && sessionStartGen.get(sessionKey) !== deps.stopGen()
+
+  /** May a task be bound to this session right now? Not while it runs a task (one
+   *  task per session), and not while ANY other turn is in flight or queued on it
+   *  (see `isSessionOccupied`). A session that is busy with a non-task turn is
+   *  remembered, so its terminal fires the work that had to wait. */
+  const sessionTakesTask = (sessionKey: string): boolean => {
+    if (sessionToTask.has(sessionKey)) return false
+    if (deps.isSessionOccupied?.(sessionKey)) {
+      waitingOnTurn.add(sessionKey)
+      return false
+    }
+    return true
+  }
 
   /** Drop all in-memory tracking for a session's current task. */
   /** See {@link BoardOrchestrator.detachTask}. */
@@ -596,6 +652,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  reflection (those are for a genuine failure, not a user pause). */
   async function releaseClaimed(taskId: string, sessionKey: string): Promise<void> {
     forgetSession(sessionKey)
+    humanTasks.delete(taskId)
     const execId = taskToExec.get(taskId)
     if (execId) {
       taskToExec.delete(taskId)
@@ -713,7 +770,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // `:agent:` marker so the ready-pump fires it once the session frees (and after
     // a refresh, `resume`'s pump decodes the agent from the persisted id). The
     // delegator is encoded too so a mid-chain reduce-point survives a refresh.
-    const deferred = sessionToTask.has(targetSk)
+    const deferred = !sessionTakesTask(targetSk)
     const title = signal.task.slice(0, 200)
     const task = await deps.board.createTask({
       title,
@@ -905,25 +962,35 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     return sdidAgent(sdid)
   }
 
-  /** Claim + open-execution + deliver a dep-ready task to its target agent. */
-  async function fireTask(taskId: string, agentId: string, description: string): Promise<void> {
+  /** Claim + open-execution + deliver a dep-ready task to its target agent.
+   *  `human`: a person assigned it, so it is delivered as their assignment and its
+   *  result reports to them (on the card), never to an agent. */
+  async function fireTask(
+    taskId: string,
+    agentId: string,
+    description: string,
+    human = false,
+  ): Promise<void> {
     if (taskToExec.has(taskId)) return
+    if (human) humanTasks.add(taskId)
     const targetSk = deps.sessionKeyForAgent(agentId)
     if (!targetSk) {
       pendingTargets.delete(taskId)
-      enqueueReflection({
-        toAgentId: reflectTargetFor(taskId),
-        by: nameOf(agentId),
-        title: taskTitle.get(taskId),
-        summary: `A plan step could not be delivered — ${nameOf(agentId)} has no active session.`,
-        outcome: 'error',
-      })
+      if (!human)
+        enqueueReflection({
+          toAgentId: reflectTargetFor(taskId),
+          by: nameOf(agentId),
+          title: taskTitle.get(taskId),
+          summary: `A plan step could not be delivered — ${nameOf(agentId)} has no active session.`,
+          outcome: 'error',
+        })
       return
     }
-    // The agent's single session is busy with another delegation. Leave this task
-    // `todo` + its pendingTargets entry intact so the ready-pump re-fires it once
-    // the session frees — two tasks for one agent run serially, never orphaning one.
-    if (sessionToTask.has(targetSk)) return
+    // The agent's single session is busy (another task, or any other turn). Leave
+    // this task `todo` + its pendingTargets entry intact so the ready-pump re-fires
+    // it once the session frees: two tasks for one agent run serially, never
+    // orphaning one, and never completing with someone else's reply.
+    if (!sessionTakesTask(targetSk)) return
     const startGen = deps.stopGen()
     const claim = await deps.board.claim(taskId, agentId, 'openclaw')
     pendingTargets.delete(taskId)
@@ -937,6 +1004,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return
     }
     taskToExec.set(taskId, exec.id)
+    // The person's "run it now" is spent on this run: a later failure goes back
+    // under the automatic pump's policy like any other.
+    forceFire.delete(taskId)
     sessionToTask.set(targetSk, taskId)
     sessionStartGen.set(targetSk, startGen) // capture for the Stop-vs-abort distinction
     lastActivityAt.set(targetSk, now()) // start the idle watchdog clock for this delegate
@@ -949,10 +1019,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return
     }
     try {
-      await deps.deliver(targetSk, agentId, description, {
-        kind: 'delegation',
-        fromAgentId: reflectTargetFor(taskId),
-      })
+      await deps.deliver(
+        targetSk,
+        agentId,
+        description,
+        humanTasks.has(taskId)
+          ? ASSIGNMENT_TURN
+          : { kind: 'delegation', fromAgentId: reflectTargetFor(taskId) },
+      )
     } catch {
       await failForSession(
         targetSk,
@@ -992,11 +1066,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // task may fire, so collapsing a read failure into it would auto-fire work
       // the user Stopped. Skip the task this pass; the pump runs again.
       if (execs === null) continue
-      if (!ledgerAllowsAutoFire(execs)) {
+      // A person asked for this run (`dispatchTask` found its agent busy): the
+      // policy below guards the AUTOMATIC re-fire, not the person asking again.
+      if (!forceFire.has(task.id) && !ledgerAllowsAutoFire(execs)) {
         // Tell the leader ONCE when the cap parks a task — a silently-parked
         // delegation is precisely the "sits forever, nobody told" failure mode.
+        // A task a person assigned is theirs to decide on, not the leader's: it
+        // surfaces on the board's needs-you column instead.
         const last = execs[execs.length - 1]?.status
-        if (last !== 'cancelled' && last !== 'running' && !parkAlerted.has(task.id)) {
+        if (
+          last !== 'cancelled' &&
+          last !== 'running' &&
+          !parkAlerted.has(task.id) &&
+          !isHumanAssignment(sdidOf(task))
+        ) {
           parkAlerted.add(task.id)
           const leaderSk = deps.leaderAgentId()
             ? deps.sessionKeyForAgent(deps.leaderAgentId()!)
@@ -1011,7 +1094,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         continue
       }
       if (!taskTitle.has(task.id) && task.title) taskTitle.set(task.id, task.title)
-      const description = (task.description as string | undefined) ?? task.title ?? ''
+      const description = briefFor(task)
+      const human = isHumanAssignment(sdidOf(task))
       const targetSk = deps.sessionKeyForAgent(agentId)
       if (completingSessionKey && targetSk === completingSessionKey) {
         const t = setTimeout(() => {
@@ -1019,7 +1103,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           // Deferred out of a mid-terminal drain, so nothing is awaiting this:
           // a rejection here would be an unhandled one, and the delegation it
           // was meant to start would simply never happen, silently.
-          void fireTask(task.id, agentId, description).catch((err: unknown) => {
+          void fireTask(task.id, agentId, description, human).catch((err: unknown) => {
             const leaderId = deps.leaderAgentId()
             const leaderSk = leaderId ? deps.sessionKeyForAgent(leaderId) : null
             if (leaderSk)
@@ -1036,7 +1120,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         deferredFires.add(t)
         continue
       }
-      await fireTask(task.id, agentId, description)
+      await fireTask(task.id, agentId, description, human)
     }
   }
 
@@ -1100,6 +1184,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           const sdid = typeof t.sourceDelegationId === 'string' ? t.sourceDelegationId : ''
           if (sdidReflectTo(sdid) !== toAgentId) continue
           if (t.status !== 'todo' && t.status !== 'in_progress') continue
+          // A `todo` the pump will never fire again (the user stopped it, or it
+          // was parked after failing repeatedly) is not coming back on its own.
+          // Listing it would tell the delegator to keep waiting on work that now
+          // needs a person, which is how one dead task stalls a whole synthesis.
+          if (t.status === 'todo' && !forceFire.has(t.id)) {
+            const execs = await deps.board.listExecutions(t.id)
+            if (execs !== null && execs.length > 0 && !ledgerAllowsAutoFire(execs)) continue
+          }
           const title = typeof t.title === 'string' ? t.title : undefined
           // A task in this very batch is reporting now, not outstanding.
           if (title && settled.has(title)) continue
@@ -1151,6 +1243,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // always runs, but no new turn is started after the user halted.
     const stopped = stopChangedFor(sessionKey)
     forgetSession(sessionKey)
+    // A person assigned this task: its result is theirs, read on the card. It is
+    // recorded on the board exactly like a delegation's, but no agent is told:
+    // handing it to the team lead would make the lead act on work nobody asked it
+    // to coordinate.
+    const human = humanTasks.delete(taskId)
     // Compact verbose tool output in the report-up BEFORE it's recorded/relayed
     // (flag-on). Pass-through-safe + failure-preserving — never drops an error.
     const compacted = deps.compact ? deps.compact(summary) : summary
@@ -1186,7 +1283,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           agentId ?? undefined,
         )
       }
-      if (!stopped)
+      if (!stopped && !human)
         enqueueReflection({
           toAgentId: reflectTargetFor(taskId),
           by,
@@ -1229,12 +1326,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // sub-task reports to its parent, a top-level task to the leader). An EMPTY result
       // still reflects, but HONESTLY — the leader is told the agent returned no output so
       // it can re-delegate / note the gap instead of synthesizing a false success.
-      enqueueReflection({
-        toAgentId: reflectTargetFor(taskId),
-        by,
-        title,
-        summary: trimmed || `${by} finished “${title ?? 'the task'}” but returned no output.`,
-      })
+      if (!human)
+        enqueueReflection({
+          toAgentId: reflectTargetFor(taskId),
+          by,
+          title,
+          summary: trimmed || `${by} finished “${title ?? 'the task'}” but returned no output.`,
+        })
     }
     taskReflectTo.delete(taskId)
     taskTitle.delete(taskId)
@@ -1273,6 +1371,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // the failure (truth), but no post-Stop re-amplification fires.
     const stopped = stopChangedFor(sessionKey)
     forgetSession(sessionKey)
+    // A person-assigned task fails back to that person (the board's needs-you
+    // column), not to the team lead: see completeForSession.
+    const human = humanTasks.delete(taskId)
     const detailTrim = (detail ?? '').slice(0, 4000).trim()
     const reflectTo = reflectTargetFor(taskId)
     const title = taskTitle.get(taskId)
@@ -1313,7 +1414,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             .map((c) => `“${(c.title ?? '').slice(0, 40)}”`)
             .join(', ')} were cancelled — retry the plan or re-delegate.`
         : ''
-    if (!stopped)
+    if (!stopped && !human)
       enqueueReflection({
         toAgentId: reflectTo,
         by,
@@ -1396,11 +1497,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           if (t.title) taskTitle.set(t.id, t.title)
           // Recover the IMMEDIATE delegator (the reduce-point) from the persisted
           // sourceDelegationId so a mid-chain sub-task still reports to its parent,
-          // not the leader. Falls back to the leader when the sdid carries none.
-          const sdid =
-            typeof t['sourceDelegationId'] === 'string' ? (t['sourceDelegationId'] as string) : ''
-          const reflectTo = sdidReflectTo(sdid) ?? deps.leaderAgentId()
-          if (reflectTo) taskReflectTo.set(t.id, reflectTo)
+          // not the leader. Falls back to the leader when the sdid carries none,
+          // except for a task a person assigned, which reports to no agent at all.
+          const sdid = sdidOf(t)
+          if (isHumanAssignment(sdid)) {
+            humanTasks.add(t.id)
+          } else {
+            const reflectTo = sdidReflectTo(sdid) ?? deps.leaderAgentId()
+            if (reflectTo) taskReflectTo.set(t.id, reflectTo)
+          }
         }
       }
     }
@@ -1408,6 +1513,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   }
 
   async function onEvent(sessionKey: string, event: RuntimeEvent): Promise<void> {
+    const wasTaskRun = sessionToTask.has(sessionKey)
+    await handleEvent(sessionKey, event)
+    // A NON-task turn (a user turn, a reflection) just ended on a session that had
+    // work waiting behind it: a task that could not be bound while the turn was in
+    // flight. Fire it now. (A task run's own terminal already pumps.)
+    const terminal = event.kind === 'done' || (event.kind === 'error' && event.fatal)
+    if (terminal && !wasTaskRun && waitingOnTurn.delete(sessionKey)) await pumpReady(sessionKey)
+  }
+
+  async function handleEvent(sessionKey: string, event: RuntimeEvent): Promise<void> {
     const sourceAgentId = deps.agentIdForSession(sessionKey) ?? ''
     // Capture BEFORE completion deletes the mapping, so a done that both
     // completes a child AND sub-delegates parents the grandchild correctly.
@@ -1531,12 +1646,48 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
   }
 
+  /** See the interface. A person's explicit "run this now". */
+  async function dispatchTask(taskId: string): Promise<DispatchOutcome> {
+    const detail = await deps.board.getTask(taskId)
+    if (!detail) return 'not_found'
+    const task = detail.task
+    if (task.status !== 'todo') return 'not_ready'
+    const agentId = targetForTask(task)
+    if (!agentId) return 'no_agent'
+    // Readiness is the pump's own query, so a plan step still waiting on its
+    // blocker (or a task from another team) is refused exactly as the pump
+    // would skip it.
+    const ready = await deps.board.getReadyTasks(deps.teamId)
+    if (!ready.some((t) => t.id === taskId)) return 'not_ready'
+    const sdid = sdidOf(task)
+    const human = isHumanAssignment(sdid)
+    // A retried DELEGATION still reports to whoever delegated it; the in-memory
+    // record of that was dropped when it failed, the durable one was not.
+    if (!human && !taskReflectTo.has(taskId)) {
+      const reflectTo = sdidReflectTo(sdid)
+      if (reflectTo) taskReflectTo.set(taskId, reflectTo)
+    }
+    if (!taskTitle.has(taskId) && task.title) taskTitle.set(taskId, task.title)
+    // Waive the ledger policy for THIS run. If the agent is busy it stays set, so
+    // the pump that runs when the agent frees up fires it too.
+    forceFire.add(taskId)
+    const targetSk = deps.sessionKeyForAgent(agentId)
+    const busy =
+      targetSk !== null &&
+      (sessionToTask.has(targetSk) || (deps.isSessionOccupied?.(targetSk) ?? false))
+    await fireTask(taskId, agentId, briefFor(task), human)
+    if (taskToExec.has(taskId)) return 'started'
+    return busy ? 'queued' : 'not_ready'
+  }
+
   /** See the interface. Durable-Stop writer — runs alongside the host's aborts. */
   async function markStopped(): Promise<void> {
     // Pending deferred fires would start NEW runs after the Stop — kill them
     // first (they were scheduled pre-Stop, so their gen check would pass).
     for (const t of deferredFires) clearTimeout(t)
     deferredFires.clear()
+    // A Stop outranks an earlier "run this now": the person halted the team.
+    forceFire.clear()
     // Tracked runs: cancel the open execution NOW; the abort's later
     // done:aborted → releaseClaimed completeExecution no-ops (terminals are
     // immutable) and still releases the task row. A RESUME-ATTACHED run has no
@@ -1580,6 +1731,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     resume,
     markStopped,
     detachTask,
+    dispatchTask,
     taskForSession: (sessionKey) => sessionToTask.get(sessionKey) ?? null,
     reset() {
       // Best-effort: deliver any pending reflection BEFORE tearing down, so a
@@ -1604,6 +1756,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       openToolCall.clear()
       recentlyTerminated.clear()
       failureCounts.clear()
+      humanTasks.clear()
+      forceFire.clear()
+      waitingOnTurn.clear()
       parkAlerted.clear()
       for (const t of deferredFires) clearTimeout(t)
       deferredFires.clear()

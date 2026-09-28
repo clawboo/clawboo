@@ -33,7 +33,7 @@ These open from the nav buttons at the bottom of `AgentListColumn` or from the S
 
 ## App-wide
 
-- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals, native `run_command` requests, and the brokered tool-approval queue). Not a nav panel: it renders as the Board's **Needs approval** column and as an inline tray above the group-chat composer.
+- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals, native `run_command` requests, and the brokered tool-approval queue). Not a nav panel: it renders in the Board's **Needs you** column and as an inline tray above the group-chat composer.
 - **[Theming](/using/theming)**: The light/dark/system theme toggle in the bottom-left of the sidebar (`ThemeToggle`); fresh installs default to light.
 
 ## Where things live (nav slots)
@@ -61,7 +61,7 @@ The fifteen nav panels map one-to-one to `NavView` ids. The table is the same wi
 <Note>
 The `fleet` panel (a read-only overview) does not have its own how-to; it is covered in the [dashboard tour](/getting-started/dashboard-tour).
 
-**Approvals is not a nav slot.** It has a how-to page ([Approvals](/using/approvals)) but no `NavView` id: approvals render on the [board](/using/board)'s **Needs approval** column and in an inline tray above the [group-chat](/using/group-chat) composer.
+**Approvals is not a nav slot.** It has a how-to page ([Approvals](/using/approvals)) but no `NavView` id: approvals render in the [board](/using/board)'s **Needs you** column and in an inline tray above the [group-chat](/using/group-chat) composer.
 </Note>
 
 ![The team space: Ghost Graph above the group chat for a selected team](/images/team-space.png)

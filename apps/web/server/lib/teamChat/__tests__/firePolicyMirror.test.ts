@@ -1,15 +1,15 @@
-// The fire policy exists TWICE, on purpose, and nothing but a comment kept the
-// two halves in agreement:
+// The fire policy is read under TWO names, and both must keep meaning the same
+// decision:
 //
 //   • `ledgerAllowsAutoFire` (@clawboo/team-orchestration) — the engine's own
 //     decision when it pumps ready work;
 //   • `isLedgerAutoFireable` (@clawboo/db) — the same decision, made by the
 //     server's dispatch-pump SCAN, which runs without an engine resident.
 //
-// The duplication is deliberate: the engine package cannot import the db package
-// (its board is host-injected, which is what lets the browser drive it). So the
-// guard has to be a test, and it has to live somewhere that can see both — only
-// apps/web depends on each of them.
+// Both now resolve to the one rule in @clawboo/board-core (which the board's
+// needs-you column also reads), so they can no longer drift by being edited
+// apart. This table stays as the guard against either package re-growing a
+// private copy: it lives in apps/web because only apps/web depends on both.
 //
 // A drift here is not cosmetic. If the scan is more permissive than the engine,
 // the pump re-fires work a user STOPPED; if it is stricter, delegated work sits
