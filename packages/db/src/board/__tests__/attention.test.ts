@@ -9,7 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDb, type ClawbooDb } from '../../db'
 import { tasks } from '../../schema'
 import { attentionForTask, attentionForTasks } from '../attention'
+import { onBoardLifecycle, resetBoardLifecycleListeners, type BoardLifecycleEvent } from '../events'
 import {
+  assignTaskDelegation,
   claimTask,
   completeExecutionProcess,
   createExecutionProcess,
@@ -17,7 +19,6 @@ import {
   getTask,
   listExecutionsForTasks,
   listTasks,
-  rebindTaskDelegation,
   updateStatus,
 } from '../repository'
 
@@ -112,18 +113,65 @@ describe('attentionForTasks', () => {
   })
 })
 
-describe('rebindTaskDelegation', () => {
+describe('assignTaskDelegation', () => {
+  let seen: BoardLifecycleEvent[]
+  beforeEach(() => {
+    seen = []
+    onBoardLifecycle((ev) => seen.push(ev))
+  })
+  afterEach(() => resetBoardLifecycleListeners())
+
   it('binds an unassigned card to an agent, which clears its needs-you state', () => {
     const t = createTask(db, { title: 'manual', teamId: 'T' })
     const sdid = encodeHumanAssignment('a2', 'n1')
-    expect(rebindTaskDelegation(db, t.id, sdid)?.sourceDelegationId).toBe(sdid)
+    const res = assignTaskDelegation(db, t.id, sdid)
+    expect(res).toMatchObject({ ok: true, from: 'todo' })
+    expect(getTask(db, t.id)).toMatchObject({ status: 'todo', sourceDelegationId: sdid })
     expect(attentionForTask(db, t.id)).toBeNull()
+    // Already `todo`: only the binding changed, so no status event.
+    expect(seen.filter((e) => e.kind === 'status_changed')).toEqual([])
+  })
+
+  it('binds a blocked task and releases it to todo in the same write', () => {
+    const t = createTask(db, { title: 'stuck', teamId: 'T', sourceDelegationId: BOUND })
+    claimTask(db, t.id, 'a2')
+    updateStatus(db, t.id, 'blocked')
+    seen.length = 0
+    const sdid = encodeHumanAssignment('a3', 'n1')
+    expect(assignTaskDelegation(db, t.id, sdid)).toMatchObject({ ok: true, from: 'blocked' })
+    expect(getTask(db, t.id)).toMatchObject({
+      status: 'todo',
+      sourceDelegationId: sdid,
+      assigneeAgentId: null,
+      assigneeRuntime: null,
+      verification: null,
+    })
+    expect(seen).toEqual([{ kind: 'status_changed', taskId: t.id, teamId: 'T', status: 'todo' }])
   })
 
   it('refuses while the task is being worked, so a live run keeps its owner', () => {
     const t = createTask(db, { title: 'live', teamId: 'T', sourceDelegationId: BOUND })
     claimTask(db, t.id, 'a2')
-    expect(rebindTaskDelegation(db, t.id, encodeHumanAssignment('a3', 'n1'))).toBeNull()
-    expect(getTask(db, t.id)?.sourceDelegationId).toBe(BOUND)
+    seen.length = 0
+    expect(assignTaskDelegation(db, t.id, encodeHumanAssignment('a3', 'n1'))).toEqual({
+      ok: false,
+      reason: 'not_assignable',
+    })
+    expect(getTask(db, t.id)).toMatchObject({ status: 'in_progress', sourceDelegationId: BOUND })
+    expect(seen).toEqual([])
+  })
+
+  it('refuses finished and dropped tasks, and reports a missing one', () => {
+    const done = createTask(db, { title: 'shipped', teamId: 'T', sourceDelegationId: BOUND })
+    claimTask(db, done.id, 'a2')
+    updateStatus(db, done.id, 'done')
+    const dropped = createTask(db, { title: 'gone', teamId: 'T' })
+    db.update(tasks).set({ dropped: 1 }).where(eq(tasks.id, dropped.id)).run()
+    const sdid = encodeHumanAssignment('a3', 'n1')
+    expect(assignTaskDelegation(db, done.id, sdid)).toMatchObject({ reason: 'not_assignable' })
+    expect(assignTaskDelegation(db, dropped.id, sdid)).toMatchObject({ reason: 'not_assignable' })
+    expect(assignTaskDelegation(db, 'nope', sdid)).toEqual({ ok: false, reason: 'not_found' })
+    expect(getTask(db, done.id)?.sourceDelegationId).toBe(BOUND)
+    expect(getTask(db, dropped.id)?.sourceDelegationId).toBeNull()
   })
 })

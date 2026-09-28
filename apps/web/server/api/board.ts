@@ -13,6 +13,7 @@ import {
   addComment,
   agents,
   appendAudit,
+  assignTaskDelegation,
   attentionForTask,
   attentionForTasks,
   claimBody,
@@ -34,7 +35,6 @@ import {
   listExecutions,
   listTasks,
   provisionWorkspaceBody,
-  rebindTaskDelegation,
   TaskDependencyCycleError,
   updateStatus,
   updateTaskBody,
@@ -262,22 +262,22 @@ export function boardAssignPOST(req: Request, res: Response): void {
       res.status(400).json({ ok: false, error: 'agent_not_in_team' })
       return
     }
-    const bound = rebindTaskDelegation(
+    // The new binding and the release to `todo` commit together or not at all.
+    const assigned = assignTaskDelegation(
       db,
       taskId,
       encodeHumanAssignment(agentId, randomUUID().slice(0, 8)),
     )
-    if (!bound) {
+    if (!assigned.ok) {
+      if (assigned.reason === 'not_found') {
+        res.status(404).json({ ok: false, error: 'task not found' })
+        return
+      }
       // Running, finished, cancelled or dropped: nothing to hand over.
       res.status(409).json({ ok: false, error: 'not_assignable' })
       return
     }
-    if (bound.status !== 'todo') {
-      const moved = updateStatus(db, taskId, 'todo')
-      if (!moved.ok) {
-        res.status(409).json({ ok: false, error: moved.reason })
-        return
-      }
+    if (assigned.from !== 'todo') {
       emitEvent(db, {
         kind: 'status_changed',
         taskId,

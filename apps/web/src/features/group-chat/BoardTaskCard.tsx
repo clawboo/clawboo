@@ -86,7 +86,8 @@ export const BoardTaskCard = memo(function BoardTaskCard({
   teamId = null,
 }: {
   task: BoardTaskView
-  /** The team whose chat shows this card; "Open on board" filters the board to it. */
+  /** The team whose chat shows this card. "Open on board" switches the board's team
+   *  filter to it only when a filter set to another team would hide the task. */
   teamId?: string | null
 }) {
   const assigneeName = useFleetStore((s) =>
@@ -173,16 +174,33 @@ export const BoardTaskCard = memo(function BoardTaskCard({
   const [trailOpen, setTrailOpen] = useState(false)
   const [trailTab, setTrailTab] = useState<TrailTab>('comments')
   const [comments, setComments] = useState<TaskComment[] | null>(null)
+  // A read that failed is not one still pending: it says so and offers Retry,
+  // which reads again, rather than showing "Loading…" for good.
+  const [commentsFailed, setCommentsFailed] = useState(false)
+  const [commentsAttempt, setCommentsAttempt] = useState(0)
   useEffect(() => {
     if (!trailOpen) return
     let cancelled = false
-    void boardClient.getTask(task.id).then((detail) => {
-      if (!cancelled && detail) setComments(detail.comments as TaskComment[])
-    })
+    void boardClient
+      .getTask(task.id)
+      .catch(() => null)
+      .then((detail) => {
+        if (cancelled) return
+        if (detail) {
+          setComments(detail.comments as TaskComment[])
+          setCommentsFailed(false)
+        } else {
+          setCommentsFailed(true)
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [trailOpen, task.id, task.status, task.updatedAt])
+  }, [trailOpen, task.id, task.status, task.updatedAt, commentsAttempt])
+  const retryComments = (): void => {
+    setCommentsFailed(false)
+    setCommentsAttempt((n) => n + 1)
+  }
   const openOnBoard = (): void => useViewStore.getState().openBoardTask(task.id, teamId)
 
   // Collapsible output — measure the rendered height so the "Show more" toggle only
@@ -368,7 +386,23 @@ export const BoardTaskCard = memo(function BoardTaskCard({
             </div>
             {trailTab === 'comments' ? (
               comments === null ? (
-                <div className="text-[11.5px] text-muted-foreground">Loading…</div>
+                commentsFailed ? (
+                  <div
+                    className="flex items-center gap-2 text-[11.5px] text-muted-foreground"
+                    data-testid="board-task-comments-error"
+                  >
+                    Couldn’t load the comments.
+                    <button
+                      type="button"
+                      onClick={retryComments}
+                      className="cursor-pointer font-mono text-[10px] uppercase tracking-wider text-primary/80 transition-colors hover:text-primary"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-[11.5px] text-muted-foreground">Loading…</div>
+                )
               ) : (
                 <div className="max-h-[260px] overflow-y-auto pr-1">
                   <TaskComments comments={comments} compact />

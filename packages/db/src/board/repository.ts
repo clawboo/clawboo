@@ -670,33 +670,59 @@ export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFiel
   return getTask(db, taskId)
 }
 
+/** The statuses a person can hand a task over from: nothing is running it. */
+const ASSIGNABLE_STATUSES: ReadonlySet<TaskStatus> = new Set(['todo', 'backlog', 'blocked'])
+
+export type AssignTaskResult =
+  | { ok: true; task: DbTask; from: TaskStatus }
+  | { ok: false; reason: 'not_found' | 'not_assignable' }
+
 /**
- * Re-bind a task that is NOT running to the agent named in `sourceDelegationId`
- * (a person assigning it from the board). Refused (null) while the task is being
- * worked, finished, cancelled or dropped: re-binding a live run would leave its
- * result reporting to an agent that no longer owns the task.
+ * Bind a task that is NOT running to the agent named in `sourceDelegationId` (a
+ * person assigning it from the board) and release it to `todo` so it can run.
+ * Both writes happen in ONE BEGIN IMMEDIATE transaction, so no other writer can
+ * see, or be left with, a task bound to its new agent but still parked.
+ *
+ * Refused while the task is being worked, finished, cancelled or dropped:
+ * re-binding a live run would leave its result reporting to an agent that no
+ * longer owns the task. A task already in `todo` only changes its binding.
  */
-export function rebindTaskDelegation(
+export function assignTaskDelegation(
   db: ClawbooDb,
   taskId: string,
   sourceDelegationId: string,
-): DbTask | null {
-  const rows = withWriteRetry(
-    () =>
-      db
-        .update(tasks)
-        .set({ sourceDelegationId, updatedAt: Date.now() })
-        .where(
-          and(
-            eq(tasks.id, taskId),
-            inArray(tasks.status, ['todo', 'backlog', 'blocked']),
-            eq(tasks.dropped, 0),
-          ),
-        )
-        .returning()
-        .all() as DbTask[],
-  )
-  return rows[0] ?? null
+): AssignTaskResult {
+  // Post-commit emission, as in `updateStatus`: a subscriber never observes an
+  // uncommitted transition.
+  const result = immediateWrite(db, (tx): AssignTaskResult => {
+    const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
+    if (!row) return { ok: false, reason: 'not_found' }
+    const from = row.status as TaskStatus
+    if (row.dropped || !ASSIGNABLE_STATUSES.has(from) || !canTransition(from, 'todo')) {
+      return { ok: false, reason: 'not_assignable' }
+    }
+    tx.update(tasks)
+      .set({
+        sourceDelegationId,
+        updatedAt: Date.now(),
+        // Released for a fresh run: the same fields `updateStatus(→todo)` clears.
+        ...(from !== 'todo'
+          ? { status: 'todo', assigneeAgentId: null, assigneeRuntime: null, verification: null }
+          : {}),
+      })
+      .where(eq(tasks.id, taskId))
+      .run()
+    const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
+    return { ok: true, task, from }
+  })
+  if (result.ok && result.from !== 'todo')
+    emitBoardLifecycle({
+      kind: 'status_changed',
+      taskId,
+      teamId: result.task.teamId ?? null,
+      status: 'todo',
+    })
+  return result
 }
 
 export function blockTask(db: ClawbooDb, taskId: string): UpdateStatusResult {

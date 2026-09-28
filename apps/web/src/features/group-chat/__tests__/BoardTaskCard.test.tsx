@@ -252,6 +252,32 @@ describe('the trail (comments + activity)', () => {
     )
   })
 
+  it('says when the comments could not load, and Retry reads them again', async () => {
+    let available = false
+    server.use(
+      http.get('/api/board/t1', () =>
+        available
+          ? HttpResponse.json({
+              task: { id: 't1', title: 'Summarise the changelog' },
+              comments: [{ id: 'c1', body: 'Retry requested.', authorType: 'user' }],
+              ancestors: [],
+            })
+          : HttpResponse.json({ error: 'unavailable' }, { status: 500 }),
+      ),
+    )
+    render(task({ status: 'in_progress' }))
+    await userEvent.click(await screen.findByTestId('board-task-trail-toggle'))
+    const error = await screen.findByTestId('board-task-comments-error')
+    expect(error).toHaveTextContent('Couldn’t load the comments.')
+    expect(screen.queryByText('Loading…')).toBeNull()
+
+    available = true
+    await userEvent.click(within(error).getByRole('button', { name: 'Retry' }))
+    const log = await screen.findByTestId('task-comments')
+    expect(within(log).getByText('Retry requested.')).toBeInTheDocument()
+    expect(screen.queryByTestId('board-task-comments-error')).toBeNull()
+  })
+
   it('switches to the live activity feed for the same task', async () => {
     let scoped = ''
     server.use(

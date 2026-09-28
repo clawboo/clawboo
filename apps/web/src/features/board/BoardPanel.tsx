@@ -333,8 +333,9 @@ export function BoardPanel() {
 
   useVisiblePolling(() => void refresh(), 5000)
 
-  // "Open on board" from a chat task card: open that task's drawer, widening the
-  // team filter first if it would hide the task's card behind the drawer.
+  // "Open on board" from a chat task card: open that task's drawer. A filter set to
+  // another team would hide the task's card behind the drawer, so it switches to
+  // the task's team; "All teams" already shows the card and stays as it is.
   useEffect(() => {
     if (!boardFocus) return
     setTeamFilter((f) =>
