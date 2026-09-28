@@ -292,20 +292,21 @@ A `scheduled_runs` ledger row fired.
 
 #### `routine_dispatched`
 
-A fire materialized (or bound to) a board task and dispatched it. `dispatchPath` records the wake-bridge branch.
+A fire was handed to its target. An agent routine materialized (or bound to) a board task and dispatched it; a team routine posted its message into the team chat and names the lead it went to. `dispatchPath` records the wake-bridge branch.
 
 ```ts
 {
   scheduledRunId: string
-  taskId: string
-  runtime: string
-  dispatchPath: 'one-shot' | 'connected' | 'human'
+  taskId: string | null // null for a team routine, which files no task
+  runtime: string | null
+  dispatchPath: 'one-shot' | 'connected' | 'human' | 'team-chat'
+  targetAgentId?: string | null // team routines: the lead the message went to
 }
 ```
 
 #### `routine_completed`
 
-A fire's dispatch reached a terminal outcome. `nextRunAt` is null when disarmed (a spent `once@` or an errored recurring routine).
+A fire's dispatch reached a successful outcome and the routine re-armed. `nextRunAt` is null when nothing is left to fire (a spent `once@`).
 
 ```ts
 {

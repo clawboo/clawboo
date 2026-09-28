@@ -56,8 +56,8 @@ const PANEL_SOURCES: Record<NavView, RetryableLazy<ComponentType>> = {
   fleet: createRetryableLazy(() =>
     import('@/features/fleet/FleetHealth').then((m) => ({ default: m.FleetHealth })),
   ),
-  scheduler: createRetryableLazy(() =>
-    import('@/features/scheduler/SchedulerPanel').then((m) => ({ default: m.SchedulerPanel })),
+  routines: createRetryableLazy(() =>
+    import('@/features/routines/RoutinesPanel').then((m) => ({ default: m.RoutinesPanel })),
   ),
   cost: createRetryableLazy(() =>
     import('@/app/cost/CostDashboard').then((m) => ({ default: m.CostDashboard })),

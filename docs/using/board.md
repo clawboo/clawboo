@@ -23,7 +23,7 @@ The Board panel is always available. Its subsystem is always on, so the panel re
 Click **Board** (the kanban-square icon) in the primary nav of the left sidebar, or press **`Cmd/Ctrl + 4`**. The panel mounts in the main content area.
 
 <Note>
-The number shortcuts cover the four sidebar work surfaces only: `Cmd/Ctrl+1` Atlas, `+2` Fleet, `+3` Marketplace, `+4` Board. Everything else (Scheduler, Tokens Used, System, and the rest) lives in the Settings modal (`Cmd/Ctrl+,`).
+The number shortcuts cover four of the sidebar surfaces: `Cmd/Ctrl+1` Atlas, `+2` Fleet, `+3` Marketplace, `+4` Board. Connectors and Memory sit in the sidebar without one, and the rest (Routines, Tokens Used, System, and so on) live in the Settings modal (`Cmd/Ctrl+,`).
 </Note>
 
 ## The columns

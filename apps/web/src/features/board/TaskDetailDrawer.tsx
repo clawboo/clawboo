@@ -130,6 +130,7 @@ export function TaskDetailDrawer({
   taskId,
   onClose,
   onStatusCommitted,
+  layer = 60,
 }: {
   taskId: string
   onClose: () => void
@@ -137,6 +138,8 @@ export function TaskDetailDrawer({
    *  the card to its new column immediately instead of waiting for the next ~5s
    *  reconciliation poll (#98). Mirrors the drawer's own optimistic `setDetail`. */
   onStatusCommitted?: (taskId: string, newStatus: string) => void
+  /** Stacking layer. Raise it when opening the drawer over another overlay. */
+  layer?: number
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [executions, setExecutions] = useState<BoardExecution[]>([])
@@ -194,7 +197,7 @@ export function TaskDetailDrawer({
     <Modal
       open
       variant="drawer"
-      layer={60}
+      layer={layer}
       labelledBy={headingId}
       onClose={onClose}
       data-testid="task-detail-drawer"

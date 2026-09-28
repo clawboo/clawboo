@@ -299,15 +299,9 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
   -d '{"apiKey":"sk-or-...","provider":"openrouter"}'
 ```
 
-### 3. Seed a default starter team (`seed-native-team`)
+### 3. Deploy a team
 
-`POST /api/onboarding/seed-native-team` with `{ provider?, model? }` mints a default native team in one call: a leader (capable model) and a specialist (cheap model). When `provider` is omitted, the seed follows what is usable rather than assuming Anthropic: the recorded leader-model pick when that provider can still run (keyless Ollama always can, so a deliberate local pick is never swapped for a billed provider), else the first connected provider in priority order, else the `anthropic` fallback when nothing is connected. Both get the Memory and Tools MCP, TeamChat, and the Tasks MCP in **read-only** mode (`list_tasks` / `get_task`). Board WRITES stay off, because the orchestration engine owns them: a leader-created task would race the engine's claim or become an unrun orphan. Reads were never the risk, and without them a leader could not see the board it presides over. The leader hands work over through the `delegate` signal tool the native driver adds for team runs, and sees results as `[Task Update]` reflections. First-run onboarding no longer calls this; it deploys a team you pick from the marketplace instead. The endpoint remains as a quick way to stand up a default two-agent native team. Both agents are `clawboo-native` rows created through the native AgentSource (no Gateway, no provider SDK call). Per-provider leader / specialist model defaults: `anthropic` → `claude-sonnet-5` / `claude-haiku-4-5`; `openai` → `gpt-5.4` / `gpt-4o-mini`; `openrouter` → `anthropic/claude-haiku-4.5` / `openai/gpt-4o-mini`; `ollama` → `llama3.2` / `llama3.2`. Each of the seven extra OpenAI-compatible providers carries its own pair in the same `MODEL_DEFAULTS` table, and all eleven ids are accepted (an unrecognized `provider` is a `400`).
-
-```bash
-curl -X POST http://localhost:18790/api/onboarding/seed-native-team \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"anthropic"}'
-```
+A connected native runtime runs any team you deploy. Onboarding creates no team of its own: its last step opens the marketplace, where you pick a team, choose the runtime each member runs on, and deploy it. Later teams come from the same place, through the **+** button in the team sidebar or the Marketplace's **Teams** tab. See [Deploy your first team](/getting-started/first-team).
 
 ## Verify it worked
 
@@ -336,7 +330,7 @@ curl -X POST http://localhost:18790/api/onboarding/seed-native-team \
 
 - [Connecting runtimes](/runtimes/connecting-runtimes), the install/connect/disconnect lifecycle and the encrypted vault
 - [Runtimes overview](/runtimes/index), the capability matrix across all five runtimes
-- [`/api/runtimes` reference](/reference/rest-api/runtimes), full request/response shapes for connect, healthcheck, run, and seed-native-team
+- [`/api/runtimes` reference](/reference/rest-api/runtimes), full request/response shapes for connect, healthcheck, and run
 - [Quickstart: native-first](/getting-started/quickstart-native), paste a key and land in a team with no Gateway
 - [The board](/concepts/the-board), the durable task substrate a native run drives
 - [Memory](/concepts/memory), the shared facts tier a native run reads and writes over MCP

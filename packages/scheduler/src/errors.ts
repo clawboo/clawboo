@@ -103,6 +103,19 @@ export class DuplicateFiringOwnerError extends Error {
 }
 
 /**
+ * A routine whose target is incomplete or contradicts itself: a team routine
+ * with no team, an agent routine with no agent, an agent that is not on the
+ * team it was paired with, or a team or agent that does not exist. REST → 400.
+ */
+export class InvalidRoutineTargetError extends Error {
+  readonly code = 'invalid_routine_target' as const
+  constructor(message: string) {
+    super(message)
+    this.name = 'InvalidRoutineTargetError'
+  }
+}
+
+/**
  * Binding a RECURRING routine to a pre-existing team task. A bound task is
  * dispatched as-is and is claimable only once (todo → done); a recurring cron
  * would fire once then park in error forever. Bound routines must be one-shot

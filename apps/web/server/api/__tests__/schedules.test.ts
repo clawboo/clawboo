@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createTask, listScheduledRuns } from '@clawboo/db'
+import { agents, appendEvent, createTask, listScheduledRuns, setSetting, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -18,6 +18,7 @@ import {
   schedulesDELETE,
   schedulesListGET,
   schedulesRunPOST,
+  schedulesRunsGET,
   schedulesUpdatePATCH,
 } from '../schedules'
 
@@ -65,7 +66,31 @@ describe('schedules REST (gateway disconnected)', () => {
         id: 'a1',
         name: 'A1',
         gatewayId: 'a1',
+        // Not OpenClaw-sourced: a teamless OpenClaw agent is the Boo Zero fallback.
+        sourceId: 'clawboo-native',
         runtime: 'clawboo-native',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    db.insert(teams)
+      .values({
+        id: 't1',
+        name: 'Research',
+        icon: 'T',
+        color: '#123456',
+        leaderAgentId: 'lead',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    db.insert(agents)
+      .values({
+        id: 'lead',
+        name: 'Lead',
+        gatewayId: 'lead',
+        runtime: 'claude-code',
+        teamId: 't1',
         createdAt: now,
         updatedAt: now,
       })
@@ -198,5 +223,185 @@ describe('schedules REST (gateway disconnected)', () => {
     await schedulesRunPOST(req({ params: { id } }), run.res)
     expect(run.status()).toBe(202)
     expect(listScheduledRuns(getDb())[0]?.status).toBe('queued')
+  })
+
+  it('creates a TEAM routine by team, and lists it with the team and its lead named', async () => {
+    const create = mockRes()
+    await schedulesCreatePOST(
+      req({
+        body: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          target: 'team',
+          teamId: 't1',
+          cronSpec: '0 9 * * 1-5',
+          label: 'Standup',
+          taskTemplate: { description: 'Post the standup.' },
+        },
+      }),
+      create.res,
+    )
+    expect(create.status()).toBe(201)
+    expect((create.body() as { schedule: unknown }).schedule).toMatchObject({
+      target: 'team',
+      agentId: '',
+      teamId: 't1',
+    })
+
+    const list = mockRes()
+    await schedulesListGET(req(), list.res)
+    const [row] = (list.body() as { schedules: Array<Record<string, unknown>> }).schedules
+    // No Boo Zero in this install, so the team's own lead receives the fire.
+    expect(row).toMatchObject({
+      target: 'team',
+      teamName: 'Research',
+      agentName: 'Lead',
+      runtime: 'claude-code',
+      description: 'Post the standup.',
+    })
+  })
+
+  it("a team routine's lead is Boo Zero once the install has one", async () => {
+    const db = getDb()
+    const now = Date.now()
+    db.insert(agents)
+      .values({
+        id: 'bz',
+        name: 'Boo Zero',
+        gatewayId: 'bz',
+        sourceId: 'clawboo-native',
+        runtime: 'clawboo-native',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    setSetting(db, 'boo-zero:native-agent-id', 'bz')
+    const create = mockRes()
+    await schedulesCreatePOST(
+      req({
+        body: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          target: 'team',
+          teamId: 't1',
+          cronSpec: '0 9 * * *',
+          label: 'Standup',
+        },
+      }),
+      create.res,
+    )
+    const list = mockRes()
+    await schedulesListGET(req(), list.res)
+    const [row] = (list.body() as { schedules: Array<Record<string, unknown>> }).schedules
+    expect(row).toMatchObject({ agentName: 'Boo Zero', runtime: 'clawboo-native' })
+  })
+
+  it('names the agent of an agent routine in the list', async () => {
+    const create = mockRes()
+    await schedulesCreatePOST(req({ body: { ...CREATE_BODY } }), create.res)
+    const list = mockRes()
+    await schedulesListGET(req(), list.res)
+    const [row] = (list.body() as { schedules: Array<Record<string, unknown>> }).schedules
+    expect(row).toMatchObject({ target: 'agent', agentId: 'a1', agentName: 'A1', teamId: null })
+    expect(row).not.toHaveProperty('teamName')
+  })
+
+  it('a team routine needs a team, and a real one', async () => {
+    const noTeam = mockRes()
+    await schedulesCreatePOST(
+      req({
+        body: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          target: 'team',
+          cronSpec: '0 9 * * *',
+        },
+      }),
+      noTeam.res,
+    )
+    expect(noTeam.status()).toBe(400)
+    expect((noTeam.body() as { code: string }).code).toBe('invalid_body')
+
+    const unknownTeam = mockRes()
+    await schedulesCreatePOST(
+      req({
+        body: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          target: 'team',
+          teamId: 'nope',
+          cronSpec: '0 9 * * *',
+        },
+      }),
+      unknownTeam.res,
+    )
+    expect(unknownTeam.status()).toBe(400)
+    expect((unknownTeam.body() as { code: string }).code).toBe('invalid_routine_target')
+
+    const badTarget = mockRes()
+    await schedulesCreatePOST(req({ body: { ...CREATE_BODY, target: 'everyone' } }), badTarget.res)
+    expect(badTarget.status()).toBe(400)
+    expect(listScheduledRuns(getDb())).toHaveLength(0)
+  })
+
+  it('an agent paired with a team it is not on is a 400', async () => {
+    const r = mockRes()
+    await schedulesCreatePOST(req({ body: { ...CREATE_BODY, teamId: 't1' } }), r.res)
+    expect(r.status()).toBe(400)
+    expect((r.body() as { code: string }).code).toBe('invalid_routine_target')
+  })
+
+  it('GET :id/runs returns recent fires with their board task, newest first', async () => {
+    const create = mockRes()
+    await schedulesCreatePOST(req({ body: { ...CREATE_BODY } }), create.res)
+    const schedule = (create.body() as { schedule: { id: string; sourceScheduleId: string } })
+      .schedule
+    const db = getDb()
+    const task = createTask(db, { title: 'Weekly report', status: 'done' })
+    const runId = schedule.sourceScheduleId
+    appendEvent(db, { kind: 'routine_fired', ts: 10, data: { scheduledRunId: runId } })
+    appendEvent(db, {
+      kind: 'routine_dispatched',
+      ts: 11,
+      taskId: task.id,
+      data: { scheduledRunId: runId, taskId: task.id, dispatchPath: 'one-shot' },
+    })
+    appendEvent(db, {
+      kind: 'routine_completed',
+      ts: 12,
+      taskId: task.id,
+      data: { scheduledRunId: runId, taskId: task.id, status: 'idle' },
+    })
+    // A later fire the server never finished: the routine row has since gone
+    // back to idle, so it can only have been cut off.
+    appendEvent(db, { kind: 'routine_fired', ts: 20, data: { scheduledRunId: runId } })
+
+    const r = mockRes()
+    schedulesRunsGET(req({ params: { id: schedule.id } }), r.res)
+    expect(r.status()).toBe(200)
+    const { runs } = r.body() as { runs: Array<Record<string, unknown>> }
+    expect(runs).toHaveLength(2)
+    expect(runs[0]).toMatchObject({ firedAt: 20, status: 'interrupted', task: null })
+    expect(runs[1]).toMatchObject({
+      firedAt: 10,
+      finishedAt: 12,
+      status: 'succeeded',
+      task: { id: task.id, title: 'Weekly report', status: 'done' },
+    })
+  })
+
+  it('GET :id/runs is empty for a Gateway job and 404 for an unknown routine', () => {
+    const gateway = mockRes()
+    schedulesRunsGET(req({ params: { id: 'openclaw-gateway-cron:job-1' } }), gateway.res)
+    expect(gateway.status()).toBe(200)
+    expect(gateway.body()).toEqual({ runs: [] })
+
+    const missing = mockRes()
+    schedulesRunsGET(req({ params: { id: 'clawboo-routine:nope' } }), missing.res)
+    expect(missing.status()).toBe(404)
+
+    const garbage = mockRes()
+    schedulesRunsGET(req({ params: { id: 'mystery:1' } }), garbage.res)
+    expect(garbage.status()).toBe(404)
   })
 })

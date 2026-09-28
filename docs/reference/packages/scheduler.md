@@ -30,6 +30,7 @@ Every export below comes from the `.` barrel ([`src/index.ts`](#source)). There 
 | `nextOccurrence`    | `(spec: string, fromMs: number) => number \| null`                               | The next fire time strictly after `fromMs`, or `null` when the spec will never fire again (a spent `once@`, or an expression with no future occurrence). Throws `InvalidCronSpecError` on a malformed spec.                               |
 | `probeCronSpec`     | `(spec: string) => void`                                                         | Validate a spec at the registration boundary (no meaningful `from` anchor needed). Throws `InvalidCronSpecError` when malformed.                                                                                                          |
 | `parseTaskTemplate` | `(json: string) => TaskTemplate \| null`                                         | Parse + zod-validate a `task_template` JSON string. Returns `null` when invalid (never throws).                                                                                                                                           |
+| `routineTargetOf`   | `(template: { target?: RoutineTarget \| null }) => RoutineTarget`                | The target a template fires at. A template without one is an agent routine (the only kind older rows could be).                                                                                                                           |
 | `encodeCronSpec`    | `(schedule: GatewayCronScheduleShape) => string`                                 | Flatten the Gateway's discriminated schedule union into the canonical `cronSpec` string (`cron` / `every:<ms>[@anchor:<ms>]` / `at:<iso>`, with an optional `@tz:<tz>` suffix on cron).                                                   |
 | `decodeCronSpec`    | `(spec: string) => GatewayCronScheduleShape`                                     | Inverse of `encodeCronSpec`. An unprefixed spec is treated as a bare cron expression.                                                                                                                                                     |
 | `makeScheduleId`    | `(source: ScheduleSourceId, raw: string) => string`                              | Build the source-namespaced composite id `\`${source}:${raw}\``.                                                                                                                                                                          |
@@ -37,23 +38,24 @@ Every export below comes from the `.` barrel ([`src/index.ts`](#source)). There 
 
 ### Types & interfaces
 
-| Export                     | Kind      | Contract                                                                                                                                                                                                                                          |
-| -------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ParsedSpec`               | type      | `{ kind: 'cron'; expr: string } \| { kind: 'once'; atMs: number }`, the parse result.                                                                                                                                                             |
-| `TaskTemplate`             | type      | `z.infer<typeof taskTemplateSchema>`, the bounded per-fire team-task spec (`title`, `description?`, `kind` [default `'code'`], `priority` [default `0`], `repoPath?`, `model?`, `maxNodeCents?`, `teamTaskId?`).                                  |
-| `GatewayCronScheduleShape` | type      | The OpenClaw Gateway schedule union: `{ kind:'cron'; expr; tz? } \| { kind:'every'; everyMs; anchorMs? } \| { kind:'at'; at }`.                                                                                                                   |
-| `ScheduleDomain`           | type      | `'team-task' \| 'runtime-own-life'`, keeps the merged view honest (Routines vs a runtime's own cron, never conflated).                                                                                                                            |
-| `ScheduleManageability`    | type      | `'managed' \| 'external-write' \| 'observe-only'`, the write-gate tier the UI is a pure function of.                                                                                                                                              |
-| `ScheduleStatus`           | type      | `'queued' \| 'claimed' \| 'running' \| 'idle' \| 'paused' \| 'error'`.                                                                                                                                                                            |
-| `ScheduleSourceId`         | type      | `'clawboo-routine' \| 'openclaw-gateway-cron'`.                                                                                                                                                                                                   |
-| `ScheduleRecord`           | interface | The normalized row every source projects into (`id`, `sourceScheduleId`, `runtime`, `owner`, `source`, `agentId`, `teamTaskId?`, `label?`, `cronSpec`, `nextRunAt`, `lastRunAt?`, `lastError?`, `status`, `manageability`, `domain`, `tenantId`). |
-| `ScheduleCreateSpec`       | interface | Create payload (`source`, `domain`, `agentId`, `cronSpec`, `label?`, `teamId?`, `teamTaskId?`, `taskTemplate?`, `payload?`, `tenantId?`).                                                                                                         |
-| `ScheduleUpdatePatch`      | interface | Partial update (`cronSpec?`, `label?`, `taskTemplate?`, `payload?`).                                                                                                                                                                              |
-| `ScheduleWriteAction`      | type      | Discriminated write op: `create` / `update` / `pause` / `resume` / `remove` / `run`.                                                                                                                                                              |
-| `ScheduleSourceReadStatus` | interface | Per-source read outcome (`sourceId`, `ok`, `degraded`, `reason?`, `at`), degradation is _data_, not a thrown error.                                                                                                                               |
-| `ScheduleReadResult`       | interface | `{ records: ScheduleRecord[]; status: ScheduleSourceReadStatus }`, one source's read.                                                                                                                                                             |
-| `ScheduleSource`           | interface | The per-system adapter trait: readonly `id`/`domain`/`manageability`, `read()` (never rejects), `write(action)` (throws the typed errors; returns the fresh record or `null`).                                                                    |
-| `MergedScheduleRead`       | type      | `{ records: ScheduleRecord[]; sources: ScheduleSourceReadStatus[] }`, the multiplexer's fan-in result.                                                                                                                                            |
+| Export                     | Kind      | Contract                                                                                                                                                                                                                                                                                                           |
+| -------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ParsedSpec`               | type      | `{ kind: 'cron'; expr: string } \| { kind: 'once'; atMs: number }`, the parse result.                                                                                                                                                                                                                              |
+| `TaskTemplate`             | type      | `z.infer<typeof taskTemplateSchema>`, the bounded per-fire spec (`title`, `description?`, `target?`, `kind` [default `'code'`], `priority` [default `0`], `repoPath?`, `model?`, `maxNodeCents?`, `teamTaskId?`).                                                                                                  |
+| `GatewayCronScheduleShape` | type      | The OpenClaw Gateway schedule union: `{ kind:'cron'; expr; tz? } \| { kind:'every'; everyMs; anchorMs? } \| { kind:'at'; at }`.                                                                                                                                                                                    |
+| `ScheduleDomain`           | type      | `'team-task' \| 'runtime-own-life'`, keeps the merged view honest (Routines vs a runtime's own cron, never conflated).                                                                                                                                                                                             |
+| `ScheduleManageability`    | type      | `'managed' \| 'external-write' \| 'observe-only'`, the write-gate tier the UI is a pure function of.                                                                                                                                                                                                               |
+| `ScheduleStatus`           | type      | `'queued' \| 'claimed' \| 'running' \| 'idle' \| 'paused' \| 'error'`.                                                                                                                                                                                                                                             |
+| `ScheduleSourceId`         | type      | `'clawboo-routine' \| 'openclaw-gateway-cron'`.                                                                                                                                                                                                                                                                    |
+| `RoutineTarget`            | type      | `'team' \| 'agent'`: who a Routine's fire goes to (the team chat's lead, or one agent's board task).                                                                                                                                                                                                               |
+| `ScheduleRecord`           | interface | The normalized row every source projects into (`id`, `sourceScheduleId`, `runtime`, `owner`, `source`, `agentId`, `target?`, `teamId?`, `teamName?`, `agentName?`, `teamTaskId?`, `label?`, `description?`, `cronSpec`, `nextRunAt`, `lastRunAt?`, `lastError?`, `status`, `manageability`, `domain`, `tenantId`). |
+| `ScheduleCreateSpec`       | interface | Create payload (`source`, `domain`, `cronSpec`, `agentId?`, `target?`, `label?`, `teamId?`, `teamTaskId?`, `taskTemplate?`, `payload?`, `tenantId?`). A team routine names a `teamId`; everything else names an `agentId`.                                                                                         |
+| `ScheduleUpdatePatch`      | interface | Partial update (`cronSpec?`, `label?`, `taskTemplate?`, `payload?`, and `target?` / `agentId?` / `teamId?` to re-point a Routine).                                                                                                                                                                                 |
+| `ScheduleWriteAction`      | type      | Discriminated write op: `create` / `update` / `pause` / `resume` / `remove` / `run`.                                                                                                                                                                                                                               |
+| `ScheduleSourceReadStatus` | interface | Per-source read outcome (`sourceId`, `ok`, `degraded`, `reason?`, `at`), degradation is _data_, not a thrown error.                                                                                                                                                                                                |
+| `ScheduleReadResult`       | interface | `{ records: ScheduleRecord[]; status: ScheduleSourceReadStatus }`, one source's read.                                                                                                                                                                                                                              |
+| `ScheduleSource`           | interface | The per-system adapter trait: readonly `id`/`domain`/`manageability`, `read()` (never rejects), `write(action)` (throws the typed errors; returns the fresh record or `null`).                                                                                                                                     |
+| `MergedScheduleRead`       | type      | `{ records: ScheduleRecord[]; sources: ScheduleSourceReadStatus[] }`, the multiplexer's fan-in result.                                                                                                                                                                                                             |
 
 ### Classes
 
@@ -76,13 +78,15 @@ All extend `Error` and carry a readonly `code` for structural branching (never m
 | `UnknownScheduleError`           | `unknown_schedule`            | Unknown composite id / unknown source (REST → 404).                                                                                     |
 | `DuplicateFiringOwnerError`      | `duplicate_firing_owner`      | The registration-time one-firing-owner de-dup refusal. Never retried.                                                                   |
 | `BoundRecurringScheduleError`    | `bound_recurring_schedule`    | Binding a _recurring_ routine to an existing team task: a bound task is claimable once, so bound routines must be one-shot. REST → 400. |
+| `InvalidRoutineTargetError`      | `invalid_routine_target`      | A Routine's team or agent is missing, archived, or contradicts itself (an agent paired with a team it is not on). REST → 400.           |
 
 ### Constants
 
-| Export               | Value         | Use                                                          |
-| -------------------- | ------------- | ------------------------------------------------------------ |
-| `ONCE_PREFIX`        | `'once@'`     | The one-shot spec prefix; pair with `isOnceSpec`.            |
-| `taskTemplateSchema` | `z.ZodObject` | The zod schema backing `TaskTemplate` / `parseTaskTemplate`. |
+| Export               | Value               | Use                                                          |
+| -------------------- | ------------------- | ------------------------------------------------------------ |
+| `ONCE_PREFIX`        | `'once@'`           | The one-shot spec prefix; pair with `isOnceSpec`.            |
+| `taskTemplateSchema` | `z.ZodObject`       | The zod schema backing `TaskTemplate` / `parseTaskTemplate`. |
+| `ROUTINE_TARGETS`    | `['team', 'agent']` | The allowed `RoutineTarget` values.                          |
 
 ## Used by
 
@@ -91,7 +95,7 @@ Only `apps/web` depends on `@clawboo/scheduler`. `@clawboo/db` deliberately take
 - `apps/web/server/lib/routines/`, `ticker.ts`, `wakeBridge.ts`, `openclawDispatch.ts` (the Routines actuator).
 - `apps/web/server/lib/scheduleSource/`, `registry.ts`, `clawbooRoutineScheduleSource.ts`, `openClawGatewayCronScheduleSource.ts` (the two concrete `ScheduleSource` implementations).
 - `apps/web/server/api/schedules.ts`, the `/api/schedules*` REST surface.
-- `apps/web/src/features/scheduler/scheduleHelpers.ts` + `apps/web/src/lib/schedulesClient.ts`, the SPA scheduler tab (the types cross into the browser, which is why the package stays browser-safe).
+- `apps/web/src/features/routines/routineHelpers.ts` + `apps/web/src/lib/schedulesClient.ts`, the SPA Routines view (the types cross into the browser, which is why the package stays browser-safe).
 
 ## Source
 
@@ -101,6 +105,6 @@ Barrel: [`packages/scheduler/src/index.ts`](https://github.com/clawboo/clawboo/t
 
 - [Scheduling concept](/concepts/scheduling), Routines: team-task cron vs runtime-own-life cron.
 - [Schedules REST API](/reference/rest-api/schedules), `/api/schedules*`.
-- [Routines tab](/using/scheduler), the Scheduler UI.
+- [Routines](/using/routines), the Routines view.
 - [Seams (internals)](/internals/seams), `ScheduleSource` + `CapabilitySource` multiplexers.
 - [Package overview](/reference/packages/index)

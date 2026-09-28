@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 // Visibility-aware refresh primitives. Two related problems, one module:
 //
-//   1. Every interval poller in the SPA (board 5 s, runtimes/fleet/scheduler 8 s,
+//   1. Every interval poller in the SPA (board 5 s, runtimes/fleet/routines 8 s,
 //      obs 5 s × 5 fetches, …) kept firing on its timer in a backgrounded tab, so
 //      a window nobody was looking at went on hitting the local API forever.
 //      `useVisiblePolling` CLEARS the interval while `document.hidden` — rather

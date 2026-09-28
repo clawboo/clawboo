@@ -222,6 +222,17 @@ function hasBoardRead(db: ClawbooDb, agentId: string, runtime: string | null): b
   return loadAgentConfigOrDefault(db, agentId).tools.tasks !== false
 }
 
+/** The note a turn carries when a scheduled routine sent it. The routine posted
+ *  the person's own instructions, but they may be away, and a question back to
+ *  them would sit unanswered until they return. */
+export function buildScheduledRoutineBlock(routineName: string): string {
+  return [
+    '[Scheduled Routine]',
+    `This message was posted by "${routineName}", a routine the user scheduled. They may not be watching right now, so do not wait on them: carry it out, make reasonable assumptions instead of asking questions, and state those assumptions in your reply.`,
+    '[End Scheduled Routine]',
+  ].join('\n')
+}
+
 /** Compose the volatile team-context preamble for a team run. Returns null when
  *  there is nothing to say (no rules, no intro, no other teammates). */
 export function buildServerTeamContext(
@@ -273,12 +284,17 @@ export function buildServerTeamContext(
     isUserFacing: framing.isUserFacing,
   })
 
+  const scheduledBlock = framing.scheduledRoutine
+    ? buildScheduledRoutineBlock(framing.scheduledRoutine)
+    : null
+
   const composed = [
     personaBlock,
     rulesBlock,
     aboutUserBlock,
     rosterBlock,
     coordinationBlock,
+    scheduledBlock,
     connectorsBlock,
   ]
     .filter(Boolean)

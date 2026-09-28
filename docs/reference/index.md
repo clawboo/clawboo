@@ -31,7 +31,7 @@ Base URL, loopback posture, the shared `{ error: string }` envelope, and the rou
 - [Agents](/reference/rest-api/agents), `/api/agents*` (registry, files, sessions, sync, cleanup-ghosts)
 - [Teams](/reference/rest-api/teams), `/api/teams*`, team-onboarding, team-rules, team-chat
 - [Board](/reference/rest-api/board), `/api/board*` (tasks, claim, comments, executions, deps, workspace)
-- [Runtimes](/reference/rest-api/runtimes), `/api/runtimes*`, `/api/onboarding/seed-native-team`
+- [Runtimes](/reference/rest-api/runtimes), `/api/runtimes*`, `/api/onboarding/*`, `/api/providers*`
 - [Memory](/reference/rest-api/memory), `/api/memory*`
 - [Tools & MCP](/reference/rest-api/tools-and-mcp), `/api/tools*`, `/api/mcp*` (incl. SSE/WS)
 - [Governance](/reference/rest-api/governance), budgets, delegation-approval, approvals

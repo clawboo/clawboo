@@ -4,10 +4,25 @@
 
 import { z } from 'zod'
 
+/**
+ * Who a routine's fire goes to.
+ * - 'team': the instructions are posted into the team's group chat, where the
+ *   team's lead (Boo Zero) picks them up and brings in teammates as needed.
+ * - 'agent': a board task for one agent, run through the executor pipeline.
+ */
+export const ROUTINE_TARGETS = ['team', 'agent'] as const
+export type RoutineTarget = (typeof ROUTINE_TARGETS)[number]
+
 export const taskTemplateSchema = z.object({
   /** Board task title for the materialized per-fire task. */
   title: z.string().min(1),
   description: z.string().nullish(),
+  /**
+   * Who a fire goes to (see ROUTINE_TARGETS). Rows written before routines had
+   * a target carry none; those are agent routines, the only kind that could be
+   * created then.
+   */
+  target: z.enum(ROUTINE_TARGETS).optional(),
   /** Worktree isolation kind (the board convention; 'code' provisions one). */
   kind: z.string().default('code'),
   priority: z.number().int().default(0),
@@ -33,4 +48,9 @@ export function parseTaskTemplate(json: string): TaskTemplate | null {
   } catch {
     return null
   }
+}
+
+/** The target a template fires at. A template without one is an agent routine. */
+export function routineTargetOf(template: { target?: RoutineTarget | null }): RoutineTarget {
+  return template.target ?? 'agent'
 }

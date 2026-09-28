@@ -11,6 +11,7 @@ import type {
   ScheduleRecord,
   ScheduleSourceId,
 } from './records'
+import type { RoutineTarget } from './template'
 
 export type ScheduleWriteAction =
   | { kind: 'create'; spec: ScheduleCreateSpec }
@@ -23,9 +24,15 @@ export type ScheduleWriteAction =
 export interface ScheduleCreateSpec {
   source: ScheduleSourceId
   domain: ScheduleDomain
-  agentId: string
+  /** The agent a fire runs on. Required for Gateway rows and agent routines; a
+   *  team routine has none (its fire goes to whoever leads the team then). */
+  agentId?: string
+  /** Routine rows: who a fire goes to. Defaults to 'agent'. */
+  target?: RoutineTarget
   cronSpec: string
   label?: string
+  /** Routine rows: the team. Required for a team routine; for an agent routine
+   *  it defaults to the agent's own team and must match it when given. */
   teamId?: string | null
   /** Routine rows: bind to an existing board task (the ownership-guard site). */
   teamTaskId?: string | null
@@ -42,6 +49,11 @@ export interface ScheduleUpdatePatch {
   label?: string
   taskTemplate?: unknown
   payload?: unknown
+  /** Routine rows: re-point the routine. The resulting target is validated
+   *  exactly like a create. */
+  target?: RoutineTarget
+  agentId?: string | null
+  teamId?: string | null
 }
 
 export interface ScheduleSourceReadStatus {

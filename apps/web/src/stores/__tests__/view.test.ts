@@ -52,7 +52,7 @@ describe('useViewStore', () => {
     })
 
     it('works for all NavView values', () => {
-      const views: NavView[] = ['graph', 'board', 'cost', 'marketplace', 'scheduler', 'system']
+      const views: NavView[] = ['graph', 'board', 'cost', 'marketplace', 'routines', 'system']
       for (const view of views) {
         useViewStore.getState().navigateTo(view)
         expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view })

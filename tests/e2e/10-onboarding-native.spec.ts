@@ -1,10 +1,11 @@
 // Native onboarding happy path (the headline ~60-second first-run): a fresh
-// install → the native-first wizard → paste a key → seed a starter team → skip
-// the optional "add runtimes" step → land in the dashboard with the team
-// showing. Native is the DEFAULT (no up-front runtime choice). Fully offline-
-// capable — the native connect route only writes the vault and the seed only
-// writes SQLite (no Gateway, and the one call that WOULD reach a provider, the
-// pre-advance key healthcheck, is route-stubbed; the spec asserts it ran).
+// install → the native-first wizard → paste a key → skip the optional "add
+// runtimes" step → pick a team in the marketplace and deploy it → land in the
+// dashboard with that team showing. Native is the DEFAULT (no up-front runtime
+// choice). Fully offline-capable: the native connect route only writes the vault
+// and the deploy only writes SQLite (no Gateway, and the one call that WOULD reach
+// a provider, the pre-advance key healthcheck, is route-stubbed; the spec asserts
+// it ran).
 //
 // The OpenClaw / coding-agent runtime connect flows are covered by the RTL step
 // tests (ConfigureNativeStep / AddRuntimesStep / RuntimeConnectionCard) plus the
@@ -14,7 +15,7 @@
 import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
 
 test.describe('Native onboarding', () => {
-  test('fresh install → paste key → seed team → skip runtimes → land in dashboard', async ({
+  test('fresh install → paste key → skip runtimes → deploy a team → land in dashboard', async ({
     page,
     request,
   }) => {

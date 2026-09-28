@@ -1,5 +1,6 @@
 export {
   canRoutineTransition,
+  canUserSetRoutineStatus,
   isAutoFireable,
   isScheduledRunStatus,
   SCHEDULED_RUN_STATUSES,
@@ -28,3 +29,9 @@ export {
   type SetStatusResult,
   type UpdateScheduledRunPatch,
 } from './repository'
+export {
+  listRoutineFires,
+  ROUTINE_FIRES_MAX_LIMIT,
+  type RoutineFire,
+  type RoutineFireStatus,
+} from './history'

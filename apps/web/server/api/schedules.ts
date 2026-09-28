@@ -3,23 +3,34 @@
 // (team-task domain, managed) + the OpenClaw Gateway cron (runtime-own-life
 // domain, external-write via the operator WS-RPC). Reads always 200 —
 // per-source degradation is data; writes route by owner and surface the typed
-// scheduling errors as precise statuses. The backend the Scheduler tab consumes.
+// scheduling errors as precise statuses. The backend the Routines view consumes.
 
 import type { Request, Response } from 'express'
 
+import {
+  getScheduledRun,
+  getTask,
+  listRoutineFires,
+  ROUTINE_FIRES_MAX_LIMIT,
+  type RoutineFire,
+} from '@clawboo/db'
 import {
   BoundRecurringScheduleError,
   DuplicateFiringOwnerError,
   IllegalScheduleTransitionError,
   InvalidCronSpecError,
+  InvalidRoutineTargetError,
   ScheduleSourceUnavailableError,
   TeamTaskDomainViolationError,
   UnknownScheduleError,
   UnsupportedScheduleWriteError,
+  parseScheduleId,
   type ScheduleCreateSpec,
   type ScheduleUpdatePatch,
 } from '@clawboo/scheduler'
 
+import { getDb } from '../lib/db'
+import { enrichScheduleRecords } from '../lib/scheduleSource/enrich'
 import { getScheduleMultiplexer } from '../lib/scheduleSource/registry'
 
 // Structural ZodError check — apps/web carries no direct zod dep; the schema
@@ -32,11 +43,15 @@ function mapScheduleError(err: unknown, res: Response): void {
   if (
     err instanceof InvalidCronSpecError ||
     err instanceof BoundRecurringScheduleError ||
+    err instanceof InvalidRoutineTargetError ||
     isZodError(err)
   ) {
     res.status(400).json({
       error: isZodError(err) ? 'invalid task template' : (err as Error).message,
-      code: err instanceof BoundRecurringScheduleError ? err.code : 'invalid_body',
+      code:
+        err instanceof BoundRecurringScheduleError || err instanceof InvalidRoutineTargetError
+          ? err.code
+          : 'invalid_body',
     })
     return
   }
@@ -71,23 +86,36 @@ function scheduleId(req: Request): string {
 // GET /api/schedules — the merged view (degradation is data, always 200)
 export async function schedulesListGET(_req: Request, res: Response): Promise<void> {
   const merged = await getScheduleMultiplexer().read()
-  res.json({ schedules: merged.records, sources: merged.sources })
+  let schedules = merged.records
+  try {
+    schedules = enrichScheduleRecords(getDb(), merged.records)
+  } catch {
+    // Names are a convenience: the rows are still right without them.
+  }
+  res.json({ schedules, sources: merged.sources })
 }
 
 // POST /api/schedules — body = ScheduleCreateSpec; routed by spec.source
+// A team routine (`target: 'team'`) names a team instead of an agent; every other
+// create names the agent it runs on.
 export async function schedulesCreatePOST(req: Request, res: Response): Promise<void> {
   const body = (req.body ?? {}) as Partial<ScheduleCreateSpec>
+  const teamRoutine = body.source === 'clawboo-routine' && body.target === 'team'
   if (
-    typeof body.agentId !== 'string' ||
-    !body.agentId ||
     typeof body.cronSpec !== 'string' ||
     !body.cronSpec ||
     (body.source !== 'clawboo-routine' && body.source !== 'openclaw-gateway-cron') ||
-    (body.domain !== 'team-task' && body.domain !== 'runtime-own-life')
+    (body.domain !== 'team-task' && body.domain !== 'runtime-own-life') ||
+    (body.target !== undefined && body.target !== 'team' && body.target !== 'agent') ||
+    (teamRoutine
+      ? typeof body.teamId !== 'string' || !body.teamId
+      : typeof body.agentId !== 'string' || !body.agentId)
   ) {
-    res
-      .status(400)
-      .json({ error: 'source, domain, agentId, and cronSpec are required', code: 'invalid_body' })
+    res.status(400).json({
+      error:
+        'source, domain, cronSpec, and an agentId (or a teamId for a team routine) are required',
+      code: 'invalid_body',
+    })
     return
   }
   try {
@@ -146,5 +174,50 @@ export async function schedulesRunPOST(req: Request, res: Response): Promise<voi
     res.status(202).json({ ok: true })
   } catch (err) {
     mapScheduleError(err, res)
+  }
+}
+
+// GET /api/schedules/:id/runs
+// A routine's recent fires, newest first. An agent routine's fire carries the
+// board task it created, resolved to its current title and status. Gateway jobs
+// keep their run history in OpenClaw, so they have none here.
+export function schedulesRunsGET(req: Request, res: Response): void {
+  const id = scheduleId(req)
+  const parsed = parseScheduleId(id)
+  if (!parsed) {
+    res.status(404).json({ error: `Unknown schedule "${id}"`, code: 'unknown_schedule' })
+    return
+  }
+  if (parsed.source !== 'clawboo-routine') {
+    res.json({ runs: [] })
+    return
+  }
+  try {
+    const db = getDb()
+    const row = getScheduledRun(db, parsed.sourceScheduleId)
+    if (!row) {
+      res.status(404).json({ error: `Unknown schedule "${id}"`, code: 'unknown_schedule' })
+      return
+    }
+    const requested = Number(req.query['limit'])
+    const limit = Number.isFinite(requested)
+      ? Math.min(Math.max(Math.trunc(requested), 1), ROUTINE_FIRES_MAX_LIMIT)
+      : 10
+    const fires: RoutineFire[] = listRoutineFires(db, row.id, { limit })
+    // The newest fire can only still be running while the routine is. Once the
+    // row has moved on without recording an outcome for it, a restart cut it off.
+    const inFlight = row.status === 'queued' || row.status === 'claimed' || row.status === 'running'
+    const latest = fires[0]
+    if (latest && latest.status === 'running' && !inFlight) latest.status = 'interrupted'
+    const runs = fires.map((fire) => {
+      const task = fire.taskId ? getTask(db, fire.taskId) : null
+      return {
+        ...fire,
+        task: task ? { id: task.id, title: task.title, status: task.status } : null,
+      }
+    })
+    res.json({ runs })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
   }
 }

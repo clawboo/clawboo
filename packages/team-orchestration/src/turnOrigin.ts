@@ -22,13 +22,7 @@
 // is neither. Passing that fact costs one argument and makes the classification
 // impossible to get wrong by timing.
 
-/**
- * The reason a turn is being delivered.
- *
- * `schedule` is deliberately absent: routines dispatch through their own path and
- * never reach `deliver`, and a variant no caller can produce is a variant no test
- * can cover. Add it when something actually stamps it.
- */
+/** The reason a turn is being delivered. */
 export type TurnOrigin =
   /** A human typed into team chat — the leader, or a specialist they @mentioned. */
   | { kind: 'human' }
@@ -38,6 +32,10 @@ export type TurnOrigin =
   /** Clawboo itself: a batched `[Task Update]` reflection, an alert, a pump
    *  re-fire. No human is waiting on the other end of this particular turn. */
   | { kind: 'system' }
+  /** A routine the person scheduled posted this into team chat on their behalf.
+   *  It carries their words, so it frames like a human turn, but nobody is
+   *  necessarily watching when it runs. */
+  | { kind: 'schedule'; routineName: string }
 
 /** Convenience singletons — these two variants carry no payload. */
 export const HUMAN_TURN: TurnOrigin = { kind: 'human' }
@@ -52,6 +50,10 @@ export interface TurnFraming {
   isLeader: boolean
   /** This turn's output reaches the human. Gates `[About the User]`. */
   isUserFacing: boolean
+  /** Present when a scheduled routine sent this turn: the routine's name. The
+   *  person may be away, so the turn is framed to finish without waiting on
+   *  them. Absent on every other turn (and on a worker, whose guardrail wins). */
+  scheduledRoutine?: string
 }
 
 /**
@@ -68,7 +70,8 @@ export interface TurnFraming {
  *   • **user-facing** — can this turn's reply reach the human? True when a human
  *     addressed it (including an @mentioned specialist, which used to be told it
  *     was the team lead) and true for the leader, whose synthesis of a reflection
- *     is written for the user even though clawboo triggered it.
+ *     is written for the user even though clawboo triggered it. A scheduled
+ *     routine counts as the human addressing it: the message is their own.
  */
 export function classifyTurn(input: {
   origin: TurnOrigin
@@ -79,6 +82,7 @@ export function classifyTurn(input: {
   const isWorker = input.origin.kind === 'delegation' || input.hasBoardTask
   const isLeader =
     !isWorker && input.leaderAgentId !== null && input.targetAgentId === input.leaderAgentId
+  const fromThePerson = input.origin.kind === 'human' || input.origin.kind === 'schedule'
   // A worker is NEVER user-facing, even on a human-origin turn: the user can
   // @mention a specialist mid-task, and framing that turn with both the worker
   // guardrail ("you CANNOT reach the user") and [About the User] is a
@@ -87,6 +91,9 @@ export function classifyTurn(input: {
   return {
     isWorker,
     isLeader,
-    isUserFacing: (input.origin.kind === 'human' && !isWorker) || isLeader,
+    isUserFacing: (fromThePerson && !isWorker) || isLeader,
+    ...(input.origin.kind === 'schedule' && !isWorker
+      ? { scheduledRoutine: input.origin.routineName }
+      : {}),
   }
 }

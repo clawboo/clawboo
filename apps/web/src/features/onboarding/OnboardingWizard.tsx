@@ -109,7 +109,7 @@ export type OnboardingWizardProps = {
    *     GatewayClient and `gatewayUrl` its URL.
    *   - `native` — a Gateway-free native install; `client` + `gatewayUrl` are
    *     null (native agents run server-side, no Gateway).
-   * `teamId` is the id of the team the user just deployed / seeded (or null
+   * `teamId` is the id of the team the user just deployed (or null
    * when they skipped the team step). The host (`GatewayBootstrap`) uses it to
    * navigate into the team's group chat; otherwise the user lands on Atlas.
    */
@@ -505,11 +505,11 @@ export function OnboardingWizard({ onComplete, initialStep = 'welcome' }: Onboar
     goTo('selectTeam')
   }, [goTo])
 
-  // ── Native ready: the seeded team is shown; the user opens the dashboard.
+  // ── Native ready: the deployed team is shown; the user opens the dashboard.
   // If the OpenClaw detour connected a live client, hand it through ('gateway'
   // mode) rather than discarding it; otherwise the client-free 'native' landing
-  // (the host enters native/REST mode). Either way the user lands in their
-  // seeded native team's chat.
+  // (the host enters native/REST mode). Either way the user lands in the chat of
+  // the team they deployed.
   const handleNativeReady = useCallback(
     (teamId: string | null) => {
       if (client) onComplete(client, gatewayUrl || null, teamId, 'gateway')

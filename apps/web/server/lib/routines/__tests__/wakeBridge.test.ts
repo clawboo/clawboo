@@ -16,16 +16,22 @@ import {
   agents,
   createDb,
   createTask,
+  getComments,
   getTask,
+  listEvents,
   listTasks,
   registerScheduledRun,
+  setSetting,
+  teams,
   type ClawbooDb,
   type DbScheduledRun,
 } from '@clawboo/db'
 import { NotImplementedError } from '@clawboo/scheduler'
+import { eq } from 'drizzle-orm'
 
 import type { runTaskOnRuntime } from '../../executorRunner'
-import { dispatchRoutine } from '../wakeBridge'
+import type { EnqueueUserMessageInput } from '../../teamChat/teamOrchestrator'
+import { dispatchRoutine, runKindFor } from '../wakeBridge'
 import type { dispatchConnectedSubstrate } from '../openclawDispatch'
 
 type RunTaskInput = Parameters<typeof runTaskOnRuntime>[0]
@@ -66,6 +72,54 @@ function seedRoutine(agentId: string, template: Record<string, unknown> = {}): D
   })
   if (!result.ok) throw new Error(`register failed: ${result.reason}`)
   return result.run
+}
+
+function seedTeam(id: string, opts: { archived?: boolean } = {}): void {
+  const now = Date.now()
+  db.insert(teams)
+    .values({
+      id,
+      name: `Team ${id}`,
+      icon: 'T',
+      color: '#123456',
+      isArchived: opts.archived ? 1 : 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run()
+}
+
+function seedTeamRoutine(
+  teamId: string | null,
+  template: Record<string, unknown> = {},
+): DbScheduledRun {
+  const result = registerScheduledRun(db, {
+    agentId: '',
+    teamId,
+    cronSpec: '0 9 * * *',
+    taskTemplate: JSON.stringify({
+      title: 'Morning briefing',
+      description: 'Summarize what shipped yesterday.',
+      target: 'team',
+      ...template,
+    }),
+    nextRunAt: 1_000,
+    tenantId: null,
+  })
+  if (!result.ok) throw new Error(`register failed: ${result.reason}`)
+  return result.run
+}
+
+const SUCCESS = {
+  ok: true as const,
+  runtimeId: 'clawboo-native',
+  execId: 'e1',
+  doneReason: 'success' as const,
+  status: 'done',
+  summary: 'ok',
+  costUsd: null,
+  usedWorktree: false,
+  degradations: [],
 }
 
 beforeEach(() => {
@@ -292,5 +346,280 @@ describe('dispatchRoutine', () => {
     expect(outcome.error).toContain('unknown runtime')
     expect(askedOperator).toBe(false) // never reached the OpenClaw operator branch
     expect(runCalls).toHaveLength(0) // never reached the one-shot runner
+  })
+})
+
+describe('runKindFor', () => {
+  it('runs a worktree kind with no repository without a worktree', () => {
+    expect(runKindFor({ kind: 'code', repoPath: null })).toBe('research')
+    expect(runKindFor({ kind: 'code', repoPath: undefined })).toBe('research')
+    expect(runKindFor({ kind: 'something-new', repoPath: '' })).toBe('research')
+  })
+
+  it('keeps the kind when a repository is named, or when the kind needs no worktree', () => {
+    expect(runKindFor({ kind: 'code', repoPath: '/tmp/repo' })).toBe('code')
+    expect(runKindFor({ kind: 'research', repoPath: null })).toBe('research')
+    expect(runKindFor({ kind: 'review', repoPath: null })).toBe('review')
+  })
+})
+
+describe('dispatchRoutine: agent routines', () => {
+  it('an agent routine with no repository runs without a worktree, even if its kind says code', async () => {
+    seedAgent('agent-native', 'clawboo-native')
+    const run = seedRoutine('agent-native', { kind: 'code' })
+    const calls: RunTaskInput[] = []
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async (input) => {
+        calls.push(input)
+        return SUCCESS
+      },
+    })
+    expect(outcome.ok).toBe(true)
+    expect(calls[0]?.kind).toBe('research')
+    expect(calls[0]?.repoPath).toBeNull()
+  })
+
+  it('a legacy template (no target, default kind) is an agent routine and runs', async () => {
+    seedAgent('agent-native', 'clawboo-native')
+    const result = registerScheduledRun(db, {
+      agentId: 'agent-native',
+      teamId: 'team-1',
+      cronSpec: '0 9 * * *',
+      taskTemplate: JSON.stringify({ title: 'Old routine', kind: 'code', priority: 0 }),
+      nextRunAt: 1_000,
+    })
+    if (!result.ok) throw new Error('register failed')
+    const calls: RunTaskInput[] = []
+    const outcome = await dispatchRoutine(result.run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async (input) => {
+        calls.push(input)
+        return SUCCESS
+      },
+    })
+    expect(outcome.ok).toBe(true)
+    expect(calls[0]).toMatchObject({ assigneeAgentId: 'agent-native', kind: 'research' })
+  })
+
+  it('reaches the mock runtime when its flag is on, and refuses it when off', async () => {
+    seedAgent('agent-mock', 'clawboo-mock')
+    const prev = process.env['CLAWBOO_ENABLE_MOCK_RUNTIME']
+    try {
+      delete process.env['CLAWBOO_ENABLE_MOCK_RUNTIME']
+      const off = await dispatchRoutine(seedRoutine('agent-mock'), { db, mcpBaseUrl: null })
+      expect(off).toMatchObject({ ok: false })
+      expect(off.error).toContain('unknown runtime')
+
+      process.env['CLAWBOO_ENABLE_MOCK_RUNTIME'] = '1'
+      const calls: RunTaskInput[] = []
+      const on = await dispatchRoutine(seedRoutine('agent-mock'), {
+        db,
+        mcpBaseUrl: null,
+        runTask: async (input) => {
+          calls.push(input)
+          return SUCCESS
+        },
+      })
+      expect(on.ok).toBe(true)
+      expect(calls[0]?.assigneeAgentId).toBe('agent-mock')
+    } finally {
+      if (prev === undefined) delete process.env['CLAWBOO_ENABLE_MOCK_RUNTIME']
+      else process.env['CLAWBOO_ENABLE_MOCK_RUNTIME'] = prev
+    }
+  })
+
+  it('a failed fire sets the task it created aside as blocked, with a note', async () => {
+    seedAgent('agent-native', 'clawboo-native')
+    const run = seedRoutine('agent-native')
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      // What the runner does with a failed run: the task goes back to todo.
+      runTask: async () => ({ ...SUCCESS, doneReason: 'error' as const, summary: 'boom' }),
+    })
+    expect(outcome.ok).toBe(false)
+    const task = getTask(db, outcome.taskId!)
+    expect(task?.status).toBe('blocked')
+    expect(getComments(db, outcome.taskId!).map((c) => c.body)).toContain(
+      "agent-native's scheduled run failed: run error: boom. The routine files a new task on its next run, so this one was set aside.",
+    )
+  })
+
+  it('a runner that throws is a failed fire too, and its task is set aside', async () => {
+    seedAgent('agent-native', 'clawboo-native')
+    const run = seedRoutine('agent-native')
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      // A home-mutex acquire timeout throws before the claim, leaving the task todo.
+      runTask: async () => {
+        throw new Error('timed out waiting for the agent home')
+      },
+    })
+    expect(outcome).toMatchObject({ ok: false, error: 'timed out waiting for the agent home' })
+    expect(getTask(db, outcome.taskId!)?.status).toBe('blocked')
+    expect(getComments(db, outcome.taskId!).map((c) => c.body)).toContain(
+      "agent-native's scheduled run failed: timed out waiting for the agent home. The routine files a new task on its next run, so this one was set aside.",
+    )
+  })
+
+  it('a connected dispatcher that throws is a failed fire too, and its task is set aside', async () => {
+    seedAgent('agent-oc', 'openclaw')
+    const run = seedRoutine('agent-oc')
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      getOperatorClient: () => ({}) as never,
+      dispatchConnected: async () => {
+        throw new Error('operator socket closed')
+      },
+    })
+    expect(outcome).toMatchObject({ ok: false, error: 'operator socket closed' })
+    expect(getTask(db, outcome.taskId!)?.status).toBe('blocked')
+  })
+
+  it('a failed fire of a BOUND task leaves that task as the runner left it', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const bound = createTask(db, { title: 'Bound chore', status: 'todo', scheduledBy: 'clawboo' })
+    const run = seedRoutine('agent-cc', { teamTaskId: bound.id })
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async () => ({ ...SUCCESS, doneReason: 'error' as const, summary: 'boom' }),
+    })
+    expect(outcome.ok).toBe(false)
+    expect(getTask(db, bound.id)?.status).toBe('todo')
+  })
+
+  it('an agent that was removed is not dispatched and no task is created', async () => {
+    seedAgent('agent-gone', 'clawboo-native')
+    db.update(agents).set({ archivedAt: Date.now() }).where(eq(agents.id, 'agent-gone')).run()
+    const run = seedRoutine('agent-gone')
+    let ran = false
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async () => {
+        ran = true
+        return SUCCESS
+      },
+    })
+    expect(outcome.ok).toBe(false)
+    expect(outcome.error).toContain('was removed')
+    expect(ran).toBe(false)
+    expect(listTasks(db)).toHaveLength(0)
+  })
+})
+
+describe('dispatchRoutine: team routines', () => {
+  it('posts the instructions to the team chat for its lead and creates no board task', async () => {
+    seedTeam('team-1')
+    seedAgent('boo-zero', 'clawboo-native')
+    const run = seedTeamRoutine('team-1')
+    const posted: Array<{ teamId: string; input: EnqueueUserMessageInput }> = []
+    let ranTask = false
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async () => {
+        ranTask = true
+        return SUCCESS
+      },
+      enqueueTeamMessage: async (teamId, input) => {
+        posted.push({ teamId, input })
+        return { ok: true, targetAgentId: 'boo-zero' }
+      },
+    })
+
+    expect(outcome).toEqual({ ok: true, taskId: null })
+    expect(posted).toEqual([
+      {
+        teamId: 'team-1',
+        input: {
+          stimulus: 'Summarize what shipped yesterday.',
+          routine: { id: run.id, name: 'Morning briefing' },
+        },
+      },
+    ])
+    expect(ranTask).toBe(false)
+    expect(listTasks(db)).toHaveLength(0)
+
+    const [dispatched] = listEvents(db, { kinds: ['routine_dispatched'] })
+    expect(dispatched).toMatchObject({ teamId: 'team-1', agentId: 'boo-zero' })
+    expect(JSON.parse(dispatched!.data)).toMatchObject({
+      scheduledRunId: run.id,
+      taskId: null,
+      dispatchPath: 'team-chat',
+      targetAgentId: 'boo-zero',
+      runtime: 'clawboo-native',
+    })
+  })
+
+  it('posts the routine name when it carries no instructions', async () => {
+    seedTeam('team-1')
+    const run = seedTeamRoutine('team-1', { description: '   ' })
+    const posted: EnqueueUserMessageInput[] = []
+    await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage: async (_teamId, input) => {
+        posted.push(input)
+        return { ok: true, targetAgentId: 'boo-zero' }
+      },
+    })
+    expect(posted[0]?.stimulus).toBe('Morning briefing')
+  })
+
+  it('refuses a routine whose team is missing, gone, archived, or closed to routines', async () => {
+    const enqueueTeamMessage = async () => {
+      throw new Error('must not post')
+    }
+    const noTeam = await dispatchRoutine(seedTeamRoutine(null), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage,
+    })
+    expect(noTeam).toMatchObject({ ok: false, error: 'This team routine has no team.' })
+
+    const gone = await dispatchRoutine(seedTeamRoutine('team-gone'), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage,
+    })
+    expect(gone.ok).toBe(false)
+    expect(gone.error).toContain('no longer exists')
+
+    seedTeam('team-old', { archived: true })
+    const archived = await dispatchRoutine(seedTeamRoutine('team-old'), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage,
+    })
+    expect(archived.ok).toBe(false)
+    expect(archived.error).toContain('archived')
+
+    seedTeam('team-browser')
+    setSetting(db, 'team-server-orchestrated:team-browser', 'false')
+    const closed = await dispatchRoutine(seedTeamRoutine('team-browser'), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage,
+    })
+    expect(closed.ok).toBe(false)
+    expect(closed.error).toContain('does not take messages from routines')
+  })
+
+  it('a message the team could not take becomes the outcome error', async () => {
+    seedTeam('team-1')
+    const outcome = await dispatchRoutine(seedTeamRoutine('team-1'), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage: async () => ({ ok: false, error: 'The team has no active members.' }),
+    })
+    expect(outcome).toEqual({ ok: false, error: 'The team has no active members.' })
+    expect(listEvents(db, { kinds: ['routine_dispatched'] })).toHaveLength(0)
   })
 })

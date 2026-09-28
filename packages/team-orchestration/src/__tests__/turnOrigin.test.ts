@@ -90,6 +90,41 @@ describe('classifyTurn, a busy worker mentioned by the user', () => {
   })
 })
 
+describe('classifyTurn, a scheduled routine', () => {
+  const SCHEDULED: TurnOrigin = { kind: 'schedule', routineName: 'Morning briefing' }
+
+  it('a routine posting to the leader is a user-facing leader turn that names the routine', () => {
+    expect(frame(SCHEDULED, LEADER)).toEqual({
+      isWorker: false,
+      isLeader: true,
+      isUserFacing: true,
+      scheduledRoutine: 'Morning briefing',
+    })
+  })
+
+  it('a routine that @mentions a specialist reaches the user but does not make it the lead', () => {
+    expect(frame(SCHEDULED, WORKER)).toEqual({
+      isWorker: false,
+      isLeader: false,
+      isUserFacing: true,
+      scheduledRoutine: 'Morning briefing',
+    })
+  })
+
+  it('a routine reaching an agent that holds a board task leaves it a plain worker', () => {
+    expect(frame(SCHEDULED, WORKER, true)).toEqual({
+      isWorker: true,
+      isLeader: false,
+      isUserFacing: false,
+    })
+  })
+
+  it('no other origin carries a routine name', () => {
+    expect(frame(HUMAN_TURN, LEADER)).not.toHaveProperty('scheduledRoutine')
+    expect(frame(SYSTEM_TURN, LEADER)).not.toHaveProperty('scheduledRoutine')
+  })
+})
+
 describe('classifyTurn — degenerate input', () => {
   it('a team with no resolvable leader frames nobody as the leader', () => {
     // `resolveLeaderId` returns null for an empty roster. Comparing against null

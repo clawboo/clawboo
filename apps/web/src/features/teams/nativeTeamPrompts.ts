@@ -1,11 +1,6 @@
 /**
- * Native team system-prompt constants for CreateTeamModal's native path.
- *
- * These MUST stay byte-identical to the onboarding seed's canonical copies
- * (`apps/web/server/api/onboardingSeed.ts` — `LEADER_PROMPT` / `SPECIALIST_PROMPT`).
- * The server can't be imported by the browser bundle, so they're duplicated here;
- * `nativeTeamPrompts.parity.test.ts` imports both and asserts equality so they
- * can't drift.
+ * Native team system-prompt constants for CreateTeamModal's native path (onboarding
+ * deploys its team through the same modal).
  *
  * The leader is taught the `delegate` TOOL by NAME only — NO `<delegate to="...">`
  * XML example (the leader echoing that XML shape would trip the server engine's

@@ -129,6 +129,30 @@ describe('buildServerTeamContext coordination blocks', () => {
     expect(ctx).not.toContain(OPENCLAW_BLOCK)
   })
 
+  it('a SCHEDULED leader turn says which routine sent it and not to wait on the user', () => {
+    const ctx =
+      buildServerTeamContext(db, 'T', 'nlead', {
+        ...LEADER,
+        scheduledRoutine: 'Morning briefing',
+      }) ?? ''
+    expect(ctx).toContain('[Scheduled Routine]')
+    expect(ctx).toContain('"Morning briefing"')
+    expect(ctx).toContain('do not wait on them')
+    // Otherwise framed exactly like the person's own turn to the lead.
+    expect(ctx).toContain(LEADER_BLOCK)
+    expect(ctx).toContain(ABOUT_USER)
+    expect(ctx.indexOf(LEADER_BLOCK)).toBeLessThan(ctx.indexOf('[Scheduled Routine]'))
+  })
+
+  it('an unscheduled turn carries no routine note', () => {
+    expect(buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? '').not.toContain(
+      '[Scheduled Routine]',
+    )
+    expect(buildServerTeamContext(db, 'T', 'nwork', WORKER) ?? '').not.toContain(
+      '[Scheduled Routine]',
+    )
+  })
+
   it('native WORKER turn: worker guardrail, NO [About the User], NO leader block', () => {
     const ctx = buildServerTeamContext(db, 'T', 'nwork', WORKER) ?? ''
     expect(ctx).toContain(WORKER_BLOCK)

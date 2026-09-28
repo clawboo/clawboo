@@ -10,7 +10,6 @@ import {
   healthcheckNativeKey,
   listAgents,
   resetControlClient,
-  seedNativeTeam,
   setApiBase,
   setNativeLeaderModel,
   setRequestHeaderProvider,
@@ -169,14 +168,6 @@ describe('agents client', () => {
 })
 
 describe('onboarding client', () => {
-  it('seedNativeTeam is defensive on error', async () => {
-    stubFetch(async () => {
-      throw new Error('down')
-    })
-    const res = await seedNativeTeam('anthropic')
-    expect(res).toEqual({ ok: false, error: 'down' })
-  })
-
   it('setNativeLeaderModel posts provider+model and returns ok; never throws', async () => {
     let body: unknown = null
     stubFetch(async (_url, init) => {

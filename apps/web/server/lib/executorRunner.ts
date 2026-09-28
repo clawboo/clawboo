@@ -869,6 +869,10 @@ async function runTaskInner(
     // Did the adapter surface a real `done` terminal (possibly inside the idle
     // guard's grace window)? Gates the synthetic "runtime silent" diagnosis.
     let sawTerminal = false
+    // The last fatal error the runtime reported. A runtime can end its stream on
+    // a fatal error without a `done`, and then this is the only statement of why
+    // the run failed.
+    let lastFatalError: string | null = null
 
     for await (const ev of withIdleTimeout(adapter.events(run), {
       idleMs: silentMs,
@@ -1026,6 +1030,7 @@ async function runTaskInner(
           }
         }
       } else if (ev.kind === 'error') {
+        if (ev.fatal && ev.message) lastFatalError = ev.message
         // A recognized policy denial (a broker Deny surfaced by the runtime) is
         // EXPECTED governance, not a harness bug — classify it as such and skip
         // the alert. Everything else goes through the taxonomy; an unknown class
@@ -1129,6 +1134,10 @@ async function runTaskInner(
       summary = `runtime silent: no events for ${Math.round(silentMs / 60_000)} minutes — the run was aborted by the drain idle guard`
       break
     }
+
+    // The stream ended on a fatal error with no terminal to explain it: report
+    // the runtime's own error rather than an empty summary.
+    if (!sawTerminal && !summary && lastFatalError) summary = lastFatalError
 
     // A budget / breaker / cancel trip ends the task here — never rotate over a stop.
     if (stopForBudget || stopForBreaker || stopForCancel) break

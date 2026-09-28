@@ -33,8 +33,9 @@ export const SETTING_NATIVE_LEADER_MODEL = 'boo-zero:native-leader-model'
 const NATIVE_RUNTIME = 'clawboo-native'
 
 /** The native Boo Zero's system prompt — the delegate-silently universal-lead behavior
- *  (mirrors the native `LEADER_PROMPT`) plus the Boo Zero identity. Kept here (not
- *  imported from the api layer) so lib doesn't depend on api. */
+ *  (mirrors the native team leader prompt, `NATIVE_LEADER_PROMPT` in the web app's
+ *  `features/teams/nativeTeamPrompts.ts`) plus the Boo Zero identity. Kept here: the
+ *  server cannot import the browser bundle's modules. */
 export const NATIVE_BOO_ZERO_PROMPT =
   'You are Boo Zero, the universal lead of the team. Answer simple questions and quick ' +
   'clarifications yourself, directly — do NOT delegate or create a task for something you ' +

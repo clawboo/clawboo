@@ -56,7 +56,7 @@ The AgentSource REST wrappers: `listAgents`, `getAgentRecord`, `createAgentRecor
 
 ### Onboarding (`onboarding.ts`)
 
-`seedNativeTeam`, `setNativeLeaderModel`, and `fetchOnboardingState` (the aggregated first-run signals in one call; returns a defensive all-false "fresh install" shape on any error).
+`fetchNativeLeaderModel`, `setNativeLeaderModel`, and `fetchOnboardingState` (the aggregated first-run signals in one call; returns a defensive all-false "fresh install" shape on any error).
 
 ## Used by
 

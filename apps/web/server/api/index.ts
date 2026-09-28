@@ -160,11 +160,7 @@ import {
   providerModelsGET,
   providerModelsPOST,
 } from './providers'
-import {
-  onboardingNativeLeaderModelGET,
-  onboardingNativeLeaderModelPOST,
-  onboardingSeedNativeTeamPOST,
-} from './onboardingSeed'
+import { onboardingNativeLeaderModelGET, onboardingNativeLeaderModelPOST } from './onboardingSeed'
 import { onboardingStateGET } from './onboardingState'
 import { budgetsListGET, budgetsResumePOST, budgetsSetPOST } from './budgets'
 import { governanceAuditGET } from './governanceAudit'
@@ -186,6 +182,7 @@ import {
   schedulesDELETE,
   schedulesListGET,
   schedulesRunPOST,
+  schedulesRunsGET,
   schedulesUpdatePATCH,
 } from './schedules'
 
@@ -486,16 +483,16 @@ router.post('/api/runtimes/:id/install', sensitiveLimiter, runtimesInstallPOST)
 router.post('/api/runtimes/:id/connect', sensitiveLimiter, runtimesConnectPOST)
 router.post('/api/runtimes/:id/disconnect', sensitiveLimiter, runtimesDisconnectPOST)
 router.post('/api/runtimes/:id/logout', sensitiveLimiter, runtimesLogoutPOST)
-// Verify a pasted provider key (native, multi-provider) BEFORE seeding. Distinct
-// two-segment suffix — no collision with `:id/run`.
+// Verify a pasted provider key (native, multi-provider) before onboarding moves on.
+// Distinct two-segment suffix, so it cannot collide with `:id/run`.
 router.post('/api/runtimes/:id/healthcheck', runtimesHealthcheckPOST)
 router.post('/api/runtimes/:id/run', runtimesRunPOST)
 
-// Onboarding — seed a default native leader + specialist team (the native
-// first-run lands here straight after connecting a provider key). The state
-// route aggregates the first-run signals (configured/hasNative/hasTeam/
-// hasConnectedRuntime) so a thin client skips the multi-call decision dance.
-router.post('/api/onboarding/seed-native-team', onboardingSeedNativeTeamPOST)
+// Onboarding. The leader-model pair records the provider + model chosen when the
+// native key is connected (onboarding creates no team; the user deploys one from
+// the marketplace). The state route aggregates the first-run signals
+// (configured/hasNative/hasTeam/hasConnectedRuntime) so a thin client skips the
+// multi-call decision dance.
 router.post('/api/onboarding/native-leader-model', onboardingNativeLeaderModelPOST)
 router.get('/api/onboarding/native-leader-model', onboardingNativeLeaderModelGET)
 router.get('/api/onboarding/state', onboardingStateGET)
@@ -506,10 +503,11 @@ router.post('/api/governance/budgets', budgetsSetPOST)
 router.post('/api/governance/budgets/:scope/:scopeId/resume', budgetsResumePOST)
 
 // Unified Scheduler surface — merged read over clawboo Routines + the OpenClaw
-// Gateway cron (operator WS-RPC); writes routed by owner. The Scheduler tab's backend.
+// Gateway cron (operator WS-RPC); writes routed by owner. The Routines view's backend.
 router.get('/api/schedules', schedulesListGET)
 router.post('/api/schedules', schedulesCreatePOST)
 router.post('/api/schedules/:id/run', schedulesRunPOST)
+router.get('/api/schedules/:id/runs', schedulesRunsGET)
 router.patch('/api/schedules/:id', schedulesUpdatePATCH)
 router.delete('/api/schedules/:id', schedulesDELETE)
 router.get('/api/governance/audit', governanceAuditGET)

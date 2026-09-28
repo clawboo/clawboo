@@ -19,7 +19,7 @@ export const NAV_VIEWS = [
   'cost',
   'marketplace',
   'connectors',
-  'scheduler',
+  'routines',
   'system',
   'obs',
   'board',
@@ -46,7 +46,7 @@ interface ViewStore {
   viewMode: ViewMode
   setViewMode: (mode: ViewMode) => void
 
-  /** Navigate to a NavView (graph, board, cost, marketplace, scheduler, system). */
+  /** Navigate to a NavView (graph, board, cost, marketplace, routines, system). */
   navigateTo: (view: NavView) => void
 
   /** Open an agent's chat / detail view. */
