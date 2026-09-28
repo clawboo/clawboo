@@ -15,18 +15,38 @@
 // down their left edge and the differences between them are all content. The
 // tints are the canvas node accents the picker already borrows, so this reads as
 // a map of the graph rather than a second palette invented for a menu.
+//
+// EVERYTHING SITS INSIDE THE TILE, with tile showing on both sides. A fan as
+// wide as the tile has its outer marks cut by the rounded corners, and a cut
+// mark reads as spilling out of its box. The sizes below are chosen for that
+// room, and ThreadPickerMarks.test.tsx holds them to it.
 
 import { memo } from 'react'
 import { BooAvatar } from '@clawboo/ui'
 
 import { brandColorVar, ConnectorGlyph } from '@/features/connectors/ConnectorMark'
 
+/** The tile's edge, in CSS pixels. */
+const TILE = 32
+// Three 11px discs, each overlapping the last by 4px, make a 25px fan: 27 with
+// their hairlines, which leaves the tile showing on both sides. The plates are a
+// pixel smaller and overlap a pixel less, so the two fans are one width.
+const DISC = 11
+const DISC_OVERLAP = 4
+const DISC_LOGO = 7
+const PLATE = 10
+const PLATE_OVERLAP = 3
+/** How far the outer two plates lean, in degrees. */
+const PLATE_LEAN = 6
+
 /** The shared tile. Ground and hairline are both derived from one tint. */
 function Tile({ tint, children }: { tint: string; children: React.ReactNode }) {
   return (
     <span
-      className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-[10px]"
+      className="relative flex shrink-0 items-center justify-center overflow-hidden rounded-[10px]"
       style={{
+        width: TILE,
+        height: TILE,
         background: `color-mix(in srgb, ${tint} 11%, transparent)`,
         // A hairline rather than a border, so the tile keeps its 32px box and
         // the three rows stay on one baseline.
@@ -63,16 +83,18 @@ export const ConnectorsMark = memo(function ConnectorsMark({
         {[...shown].reverse().map((slug, i) => (
           <span
             key={slug}
-            className="flex size-[14px] items-center justify-center rounded-full bg-surface"
+            className="flex items-center justify-center rounded-full bg-surface"
             style={{
+              width: DISC,
+              height: DISC,
               // Overlap, and lift each one over the last.
-              marginLeft: i === 0 ? 0 : -5,
+              marginLeft: i === 0 ? 0 : -DISC_OVERLAP,
               zIndex: i,
               boxShadow: '0 0 0 1px color-mix(in srgb, var(--foreground) 9%, transparent)',
               color: brandColorVar(slug),
             }}
           >
-            <ConnectorGlyph slug={slug} title="" size={9} />
+            <ConnectorGlyph slug={slug} title="" size={DISC_LOGO} />
           </span>
         ))}
       </span>
@@ -89,9 +111,9 @@ export const ConnectorsMark = memo(function ConnectorsMark({
  */
 export const SkillsMark = memo(function SkillsMark({ tint }: { tint: string }) {
   const plates = [
-    { rotate: -8, opacity: 0.4 },
+    { rotate: -PLATE_LEAN, opacity: 0.4 },
     { rotate: 0, opacity: 0.68 },
-    { rotate: 8, opacity: 1 },
+    { rotate: PLATE_LEAN, opacity: 1 },
   ]
   return (
     <Tile tint={tint}>
@@ -99,9 +121,11 @@ export const SkillsMark = memo(function SkillsMark({ tint }: { tint: string }) {
         {plates.map((p, i) => (
           <span
             key={p.rotate}
-            className="size-[13px] rounded-[3.5px]"
+            className="rounded-[3px]"
             style={{
-              marginLeft: i === 0 ? 0 : -4,
+              width: PLATE,
+              height: PLATE,
+              marginLeft: i === 0 ? 0 : -PLATE_OVERLAP,
               transform: `rotate(${p.rotate}deg)`,
               background: tint,
               opacity: p.opacity,

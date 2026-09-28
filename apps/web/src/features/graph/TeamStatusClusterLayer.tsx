@@ -1,17 +1,30 @@
 import { useMemo } from 'react'
-import { useViewport } from '@xyflow/react'
+import { useStore, useViewport } from '@xyflow/react'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { teamStatusBreakdown } from '@/lib/teamStatus'
-import type { GraphNode, TeamRootNodeData } from './types'
+import { centreOf, segmentsFrom } from './looseNodes'
+import {
+  TEAM_BADGE_MIN_SCREEN,
+  TEAM_BADGE_RING,
+  TEAM_BADGE_SIZE,
+  teamBadgeScreenSize,
+} from './nodes/TeamBadge'
+import { keepoutsFrom, placePills, sideBox, type KeepoutNode } from './teamPillPlacement'
+import type { TeamRootNodeData } from './types'
+import { selectZoomStep } from './useMinScreenSize'
 
 /**
  * TeamStatusClusterLayer.
  *
- * Renders a compact `● N` aggregate-status pill above every Atlas team-root
+ * Renders a compact `● N` aggregate-status pill beside every Atlas team-root
  * junction. Inspired by the General Intelligence Cofounder hub screenshot
  * (#4 from the reference set) — gives at-a-glance team activity without
  * forcing the user to count Boos.
+ *
+ * WHICH SIDE is worked out per team (see teamPillPlacement.ts): right of the
+ * badge unless a line, a Boo, another badge or another pill is there. Straight
+ * above is where the line from Boo Zero comes in, so it is tried near last.
  *
  * Architecture mirrors TeamHaloLayer: absolute-positioned SVG sibling, inner
  * `<g>` transformed by `useViewport()` so pan/zoom stays locked to the
@@ -22,7 +35,16 @@ import type { GraphNode, TeamRootNodeData } from './types'
  */
 
 interface TeamStatusClusterLayerProps {
-  nodes: GraphNode[]
+  /** Everything the canvas draws, so the pills can keep clear of all of it. */
+  nodes: readonly KeepoutNode[]
+  /** The edges as drawn, closed rings marked, for the lines to keep off. */
+  edges: readonly {
+    source: string
+    target: string
+    type?: string
+    hidden?: boolean
+    data?: unknown
+  }[]
 }
 
 interface BucketDefinition {
@@ -43,13 +65,15 @@ const BUCKETS: readonly BucketDefinition[] = [
   { key: 'idle', color: 'rgb(var(--foreground-rgb) / 0.45)', pulse: false, word: 'idle' },
 ] as const
 
-// SCREEN pixels above the anchor, not graph units. The pill's SIZE is screen-fixed
-// (see the note below), so an offset measured in graph units drifted away from the
-// team at every zoom except 1: far out the pill sat on top of the boos, zoomed in it
-// floated off into empty canvas. Both halves are screen space now, so the pill keeps
-// its distance whatever the zoom.
-const CLUSTER_Y_OFFSET = 36
+// SCREEN pixels, not graph units. The pill's SIZE is screen-fixed (see the note
+// below), so a distance measured in graph units drifted away from the team at
+// every zoom except 1. Its distance from the badge is screen space too, so the
+// pill keeps its place beside the badge whatever the zoom.
 const PILL_HEIGHT = 22
+/** Clear air between the team's junction badge and its pill. */
+const BADGE_GAP = 6
+/** Below this zoom the badge holds its floor size; above it, it grows. */
+const BADGE_FLOOR_ZOOM = TEAM_BADGE_MIN_SCREEN / TEAM_BADGE_SIZE
 const PILL_PADDING_X = 9
 const DOT_RADIUS = 3.5
 const DOT_GAP = 7 // dot to its text
@@ -61,25 +85,21 @@ function segmentWidth(count: number, word: string): number {
   return DOT_RADIUS * 2 + DOT_GAP + (String(count).length + 1 + word.length) * CHAR_W
 }
 
-export function TeamStatusClusterLayer({ nodes }: TeamStatusClusterLayerProps) {
+export function TeamStatusClusterLayer({ nodes, edges }: TeamStatusClusterLayerProps) {
   const vp = useViewport()
+  // The placement moves only when the zoom crosses a step, never on a pan.
+  const zoom = useStore(selectZoomStep)
   const agents = useFleetStore((s) => s.agents)
   const teams = useTeamStore((s) => s.teams)
 
-  // Stable team-root list — we re-render when any team-root moves or when the
-  // fleet status changes. Position-keyed memo avoids sub-pixel drag thrash.
+  // Each team's junction: the point its badge is centred on, in graph units.
   const teamRoots = useMemo(() => {
     const out: Array<{ id: string; teamId: string; x: number; y: number }> = []
     for (const node of nodes) {
       if (node.type !== 'team-root') continue
       const data = node.data as TeamRootNodeData
       if (!data.teamId) continue
-      out.push({
-        id: node.id,
-        teamId: data.teamId,
-        x: node.position.x | 0,
-        y: node.position.y | 0,
-      })
+      out.push({ id: node.id, teamId: data.teamId, ...centreOf(node) })
     }
     return out
   }, [nodes])
@@ -97,10 +117,60 @@ export function TeamStatusClusterLayer({ nodes }: TeamStatusClusterLayerProps) {
         // bucket so the cluster never collapses to invisible mid-activity.
         const shown = BUCKETS.filter((b) => breakdown[b.key] > 0)
         if (shown.length === 0) return null
-        return { teamRoot: tr, team, breakdown, shown }
+        const widths = shown.map((b) => segmentWidth(breakdown[b.key], b.word))
+        const pillWidth =
+          PILL_PADDING_X * 2 +
+          widths.reduce((a, w) => a + w, 0) +
+          SEGMENT_GAP * Math.max(0, shown.length - 1)
+        return { teamRoot: tr, team, breakdown, shown, widths, pillWidth }
       })
       .filter(<T,>(v: T | null): v is T => v !== null)
   }, [teamRoots, teams, agents])
+
+  // The lines as drawn, in graph units: they only change when the graph does.
+  const segments = useMemo(() => segmentsFrom(nodes, edges), [nodes, edges])
+
+  // Where each pill sits, as an offset from its junction in screen pixels.
+  //
+  // THE SIDE IS CHOSEN AT NO MORE THAN THE BADGE'S FLOOR ZOOM. Past it the badge
+  // grows while the pill does not, so zooming in only ever opens more room
+  // around every side: lines are rays from the junction or run further off,
+  // and everything else moves apart. Choosing there keeps a pill on one side
+  // however far in you zoom, instead of hopping each time another side clears.
+  const offsets = useMemo(() => {
+    // The badge's radius on screen at a zoom; its ring counts.
+    const badgeRadius = (z: number): number => teamBadgeScreenSize(z) * (0.5 + TEAM_BADGE_RING)
+    const at = Math.min(zoom, BADGE_FLOOR_ZOOM)
+    const placed = placePills(
+      clusters.map(({ teamRoot, pillWidth }) => ({
+        id: teamRoot.id,
+        x: teamRoot.x * at,
+        y: teamRoot.y * at,
+        width: pillWidth,
+      })),
+      {
+        badgeRadius: badgeRadius(at),
+        gap: BADGE_GAP,
+        height: PILL_HEIGHT,
+        segments: segments.map((s) => ({
+          x1: s.x1 * at,
+          y1: s.y1 * at,
+          x2: s.x2 * at,
+          y2: s.y2 * at,
+        })),
+        keepouts: keepoutsFrom(nodes, at, badgeRadius(at)),
+      },
+    )
+    const clear = badgeRadius(zoom) + BADGE_GAP
+    const out = new Map<string, { dx: number; dy: number }>()
+    for (const { teamRoot, pillWidth } of clusters) {
+      const p = placed.get(teamRoot.id)
+      if (!p) continue
+      const box = sideBox(p.side, 0, 0, pillWidth / 2, PILL_HEIGHT / 2, clear)
+      out.set(teamRoot.id, { dx: box.cx, dy: box.cy })
+    }
+    return out
+  }, [clusters, segments, nodes, zoom])
 
   if (clusters.length === 0) return null
 
@@ -124,15 +194,12 @@ export function TeamStatusClusterLayer({ nodes }: TeamStatusClusterLayerProps) {
       }}
     >
       <svg width="100%" height="100%" style={{ overflow: 'visible' }}>
-        {clusters.map(({ teamRoot, team, breakdown, shown }) => {
-          const widths = shown.map((b) => segmentWidth(breakdown[b.key], b.word))
-          const pillWidth =
-            PILL_PADDING_X * 2 +
-            widths.reduce((a, w) => a + w, 0) +
-            SEGMENT_GAP * Math.max(0, shown.length - 1)
-          // Graph-coords → screen-coords via the viewport transform.
-          const screenX = vp.x + (teamRoot.x + 0.5) * vp.zoom
-          const screenY = vp.y + teamRoot.y * vp.zoom - CLUSTER_Y_OFFSET
+        {clusters.map(({ teamRoot, team, breakdown, shown, widths, pillWidth }) => {
+          const offset = offsets.get(teamRoot.id) ?? { dx: 0, dy: 0 }
+          // Graph-coords → screen-coords via the viewport transform, then over to
+          // the pill's side of the badge.
+          const screenX = vp.x + teamRoot.x * vp.zoom + offset.dx
+          const screenY = vp.y + teamRoot.y * vp.zoom + offset.dy
           const left = -pillWidth / 2
           const top = -PILL_HEIGHT / 2
           return (

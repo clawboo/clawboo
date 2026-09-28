@@ -2,7 +2,7 @@ import '@xyflow/react/dist/style.css'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { isConnectionAllowed } from '@/features/graph/connectionGrammar'
+import { connectionRefusal, isConnectionAllowed } from '@/features/graph/connectionGrammar'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -27,6 +27,18 @@ import { edgeTypes } from '@/features/graph/edges/edgeTypes'
 import { ConnectionLine } from '@/features/graph/edges/ConnectionLine'
 import { computeOrbitalPositions } from '@/features/graph/computeOrbitalPositions'
 import { installSkillForAgent } from '@/features/graph/operations/installSkill'
+import { ThreadPicker } from '@/features/graph/ThreadPicker'
+import { useThreadDrop } from '@/features/graph/useThreadDrop'
+import { ActivityDock } from '@/features/graph/ActivityDock'
+import { BarBtn, BarDivider } from '@/features/graph/toolbar'
+import { useAddToGraph } from '@/features/graph/useAddToGraph'
+import {
+  isLooseNodeId,
+  useLooseNodes,
+  useLooseNodeStore,
+  type LooseNodeData,
+} from '@/features/graph/looseNodes'
+import { agentAlreadyHas, attachLooseToAgent } from '@/features/graph/operations/attachLoose'
 import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
@@ -38,6 +50,7 @@ import { nativeProviderIdForGroup } from '@/lib/nativeModelCatalog'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
+import { Plus, Terminal } from 'lucide-react'
 import { apiFetch, setAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
@@ -92,10 +105,24 @@ interface Particle {
 
 // ─── MiniGraph (inner — must be inside ReactFlowProvider) ────────────────────
 
+/** The loose-node layer's key for one agent's mini graph. */
+function miniCanvasKey(agentId: string): string {
+  return `agent-${agentId}`
+}
+
 function MiniGraphInner({ agentId }: { agentId: string }) {
   const { nodes: rawNodes, edges: rawEdges, isLoading } = useMiniGraphData(agentId)
-  const { fitView } = useReactFlow()
+  const { fitView, getNode, screenToFlowPosition } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
+
+  // What the + button put here, held by nobody yet (see looseNodes.ts). Its own
+  // layer, so the layout and the local physics below never see it.
+  const canvasKey = miniCanvasKey(agentId)
+  const looseScopeUrl = useConnectionStore((s) => s.gatewayUrl) ?? ''
+  useEffect(() => {
+    void useLooseNodeStore.getState().load(canvasKey, looseScopeUrl)
+  }, [canvasKey, looseScopeUrl])
+  const looseNodes = useLooseNodes(canvasKey)
 
   // Local ReactFlow state
   const [nodes, setNodes] = useState<GraphNode[]>([])
@@ -154,6 +181,12 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
       },
     }))
   }, [nodes, hoveredNodeId, highlightedNodeIds, highlightedEdgeIds]) as GraphNode[]
+
+  // What React Flow draws: the agent's graph, then the canvas's loose nodes.
+  const flowNodes = useMemo<Node[]>(
+    () => (looseNodes.length === 0 ? nodesWithHover : [...nodesWithHover, ...looseNodes]),
+    [nodesWithHover, looseNodes],
+  )
 
   const edgesWithHover = useMemo(() => {
     if (hoveredNodeId === null) return edges
@@ -478,9 +511,22 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
 
   // ── Interaction handlers ──────────────────────────────────────────────────
 
-  const onNodesChange = useCallback((changes: NodeChange<GraphNode>[]) => {
-    setNodes((nds) => applyNodeChanges(changes, nds) as GraphNode[])
-  }, [])
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      // A loose node's changes go to its own layer, the rest to local state.
+      const loose: NodeChange[] = []
+      const rest: NodeChange[] = []
+      for (const c of changes) {
+        const id = 'id' in c ? c.id : c.item.id
+        ;(isLooseNodeId(id) ? loose : rest).push(c)
+      }
+      if (loose.length > 0) useLooseNodeStore.getState().applyChanges(canvasKey, loose)
+      if (rest.length > 0) {
+        setNodes((nds) => applyNodeChanges(rest as NodeChange<GraphNode>[], nds) as GraphNode[])
+      }
+    },
+    [canvasKey],
+  )
 
   const onEdgesChange = useCallback((changes: EdgeChange<GraphEdge>[]) => {
     setEdges((eds) => applyEdgeChanges(changes, eds) as GraphEdge[])
@@ -488,6 +534,7 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
 
   const onNodeDragStart: OnNodeDrag<Node> = useCallback(
     (_event, node) => {
+      if (isLooseNodeId(node.id)) return
       const p = particleMapRef.current.get(node.id)
       if (p) {
         p.pinned = true
@@ -511,6 +558,10 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
 
   const onNodeDragStop: OnNodeDrag<Node> = useCallback(
     (_event, node) => {
+      if (isLooseNodeId(node.id)) {
+        useLooseNodeStore.getState().persist(canvasKey)
+        return
+      }
       const p = particleMapRef.current.get(node.id)
       if (p) {
         p.pinned = false
@@ -521,7 +572,7 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
       }
       startPhysics()
     },
-    [startPhysics],
+    [startPhysics, canvasKey],
   )
 
   const onNodeMouseEnter: NodeMouseHandler<Node> = useCallback(
@@ -537,6 +588,23 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
 
   const onConnect = useCallback(
     async (connection: Connection) => {
+      // A loose node dropped on the Boo: give this agent the thing.
+      if (connection.source && isLooseNodeId(connection.source)) {
+        const src = getNode(connection.source)
+        const tgt = connection.target ? getNode(connection.target) : undefined
+        if (!src || tgt?.type !== 'boo') return
+        const loose = src.data as LooseNodeData
+        const boo = tgt.data as BooNodeData
+        if (agentAlreadyHas(nodes, boo.agentId, loose)) {
+          useToastStore
+            .getState()
+            .addToast({ message: `${boo.name} already has ${loose.name}.`, type: 'info' })
+          return
+        }
+        void attachLooseToAgent(loose, src.id, boo.agentId, boo.name)
+        return
+      }
+
       const sourceNode = nodes.find((n) => n.id === connection.source)
       const targetNode = nodes.find((n) => n.id === connection.target)
       if (!sourceNode || !targetNode) return
@@ -548,7 +616,7 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
         void installSkillForAgent(skillData.name, booData.agentId, booData.name)
       }
     },
-    [nodes],
+    [nodes, getNode],
   )
 
   // THE SHARED GRAMMAR, scoped rather than re-implemented. This panel draws one
@@ -557,8 +625,10 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
   // returned a bare boolean, which is how the two surfaces drifted silently.
   const isValidConnection: IsValidConnection = useCallback(
     (connection) => {
-      const source = nodes.find((n) => n.id === connection.source)
-      const target = nodes.find((n) => n.id === connection.target)
+      // Through React Flow, not the local array: a loose node is drawn here
+      // but lives in its own layer, so the local array cannot see it.
+      const source = connection.source ? getNode(connection.source) : undefined
+      const target = connection.target ? getNode(connection.target) : undefined
       return isConnectionAllowed(
         source?.type,
         target?.type,
@@ -566,7 +636,43 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
         'single-agent',
       )
     },
-    [nodes],
+    [getNode],
+  )
+
+  // THE PORT WORKS HERE TOO. A thread pulled off this Boo and let go on empty
+  // space opens the same picker the Ghost Graph does, for this one agent. New
+  // agents stay on the Ghost Graph: this canvas draws one Boo, so a second would
+  // be created somewhere it cannot show.
+  const thread = useThreadDrop({ nodes, getNode, screenToFlowPosition, fallbackTeamId: null })
+
+  // A refused drop is SAID, not just felt as a thread snapping back, in the same
+  // words the Ghost Graph uses (one grammar, scoped).
+  const onConnectEnd = useCallback(
+    (
+      event: MouseEvent | TouchEvent,
+      connectionState: { isValid: boolean | null; fromNode: Node | null; toNode: Node | null },
+    ) => {
+      const { fromNode, toNode } = connectionState
+      if (fromNode && !toNode) {
+        if (fromNode.type === 'loose') {
+          useToastStore
+            .getState()
+            .addToast({ message: 'Drop it on an agent to give it to them.', type: 'info' })
+          return
+        }
+        thread.openFromDrop(event, fromNode)
+        return
+      }
+      if (connectionState.isValid !== false || !fromNode || !toNode) return
+      const reason = connectionRefusal(
+        fromNode.type,
+        toNode.type,
+        fromNode.id === toNode.id,
+        'single-agent',
+      )
+      if (reason) useToastStore.getState().addToast({ message: reason, type: 'info' })
+    },
+    [thread.openFromDrop],
   )
 
   const onPaneClick = useCallback(() => {
@@ -592,43 +698,68 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
   }
 
   return (
-    <ReactFlow
-      nodes={nodesWithHover}
-      edges={edgesWithHover}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onNodeDragStart={onNodeDragStart}
-      onNodeDrag={onNodeDrag}
-      onNodeDragStop={onNodeDragStop}
-      onNodeMouseEnter={onNodeMouseEnter}
-      onNodeMouseLeave={onNodeMouseLeave}
-      onPaneClick={onPaneClick}
-      onConnect={onConnect}
-      isValidConnection={isValidConnection}
-      connectionLineComponent={ConnectionLine}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      fitView
-      proOptions={{ hideAttribution: true }}
-      style={{ background: 'var(--canvas)' }}
-      minZoom={0.3}
-      maxZoom={2}
-      defaultEdgeOptions={{ animated: false }}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="var(--canvas-dot)" />
-      {/* Connector brand colours. Every mark is drawn in `currentColor` and takes
+    <>
+      <ReactFlow
+        nodes={flowNodes}
+        edges={edgesWithHover}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
+        onPaneClick={onPaneClick}
+        onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
+        isValidConnection={isValidConnection}
+        connectionLineComponent={ConnectionLine}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        fitView
+        proOptions={{ hideAttribution: true }}
+        style={{ background: 'var(--canvas)' }}
+        minZoom={0.3}
+        maxZoom={2}
+        defaultEdgeOptions={{ animated: false }}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="var(--canvas-dot)" />
+        {/* Connector brand colours. Every mark is drawn in `currentColor` and takes
           its hue from a `--cm-<slug>` variable this component emits, so without it
           Gmail's M and every other logo fall back to the theme foreground and read
           as dead. The Ghost Graph mounts it; this graph draws the same tiles and
           has to as well. */}
-      <ConnectorMarkStyles />
-    </ReactFlow>
+        <ConnectorMarkStyles />
+      </ReactFlow>
+      {/* Beside the canvas rather than inside it, as on the Ghost Graph, so
+          the pane's pan and zoom never see its events. */}
+      {thread.threadDrop && thread.threadOptions.length > 0 && (
+        <ThreadPicker
+          at={thread.threadDrop.screen}
+          options={thread.threadOptions}
+          allowNewAgent={false}
+          onPick={(option) => void thread.pick(option)}
+          onCreateAgent={(name) => void thread.createAgent(name)}
+          onClose={thread.close}
+        />
+      )}
+    </>
   )
 }
 
 // ─── MiniGraph (outer — provides ReactFlowProvider + model selector overlay) ─
 
 export function MiniGraph({ agentId }: { agentId: string }) {
+  // The provider wraps the whole frame, the controls included, so the + button
+  // can place a node on this canvas: that needs the canvas's own coordinates.
+  return (
+    <ReactFlowProvider>
+      <MiniGraphFrame agentId={agentId} />
+    </ReactFlowProvider>
+  )
+}
+
+function MiniGraphFrame({ agentId }: { agentId: string }) {
   const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
   const client = useConnectionStore((s) => s.client)
   const addToast = useToastStore((s) => s.addToast)
@@ -638,6 +769,26 @@ export function MiniGraph({ agentId }: { agentId: string }) {
 
   // ── Default model (fetched once, shared with the graph's model orbital) ────
   const defaultModel = useOpenclawDefaultModel()
+  // The live activity dock, scoped to this one agent: the same toggle and panel
+  // Atlas and a team's graph carry, so every graph answers "what is it doing"
+  // the same way.
+  const [showActivity, setShowActivity] = useState(false)
+
+  // The + button, as on every graph. No new agent here: this canvas draws one
+  // Boo, so a second would be made somewhere it cannot show.
+  const { getNodes, getEdges, getZoom, screenToFlowPosition } = useReactFlow()
+  const frameRef = useRef<HTMLDivElement>(null)
+  const controlsRef = useRef<HTMLDivElement>(null)
+  const add = useAddToGraph({
+    canvasKey: miniCanvasKey(agentId),
+    getNodes,
+    getEdges,
+    getZoom,
+    screenToFlowPosition,
+    paneRef: frameRef,
+    barRef: controlsRef,
+    newAgentTeamId: null,
+  })
 
   const handleModelChange = useCallback(
     async (model: string | null, groupProvider?: string) => {
@@ -699,12 +850,10 @@ export function MiniGraph({ agentId }: { agentId: string }) {
   )
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <ReactFlowProvider>
-        <MiniGraphInner agentId={agentId} />
-      </ReactFlowProvider>
+    <div ref={frameRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <MiniGraphInner agentId={agentId} />
 
-      {/* Model selector — floating overlay, top-right */}
+      {/* Top-right: add and activity, beside the model selector. */}
       {agent && (
         <div
           style={{
@@ -712,8 +861,33 @@ export function MiniGraph({ agentId }: { agentId: string }) {
             top: 8,
             right: 8,
             zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
           }}
         >
+          <div
+            ref={controlsRef}
+            role="toolbar"
+            aria-label="Graph controls"
+            className="surface-floating-tier"
+            style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10 }}
+          >
+            <BarBtn
+              icon={Plus}
+              label="Add a connector or skill"
+              active={add.anchor !== null}
+              onClick={add.toggle}
+            />
+            <BarDivider />
+            <BarBtn
+              icon={Terminal}
+              label={showActivity ? 'Hide activity feed' : 'Activity feed (this agent)'}
+              tint="mint"
+              active={showActivity}
+              onClick={() => setShowActivity((v) => !v)}
+            />
+          </div>
           <AgentModelControl
             runtime={agent.runtime}
             currentModel={agent.model ?? null}
@@ -734,6 +908,25 @@ export function MiniGraph({ agentId }: { agentId: string }) {
                 : {})}
           />
         </div>
+      )}
+
+      <ActivityDock
+        open={showActivity}
+        onClose={() => setShowActivity(false)}
+        scope={{ agentId }}
+        scopeLabel={agent?.name ?? 'this agent'}
+      />
+
+      {add.anchor && (
+        <ThreadPicker
+          at={add.anchor}
+          options={add.options}
+          allowNewAgent={false}
+          label="Add to the graph"
+          onPick={(option) => void add.pick(option)}
+          onCreateAgent={() => undefined}
+          onClose={add.close}
+        />
       )}
     </div>
   )

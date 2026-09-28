@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { motion, useReducedMotion } from 'framer-motion'
 import {
   ArrowRight,
-  Globe,
   KanbanSquare,
+  Network,
   ShoppingCart,
   SlidersHorizontal,
   Users,
@@ -88,7 +88,7 @@ const STEPS: Step[] = [
     eyebrow: 'Atlas',
     title: 'See the whole org',
     body: 'Atlas maps every team and how your agents connect: one live, cross-team org-graph.',
-    icon: Globe,
+    icon: Network,
     enter: () => nav().navigateTo('graph'),
   },
   {

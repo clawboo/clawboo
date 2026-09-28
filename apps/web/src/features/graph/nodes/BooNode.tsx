@@ -1,15 +1,17 @@
 import { memo, useRef, type MutableRefObject } from 'react'
-import { Handle, Position, useConnection } from '@xyflow/react'
+import { Handle, Position } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { AgentBooAvatar, useAgentBooAspect } from '@/components/AgentBooAvatar'
 import type { BooNodeData } from '../types'
+import { capabilityCount, describeClassCounts } from '../capabilityVocabulary'
 import { useGraphStore } from '../store'
 import { useFloatingMotion } from '../useFloatingMotion'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
 import { useObsOverlayStore } from '@/stores/obsOverlay'
 import { BooThoughtBubble } from './BooThoughtBubble'
+import { BooDock, BooPort } from './BooPort'
 import { RuntimeBadge } from './RuntimeBadge'
 import { createFlipState, useFlipMorph, type FlipState } from './useFlipMorph'
 import { useChatStore } from '@/stores/chat'
@@ -126,47 +128,6 @@ const STATUS_LABEL: Record<string, string> = {
 
 // ─── Handle styles ───────────────────────────────────────────────────────────
 
-const handleBase: React.CSSProperties = {
-  background: 'transparent',
-  border: '1.5px solid rgb(var(--foreground-rgb) / 0.22)',
-  width: 8,
-  height: 8,
-  transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
-}
-
-const handleConnecting: React.CSSProperties = {
-  background: 'rgb(var(--primary-rgb) / 0.5)',
-  border: '1px solid rgb(var(--primary-rgb) / 0.3)',
-  width: 12,
-  height: 12,
-  borderRadius: '50%',
-  transition: 'opacity 0.15s, background 0.15s, width 0.15s, height 0.15s',
-}
-
-/**
- * The always-visible port.
- *
- * Sized for a pointer rather than for tidiness: 20px is the smallest disc that
- * reads as a target at the zoom levels the canvas actually sits at, and the
- * three handles it replaces were 8px.
- */
-const portStyle: React.CSSProperties = {
-  background: 'rgb(var(--surface-rgb, 255 255 255) / 1)',
-  border: '1.5px solid rgb(var(--foreground-rgb) / 0.28)',
-  width: 20,
-  height: 20,
-  borderRadius: '50%',
-  transition: 'background 0.15s, border-color 0.15s, transform 0.15s',
-}
-
-/** Engaged: the thread is out, or connect mode is on. */
-const portStyleActive: React.CSSProperties = {
-  ...portStyle,
-  background: 'rgb(var(--primary-rgb) / 0.12)',
-  border: '1.5px solid rgb(var(--primary-rgb))',
-  transform: 'scale(1.1)',
-}
-
 const centerHandleStyle: React.CSSProperties = {
   position: 'absolute',
   top: '50%',
@@ -198,9 +159,11 @@ const SHAPE_TRANSITION =
 // ─── BooNode ─────────────────────────────────────────────────────────────────
 
 export const BooNode = memo(function BooNode({
+  id,
   data,
   selected,
   dragging,
+  isConnectable,
 }: NodeProps<Node<BooNodeData, 'boo'>>) {
   const { agentId, name, status, ringCounts } = data
   // SELECTOR, not the whole store: BooNode renders once per agent, and a
@@ -236,9 +199,6 @@ export const BooNode = memo(function BooNode({
   const statusFlip = useRef<FlipState>(createFlipState())
 
   const glow = STATUS_GLOW[status] ?? null
-  const connection = useConnection()
-  const isConnecting = connection.inProgress
-  const connectMode = useGraphStore((s) => s.connectMode)
   const pendingApprovals = useApprovalsStore((s) => s.pendingApprovals)
   const hasPendingApproval = Array.from(pendingApprovals.values()).some(
     (a) => a.agentId === agentId,
@@ -475,58 +435,16 @@ export const BooNode = memo(function BooNode({
             statusFlip={statusFlip}
           />
 
-          {/* ── The port ─────────────────────────────────────────────────────
-              ONE, AND ALWAYS VISIBLE. This replaced three 8x8px handles at
-              22% border opacity that only appeared on hover: the canvas could
-              already author skills, shares and routes, and every one of those
-              gestures started from something a first-time user could not see.
-              A 20px disc carrying a + is the only advertisement the graph has
-              that it can be built on.
-
-              The TARGET handle stays where it was (top) but shares the port's
-              visibility, so a thread can still be dropped ON a Boo. */}
-          <Handle
-            type="target"
-            position={Position.Top}
-            className={
-              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-            }
-            style={isConnecting || connectMode ? handleConnecting : handleBase}
-          />
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            className={
-              isConnecting || connectMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-            }
-            style={isConnecting || connectMode ? handleConnecting : handleBase}
-          />
-          <Handle
-            type="source"
-            id="right"
-            position={Position.Right}
-            className="opacity-100"
-            style={isConnecting || connectMode ? portStyleActive : portStyle}
-          />
-          {/* The + glyph, drawn OVER the handle and click-through so the handle
-              keeps the whole 20px hit area. Purely decorative: the drag is the
-              handle's. */}
-          <span
-            aria-hidden
-            className="pointer-events-none absolute z-10 select-none font-semibold leading-none transition-colors duration-150"
-            style={{
-              right: -10,
-              top: '50%',
-              transform: 'translate(50%, -50%)',
-              fontSize: 13,
-              color:
-                isConnecting || connectMode
-                  ? 'rgb(var(--primary-rgb))'
-                  : 'rgb(var(--foreground-rgb) / 0.5)',
-            }}
-          >
-            +
-          </span>
+          {/* ── The port and the dock ────────────────────────────────────────
+              ONE PORT: every gesture that builds on this canvas (a route, a
+              skill, a share, a new agent) starts from it. It shows while the
+              pointer is on this Boo, and must stay a child of this wrapper:
+              the CSS keys off `.group:hover`. The DOCK is the other end: a
+              ring that rises around each Boo a thread can land on. Both are on
+              every canvas that draws a Boo, and both stand down when the
+              canvas is locked. See BooPort. */}
+          <BooDock agentNodeId={id} booW={booW} booH={booH} isConnectable={isConnectable} />
+          <BooPort booW={booW} isConnectable={isConnectable} />
         </motion.div>
       </div>
 
@@ -567,9 +485,15 @@ export const BooNode = memo(function BooNode({
  * chevron, badge or count -- so nothing on screen said the ring existed, and
  * every authoring gesture starts inside it.
  *
- * Silent at zero: a Boo with nothing yet should read as empty, not as three
- * zeroes. Dimmed once the ring is open, because then the tiles themselves are
- * the answer and the summary would be repeating them.
+ * Silent at zero: a Boo with nothing yet should read as empty, not as zeroes.
+ * One total on the face, the breakdown in the tooltip: the face has room for a
+ * word or two beside the status, and a Boo carrying five kinds of thing would
+ * need five.
+ *
+ * Hidden, not dimmed, once the ring is open: the tiles are the answer then. It
+ * used to fade to 40%, and `--muted-foreground` is only readable at full
+ * strength, so the label sat below contrast at rest (85%) as well as open.
+ * `visibility` keeps its width, so the status beside it does not jump.
  */
 function RingCounts({
   counts,
@@ -579,23 +503,24 @@ function RingCounts({
   expanded: boolean
 }) {
   if (!counts) return null
-  const total = counts.skills + counts.connectors + counts.routes
-  if (total === 0) return null
-  const parts: string[] = []
-  if (counts.skills > 0) parts.push(`${counts.skills} skill${counts.skills === 1 ? '' : 's'}`)
-  if (counts.connectors > 0)
-    parts.push(`${counts.connectors} connector${counts.connectors === 1 ? '' : 's'}`)
-  if (counts.routes > 0) parts.push(`${counts.routes} route${counts.routes === 1 ? '' : 's'}`)
-  const label = parts.join(' · ')
+  const { capabilities, routes } = counts
+  if (capabilities + routes === 0) return null
+  const routePhrase = routes > 0 ? `${routes} route${routes === 1 ? '' : 's'}` : ''
+  const label = [capabilities > 0 ? capabilityCount(capabilities) : '', routePhrase]
+    .filter(Boolean)
+    .join(' · ')
+  // "1 skill, 2 tools, 41 plugins, built-in tools; 1 route"
+  const detail = [describeClassCounts(counts.byClass), routePhrase].filter(Boolean).join('; ')
   return (
     <span
-      title={label}
+      title={detail || label}
       style={{
         fontSize: 10,
         letterSpacing: '0.04em',
         color: 'var(--muted-foreground)',
-        opacity: expanded ? 0.4 : 0.85,
-        transition: 'opacity 0.18s',
+        opacity: expanded ? 0 : 1,
+        visibility: expanded ? 'hidden' : 'visible',
+        transition: 'opacity 0.18s, visibility 0.18s',
         whiteSpace: 'nowrap',
       }}
     >

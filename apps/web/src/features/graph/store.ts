@@ -79,10 +79,6 @@ interface GraphStore {
   refreshKey: number
   triggerRefresh: () => void
 
-  /** When true, BooNode handles are always visible for easier edge drawing. */
-  connectMode: boolean
-  setConnectMode: (v: boolean) => void
-
   /** When true, colored convex-hull halos render behind team groupings. */
   showTeamHalos: boolean
   setShowTeamHalos: (v: boolean) => void
@@ -192,9 +188,6 @@ export const useGraphStore = create<GraphStore>((set) => ({
 
   refreshKey: 0,
   triggerRefresh: () => set((state) => ({ refreshKey: state.refreshKey + 1 })),
-
-  connectMode: false,
-  setConnectMode: (v) => set({ connectMode: v }),
 
   showTeamHalos: false,
   setShowTeamHalos: (v) => set({ showTeamHalos: v }),

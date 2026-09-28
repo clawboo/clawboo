@@ -11,7 +11,7 @@ These live in the left two columns and follow the currently selected team. The t
 
 - **[Teams](/using/teams)**: Create and manage teams, set the team leader, capture per-team rules, and pick a color collection. Reached from the team-icon strip's **+ Create team** button and right-click context menu.
 - **[Group chat](/using/group-chat)**: The team's collaboration room, opened by clicking a team icon or the **Group Chat** row in the agent column. Gated once per team by the "Know Your Team" onboarding flow before the composer unlocks.
-- **[Ghost Graph & Atlas](/using/ghost-graph)**: The team's agent topology (embedded in group chat) and the global all-teams **Atlas** view (the `graph` nav slot, labeled **Atlas (All Teams)**). Halos, peacock expand/collapse, and connect mode live here.
+- **[Ghost Graph & Atlas](/using/ghost-graph)**: The team's agent topology (embedded in group chat) and the global all-teams **Atlas** view (the `graph` nav slot, labeled **Atlas (All Teams)**). Halos, team badges, peacock expand/collapse, the Boo port and the + button for building on the canvas, and the activity dock live here.
 - **[Agents](/using/agents)**: Click any agent row to open its detail view: chat, the SOUL / IDENTITY / TOOLS / AGENTS file editors, and the personality sliders.
 - **[Boo Zero](/using/boo-zero)**: The universal team leader. Its standalone view (opened from the mascot icon) hosts the display name and global brief; per-team briefs and rules live behind the gear in the group-chat header.
 

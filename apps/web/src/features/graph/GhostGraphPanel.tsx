@@ -6,7 +6,8 @@ import { useGraphStore } from './store'
 import { useTeamStore } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { EmptyState } from '@/features/shared/EmptyState'
-import { isCapabilitySkillNode, type GhostGraphScope } from './types'
+import { countOf } from './capabilityVocabulary'
+import { countGraphSkills, type GhostGraphScope } from './types'
 
 export type { GhostGraphScope }
 
@@ -37,7 +38,7 @@ export function GhostGraphPanel({
   )
 
   const booCount = nodes.filter((n) => n.type === 'boo').length
-  const skillCount = nodes.filter(isCapabilitySkillNode).length
+  const skillCount = countGraphSkills(nodes)
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-canvas">
@@ -52,9 +53,9 @@ export function GhostGraphPanel({
                   : 'Ghost Graph'}
             </span>
             {booCount > 0 && (
-              <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-semibold text-foreground/55">
+              <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
                 {booCount} Boo{booCount !== 1 ? 's' : ''}
-                {skillCount > 0 && ` · ${skillCount} skills`}
+                {skillCount > 0 && ` · ${countOf(skillCount, 'skill')}`}
               </span>
             )}
           </div>

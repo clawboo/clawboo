@@ -24,8 +24,8 @@
 // Seeding only one produces a bubble that renders the wrong line, which reads as
 // a pass. Every case below sets both deliberately.
 
-import { cleanup, render, screen } from '@testing-library/react'
-import { ReactFlowProvider } from '@xyflow/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
+import { ReactFlowProvider, useStoreApi } from '@xyflow/react'
 import type { Node, NodeProps } from '@xyflow/react'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -147,7 +147,7 @@ beforeEach(() => {
   useApprovalsStore.setState({ pendingApprovals: new Map() })
   useTeamStore.setState({ teams: [] })
   useBooZeroStore.setState({ booZeroAgentId: null })
-  useGraphStore.setState({ hoveredNodeId: null, connectMode: false })
+  useGraphStore.setState({ hoveredNodeId: null })
 })
 
 afterEach(() => cleanup())
@@ -254,10 +254,47 @@ describe('BooNode — the status row stands down without taking the ring counts'
     // is the obvious-looking cleanup that must not happen.
     seed({ status: 'running' })
     const { container } = renderNode(
-      nodeProps({ status: 'running', ringCounts: { skills: 2, connectors: 1, routes: 0 } }),
+      nodeProps({
+        status: 'running',
+        ringCounts: { capabilities: 3, routes: 0, byClass: { skill: 2, connector: 1 } },
+      }),
     )
 
-    expect(container.textContent).toContain('2 skills')
+    expect(container.textContent).toContain('3 capabilities')
+  })
+
+  it('counts what the agent has, and names each kind in the tooltip', () => {
+    // The face used to count tiles, so an OpenClaw Boo carrying one skill read
+    // "5 skills · 44 connectors": its plugins counted as connectors, its tools and
+    // its model tile as skills.
+    seed({ status: 'idle' })
+    const { container } = renderNode(
+      nodeProps({
+        status: 'idle',
+        ringCounts: {
+          capabilities: 48,
+          routes: 1,
+          byClass: { skill: 1, tool: 2, connector: 3, plugin: 41, builtin: 1 },
+        },
+      }),
+    )
+
+    expect(container.textContent).toContain('48 capabilities · 1 route')
+    const label = [...container.querySelectorAll('[title]')].find((el) =>
+      el.textContent?.includes('48 capabilities'),
+    )
+    expect(label?.getAttribute('title')).toBe(
+      '1 skill, 2 tools, 3 connectors, 41 plugins, built-in tools; 1 route',
+    )
+  })
+
+  it('stays silent for a Boo that carries nothing yet', () => {
+    seed({ status: 'idle' })
+    const { container } = renderNode(
+      nodeProps({ status: 'idle', ringCounts: { capabilities: 0, routes: 0, byClass: {} } }),
+    )
+
+    expect(container.textContent).not.toContain('capabilit')
   })
 
   it('keeps the verb when the agent is idle', () => {
@@ -320,5 +357,102 @@ describe('BooNode — the event-sourced pip', () => {
     useObsOverlayStore.setState({ statusByAgent: new Map([['a1', 'idle']]) })
     renderNode(nodeProps())
     expect(screen.queryByTitle(/^live:/)).not.toBeInTheDocument()
+  })
+})
+
+// ─── The port and the dock ───────────────────────────────────────────────────
+//
+// STRUCTURE ONLY, for the reason at the top of this file: the rings, the fill
+// and the hover hint are CSS keyed off classes React Flow adds, and jsdom loads
+// no stylesheet. These pin the handles and the classes the CSS reads; the look
+// is verified by screenshot.
+
+describe('BooNode: the port and the dock', () => {
+  it('carries the port, with the hint that says what it does', () => {
+    // Both are in the DOM on every Boo. Showing them only while the Boo is
+    // hovered is CSS, which jsdom does not load: a screenshot question.
+    seed({ status: 'idle' })
+    const { container } = renderNode(nodeProps())
+
+    const port = container.querySelector('.boo-port')
+    expect(port).toHaveClass('source', 'connectable')
+    expect(screen.getByText('Drag to connect')).toBeInTheDocument()
+  })
+
+  it('quiets its port and hint while a thread is out', () => {
+    // A port that rose on each Boo the pointer crossed on its way to a target
+    // would read as a second place to drop the thread. The stylesheet hides a
+    // quiet port unless React Flow marks it as the thread's origin
+    // (`connectingfrom` / `clickconnecting`). Those two need the node-id
+    // context only a mounted <ReactFlow> provides, so the origin exemption is
+    // verified live, not here.
+    seed({ status: 'idle' })
+    const flow: { store?: ReturnType<typeof useStoreApi> } = {}
+    function StoreProbe() {
+      flow.store = useStoreApi()
+      return null
+    }
+    const { container } = render(
+      <ReactFlowProvider>
+        <ThemeProvider>
+          <StoreProbe />
+          <BooNode {...nodeProps()} />
+        </ThemeProvider>
+      </ReactFlowProvider>,
+    )
+    const port = container.querySelector('.boo-port')
+    const label = container.querySelector('.boo-port__label')
+    expect(port).not.toHaveClass('boo-port--quiet')
+    expect(label).not.toHaveClass('boo-port__label--quiet')
+
+    // Click-to-connect armed on another Boo's port.
+    act(() => {
+      flow.store?.setState({
+        connectionClickStartHandle: { nodeId: 'boo-b2', type: 'source', id: 'right' },
+      })
+    })
+    expect(port).toHaveClass('boo-port--quiet')
+    expect(label).toHaveClass('boo-port__label--quiet')
+
+    act(() => {
+      flow.store?.setState({ connectionClickStartHandle: null })
+    })
+    expect(port).not.toHaveClass('boo-port--quiet')
+  })
+
+  it('stands the port and the dock down on a locked canvas', () => {
+    // React Flow hands a node `isConnectable: false` when `nodesConnectable` is
+    // off, which is what the padlock sets. A handle only obeys it when the node
+    // passes it on, and a locked canvas that still drew routes would contradict
+    // its own padlock.
+    seed({ status: 'idle' })
+    const { container } = renderNode({ ...nodeProps(), isConnectable: false })
+
+    expect(container.querySelector('.boo-port')).not.toHaveClass('connectable')
+    expect(container.querySelector('.boo-port-anchor')).toHaveStyle({ visibility: 'hidden' })
+    expect(container.querySelector('.boo-dock')).not.toHaveClass('connectable')
+  })
+
+  it('makes the dock a place to land a thread, never to start one', () => {
+    seed({ status: 'idle' })
+    const { container } = renderNode(nodeProps())
+
+    const dock = container.querySelector('.boo-dock')
+    expect(dock).toHaveClass('target', 'connectableend')
+    // A thread started from a dock would be drawn backwards, from the agent it
+    // should end at.
+    expect(dock).not.toHaveClass('connectablestart')
+  })
+
+  it('keeps one source handle for authoring, besides the invisible routing anchor', () => {
+    // The old hover-only handle at the bottom was a second, smaller way to do
+    // what the port does. Edges attach to `center` by id and never needed it.
+    seed({ status: 'idle' })
+    const { container } = renderNode(nodeProps())
+
+    const sources = [...container.querySelectorAll('.react-flow__handle.source')].map((h) =>
+      h.getAttribute('data-handleid'),
+    )
+    expect(sources.sort()).toEqual(['center', 'right'])
   })
 })

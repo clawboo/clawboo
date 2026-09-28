@@ -18,6 +18,15 @@ import { readAgentFile } from '@clawboo/control-client'
 import { fetchCapabilities, groupAgentCapabilities } from '@/lib/capabilitiesClient'
 import type { CapabilityRecord } from '@clawboo/capability-registry'
 import type { AgentState } from '@/stores/fleet'
+import {
+  capabilityClassOf,
+  countOf,
+  humanizeCapabilityName,
+  isPluginRecord,
+  pluginProviderId,
+  type CapabilityClass,
+  type ClassCounts,
+} from './capabilityVocabulary'
 import type {
   GraphNode,
   GraphEdge,
@@ -26,6 +35,7 @@ import type {
   ResourceNodeData,
   SkillCategory,
   ConnectorServiceKind,
+  CapabilityGroupMember,
   TeamRootNodeData,
   GhostGraphScope,
 } from './types'
@@ -38,9 +48,6 @@ function capSlug(sourceKey: string): string {
     .replace(/(^-|-$)/g, '')
 }
 
-/** Map a capability to a SkillNode category (picks the tile GLYPH — the tile
- *  ACCENT is type-coded in SkillNode: mint for skills/tools, slate for the
- *  built-ins rollup, violet for connectors, brand for the model). */
 /**
  * The ring's comfortable size, and the Atlas ceiling.
  *
@@ -54,14 +61,99 @@ function capSlug(sourceKey: string): string {
  *
  * ATLAS STILL NEEDS A CEILING, for a different reason: node count. Fifty agents at
  * four hundred capabilities is twenty thousand React Flow nodes, and no radius
- * arithmetic saves that. So the all-teams view keeps a bound (a generous one) until
- * grouped orbitals land, and a focused view has none.
+ * arithmetic saves that. Grouping (below) folds the big read-only sets, which is
+ * what filled the ring on a real install, so the ceiling is now a backstop for
+ * what cannot fold: skills a person installed and connectors with actions.
  */
 export const COMFORTABLE_ORBITAL_COUNT = 8
 
 /** The most tiles one Boo may draw in the all-teams view. */
 export const ATLAS_ORBITAL_CEILING = 24
 
+/**
+ * How many capabilities of one foldable class it takes to fold them into a tile.
+ *
+ * An OpenClaw Gateway reports forty-odd plugins, and every OpenClaw Boo inherits
+ * them all: drawn one tile each, they were most of the ring, and in Atlas they
+ * filled the slots under the ceiling, so a skill a person had installed was the
+ * thing pushed behind "+N more". Below this, a set stays as separate tiles,
+ * because four named tools read better than one tile that has to be opened.
+ */
+export const GROUP_MIN_MEMBERS = 5
+
+/**
+ * The class a capability folds into, or null when it must keep its own tile.
+ *
+ * ONLY WHAT THE CANVAS CANNOT ACT ON FOLDS. A person's installed skill carries
+ * the install drag and the removable edge; a connector carries its toolbar; a
+ * share carries a grant edge that IS the authorization; a tile asking for
+ * sign-in or showing drift is the one that must never be buried. None of those
+ * fold. The test is `grantId`, never `connectorId`: the server stamps a grant
+ * identity on every connector record, plugins included, and only an operator's
+ * share surfaces as a `grantId`.
+ */
+function groupClassFor(cap: CapabilityRecord): CapabilityClass | null {
+  if (cap.health === 'drift' || cap.health === 'needs-auth') return null
+  if (cap.grantId) return null
+  const cls = capabilityClassOf(cap)
+  if (cls === 'plugin') return cls
+  if (cls === 'tool' && (cap.source === 'brokered-mcp' || cap.source === 'openclaw-extension')) {
+    return cls
+  }
+  if (cls === 'skill' && cap.source === 'filesystem-skill-md') return cls
+  return null
+}
+
+/** One orbital slot: a capability's own tile, or a group of them. */
+type OrbitalEntry =
+  | { kind: 'cap'; cap: CapabilityRecord }
+  | { kind: 'group'; cls: CapabilityClass; members: CapabilityRecord[] }
+
+/**
+ * Fold each foldable class that reaches `GROUP_MIN_MEMBERS` into one entry, which
+ * takes the place of the class's first member so the ranking still decides where
+ * it sits.
+ */
+function foldIntoGroups(caps: readonly CapabilityRecord[]): OrbitalEntry[] {
+  const byClass = new Map<CapabilityClass, CapabilityRecord[]>()
+  for (const cap of caps) {
+    const cls = groupClassFor(cap)
+    if (!cls) continue
+    const list = byClass.get(cls)
+    if (list) list.push(cap)
+    else byClass.set(cls, [cap])
+  }
+  const out: OrbitalEntry[] = []
+  const emitted = new Set<CapabilityClass>()
+  for (const cap of caps) {
+    const cls = groupClassFor(cap)
+    const members = cls ? byClass.get(cls) : undefined
+    if (cls && members && members.length >= GROUP_MIN_MEMBERS) {
+      if (!emitted.has(cls)) {
+        emitted.add(cls)
+        out.push({ kind: 'group', cls, members })
+      }
+      continue
+    }
+    out.push({ kind: 'cap', cap })
+  }
+  return out
+}
+
+/** How a folded capability reads in its group's list. */
+function groupMember(cap: CapabilityRecord): CapabilityGroupMember {
+  const state = cap.status === 'disabled' ? 'off' : cap.available === false ? 'unavailable' : null
+  const providerId = pluginProviderId(cap)
+  return {
+    name: humanizeCapabilityName(cap.name),
+    ...(state ? { state } : {}),
+    ...(providerId ? { providerId } : {}),
+  }
+}
+
+/** Map a capability to a SkillNode category, which picks the tile GLYPH. The
+ *  tile ACCENT is type-coded in SkillNode: mint for skills/tools, slate for the
+ *  built-ins rollup, violet for connectors and plugins, brand for the model. */
 function capCategory(cap: CapabilityRecord): SkillCategory {
   if (cap.source === 'brokered-mcp' || cap.source === 'runtime-builtin') return 'code'
   if (cap.source === 'mcp-connector') return 'comm'
@@ -76,8 +168,9 @@ function capCategory(cap: CapabilityRecord): SkillCategory {
 // Raw connector names ("clawboo-memory", "memory MCP", "mcp:clawboo-tasks")
 // render truncated + shouty on a small tile ("CLAWB…"). Normalize the clawboo
 // spine servers to their clean service name + a glyph key; anything else keeps
-// its own name with a generic glyph. The raw name stays in the tooltip.
-const CONNECTOR_LABEL: Record<Exclude<ConnectorServiceKind, 'generic'>, string> = {
+// its own name, made readable when it is an identifier ("github-issues" reads
+// "GitHub Issues"), with a generic glyph. The raw name stays in the tooltip.
+const CONNECTOR_LABEL: Record<Exclude<ConnectorServiceKind, 'generic' | 'plugin'>, string> = {
   memory: 'Memory',
   tasks: 'Tasks',
   tools: 'Tools',
@@ -96,7 +189,7 @@ export function connectorMeta(rawName: string): {
   const kind = (['memory', 'tasks', 'tools', 'teamchat'] as const).find((k) => k === base)
   return kind
     ? { displayName: CONNECTOR_LABEL[kind], serviceKind: kind }
-    : { displayName: rawName.replace(/^mcp:/, ''), serviceKind: 'generic' }
+    : { displayName: humanizeCapabilityName(rawName.replace(/^mcp:/, '')), serviceKind: 'generic' }
 }
 
 // Label for the model orbital when clawboo doesn't know the agent's model
@@ -680,7 +773,13 @@ export function buildGraphElements(
         skillId: 'clawboo-model',
         name,
         category: 'other',
-        description: modelRuntime ? 'Model managed by the runtime' : `Current model: ${name}`,
+        // The tile shows a readable name; the tooltip keeps the exact id, which is
+        // what a person pastes into a config.
+        description: modelRuntime
+          ? 'Model managed by the runtime'
+          : effectiveModel && effectiveModel !== name
+            ? `Current model: ${name} (${effectiveModel})`
+            : `Current model: ${name}`,
         agentIds: [agentId],
         isModel: true,
         providerId,
@@ -723,6 +822,10 @@ export function buildGraphElements(
     return 5
   }
 
+  // What each agent carries, counted from its records before anything folds or
+  // is cut, for the counts on its face (see `ringCounts` below).
+  const capabilityTotals = new Map<string, { capabilities: number; byClass: ClassCounts }>()
+
   for (const agent of agents) {
     const files = agentFiles.get(agent.id)
 
@@ -757,13 +860,69 @@ export function buildGraphElements(
         uniqueKeys.add(key)
         return true
       })
+      const byClass: ClassCounts = {}
+      for (const cap of unique) {
+        const cls = capabilityClassOf(cap)
+        byClass[cls] = (byClass[cls] ?? 0) + 1
+      }
+      capabilityTotals.set(agent.id, { capabilities: unique.length, byClass })
+      const entries = foldIntoGroups(unique)
       // A focused view draws EVERYTHING: one Boo has all the room it needs and the
       // ring grows to fit. Atlas keeps a ceiling because its cost is node count
       // across every agent at once, which no amount of radius fixes.
-      const ceiling = scope === 'atlas' ? ATLAS_ORBITAL_CEILING : unique.length
-      const shown = unique.slice(0, ceiling)
-      const hiddenCount = unique.length - shown.length
-      for (const cap of shown) {
+      const ceiling = scope === 'atlas' ? ATLAS_ORBITAL_CEILING : entries.length
+      const shown = entries.slice(0, ceiling)
+      // Capabilities, not tiles: a group cut by the ceiling hides all its members.
+      const hiddenCount = entries
+        .slice(ceiling)
+        .reduce((n, entry) => n + (entry.kind === 'group' ? entry.members.length : 1), 0)
+      for (const entry of shown) {
+        if (entry.kind === 'group') {
+          const { cls, members } = entry
+          const nodeId = `skill-${agent.id}-group-${cls}`
+          if (seen.has(nodeId)) continue
+          seen.add(nodeId)
+          const runtimes = new Set(members.map((m) => m.runtime))
+          const listed = members
+            .map(groupMember)
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+          const off = listed.filter((m) => m.state === 'off').length
+          const label = countOf(members.length, cls)
+          skillNodes.push({
+            id: nodeId,
+            type: 'skill' as const,
+            data: {
+              skillId: `group-${cls}`,
+              name: label,
+              category: 'other',
+              description: `${label}${off > 0 ? `, ${off} off` : ''}. Click to list them.`,
+              agentIds: [agent.id],
+              // Greyed only when nothing inside is usable; one off plugin among
+              // forty is a line in the list, not a grey tile.
+              available: members.some((m) => m.available !== false),
+              enabled: members.some((m) => m.status !== 'disabled'),
+              installable: false,
+              group: {
+                cls,
+                members: listed,
+                runtime: runtimes.size === 1 ? String([...runtimes][0]) : null,
+              },
+            } satisfies SkillNodeData,
+            position: { x: 0, y: 0 },
+          })
+          skillEdges.push({
+            id: `skilledge-${agent.id}-group-${cls}`,
+            type: 'skill',
+            source: `boo-${agent.id}`,
+            sourceHandle: 'center',
+            target: nodeId,
+            targetHandle: 'center',
+            // No capabilityId: a group is not one thing that can be removed.
+            data: cls === 'plugin' ? { accent: 'var(--violet)' } : {},
+          })
+          continue
+        }
+        const cap = entry.cap
         const slug = capSlug(cap.sourceKey)
         // Policy-disabled capabilities (denied gateway tools, toggled-off MCP)
         // render greyed so they never read as "the agent has this".
@@ -777,7 +936,13 @@ export function buildGraphElements(
           const nodeId = `resource-${agent.id}-${instanceKey}`
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
-          const meta = connectorMeta(cap.name)
+          // A plugin skips the spine lookup: a plugin that happened to be called
+          // "memory" is not clawboo's Memory server.
+          const plugin = isPluginRecord(cap)
+          const meta: { displayName: string; serviceKind: ConnectorServiceKind } = plugin
+            ? { displayName: humanizeCapabilityName(cap.name), serviceKind: 'plugin' }
+            : connectorMeta(cap.name)
+          const providerId = pluginProviderId(cap)
           resourceNodes.push({
             id: nodeId,
             type: 'resource' as const,
@@ -786,6 +951,7 @@ export function buildGraphElements(
               name: meta.displayName,
               fullName: cap.name,
               serviceKind: meta.serviceKind,
+              ...(providerId ? { providerId } : {}),
               agentIds: [agent.id],
               available: cap.available,
               enabled,
@@ -843,12 +1009,14 @@ export function buildGraphElements(
           if (seen.has(nodeId)) continue
           seen.add(nodeId)
           const isBuiltinRollup = cap.source === 'runtime-builtin'
+          const displayName = humanizeCapabilityName(cap.name)
           skillNodes.push({
             id: nodeId,
             type: 'skill' as const,
             data: {
               skillId: slug,
               name: cap.name,
+              ...(displayName !== cap.name ? { displayName } : {}),
               category: capCategory(cap),
               description: cap.description || null,
               agentIds: [agent.id],
@@ -1001,6 +1169,9 @@ export function buildGraphElements(
   const synthesizeTeamScopeEdges = (bz: AgentState, teamId: string, teamLeadId: string | null) => {
     const teamMemberIds = agents.filter((a) => a.teamId === teamId).map((a) => a.id)
     if (teamMemberIds.length === 0) return // skip empty teams
+    // `teamJunction` marks the edges that hang this team off Boo Zero, so the
+    // edge can wear the team's badge where it splits into the team (the same
+    // badge Atlas draws on each team's junction node).
     if (teamLeadId && teamMemberIds.includes(teamLeadId)) {
       depEdges.push({
         id: `dep-syn-${bz.id}-${teamLeadId}`,
@@ -1009,7 +1180,7 @@ export function buildGraphElements(
         sourceHandle: 'center',
         target: `boo-${teamLeadId}`,
         targetHandle: 'center-target',
-        data: { isSynthetic: true },
+        data: { isSynthetic: true, teamJunction: teamId },
       })
       for (const memberId of teamMemberIds) {
         if (memberId === teamLeadId) continue
@@ -1032,7 +1203,7 @@ export function buildGraphElements(
           sourceHandle: 'center',
           target: `boo-${memberId}`,
           targetHandle: 'center-target',
-          data: { isSynthetic: true },
+          data: { isSynthetic: true, teamJunction: teamId },
         })
       }
     }
@@ -1303,19 +1474,15 @@ export function buildGraphElements(
     ;(node.data as BooNodeData).edgeCount = edgeCounts.get(node.id) ?? 0
   }
 
-  // WHAT EACH BOO CARRIES, counted from the edges that were just built rather
-  // than from the capability records: the edges are what the ring will actually
-  // render, so a count taken here can never promise a tile the ring does not
-  // draw. Routes are the agent-to-agent edges this Boo is the SOURCE of --
-  // "who I delegate to" -- because that is the direction the operator authored.
-  const ringCounts = new Map<string, { skills: number; connectors: number; routes: number }>()
-  const bump = (id: string, key: 'skills' | 'connectors' | 'routes') => {
-    const cur = ringCounts.get(id) ?? { skills: 0, connectors: 0, routes: 0 }
-    cur[key] += 1
-    ringCounts.set(id, cur)
-  }
-  for (const e of skillEdges) bump(e.source, 'skills')
-  for (const e of resourceEdges) bump(e.source, 'connectors')
+  // WHAT EACH BOO CARRIES, counted from its capability records rather than from
+  // the tiles built for them. Counting tiles was the old way, and it counted the
+  // wrong things: the model tile and the Atlas overflow chip read as skills, forty
+  // OpenClaw plugins read as forty connectors, and a group tile would read as one.
+  // The ring still accounts for every record: a group lists its members and the
+  // overflow chip says how many it cut. Routes are the agent-to-agent edges this
+  // Boo is the SOURCE of -- "who I delegate to" -- because that is the direction
+  // the operator authored.
+  const routeCounts = new Map<string, number>()
   // Routes are the ones a PERSON authored, so synthetic backbone edges do not count.
   // The count used to come from `visibleDepEdges`, which in Atlas is only the
   // invented Boo-Zero-to-team-root scaffold: Boo Zero read "2 routes" because two
@@ -1324,13 +1491,15 @@ export function buildGraphElements(
   // invisible layout artifact is worse than no number.
   for (const e of depEdges) {
     if ((e.data as { isSynthetic?: boolean } | undefined)?.isSynthetic) continue
-    bump(e.source, 'routes')
+    routeCounts.set(e.source, (routeCounts.get(e.source) ?? 0) + 1)
   }
   for (const node of booNodes) {
-    ;(node.data as BooNodeData).ringCounts = ringCounts.get(node.id) ?? {
-      skills: 0,
-      connectors: 0,
-      routes: 0,
+    const data = node.data as BooNodeData
+    const totals = capabilityTotals.get(data.agentId)
+    data.ringCounts = {
+      capabilities: totals?.capabilities ?? 0,
+      routes: routeCounts.get(node.id) ?? 0,
+      byClass: totals?.byClass ?? {},
     }
   }
 

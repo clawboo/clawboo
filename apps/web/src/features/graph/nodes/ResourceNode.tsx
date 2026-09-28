@@ -5,6 +5,7 @@ import {
   Database,
   KanbanSquare,
   MessagesSquare,
+  Puzzle,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
@@ -21,15 +22,17 @@ import type { ResourceNodeData, ConnectorServiceKind } from '../types'
 import { capabilityBadge, capabilityReason } from './capabilityBadge'
 import { connectorBrandSlug, connectorSlugFromId, isRemoteConnector } from './connectorTile'
 import { brandColorVar, ConnectorGlyph, hasBrandMark } from '@/features/connectors/ConnectorMark'
+import { PROVIDER_BRAND, ProviderGlyph } from '@/features/onboarding/ProviderIcon'
 
 // ─── ResourceNode — the MCP-connector tile ────────────────────────────────────
 //
 // Part of the unified orbital tile family (see SkillNode's tile-system note):
 // an OPAQUE violet-tinted disc + solid violet ring + a per-service glyph +
 // a theme-foreground label. Violet is the CONNECTOR type accent — at a glance:
-// violet = an attached MCP server, mint = a skill/tool, brand = the model,
-// slate = built-ins, amber = leadership. Replaces the old faint amber card
-// with the generic Plug icon and the shouty truncated uppercase label.
+// violet = an attached MCP server (or an OpenClaw plugin, which the Gateway
+// reports as one), mint = a skill/tool, brand = the model, slate = built-ins,
+// amber = leadership. Replaces the old faint amber card with the generic Plug
+// icon and the shouty truncated uppercase label.
 
 const VIOLET = 'var(--violet)'
 const CIRCLE = 46 // matches the regular SkillNode tile
@@ -38,12 +41,15 @@ const LOD_ZOOM = 0.4
 
 // Each clawboo MCP server gets a MEANINGFUL glyph (lucide, never emoji):
 // memory → Database, tasks → Kanban, tools → Wrench, team chat → Messages.
-// Unknown / third-party servers fall back to the Cable connector glyph.
+// An OpenClaw plugin gets the puzzle piece, unless it is a model provider, in
+// which case it wears that provider's mark (see the glyph below). Unknown /
+// third-party servers fall back to the Cable connector glyph.
 const SERVICE_ICON: Record<ConnectorServiceKind, LucideIcon> = {
   memory: Database,
   tasks: KanbanSquare,
   tools: Wrench,
   teamchat: MessagesSquare,
+  plugin: Puzzle,
   generic: Cable,
 }
 
@@ -80,7 +86,7 @@ export const ResourceNode = memo(function ResourceNode({
   positionAbsoluteY,
   selected,
 }: NodeProps<Node<ResourceNodeData, 'resource'>>) {
-  const { name, fullName, serviceKind, isVisible, available, enabled, agentIds } = data
+  const { name, fullName, serviceKind, providerId, isVisible, available, enabled, agentIds } = data
   const { orbitIndex, orbitCount, health, healthDetail, diagnostics, hint, grantIds, connectorId } =
     data
   const { grantCount, grantState } = data
@@ -107,6 +113,30 @@ export const ResourceNode = memo(function ResourceNode({
   // committed mark exists: everything else keeps its service glyph rather than
   // falling back to a monogram, which would be a downgrade.
   const brandSlug = connectorBrandSlug(connectorId, hasBrandMark, fullName ?? name)
+  // A provider plugin's mark, in the provider's own colour, the way the model
+  // tile draws it. Monochrome brands take the theme's ink.
+  const providerBrand = !brandSlug && providerId ? PROVIDER_BRAND[providerId] : null
+  const providerInk =
+    providerBrand && providerBrand.color !== 'currentColor'
+      ? providerBrand.color
+      : 'var(--foreground)'
+  const glyph = brandSlug ? (
+    // THE GLYPH TAKES THE BRAND, THE DISC KEEPS THE TYPE. The model orbital
+    // already sets this precedent: it is tinted by whoever makes the model while
+    // staying an orbital. Colouring a logo violet would make Gmail and Jira and
+    // Slack indistinguishable at the size this renders, which is the opposite of
+    // the reason to draw a logo at all.
+    <span style={{ display: 'flex', color: brandColorVar(brandSlug) }}>
+      <ConnectorGlyph slug={brandSlug} title={name} size={20} />
+    </span>
+  ) : providerBrand && providerId ? (
+    <span aria-hidden style={{ display: 'flex', color: providerInk }}>
+      <ProviderGlyph id={providerId} size={20} />
+    </span>
+  ) : (
+    <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
+  )
+  const kindPhrase = serviceKind === 'plugin' ? 'OpenClaw plugin' : 'attached MCP server'
   // Float with the SKILL motion profile: connector tiles are visual peers of
   // skill tiles in the same orbital fan, so a static tile next to gently
   // bobbing siblings would read as frozen/broken, not calm.
@@ -174,13 +204,7 @@ export const ResourceNode = memo(function ResourceNode({
             opacity: greyed ? 0.4 : 1,
           }}
         >
-          {brandSlug ? (
-            <span style={{ display: 'flex', color: brandColorVar(brandSlug) }}>
-              <ConnectorGlyph slug={brandSlug} title={name} size={20} />
-            </span>
-          ) : (
-            <Icon size={20} strokeWidth={2} style={{ color: VIOLET }} />
-          )}
+          {glyph}
         </div>
         <Handle type="target" position={Position.Left} style={centerHandleStyle} />
         <Handle id="center" type="target" position={Position.Left} style={centerHandleStyle} />
@@ -229,7 +253,7 @@ export const ResourceNode = memo(function ResourceNode({
             title={
               reason
                 ? `${tooltipBase}: ${reason}`
-                : `${tooltipBase} · attached MCP server${
+                : `${tooltipBase} · ${kindPhrase}${
                     (grantCount ?? 0) >= 2 ? ` · shared by ${grantCount} agents` : ''
                   }`
             }
@@ -263,19 +287,7 @@ export const ResourceNode = memo(function ResourceNode({
                 boxShadow: `0 2px 8px color-mix(in srgb, ${VIOLET} 20%, transparent), inset 0 1px 0 rgb(var(--foreground-rgb) / 0.07)`,
               }}
             >
-              {brandSlug ? (
-                // THE GLYPH TAKES THE BRAND, THE DISC KEEPS THE TYPE. The model
-                // orbital already sets this precedent: it is tinted by whoever
-                // makes the model while staying an orbital. Colouring a logo
-                // violet would make Gmail and Jira and Slack indistinguishable
-                // at the size this renders, which is the opposite of the reason
-                // to draw a logo at all.
-                <span style={{ display: 'flex', color: brandColorVar(brandSlug) }}>
-                  <ConnectorGlyph slug={brandSlug} title={name} size={20} />
-                </span>
-              ) : (
-                <Icon size={20} strokeWidth={2} aria-hidden style={{ color: VIOLET }} />
-              )}
+              {glyph}
             </motion.div>
 
             {/* ONE badge, top-right of the disc. Suppressed while collapsed: a

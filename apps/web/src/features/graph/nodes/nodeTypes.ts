@@ -5,10 +5,13 @@ import { BooNode } from './BooNode'
 import { SkillNode } from './SkillNode'
 import { ResourceNode } from './ResourceNode'
 import { TeamRootNode } from './TeamRootNode'
+import { LooseNode } from './LooseNode'
 
 export const nodeTypes: NodeTypes = {
   boo: BooNode,
   skill: SkillNode,
   resource: ResourceNode,
   'team-root': TeamRootNode,
+  // A skill or connector placed with the + button, attached to no agent yet.
+  loose: LooseNode,
 }
