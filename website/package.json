@@ -18,7 +18,7 @@
     "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^6.4.8",
-    "framer-motion": "^13.2.0",
+    "framer-motion": "^13.4.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3"
