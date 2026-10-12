@@ -33,6 +33,14 @@ describe('extractRoleSummary', () => {
     )
   })
 
+  it('never takes the role from the section after an empty Role section', () => {
+    expect(extractRoleSummary('## Role\n\n## Rules\n\n- Be terse')).toBeNull()
+    expect(extractRoleSummary('## Role\n\n## Mission\n\nShips small patches.')).toBe(
+      'Ships small patches.',
+    )
+    expect(extractRoleSummary('# Coder\n\n## Rules\n\nNever push to main.')).toBeNull()
+  })
+
   it('ignores everything after the Personality block', () => {
     const soul = '<!-- clawboo:personality v2 -->\n## Role\n\nWritten by the sliders, not a role.\n'
     expect(extractRoleSummary(soul)).toBeNull()

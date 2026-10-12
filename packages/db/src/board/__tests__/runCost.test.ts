@@ -137,11 +137,13 @@ describe('completeExecutionProcess with a cost', () => {
     expect(getTask(db, t.id)!.costUsd).toBeCloseTo(0.5, 10)
   })
 
-  it('an explicit null clears the run cost and leaves the task total alone', () => {
+  it('an explicit null that clears a recorded run cost refreshes the task total', () => {
     const t = createTask(db, { title: 'cleared', teamId: 'T' })
+    const kept = openRun(t.id)
+    recordExecutionUsage(db, kept.id, { costUsd: 0.1, costSource: 'reported' })
     const ex = openRun(t.id)
     recordExecutionUsage(db, ex.id, { costUsd: 0.2, costSource: 'reported' })
-    db.update(tasks).set({ costUsd: 0.9 }).where(eq(tasks.id, t.id)).run()
+    expect(getTask(db, t.id)!.costUsd).toBeCloseTo(0.3, 10)
 
     const closed = completeExecutionProcess(db, ex.id, {
       status: 'failed',
@@ -150,6 +152,16 @@ describe('completeExecutionProcess with a cost', () => {
     })
 
     expect(closed).toMatchObject({ costUsd: null, costSource: null })
+    expect(getTask(db, t.id)!.costUsd).toBeCloseTo(0.1, 10)
+  })
+
+  it('an explicit null on a run that never had a cost leaves an older task total alone', () => {
+    const t = createTask(db, { title: 'from before the ledger', teamId: 'T' })
+    db.update(tasks).set({ costUsd: 0.9 }).where(eq(tasks.id, t.id)).run()
+    const ex = openRun(t.id)
+
+    completeExecutionProcess(db, ex.id, { status: 'failed', costUsd: null, costSource: null })
+
     expect(getTask(db, t.id)!.costUsd).toBeCloseTo(0.9, 10)
   })
 })

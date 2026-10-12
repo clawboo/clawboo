@@ -1055,6 +1055,16 @@ export function completeExecutionProcess(
   outcome: CompleteExecOutcome,
 ): DbExecutionProcess | null {
   const now = Date.now()
+  // An explicit null clears the run's cost, which changes the task total only if
+  // the run had a cost to clear. A close that never had one must not recompute the
+  // total: that would wipe a task's cost from before the run ledger carried it.
+  const clearsACost =
+    outcome.costUsd === null &&
+    db
+      .select({ costUsd: executionProcesses.costUsd })
+      .from(executionProcesses)
+      .where(eq(executionProcesses.id, execId))
+      .get()?.costUsd != null
   const completedRows = withWriteRetry(() =>
     db
       .update(executionProcesses)
@@ -1087,7 +1097,8 @@ export function completeExecutionProcess(
   ) as DbExecutionProcess[]
   const row = completedRows[0]
   if (!row) return null
-  if (outcome.costUsd != null) immediateWrite(db, (tx) => refreshTaskCostTx(tx, row.taskId))
+  if (outcome.costUsd != null || clearsACost)
+    immediateWrite(db, (tx) => refreshTaskCostTx(tx, row.taskId))
   const t = db
     .select({ teamId: tasks.teamId })
     .from(tasks)

@@ -83,18 +83,26 @@ function firstParagraph(lines: readonly string[]): string | null {
 
 /**
  * The one-line role a SOUL.md states, or null when it states none. Tried in
- * order: a `- **Role**:` bullet, the first paragraph under a Role or Mission
- * heading, the first prose paragraph. Null too when the role only repeats `name`.
+ * order: a `- **Role**:` bullet, the first Role or Mission section with text,
+ * the intro before the first section. A section is read only up to the next
+ * heading, so a following one (Rules, Style) never supplies the role. Null too
+ * when the role only repeats `name`.
  */
 export function extractRoleSummary(soul: string, name?: string): string | null {
   const body = soul.replace(/\r\n?/g, '\n').split(PERSONALITY_MARKER)[0] ?? ''
   const lines = body.split('\n')
+  const isHeading = (line: string): boolean => /^#{1,6}\s/.test(line.trim())
   let found = body.match(/^\s*[-*]\s*\*\*Role\*\*\s*:\s*(.+)$/im)?.[1] ?? null
-  if (!found) {
-    const at = lines.findIndex((l) => /^#{1,6}\s.*\b(?:role|mission)\b/i.test(l))
-    if (at >= 0) found = firstParagraph(lines.slice(at + 1))
+  for (let i = 0; !found && i < lines.length; i++) {
+    if (!/^#{1,6}\s.*\b(?:role|mission)\b/i.test(lines[i]!)) continue
+    const end = lines.findIndex((line, j) => j > i && isHeading(line))
+    found = firstParagraph(lines.slice(i + 1, end < 0 ? undefined : end))
   }
-  found ??= firstParagraph(lines)
+  if (!found) {
+    // The intro: prose after an optional `# Title`, before any `##` section.
+    const firstSection = lines.findIndex((line) => /^#{2,6}\s/.test(line.trim()))
+    found = firstParagraph(lines.slice(0, firstSection < 0 ? undefined : firstSection))
+  }
   if (!found) return null
   const role = plain(found)
     .replace(/^you are\s+(?:an?\s+)?/i, '')
