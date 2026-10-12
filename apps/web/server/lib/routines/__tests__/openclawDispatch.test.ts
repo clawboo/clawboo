@@ -368,6 +368,12 @@ describe('dispatchConnectedSubstrate', () => {
     expect(budget?.spentUsdCents).toBeGreaterThan(0) // spend is no longer invisible
     expect(budget?.status).toBe('paused') // the cap engaged on the estimate
     expect(getComments(db, taskId).some((c) => c.body.includes('Budget cap reached'))).toBe(true)
+    // The run's ledger row records the estimate the budgets were charged, and the
+    // task's cost is that row's.
+    const [exec] = listExecutions(db, taskId)
+    expect(exec?.costUsd).toBeGreaterThan(0)
+    expect(exec?.costSource).toBe('char-estimate')
+    expect(getTask(db, taskId)?.costUsd).toBeCloseTo(exec!.costUsd!, 12)
   })
 
   it('a PRE-FLIGHT paused cap blocks the next dispatch (no claim, no exec, no chat.send)', async () => {
@@ -495,6 +501,7 @@ describe('dispatchConnectedSubstrate', () => {
     // pause the NEXT fire) — proving OpenClaw spend is no longer invisible.
     expect(getBudget(db, 'agent', agentRow.id)?.status).toBe('paused')
     expect(getBudget(db, 'agent', agentRow.id)?.spentUsdCents).toBe(250)
+    expect(listExecutions(db, taskId)[0]).toMatchObject({ costUsd: 2.5, costSource: 'reported' })
   })
 
   it('a usage-but-NULL-cost incremental `cost` event does NOT suppress the terminal estimate', async () => {

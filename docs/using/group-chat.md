@@ -62,7 +62,7 @@ Type in the composer and press Enter. With no `@mention`, the message routes to 
 3. The team-internal lead (a CTO / Team Lead role detected at deploy time, stored as `team.leaderAgentId`).
 4. The first team member.
 
-The client resolves that target and posts your message to `POST /api/teams/:id/chat`, which returns immediately (202) while the work proceeds on the server. Before the message reaches the target, the **server** assembles a context preamble and prepends the team's durable rules and your `userIntroText` (and the live roster) to the turn, so a correction or who-you-are persists across the conversation. The raw message, `@mention` included, is what shows in the transcript; the assembled context goes only to the runtime. Responses stream back live over `GET /api/teams/:id/chat/stream`.
+The client resolves that target and posts your message to `POST /api/teams/:id/chat`, which returns immediately (202) while the work proceeds on the server. Before the message reaches the target, the **server** assembles a context preamble and prepends the team's durable rules and your `userIntroText` (and the live roster) to the turn, so a correction or who-you-are persists across the conversation. On the team lead's turn the roster also gives each teammate's runtime and a one-line role read from its `SOUL.md`, so the lead routes work by what each teammate does. An OpenClaw teammate shows only its runtime, because its files live on the Gateway. Every other turn lists teammates by name. The raw message, `@mention` included, is what shows in the transcript; the assembled context goes only to the runtime. Responses stream back live over `GET /api/teams/:id/chat/stream`.
 
 ### 4. Route with @mentions
 
@@ -94,7 +94,7 @@ sequenceDiagram
 
 - **Derive**: chat to board: the delegation creates a task, atomically claims it for the target, and opens an execution row.
 - **Round-trip**: result to board: when the child finishes, its report-up summary and status are written to the board (never the raw transcript).
-- **Reflect**: board to chat: completed tasks are batched (a 3-second window) into a single `[Task Update]` delivered back to the leader for synthesis, plus a visible narration entry.
+- **Reflect**: board to chat: completed tasks are batched (a 3-second window) into a single `[Task Update]` delivered back to the leader for synthesis, plus a visible narration entry. A teammate that handed work off from its own task has often finished that task by the time the results come back. Its follow-up is added as a comment on that task's card and reported to whoever delegated the task to it (a task you assigned keeps it on the card), and it does not post in the chat.
 
 Board task cards update **live** as the cascade runs (the board projection streams over the same connection), so you watch a plan's steps advance without a refresh. Multiple parallel delegations fan out into N tasks (capped at 8 per turn); a `<plan>` becomes a dependency chain where each step fires when its blocker completes. Delivery routes through a non-destructive nudge-queue, so a message to a busy teammate waits for its turn boundary instead of interrupting an in-flight run. Because the engine runs server-side, the cascade keeps going even if you close the tab, and it is all still there when you reopen. The full model is in [Delegation and orchestration](/concepts/delegation-and-orchestration) and [The board](/using/board).
 
@@ -108,7 +108,7 @@ A risky-looking delegation (matching keywords like `delete`, `deploy`, `publish`
 
 ### 6. Stop a runaway team
 
-While any agent is running or streaming, the composer's Send button morphs into a red **Stop** button (`data-testid="chat-stop-button"`). Clicking it posts to `POST /api/teams/:id/chat/stop`, which bumps the server's stop generation and aborts every in-flight run for the team, then cleanly releases each task back to `todo` (it is re-runnable, not blocked, and no failure is reflected). The UI flips to idle immediately, and because the stop happens on the server, a stopped team does not restart its cascade one beat later.
+While any agent is running or streaming, the composer's Send button morphs into a red **Stop** button (`data-testid="chat-stop-button"`). Clicking it posts to `POST /api/teams/:id/chat/stop`, which bumps the server's stop generation and aborts every in-flight run for the team, then cleanly releases each task back to `todo` (it is re-runnable, not blocked, and no failure is reflected). A reply or task that was still waiting for its agent when you pressed Stop never starts. The UI flips to idle immediately, and because the stop happens on the server, a stopped team does not restart its cascade one beat later.
 
 ### 7. Capture a durable team rule with `/rule`
 

@@ -106,7 +106,8 @@ The runner double-guards this: the DB layer clamps a `warn` budget's status so i
 Two precision details keep the ledger honest while you watch it climb:
 
 - **Sub-cent carry.** A cost event can be a fraction of a cent. Spend accumulates in _micro-cents_ (`MICRO_CENTS_PER_CENT = 10000`) so repeated tiny amounts are not floored to zero; the displayed `spentUsdCents` is `floor(spentMicroCents / 10000)`.
-- **Estimated cost for runtimes without USD.** A runtime that reports tokens but no dollar figure (Codex, Hermes, an unpinned native model) emits `costUsd: null`; the runner estimates spend from exact token usage × the model rate so the cap still engages. A real `costUsd` (Claude Code, a pinned native model) is used as-is.
+- **Estimated cost for runtimes without USD.** A runtime that reports tokens but no dollar figure (Codex, Hermes, an unpinned native model) emits `costUsd: null`; the runner estimates spend from exact token usage × the model rate so the cap still engages. A real `costUsd` (Claude Code, a pinned native model) is used as-is. The runner sums the run's cost across every cost event and every rotation pass, so a long run that rotates its context pays for each pass.
+- **Team runs are priced at their end.** A run the team orchestrator starts charges a reported USD cost event as it arrives, so a `cap` can stop that run mid-flight. A run that reported no USD is priced once, when it ends: from its exact token usage, or from the length of its prompt and reply when it reported none (OpenClaw's Gateway, a failed CLI run). That estimate is charged to the budgets for failed and cut-off runs too, but it never stops the run it prices, because that run is already over. A `cap` budget it pushes past its limit still reads `paused`.
 
 ### 4. Resume the paused scope (raise the cap, don't just un-pause)
 

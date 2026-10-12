@@ -187,20 +187,24 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     mcpBaseUrl,
     nudge,
     abortMap,
-    onEvent: (sk, ev) => {
+    onEvent: (sk, ev, run) => {
       // ENGINE ACTIVITY IS ACTIVITY. The idle clock used to advance only on a
       // USER message, so a long autonomous cascade — the exact "kick it off and
       // walk away" case — looked idle and was evicted mid-flight at IDLE_TTL_MS.
       // Every observed run event now refreshes it, so an instance ages out only
       // when the TEAM is genuinely quiet, not when the human is.
       touch()
-      return engineRef.current!.onEvent(sk, ev)
+      return engineRef.current!.onEvent(sk, ev, run)
     },
     // Deliberately does NOT `touch()`: a closing session is the END of activity,
     // and refreshing the clock here would push out the eviction of an instance
     // whose runs have all finished — the case the idle TTL exists to reclaim.
-    onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
+    onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
+    execForSession: (sk) => engineRef.current!.execForSession(sk),
+    // The start gate reads it: a delivery made before a Stop or a dispose never
+    // starts after it.
+    stopGen: () => serverStopGen,
     // The SAME resolution the engine uses for its reduce point, so "who leads" has
     // one answer whether the question comes from the reflection router or from the
     // prompt builder.
@@ -494,6 +498,10 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       // markIdle after the aborts would otherwise FLUSH them into brand-new
       // post-Stop runs. Dropping them loses nothing durable — task updates and
       // alerts live in the mailbox now, and stopped work is tombstoned below.
+      // A delivery the queue already released but whose run has not started
+      // (waiting on the agent's lock, or inside adapter.start) is refused by
+      // serverDeliver's start gate on the bumped generation, so it dies with the
+      // Stop too.
       nudge.reset()
       // Durable Stop: write the cancelled markers NOW, independent of whether the
       // aborts' terminals ever land (a restart mid-stop must not let the pump

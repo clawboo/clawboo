@@ -29,6 +29,7 @@ import {
   type CompleteExecOutcome,
   type DbAgent,
   type DbScheduledRun,
+  type RunCostSource,
 } from '@clawboo/db'
 import type { RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
@@ -386,6 +387,9 @@ async function drainClaimedRoutineRun(
     // terminal carries no `costUsd` — so a cap can still engage. A future cost-
     // bearing Gateway's real `costUsd` is used as-is. Skipped if a `cost` event
     // already recorded spend this run (forward-safe against a future Gateway).
+    // The run's ledger row records the same figure the budgets were charged.
+    let ledgerCostUsd: number | null = terminal.costUsd ?? null
+    let ledgerCostSource: RunCostSource | null = terminal.costUsd != null ? 'reported' : null
     if (!recordedAnyCost) {
       const estimated = terminal.costUsd == null
       const usd = estimated
@@ -395,6 +399,10 @@ async function drainClaimedRoutineRun(
             outputChars: summary.length,
           })
         : terminal.costUsd!
+      if (estimated) {
+        ledgerCostUsd = usd
+        ledgerCostSource = 'char-estimate'
+      }
       const cents = usdToFractionalCents(usd)
       const scopes: [BudgetScope, string | null][] = [
         ['agent', run.agentId],
@@ -443,7 +451,8 @@ async function drainClaimedRoutineRun(
     const closed = completeExecutionProcess(db, exec.id, {
       status: 'succeeded',
       summary,
-      costUsd: terminal.costUsd ?? null,
+      costUsd: ledgerCostUsd,
+      costSource: ledgerCostSource,
       inputTokens: terminal.usage?.inputTokens ?? null,
       outputTokens: terminal.usage?.outputTokens ?? null,
     })

@@ -13,7 +13,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createTask } from '@clawboo/db'
+import { createTask, listExecutions } from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -32,6 +32,7 @@ vi.mock('../obs', async (importOriginal) => ({
 
 const { getDb, resetDb } = await import('../db')
 const { runTaskOnRuntime } = await import('../executorRunner')
+const { estimateRunCostUsdFromUsage } = await import('../runtimes/estimateCost')
 
 const CAPS: Capabilities = {
   streaming: true,
@@ -79,6 +80,41 @@ class SpendAdapter implements RuntimeAdapter {
         } as RuntimeEvent
       }
       yield { ...base(), kind: 'done', reason: 'success', summary: 'ok' } as RuntimeEvent
+    })()
+  }
+  async abort() {}
+  async setModel() {}
+  async writeContext() {}
+}
+
+/** Emits a fixed script of events, each given the run's envelope. */
+class ScriptAdapter implements RuntimeAdapter {
+  readonly participantKind = 'agent' as const
+  readonly id = 'claude-code'
+  constructor(private readonly script: Array<Record<string, unknown>>) {}
+  capabilities(): Capabilities {
+    return CAPS
+  }
+  async health() {
+    return { ok: true }
+  }
+  async start(_t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
+    return { adapterId: this.id, sessionKey: opts.sessionKey, runId: 'rid-0' }
+  }
+  events(run: RunHandle): AsyncIterable<RuntimeEvent> {
+    const script = this.script
+    return (async function* () {
+      let seq = 0
+      for (const e of script) {
+        seq += 1
+        yield {
+          runId: run.runId ?? run.sessionKey,
+          sessionId: run.sessionKey,
+          ts: 1,
+          seq,
+          ...e,
+        } as RuntimeEvent
+      }
     })()
   }
   async abort() {}
@@ -148,5 +184,82 @@ describe('executor runner — unreported spend is visible', () => {
 
     expect(result.ok).toBe(true)
     expect(spendWarnings()).toHaveLength(0)
+  })
+})
+
+describe('executor runner: what the run cost, on its ledger row', () => {
+  let home: string
+  let prevHome: string | undefined
+
+  beforeEach(async () => {
+    home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-run-cost-home-'))
+    await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
+    prevHome = process.env['HOME']
+    process.env['HOME'] = home
+  })
+  afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
+    if (prevHome === undefined) delete process.env['HOME']
+    else process.env['HOME'] = prevHome
+    await rm(home, { recursive: true, force: true })
+  })
+
+  /** Run a fresh task on a scripted adapter; return its single ledger row. */
+  async function runScript(script: Array<Record<string, unknown>>) {
+    const taskId = createTask(getDb(), {
+      title: 'Look something up',
+      description: 'read-only',
+      status: 'todo',
+      teamId: 'team-1',
+    }).id
+    await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => new ScriptAdapter(script),
+      taskId,
+      assigneeAgentId: 'cc-1',
+      disableMemoryAutoInject: true,
+      kind: 'research',
+    })
+    const rows = listExecutions(getDb(), taskId)
+    expect(rows).toHaveLength(1)
+    return rows[0]!
+  }
+  const usageEvent = { kind: 'cost', costUsd: null, estimated: true, model: 'm' }
+
+  it('sums every token-estimated cost event instead of keeping the last one', async () => {
+    const usage = { inputTokens: 1_000, outputTokens: 100 }
+    const row = await runScript([
+      { ...usageEvent, usage },
+      { ...usageEvent, usage },
+      { kind: 'done', reason: 'success', summary: 'ok' },
+    ])
+    const each = estimateRunCostUsdFromUsage({ model: 'm', ...usage })
+    expect(each).toBeGreaterThan(0)
+    expect(row.status).toBe('succeeded')
+    expect(row.costUsd).toBeCloseTo(2 * each, 12)
+    expect(row.costSource).toBe('token-estimate')
+  })
+
+  it("does not count a done's cost again when the cost event already reported it", async () => {
+    const row = await runScript([
+      { kind: 'cost', costUsd: 0.5, usage: { inputTokens: 10, outputTokens: 5 }, model: 'm' },
+      { kind: 'done', reason: 'success', summary: 'ok', costUsd: 0.5 },
+    ])
+    expect(row.costUsd).toBeCloseTo(0.5, 12)
+    expect(row.costSource).toBe('reported')
+  })
+
+  it('keeps the tokens of a run that failed', async () => {
+    const row = await runScript([
+      { kind: 'cost', costUsd: 0.02, usage: { inputTokens: 100, outputTokens: 20 }, model: 'm' },
+      { kind: 'done', reason: 'error', summary: 'upstream provider error' },
+    ])
+    expect(row.status).toBe('failed')
+    expect(row.inputTokens).toBe(100)
+    expect(row.outputTokens).toBe(20)
+    expect(row.costUsd).toBeCloseTo(0.02, 12)
+    expect(row.costSource).toBe('reported')
   })
 })

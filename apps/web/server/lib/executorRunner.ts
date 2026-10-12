@@ -36,6 +36,7 @@ import {
   startTaskHeartbeat,
   updateStatus,
   type ClawbooDb,
+  type RunCostSource,
 } from '@clawboo/db'
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
@@ -776,9 +777,18 @@ async function runTaskInner(
   // Drive the normalized event stream to its terminal `done`.
   let lastText = ''
   let summary = ''
+  // The run's cost, summed over every cost event in every rotation pass.
   let costUsd: number | null = null
+  // True once any part of `costUsd` was estimated from tokens rather than reported.
+  let runCostEstimated = false
   let inputTokens = 0
   let outputTokens = 0
+  // The run's token totals for the ledger, summed over every cost event in every
+  // rotation pass like `costUsd`. The per-pass values above describe the current
+  // context (the rotation watermark reads them) and reset each pass.
+  let runInputTokens = 0
+  let runOutputTokens = 0
+  let runSawUsage = false
   let doneReason: 'success' | 'max_turns' | 'aborted' | 'error' = 'error'
 
   // Budget kill-switch: on every cost event, atomically record spend against the
@@ -866,6 +876,8 @@ async function runTaskInner(
     // yields zero recorded spend — the budget ledger would then under-count real
     // money with no signal at all. Surfaced after the loop.
     let sawSpend = false
+    // Whether this pass had a cost event, so its `done` cost is not counted again.
+    let passSawCost = false
     // Did the adapter surface a real `done` terminal (possibly inside the idle
     // guard's grace window)? Gates the synthetic "runtime silent" diagnosis.
     let sawTerminal = false
@@ -904,10 +916,17 @@ async function runTaskInner(
               : 0
         const costEstimated = ev.costUsd == null
         sawSpend = true
-        costUsd = usd
+        // Summed, not replaced: native reports a per-turn delta, and a rotated run
+        // pays for every pass.
+        costUsd = (costUsd ?? 0) + usd
+        passSawCost = true
+        if (costEstimated) runCostEstimated = true
         if (ev.usage) {
           inputTokens = ev.usage.inputTokens
           outputTokens = ev.usage.outputTokens
+          runInputTokens += ev.usage.inputTokens
+          runOutputTokens += ev.usage.outputTokens
+          runSawUsage = true
         }
         emitEvent(db, {
           kind: 'cost',
@@ -1083,9 +1102,11 @@ async function runTaskInner(
         sawTerminal = true
         doneReason = ev.reason
         summary = ev.summary || lastText
-        if (ev.costUsd != null) {
+        // A done's cost repeats (Claude Code) or totals (native) the pass's cost
+        // events, so it counts only for a pass that had none.
+        if (ev.costUsd != null && !passSawCost) {
           sawSpend = true
-          costUsd = ev.costUsd
+          costUsd = (costUsd ?? 0) + ev.costUsd
         }
         if (ev.usage) {
           inputTokens = ev.usage.inputTokens
@@ -1229,6 +1250,14 @@ async function runTaskInner(
     // doneReason — `max_turns` falls into the non-success terminal → released.)
   }
 
+  // Where the run's cost came from, recorded beside it on every close below.
+  const costSource: RunCostSource | null =
+    costUsd == null ? null : runCostEstimated ? 'token-estimate' : 'reported'
+  // The tokens recorded beside it: the run's summed totals, or, when no cost
+  // event carried usage, whatever the last terminal reported.
+  const ledgerInputTokens = runSawUsage ? runInputTokens : inputTokens
+  const ledgerOutputTokens = runSawUsage ? runOutputTokens : outputTokens
+
   // Auto-pause: a budget (or per-node cap) tripped mid-run. Record the forensic
   // event, complete the execution as cancelled, and release the task to `todo`
   // (retryable once a human raises the cap / resumes the budget).
@@ -1253,8 +1282,9 @@ async function runTaskInner(
       status: 'cancelled',
       error: `budget_paused:${stopForBudget}`,
       costUsd,
-      inputTokens,
-      outputTokens,
+      costSource,
+      inputTokens: ledgerInputTokens,
+      outputTokens: ledgerOutputTokens,
     })
     if (ledgerClosed)
       emitEvent(db, {
@@ -1270,8 +1300,8 @@ async function runTaskInner(
           status: 'cancelled',
           error: `budget_paused:${stopForBudget}`,
           costUsd,
-          inputTokens,
-          outputTokens,
+          inputTokens: ledgerInputTokens,
+          outputTokens: ledgerOutputTokens,
         },
       })
     releaseTask(db, taskId)
@@ -1322,8 +1352,9 @@ async function runTaskInner(
       status: 'cancelled',
       error: `circuit_broken:${reason}`,
       costUsd,
-      inputTokens,
-      outputTokens,
+      costSource,
+      inputTokens: ledgerInputTokens,
+      outputTokens: ledgerOutputTokens,
     })
     if (ledgerClosed)
       emitEvent(db, {
@@ -1339,8 +1370,8 @@ async function runTaskInner(
           status: 'cancelled',
           error: `circuit_broken:${reason}`,
           costUsd,
-          inputTokens,
-          outputTokens,
+          inputTokens: ledgerInputTokens,
+          outputTokens: ledgerOutputTokens,
         },
       })
     releaseTask(db, taskId)
@@ -1376,8 +1407,9 @@ async function runTaskInner(
       status: 'succeeded',
       summary: reported,
       costUsd,
-      inputTokens,
-      outputTokens,
+      costSource,
+      inputTokens: ledgerInputTokens,
+      outputTokens: ledgerOutputTokens,
     })
     if (ledgerClosed)
       emitEvent(db, {
@@ -1388,7 +1420,13 @@ async function runTaskInner(
         teamId: task.teamId,
         agentId: assigneeAgentId,
         runtime: runtimeId,
-        data: { execId: exec.id, status: 'succeeded', costUsd, inputTokens, outputTokens },
+        data: {
+          execId: exec.id,
+          status: 'succeeded',
+          costUsd,
+          inputTokens: ledgerInputTokens,
+          outputTokens: ledgerOutputTokens,
+        },
       })
     if (cwd) {
       // Persist the run's native session id (best-effort) so the next SAME-
@@ -1493,6 +1531,9 @@ async function runTaskInner(
       status: doneReason === 'aborted' ? 'cancelled' : 'failed',
       error: safeSummary || doneReason,
       costUsd,
+      costSource,
+      inputTokens: ledgerInputTokens,
+      outputTokens: ledgerOutputTokens,
     })
     if (ledgerClosed)
       emitEvent(db, {
@@ -1508,6 +1549,8 @@ async function runTaskInner(
           status: doneReason === 'aborted' ? 'cancelled' : 'failed',
           error: safeSummary || doneReason,
           costUsd,
+          inputTokens: ledgerInputTokens,
+          outputTokens: ledgerOutputTokens,
         },
       })
     if (doneReason === 'error') {

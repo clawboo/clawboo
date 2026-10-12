@@ -121,6 +121,8 @@ Read-only or research tasks don't pay the worktree cost; provisioning a worktree
 
 Each spawned run for a task is recorded as an `execution_processes` row, a per-run ledger that exists for any executor. An exec row is opened only _after_ a successful claim, starts in `running`, and is closed with an outcome (`succeeded`, `failed`, `timed_out`, or `cancelled`) plus an optional token / cost ledger and git before/after commit checkpoints. This ledger is what crash recovery reads on restart, which is why an executor that starts work must open one and close it.
 
+The ledger is also where cost lives. Each run records its cost, its tokens, and where the cost came from (the runtime's own report, or Clawboo's estimate from the run's token usage or text length) on its own row, and a task's cost is the sum of its runs. Recording a cost never changes a row's status, so it can land on a run that a Stop already closed.
+
 ## The contention recipe
 
 Clawboo is team-first: many agents may write one SQLite file. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: five connection-level pragmas plus two application-level pieces.

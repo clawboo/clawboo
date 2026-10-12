@@ -7,6 +7,7 @@ import {
   ASSIGNMENT_TURN,
   classifyTurn,
   HUMAN_TURN,
+  isChatVisible,
   SYSTEM_TURN,
   type TurnOrigin,
 } from '../turnOrigin'
@@ -185,5 +186,45 @@ describe('classifyTurn — degenerate input', () => {
     expect(frame({ kind: 'delegation', fromAgentId: LEADER }, WORKER, false)).toMatchObject({
       isWorker: true,
     })
+  })
+})
+
+describe('classifyTurn, a follow-up on a closed task', () => {
+  const FOLLOW_UP: TurnOrigin = { kind: 'system', forTaskId: 'T1' }
+
+  it('is neither a worker turn nor user-facing, whether or not the session maps a task', () => {
+    // A follow-up can queue behind the agent's own next task run, so the session
+    // may map a task by the time it is framed. It is still a report on T1.
+    for (const hasBoardTask of [false, true]) {
+      expect(frame(FOLLOW_UP, WORKER, hasBoardTask)).toEqual({
+        isWorker: false,
+        isLeader: false,
+        isUserFacing: false,
+        reportsForTask: 'T1',
+      })
+    }
+  })
+
+  it('never applies to the lead, whose synthesis is written for the user', () => {
+    expect(frame(FOLLOW_UP, LEADER)).toEqual({
+      isWorker: false,
+      isLeader: true,
+      isUserFacing: true,
+    })
+  })
+})
+
+describe('isChatVisible', () => {
+  const visible = (origin: TurnOrigin, target: string): boolean =>
+    isChatVisible(origin, frame(origin, target))
+
+  it('is decided by why the turn was delivered', () => {
+    expect(visible(HUMAN_TURN, WORKER)).toBe(true)
+    expect(visible({ kind: 'schedule', routineName: 'Morning briefing' }, LEADER)).toBe(true)
+    expect(visible(SYSTEM_TURN, WORKER)).toBe(true)
+    expect(visible({ kind: 'system', forTaskId: 'T1' }, WORKER)).toBe(false)
+    expect(visible({ kind: 'system', forTaskId: 'T1' }, LEADER)).toBe(true)
+    expect(visible({ kind: 'delegation', fromAgentId: LEADER }, WORKER)).toBe(false)
+    expect(visible(ASSIGNMENT_TURN, WORKER)).toBe(false)
   })
 })

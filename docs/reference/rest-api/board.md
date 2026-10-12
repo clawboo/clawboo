@@ -80,7 +80,7 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
     sourceDelegationId: string | null
     worktreeRef: string | null
     branchRef: string | null
-    costUsd: number
+    costUsd: number // the sum of the task's recorded run costs (0 before any)
     parentSessionId: string | null
     dropped: number // 0 | 1 (soft-delete flag)
     tenantId: string | null // dormant multi-tenant seam
@@ -96,11 +96,19 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out
     }
+    // What the task's runs cost, summed from its execution ledger. Not returned by
+    // the `ready=true` variant.
+    runCost: {
+      usd: number | null // null when no run recorded a cost
+      estimated: boolean // true when any part of usd is an estimate
+    }
   }>
 }
 ```
 
 `attention` is computed from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its execution ledger, and its verification verdict, with the pure `taskAttention` rule from `@clawboo/board-core`. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). The board renders every task with an `attention` in its **Needs you** column.
+
+`runCost` sums the `costUsd` of the task's execution rows, with the pure `summarizeRunCost` rule from `@clawboo/board-core`. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource: 'reported'`; a row with a null source counts as an estimate. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
 **`500 Internal Server Error`**: any DB failure:
 
@@ -152,7 +160,7 @@ Creates a task. `status` defaults to `todo` (immediately claimable); pass `backl
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`200 OK`**: the created task (full `DbTask` with `attention`, shape as in `GET /api/board`):
+**`200 OK`**: the created task (full `DbTask` with `attention` and `runCost`, shape as in `GET /api/board`):
 
 ```ts
 { task: { id: string, title: string, status: 'todo', /* …full DbTask… */ } }
@@ -228,7 +236,7 @@ Returns one task plus its comments (oldest first) and its ancestor chain (the pa
 
 ```ts
 {
-  task: DbTask & { attention } // shape as in GET /api/board, including `attention`
+  task: DbTask & { attention; runCost } // shape as in GET /api/board, including both
   comments: Array<{
     id: string
     taskId: string
@@ -503,6 +511,9 @@ Opens an execution-process row for a task, recorded only after a successful clai
     taskId: string
     workspaceId: string | null
     executorType: string
+    // The runtime that actually ran, when executorType names an owner instead: the
+    // team engine records every run it starts as 'openclaw'. Null otherwise.
+    runtime: string | null
     status: 'queued' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
     claimedAt: number | null
     startedAt: number | null
@@ -514,6 +525,9 @@ Opens an execution-process row for a task, recorded only after a successful clai
     cacheRead: number | null
     cacheWrite: number | null
     costUsd: number | null
+    // How costUsd was obtained; null when no cost is recorded or the row predates
+    // the column (the board then treats a recorded cost as an estimate).
+    costSource: 'reported' | 'token-estimate' | 'char-estimate' | null
     summary: string | null
     runReason: string | null
     error: string | null
@@ -558,8 +572,11 @@ Closes out an execution row with its outcome and an optional token/cost ledger. 
   cacheRead?: number            // integer
   cacheWrite?: number           // integer
   costUsd?: number
+  costSource?: 'reported' | 'token-estimate' | 'char-estimate'
 }
 ```
+
+A token or cost field the body omits leaves the row's value as it is, so closing a row never erases a cost already recorded on it. These fields take a number or are left out; a `null` fails validation with `400`. A `costUsd` sent without a `costSource` is stored with a null source, which the board counts as an estimate. A close that records a cost also refreshes the task's `costUsd`, the sum of its rows.
 
 ### Responses
 

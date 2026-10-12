@@ -37,6 +37,7 @@ import { StatusSelect } from './StatusSelect'
 import { TaskComments } from './TaskComments'
 import { ATTENTION_META, attentionLabel, taskAttentionOf, type TaskAttention } from './boardStatus'
 import { useTaskActions } from './useTaskActions'
+import { formatRunCost, runCostOf } from './taskCost'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 const SECTION_LABEL =
@@ -249,7 +250,7 @@ export function TaskDetailDrawer({
 
   const task = detail?.task
   const verdict = parseVerification(task?.['verification'])
-  const cost = typeof task?.['costUsd'] === 'number' ? (task['costUsd'] as number) : null
+  const runCost = task ? runCostOf(task) : null
   const comments = (detail?.comments ?? []) as {
     body?: string
     authorType?: string
@@ -438,7 +439,12 @@ export function TaskDetailDrawer({
               {kv('Agent', ownerName ?? ownerId ?? '—')}
               {teamId ? kv('Team', teamName ?? teamId) : null}
               {kv('Runtime', String(task['assigneeRuntime'] ?? 'openclaw'))}
-              {kv('Cost', cost != null ? `$${cost.toFixed(4)}` : '—')}
+              {kv(
+                'Cost',
+                runCost?.usd != null
+                  ? formatRunCost(runCost.usd, runCost.estimated, { precise: true })
+                  : 'None recorded',
+              )}
               {task['parentTaskId']
                 ? kv('Parent', String(task['parentTaskId']).slice(0, 12))
                 : null}
@@ -569,14 +575,19 @@ export function TaskDetailDrawer({
               ) : (
                 executions.map((ex) => (
                   <div key={ex.id} className="border-t border-border py-2 text-[11px]">
+                    {/* `runtime` names what actually ran: the team engine types
+                        every fire 'openclaw', whichever runtime the agent uses. */}
                     <span className="font-semibold text-foreground">
-                      {ex.executorType ?? 'runtime'}
+                      {ex.runtime ?? ex.executorType ?? 'runtime'}
                     </span>{' '}
                     <span className="text-foreground/50">{ex.status}</span>
                     {typeof ex.costUsd === 'number' && (
                       <span className="font-data text-foreground/50">
                         {' '}
-                        · ${ex.costUsd.toFixed(4)}
+                        ·{' '}
+                        {formatRunCost(ex.costUsd, ex.costSource !== 'reported', {
+                          precise: true,
+                        })}
                       </span>
                     )}
                     {(ex.inputTokens != null || ex.outputTokens != null) && (

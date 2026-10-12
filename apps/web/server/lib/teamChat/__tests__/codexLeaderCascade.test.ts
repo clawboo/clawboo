@@ -244,9 +244,11 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       mcpBaseUrl: null,
       nudge,
       abortMap,
-      onEvent: (sk, ev) => engineRef.current!.onEvent(sk, ev),
-      onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
+      onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
+      onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
+      execForSession: (sk) => engineRef.current!.execForSession(sk),
+      stopGen: () => 0,
       leaderAgentId: () => LEAD,
       persistTurn: (sk, text) => {
         persisted.push({ sk, text })
@@ -317,6 +319,121 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     expect(getSetting(db, nativeTeamSessionSettingKey(WORKER, TEAM)) || null).toBeNull()
   })
 
+  it("a worker's FOLLOW-UP goes to its task card and the lead, never the chat", async () => {
+    // The worker hands part of its task to a sub-agent and finishes its own part
+    // first, so its task closes before the sub-task reports. What it then writes
+    // about the combined result is a report for the lead, not a chat message.
+    const SUB = 'codex-sub'
+    const now = Date.now()
+    db.insert(agents)
+      .values({
+        id: SUB,
+        name: 'Codex Sub',
+        gatewayId: SUB,
+        sourceId: 'codex',
+        runtime: 'codex',
+        teamId: TEAM,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    const delegateTo = (assignee: string, task: string): RuntimeEvent =>
+      ({
+        kind: 'tool-call',
+        name: 'clawboo-teamchat.team_delegate',
+        input: { assignee, task },
+        partial: false,
+      }) as unknown as RuntimeEvent
+    const adapters = new Map<string, ScriptedCodex>([
+      [
+        LEAD,
+        new ScriptedCodex([
+          [delegateTo('Codex Worker', 'build the parser and its tests'), done('handed off')],
+          [done('SYNTHESIS 1')],
+          [done('SYNTHESIS 2')],
+        ]),
+      ],
+      [
+        WORKER,
+        new ScriptedCodex([
+          [delegateTo('Codex Sub', 'write the parser tests'), done('my part done')],
+          [done('FOLLOW-UP: combined')],
+        ]),
+      ],
+      [SUB, new ScriptedCodex([[done('sub result')]])],
+    ])
+    const persisted: Array<{ sk: string; text: string }> = []
+    const engineRef: { current: BoardOrchestrator | null } = { current: null }
+    const deliver = createServerDeliver({
+      db,
+      teamId: TEAM,
+      mcpBaseUrl: null,
+      nudge: createNudgeQueue(),
+      abortMap: new Map<string, RunEntry>(),
+      onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
+      onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
+      taskForSession: (sk) => engineRef.current!.taskForSession(sk),
+      execForSession: (sk) => engineRef.current!.execForSession(sk),
+      stopGen: () => 0,
+      leaderAgentId: () => LEAD,
+      persistTurn: (sk, text) => {
+        persisted.push({ sk, text })
+      },
+      makeAdapterForAgent: (agentId) => adapters.get(agentId) ?? null,
+    })
+    engineRef.current = createBoardOrchestrator({
+      teamId: TEAM,
+      board: createServerBoardClient(db),
+      known: () => [
+        { id: LEAD, name: 'Codex Lead' },
+        { id: WORKER, name: 'Codex Worker' },
+        { id: SUB, name: 'Codex Sub' },
+      ],
+      leaderAgentId: () => LEAD,
+      sessionKeyForAgent: (id) => buildTeamSessionKey(id, TEAM),
+      agentIdForSession: (sk) => agentIdFromSessionKey(sk),
+      deliver,
+      stopGen: () => 0,
+      caps: { maxFanout: 8 },
+    })
+
+    await deliver(skFor(LEAD), LEAD, 'team: build a CSV parser', HUMAN_TURN)
+    await settle(() => persisted.length >= 3)
+
+    // 1. Only the lead's turns reach the chat: the ack and its two syntheses.
+    expect(persisted.map((p) => p.text)).toEqual(['handed off', 'SYNTHESIS 1', 'SYNTHESIS 2'])
+    expect(persisted.every((p) => p.sk === skFor(LEAD))).toBe(true)
+    const chat = persisted.map((p) => p.text).join('\n')
+    for (const leak of ['FOLLOW-UP', 'my part done', 'sub result']) expect(chat).not.toContain(leak)
+
+    // 2. Both tasks finished, and the sub-task hangs under the worker's task.
+    const tasks = listTasks(db, { teamId: TEAM })
+    expect(tasks).toHaveLength(2)
+    expect(tasks.every((t) => t.status === 'done')).toBe(true)
+    const workerTask = tasks.find((t) => t.assigneeAgentId === WORKER)!
+    const subTask = tasks.find((t) => t.assigneeAgentId === SUB)!
+    expect(subTask.parentTaskId).toBe(workerTask.id)
+
+    // 3. The follow-up is recorded on the worker's (closed) task card.
+    const comments = getComments(db, workerTask.id).map((c) => c.body)
+    expect(comments.join('\n')).toContain('FOLLOW-UP: combined')
+
+    // 4. The worker's second turn was framed as a follow-up, not a chat turn.
+    const workerStarts = adapters.get(WORKER)!.startOpts
+    expect(workerStarts).toHaveLength(2)
+    expect(workerStarts[1]!.message).toContain('[Task Update]')
+    expect(workerStarts[1]!.message).toContain('not shown to the user')
+    expect(workerStarts[1]!.context ?? '').toContain('[Following up on your task')
+
+    // 5. The lead heard the follow-up as its own [Task Update] turn.
+    const leadStarts = adapters.get(LEAD)!.startOpts
+    expect(leadStarts).toHaveLength(3)
+    expect(leadStarts[2]!.message).toContain('FOLLOW-UP: combined')
+
+    // 6. A follow-up never writes the worker's user-facing resume pointer.
+    expect(getSetting(db, nativeTeamSessionSettingKey(WORKER, TEAM)) || null).toBeNull()
+  })
+
   it('stale-pointer self-heal: a FAILED resumed leader turn clears the pointer', async () => {
     // A dead handle (e.g. the managed home's sessions were wiped): `codex exec
     // resume <unknown-id>` hard-fails. Without the clear, EVERY subsequent turn
@@ -338,9 +455,11 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       mcpBaseUrl: null,
       nudge: createNudgeQueue(),
       abortMap: new Map<string, RunEntry>(),
-      onEvent: (sk, ev) => engineRef.current!.onEvent(sk, ev),
-      onSessionClosed: (sk) => engineRef.current!.onSessionClosed(sk),
+      onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
+      onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
+      execForSession: (sk) => engineRef.current!.execForSession(sk),
+      stopGen: () => 0,
       leaderAgentId: () => LEAD,
       makeAdapterForAgent: (agentId) => adapters.get(agentId) ?? null,
     })

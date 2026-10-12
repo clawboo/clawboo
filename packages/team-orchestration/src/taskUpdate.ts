@@ -59,6 +59,18 @@ export interface OutstandingDelegation {
   title?: string
 }
 
+/** How the envelope is framed for its recipient. */
+export interface TaskUpdateOptions {
+  /** Set when the recipient delegated these tasks while on a task that has since
+   *  closed: its reply is a follow-up on that task, not a message to the user.
+   *  `title` is that task's title, when known. */
+  followUp?: { title?: string }
+}
+
+/** Shorten a title exactly as the item headers below do. */
+const clipTitle = (title: string): string =>
+  title.length > 80 ? title.slice(0, 80) + '...' : title
+
 /**
  * `outstanding` is the cardinality half of reply-threads, and deliberately only
  * that. A delegator batching three answers has no way today to tell "all three
@@ -67,18 +79,23 @@ export interface OutstandingDelegation {
  * One header line fixes that without a thread id, a new verb, or a column: the
  * information is already on the board, it was just never rendered.
  *
- * Omitted or empty renders NOTHING, so an existing call is byte-identical.
+ * Omitted or empty renders NOTHING, so an existing call is byte-identical. The
+ * same holds for `opts`: only `followUp` changes the second header line.
  */
 export function buildTaskUpdateMessage(
   items: TaskUpdateItem[],
   outstanding: OutstandingDelegation[] = [],
+  opts: TaskUpdateOptions = {},
 ): string {
   if (items.length === 0) return ''
   const failures = items.filter((i) => isTaskFailure(i.outcome))
   const plural = items.length === 1 ? 'task' : 'tasks'
+  const where = opts.followUp?.title ? `"${clipTitle(opts.followUp.title)}"` : 'a task'
   const headerLines = [
     `[Task Update] — ${items.length} ${plural} on the board reached a terminal state (not a fresh user message).`,
-    'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
+    opts.followUp
+      ? `These came back from work you handed to teammates while on ${where}, which has since closed. Your reply is not shown to the user: it is recorded on that task and passed to whoever gave it to you. Reply with ONE short, concrete follow-up on what these results add to it. Do not address the user or ask them anything, and do NOT acknowledge the results individually.`
+      : 'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
   ]
   if (outstanding.length > 0) {
     const named = outstanding

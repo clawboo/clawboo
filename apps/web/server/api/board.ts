@@ -35,6 +35,7 @@ import {
   listExecutions,
   listTasks,
   provisionWorkspaceBody,
+  runCostForTasks,
   TaskDependencyCycleError,
   updateStatus,
   updateTaskBody,
@@ -43,6 +44,7 @@ import {
   getWorkspaceForTask,
   type ClawbooDb,
   type DbTask,
+  type TaskRunCost,
   type TaskStatus,
 } from '@clawboo/db'
 import { agentHandoffSchema } from '@clawboo/worktrees'
@@ -83,7 +85,9 @@ export function boardListGET(req: Request, res: Response): void {
     const status =
       typeof req.query['status'] === 'string' ? (req.query['status'] as TaskStatus) : undefined
     const includeDropped = req.query['includeDropped'] === 'true'
-    res.json({ tasks: withAttention(db, listTasks(db, { teamId, status, includeDropped })) })
+    res.json({
+      tasks: withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -101,7 +105,7 @@ export function boardGetGET(req: Request, res: Response): void {
       return
     }
     res.json({
-      task: { ...task, attention: attentionForTask(db, taskId) },
+      task: { ...task, attention: attentionForTask(db, taskId), runCost: runCostOf(db, task) },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),
     })
@@ -115,6 +119,24 @@ export function boardGetGET(req: Request, res: Response): void {
 function withAttention(db: ClawbooDb, rows: DbTask[]): Array<DbTask & { attention: unknown }> {
   const byId = attentionForTasks(db, rows)
   return rows.map((t) => ({ ...t, attention: byId.get(t.id) ?? null }))
+}
+
+/** What a task with no recorded run cost carries. */
+const NO_RUN_COST: TaskRunCost = { usd: null, estimated: false }
+
+/** Each task with what its runs cost (`runCost`), summed from the run ledger in
+ *  one read, so a card shows every run's cost and whether any of it is estimated. */
+function withRunCost<T extends DbTask>(
+  db: ClawbooDb,
+  rows: T[],
+): Array<T & { runCost: TaskRunCost }> {
+  const byId = runCostForTasks(db, rows)
+  return rows.map((t) => ({ ...t, runCost: byId.get(t.id) ?? NO_RUN_COST }))
+}
+
+/** One task's `runCost` (see `withRunCost`). */
+function runCostOf(db: ClawbooDb, task: DbTask): TaskRunCost {
+  return runCostForTasks(db, [task]).get(task.id) ?? NO_RUN_COST
 }
 
 /** An active (not archived) member of `teamId`, or null. A person can hand a task
@@ -179,7 +201,9 @@ export function boardCreatePOST(req: Request, res: Response): void {
     if (assigneeAgentId && task.teamId && task.status === 'todo') {
       requestTaskDispatch(task.teamId, task.id, loopbackMcpBaseUrl(req))
     }
-    res.json({ task: { ...task, attention: attentionForTask(db, task.id) } })
+    res.json({
+      task: { ...task, attention: attentionForTask(db, task.id), runCost: runCostOf(db, task) },
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

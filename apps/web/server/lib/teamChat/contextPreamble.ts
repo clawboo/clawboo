@@ -5,7 +5,9 @@
 //   1. the team's durable RULES (set by the user via `/rule` or the team settings),
 //   2. the user's onboarding SELF-INTRODUCTION ([About the User]),
 //   3. the live team ROSTER (teammates by NAME, recipient excluded — so the leader
-//      can `delegate` to a teammate by name, robust to renames).
+//      can `delegate` to a teammate by name, robust to renames). On the team lead's
+//      turn each teammate also gets its runtime and a one-line role, bounded (see
+//      ./teammateRoles), so the lead routes by what a teammate does.
 //
 // It rides `opts.context` (the volatile first-message tier), NOT the stable system
 // prompt, so it never busts the provider prefix cache. Reads are cheap indexed
@@ -19,12 +21,13 @@
 
 import { agents, getSetting, type ClawbooDb } from '@clawboo/db'
 import type { TurnFraming } from '@clawboo/team-orchestration'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 
 import { listLiveConnectors } from '../connectors/supervisor'
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
 import { buildConnectorAwareness } from './connectorAwareness'
+import { formatLeaderRoster, readTeammateRole } from './teammateRoles'
 
 /** Durable team rules (settings key `team-rules:<teamId>`, JSON `{ content }`). */
 function readTeamRulesContent(db: ClawbooDb, teamId: string): string {
@@ -51,16 +54,46 @@ function readUserIntroText(db: ClawbooDb, teamId: string): string {
   }
 }
 
-/** Live teammate names for the team, recipient excluded; null when none. */
-function buildRosterLine(db: ClawbooDb, teamId: string, selfAgentId: string): string | null {
-  const rows = db.select().from(agents).where(eq(agents.teamId, teamId)).all() as Array<{
-    id: string
-    name: string
-    archivedAt?: number | null
-  }>
-  const mates = rows.filter((a) => !a.archivedAt && a.id !== selfAgentId).map((a) => a.name)
+/** Live teammates for the team, recipient and archived agents excluded, oldest
+ *  first so the roster reads the same from turn to turn. */
+function readTeammates(
+  db: ClawbooDb,
+  teamId: string,
+  selfAgentId: string,
+): Array<{ id: string; name: string; runtime: string | null }> {
+  return db
+    .select({
+      id: agents.id,
+      name: agents.name,
+      runtime: agents.runtime,
+      archivedAt: agents.archivedAt,
+    })
+    .from(agents)
+    .where(eq(agents.teamId, teamId))
+    .orderBy(asc(agents.createdAt), asc(agents.id))
+    .all()
+    .filter((a) => !a.archivedAt && a.id !== selfAgentId)
+}
+
+/** The roster; null when there are no teammates. Every turn gets the names. The
+ *  team lead's turn also gets each teammate's runtime and role, and falls back to
+ *  the names line when even the role-free lines would overflow its budget, so a
+ *  teammate is never dropped. */
+function buildRosterBlock(
+  db: ClawbooDb,
+  teamId: string,
+  selfAgentId: string,
+  isLeader: boolean,
+): string | null {
+  const mates = readTeammates(db, teamId, selfAgentId)
   if (mates.length === 0) return null
-  return `Your teammates on this team: ${mates.join(', ')}.`
+  if (isLeader) {
+    const block = formatLeaderRoster(
+      mates.map((m) => ({ name: m.name, runtime: m.runtime, role: readTeammateRole(db, m) })),
+    )
+    if (block) return block
+  }
+  return `Your teammates on this team: ${mates.map((m) => m.name).join(', ')}.`
 }
 
 /** The runtime of the recipient agent (drives the OpenClaw coordination block). */
@@ -136,6 +169,14 @@ const USER_ASSIGNED_WORKER_BLOCK = `[Your task (read carefully)]
 You are executing ONE scoped task the user assigned to you directly from the team board. Your final reply is posted on that task's card for the user to read. They cannot answer questions while you work, so do the work using your own knowledge and tools, and if a detail is missing, make a reasonable assumption and note it. Do not hand the task to a teammate. When you're done, report a short, concrete result, not a question.
 [End Your task]`
 
+// A FOLLOW-UP: results of work the agent handed out while on a task it has since
+// finished. The reply is recorded on that task and passed to whoever gave it the
+// task, so it must not be written for the user. Comes after the OpenClaw block and
+// overrides its "final answer for the user" line.
+const FOLLOW_UP_BLOCK = `[Following up on your task (read carefully)]
+This turn brings back the results of work you handed to teammates while on a task you have already finished. Combine them with what you did into ONE short, concrete follow-up. It is posted on that task's card and passed to whoever gave you the task. It is NOT shown to the user, and you cannot reach the user from here, so do not address them or ask them anything. If something is still missing, say what, or hand it to a teammate.
+[End Following up]`
+
 // The team room + board-read tools are attached to every orchestrator-driven run
 // (native via its in-process MCP bridge, the other runtimes over the loopback MCP
 // control plane) — but NOTHING told an agent they exist, so the room stayed empty
@@ -185,7 +226,12 @@ const CODING_RUNTIMES = new Set(['codex', 'claude-code', 'hermes'])
  *  it received. Both of those turns want the roster and the rules and NEITHER block. */
 function coordinationBlockFor(
   runtime: string | null,
-  framing: { isLeader: boolean; isWorker: boolean; isUserAssigned?: boolean },
+  framing: {
+    isLeader: boolean
+    isWorker: boolean
+    isUserAssigned?: boolean
+    reportsForTask?: string
+  },
   awareness: string | null,
 ): string | null {
   const blocks: string[] = []
@@ -196,6 +242,7 @@ function coordinationBlockFor(
     blocks.push(CODING_LEADER_COORDINATION_BLOCK)
   if (framing.isWorker)
     blocks.push(framing.isUserAssigned ? USER_ASSIGNED_WORKER_BLOCK : WORKER_COORDINATION_BLOCK)
+  if (framing.reportsForTask) blocks.push(FOLLOW_UP_BLOCK)
   if (awareness) blocks.push(awareness)
   return blocks.length > 0 ? blocks.join('\n\n') : null
 }
@@ -264,12 +311,13 @@ export function buildServerTeamContext(
   const introText = framing.isUserFacing ? readUserIntroText(db, teamId).trim() : ''
   const aboutUserBlock = introText ? `[About the User]\n${introText}\n[End About the User]` : null
 
-  const rosterBlock = buildRosterLine(db, teamId, selfAgentId)
+  const rosterBlock = buildRosterBlock(db, teamId, selfAgentId, framing.isLeader)
   // The coordination rules come AFTER the roster (so the teammate names are in view):
   // OpenClaw agents get the delegate-protocol block; a native LEADER turn gets the
-  // behavioral-guidance block; a worker gets the guardrail; a turn that is neither
-  // (an @mentioned specialist, an idle agent receiving a system message) gets both
-  // the roster and the rules and neither block.
+  // behavioral-guidance block; a worker gets the guardrail; a follow-up gets the
+  // follow-up block instead; a turn that is none of these (an @mentioned
+  // specialist, an idle agent receiving a system message) gets both the roster and
+  // the rules and no block.
   const coordinationBlock = coordinationBlockFor(
     runtime,
     framing,

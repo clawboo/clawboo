@@ -1,6 +1,6 @@
 ---
 title: '@clawboo/board-core'
-description: 'The pure task rules: the seven board statuses, the legal-transition table, the dispatch rules, and the needs-you classification every layer shares.'
+description: 'The pure task rules: the seven board statuses, the legal-transition table, the dispatch rules, the needs-you classification, and the run-cost sum every layer shares.'
 ---
 
 - **Version** `0.1.0`
@@ -81,6 +81,16 @@ Whether a `todo` task will ever be picked up on its own, from two durable facts 
 
 `TaskAttention` is `{ reason, failedRuns, detail? }`, where `reason` is an `AttentionReason`.
 
+## Run cost
+
+`summarizeRunCost(runs, taskCostUsd?): TaskRunCost` adds up what a task's runs cost. The server applies it to each task's execution rows (the `runCost` field on every task it returns), and the board UI renders the result on the card and in the drawer.
+
+- A run counts only when its `costUsd` is a finite number, so a run stopped before it priced itself adds nothing.
+- The total is an estimate (`estimated: true`) unless every counted run has `costSource: 'reported'`. A null or unknown source counts as an estimate.
+- With no counted run, a positive `taskCostUsd` (the task's own column, which predates per-run costs) is returned as an estimate; otherwise `usd` is `null`.
+
+`TaskRunCost` is `{ usd: number | null, estimated: boolean }`. `RUN_COST_SOURCES` is `['reported', 'token-estimate', 'char-estimate']`, most trustworthy first, and `RunCostSource` is its union.
+
 ## Source
 
-`packages/board-core/src/state-machine.ts`, `dispatch.ts` and `attention.ts`, plus a barrel. See [Board internals](/internals/board-internals) for how the repository enforces the transitions and [The board](/concepts/the-board) for the concepts.
+`packages/board-core/src/state-machine.ts`, `dispatch.ts`, `attention.ts` and `runCost.ts`, plus a barrel. See [Board internals](/internals/board-internals) for how the repository enforces the transitions and [The board](/concepts/the-board) for the concepts.

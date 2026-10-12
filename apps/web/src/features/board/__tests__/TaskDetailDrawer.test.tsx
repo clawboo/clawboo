@@ -431,6 +431,82 @@ describe('TaskDetailDrawer', () => {
     ).toBeInTheDocument()
   })
 
+  describe('cost', () => {
+    /** The drawer for a task with this `runCost` and these ledger rows. */
+    function costHandlers(runCost: unknown, executions: unknown[] = []) {
+      return [
+        http.get('/api/board/t1', () =>
+          HttpResponse.json({
+            task: { id: 't1', title: 'Ship it', status: 'done', costUsd: 0, runCost },
+            comments: [],
+            ancestors: [],
+          }),
+        ),
+        http.get('/api/board/t1/executions', () => HttpResponse.json({ executions })),
+        http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+        http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      ]
+    }
+    /** The value beside the Cost label in the drawer's detail rows. */
+    const costValue = () => screen.getByText('Cost').nextElementSibling
+
+    it('shows the run-ledger total to four decimals, marked when estimated', async () => {
+      server.use(...costHandlers({ usd: 0.0042, estimated: true }))
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      await screen.findByText('Ship it')
+      expect(costValue()).toHaveTextContent(/^~\$0\.0042 est\.$/)
+    })
+
+    it('shows a reported $0 as a cost', async () => {
+      server.use(...costHandlers({ usd: 0, estimated: false }))
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      await screen.findByText('Ship it')
+      expect(costValue()).toHaveTextContent(/^\$0\.0000$/)
+    })
+
+    it('says no cost is recorded when no run recorded one', async () => {
+      server.use(...costHandlers({ usd: null, estimated: false }))
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      await screen.findByText('Ship it')
+      expect(costValue()).toHaveTextContent(/^None recorded$/)
+    })
+
+    it('names the runtime each run used and marks an estimated run cost', async () => {
+      server.use(
+        ...costHandlers({ usd: 0.1242, estimated: true }, [
+          {
+            id: 'e1',
+            executorType: 'openclaw',
+            runtime: 'codex',
+            status: 'succeeded',
+            costUsd: 0.0042,
+            costSource: 'token-estimate',
+          },
+          {
+            id: 'e2',
+            executorType: 'claude-code',
+            status: 'succeeded',
+            costUsd: 0.12,
+            costSource: 'reported',
+          },
+          { id: 'e3', executorType: 'openclaw', status: 'cancelled', costUsd: null },
+        ]),
+      )
+      const { container } = render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      await screen.findByText('Execution ledger (3)')
+      // The team engine types every run 'openclaw'; the row names the runtime that ran.
+      const estimated = screen.getByText('codex').parentElement as HTMLElement
+      expect(estimated).toHaveTextContent('· ~$0.0042 est.')
+      const reported = screen.getByText('claude-code').parentElement as HTMLElement
+      expect(reported).toHaveTextContent('· $0.1200')
+      expect(reported).not.toHaveTextContent('est.')
+      // A run that recorded no cost shows none.
+      const stopped = screen.getByText('cancelled').parentElement as HTMLElement
+      expect(stopped).not.toHaveTextContent('$')
+      expect(await axe(container)).toHaveNoViolations()
+    })
+  })
+
   // The drawer had no dialog semantics and no focus trap before it adopted the
   // shared <Modal>; screen-reader and keyboard users could Tab straight out of
   // it into the board behind the scrim.

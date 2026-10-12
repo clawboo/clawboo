@@ -33,9 +33,14 @@ export type TurnOrigin =
    *  task dialog, an explicit assignment, a retry). Its result is posted on the
    *  task card for that person; no teammate is waiting on it. */
   | { kind: 'assignment' }
-  /** Clawboo itself: a batched `[Task Update]` reflection, an alert, a pump
-   *  re-fire. No human is waiting on the other end of this particular turn. */
-  | { kind: 'system' }
+  /** Clawboo itself: a batched `[Task Update]` (the reflection batcher is the
+   *  only producer). No human is waiting on the other end of this turn.
+   *
+   *  `forTaskId`, present only when set, marks a FOLLOW-UP: the recipient
+   *  delegated this work while running that task, which has since closed. Its
+   *  reply is a report on that task for whoever gave it the task, not a message
+   *  to the user. The engine never sets it for the team lead. */
+  | { kind: 'system'; forTaskId?: string }
   /** A routine the person scheduled posted this into team chat on their behalf.
    *  It carries their words, so it frames like a human turn, but nobody is
    *  necessarily watching when it runs. */
@@ -63,6 +68,10 @@ export interface TurnFraming {
    *  person may be away, so the turn is framed to finish without waiting on
    *  them. Absent on every other turn (and on a worker, whose guardrail wins). */
   scheduledRoutine?: string
+  /** Present only on a follow-up (a system origin with `forTaskId`, delivered to
+   *  an agent that is not the team lead): that task's id. The reply is recorded
+   *  on that task and never shown in chat. */
+  reportsForTask?: string
 }
 
 /**
@@ -81,6 +90,10 @@ export interface TurnFraming {
  *     was the team lead) and true for the leader, whose synthesis of a reflection
  *     is written for the user even though clawboo triggered it. A scheduled
  *     routine counts as the human addressing it: the message is their own.
+ *
+ * A follow-up (a system origin carrying `forTaskId`, to anyone but the lead) is
+ * none of the three: it reports on a closed task to whoever gave it, even when
+ * it is queued behind the agent's own task run and `hasBoardTask` is true.
  */
 export function classifyTurn(input: {
   origin: TurnOrigin
@@ -88,8 +101,16 @@ export function classifyTurn(input: {
   leaderAgentId: string | null
   hasBoardTask: boolean
 }): TurnFraming {
+  const reportFor =
+    input.origin.kind === 'system' &&
+    input.origin.forTaskId &&
+    input.targetAgentId !== input.leaderAgentId
+      ? input.origin.forTaskId
+      : null
   const isUserAssigned = input.origin.kind === 'assignment'
-  const isWorker = input.origin.kind === 'delegation' || isUserAssigned || input.hasBoardTask
+  const isWorker =
+    reportFor === null &&
+    (input.origin.kind === 'delegation' || isUserAssigned || input.hasBoardTask)
   const isLeader =
     !isWorker && input.leaderAgentId !== null && input.targetAgentId === input.leaderAgentId
   const fromThePerson = input.origin.kind === 'human' || input.origin.kind === 'schedule'
@@ -107,5 +128,38 @@ export function classifyTurn(input: {
     ...(input.origin.kind === 'schedule' && !isWorker
       ? { scheduledRoutine: input.origin.routineName }
       : {}),
+    ...(reportFor !== null ? { reportsForTask: reportFor } : {}),
+  }
+}
+
+/** What a run was delivered as, fixed at delivery and handed back to the engine
+ *  with each of its events. `reportForTaskId` is the framing's `reportsForTask`,
+ *  or null. `stopGen` is the host's stop generation at delivery. */
+export interface RunStamp {
+  reportForTaskId: string | null
+  stopGen: number
+}
+
+/**
+ * May this turn's reply reach the team chat? Decided from why the turn was
+ * delivered, never from whether the session happens to map a task when it runs.
+ *
+ * Must never be derived from `isUserFacing`: a person's @mention to a worker
+ * that holds a task is framed as a worker turn, but it is still a reply they
+ * asked for.
+ */
+export function isChatVisible(
+  origin: TurnOrigin,
+  framing: Pick<TurnFraming, 'reportsForTask'>,
+): boolean {
+  switch (origin.kind) {
+    case 'human':
+    case 'schedule':
+      return true
+    case 'system':
+      return framing.reportsForTask === undefined
+    case 'delegation':
+    case 'assignment':
+      return false
   }
 }

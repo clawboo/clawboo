@@ -11,18 +11,27 @@
 // the names statically (esbuild fails the apps/web server build). Local modules
 // below are safe to star-export — they are bundled, not external.
 export {
+  RUN_COST_SOURCES,
   TASK_STATUSES,
   canTransition,
   isLocked,
   isTaskStatus,
   isTerminal,
   legalTargets,
+  summarizeRunCost,
 } from '@clawboo/board-core'
-export type { AttentionReason, TaskAttention, TaskStatus } from '@clawboo/board-core'
+export type {
+  AttentionReason,
+  RunCostSource,
+  TaskAttention,
+  TaskRunCost,
+  TaskStatus,
+} from '@clawboo/board-core'
 export * from './attention'
 export * from './attempts'
 export * from './events'
 export * from './repository'
+export * from './runCost'
 export * from './contention'
 export * from './schemas'
 export * from './verification'

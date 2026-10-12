@@ -18,7 +18,9 @@ import {
   getBudget,
   getSessionBySourceId,
   getSessionLineage,
+  getTask,
   listEvents,
+  listExecutions,
   setBudgetLimit,
 } from '@clawboo/db'
 import type {
@@ -251,6 +253,49 @@ describe('executor runner — session rotation + memory injection', () => {
     expect(result.ok).toBe(true)
     // Two runs × 5¢ = 10¢ recorded against the agent budget.
     expect(getBudget(getDb(), 'agent', 'claude-1')?.spentUsdCents).toBe(10)
+  })
+
+  it("records every rotation pass's cost on the run's ledger row, not just the last pass", async () => {
+    const taskId = newTask()
+    const db = getDb()
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'claude-1', limitUsdCents: 100 }) // high → never pauses
+    const fake = new RotatingAdapter('claude-code', ['max_turns', 'success'], 0.05) // 5¢ per run
+    const result = await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'claude-1',
+      disableMemoryAutoInject: true,
+      kind: 'research',
+    })
+    expect(result.ok).toBe(true)
+    const rows = listExecutions(db, taskId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.costUsd).toBeCloseTo(0.1, 12)
+    expect(rows[0]!.costSource).toBe('reported')
+    expect(getTask(db, taskId)!.costUsd).toBeCloseTo(0.1, 12)
+    // The budget is charged per event, so it stays at the same 10 cents.
+    expect(getBudget(db, 'agent', 'claude-1')?.spentUsdCents).toBe(10)
+  })
+
+  it("records every rotation pass's tokens on the run's ledger row, beside its cost", async () => {
+    const taskId = newTask()
+    const db = getDb()
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'claude-1', limitUsdCents: 100 }) // high → never pauses
+    // Each pass reports 10 input and 10 output tokens.
+    const fake = new RotatingAdapter('claude-code', ['max_turns', 'success'], 0.05)
+    const result = await runTaskOnRuntime({
+      db,
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'claude-1',
+      disableMemoryAutoInject: true,
+      kind: 'research',
+    })
+    expect(result.ok).toBe(true)
+    const row = listExecutions(db, taskId)[0]!
+    expect(row.inputTokens).toBe(20)
+    expect(row.outputTokens).toBe(20)
   })
 
   it('injects an <auto-memory> block at run start (and suppresses it when disabled)', async () => {

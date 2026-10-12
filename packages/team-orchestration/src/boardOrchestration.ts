@@ -39,7 +39,7 @@ import {
   detectDelegationIntent,
   type SessionsSendParams,
 } from './delegationTags'
-import { ASSIGNMENT_TURN, SYSTEM_TURN, type TurnOrigin } from './turnOrigin'
+import { ASSIGNMENT_TURN, SYSTEM_TURN, type RunStamp, type TurnOrigin } from './turnOrigin'
 
 /**
  * A source task at this ancestor-depth (or deeper) may not spawn children —
@@ -87,6 +87,13 @@ export type DispatchOutcome = 'started' | 'queued' | 'not_found' | 'not_ready' |
  *  and failing it there kills exactly the long-running work teams exist for.
  *  Still bounded: a tool call that outlives even this ceiling is failed. */
 export const OPEN_TOOL_CALL_TIMEOUT_MS = 3 * DELEGATION_IDLE_TIMEOUT_MS
+
+/** The idle allowance while a delegation's run has not started yet. It is not
+ *  silent: it is waiting behind another run on the agent's home or connection
+ *  lock. The host bounds that wait with `HOME_MUTEX_ACQUIRE_MS` (10 minutes by
+ *  default), after which deliver rejects, so this is only the ceiling for a
+ *  start that never settles. */
+export const PENDING_START_TIMEOUT_MS = OPEN_TOOL_CALL_TIMEOUT_MS
 
 /**
  * Consecutive failures of the SAME (target, task) after which re-delegation is
@@ -397,10 +404,23 @@ export interface BoardOrchestratorDeps {
 }
 
 export interface BoardOrchestrator {
-  /** Feed one normalized event observed on `sessionKey`. */
-  onEvent(sessionKey: string, event: RuntimeEvent): Promise<void>
+  /**
+   * Feed one normalized event observed on `sessionKey`. `run` is the host's stamp
+   * for the run that produced it: a follow-up's terminal is recorded on its task
+   * and never treated as the session's task run, and a run delivered before a
+   * Stop starts no new work. Omitted means neither (a direct call).
+   */
+  onEvent(sessionKey: string, event: RuntimeEvent, run?: RunStamp): Promise<void>
   /** The board task a session is currently executing, if any (for obs correlation). */
   taskForSession(sessionKey: string): string | null
+  /**
+   * The execution row of the run a session is doing for its task. The host's drain
+   * records the run's cost on it, because the engine closes its rows without a cost
+   * and a Stop or the idle watchdog closes a row before the run's own terminal
+   * arrives. Null for a turn that runs no task (a leader or user turn) and for a task
+   * re-attached by resume(), whose run belonged to a process that is gone.
+   */
+  execForSession(sessionKey: string): string | null
   /**
    * Fail any delegated child that has emitted no lifecycle event for longer than
    * `DELEGATION_IDLE_TIMEOUT_MS` — reflects the timeout to the leader so it is
@@ -410,9 +430,10 @@ export interface BoardOrchestrator {
   sweepStaleSessions(): Promise<void>
   /**
    * A session's observer ended (connection drop / teardown of one session) while
-   * a delegation was still in flight — fail it so the leader learns.
+   * a delegation was still in flight: fail it so the leader learns. `run` is the
+   * same stamp `onEvent` takes: a follow-up that ended is recorded on its task.
    */
-  onSessionClosed(sessionKey: string): Promise<void>
+  onSessionClosed(sessionKey: string, run?: RunStamp): Promise<void>
   /**
    * Re-attach to durable in-flight work on (re)mount: track `in_progress` tasks
    * so their completions/timeouts are still handled, and fire any plan step left
@@ -491,6 +512,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const humanTasks = new Set<string>() // task ids a PERSON assigned: they report to the card, not an agent
   const waitingOnTurn = new Set<string>() // sessions with work deferred behind a non-task turn (pump on its terminal)
   const forceFire = new Set<string>() // task ids a person asked to run: waive the auto-fire ledger policy once
+  const pendingStart = new Map<string, string>() // session -> task whose delivery has not started yet (watchdog allowance)
 
   // Reflection batch state — closure-owned so reset() collects it (no leak).
   // `toAgentId` is the recipient: a sub-task reports to its IMMEDIATE delegator
@@ -502,6 +524,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     title?: string
     summary: string
     outcome?: TaskUpdateOutcome
+    /** The task this item reports on. */
+    taskId?: string
+    /** The closed task the recipient was running when it delegated this work:
+     *  marks a follow-up. */
+    forTaskId?: string
     /** Delivery-retry counter (bounded by MAX_REFLECT_ATTEMPTS). */
     attempts?: number
   }> = []
@@ -556,6 +583,26 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     sdid.match(/:reflectTo:([^:]+)/)?.[1] ?? null
   const sdidOf = (task: BoardTask): string =>
     typeof task['sourceDelegationId'] === 'string' ? (task['sourceDelegationId'] as string) : ''
+
+  /** The closed task `recipient` was running when it delegated `task`: the parent,
+   *  when the durable row says the result reports to `recipient`. A mismatch means
+   *  the recipient is only the leader fallback. The team lead is never handed a
+   *  follow-up, so its synthesis always reaches the chat. */
+  const followUpScope = (task: BoardTask, recipient: string | null): string | undefined => {
+    if (!recipient || recipient === deps.leaderAgentId()) return undefined
+    const parent = typeof task.parentTaskId === 'string' ? task.parentTaskId : ''
+    return parent && sdidReflectTo(sdidOf(task)) === recipient ? parent : undefined
+  }
+
+  /** {@link followUpScope} by task id. No board read on the leader path. */
+  async function followUpScopeOf(
+    taskId: string,
+    recipient: string | null,
+  ): Promise<string | undefined> {
+    if (!recipient || recipient === deps.leaderAgentId()) return undefined
+    const d = await deps.board.getTask(taskId)
+    return d ? followUpScope(d.task, recipient) : undefined
+  }
 
   /** The brief an agent receives for a task. An engine delegation stores the whole
    *  ask as its description (its title is a prefix of it); a task a person wrote
@@ -670,6 +717,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (taskId) await releaseClaimed(taskId, sessionKey)
   }
 
+  /** A task's delivery settled (its run started, or the host refused the start).
+   *  The idle window counts from the run's start. A Stop that landed while the
+   *  delivery waited made the host refuse the start, so no terminal will ever
+   *  release the task: release it here. */
+  async function settleDelivery(
+    taskId: string,
+    sessionKey: string,
+    startGen: number,
+  ): Promise<void> {
+    if (sessionToTask.get(sessionKey) !== taskId) return
+    if (deps.stopGen() !== startGen) await releaseClaimed(taskId, sessionKey)
+    else lastActivityAt.set(sessionKey, now())
+  }
+
   /** Create + claim + open-execution + deliver a single immediate delegation.
    *  `delegatorAgentId` is who tried to delegate (the reduce-point recipient for
    *  this child's result, and the one told if the delegation can't be started). */
@@ -689,6 +750,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         title: signal.task.slice(0, 80),
         summary,
         outcome: 'error',
+        ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
       })
 
     const targetSk = deps.sessionKeyForAgent(signal.targetAgentId)
@@ -845,11 +907,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await releaseClaimed(task.id, targetSk)
       return task.id
     }
+    // While the delivery waits to start (behind another run on the agent's lock)
+    // the watchdog grants the pending-start allowance instead of the idle one.
+    pendingStart.set(targetSk, task.id)
+    let delivered = false
     try {
       await deps.deliver(targetSk, signal.targetAgentId, signal.task, {
         kind: 'delegation',
         fromAgentId: reflectTargetFor(task.id),
       })
+      delivered = true
     } catch {
       // Delivery rejected (the agent never received the task) — fail it now rather
       // than waiting out the 8-minute watchdog.
@@ -858,7 +925,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         'error',
         `Could not deliver the task to ${signal.targetAgentName} (the message was rejected).`,
       )
+    } finally {
+      if (pendingStart.get(targetSk) === task.id) pendingStart.delete(targetSk)
     }
+    if (delivered) await settleDelivery(task.id, targetSk, startGen)
     return task.id
   }
 
@@ -893,6 +963,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         by: steps[0]?.targetAgentName ?? 'plan',
         summary: `Plan not started — max delegation depth (${MAX_SPAWN_DEPTH}) reached. Handle the work directly or report it back.`,
         outcome: 'error',
+        ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
       })
       return
     }
@@ -910,6 +981,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           title: step.task.slice(0, 80),
           summary: `Plan step skipped — could not reach ${step.targetAgentName} (no active session).`,
           outcome: 'error',
+          ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
         })
         continue
       }
@@ -931,6 +1003,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           by: step.targetAgentName,
           summary: `Could not create the board task for plan step "${title.slice(0, 60)}" (server error).`,
           outcome: 'error',
+          ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
         })
         continue
       }
@@ -976,14 +1049,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const targetSk = deps.sessionKeyForAgent(agentId)
     if (!targetSk) {
       pendingTargets.delete(taskId)
-      if (!human)
+      if (!human) {
+        const to = reflectTargetFor(taskId)
+        const scope = await followUpScopeOf(taskId, to)
         enqueueReflection({
-          toAgentId: reflectTargetFor(taskId),
+          toAgentId: to,
           by: nameOf(agentId),
           title: taskTitle.get(taskId),
           summary: `A plan step could not be delivered — ${nameOf(agentId)} has no active session.`,
           outcome: 'error',
+          ...(scope ? { forTaskId: scope } : {}),
         })
+      }
       return
     }
     // The agent's single session is busy (another task, or any other turn). Leave
@@ -1018,6 +1095,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await releaseClaimed(taskId, targetSk)
       return
     }
+    pendingStart.set(targetSk, taskId)
+    let delivered = false
     try {
       await deps.deliver(
         targetSk,
@@ -1027,13 +1106,17 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           ? ASSIGNMENT_TURN
           : { kind: 'delegation', fromAgentId: reflectTargetFor(taskId) },
       )
+      delivered = true
     } catch {
       await failForSession(
         targetSk,
         'error',
         `Could not deliver the step to ${nameOf(agentId)} (the message was rejected).`,
       )
+    } finally {
+      if (pendingStart.get(targetSk) === taskId) pendingStart.delete(targetSk)
     }
+    if (delivered) await settleDelivery(taskId, targetSk, startGen)
   }
 
   /** Tasks already alerted as parked (cap-hit) — one alert per engine lifetime. */
@@ -1096,6 +1179,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       if (!taskTitle.has(task.id) && task.title) taskTitle.set(task.id, task.title)
       const description = briefFor(task)
       const human = isHumanAssignment(sdidOf(task))
+      // After an engine rebuild a pump-fired sub-task must still report to its
+      // mid-chain delegator, not the leader fallback (as resume and dispatchTask
+      // already recover it).
+      if (!human && !taskReflectTo.has(task.id)) {
+        const r = sdidReflectTo(sdidOf(task))
+        if (r) taskReflectTo.set(task.id, r)
+      }
       const targetSk = deps.sessionKeyForAgent(agentId)
       if (completingSessionKey && targetSk === completingSessionKey) {
         const t = setTimeout(() => {
@@ -1130,6 +1220,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     title?: string
     summary: string
     outcome?: TaskUpdateOutcome
+    taskId?: string
+    forTaskId?: string
   }): void {
     // Failures must reach the recipient even with an empty summary; successes
     // need substance (the empty-success placeholder is applied by the caller).
@@ -1146,28 +1238,34 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     reflectTimer = null
     if (reflectQueue.length === 0) return
     const items = reflectQueue.splice(0)
-    // Group by recipient session: a sub-task reports to its delegator, a
-    // top-level task to the leader. A recipient that can't be resolved yet
+    // Group by recipient session and follow-up scope: a sub-task reports to its
+    // delegator, a top-level task to the leader, and results a recipient gets
+    // back on a task it already closed form their own follow-up batch. The lead
+    // is never handed a follow-up. A recipient that can't be resolved yet
     // (leader not identified / no session) is re-queued + re-armed, never lost.
-    const byTarget = new Map<string, typeof items>()
+    const leaderId = deps.leaderAgentId()
+    const groups = new Map<string, { toSk: string; forTaskId?: string; items: typeof items }>()
     const unresolved: typeof items = []
     for (const item of items) {
-      const toId = item.toAgentId ?? deps.leaderAgentId()
+      const toId = item.toAgentId ?? leaderId
       const toSk = toId ? deps.sessionKeyForAgent(toId) : null
       if (!toId || !toSk) {
         unresolved.push(item)
         continue
       }
-      const g = byTarget.get(toSk) ?? []
-      g.push(item)
-      byTarget.set(toSk, g)
+      const forTaskId = item.forTaskId && toId !== leaderId ? item.forTaskId : undefined
+      const key = `${toSk}\u0000${forTaskId ?? ''}`
+      const g = groups.get(key) ?? { toSk, ...(forTaskId ? { forTaskId } : {}), items: [] }
+      g.items.push(item)
+      groups.set(key, g)
     }
     if (unresolved.length > 0) {
       reflectQueue.unshift(...unresolved)
       armReflectTimer()
     }
     const startGen = deps.stopGen()
-    for (const [toSk, group] of byTarget) {
+    for (const g of groups.values()) {
+      const { toSk, items: group } = g
       // A Stop mid-flush suppresses the remaining groups' narration AND delivery —
       // the user halted; don't append stale [Task Update]s or re-amplify after Stop.
       if (deps.stopGen() !== startGen) return
@@ -1180,9 +1278,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const toAgentId = deps.agentIdForSession(toSk)
       if (toAgentId) {
         const settled = new Set(group.map((i) => i.title ?? ''))
+        const batchIds = new Set(group.flatMap((i) => (i.taskId ? [i.taskId] : [])))
         for (const t of await deps.board.listTasks(deps.teamId).catch(() => [])) {
           const sdid = typeof t.sourceDelegationId === 'string' ? t.sourceDelegationId : ''
-          if (sdidReflectTo(sdid) !== toAgentId) continue
+          const parent =
+            typeof t.parentTaskId === 'string' && t.parentTaskId ? t.parentTaskId : null
+          const reportsHere =
+            sdidReflectTo(sdid) === toAgentId && (!g.forTaskId || parent === g.forTaskId)
+          // Work still running under a task this batch reports as finished: the
+          // recipient is hearing a partial result, and the rest arrives later as
+          // a follow-up.
+          const underBatch = parent !== null && batchIds.has(parent)
+          if (!reportsHere && !underBatch) continue
           if (t.status !== 'todo' && t.status !== 'in_progress') continue
           // A `todo` the pump will never fire again (the user stopped it, or it
           // was parked after failing repeatedly) is not coming back on its own.
@@ -1201,14 +1308,30 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           })
         }
       }
-      const message = buildTaskUpdateMessage(group, outstanding)
+      const followUpTask = g.forTaskId ? (await deps.board.getTask(g.forTaskId))?.task : undefined
+      const message = buildTaskUpdateMessage(
+        group,
+        outstanding,
+        g.forTaskId
+          ? {
+              followUp: {
+                title: typeof followUpTask?.title === 'string' ? followUpTask.title : undefined,
+              },
+            }
+          : {},
+      )
       // Visible narration (board→chat) + context delivery to the recipient. The
       // narration is the user-facing signal even if the delivery itself fails.
       deps.narrate?.(toSk, message)
       const toId = deps.agentIdForSession(toSk)
       if (toId) {
         try {
-          await deps.deliver(toSk, toId, message, SYSTEM_TURN)
+          await deps.deliver(
+            toSk,
+            toId,
+            message,
+            g.forTaskId ? { kind: 'system', forTaskId: g.forTaskId } : SYSTEM_TURN,
+          )
         } catch {
           // Delivery rejected (a transient chat.send failure) — re-queue for a
           // bounded retry rather than silently dropping the recipient's update
@@ -1283,16 +1406,21 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           agentId ?? undefined,
         )
       }
-      if (!stopped && !human)
+      if (!stopped && !human) {
+        const to = reflectTargetFor(taskId)
+        const scope = await followUpScopeOf(taskId, to)
         enqueueReflection({
-          toAgentId: reflectTargetFor(taskId),
+          toAgentId: to,
           by,
           title,
           summary: trimmed
             ? `${by}'s result for “${title ?? 'the task'}” arrived after the task was released/reassigned. The result was preserved as a comment on the task — review it before re-delegating; the work may already be done.`
             : `${by}'s result for “${title ?? 'the task'}” arrived after the task was released/reassigned — it was not recorded. Re-check the board or re-delegate if it's still needed.`,
           outcome: 'error',
+          taskId,
+          ...(scope ? { forTaskId: scope } : {}),
         })
+      }
       taskReflectTo.delete(taskId)
       taskTitle.delete(taskId)
       return
@@ -1326,13 +1454,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // sub-task reports to its parent, a top-level task to the leader). An EMPTY result
       // still reflects, but HONESTLY — the leader is told the agent returned no output so
       // it can re-delegate / note the gap instead of synthesizing a false success.
-      if (!human)
+      if (!human) {
+        // A sub-task reporting to a delegator that has since closed the task it
+        // delegated from is a follow-up on that task (see followUpScope).
+        const to = reflectTargetFor(taskId)
+        const scope = await followUpScopeOf(taskId, to)
         enqueueReflection({
-          toAgentId: reflectTargetFor(taskId),
+          toAgentId: to,
           by,
           title,
           summary: trimmed || `${by} finished “${title ?? 'the task'}” but returned no output.`,
+          taskId,
+          ...(scope ? { forTaskId: scope } : {}),
         })
+      }
     }
     taskReflectTo.delete(taskId)
     taskTitle.delete(taskId)
@@ -1414,17 +1549,90 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             .map((c) => `“${(c.title ?? '').slice(0, 40)}”`)
             .join(', ')} were cancelled — retry the plan or re-delegate.`
         : ''
-    if (!stopped && !human)
+    if (!stopped && !human) {
+      const scope = await followUpScopeOf(taskId, reflectTo)
       enqueueReflection({
         toAgentId: reflectTo,
         by,
         title,
         summary: (detailTrim || FAIL_REASON_LABEL[reason]) + chainNote,
         outcome: reason,
+        taskId,
+        ...(scope ? { forTaskId: scope } : {}),
       })
+    }
     taskReflectTo.delete(taskId)
     taskTitle.delete(taskId)
     if (!stopped) await pumpReady(sessionKey)
+  }
+
+  /**
+   * The end of a follow-up run: the agent's reply to results that came back on a
+   * task it had already closed. It is recorded as a comment on that task, then
+   * passed to whoever gave the agent the task (itself a follow-up when that
+   * delegator was on a task too, so the chain climbs until it reaches the lead).
+   * A task a person assigned keeps it on its card. Never reads or writes the
+   * session's task tracking: a follow-up is not a task run, so the occupancy
+   * guard and the one-task-per-session rule are untouched.
+   */
+  async function recordFollowUp(
+    sessionKey: string,
+    forTaskId: string,
+    result: { summary: string } | { reason: FailReason; detail: string },
+    run: RunStamp,
+  ): Promise<void> {
+    const stopped = run.stopGen !== deps.stopGen()
+    // A follow-up cut short by the user's Stop is a pause, not a failure.
+    if ('reason' in result && stopped) return
+    const d = await deps.board.getTask(forTaskId)
+    if (!d) return
+    const title = typeof d.task.title === 'string' ? d.task.title : undefined
+    const sdid = sdidOf(d.task)
+    const human = isHumanAssignment(sdid)
+    const to = human ? null : (sdidReflectTo(sdid) ?? deps.leaderAgentId())
+    const scope = followUpScope(d.task, to)
+    const agentId = deps.agentIdForSession(sessionKey)
+    const by = nameOf(agentId)
+    if (!('reason' in result)) {
+      const compacted = deps.compact ? deps.compact(result.summary) : result.summary
+      const trimmed = compacted.slice(0, 20_000).trim()
+      if (trimmed)
+        await deps.board.addComment(
+          forTaskId,
+          `[follow-up after its sub-tasks reported] ${trimmed}`,
+          'agent',
+          agentId ?? undefined,
+        )
+      // After a Stop the card keeps it; nothing new is started.
+      if (!stopped && to)
+        enqueueReflection({
+          toAgentId: to,
+          by,
+          title,
+          taskId: forTaskId,
+          summary: trimmed
+            ? `Follow-up after the work ${by} handed off came back: ${trimmed}`
+            : `${by} got back the results of work it handed off on “${title ?? 'its task'}” but wrote no follow-up. Those results are on their own cards.`,
+          ...(scope ? { forTaskId: scope } : {}),
+        })
+      return
+    }
+    const why = result.detail.slice(0, 4000).trim()
+    await deps.board.addComment(
+      forTaskId,
+      `Follow-up did not finish. ${FAIL_REASON_LABEL[result.reason]}: ${why || '(no output)'}`,
+      'system',
+    )
+    if (to)
+      enqueueReflection({
+        toAgentId: to,
+        by,
+        title,
+        taskId: forTaskId,
+        summary: `${by}'s follow-up on the work it handed off did not finish (${why || FAIL_REASON_LABEL[result.reason]}). The results it was reporting on are on their own cards.`,
+        outcome: result.reason,
+        ...(scope ? { forTaskId: scope } : {}),
+      })
   }
 
   /** Fail any delegated child idle past the watchdog window (never left standing).
@@ -1438,14 +1646,25 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       if (ts <= tnow - RECENTLY_TERMINATED_TTL_MS) recentlyTerminated.delete(s)
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
-      // A session inside a tool call (build/test/install) is legitimately silent
-      // — grant it the longer allowance instead of executing it at 8 minutes.
-      const allowance = openToolCall.has(sk)
-        ? OPEN_TOOL_CALL_TIMEOUT_MS
-        : DELEGATION_IDLE_TIMEOUT_MS
+      // A session inside a tool call (build/test/install) is legitimately silent,
+      // so it gets the longer allowance instead of being failed at 8 minutes. So
+      // does a delivery still waiting to start behind another run on the agent.
+      const allowance =
+        openToolCall.has(sk) || pendingStart.has(sk)
+          ? OPEN_TOOL_CALL_TIMEOUT_MS
+          : DELEGATION_IDLE_TIMEOUT_MS
       if (ts <= tnow - allowance && sessionToTask.has(sk)) stale.push(sk)
     }
     for (const sk of stale) {
+      if (pendingStart.has(sk)) {
+        const mins = Math.round(PENDING_START_TIMEOUT_MS / 60_000)
+        await failForSession(
+          sk,
+          'timeout',
+          `The delegate's run did not start within ${mins} minutes.`,
+        )
+        continue
+      }
       const wasInToolCall = openToolCall.has(sk)
       const mins = Math.round(
         (wasInToolCall ? OPEN_TOOL_CALL_TIMEOUT_MS : DELEGATION_IDLE_TIMEOUT_MS) / 60_000,
@@ -1461,7 +1680,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   }
 
   /** A session's observer ended while a delegation was still in flight. */
-  async function onSessionClosed(sessionKey: string): Promise<void> {
+  async function onSessionClosed(sessionKey: string, run?: RunStamp): Promise<void> {
+    if (run?.reportForTaskId) {
+      await recordFollowUp(
+        sessionKey,
+        run.reportForTaskId,
+        { reason: 'error', detail: 'The follow-up run ended before reporting.' },
+        run,
+      )
+      return
+    }
     if (!sessionToTask.has(sessionKey)) return
     await failForSession(
       sessionKey,
@@ -1512,9 +1740,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     await pumpReady()
   }
 
-  async function onEvent(sessionKey: string, event: RuntimeEvent): Promise<void> {
-    const wasTaskRun = sessionToTask.has(sessionKey)
-    await handleEvent(sessionKey, event)
+  async function onEvent(sessionKey: string, event: RuntimeEvent, run?: RunStamp): Promise<void> {
+    const reportFor = run?.reportForTaskId ?? null
+    const wasTaskRun = reportFor === null && sessionToTask.has(sessionKey)
+    await handleEvent(sessionKey, event, run)
     // A NON-task turn (a user turn, a reflection) just ended on a session that had
     // work waiting behind it: a task that could not be bound while the turn was in
     // flight. Fire it now. (A task run's own terminal already pumps.)
@@ -1522,15 +1751,24 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (terminal && !wasTaskRun && waitingOnTurn.delete(sessionKey)) await pumpReady(sessionKey)
   }
 
-  async function handleEvent(sessionKey: string, event: RuntimeEvent): Promise<void> {
+  async function handleEvent(
+    sessionKey: string,
+    event: RuntimeEvent,
+    run?: RunStamp,
+  ): Promise<void> {
     const sourceAgentId = deps.agentIdForSession(sessionKey) ?? ''
+    // A follow-up run reports on a task that already closed. It is never the
+    // session's task run, even if the session maps one by the time it streams,
+    // and whatever it delegates is parented under the task it follows up on.
+    const reportFor = run?.reportForTaskId ?? null
     // Capture BEFORE completion deletes the mapping, so a done that both
     // completes a child AND sub-delegates parents the grandchild correctly.
-    const sourceTaskId = sessionToTask.get(sessionKey) ?? null
+    const mapped = reportFor !== null ? null : (sessionToTask.get(sessionKey) ?? null)
+    const sourceTaskId = mapped ?? reportFor
 
     // Any observed event = the delegate is alive; refresh the idle watchdog so a
     // slow-but-working agent (streaming deltas / tool calls) is never swept.
-    if (sessionToTask.has(sessionKey)) {
+    if (mapped !== null) {
       lastActivityAt.set(sessionKey, now())
       // Track whether the session sits inside a tool call: `tool-call` opens the
       // window, `tool-result` closes it, and any terminal clears it (a run can
@@ -1541,7 +1779,30 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         openToolCall.delete(sessionKey)
     }
 
-    if (event.kind === 'done') {
+    if (reportFor !== null) {
+      if (event.kind === 'done') {
+        if (event.reason === 'success') {
+          await recordFollowUp(sessionKey, reportFor, { summary: event.summary ?? '' }, run!)
+          // fall through: a follow-up may delegate the work it found missing.
+        } else {
+          await recordFollowUp(
+            sessionKey,
+            reportFor,
+            { reason: event.reason, detail: event.summary ?? '' },
+            run!,
+          )
+          return
+        }
+      } else if (event.kind === 'error' && event.fatal) {
+        await recordFollowUp(
+          sessionKey,
+          reportFor,
+          { reason: 'error', detail: event.message },
+          run!,
+        )
+        return
+      }
+    } else if (event.kind === 'done') {
       if (event.reason === 'success') {
         await completeForSession(sessionKey, event.summary ?? '')
         // fall through: a successful done may ALSO carry <delegate>/<plan> to spawn.
@@ -1563,6 +1824,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await failForSession(sessionKey, 'error', event.message)
       return
     }
+
+    // A run delivered before the user's Stop starts no new work after it.
+    if (run && run.stopGen !== deps.stopGen()) return
 
     // Late-replay guard: a terminal on an already-unmapped session (its delegation
     // was completed / failed / timed-out) must NOT seed new work — a stale
@@ -1610,6 +1874,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         by: 'System',
         summary: `Fan-out cap (${maxFanout}) reached — ${cappedThisTurn} delegation(s) this turn were not started. Re-issue them in a follow-up if still needed.`,
         outcome: 'error',
+        ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
       })
     }
 
@@ -1733,6 +1998,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     detachTask,
     dispatchTask,
     taskForSession: (sessionKey) => sessionToTask.get(sessionKey) ?? null,
+    execForSession: (sessionKey) => {
+      const taskId = sessionToTask.get(sessionKey)
+      return taskId ? (taskToExec.get(taskId) ?? null) : null
+    },
     reset() {
       // Best-effort: deliver any pending reflection BEFORE tearing down, so a
       // child result isn't silently lost on a team-switch / reconnect that lands
@@ -1758,6 +2027,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       failureCounts.clear()
       humanTasks.clear()
       forceFire.clear()
+      pendingStart.clear()
       waitingOnTurn.clear()
       parkAlerted.clear()
       for (const t of deferredFires) clearTimeout(t)
