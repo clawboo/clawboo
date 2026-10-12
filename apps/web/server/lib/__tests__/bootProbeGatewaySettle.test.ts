@@ -99,10 +99,13 @@ describe('boot probe: Gateway connection settling', () => {
 
   it('reports reachable immediately when already connected, without waiting', async () => {
     connectionState.value = 'connected'
-    const started = Date.now()
     const report = await runBootProbe({ port: 18790 })
-    expect(gatewayCheck(report)?.ok).toBe(true)
+    const check = gatewayCheck(report)
+    expect(check?.ok).toBe(true)
     // The settle window is 1500ms; an already-connected Gateway must not pay it.
-    expect(Date.now() - started).toBeLessThan(1200)
+    // Time the Gateway check alone, not the whole probe: the checks before it
+    // build a fresh database and four MCP servers, and on a loaded Windows CI
+    // runner those alone ran past 1200ms while this check took a few ms.
+    expect(check?.durationMs).toBeLessThan(1200)
   })
 })
