@@ -37,12 +37,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "pino": "^10.3.1",
-    "pino-pretty": "^13.0.0"
+    "pino": "^10.4.0",
+    "pino-pretty": "^13.2.0"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.4",
     "tsup": "^8.4.0",
     "typescript": "^6.0.3"
   }
