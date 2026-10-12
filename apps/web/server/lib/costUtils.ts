@@ -1,21 +1,43 @@
 // ─── Model pricing per million tokens (USD) ───────────────────────────────────
 
+// Anthropic list prices, verified on 2026-09-28 against
+// https://platform.claude.com/docs/en/about-claude/pricing. The substring pass in
+// getPricing walks these keys in order, so a more specific id sits before any key
+// it contains (claude-opus-4-5 before claude-opus-4, claude-opus-5-5 before
+// claude-opus-5). Sonnet 3.7 and Haiku 3.5 shipped as claude-3-7-sonnet and
+// claude-3-5-haiku, so both spellings are keyed.
 const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: number }> = {
-  'claude-opus-4-6': { inputPerM: 15, outputPerM: 75 },
+  'claude-fable-5-1': { inputPerM: 10, outputPerM: 50 },
+  'claude-fable-5': { inputPerM: 10, outputPerM: 50 },
+  'claude-opus-5-5': { inputPerM: 4, outputPerM: 20 },
+  'claude-opus-5': { inputPerM: 5, outputPerM: 25 },
+  'claude-opus-4-8': { inputPerM: 5, outputPerM: 25 },
+  'claude-opus-4-7': { inputPerM: 5, outputPerM: 25 },
+  'claude-opus-4-6': { inputPerM: 5, outputPerM: 25 },
+  'claude-opus-4-5': { inputPerM: 5, outputPerM: 25 },
+  'claude-opus-4-1': { inputPerM: 15, outputPerM: 75 },
   'claude-opus-4': { inputPerM: 15, outputPerM: 75 },
+  'claude-sonnet-5-5': { inputPerM: 2, outputPerM: 10 },
+  'claude-sonnet-5': { inputPerM: 2, outputPerM: 10 },
   'claude-sonnet-4-6': { inputPerM: 3, outputPerM: 15 },
+  'claude-sonnet-4-5': { inputPerM: 3, outputPerM: 15 },
   'claude-sonnet-4': { inputPerM: 3, outputPerM: 15 },
   'claude-sonnet-3-7': { inputPerM: 3, outputPerM: 15 },
-  'claude-haiku-4-5': { inputPerM: 0.25, outputPerM: 1.25 },
-  'claude-haiku-3-5': { inputPerM: 0.25, outputPerM: 1.25 },
+  'claude-3-7-sonnet': { inputPerM: 3, outputPerM: 15 },
+  'claude-haiku-4-5': { inputPerM: 1, outputPerM: 5 },
+  'claude-haiku-3-5': { inputPerM: 0.8, outputPerM: 4 },
+  'claude-3-5-haiku': { inputPerM: 0.8, outputPerM: 4 },
+  'gpt-4o-mini': { inputPerM: 0.15, outputPerM: 0.6 },
+  'gpt-4o': { inputPerM: 2.5, outputPerM: 10 },
   default: { inputPerM: 3, outputPerM: 15 },
 }
 
 function getPricing(model: string): { inputPerM: number; outputPerM: number } {
   if (MODEL_PRICING[model]) return MODEL_PRICING[model]!
-  const lower = model.toLowerCase()
+  // Dotted ids (OpenRouter's anthropic/claude-haiku-4.5) match the hyphenated keys.
+  const normalized = model.toLowerCase().replace(/\./g, '-')
   for (const [key, pricing] of Object.entries(MODEL_PRICING)) {
-    if (key !== 'default' && lower.includes(key.toLowerCase())) return pricing
+    if (key !== 'default' && normalized.includes(key)) return pricing
   }
   return MODEL_PRICING['default']!
 }

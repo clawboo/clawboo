@@ -11,13 +11,17 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   agents,
+  createExecutionProcess,
+  createTask,
   enqueueInbox,
   getBudget,
+  getTask,
   listEvents,
+  listExecutions,
   listUndeliveredInbox,
   postToRoom,
   resolveRoomForTeam,
@@ -34,9 +38,12 @@ import type {
   StartOpts,
   TaskHandle,
 } from '@clawboo/executor'
-import { createNudgeQueue, type NudgeQueue } from '@clawboo/team-orchestration'
+import { createNudgeQueue, type NudgeQueue, type RunStamp } from '@clawboo/team-orchestration'
 
 import { getDb, resetDb } from '../../db'
+import { homeDispatchMutex } from '../../executorRunner'
+import { estimateRunCostUsd, estimateRunCostUsdFromUsage } from '../../runtimes/estimateCost'
+import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import { HUMAN_TURN, SYSTEM_TURN } from '@clawboo/team-orchestration'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 
@@ -48,6 +55,12 @@ const CAPS: Capabilities = {
   toolApproval: false,
   models: [],
 }
+/** A persistent per-identity home, so an injected FakeAdapter takes the home
+ *  mutex exactly as a native run does. */
+const PERSISTENT_CAPS: Capabilities = {
+  ...CAPS,
+  nativeHome: { scope: 'per-identity', persist: true },
+}
 
 const SK = 'agent:a1:team:T'
 
@@ -57,6 +70,12 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve }
 }
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+/** Hold a1's home lock (as a sibling run would) until the gate opens. Resolves
+ *  once the lock is released. */
+function hold(gate: Promise<void>): Promise<void> {
+  return homeDispatchMutex.run(runtimeIdentityHomePath('fake-native', 'a1'), () => gate)
+}
 
 const base = (
   sk: string,
@@ -133,11 +152,23 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
        *  simulates the engine's real (slow) board I/O on a terminal, the window
        *  in which a markIdle-flushed successor run starts. */
       firstDoneGate?: Promise<void>
+      /** The engine's live session map, read on every call. Overrides `taskId`. */
+      taskForSession?: (sk: string) => string | null
+      /** The host's Stop generation. Defaults to a constant 0. */
+      stopGen?: () => number
+      /** Runs inside the engine stub for each forwarded event, before it returns. */
+      onEngineEvent?: (sk: string, e: RuntimeEvent) => void
+      /** The execution row the engine names for a task run. Defaults to none. */
+      execId?: string | null
+      /** Runs inside the engine's `onSessionClosed` stub, before it returns. */
+      onClose?: (sk: string) => void
     },
   ) {
     let doneGateUsed = false
     const order: string[] = []
     const events: RuntimeEvent[] = []
+    const stamps: RunStamp[] = []
+    const closedStamps: RunStamp[] = []
     const closed: string[] = []
     const persisted: Array<{ sk: string; text: string }> = []
     const deltas: Array<{ sk: string; runId: string | null; text: string }> = []
@@ -166,18 +197,24 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       mcpBaseUrl: null,
       nudge,
       abortMap,
-      onEvent: async (_sk, e) => {
+      onEvent: async (sk, e, run) => {
         order.push(`event:${e.kind}`)
         events.push(e)
+        stamps.push(run)
+        opts?.onEngineEvent?.(sk, e)
         if (e.kind === 'done' && opts?.firstDoneGate && !doneGateUsed) {
           doneGateUsed = true
           await opts.firstDoneGate
         }
       },
-      onSessionClosed: async (sk) => {
+      onSessionClosed: async (sk, run) => {
+        opts?.onClose?.(sk)
         closed.push(sk)
+        closedStamps.push(run)
       },
-      taskForSession: () => opts?.taskId ?? null,
+      taskForSession: opts?.taskForSession ?? (() => opts?.taskId ?? null),
+      execForSession: () => opts?.execId ?? null,
+      stopGen: opts?.stopGen ?? (() => 0),
       leaderAgentId: () => 'leader',
       persistTurn: (sk, text) => {
         persisted.push({ sk, text })
@@ -193,7 +230,20 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       publishStatus: (agentId, status) => statuses.push({ agentId, status }),
       makeAdapterForAgent: () => adapter,
     })
-    return { deliver, order, events, closed, persisted, metas, deltas, statuses, abortMap }
+    return {
+      deliver,
+      order,
+      events,
+      stamps,
+      closed,
+      closedStamps,
+      persisted,
+      metas,
+      deltas,
+      statuses,
+      abortMap,
+      nudge,
+    }
   }
 
   it('resolves AFTER start (detached drain), forwards events, markIdle precedes onEvent(done), evicts the abort map, persists the terminal', async () => {
@@ -514,7 +564,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       })(),
     )
     const w = wire(adapter, { taskId: 't-1' })
-    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    await w.deliver(SK, 'a1', 'hi', { kind: 'delegation', fromAgentId: 'leader' })
     for (let i = 0; i < 4; i++) await tick()
     expect(w.metas).toEqual([])
   })
@@ -643,6 +693,552 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const w = wire(adapter)
     await expect(w.deliver(SK, 'a1', 'hi', HUMAN_TURN)).rejects.toThrow('boom')
     expect(w.abortMap.has(SK)).toBe(false)
+  })
+
+  // ── The start gate: a delivery starts only while it is still wanted ─────────
+
+  it('a delegation whose task is RELEASED while it waits on the home lock never starts', async () => {
+    // A sibling run holds the agent's home lock. While this delegation waits, the
+    // engine releases its task (a stale sweep, a person moving the card), so the
+    // run would do work nobody tracks and stream it as if it were wanted.
+    const lock = deferred()
+    const held = hold(lock.promise)
+    let task: string | null = 't-1'
+    const adapter = new FakeAdapter(
+      (run) =>
+        (async function* () {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'text-delta',
+            text: 'late work',
+            channel: 'assistant',
+          }
+          yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'late' }
+        })(),
+      undefined,
+      PERSISTENT_CAPS,
+    )
+    const w = wire(adapter, { taskForSession: () => task })
+    const p = w.deliver(SK, 'a1', 'do the task', { kind: 'delegation', fromAgentId: 'leader' })
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.startCalls).toBe(0) // still waiting on the lock
+
+    task = null
+    lock.resolve()
+    await held
+    // Resolves rather than rejects: a rejection would fail whatever task holds the
+    // session now.
+    await expect(p).resolves.toBeUndefined()
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.startCalls).toBe(0)
+    expect(w.persisted).toEqual([])
+    expect(w.deltas).toEqual([])
+    expect(w.statuses).toEqual([])
+    // The released slot is free again, so the next turn is not stuck behind it.
+    expect(w.nudge.isBusy(SK)).toBe(false)
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    expect(adapter.startCalls).toBe(1)
+  })
+
+  it('a delivery made before a Stop never starts after it, and does not un-busy a post-Stop run', async () => {
+    const lock = deferred()
+    const held = hold(lock.promise)
+    let gen = 0
+    const gate = deferred()
+    const adapter = new FakeAdapter(
+      (run) =>
+        (async function* () {
+          await gate.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+        })(),
+      undefined,
+      PERSISTENT_CAPS,
+    )
+    const w = wire(adapter, { taskId: 't-1', stopGen: () => gen })
+    const p1 = w.deliver(SK, 'a1', 'D1 before the stop', {
+      kind: 'delegation',
+      fromAgentId: 'leader',
+    })
+    for (let i = 0; i < 4; i++) await tick()
+    // What stop() does: bump the generation, then reset the queue.
+    gen = 1
+    w.nudge.reset()
+    const p2 = w.deliver(SK, 'a1', 'D2 after the stop', HUMAN_TURN)
+    lock.resolve()
+    await held
+    await p1
+    await p2
+    for (let i = 0; i < 4; i++) await tick()
+
+    expect(adapter.startOptsLog.map((o) => o.message)).toEqual(['D2 after the stop'])
+    // D1's refusal left D2's busy mark alone: D2 is still running.
+    expect(w.nudge.isBusy(SK)).toBe(true)
+    gate.resolve()
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.nudge.isBusy(SK)).toBe(false)
+  })
+
+  /** Two-run adapter: run 1 ends `done: aborted` on `g1`, every later run `done` on `g2`. */
+  function twoRunAdapter(caps: Capabilities = CAPS): {
+    adapter: FakeAdapter
+    g1: ReturnType<typeof deferred>
+    g2: ReturnType<typeof deferred>
+  } {
+    const g1 = deferred()
+    const g2 = deferred()
+    let n = 0
+    const adapter = new FakeAdapter(
+      (run) => {
+        const mine = ++n
+        return (async function* () {
+          if (mine === 1) {
+            await g1.promise
+            yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+          } else {
+            await g2.promise
+            yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'r' }
+          }
+        })()
+      },
+      undefined,
+      caps,
+    )
+    return { adapter, g1, g2 }
+  }
+
+  it('a pre-Stop run ending after the Stop keeps off the post-Stop run (abort entry and busy mark)', async () => {
+    // claude-code takes no lock, so a run delivered after a Stop starts while
+    // the run the Stop aborted is still winding down.
+    let gen = 0
+    const { adapter, g1, g2 } = twoRunAdapter()
+    const w = wire(adapter, { stopGen: () => gen })
+    await w.deliver(SK, 'leader', 'D1', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    const d1 = w.abortMap.get(SK)?.run
+    // What stop() does: bump the generation, abort the map's runs, reset the queue.
+    gen = 1
+    for (const [, e] of w.abortMap) void e.adapter.abort(e.run)
+    w.nudge.reset()
+    await w.deliver(SK, 'leader', 'D2', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    const d2 = w.abortMap.get(SK)?.run
+    expect(d2).toBeDefined()
+    expect(d2).not.toBe(d1)
+
+    g1.resolve() // D1's aborted terminal lands while D2 runs
+    for (let i = 0; i < 6; i++) await tick()
+    expect(w.abortMap.get(SK)?.run).toBe(d2) // a second Stop still reaches D2
+    expect(w.nudge.isBusy(SK)).toBe(true)
+    // So a third message queues behind D2 instead of starting beside it.
+    void w.deliver(SK, 'leader', 'D3', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.startCalls).toBe(2)
+    g2.resolve()
+    for (let i = 0; i < 6; i++) await tick()
+    expect(adapter.startCalls).toBe(3) // D2's own end released D3
+  })
+
+  it('a pre-Stop run ending after the Stop leaves a post-Stop run waiting on the lock busy', async () => {
+    let gen = 0
+    const { adapter, g1, g2 } = twoRunAdapter(PERSISTENT_CAPS)
+    const w = wire(adapter, { stopGen: () => gen })
+    await w.deliver(SK, 'a1', 'D1', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    gen = 1
+    for (const [, e] of w.abortMap) void e.adapter.abort(e.run)
+    w.nudge.reset()
+    const p2 = w.deliver(SK, 'a1', 'D2', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.startCalls).toBe(1) // D2 waits on the home lock D1's drain holds
+    g1.resolve()
+    await p2
+    expect(adapter.startCalls).toBe(2)
+    expect(w.nudge.isBusy(SK)).toBe(true) // D2 is running
+    g2.resolve()
+    for (let i = 0; i < 6; i++) await tick()
+    expect(w.nudge.isBusy(SK)).toBe(false)
+  })
+
+  it('a pre-Stop run still streaming after the Stop does not re-busy the session', async () => {
+    let gen = 0
+    const g1 = deferred()
+    let n = 0
+    const adapter = new FakeAdapter((run) => {
+      const mine = ++n
+      return (async function* () {
+        if (mine === 1) {
+          await g1.promise
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'text-delta',
+            text: 'late',
+            channel: 'assistant',
+          }
+          yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'aborted', summary: '' }
+        } else {
+          yield { ...base(run.sessionKey, 3), kind: 'done', reason: 'success', summary: 'r' }
+        }
+      })()
+    })
+    const w = wire(adapter, { stopGen: () => gen })
+    await w.deliver(SK, 'leader', 'D1', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    gen = 1
+    w.nudge.reset()
+    g1.resolve() // D1 streams once more, then ends
+    for (let i = 0; i < 6; i++) await tick()
+    expect(w.nudge.isBusy(SK)).toBe(false)
+    await w.deliver(SK, 'leader', 'D2', HUMAN_TURN)
+    expect(adapter.startCalls).toBe(2) // started at once, not queued behind a dead run
+  })
+
+  it('a wedge-aborted run ending late does not evict the successor the wedge released', async () => {
+    const { adapter, g1, g2 } = twoRunAdapter()
+    const w = wire(adapter)
+    await w.deliver(SK, 'leader', 'D1', HUMAN_TURN)
+    void w.deliver(SK, 'leader', 'D2', HUMAN_TURN) // queued behind D1
+    for (let i = 0; i < 4; i++) await tick()
+    // What the wedge does: abort the session's run, then force-idle, which flushes D2.
+    const d1 = w.abortMap.get(SK)
+    if (d1) void d1.adapter.abort(d1.run)
+    w.nudge.markIdle(SK)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.startCalls).toBe(2)
+    const d2 = w.abortMap.get(SK)?.run
+    expect(d2).not.toBe(d1?.run)
+
+    g1.resolve() // D1's aborted terminal lands while D2 runs
+    for (let i = 0; i < 6; i++) await tick()
+    expect(w.abortMap.get(SK)?.run).toBe(d2)
+    g2.resolve()
+    for (let i = 0; i < 6; i++) await tick()
+    expect(w.abortMap.has(SK)).toBe(false)
+  })
+
+  for (const why of ['stop', 'release'] as const) {
+    it(`a ${why} DURING adapter.start discards the run: nothing reaches the engine, the chat or the inbox`, async () => {
+      enqueueInbox(db, { agentId: 'a1', teamId: 'T', kind: 'task_update', body: 'waiting row' })
+      let gen = 0
+      let task: string | null = 't-1'
+      const adapter = new FakeAdapter(
+        (run) =>
+          (async function* () {
+            yield {
+              ...base(run.sessionKey, 1),
+              kind: 'text-delta',
+              text: 'unwanted',
+              channel: 'assistant',
+            }
+            yield {
+              ...base(run.sessionKey, 2),
+              kind: 'done',
+              reason: 'success',
+              summary: 'unwanted',
+            }
+          })(),
+        () => {
+          if (why === 'stop') gen = 1
+          else task = null
+        },
+      )
+      const w = wire(adapter, { taskForSession: () => task, stopGen: () => gen })
+      await expect(
+        w.deliver(SK, 'a1', 'do the task', { kind: 'delegation', fromAgentId: 'leader' }),
+      ).resolves.toBeUndefined()
+      for (let i = 0; i < 6; i++) await tick()
+
+      expect(adapter.startCalls).toBe(1)
+      expect(adapter.aborted).toBe(1)
+      expect(w.events).toEqual([]) // the engine never saw the run
+      expect(w.persisted).toEqual([])
+      expect(w.deltas).toEqual([])
+      expect(w.statuses.map((s) => s.status)).not.toContain('running')
+      expect(w.abortMap.has(SK)).toBe(false)
+      // The digest it was rendered with was never delivered: it rides the next run.
+      expect(listUndeliveredInbox(db, 'a1', { teamId: 'T' }).map((r) => r.body)).toEqual([
+        'waiting row',
+      ])
+      if (why === 'release') expect(w.nudge.isBusy(SK)).toBe(false)
+    })
+  }
+
+  it('a Stop during a released run discard leaves the post-Stop run busy', async () => {
+    let gen = 0
+    let task: string | null = 't-1'
+    const discardGate = deferred()
+    const g2 = deferred()
+    let n = 0
+    const adapter: FakeAdapter = new FakeAdapter(
+      (run) => {
+        const mine = ++n
+        return (async function* () {
+          if (mine === 1) {
+            await discardGate.promise
+            yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+          } else {
+            await g2.promise
+            yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'r' }
+          }
+        })()
+      },
+      () => {
+        // The person moves the card while D1's adapter.start is in flight.
+        if (adapter.startCalls === 1) task = null
+      },
+    )
+    const w = wire(adapter, { taskForSession: () => task, stopGen: () => gen })
+    await w.deliver(SK, 'a1', 'D1 task', { kind: 'delegation', fromAgentId: 'leader' })
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.aborted).toBe(1) // gate 3 refused D1 and is discarding it
+    // Stop while the discard winds down, then a person's message.
+    gen = 1
+    w.nudge.reset()
+    await w.deliver(SK, 'a1', 'D2 after the stop', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.startCalls).toBe(2)
+
+    discardGate.resolve() // the discard ends while D2 runs
+    for (let i = 0; i < 6; i++) await tick()
+    expect(w.nudge.isBusy(SK)).toBe(true)
+    // So a third message queues behind D2 instead of starting beside it.
+    void w.deliver(SK, 'a1', 'D3', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(adapter.startCalls).toBe(2)
+    g2.resolve()
+    for (let i = 0; i < 6; i++) await tick()
+    expect(adapter.startCalls).toBe(3)
+  })
+
+  it('a start FAILURE after a Stop resolves instead of rejecting', async () => {
+    let gen = 0
+    const adapter = new FakeAdapter(
+      () => (async function* () {})(),
+      () => {
+        gen = 1
+        throw new Error('killed by the stop')
+      },
+    )
+    const w = wire(adapter, { stopGen: () => gen })
+    await expect(w.deliver(SK, 'a1', 'hi', HUMAN_TURN)).resolves.toBeUndefined()
+    expect(w.abortMap.has(SK)).toBe(false)
+  })
+
+  it('a start FAILURE after a release resolves, and frees the session', async () => {
+    // Rejecting here makes the engine fail (block) whatever task the session
+    // holds now, which is not the task this delivery was for.
+    let task: string | null = 't-1'
+    const adapter = new FakeAdapter(
+      () => (async function* () {})(),
+      () => {
+        task = null
+        throw new Error('spawn failed')
+      },
+    )
+    const w = wire(adapter, { taskForSession: () => task })
+    await expect(
+      w.deliver(SK, 'a1', 'do the task', { kind: 'delegation', fromAgentId: 'leader' }),
+    ).resolves.toBeUndefined()
+    expect(w.nudge.isBusy(SK)).toBe(false)
+  })
+
+  it('a lock wait that times out after a Stop resolves, and leaves the retry alone', async () => {
+    // The timeout never reaches runJob's gates. Rejecting here makes the engine
+    // fail whatever task the session holds now: the person's retry.
+    const lock = deferred()
+    const held = hold(lock.promise)
+    // D1 waits on the real home lock with a short acquire bound; D2 keeps the
+    // default one.
+    const realRun = homeDispatchMutex.run.bind(homeDispatchMutex)
+    const spy = vi
+      .spyOn(homeDispatchMutex, 'run')
+      .mockImplementationOnce((key, fn) => realRun(key, fn, { acquireTimeoutMs: 150 }))
+    try {
+      let gen = 0
+      let task: string | null = 'T1'
+      const adapter = new FakeAdapter(
+        (run) =>
+          (async function* () {
+            yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+          })(),
+        undefined,
+        PERSISTENT_CAPS,
+      )
+      const w = wire(adapter, { taskForSession: () => task, stopGen: () => gen })
+      const p1 = w.deliver(SK, 'a1', 'D1 before the stop', {
+        kind: 'delegation',
+        fromAgentId: 'leader',
+      })
+      for (let i = 0; i < 4; i++) await tick()
+      // What stop() does, then the retry maps the session to a new task.
+      gen = 1
+      w.nudge.reset()
+      task = 'T2'
+      const p2 = w.deliver(SK, 'a1', 'D2 the retry', { kind: 'delegation', fromAgentId: 'leader' })
+
+      await expect(p1).resolves.toBeUndefined()
+      // D1's timeout left D2's busy mark alone.
+      expect(w.nudge.isBusy(SK)).toBe(true)
+      expect(adapter.startCalls).toBe(0)
+
+      lock.resolve()
+      await held
+      await p2
+      for (let i = 0; i < 4; i++) await tick()
+      expect(adapter.startOptsLog.map((o) => o.message)).toEqual(['D2 the retry'])
+    } finally {
+      spy.mockRestore()
+      lock.resolve()
+    }
+  })
+
+  it('a lock wait that times out after a release resolves, and frees the session', async () => {
+    const lock = deferred()
+    const held = hold(lock.promise)
+    const realRun = homeDispatchMutex.run.bind(homeDispatchMutex)
+    const spy = vi
+      .spyOn(homeDispatchMutex, 'run')
+      .mockImplementationOnce((key, fn) => realRun(key, fn, { acquireTimeoutMs: 150 }))
+    try {
+      let task: string | null = 't-1'
+      const adapter = new FakeAdapter(() => (async function* () {})(), undefined, PERSISTENT_CAPS)
+      const w = wire(adapter, { taskForSession: () => task })
+      const p = w.deliver(SK, 'a1', 'do the task', { kind: 'delegation', fromAgentId: 'leader' })
+      for (let i = 0; i < 4; i++) await tick()
+      task = null
+      await expect(p).resolves.toBeUndefined()
+      expect(adapter.startCalls).toBe(0)
+      expect(w.nudge.isBusy(SK)).toBe(false)
+    } finally {
+      spy.mockRestore()
+      lock.resolve()
+      await held
+    }
+  })
+
+  // ── Follow-ups and chat visibility ───────────────────────────────────────────
+
+  const FOLLOW_UP = { kind: 'system', forTaskId: 'T1' } as const
+
+  it('a FOLLOW-UP neither streams nor commits, and its stamp reaches the engine', async () => {
+    // a1 delegated work while running T1, T1 closed, and the work came back. Its
+    // reply is a report on T1 for whoever gave it T1, not a chat message.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'text-delta',
+          text: 'combined',
+          channel: 'assistant',
+        }
+        yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'combined' }
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', '[Task Update] your sub-task finished', FOLLOW_UP)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.events.map((e) => e.kind)).toEqual(['text-delta', 'done'])
+    expect(w.persisted).toEqual([])
+    expect(w.deltas).toEqual([])
+    for (const s of w.stamps) expect(s).toEqual({ reportForTaskId: 'T1', stopGen: 0 })
+  })
+
+  it('a FOLLOW-UP that fails, or ends with no terminal, posts no chat notice', async () => {
+    const fatal = wire(
+      new FakeAdapter((run) =>
+        (async function* () {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'error',
+            code: 'provider_down',
+            message: 'upstream 503',
+            fatal: true,
+          }
+        })(),
+      ),
+    )
+    await fatal.deliver(SK, 'a1', '[Task Update] done', FOLLOW_UP)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(fatal.metas).toEqual([])
+
+    const dead = wire(new FakeAdapter(() => (async function* () {})()))
+    await dead.deliver(SK, 'a1', '[Task Update] done', FOLLOW_UP)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(dead.metas).toEqual([])
+    // The engine still learns which task the dead follow-up was reporting on.
+    expect(dead.closedStamps[0]?.reportForTaskId).toBe('T1')
+  })
+
+  it('the same origin delivered to the LEAD is an ordinary, visible synthesis', async () => {
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'synthesis' }
+      })(),
+    )
+    const w = wire(adapter)
+    const leadSk = 'agent:leader:team:T'
+    await w.deliver(leadSk, 'leader', '[Task Update] done', FOLLOW_UP)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.persisted).toEqual([{ sk: leadSk, text: 'synthesis' }])
+    expect(w.stamps[0]?.reportForTaskId).toBeNull()
+  })
+
+  it('visibility tracks the ORIGIN, not the session map at drain start (a follow-up behind a task run)', async () => {
+    // The follow-up is queued behind a1's own task run. That run's done makes the
+    // engine forget the task before the follow-up starts draining, so a map read
+    // at drain start called the follow-up a chat turn.
+    const gate = deferred()
+    let task: string | null = 'T2'
+    let call = 0
+    const adapter = new FakeAdapter((run) => {
+      call += 1
+      if (call === 1)
+        return (async function* () {
+          await gate.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'T2 done' }
+        })()
+      return (async function* () {
+        yield {
+          ...base(run.sessionKey, 2),
+          kind: 'text-delta',
+          text: 'follow-up words',
+          channel: 'assistant',
+        }
+        yield {
+          ...base(run.sessionKey, 3),
+          kind: 'done',
+          reason: 'success',
+          summary: 'follow-up words',
+        }
+      })()
+    })
+    const w = wire(adapter, {
+      taskForSession: () => task,
+      onEngineEvent: (_sk, e) => {
+        if (e.kind === 'done') task = null // the engine's completeForSession
+      },
+    })
+    await w.deliver(SK, 'a1', 'run T2', { kind: 'delegation', fromAgentId: 'leader' })
+    const p2 = w.deliver(SK, 'a1', '[Task Update] T1 sub-task done', FOLLOW_UP)
+    gate.resolve()
+    await p2
+    for (let i = 0; i < 6; i++) await tick()
+    expect(adapter.startCalls).toBe(2)
+    expect(w.persisted).toEqual([])
+    expect(w.deltas).toEqual([])
+  })
+
+  it("a person's message to an agent holding a task is still persisted and streamed", async () => {
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'text-delta', text: 'yes', channel: 'assistant' }
+        yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'yes' }
+      })(),
+    )
+    const w = wire(adapter, { taskId: 't-1' })
+    await w.deliver(SK, 'a1', '@Coder are you on it?', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.persisted).toEqual([{ sk: SK, text: 'yes' }])
+    expect(w.deltas.map((d) => d.text)).toEqual(['yes'])
   })
 
   it('Tier-2 deltas: an assistant text-delta publishes the RUNNING accumulated text; a reasoning delta does not', async () => {
@@ -1200,5 +1796,224 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     expect(kinds).toContain('tool_call')
     expect(kinds).toContain('tool_result')
     expect(events.find((e) => e.kind === 'tool_call')?.runtime).toBe('openclaw')
+  })
+
+  describe('run cost on the ledger', () => {
+    const DELEGATION = { kind: 'delegation', fromAgentId: 'leader' } as const
+
+    /** A task and its open run, as the engine creates them before it delivers. */
+    function seedRun(): { taskId: string; execId: string } {
+      const task = createTask(db, { title: 'cost task' })
+      const exec = createExecutionProcess(db, { taskId: task.id, executorType: 'openclaw' })
+      return { taskId: task.id, execId: exec.id }
+    }
+    /** The agent's row, so the drain knows the runtime that ran and its model. */
+    function seedAgent(runtime: string, execConfig: string | null = null): void {
+      const now = Date.now()
+      db.insert(teams)
+        .values({
+          id: 'T',
+          name: 'Team T',
+          icon: '🚀',
+          color: '#e94560',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      db.insert(agents)
+        .values({
+          id: 'a1',
+          name: 'Agent One',
+          gatewayId: 'a1',
+          sourceId: runtime,
+          runtime,
+          teamId: 'T',
+          execConfig,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+    }
+    const rowOf = (taskId: string) => listExecutions(db, taskId)[0]!
+    /** The character estimate the drain prices from what this run was sent. */
+    const charEstimate = (adapter: FakeAdapter, model: string | null, outputChars: number) =>
+      estimateRunCostUsd({
+        model,
+        inputChars:
+          (adapter.lastStartOpts?.context?.length ?? 0) +
+          (adapter.lastStartOpts?.message.length ?? 0),
+        outputChars,
+      })
+
+    it('a Codex-shaped run records its token estimate, exact tokens and runtime on its own row', async () => {
+      seedAgent('codex')
+      const { taskId, execId } = seedRun()
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'cost',
+            costUsd: null,
+            estimated: true,
+            usage: { inputTokens: 12_000, outputTokens: 3_000 },
+            model: 'gpt-4o',
+          }
+          yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'parsed' }
+        })(),
+      )
+      const w = wire(adapter, { taskId, execId })
+      await w.deliver(SK, 'a1', 'do the task', DELEGATION)
+      for (let i = 0; i < 6; i++) await tick()
+
+      const expected = estimateRunCostUsdFromUsage({
+        model: 'gpt-4o',
+        inputTokens: 12_000,
+        outputTokens: 3_000,
+      })
+      expect(expected).toBeCloseTo(0.06, 9)
+      const row = rowOf(taskId)
+      expect(row.costUsd).toBeCloseTo(expected, 12)
+      expect(row.costSource).toBe('token-estimate')
+      expect(row.inputTokens).toBe(12_000)
+      expect(row.outputTokens).toBe(3_000)
+      expect(row.runtime).toBe('codex')
+      // The engine stub never closes the row: the cost is the drain's own write.
+      expect(row.status).toBe('running')
+      expect(getTask(db, taskId)!.costUsd).toBeCloseTo(expected, 12)
+    })
+
+    it('a fatal error still prices the run: a character estimate on the row and on the budget', async () => {
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 1_000_000, mode: 'warn' })
+      const { taskId, execId } = seedRun()
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'text-delta',
+            text: 'partial',
+            channel: 'assistant',
+          }
+          yield {
+            ...base(run.sessionKey, 2),
+            kind: 'error',
+            code: 'boom',
+            message: 'the model crashed',
+            fatal: true,
+          }
+        })(),
+      )
+      const w = wire(adapter, { taskId, execId })
+      await w.deliver(SK, 'a1', 'do the task', DELEGATION)
+      for (let i = 0; i < 6; i++) await tick()
+
+      const expected = charEstimate(adapter, null, 'partial'.length)
+      expect(expected).toBeGreaterThan(0)
+      const row = rowOf(taskId)
+      expect(row.costUsd).toBeCloseTo(expected, 12)
+      expect(row.costSource).toBe('char-estimate')
+      expect(row.inputTokens).toBeNull()
+      expect(getTask(db, taskId)!.costUsd).toBeCloseTo(expected, 12)
+      expect(getBudget(db, 'agent', 'a1')!.spentMicroCents).toBeGreaterThan(0)
+    })
+
+    it('a stream that ends with no terminal is priced before the engine is told it closed', async () => {
+      const { taskId, execId } = seedRun()
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'text-delta',
+            text: 'half a reply',
+            channel: 'assistant',
+          }
+          // The stream simply ends: no done, no fatal error.
+        })(),
+      )
+      const costAtClose: Array<number | null> = []
+      const w = wire(adapter, {
+        taskId,
+        execId,
+        onClose: () => costAtClose.push(rowOf(taskId).costUsd),
+      })
+      await w.deliver(SK, 'a1', 'do the task', DELEGATION)
+      for (let i = 0; i < 6; i++) await tick()
+
+      const expected = charEstimate(adapter, null, 'half a reply'.length)
+      expect(w.closed).toEqual([SK])
+      expect(costAtClose).toHaveLength(1)
+      expect(costAtClose[0]).toBeCloseTo(expected, 12)
+      expect(rowOf(taskId).costSource).toBe('char-estimate')
+    })
+
+    it("a done with no cost is priced at the agent's configured model", async () => {
+      seedAgent('hermes', JSON.stringify({ model: 'claude-opus-4-8', provider: 'anthropic' }))
+      const { taskId, execId } = seedRun()
+      const summary = 'wrote the report. '.repeat(50)
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary }
+        })(),
+      )
+      const w = wire(adapter, { taskId, execId })
+      await w.deliver(SK, 'a1', 'do the task', DELEGATION)
+      for (let i = 0; i < 6; i++) await tick()
+
+      const expected = charEstimate(adapter, 'claude-opus-4-8', summary.length)
+      // Opus is priced above the default rate, so the model is what moved the number.
+      expect(expected).toBeGreaterThan(charEstimate(adapter, null, summary.length))
+      const row = rowOf(taskId)
+      expect(row.costUsd).toBeCloseTo(expected, 12)
+      expect(row.costSource).toBe('char-estimate')
+      expect(row.runtime).toBe('hermes')
+    })
+
+    it('a reported cost is charged to the budget once, not again at the terminal', async () => {
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 1_000_000, mode: 'warn' })
+      const { taskId, execId } = seedRun()
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'cost',
+            costUsd: 0.25,
+            usage: { inputTokens: 100, outputTokens: 20 },
+            model: 'claude-haiku-4-5',
+          }
+          // A done repeats the run's cost (Claude Code) or totals it (native).
+          yield {
+            ...base(run.sessionKey, 2),
+            kind: 'done',
+            reason: 'success',
+            summary: 'ok',
+            costUsd: 0.25,
+          }
+        })(),
+      )
+      const w = wire(adapter, { taskId, execId })
+      await w.deliver(SK, 'a1', 'do the task', DELEGATION)
+      for (let i = 0; i < 6; i++) await tick()
+
+      const row = rowOf(taskId)
+      expect(row.costUsd).toBeCloseTo(0.25, 12)
+      expect(row.costSource).toBe('reported')
+      expect(getBudget(db, 'agent', 'a1')!.spentUsdCents).toBe(25)
+    })
+
+    it('a turn that runs no task records nothing, but its estimate still reaches the budget', async () => {
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 1_000_000, mode: 'warn' })
+      const { taskId, execId } = seedRun()
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'hello' }
+        })(),
+      )
+      // The engine names a row, but a person's turn is not that task's run.
+      const w = wire(adapter, { taskId, execId })
+      await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+      for (let i = 0; i < 6; i++) await tick()
+
+      expect(rowOf(taskId).costUsd).toBeNull()
+      expect(getBudget(db, 'agent', 'a1')!.spentMicroCents).toBeGreaterThan(0)
+    })
   })
 })

@@ -26,6 +26,9 @@ const PRICES: Record<string, ModelPrice> = {
   'anthropic/claude-haiku-4.5': { inPerM: 1, outPerM: 5 },
 }
 
+/** Every model id this table prices, so a test can hold costUtils to the same rates. */
+export const NATIVE_PRICED_MODELS: readonly string[] = Object.keys(PRICES)
+
 function normalizeModelId(model: string): string {
   return model.replace(/-\d{8}$/, '')
 }

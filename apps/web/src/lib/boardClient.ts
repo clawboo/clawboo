@@ -312,10 +312,14 @@ export function assignTask(taskId: string, agentId: string): Promise<HandOffResu
 export interface BoardExecution {
   id: string
   executorType?: string
+  /** The runtime that ran, when `executorType` names the engine rather than it. */
+  runtime?: string | null
   status?: string
   summary?: string | null
   error?: string | null
   costUsd?: number | null
+  /** How `costUsd` was obtained: 'reported' by the runtime, or an estimate. */
+  costSource?: string | null
   inputTokens?: number | null
   outputTokens?: number | null
   createdAt?: number

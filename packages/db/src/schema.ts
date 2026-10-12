@@ -399,6 +399,10 @@ export const executionProcesses = sqliteTable(
       .references(() => tasks.id),
     workspaceId: text('workspace_id').references(() => workspaces.id),
     executorType: text('executor_type').notNull(), // 'openclaw' | 'claude-code' | 'codex' | …
+    // The runtime that actually ran, when executor_type records an owner rather than
+    // a runtime: the team engine types every fire 'openclaw', the marker resume()
+    // keys ownership on. Null means executor_type is the runtime.
+    runtime: text('runtime'),
     // queued | running | succeeded | failed | timed_out | cancelled
     status: text('status').notNull().default('queued'),
     claimedAt: integer('claimed_at'),
@@ -411,6 +415,9 @@ export const executionProcesses = sqliteTable(
     cacheRead: integer('cache_read'),
     cacheWrite: integer('cache_write'),
     costUsd: real('cost_usd'),
+    // How cost_usd was obtained: 'reported' | 'token-estimate' | 'char-estimate' (see
+    // RUN_COST_SOURCES). Null when no cost is recorded, or when it predates this column.
+    costSource: text('cost_source'),
     summary: text('summary'),
     runReason: text('run_reason'),
     error: text('error'),

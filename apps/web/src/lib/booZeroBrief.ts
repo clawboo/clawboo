@@ -3,8 +3,11 @@
  *
  * Two pure functions:
  *   - `buildTeamBrief`: per-team markdown brief (stored in SQLite,
- *     surfaced as a virtual file in the UI, injected into Boo Zero's
- *     context preamble when it operates on a team's session).
+ *     surfaced as a virtual file in the UI). No team-chat turn reads it:
+ *     the model sees it only in Boo Zero's 1:1 chat, when a message starts
+ *     with @TeamName (server/lib/teamChat/teamActivitySummary.ts). In team
+ *     chat, the lead's roster carries each teammate's role instead
+ *     (server/lib/teamChat/teammateRoles.ts).
  *   - `buildGlobalBrief`: Boo Zero's overall responsibilities + an
  *     auto-generated index of the teams it leads.
  *

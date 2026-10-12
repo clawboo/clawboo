@@ -26,6 +26,7 @@ import {
   getSetting,
   listUndeliveredInbox,
   markInboxDelivered,
+  recordExecutionUsage,
   recordSpend,
   INBOX_BUDGET_CHARS,
   packInboxRows,
@@ -39,6 +40,7 @@ import {
 import { createLogger } from '@clawboo/logger'
 import {
   DEFAULT_RUN_SILENT_TIMEOUT_MS,
+  IDLE_ABORT_GRACE_MS,
   resolveRuntimeIntegration,
   withIdleTimeout,
   type RunHandle,
@@ -50,8 +52,10 @@ import { classifyError, isHarnessBug } from '@clawboo/obs'
 import {
   buildTurnEnvelope,
   classifyTurn,
+  isChatVisible,
   isTeamSessionKey,
   type NudgeQueue,
+  type RunStamp,
   type TurnOrigin,
 } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
@@ -63,8 +67,8 @@ import { emitEvent } from '../obs'
 import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDispatch'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
-import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
+import { createRunCostTally } from '../runtimes/runCostTally'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
@@ -103,12 +107,23 @@ export interface ServerDeliverDeps {
   /** sessionKey → live run, so `stop()` / the wedge can abort it. Populated here
    *  (in the send closure) and evicted in `drainRun` on the run's terminal. */
   abortMap: Map<string, RunEntry>
-  /** The engine's event sink — the orchestrator's `onEvent`. */
-  onEvent: (sessionKey: string, event: RuntimeEvent) => Promise<void>
+  /** The engine's event sink: the orchestrator's `onEvent`. `run` is the stamp
+   *  fixed when this run was delivered. */
+  onEvent: (sessionKey: string, event: RuntimeEvent, run: RunStamp) => Promise<void>
   /** The engine's `onSessionClosed` — called when a drain ends without a terminal. */
-  onSessionClosed: (sessionKey: string) => Promise<void>
-  /** The engine's `taskForSession` — used to attribute a delegated run's mission spend. */
+  onSessionClosed: (sessionKey: string, run: RunStamp) => Promise<void>
+  /** The engine's `taskForSession`, used to attribute a delegated run's mission
+   *  spend, as framing's second witness, and by the start gate to check that a
+   *  task run's session still holds its task. */
   taskForSession: (sessionKey: string) => string | null
+  /** The engine's `execForSession`: the execution row of the run a session is doing
+   *  for its task. Read at deliver time, next to the run's task, so the drain records
+   *  the run's cost on its own row even after a Stop or the watchdog closed it. */
+  execForSession: (sessionKey: string) => string | null
+  /** The host's Stop generation, bumped by stop() and dispose(). A delivery made
+   *  before a bump never starts after it, because stop() only aborts runs already
+   *  in the abort map. Required so the production wiring cannot omit it. */
+  stopGen: () => number
   /** The team's reduce point. Read fresh (membership changes), and the ONLY thing
    *  that decides whether a turn is framed as the lead's — being the leader is a
    *  property of the agent, not of whether a task happens to still be tracked. */
@@ -142,7 +157,8 @@ export interface ServerDeliverDeps {
    *  patch). Optional + fire-and-forget. */
   publishStatus?: (agentId: string, status: 'running' | 'idle' | 'error') => void
   /** TEST-ONLY seam: build the adapter for an agent directly, bypassing the DB
-   *  runtime lookup + the real driver factory + the home mutex. Production OMITS
+   *  runtime lookup + the real driver factory. An injected adapter whose caps
+   *  declare a persistent home still takes the home mutex. Production OMITS
    *  it → the real runtime-resolution path below runs byte-identically. Mirrors the
    *  `makeAdapter` injection in dispatchChatTurn / runTaskOnRuntime. */
   makeAdapterForAgent?: (agentId: string) => RuntimeAdapter | null
@@ -189,6 +205,8 @@ function missionRootId(db: ClawbooDb, taskId: string): string {
 /** Build the engine's `deliver(targetSessionKey, targetAgentId, message)`. */
 export function createServerDeliver(deps: ServerDeliverDeps) {
   const { db, teamId, mcpBaseUrl, nudge, abortMap, onEvent, onSessionClosed, taskForSession } = deps
+  const execForSession = deps.execForSession
+  const stopGen = deps.stopGen
   const leaderAgentId = deps.leaderAgentId
   const persistTurn = deps.persistTurn
   const publishDelta = deps.publishDelta
@@ -269,6 +287,27 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
   }
 
   /**
+   * Wind down a run the start gate refused after it began. It runs while this
+   * job still holds the agent's lock, and none of its events reach the engine,
+   * the chat or the abort map. The stream is taken BEFORE the abort so an adapter
+   * that subscribes on call does not miss the aborted frame.
+   */
+  async function discardRun(adapter: RuntimeAdapter, run: RunHandle): Promise<void> {
+    try {
+      const stream = adapter.events(run) as AsyncIterable<RuntimeEvent>
+      await adapter.abort(run).catch(() => undefined)
+      for await (const ev of withIdleTimeout(stream, {
+        idleMs: IDLE_ABORT_GRACE_MS,
+        onIdle: () => undefined,
+      })) {
+        if (ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)) break
+      }
+    } catch {
+      // Best-effort: the run was never handed to anyone, so there is nothing to fail.
+    }
+  }
+
+  /**
    * Drain ONE run's event stream into the engine. Reuses the browser `consume`
    * loop's contract with two deliberate per-run adaptations:
    *  • It MUST `break` on the run's terminal — the native adapter's `events()`
@@ -301,6 +340,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
        *  next turn starts fresh instead of looping through identical failures
        *  (codex `exec resume <unknown-id>` is a hard exit-1). */
       resumeAttempted?: boolean
+      /** May this run's reply reach the team chat? Fixed at deliver time. */
+      chatVisible: boolean
+      /** What the run was delivered as, handed back to the engine with each event. */
+      stamp: RunStamp
+      /** The execution row this run records its cost on, read at deliver time; null
+       *  for a turn that runs no task. */
+      execId: string | null
+      /** The agent's configured model, used to price an estimate when the run's cost
+       *  events name none. */
+      model: string | null
     },
   ): Promise<void> {
     let sawTerminal = false
@@ -309,19 +358,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // semantics). The committed turn (persistTurn on `done`) stays the source of
     // truth; this is the ephemeral "type it out live" channel.
     let acc = ''
-    // The run's total cost (USD), accumulated for BOTH the budget ledger AND the task
-    // (board card / drawer). Native sums its real `cost` events here; a runtime that
-    // reports no USD (OpenClaw's Gateway, Codex, Hermes) gets a char-based ESTIMATE on
-    // the terminal (only when nothing real was summed) so the card + cap aren't stuck at
-    // $0. Written to the task via updateTaskFields on the terminal below.
-    let runCostUsd = 0
-    // Is this run a DELEGATED-CHILD board task, or a leader / user-facing turn? The
-    // engine sets `sessionToTask` BEFORE it calls deliver, so the mapping is present
-    // for the whole drain (completeForSession, which forgets it, runs on the terminal
-    // AFTER this loop). A delegated child neither STREAMS nor COMMITS into the chat
-    // timeline — its progress + output live on its BoardTaskCard. Only a leader /
-    // user-facing turn (no task) belongs in chat. Capturing once avoids a per-delta
-    // Map.get and keeps the two gates below consistent.
+    // Visibility is decided from why the run was delivered, fixed at deliver time,
+    // never from the session map at drain start. That map was stale in both
+    // directions: a task run whose mapping was dropped before it started streamed
+    // into chat, and a person's reply on a session holding an adopted task was
+    // hidden. A delegated child or a follow-up neither STREAMS nor COMMITS into the
+    // chat timeline; its output lives on its BoardTaskCard.
     //
     // NOTE the retired second gate: a leader DELEGATION turn (one that calls the
     // `delegate` tool) used to be suppressed from chat too. That made streamed
@@ -331,9 +373,45 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // as durable BoardTaskCards; a pure-delegation turn with no prose strips to
     // nothing client-side and is dropped there, exactly like the OpenClaw leader's
     // `<delegate>` XML turn always was).
+    //
+    // The session's task, read once, is runtime attribution only (the terminal's
+    // updateTaskFields below). The engine forgets it in completeForSession, which
+    // runs on the terminal AFTER that write.
     const runTaskId = taskForSession(sessionKey)
-    const isTaskRun = runTaskId != null
-    const chatVisible = !isTaskRun
+    const chatVisible = obs.chatVisible
+    // What the run cost, priced once when it ends (done, a fatal error, or a stream
+    // that died with no terminal): reported USD first, then usage tokens, then a
+    // character estimate for a run that reported neither (OpenClaw's Gateway, a
+    // failed CLI run), so the budgets are never stuck at $0. The cost lands on the
+    // run's own execution row, `obs.execId`, which is fixed at deliver time because
+    // a Stop or the watchdog can close that row before this drain ends.
+    const costTally = createRunCostTally()
+    let costSettled = false
+    const settleRunCost = (outputText: string): void => {
+      if (costSettled) return
+      costSettled = true
+      try {
+        const cost = costTally.settle({
+          model: obs.model,
+          inputChars: obs.contextChars + obs.message.length,
+          outputChars: outputText.length,
+        })
+        // Only the part no cost event already charged. The run is at its end, so a
+        // cap this crosses has no run left to stop.
+        if (cost.unbilledUsd > 0) recordSpendForRun(sessionKey, agentId, cost.unbilledUsd)
+        if (obs.execId) {
+          recordExecutionUsage(db, obs.execId, {
+            costUsd: cost.costUsd,
+            costSource: cost.costSource,
+            inputTokens: cost.inputTokens,
+            outputTokens: cost.outputTokens,
+            runtime: obs.runtime,
+          })
+        }
+      } catch {
+        /* best-effort: a ledger write never breaks the drain */
+      }
+    }
     // Did this run publish any live delta / commit its turn? Drives the
     // stream-without-commit belt at the terminal: a turn that STREAMED but persisted
     // nothing publishes one CLEARING delta (empty text) so the client's lingering
@@ -364,6 +442,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     /** The recorded reason, from wherever it was set. */
     const takeServerAbortReason = (): string | null =>
       abortMap.get(sessionKey)?.serverAbortReason ?? serverAbortReason
+    /**
+     * Does this run still own the session's queue slot? A Stop resets the queue,
+     * and from then on the slot belongs to whatever was delivered after it, so a
+     * run delivered before the Stop marks the session neither busy nor idle.
+     */
+    const ownsSlot = (): boolean => obs.stamp.stopGen === stopGen()
+    /**
+     * Evict this run's own abort-map entry, never one that replaced it: a run
+     * started after a Stop or a wedge abort can register under the same session
+     * key while this one is still winding down.
+     */
+    const evictOwnEntry = (): void => {
+      if (abortMap.get(sessionKey)?.run === run) abortMap.delete(sessionKey)
+    }
 
     // Drain idle guard: a wedged adapter iterator must not hang this drain (and
     // with it the agent's home mutex + the engine's view of the session) forever.
@@ -387,6 +479,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           }
         },
       })) {
+        costTally.observe(ev)
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
           // Tolerate BOTH delta conventions so the running text is never garbled:
           // native emits INCREMENTAL chunks, but the OpenClaw adapter emits CUMULATIVE
@@ -404,10 +497,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           }
         }
         if (ev.kind === 'cost' && ev.costUsd != null && ev.costUsd > 0) {
-          // Real per-turn USD (native): sum it for the task ledger, then run the budget
+          // Real per-turn USD (native): charge it live, then run the budget
           // kill-switch — a paused CAP budget aborts the run; the resulting `done:aborted`
           // flows through this same loop (the engine fails the task).
-          runCostUsd += ev.costUsd
           if (recordSpendForRun(sessionKey, agentId, ev.costUsd)) {
             markServerAbort('the run was stopped by a budget cap')
             await adapter.abort(run).catch(() => undefined)
@@ -434,21 +526,6 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           if (chatVisible && !doneText.trim()) {
             const killed = takeServerAbortReason()
             if (killed) deps.persistMeta?.(sessionKey, runFailureText(killed, obs.runtime))
-          }
-          // Cost fallback for a runtime that reports no USD (OpenClaw's Gateway, Codex,
-          // Hermes): a char-based ESTIMATE so the task ledger + budget cap aren't stuck
-          // at $0. Only when nothing real was summed (native already has runCostUsd > 0).
-          if (runCostUsd === 0) {
-            const usd = estimateRunCostUsd({
-              model: null,
-              inputChars: obs.contextChars + obs.message.length,
-              outputChars: doneText.length,
-            })
-            if (usd > 0) {
-              runCostUsd += usd
-              // The run is already at its terminal — no run to abort even if this pauses.
-              recordSpendForRun(sessionKey, agentId, usd)
-            }
           }
           // Leader continuity: persist THIS turn's harness session id so the NEXT team
           // turn resumes it. Done HERE (on the terminal, BEFORE markIdle) so the next
@@ -510,28 +587,31 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // own entry while we're still awaiting `onEvent(done)` below. A delete
           // left until after that await would evict the SUCCESSOR's entry, making
           // the in-flight run invisible to `stop()` and the wedge abort.
-          abortMap.delete(sessionKey)
-          nudge.markIdle(sessionKey)
+          evictOwnEntry()
+          if (ownsSlot()) nudge.markIdle(sessionKey)
           // Left-pane liveness: the run is over. `error` only on a fatal error — a
           // clean `done` (success OR aborted) reads as back-to-idle.
           publishStatus?.(agentId, ev.kind === 'error' ? 'error' : 'idle')
-          // Persist the run's cost + REAL runtime onto its task so the board card +
-          // drawer show them: the engine creates the task at cost 0 with a hardcoded
-          // `assigneeRuntime: 'openclaw'`, and nothing else writes them. Delegated-child
-          // task runs only; best-effort — a ledger write must never break the drain.
+          // Price the run now, before the engine's close (onEvent below), on the text
+          // it produced: the committed reply on a `done`, the partial on a fatal error.
+          settleRunCost(ev.kind === 'done' ? (acc.trim() ? acc : (ev.summary ?? '')) : acc)
+          // Persist the run's REAL runtime onto its task so the board card + drawer
+          // show it: the engine creates the task with a hardcoded
+          // `assigneeRuntime: 'openclaw'`, and nothing else writes it. The run's cost
+          // is not the task's to hold; the run ledger records it. Delegated-child task
+          // runs only; best-effort, because a ledger write must never break the drain.
           if (runTaskId) {
             try {
               updateTaskFields(db, runTaskId, {
-                costUsd: runCostUsd,
                 ...(obs.runtime ? { assigneeRuntime: obs.runtime } : {}),
               })
             } catch {
               /* non-fatal */
             }
           }
-        } else nudge.markBusy(sessionKey)
+        } else if (ownsSlot()) nudge.markBusy(sessionKey)
         try {
-          await onEvent(sessionKey, ev)
+          await onEvent(sessionKey, ev, obs.stamp)
         } catch (err) {
           // A single bad event must not kill the observer — but it must not be
           // invisible either: this is the engine refusing an event, which is how
@@ -568,11 +648,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // Ordered last: a partial committed just above replaces the StreamingCard on
       // its own, so only a turn that truly committed nothing needs clearing.
       if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
-      abortMap.delete(sessionKey)
-      nudge.markIdle(sessionKey)
+      evictOwnEntry()
+      if (ownsSlot()) nudge.markIdle(sessionKey)
       publishStatus?.(agentId, 'idle')
+      // A dead stream still cost something. Priced before the engine fails the task,
+      // whose cost-less close leaves this recorded cost in place.
+      settleRunCost(acc)
       try {
-        await onSessionClosed(sessionKey)
+        await onSessionClosed(sessionKey, obs.stamp)
       } catch (err) {
         // Best-effort, but logged: this is the path that fails an in-flight
         // delegation when its observer dies, so a throw here leaves the leader
@@ -611,6 +694,35 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       leaderAgentId: leaderAgentId(),
       hasBoardTask: isTaskRun,
     })
+    // The stamp: what this delivery IS, fixed now. The stop generation it was made
+    // under, the task a delegation or assignment runs (the engine maps the session
+    // immediately before it calls deliver, with no await between), and whether the
+    // turn is a follow-up report. Chat visibility follows from the origin alone.
+    const deliveredGen = stopGen()
+    const runTaskId =
+      origin.kind === 'delegation' || origin.kind === 'assignment'
+        ? taskForSession(targetSessionKey)
+        : null
+    // The run's own execution row, read with its task: the engine opens it right
+    // before it calls deliver, and forgets it when the run ends.
+    const runExecId = runTaskId !== null ? execForSession(targetSessionKey) : null
+    const reportForTaskId = framing.reportsForTask ?? null
+    const chatVisible = isChatVisible(origin, framing)
+    const stamp: RunStamp = { reportForTaskId, stopGen: deliveredGen }
+    // A follow-up holds work too: it neither resumes the agent's user-facing
+    // session nor overwrites its pointer.
+    const holdsWork = isTaskRun || reportForTaskId !== null
+    // The start gate. A delivery may start only while the stop generation has not
+    // moved and, for a task run, the engine still maps the session to that task.
+    // A refused start settles as delivered to nobody, never as a failure, because
+    // the engine's catch would fail whatever task holds the session now. After a
+    // Stop the queue is already reset and must not be marked idle. After a
+    // release the slot is this delivery's own, so queued successors must flush.
+    const refusal = (): 'stopped' | 'released' | null => {
+      if (stopGen() !== deliveredGen) return 'stopped'
+      if (runTaskId !== null && taskForSession(targetSessionKey) !== runTaskId) return 'released'
+      return null
+    }
     // Volatile-tier team context: rules + the user's self-intro + the live roster
     // (the single choke point covers the user's leader turn AND every delegated
     // child turn). See `contextPreamble.ts`.
@@ -679,6 +791,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       targetSessionKey,
       () =>
         new Promise<void>((started, failStart) => {
+          const settleRefused = (why: 'stopped' | 'released'): void => {
+            if (why === 'released') nudge.markIdle(targetSessionKey)
+            started()
+          }
           // Rendered HERE: this runs when the queue releases the delivery, so the
           // context reflects state at start time rather than at enqueue time.
           const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
@@ -697,6 +813,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               }
             | undefined
           const resolvedRuntime = row?.runtime ?? null
+          // The model a cost estimate is priced at when the run's cost events name
+          // none. Native names its real model on every cost event, and an OpenClaw
+          // agent's model lives in the Gateway, so only a coding runtime's configured
+          // model is read. Computed here so the test seam gets it too.
+          const configuredModel =
+            resolvedRuntime && resolvedRuntime !== NATIVE_RUNTIME && resolvedRuntime !== 'openclaw'
+              ? (parseCodingModelConfig(row?.execConfig ?? null)?.model ?? null)
+              : null
 
           let adapter: RuntimeAdapter
           let homeKind = 'ephemeral'
@@ -705,9 +829,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // drain's stale-pointer self-heal on a failed resumed run.
           let resumeHandle: string | null = null
           if (makeAdapterForAgent) {
-            // Test path: the adapter is injected; the home mutex is bypassed. The
-            // connected mutex still engages when a seeded row + a connected-caps adapter
-            // opt in (so the connected serialize/cost/obs path is unit-testable).
+            // Test path: the adapter is injected. Its caps still pick the mutex: a
+            // persistent home takes the home mutex, and the connected mutex engages
+            // when a seeded row + a connected-caps adapter opt in (so the connected
+            // serialize/cost/obs path is unit-testable).
             const injected = makeAdapterForAgent(targetAgentId)
             if (!injected) {
               failStart(new Error(`no adapter for agent ${targetAgentId}`))
@@ -731,7 +856,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               runtime: resolvedRuntime,
               homeDir,
               isTeamSession: isTeamSessionKey(targetSessionKey),
-              isTaskRun,
+              isTaskRun: holdsWork,
             })
               ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId)) || null
               : null
@@ -779,14 +904,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               // turn. The native harness reloads the persisted transcript from the
               // per-identity home when ctx.resume is set. Empty pointer (first turn /
               // after a reset) → a fresh session. Gated to the native leader / user-facing
-              // team session — a delegated child (isTaskRun) is excluded. Mirrors
-              // driveAgentChat, but keyed per-(agent, team) to avoid Boo-Zero cross-team
-              // / 1:1 collision (see nativeTeamSession.ts).
+              // team session; a delegated child or a follow-up (holdsWork) is excluded.
+              // Mirrors driveAgentChat, but keyed per-(agent, team) to avoid Boo-Zero
+              // cross-team / 1:1 collision (see nativeTeamSession.ts).
               const teamResumeId = teamResumeEligible({
                 runtime,
                 homeDir,
                 isTeamSession: isTeamSessionKey(targetSessionKey),
-                isTaskRun,
+                isTaskRun: holdsWork,
               })
                 ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId)) || null
                 : null
@@ -831,7 +956,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             runtime: resolvedRuntime,
             homeDir: capturedHomeDir,
             isTeamSession: isTeamSessionKey(targetSessionKey),
-            isTaskRun,
+            isTaskRun: holdsWork,
           })
             ? nativeTeamSessionSettingKey(targetAgentId, teamId)
             : null
@@ -840,9 +965,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // AND Boo-Zero-in-N-teams (the one OpenClaw agent that spans teams).
           const connectedKey = homeKind === 'connected' && row ? connectedAgentKey(row) : null
 
+          // Set once the agent's lock is held: from then on runJob settles the
+          // delivery itself.
+          let jobRan = false
           const runJob = async (): Promise<void> => {
+            jobRan = true
             if (capturedHomeDir)
               await mkdir(capturedHomeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
+            // Gate 1: a Stop or a release may have landed while this waited on the
+            // agent's lock.
+            const before = refusal()
+            if (before) {
+              settleRefused(before)
+              return
+            }
             let run: RunHandle
             try {
               run = await adapter.start(
@@ -863,9 +999,30 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 },
               )
             } catch (e) {
+              // Gate 2: a start that threw after a Stop or a release is not a
+              // failure of whatever task holds the session now.
+              const why = refusal()
+              if (why) {
+                settleRefused(why)
+                return
+              }
               // Immediate-send failure → the engine fails the task now rather than
               // waiting out the 8-minute watchdog (the nudge un-busies the session).
               failStart(e instanceof Error ? e : new Error(String(e)))
+              return
+            }
+            // Gate 3, with no await before abortMap.set: a run refused after it
+            // began is aborted and drained silently. Nothing below runs for it, so
+            // a refused delivery consumes no inbox rows or cursor.
+            const after = refusal()
+            if (after) {
+              started()
+              await discardRun(adapter, run)
+              // A Stop during the discard reset the queue, so the slot is no
+              // longer this delivery's to free.
+              if (after === 'released' && stopGen() === deliveredGen) {
+                nudge.markIdle(targetSessionKey)
+              }
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
@@ -908,6 +1065,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               contextChars: teamContext ? teamContext.length : 0,
               resumePointerKey,
               resumeAttempted: resumeHandle != null,
+              chatVisible,
+              stamp,
+              execId: runExecId,
+              model: configuredModel,
             })
           }
 
@@ -940,6 +1101,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             : (): void => undefined
           void job()
             .catch((e: unknown) => {
+              // A lock wait that timed out never reached runJob's gates. After a
+              // Stop or a release that is a refused start too, not a failure of
+              // whatever task holds the session now.
+              if (!jobRan) {
+                const why = refusal()
+                if (why) {
+                  settleRefused(why)
+                  return
+                }
+              }
               // runJob settles `started`/`failStart` itself; this catch only guards an
               // unexpected throw before/around that so it isn't an unhandled rejection.
               failStart(e instanceof Error ? e : new Error(String(e)))

@@ -10,6 +10,7 @@ import {
   canTransition,
   isTerminal,
   ledgerAllowsAutoFire,
+  type RunCostSource,
   type TaskStatus,
 } from '@clawboo/board-core'
 import {
@@ -36,7 +37,7 @@ import {
   type DbTaskComment,
   type DbWorkspace,
 } from '../schema'
-import { immediateWrite, withWriteRetry } from './contention'
+import { immediateWrite, withWriteRetry, type BoardTx } from './contention'
 import { ancestorRowsSchema, type AncestorRow } from './schemas'
 
 export interface Scope {
@@ -642,29 +643,26 @@ export function updateStatus(
 }
 
 /** Update non-status metadata (priority / title / description). Status changes
- *  must go through `updateStatus` so the state machine is enforced. */
+ *  must go through `updateStatus` so the state machine is enforced. Cost is not a
+ *  field here: the run ledger records it (`recordExecutionUsage`). */
 export interface TaskFields {
   priority?: number
   title?: string
   description?: string | null
-  /** The run's cost (USD). The engine creates a task at cost 0; the orchestrator writes
-   *  the real/estimated run cost here so the board card + drawer show it. */
-  costUsd?: number
   /** The agent's REAL runtime. The engine hardcodes `assigneeRuntime: 'openclaw'` at
    *  create; the orchestrator corrects it to the actual runtime for the card badge. */
   assigneeRuntime?: string | null
 }
 
 export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFields): DbTask | null {
-  const patch: Partial<
-    Pick<DbTask, 'priority' | 'title' | 'description' | 'costUsd' | 'assigneeRuntime'>
-  > & { updatedAt: number } = {
+  const patch: Partial<Pick<DbTask, 'priority' | 'title' | 'description' | 'assigneeRuntime'>> & {
+    updatedAt: number
+  } = {
     updatedAt: Date.now(),
   }
   if (fields.priority !== undefined) patch.priority = fields.priority
   if (fields.title !== undefined) patch.title = fields.title
   if (fields.description !== undefined) patch.description = fields.description
-  if (fields.costUsd !== undefined) patch.costUsd = fields.costUsd
   if (fields.assigneeRuntime !== undefined) patch.assigneeRuntime = fields.assigneeRuntime
   withWriteRetry(() => db.update(tasks).set(patch).where(eq(tasks.id, taskId)).run())
   return getTask(db, taskId)
@@ -1018,6 +1016,8 @@ export function createExecutionProcess(db: ClawbooDb, input: CreateExecInput): D
     cacheRead: null,
     cacheWrite: null,
     costUsd: null,
+    costSource: null,
+    runtime: null,
     summary: null,
     runReason: input.runReason ?? null,
     error: null,
@@ -1039,6 +1039,7 @@ export interface CompleteExecOutcome {
   cacheRead?: number | null
   cacheWrite?: number | null
   costUsd?: number | null
+  costSource?: RunCostSource | null
 }
 
 /**
@@ -1063,11 +1064,15 @@ export function completeExecutionProcess(
         summary: outcome.summary ?? null,
         error: outcome.error ?? null,
         afterCommit: outcome.afterCommit ?? null,
-        inputTokens: outcome.inputTokens ?? null,
-        outputTokens: outcome.outputTokens ?? null,
-        cacheRead: outcome.cacheRead ?? null,
-        cacheWrite: outcome.cacheWrite ?? null,
-        costUsd: outcome.costUsd ?? null,
+        // The engine closes its rows without a cost, and the drain records the cost
+        // on the row separately (recordExecutionUsage), so a close must not erase
+        // fields it was not given. An explicit null still clears.
+        ...(outcome.inputTokens !== undefined ? { inputTokens: outcome.inputTokens } : {}),
+        ...(outcome.outputTokens !== undefined ? { outputTokens: outcome.outputTokens } : {}),
+        ...(outcome.cacheRead !== undefined ? { cacheRead: outcome.cacheRead } : {}),
+        ...(outcome.cacheWrite !== undefined ? { cacheWrite: outcome.cacheWrite } : {}),
+        ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
+        ...(outcome.costSource !== undefined ? { costSource: outcome.costSource } : {}),
       })
       // A terminal ledger row is IMMUTABLE: only a still-`running` exec can be
       // completed. The ledger is the dispatch pump's fire-policy input, where
@@ -1082,6 +1087,7 @@ export function completeExecutionProcess(
   ) as DbExecutionProcess[]
   const row = completedRows[0]
   if (!row) return null
+  if (outcome.costUsd != null) immediateWrite(db, (tx) => refreshTaskCostTx(tx, row.taskId))
   const t = db
     .select({ teamId: tasks.teamId })
     .from(tasks)
@@ -1096,6 +1102,68 @@ export function completeExecutionProcess(
     executorType: row.executorType,
   })
   return row
+}
+
+/**
+ * Recompute `tasks.cost_usd` from the run ledger. The column is the task's total,
+ * the sum of every run's recorded cost, kept for readers that sum tasks (fleet
+ * spend). A recompute rather than an add, so rewriting a run's cost never counts
+ * it twice. Leaves `updatedAt` alone: a cost landing is not an edit to the task.
+ */
+function refreshTaskCostTx(tx: BoardTx, taskId: string): void {
+  const r = tx
+    .select({ total: sql<number | null>`sum(${executionProcesses.costUsd})` })
+    .from(executionProcesses)
+    .where(eq(executionProcesses.taskId, taskId))
+    .get()
+  tx.update(tasks)
+    .set({ costUsd: r?.total ?? 0 })
+    .where(eq(tasks.id, taskId))
+    .run()
+}
+
+/** What one run cost, as `recordExecutionUsage` writes it onto the run's row. */
+export interface ExecutionUsage {
+  costUsd: number
+  costSource: RunCostSource
+  inputTokens?: number | null
+  outputTokens?: number | null
+  /** The runtime that actually ran (see `executionProcesses.runtime`). */
+  runtime?: string | null
+}
+
+/**
+ * Record what a run cost on its execution row, whatever the row's status, because
+ * a Stop (`markStopped`) or the idle watchdog closes the row before the run's own
+ * terminal arrives. Touches only the cost, token and runtime columns: status,
+ * completedAt, summary and error stay as the first terminal left them, which is the
+ * fire-policy invariant `completeExecutionProcess` keeps. Refreshes the task's
+ * total in the same transaction. Returns the updated row, or null when `execId`
+ * matched nothing.
+ */
+export function recordExecutionUsage(
+  db: ClawbooDb,
+  execId: string,
+  usage: ExecutionUsage,
+): DbExecutionProcess | null {
+  return immediateWrite(db, (tx) => {
+    const rows = tx
+      .update(executionProcesses)
+      .set({
+        costUsd: usage.costUsd,
+        costSource: usage.costSource,
+        ...(usage.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+        ...(usage.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+        ...(usage.runtime !== undefined ? { runtime: usage.runtime } : {}),
+      })
+      .where(eq(executionProcesses.id, execId))
+      .returning()
+      .all() as DbExecutionProcess[]
+    const row = rows[0]
+    if (!row) return null
+    refreshTaskCostTx(tx, row.taskId)
+    return row
+  })
 }
 
 /** List a task's execution-process rows (the run ledger), oldest first. */

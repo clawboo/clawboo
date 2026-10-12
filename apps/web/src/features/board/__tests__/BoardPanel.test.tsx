@@ -110,6 +110,56 @@ describe('BoardPanel', () => {
     expect(hint).toHaveTextContent(/hand a task to an agent yourself/i)
   })
 
+  it("shows each card's run cost, marks an estimate, and shows none when no run recorded one", async () => {
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            {
+              id: 't1',
+              title: 'Never ran',
+              status: 'todo',
+              runCost: { usd: null, estimated: false },
+            },
+            { id: 't2', title: 'Ran free', status: 'done', runCost: { usd: 0, estimated: false } },
+            {
+              id: 't3',
+              title: 'Ran priced',
+              status: 'done',
+              runCost: { usd: 0.02, estimated: true },
+            },
+            { id: 't4', title: 'Older server', status: 'todo', costUsd: 0 },
+            {
+              id: 't5',
+              title: 'Ran billed',
+              status: 'done',
+              runCost: { usd: 0.42, estimated: false },
+            },
+          ],
+        }),
+      ),
+    )
+    render(<BoardPanel />)
+    await screen.findAllByTestId('board-card')
+    const costOf = (title: string) =>
+      within(
+        screen.getByText(title).closest('[data-testid="board-card"]') as HTMLElement,
+      ).queryByTestId('board-card-cost')
+
+    // No run recorded a cost: the card shows nothing, rather than a $0 it never charged.
+    expect(costOf('Never ran')).toBeNull()
+    expect(costOf('Older server')).toBeNull()
+    // A runtime that reported $0 did charge nothing, so that is shown.
+    expect(costOf('Ran free')).toHaveTextContent(/^\$0\.000$/)
+    expect(costOf('Ran free')).toHaveAttribute('title', 'Cost the runtime reported')
+    expect(costOf('Ran priced')).toHaveTextContent(/^~\$0\.02 est\.$/)
+    expect(costOf('Ran priced')).toHaveAttribute(
+      'title',
+      'Estimated, not a charge the runtime reported',
+    )
+    expect(costOf('Ran billed')).toHaveTextContent(/^\$0\.42$/)
+  })
+
   it('offers a New task button in the header', async () => {
     server.use(
       http.get('/api/board', () =>

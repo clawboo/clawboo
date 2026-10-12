@@ -21,8 +21,9 @@ import type { TurnFraming } from '@clawboo/team-orchestration'
 
 import { getDb, resetDb } from '../../db'
 import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
-import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
+import { saveAgentConfig, writeNativeAgentFile } from '../../runtimes/native/agentConfigStore'
 import { buildServerTeamContext } from '../contextPreamble'
+import { LEADER_ROSTER_HEADER, ROSTER_BLOCK_MAX_CHARS } from '../teammateRoles'
 
 const LEADER_BLOCK = '[Leading this team' // shared framing (native AND coding leaders)
 const CODING_LEADER_TOOL = 'team_delegate' // the coding leader block's tool (MCP)
@@ -46,6 +47,15 @@ const USER_ASSIGNED: TurnFraming = {
   isUserAssigned: true,
   isUserFacing: false,
 }
+// A follow-up: the agent's task closed while work it delegated was still out,
+// and that work has now reported back. Neither a worker turn nor user-facing.
+const FOLLOW_UP: TurnFraming = {
+  isLeader: false,
+  isWorker: false,
+  isUserFacing: false,
+  reportsForTask: 'T1',
+}
+const FOLLOW_UP_BLOCK = '[Following up on your task'
 
 describe('buildServerTeamContext coordination blocks', () => {
   let home: string
@@ -135,6 +145,99 @@ describe('buildServerTeamContext coordination blocks', () => {
     expect(ctx).not.toContain(CODING_LEADER_TOOL)
     expect(ctx).not.toContain(WORKER_BLOCK)
     expect(ctx).not.toContain(OPENCLAW_BLOCK)
+  })
+
+  describe('the roster', () => {
+    /** The lead's roster block: the header through the end of its lines. */
+    const rosterOf = (ctx: string): string => {
+      const at = ctx.indexOf(LEADER_ROSTER_HEADER)
+      if (at < 0) return ''
+      const end = ctx.indexOf('\n\n', at)
+      return ctx.slice(at, end < 0 ? undefined : end)
+    }
+    const writeRoles = (): void => {
+      writeNativeAgentFile(
+        db,
+        'nwork',
+        'SOUL.md',
+        '# SOUL\n\n## Role\n\nFixes failing tests and ships small patches.\n\n<!-- clawboo:personality -->\nFormality: 60\n',
+      )
+      writeRuntimeAgentFile(
+        db,
+        'hlead',
+        'SOUL.md',
+        '## Role\n\nResearches markets and writes briefs.',
+      )
+    }
+
+    it('the LEADER turn lists each teammate with its runtime and role', () => {
+      writeRoles()
+      const ctx = buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? ''
+      expect(rosterOf(ctx).split('\n')).toEqual([
+        LEADER_ROSTER_HEADER,
+        '- Hermes One (Hermes): Researches markets and writes briefs.',
+        '- Coder (Clawboo Native): Fixes failing tests and ships small patches.',
+        '- OC One (OpenClaw)',
+      ])
+      expect(ctx).not.toContain('Your teammates on this team: ')
+    })
+
+    it('every other turn keeps the names-only line', () => {
+      writeRoles()
+      for (const framing of [WORKER, MENTIONED, IDLE_SYSTEM, USER_ASSIGNED]) {
+        const ctx = buildServerTeamContext(db, 'T', 'ocagent', framing) ?? ''
+        expect(ctx).toContain('Your teammates on this team: Hermes One, Boo Zero, Coder.')
+        expect(ctx).not.toContain(LEADER_ROSTER_HEADER)
+        expect(ctx).not.toContain('Fixes failing tests')
+      }
+    })
+
+    it('leaves archived teammates out of both forms', () => {
+      const now = Date.now()
+      db.insert(agents)
+        .values({
+          id: 'gone',
+          name: 'Retired Boo',
+          gatewayId: 'gone',
+          runtime: 'clawboo-native',
+          teamId: 'T',
+          archivedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      writeNativeAgentFile(db, 'gone', 'SOUL.md', '## Role\n\nUsed to review designs.')
+      expect(buildServerTeamContext(db, 'T', 'nlead', LEADER)).not.toContain('Retired Boo')
+      expect(buildServerTeamContext(db, 'T', 'nwork', WORKER)).not.toContain('Retired Boo')
+    })
+
+    it('keeps the lead roster within budget without dropping a teammate', () => {
+      const now = Date.now()
+      for (let i = 0; i < 20; i++) {
+        const id = `x${String(i).padStart(2, '0')}`
+        db.insert(agents)
+          .values({
+            id,
+            name: `Specialist ${i}`,
+            gatewayId: id,
+            runtime: 'clawboo-native',
+            teamId: 'T',
+            createdAt: now + 1000 + i,
+            updatedAt: now,
+          })
+          .run()
+        writeNativeAgentFile(
+          db,
+          id,
+          'SOUL.md',
+          `## Role\n\nOwns area ${i} of the product, end to end.`,
+        )
+      }
+      const roster = rosterOf(buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? '')
+      expect(roster.length).toBeGreaterThan(0)
+      expect(roster.length).toBeLessThanOrEqual(ROSTER_BLOCK_MAX_CHARS)
+      for (let i = 0; i < 20; i++) expect(roster).toContain(`- Specialist ${i} (Clawboo Native)`)
+    })
   })
 
   it('a SCHEDULED leader turn says which routine sent it and not to wait on the user', () => {
@@ -280,6 +383,26 @@ describe('buildServerTeamContext coordination blocks', () => {
     expect(ctx).not.toContain(ABOUT_USER)
     expect(ctx).not.toContain(LEADER_BLOCK)
     expect(ctx).not.toContain(WORKER_BLOCK)
+  })
+
+  it('a FOLLOW-UP turn gets the follow-up block, and no worker, leader or user framing', () => {
+    // It reports on a closed task to whoever handed it out. It is not executing
+    // that task any more, it is not leading, and nobody in the chat is reading it.
+    for (const agentId of ['nwork', 'hlead']) {
+      const ctx = buildServerTeamContext(db, 'T', agentId, FOLLOW_UP) ?? ''
+      expect(ctx).toContain(FOLLOW_UP_BLOCK)
+      expect(ctx).not.toContain(ABOUT_USER)
+      expect(ctx).not.toContain(LEADER_BLOCK)
+      expect(ctx).not.toContain(WORKER_BLOCK)
+    }
+    // OpenClaw keeps its delegate-protocol block alongside it.
+    const oc = buildServerTeamContext(db, 'T', 'ocagent', FOLLOW_UP) ?? ''
+    expect(oc).toContain(OPENCLAW_BLOCK)
+    expect(oc).toContain(FOLLOW_UP_BLOCK)
+    // Any other system turn carries no follow-up block.
+    expect(buildServerTeamContext(db, 'T', 'nwork', IDLE_SYSTEM) ?? '').not.toContain(
+      FOLLOW_UP_BLOCK,
+    )
   })
 
   it('coding-runtime WORKER turn: worker guardrail only — no leader block', () => {

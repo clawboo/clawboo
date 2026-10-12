@@ -3,7 +3,7 @@
 // (b) validating raw recursive-CTE results at runtime (clawboo rule: never trust
 // TS generics over raw-SQL output).
 
-import { TASK_STATUSES, type TaskStatus } from '@clawboo/board-core'
+import { RUN_COST_SOURCES, TASK_STATUSES, type TaskStatus } from '@clawboo/board-core'
 import { z } from 'zod'
 
 // Cast to a non-empty tuple of TaskStatus so `z.infer` yields the union (not
@@ -76,6 +76,9 @@ export const completeExecutionBody = z.object({
   cacheRead: z.number().int().optional(),
   cacheWrite: z.number().int().optional(),
   costUsd: z.number().optional(),
+  // No default: a cost sent without a source is stored with a null source, which
+  // the board shows as an estimate.
+  costSource: z.enum(RUN_COST_SOURCES).optional(),
 })
 export type CompleteExecutionBody = z.infer<typeof completeExecutionBody>
 

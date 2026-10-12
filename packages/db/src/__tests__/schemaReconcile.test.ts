@@ -563,6 +563,31 @@ describe('reconcileSchema: an existing database is brought up to the current sch
     expect(rowCount(db, 'agents')).toBe(1)
   })
 
+  it('adds the run ledger cost source and runtime to a database that predates them', () => {
+    seedEveryTable(db)
+    db.$client.prepare(`UPDATE execution_processes SET cost_usd = 0.25`).run()
+    expect(tryRemoveColumn(db, 'execution_processes', 'runtime')).toBe(true)
+    expect(tryRemoveColumn(db, 'execution_processes', 'cost_source')).toBe(true)
+
+    const { added } = ensureSchema(db)
+
+    expect(added).toEqual(
+      expect.arrayContaining([
+        { table: 'execution_processes', column: 'runtime' },
+        { table: 'execution_processes', column: 'cost_source' },
+      ]),
+    )
+    expect(columnsOf(db, 'execution_processes')).toEqual(
+      expect.arrayContaining(['runtime', 'cost_source']),
+    )
+    // The run recorded before the upgrade keeps its cost, with no source or runtime.
+    const row = db.get(
+      sql`SELECT cost_usd AS cost, cost_source AS source, runtime FROM execution_processes`,
+    ) as { cost: number; source: string | null; runtime: string | null }
+    expect(row).toEqual({ cost: 0.25, source: null, runtime: null })
+    expect(rowCount(db, 'execution_processes')).toBe(1)
+  })
+
   it('creates a table that is missing entirely rather than trying to alter it', () => {
     db.$client.prepare('DROP TABLE team_chat').run()
     expect(tableNames(db)).not.toContain('team_chat')

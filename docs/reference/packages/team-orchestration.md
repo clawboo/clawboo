@@ -27,12 +27,13 @@ The engine is deps-injected: the board, delivery, narration, and cost all arrive
 
 Key constants, each a load-bearing invariant:
 
-| Name                         | Value    | Why                                                                                                                                                                                                    |
-| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `MAX_SPAWN_DEPTH`            | `2`      | Bounds the delegation tree via the board ancestor chain, enforced in code rather than by prompt. An alias for `DEFAULT_MAX_DEPTH` in `@clawboo/governance`, so it cannot drift from the runner's copy. |
-| `REFLECT_WINDOW_MS`          | `3000`   | Batches completed tasks into one `[Task Update]` to the leader, the single reduce point.                                                                                                               |
-| `DELEGATION_IDLE_TIMEOUT_MS` | `480000` | The 8-minute idle watchdog: a delegate that goes truly silent fails rather than hanging. Refreshed on every observed event, so a slow-but-working agent never trips it.                                |
-| `MAX_DELEGATION_FAILURES`    | `3`      | A per-`(agent, task)` loop breaker; reset on success.                                                                                                                                                  |
+| Name                         | Value     | Why                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MAX_SPAWN_DEPTH`            | `2`       | Bounds the delegation tree via the board ancestor chain, enforced in code rather than by prompt. An alias for `DEFAULT_MAX_DEPTH` in `@clawboo/governance`, so it cannot drift from the runner's copy.                                                                                                                                                                                     |
+| `REFLECT_WINDOW_MS`          | `3000`    | Batches completed tasks into one `[Task Update]` to the leader, the single reduce point.                                                                                                                                                                                                                                                                                                   |
+| `DELEGATION_IDLE_TIMEOUT_MS` | `480000`  | The 8-minute idle watchdog: a delegate that goes truly silent fails rather than hanging. Refreshed on every observed event, so a slow-but-working agent never trips it.                                                                                                                                                                                                                    |
+| `PENDING_START_TIMEOUT_MS`   | `1440000` | The 24-minute idle allowance while a delegation's run has not started yet, because it is waiting behind another run on the agent's home or connection lock (the same value as `OPEN_TOOL_CALL_TIMEOUT_MS`). The host bounds that wait with `HOME_MUTEX_ACQUIRE_MS` (10 minutes by default), so this only catches a start that never settles. The idle window restarts when the run starts. |
+| `MAX_DELEGATION_FAILURES`    | `3`       | A per-`(agent, task)` loop breaker; reset on success.                                                                                                                                                                                                                                                                                                                                      |
 
 ### The board seam (`boardClient.ts`)
 
@@ -54,13 +55,29 @@ The matchers are deliberately **drift-tolerant**: the reliable anchor is the clo
 
 ### Reflection (`taskUpdate.ts`)
 
-`buildTaskUpdateMessage(items)` renders the batched leader stimulus. `TaskUpdateOutcome` is `'done' | 'error' | 'aborted' | 'timeout' | 'max_turns'`; a non-`done` outcome renders as a "did not complete" entry, so the leader is told to decide rather than wait.
+`buildTaskUpdateMessage(items, outstanding?, opts?)` renders the batched leader stimulus. `TaskUpdateOutcome` is `'done' | 'error' | 'aborted' | 'timeout' | 'max_turns'`; a non-`done` outcome renders as a "did not complete" entry, so the leader is told to decide rather than wait.
+
+`outstanding` (`OutstandingDelegation[]`) adds one "Still outstanding" header line naming work that has not reported yet, so a partial batch is not read as the complete picture. The engine fills it with the recipient's own unfinished delegations and with any work still running under a task the batch reports as finished, whose results arrive later through a follow-up.
+
+`opts.followUp` (`{ title? }`, from `TaskUpdateOptions`) frames the envelope as a follow-up: the recipient delegated these tasks while on a task that has since closed (named by `title` when known), so its reply is not shown to the user but recorded on that task and passed to whoever gave it the task. The engine sets it only for a recipient that is not the team lead. An omitted or empty `outstanding` or `opts` renders nothing, so an existing call is byte-identical.
 
 ### Turn origin (`turnOrigin.ts`)
 
-`TurnOrigin` is `{ kind: 'human' } | { kind: 'delegation'; fromAgentId } | { kind: 'system' }`, stamped by whoever asks for a turn and passed as `deliver`'s fourth argument. It is required rather than inferred: the host used to work out whether a turn was a delegated worker's or the user-facing leader's by asking the engine whether the session still held a task, and that answer goes stale the moment `completeForSession` forgets the session.
+`TurnOrigin` is stamped by whoever asks for a turn and passed as `deliver`'s fourth argument. It is one of:
 
-`classifyTurn({ origin, targetAgentId, leaderAgentId, hasBoardTask })` returns a `TurnFraming` of three independent booleans: `isWorker` (executing a delegated task), `isLeader` (the team's reduce point, a property of who the agent is), and `isUserFacing` (this turn's reply reaches the human, so it may carry the user's self-intro). `HUMAN_TURN` and `SYSTEM_TURN` are singletons for the two payload-free variants. `schedule` is deliberately not a variant: routines dispatch through their own path and never reach `deliver`.
+- `{ kind: 'human' }`: a person typed into team chat, to the lead or to a specialist they @mentioned.
+- `{ kind: 'delegation'; fromAgentId }`: a teammate delegated this task. `fromAgentId` is the delegator, the reduce point its result reports to, or `null` when the engine could not attribute one.
+- `{ kind: 'assignment' }`: a person assigned this board task to the agent directly (the board's New task dialog, an explicit assignment, a retry). Its result goes on the task card; no teammate is waiting on it.
+- `{ kind: 'system'; forTaskId? }`: Clawboo itself, a batched `[Task Update]`. `forTaskId`, present only when set, marks a follow-up: the recipient delegated this work while on that task, which has since closed. The engine never sets it for the team lead.
+- `{ kind: 'schedule'; routineName }`: a routine the person scheduled posted this into team chat on their behalf. It frames like a human turn, but nobody is necessarily watching.
+
+The origin is required rather than inferred: the host used to work out whether a turn was a delegated worker's or the user-facing leader's by asking the engine whether the session still held a task, and that answer goes stale the moment `completeForSession` forgets the session. `HUMAN_TURN`, `SYSTEM_TURN` and `ASSIGNMENT_TURN` are singletons for the payload-free variants.
+
+`classifyTurn({ origin, targetAgentId, leaderAgentId, hasBoardTask })` returns a `TurnFraming` of three independent booleans: `isWorker` (executing a delegated or person-assigned task), `isLeader` (the team's reduce point, a property of who the agent is), and `isUserFacing` (this turn's reply reaches the human, so it may carry the user's self-intro). Three optional fields are present only when they apply: `isUserAssigned` on a person-assigned task, `scheduledRoutine` (the routine's name) on a scheduled turn that is not a worker's, and `reportsForTask` on a follow-up, a `system` origin carrying `forTaskId` delivered to anyone but the lead. A follow-up is none of worker, leader or user-facing, even when the agent holds a task by the time it runs.
+
+`isChatVisible(origin, framing)` answers whether a turn's reply may reach the team chat. It is decided from why the turn was delivered, never from whether the session maps a task when the run starts: `human` and `schedule` are visible, `system` is visible unless the framing has `reportsForTask`, and `delegation` and `assignment` never are. It must never be derived from `isUserFacing`, because a person's @mention to a worker holding a task is framed as a worker turn but is still a reply they asked for.
+
+`RunStamp` (`{ reportForTaskId, stopGen }`) is what a run was delivered as, fixed at delivery: the framing's `reportsForTask` (or `null`) and the host's stop generation at that moment. The host hands it back to the engine with each of the run's events, as the optional third argument of `onEvent(sessionKey, event, run?)` and the second of `onSessionClosed(sessionKey, run?)`. A follow-up's terminal is then recorded on its task and never treated as the session's task run, and a run delivered before a Stop starts no new work. Omitting the stamp (a direct call) means neither.
 
 ### Turn envelope (`turnEnvelope.ts`)
 
@@ -78,7 +95,7 @@ Section membership is clawboo's decision, taken from provenance (the mailbox row
 
 ### The contract suite (`./contract`)
 
-`runCascadeContract(harness)` exports the 59 cascade scenarios (stop-clean-release, the idle watchdog and its open-tool-call allowance, `sessionToTask` 1:1 serialize-don't-orphan, reflect batching, the fan-out cap, plan-dep cancel-on-fail, loop breakers, dedupe, claim-409-never-retried, detach-on-release, `markStopped`, and the pump's ledger fire policy). `CascadeBoard` keeps scenarios board-agnostic.
+`runCascadeContract(harness)` exports the 92 cascade scenarios (stop-clean-release, the idle watchdog with its open-tool-call and pending-start allowances, `sessionToTask` 1:1 serialize-don't-orphan, reflect batching, the fan-out cap, plan-dep cancel-on-fail, loop breakers, dedupe, claim-409-never-retried, detach-on-release, `markStopped`, the pump's ledger fire policy, follow-ups on closed tasks, and work delivered before a Stop). `CascadeBoard` keeps scenarios board-agnostic.
 
 It runs against **both** the in-package `FakeBoard` (proving the cascade logic) and the real `serverBoardClient` over SQLite (proving the invariants hold against the real state machine), so a FakeBoard-vs-real divergence is caught.
 

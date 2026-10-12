@@ -61,6 +61,10 @@ Four consequences worth carrying with those numbers:
 - **Cached prompt tokens are priced as full input.** There is no cached-token accounting on either path, so a long conversation whose prompt is mostly a cache hit is costed as though every token were sent fresh. Read the dollar figure as an upper bound, not as a bill.
 - **Prices are matched on the model name.** The table is checked for an exact name, then for a case-insensitive substring match against the same keys, and a name matching neither is priced at a default rate. A record whose model is the literal `unknown` therefore gets that default rate, so both its count and its price are guesses.
 
+### What one task cost
+
+For a dollar figure per task, open the [Board](/using/board). Each card shows what the task's runs cost, summed from its execution ledger, and the task's drawer shows the same total to four decimals beside each run's own cost. A figure marked `~$0.02 est.` is at least partly an estimate: the runtime reported no charge for a run, so Clawboo priced it from the run's token usage, or from the length of its prompt and reply when there was no usage. A card shows no cost until a run has recorded one.
+
 ## Setting a USD budget
 
 Open **Settings**, then **Governance** under the Insights group. The toolbar shows **Governance** and a `N budgets` pill. The **Budgets** section is where you create, raise, and resume budgets.

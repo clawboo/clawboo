@@ -106,7 +106,7 @@ Each task is a card showing its title plus a row of badges:
 - **Verifying**: shown on an `in_review` task while its verification runs.
 - **Runtime badge**: the task's `assigneeRuntime` (the [runtime](/appendices/glossary) that owns the work), defaulting to `openclaw` when unset.
 - **Verification badge**: present only once a [verification](/concepts/verification) verdict is stored. The card parses the task's `verification` JSON and renders the verdict: `pass` (green), `fail` (red), or `debt` for `completed_with_debt` (amber).
-- **Cost**: the task's `costUsd`, shown only when a cost is recorded. An exactly-zero cost reads `$0.000`; a sub-cent cost keeps four decimals (`$0.0004`) so a real charge is never rounded away; a cost of one cent or more shows cents (`$0.42`).
+- **Cost**: what every run of the task cost, summed from its [execution ledger](#execution-ledger) (the task's `runCost`). It is shown only once a run has recorded a cost, so a task that never ran, or whose only run was stopped before it priced itself, shows none. An exactly-zero cost reads `$0.000`; a sub-cent cost keeps four decimals (`$0.0004`) so a real charge is never rounded away; a cost of one cent or more shows cents (`$0.42`). A figure marked `~$0.02 est.` is at least partly an estimate: the runtime reported no charge for a run, so Clawboo priced it from the run's token usage, or from the length of its prompt and reply when there was no usage. Hover the figure to see which kind it is.
 - **Sub badge**: a "sub" marker when the task has a `parentTaskId` (it was spawned by a delegation).
 
 Click any card to open its detail drawer.
@@ -137,7 +137,7 @@ The task's description, when it says more than the title: for a task you gave an
 
 ### Overview
 
-The task's core fields: **Status**, **Agent** (by name: the one working it, or the one it is bound to while it waits), **Team**, **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (`costUsd` to four decimals), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
+The task's core fields: **Status**, **Agent** (by name: the one working it, or the one it is bound to while it waits), **Team**, **Runtime** (`assigneeRuntime`, default `openclaw`), **Cost** (the same run total as the card, to four decimals and with the same `est.` marker, or "None recorded" when no run recorded a cost), and **Parent** (a truncated `parentTaskId`, shown only for subtasks).
 
 **Status** is an inline editor, not just a label: a dropdown that offers only the transitions the [state machine](/concepts/the-board) permits from the current status (minus **In review**, the automated verification step, which is never a manual choice) (so it never lets you pick a move the server would reject), writes through `PATCH /api/board/:taskId`, and updates optimistically, rolling back and toasting if the write is refused, with the message naming the cause (an illegal transition vs. the verification gate). A committed change also moves the card to its new column on the board immediately rather than waiting for the five-second poll; it goes through the same shared commit path as [drag-and-drop](#moving-a-task-by-drag-and-drop), so a read already in flight can't snap the card back. Releasing a task to **To do** additionally clears its assignee, runtime, and stored verdict, so the card's verification badge disappears and its runtime badge falls back to `openclaw`, matching what the server writes. Terminal tasks (`done` / `cancelled`) have no legal moves, so the control locks.
 
@@ -160,7 +160,7 @@ A task with no worktree (research/review tasks, or work not yet provisioned) rea
 
 ### Execution ledger
 
-Every spawned run for the task (`GET /api/board/:taskId/executions`), oldest first. Each row shows the executor (`executorType`), the run's status, its cost, and its token counts (`input↓ output↑`). When a run carries an `error`, that failure reason is shown inline beneath the row; this is where a silently-failed delegate surfaces its reason.
+Every spawned run for the task (`GET /api/board/:taskId/executions`), oldest first. Each row shows the runtime that ran it (`runtime`, falling back to `executorType`; the team engine records every run it starts with the executor `openclaw`, whatever runtime the agent uses), the run's status, its cost (marked `~$0.0042 est.` when it is an estimate, and absent when the run recorded none), and its token counts (`input↓ output↑`). When a run carries an `error`, that failure reason is shown inline beneath the row; this is where a silently-failed delegate surfaces its reason.
 
 ### Activity
 
