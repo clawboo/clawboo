@@ -92,7 +92,8 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {
-      reason: 'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned'
+      reason:
+        'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned' | 'unstarted'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out
     }
@@ -106,7 +107,7 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
 }
 ```
 
-`attention` is computed from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its execution ledger, and its verification verdict, with the pure `taskAttention` rule from `@clawboo/board-core`. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). The board renders every task with an `attention` in its **Needs you** column.
+`attention` is computed from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its execution ledger, and its verification verdict, with the pure `taskAttention` rule from `@clawboo/board-core`. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: it was moved there by hand, which starts nothing. The board renders every task with an `attention` in its **Needs you** column.
 
 `runCost` sums the `costUsd` of the task's execution rows, with the pure `summarizeRunCost` rule from `@clawboo/board-core`. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource: 'reported'`; a row with a null source counts as an estimate. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
@@ -200,7 +201,7 @@ Runs a stuck task again because a person asked: one that failed, timed out, was 
 
 **`404 Not Found`**: unknown task.
 
-**`409 Conflict`**: `{ ok: false, error }` where `error` is `not_retryable` (the task is running, finished, or cancelled), `no_team`, or `unassigned` (no agent is bound to it; use `assign`).
+**`409 Conflict`**: `{ ok: false, error }` where `error` is `not_retryable` (the task is running, finished, or cancelled), `no_team`, or `unassigned` (no agent is bound to it; use `assign`). A task left `in_progress` with no assignee and no running run counts as retryable.
 
 ---
 
@@ -236,7 +237,7 @@ Returns one task plus its comments (oldest first) and its ancestor chain (the pa
 
 ```ts
 {
-  task: DbTask & { attention; runCost } // shape as in GET /api/board, including both
+  task: DbTask & { attention; runCost; runningSince } // shape as in GET /api/board
   comments: Array<{
     id: string
     taskId: string
@@ -339,11 +340,18 @@ curl -X POST http://localhost:18790/api/board/<task-id>/claim \
 
 Transitions a task's status and/or edits its metadata (`priority` / `title` / `description`). At least one field is required. The status change is enforced by the state machine inside a `BEGIN IMMEDIATE` transaction (illegal transition → **409**). When the target is `done`, the **intrinsic verification gate** applies: a task carrying a non-promotable verdict (a failing deterministic gate, including red-gate debt) is rejected with **409** `verification_required`. The only bypass is `humanOverride: true`; when used with `status: 'done'` the override is recorded in the governance audit log so it is never silent.
 
+This is the route a **person** uses (the board and the task drawer), and a person's move is the final word on the task:
+
+- A move to `done` or `cancelled` may carry `completedAt`, the day it really finished. It must fall between the task's creation and now (a few minutes of clock skew are allowed), else **400** `invalid_completed_at`. Without it the finish time is now. Writing the same finished status again never moves the finish time.
+- A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`.
+- A run working on the task is stopped, whether the team engine, the executor runner or an OpenClaw routine fire started it, and its execution is closed as cancelled. A task moved back to `todo` while it was running is started again for its bound agent.
+- Whoever delegated the task (the `:reflectTo:` agent in its `sourceDelegationId`) is told a person marked it done or cancelled it: through a `[Task Update]` when the team's engine is running, else as a mailbox notice read at its next turn. A task a person assigned reports to nobody.
+
 <Note>
 A task with **no** stored verification verdict is *unverified*, not *failing*; it lands `done` normally. The gate blocks known-failing verdicts, not un-run verification; manually completing unverified work is an intentional human judgment call (the autonomous path always writes a verdict via the verification gate before this transition). Moving a task to `todo` releases it (clears the assignee + verdict) so the atomic claim can re-acquire it.
 </Note>
 
-On a successful status change the handler emits a `status_changed` event and narrates the mutation into the team chat room (best-effort, after the canonical write).
+On a successful status change the handler emits a `status_changed` event and narrates the mutation into the team chat room as `A person moved "<title>" to <Status>.` (best-effort, after the canonical write).
 
 - **Path params**: `taskId`.
 - **Request body** (validated by `updateTaskBody`; at least one field required):
@@ -355,12 +363,13 @@ On a successful status change the handler emits a `status_changed` event and nar
   title?: string                // 1–500 chars
   description?: string          // ≤ 20000 chars
   humanOverride?: boolean        // audited bypass of the →done gate; only with status:'done'
+  completedAt?: number           // epoch ms; only with status 'done' or 'cancelled'
 }
 ```
 
 ### Responses
 
-**`400 Bad Request`**: empty body or failed validation:
+**`400 Bad Request`**: empty body or failed validation (including `completedAt` without a move to `done` or `cancelled`), or `{ ok: false, error: 'invalid_completed_at' }` for a finish time outside the task's life:
 
 ```json
 {
@@ -369,10 +378,10 @@ On a successful status change the handler emits a `status_changed` event and nar
 }
 ```
 
-**`200 OK`**: applied; the updated task:
+**`200 OK`**: applied; the updated task, and on a move to `cancelled` the dependents cancelled with it:
 
 ```ts
-{ ok: true, task: DbTask }
+{ ok: true, task: DbTask, cancelledDependents?: Array<{ id: string; title: string }> }
 ```
 
 **`404 Not Found`**: the task does not exist (`reason: 'not_found'`, or the field update found no row):

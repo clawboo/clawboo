@@ -8,8 +8,10 @@ import {
   buildRoutinePatch,
   cronError,
   deriveRoutineName,
+  describeCadence,
   emptyRoutineForm,
   formatDuration,
+  fireSummary,
   formatScheduleLabel,
   humanCron,
   NO_TEAM,
@@ -313,5 +315,69 @@ describe('run history display', () => {
   it('names runtimes, and leaves an unknown one as it is', () => {
     expect(runtimeDisplayName('openclaw')).toBe('OpenClaw')
     expect(runtimeDisplayName('mystery')).toBe('mystery')
+  })
+})
+
+describe('describeCadence', () => {
+  // Times go through the same locale formatter the helper uses, so the
+  // assertions hold under any default locale the suite runs with.
+  const clock = (h: number, m: number) =>
+    new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+
+  it('reads sub-daily cadences', () => {
+    expect(describeCadence('* * * * *')).toBe('Every minute')
+    expect(describeCadence('*/1 * * * *')).toBe('Every minute')
+    expect(describeCadence('*/15 * * * *')).toBe('Every 15 minutes')
+    expect(describeCadence('0 * * * *')).toBe('Every hour')
+    expect(describeCadence('30 * * * *')).toBe('Every hour at :30')
+    expect(describeCadence('0 */6 * * *')).toBe('Every 6 hours')
+    expect(describeCadence('5 */2 * * *')).toBe('Every 2 hours at :05')
+  })
+
+  it('reads daily, weekday and weekly cadences with a local time', () => {
+    expect(describeCadence('0 9 * * *')).toBe(`Daily at ${clock(9, 0)}`)
+    expect(describeCadence('30 8 * * 1-5')).toBe(`Weekdays at ${clock(8, 30)}`)
+    expect(describeCadence('0 10 * * 0,6')).toBe(`Weekends at ${clock(10, 0)}`)
+    expect(describeCadence('0 9 * * 1')).toBe(`Mondays at ${clock(9, 0)}`)
+    expect(describeCadence('0 9 * * 7')).toBe(`Sundays at ${clock(9, 0)}`)
+    expect(describeCadence('0 9 * * 1,3,5')).toBe(`Mon, Wed and Fri at ${clock(9, 0)}`)
+    expect(describeCadence('0 9 * * 0-6')).toBe(`Daily at ${clock(9, 0)}`)
+    expect(describeCadence('0 9 1 * *')).toBe(`Monthly on the 1st at ${clock(9, 0)}`)
+    expect(describeCadence('0 9 22 * *')).toBe(`Monthly on the 22nd at ${clock(9, 0)}`)
+    expect(describeCadence('0 9 13 * *')).toBe(`Monthly on the 13th at ${clock(9, 0)}`)
+  })
+
+  it('reads a cadence within the day narrowed to some days', () => {
+    expect(describeCadence('0 */4 * * 6,0')).toBe('Every 4 hours on weekends')
+    expect(describeCadence('*/30 * * * 1-5')).toBe('Every 30 minutes on weekdays')
+    expect(describeCadence('0 * * * 1')).toBe('Every hour on Mondays')
+    expect(describeCadence('15 */2 * * 1,3')).toBe('Every 2 hours at :15 on Mon and Wed')
+    expect(describeCadence('0 */6 * * 0-6')).toBe('Every 6 hours')
+  })
+
+  it('reads a one-shot, and falls back to the written form for anything else', () => {
+    expect(describeCadence('once@2026-07-01T09:00:00.000Z')).toMatch(/^Once, /)
+    expect(describeCadence('0 9 * 6 *')).toBe(humanCron('0 9 * 6 *'))
+    expect(describeCadence('0 9 * * MON')).toBe(humanCron('0 9 * * MON'))
+    expect(describeCadence('0 0 9 * * *')).toBe(humanCron('0 0 9 * * *'))
+    expect(describeCadence('0 9-17 * * *')).toBe(humanCron('0 9-17 * * *'))
+    expect(describeCadence('0 9-17/2 * * 6,0')).toBe(humanCron('0 9-17/2 * * 6,0'))
+  })
+})
+
+describe('fireSummary', () => {
+  it('says where a team routine posts and who picks it up', () => {
+    expect(fireSummary({ target: 'team', teamName: 'Research', agentName: 'Boo Zero' })).toBe(
+      'When it runs, it posts to the Research team chat, and Boo Zero takes it from there.',
+    )
+    expect(fireSummary({ target: 'team' })).toBe(
+      'When it runs, it posts to its team chat, and the team lead takes it from there.',
+    )
+  })
+
+  it('says an agent routine becomes a task for its agent', () => {
+    expect(fireSummary({ target: 'agent', agentName: 'Ada' })).toBe(
+      'When it runs, it becomes a task for Ada.',
+    )
   })
 })

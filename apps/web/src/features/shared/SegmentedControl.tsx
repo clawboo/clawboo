@@ -51,7 +51,7 @@ export function SegmentedControl<T extends string = string>({
               pad,
               active
                 ? 'bg-surface text-foreground shadow-[var(--shadow-raised)]'
-                : 'text-foreground/55 hover:text-foreground/80',
+                : 'text-muted-foreground hover:text-foreground',
             ].join(' ')}
           >
             {Icon ? <Icon size={14} strokeWidth={2} /> : null}

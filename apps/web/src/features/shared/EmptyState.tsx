@@ -1,11 +1,11 @@
 // Reusable branded empty-state primitive.
 //
 // Canonical pattern: 56-px circular icon disc + Lucide icon @ 26 px /
-// strokeWidth 1.5–1.75 + Cabinet Grotesk title @ 65% opacity + DM Sans
-// helper @ 40% opacity + optional CTA.
+// strokeWidth 1.75 + a display-font title + a smaller helper line + an
+// optional CTA. A surface with its own illustration (a Boo, say) passes
+// `art`, which takes the disc's place.
 //
-// Reference impl: ApprovalsPanel "No pending approvals" — extracted here so
-// every empty state in the app reads with the same rhythm.
+// Every empty state in the app uses it, so they all read with the same rhythm.
 
 import type { LucideIcon } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
@@ -13,7 +13,10 @@ import type { CSSProperties, ReactNode } from 'react'
 export type EmptyStateTone = 'neutral' | 'mint' | 'amber' | 'primary'
 
 export interface EmptyStateProps {
-  icon: LucideIcon
+  /** The icon drawn in the disc. Ignored when `art` is given. */
+  icon?: LucideIcon
+  /** An illustration drawn in place of the icon disc, at its own size. */
+  art?: ReactNode
   title: string
   helper?: ReactNode
   /** Optional CTA rendered below the helper. */
@@ -54,6 +57,7 @@ const TONE_PALETTE: Record<
 
 export function EmptyState({
   icon: Icon,
+  art,
   title,
   helper,
   action,
@@ -80,21 +84,27 @@ export function EmptyState({
         ...style,
       }}
     >
-      <div
-        aria-hidden
-        style={{
-          display: 'flex',
-          width: 56,
-          height: 56,
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: 999,
-          background: palette.discBg,
-          border: `1px solid ${palette.discBorder}`,
-        }}
-      >
-        <Icon size={26} strokeWidth={1.75} color={palette.iconColor} />
-      </div>
+      {art ? (
+        <div aria-hidden style={{ display: 'flex', justifyContent: 'center' }}>
+          {art}
+        </div>
+      ) : Icon ? (
+        <div
+          aria-hidden
+          style={{
+            display: 'flex',
+            width: 56,
+            height: 56,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 999,
+            background: palette.discBg,
+            border: `1px solid ${palette.discBorder}`,
+          }}
+        >
+          <Icon size={26} strokeWidth={1.75} color={palette.iconColor} />
+        </div>
+      ) : null}
       <span
         style={{
           fontSize: 16,
@@ -111,7 +121,7 @@ export function EmptyState({
           style={{
             marginTop: 2,
             fontSize: 12,
-            color: 'rgb(var(--foreground-rgb) / 0.4)',
+            color: 'var(--muted-foreground)',
             lineHeight: 1.6,
             maxWidth: 280,
           }}

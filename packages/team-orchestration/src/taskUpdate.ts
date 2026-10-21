@@ -5,10 +5,13 @@
 
 /**
  * Terminal outcome of a board task, as reflected back to the leader. `'done'`
- * (or omitted) is a successful completion; the others are failures the leader
- * must act on rather than keep waiting for.
+ * (or omitted) is a successful completion. `'person_done'` and
+ * `'person_cancelled'` are a person deciding the task on the board: neither is a
+ * failure, and a cancelled task must not be redone. The others are failures the
+ * leader must act on rather than keep waiting for.
  */
-export type TaskUpdateOutcome = 'done' | 'error' | 'aborted' | 'timeout' | 'max_turns'
+export type TaskUpdateOutcome =
+  'done' | 'person_done' | 'person_cancelled' | 'error' | 'aborted' | 'timeout' | 'max_turns'
 
 export interface TaskUpdateItem {
   /** Resolved assignee name (agent or, later, a human). */
@@ -21,15 +24,17 @@ export interface TaskUpdateItem {
   outcome?: TaskUpdateOutcome
 }
 
-const TASK_FAILURE_LABEL: Record<Exclude<TaskUpdateOutcome, 'done'>, string> = {
+type FailedOutcome = Exclude<TaskUpdateOutcome, 'done' | 'person_done' | 'person_cancelled'>
+
+const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
   error: 'failed with an error',
   aborted: 'was stopped before finishing',
   timeout: 'went silent — timed out with no response',
   max_turns: 'ran out of room before finishing',
 }
 
-function isTaskFailure(outcome?: TaskUpdateOutcome): outcome is Exclude<TaskUpdateOutcome, 'done'> {
-  return outcome != null && outcome !== 'done'
+function isTaskFailure(outcome?: TaskUpdateOutcome): outcome is FailedOutcome {
+  return outcome != null && outcome in TASK_FAILURE_LABEL
 }
 
 /** The human label for a failed outcome, or null when the task succeeded. */
@@ -107,6 +112,12 @@ export function buildTaskUpdateMessage(
       `Still outstanding: ${outstanding.length} — ${named}${more}. These have NOT reported yet, so do not treat the results below as the complete picture.`,
     )
   }
+  const cancelledByPerson = items.filter((i) => i.outcome === 'person_cancelled').length
+  if (cancelledByPerson > 0) {
+    headerLines.push(
+      `A person cancelled ${cancelledByPerson === items.length ? (items.length === 1 ? 'it' : 'all of them') : `${cancelledByPerson} of these`} on the board. Do NOT redo cancelled work or hand it to anyone again.`,
+    )
+  }
   if (failures.length > 0) {
     headerLines.push(
       `⚠ ${failures.length} of these did NOT complete (the ⚠ entries below). Decide what to do next — retry, reassign to another teammate, or tell the user it failed and why. Do NOT keep silently waiting on them.`,
@@ -116,7 +127,13 @@ export function buildTaskUpdateMessage(
   for (const item of items) {
     const failLabel = taskFailureLabel(item.outcome)
     const failed = failLabel != null
-    let header = failed ? `⚠ ${item.by} — DID NOT COMPLETE (${failLabel})` : `✓ ${item.by}`
+    let header = failed
+      ? `⚠ ${item.by} — DID NOT COMPLETE (${failLabel})`
+      : item.outcome === 'person_cancelled'
+        ? `✕ Cancelled by a person (it was ${item.by}'s)`
+        : item.outcome === 'person_done'
+          ? `✓ Marked done by a person (it was ${item.by}'s)`
+          : `✓ ${item.by}`
     if (item.title) {
       const ctx = item.title.length > 80 ? item.title.slice(0, 80) + '...' : item.title
       header += ` — "${ctx}"`

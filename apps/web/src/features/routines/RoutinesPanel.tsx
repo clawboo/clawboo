@@ -20,7 +20,6 @@ import {
   Users,
 } from 'lucide-react'
 
-import { apiFetch, listAgents } from '@clawboo/control-client'
 import { TaskDetailDrawer } from '@/features/board/TaskDetailDrawer'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button, IconButton } from '@/features/shared/Button'
@@ -43,6 +42,7 @@ import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
 
 import { RuntimeGlyph } from '../runtimes/runtimeDepth'
+import { EMPTY_DIRECTORY, loadRoutineDirectory } from './routineDirectory'
 import {
   confirmDeleteSchedule,
   RoutineDialog,
@@ -62,37 +62,6 @@ import {
   toggleBlocker,
   untilLabel,
 } from './routineHelpers'
-
-const EMPTY_DIRECTORY: RoutineDirectory = { teams: [], agents: [], booZeroName: null }
-
-/** The teams and agents a routine can point at. Null when they could not be read. */
-async function loadDirectory(): Promise<RoutineDirectory | null> {
-  try {
-    const [teamsRes, agentList] = await Promise.all([apiFetch('/api/teams'), listAgents()])
-    const teamsBody = teamsRes.ok
-      ? ((await teamsRes.json()) as {
-          teams?: Array<{ id: string; name: string; icon?: string; isArchived?: unknown }>
-        })
-      : {}
-    const teams = (teamsBody.teams ?? [])
-      .filter((t) => !t.isArchived)
-      .map((t) => ({ id: t.id, name: t.name, icon: t.icon ?? '' }))
-    const live = agentList.agents.filter(
-      (a) => !a.archivedAt && (a.participantKind as string | undefined) !== 'human',
-    )
-    const agents = live.map((a) => ({
-      id: a.id,
-      name: a.displayName,
-      // Keep an unknown runtime unknown rather than guessing one.
-      runtime: (a.runtime as string | undefined) ?? '',
-      teamId: a.teamId ?? null,
-    }))
-    const booZero = agentList.defaultId ? live.find((a) => a.id === agentList.defaultId) : undefined
-    return { teams, agents, booZeroName: booZero?.displayName ?? null }
-  } catch {
-    return null
-  }
-}
 
 const byName = (a: ScheduleRecord, b: ScheduleRecord): number =>
   (a.label ?? a.agentName ?? '').localeCompare(b.label ?? b.agentName ?? '') ||
@@ -311,7 +280,7 @@ export function RoutinesPanel() {
   }, [reads])
 
   const refreshDirectory = useCallback(async () => {
-    const next = await loadDirectory()
+    const next = await loadRoutineDirectory()
     if (next) setDirectory(next)
   }, [])
 

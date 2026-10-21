@@ -34,6 +34,8 @@ import { Modal } from '@/features/shared/Modal'
 
 import { AssignAgentSelect } from './AssignAgentSelect'
 import { StatusSelect } from './StatusSelect'
+import type { StatusCommit } from './useStatusMutation'
+import { runtimeNameOf, taskRuntimeOf, useAgentRuntime } from './TaskCard'
 import { TaskComments } from './TaskComments'
 import { ATTENTION_META, attentionLabel, taskAttentionOf, type TaskAttention } from './boardStatus'
 import { useTaskActions } from './useTaskActions'
@@ -216,7 +218,7 @@ export function TaskDetailDrawer({
   /** Fires after a status change commits (success only), so the parent board can move
    *  the card to its new column immediately instead of waiting for the next ~5s
    *  reconciliation poll (#98). Mirrors the drawer's own optimistic `setDetail`. */
-  onStatusCommitted?: (taskId: string, newStatus: string) => void
+  onStatusCommitted?: (taskId: string, newStatus: string, commit: StatusCommit) => void
   /** Stacking layer. Raise it when opening the drawer over another overlay. */
   layer?: number
   /** A needs-you action (retry, assign, dismiss) changed the task; the board should
@@ -282,6 +284,8 @@ export function TaskDetailDrawer({
   const ownerName = useFleetStore((st) =>
     ownerId ? (st.agents.find((a) => a.id === ownerId)?.name ?? null) : null,
   )
+  const ownerRuntime = useAgentRuntime(ownerId)
+  const taskRuntime = task ? taskRuntimeOf(task, ownerRuntime) : null
   const teamId = typeof task?.teamId === 'string' ? task.teamId : null
   const teamName = useTeamStore((st) =>
     teamId ? (st.teams.find((t) => t.id === teamId)?.name ?? null) : null,
@@ -406,7 +410,11 @@ export function TaskDetailDrawer({
                   taskId={task.id}
                   status={task.status}
                   assigneeAgentId={task.assigneeAgentId}
-                  onChange={(next) => {
+                  task={task}
+                  // The board says where the card went; the drawer opened from
+                  // anywhere else keeps the plain success message.
+                  quiet={onStatusCommitted != null}
+                  onChange={(next, commit) => {
                     setDetail((d) =>
                       d
                         ? {
@@ -426,19 +434,25 @@ export function TaskDetailDrawer({
                                     verification: null,
                                   }
                                 : {}),
+                              ...(commit.completedAt !== undefined
+                                ? { completedAt: commit.completedAt, runningSince: null }
+                                : {}),
                             },
                           }
                         : d,
                     )
                     // Reflect the move on the board at once (#98). onChange fires only
                     // on a committed change, so this never moves a card for a failed one.
-                    onStatusCommitted?.(taskId, next)
+                    onStatusCommitted?.(taskId, next, commit)
                   }}
                 />,
               )}
               {kv('Agent', ownerName ?? ownerId ?? '—')}
               {teamId ? kv('Team', teamName ?? teamId) : null}
-              {kv('Runtime', String(task['assigneeRuntime'] ?? 'openclaw'))}
+              {kv(
+                'Runtime',
+                taskRuntime ? runtimeNameOf(taskRuntime) : ownerId ? 'Unknown' : 'Not assigned',
+              )}
               {kv(
                 'Cost',
                 runCost?.usd != null

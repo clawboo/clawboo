@@ -38,6 +38,10 @@ export const server = setupServer(
     HttpResponse.json({ stargazers_count: 0 }),
   ),
   http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
+  // The Board's calendar reads upcoming routine runs for the range on screen,
+  // and polls them, so every test that mounts the Board fetches this. Empty by
+  // default; a test about routines overrides it.
+  http.get('/api/schedules/occurrences', () => HttpResponse.json({ now: 0, routines: [] })),
   // ConfigureNativeStep probes the Codex sign-in (Sign in with ChatGPT is the
   // DEFAULT method on the OpenAI card, so merely selecting OpenAI fires this).
   // Empty default = "codex not installed"; ChatGPT-path tests override it.

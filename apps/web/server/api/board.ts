@@ -36,12 +36,14 @@ import {
   listTasks,
   provisionWorkspaceBody,
   runCostForTasks,
+  runningSinceForTasks,
   TaskDependencyCycleError,
   updateStatus,
   updateTaskBody,
   updateTaskFields,
   workspaceActionBody,
   getWorkspaceForTask,
+  isStrandedInProgress,
   type ClawbooDb,
   type DbTask,
   type TaskRunCost,
@@ -54,6 +56,7 @@ import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
+import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import {
   actOnTaskWorkspace,
@@ -86,7 +89,10 @@ export function boardListGET(req: Request, res: Response): void {
       typeof req.query['status'] === 'string' ? (req.query['status'] as TaskStatus) : undefined
     const includeDropped = req.query['includeDropped'] === 'true'
     res.json({
-      tasks: withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+      tasks: withRunningSince(
+        db,
+        withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+      ),
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -105,7 +111,13 @@ export function boardGetGET(req: Request, res: Response): void {
       return
     }
     res.json({
-      task: { ...task, attention: attentionForTask(db, taskId), runCost: runCostOf(db, task) },
+      task: {
+        ...task,
+        attention: attentionForTask(db, taskId),
+        runCost: runCostOf(db, task),
+        // Whether a run is going, so the drawer can say a move stops it.
+        runningSince: runningSinceForTasks(db, [taskId]).get(taskId) ?? null,
+      },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),
     })
@@ -132,6 +144,19 @@ function withRunCost<T extends DbTask>(
 ): Array<T & { runCost: TaskRunCost }> {
   const byId = runCostForTasks(db, rows)
   return rows.map((t) => ({ ...t, runCost: byId.get(t.id) ?? NO_RUN_COST }))
+}
+
+/** Each task with when its current run started (`runningSince`, null when no run
+ *  is live), so an In progress card can show how long it has been running. */
+function withRunningSince<T extends DbTask>(
+  db: ClawbooDb,
+  rows: T[],
+): Array<T & { runningSince: number | null }> {
+  const byId = runningSinceForTasks(
+    db,
+    rows.map((t) => t.id),
+  )
+  return rows.map((t) => ({ ...t, runningSince: byId.get(t.id) ?? null }))
 }
 
 /** One task's `runCost` (see `withRunCost`). */
@@ -211,7 +236,8 @@ export function boardCreatePOST(req: Request, res: Response): void {
 
 // ─── POST /api/board/:taskId/retry ──────────────────────────────────────────
 // Run a task again because a person asked: one that failed, timed out, was
-// stopped, or was parked after failing repeatedly. It goes back to `todo` (which
+// stopped, was parked after failing repeatedly, or was left in progress with
+// nothing running it. It goes back to `todo` (which
 // clears the old assignee and verdict) and straight to its bound agent, past the
 // automatic pump's "don't keep re-firing this" policy: that policy exists to stop
 // the MACHINE retrying forever, not to overrule the person.
@@ -224,7 +250,12 @@ export function boardRetryPOST(req: Request, res: Response): void {
       res.status(404).json({ ok: false, error: 'task not found' })
       return
     }
-    if (task.status !== 'todo' && task.status !== 'blocked' && task.status !== 'backlog') {
+    const retryable =
+      task.status === 'todo' ||
+      task.status === 'blocked' ||
+      task.status === 'backlog' ||
+      isStrandedInProgress(db, task)
+    if (!retryable) {
       res.status(409).json({ ok: false, error: 'not_retryable' })
       return
     }
@@ -359,7 +390,10 @@ export function boardClaimPOST(req: Request, res: Response): void {
 
 // ─── PATCH /api/board/:taskId ────────────────────────────────────────────────
 // Status change (state-machine enforced; 409 on illegal transition) and/or
-// metadata (priority / title / description).
+// metadata (priority / title / description). This is a PERSON's route (the
+// board, the task drawer): their move stops the run working on the task, a
+// cancel takes the plan steps waiting on it with it, and a move to Done or
+// Cancelled may say which day it finished (`completedAt`).
 export function boardUpdatePATCH(req: Request, res: Response): void {
   try {
     const parsed = updateTaskBody.safeParse(req.body)
@@ -369,19 +403,40 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     }
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
-    const { status, humanOverride, ...fields } = parsed.data
+    const { status, humanOverride, completedAt, ...fields } = parsed.data
 
+    let priorStatus: string | null = null
+    let cancelledDependents: Array<{ id: string; title: string }> = []
     if (status) {
       // The verification gate is intrinsic to `updateStatus`; `humanOverride`
       // (a human shipping despite a non-promotable verdict) is the only bypass —
       // record it in the audit log so the override is never silent.
-      const priorStatus = getTask(db, taskId)?.status ?? null
-      const result = updateStatus(db, taskId, status, humanOverride ? { humanOverride: true } : {})
+      priorStatus = getTask(db, taskId)?.status ?? null
+      const result = updateStatus(db, taskId, status, {
+        actor: 'person',
+        ...(humanOverride ? { humanOverride: true } : {}),
+        ...(completedAt !== undefined ? { completedAt } : {}),
+      })
       if (!result.ok) {
         res
-          .status(result.reason === 'not_found' ? 404 : 409)
+          .status(
+            result.reason === 'not_found'
+              ? 404
+              : result.reason === 'invalid_completed_at'
+                ? 400
+                : 409,
+          )
           .json({ ok: false, error: result.reason })
         return
+      }
+      // A cancelled step can never be done, so the plan steps waiting on it never
+      // could run either: cancel them with it rather than leave them looking
+      // queued forever.
+      if (status === 'cancelled' && priorStatus !== 'cancelled') {
+        cancelledDependents = cancelDependents(db, taskId).map((d) => ({
+          id: d.id,
+          title: d.title,
+        }))
       }
       if (humanOverride && status === 'done') {
         const t = result.task
@@ -406,13 +461,22 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
         taskId,
         teamId: task.teamId,
         agentId: task.assigneeAgentId,
-        data: { to: status },
+        data: { to: status, by: 'person' },
       })
       // Narrate the mutation into the team room (fan-out to N peers).
       // Best-effort, AFTER the canonical board write; never a write path back.
-      reflectToRoom(db, task.teamId, `Task "${task.title}" → ${status}.`)
+      reflectToRoom(db, task.teamId, `A person moved "${task.title}" to ${statusWord(status)}.`)
+      if (status !== priorStatus) {
+        noteHumanMove(db, {
+          taskId,
+          teamId: task.teamId,
+          from: priorStatus,
+          to: status,
+          cancelledDependents,
+        })
+      }
     }
-    res.json({ ok: true, task })
+    res.json({ ok: true, task, ...(status === 'cancelled' ? { cancelledDependents } : {}) })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

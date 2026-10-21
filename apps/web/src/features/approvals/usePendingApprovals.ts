@@ -130,6 +130,22 @@ export function execRequestFromMirror(a: ToolApproval): ApprovalRequest | null {
   }
 }
 
+/** Whether two reads of the pending list hold the same rows, field for field and in
+ *  the same order. A poll that finds nothing new keeps the list it already had, so
+ *  the consumers (the Board among them) do not redraw every three seconds. */
+function sameApprovals(a: ToolApproval[], b: ToolApproval[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  return a.every((row, i) => {
+    const other = b[i]
+    if (!other) return false
+    const x = row as unknown as Record<string, unknown>
+    const y = other as unknown as Record<string, unknown>
+    const keys = Object.keys(x)
+    return keys.length === Object.keys(y).length && keys.every((k) => Object.is(x[k], y[k]))
+  })
+}
+
 /** The raw, UNSCOPED tool-approval poll + resolve. Used by the Governance dashboard's
  *  queue (which shows everything) and composed by `usePendingApprovals` below. */
 export function useToolApprovals(): {
@@ -151,7 +167,8 @@ export function useToolApprovals(): {
       const r = await apiFetch('/api/tools/approvals?status=pending')
       const body = r.ok ? ((await r.json()) as { approvals?: ToolApproval[] }) : { approvals: [] }
       if (!read.isCurrent()) return // predates a resolve, or superseded by a newer read
-      setTool(body.approvals ?? [])
+      const next = body.approvals ?? []
+      setTool((prev) => (sameApprovals(prev, next) ? prev : next))
     } catch {
       /* best-effort — the next poll reconciles */
     }
@@ -194,14 +211,26 @@ export function usePendingApprovals(scope: ApprovalScope): {
   resolveTool: (id: string, decision: ToolDecision) => Promise<void>
 } {
   const pendingExec = useApprovalsStore((s) => s.pendingApprovals)
-  const agents = useFleetStore((s) => s.agents)
+  // The team's member ids as one string, so the selection changes only when the
+  // membership does. The fleet patches an agent on every streaming delta and
+  // presence beat; selecting the agents array would redraw every consumer (the
+  // whole Board among them) on each of those.
+  const teamMembers = useFleetStore((s) =>
+    scope.teamId == null
+      ? ''
+      : s.agents
+          .filter((a) => a.teamId === scope.teamId)
+          .map((a) => a.id)
+          .sort()
+          .join('\n'),
+  )
   const booZeroId = useBooZeroStore((s) => s.booZeroAgentId)
   const { tool: toolAll, resolveTool } = useToolApprovals()
 
   const teamAgentIds = useMemo(() => {
     if (scope.teamId == null) return null
-    return new Set(agents.filter((a) => a.teamId === scope.teamId).map((a) => a.id))
-  }, [agents, scope.teamId])
+    return new Set(teamMembers ? teamMembers.split('\n') : [])
+  }, [teamMembers, scope.teamId])
 
   const matches = useCallback(
     (agentId: string | null): boolean => {

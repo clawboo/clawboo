@@ -115,10 +115,15 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
     // `schedulePump` below therefore does NOT matter — do not add a test that
     // pretends it does.) Only touch an ALREADY-resident engine: building one just
     // to tell it to forget something it never knew is pure cost.
+    // A PERSON's move is handled by the board PATCH, which stops the run and
+    // tells the delegator (`noteHumanMove`); a bare detach here would forget the
+    // run before that could close it.
     if (
       ev.teamId &&
       (ev.kind === 'task_released' ||
-        (ev.kind === 'status_changed' && (ev.status === 'todo' || ev.status === 'cancelled')))
+        (ev.kind === 'status_changed' &&
+          ev.actor !== 'person' &&
+          (ev.status === 'todo' || ev.status === 'cancelled')))
     ) {
       const teamId = ev.teamId
       if (hasTeamOrchestrator(teamId)) {
@@ -131,11 +136,14 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
     }
 
     // 2b. Wake-on-work — delegation-derived work appearing outside a live
-    // engine's own flow gets its team pumped within seconds.
+    // engine's own flow gets its team pumped within seconds. A person moving a
+    // card into To do is that too: the pump fires it now if an agent is bound,
+    // instead of at the next backstop pass.
     if (
       ev.teamId &&
       ((ev.kind === 'task_created' && SDID_AGENT_RE.test(ev.sourceDelegationId ?? '')) ||
-        ev.kind === 'task_released')
+        ev.kind === 'task_released' ||
+        (ev.kind === 'status_changed' && ev.actor === 'person' && ev.status === 'todo'))
     ) {
       schedulePump(ev.teamId, opts.mcpBaseUrl)
     }

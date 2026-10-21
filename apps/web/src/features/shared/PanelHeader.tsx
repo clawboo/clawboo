@@ -56,7 +56,7 @@ export function PanelHeader({
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-0.5 truncate text-[13px] text-foreground/50">{subtitle}</p>
+            <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{subtitle}</p>
           ) : null}
         </div>
       </div>

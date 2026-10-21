@@ -1,6 +1,6 @@
 ---
 title: Schedules API
-description: "REST reference for the unified scheduler: list, create, update, pause/resume, delete, and force-run schedules across two sources, and read a routine's run history."
+description: "REST reference for the unified scheduler: list, create, update, pause/resume, delete, and force-run schedules across two sources, read a routine's run history, and project upcoming routine runs onto days."
 ---
 
 REST surface for the unified scheduler: one merged read/write view over two [schedule sources](/concepts/scheduling): clawboo **Routines** (the `team-task` domain, fully managed) and the **OpenClaw Gateway cron** (the `runtime-own-life` domain, written through the Gateway's own operator RPC). A read always succeeds and reports per-source degradation as data; a write routes to the owning source by id and surfaces the typed scheduling errors as precise status codes.
@@ -13,14 +13,15 @@ Every record carries a **composite `id`** of the form `<source>:<rawId>` (`clawb
 
 ## Routes
 
-| Method | Path                      | Summary                                                                  | Stream? |
-| ------ | ------------------------- | ------------------------------------------------------------------------ | ------- |
-| GET    | `/api/schedules`          | Merged list across both sources (degradation is data)                    | No      |
-| POST   | `/api/schedules`          | Create a schedule (routed by `spec.source`)                              | No      |
-| PATCH  | `/api/schedules/:id`      | Pause / resume, or patch cron spec / label / template / payload / target | No      |
-| DELETE | `/api/schedules/:id`      | Remove a schedule                                                        | No      |
-| POST   | `/api/schedules/:id/run`  | Force-fire now (enqueue-style ack)                                       | No      |
-| GET    | `/api/schedules/:id/runs` | A Routine's recent fires, newest first                                   | No      |
+| Method | Path                         | Summary                                                                  | Stream? |
+| ------ | ---------------------------- | ------------------------------------------------------------------------ | ------- |
+| GET    | `/api/schedules`             | Merged list across both sources (degradation is data)                    | No      |
+| POST   | `/api/schedules`             | Create a schedule (routed by `spec.source`)                              | No      |
+| PATCH  | `/api/schedules/:id`         | Pause / resume, or patch cron spec / label / template / payload / target | No      |
+| DELETE | `/api/schedules/:id`         | Remove a schedule                                                        | No      |
+| POST   | `/api/schedules/:id/run`     | Force-fire now (enqueue-style ack)                                       | No      |
+| GET    | `/api/schedules/:id/runs`    | A Routine's recent fires, newest first                                   | No      |
+| GET    | `/api/schedules/occurrences` | Upcoming Routine runs, projected onto the windows the caller names       | No      |
 
 ---
 
@@ -506,6 +507,64 @@ curl 'http://localhost:18790/api/schedules/clawboo-routine:<row-id>/runs?limit=5
 
 ---
 
+## `GET /api/schedules/occurrences`
+
+The upcoming runs of clawboo's own Routines, projected onto consecutive time windows the caller names. The Board's calendar sends the viewer's local midnights, so each window is one day; that keeps a 23- or 25-hour daylight-saving day correct, which a fixed day length would not. The projection runs on the server because the ticker evaluates cron in the server's time zone: these are the instants it will fire at.
+
+Only runs strictly after now are projected, and only for Routines that will fire: `idle` with a next run, `queued`, `claimed` or `running`. A paused Routine, one parked in `error` after a failed run, and a spent one-shot (`idle` with no next run) are left out, as is any Routine whose spec cannot be read. So is a Routine whose target could not receive a fire: a team Routine whose team is gone, archived, opted out of server orchestration or without an active member, and an agent Routine whose agent is gone, archived or a person. Its first fire would be refused and park it in `error`. OpenClaw Gateway cron jobs are never included: they are the Gateway's own life, not team work.
+
+For an `idle` Routine the first run is its stored `nextRunAt`, the instant the ticker will actually fire it, and the cron spec gives the runs after that. A projection is reused for up to a minute, and never past its first run, so every open board polling this costs little.
+
+- **Query params**:
+  - `bounds` (required): 2 to 64 comma-separated epoch-millisecond integers in strictly ascending order, spanning at most 62 days. Window `i` is `[bounds[i], bounds[i + 1])`.
+  - `teamId` (optional): only Routines whose `teamId` matches. A Routine for an agent on no team is returned only without this filter.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: only Routines with at least one run in some window are listed, each with one entry per window, in window order:
+
+```ts
+{
+  now: number // the instant the projection started from
+  timeZone: string | null // the IANA zone the scheduler evaluates cron in
+  routines: Array<{
+    schedule: ScheduleRecord // with teamName / agentName resolved, as on GET /api/schedules
+    windows: Array<{
+      count: number // runs in the window, counted up to 96
+      more: boolean // true when the window holds more runs than `count`
+      times: number[] // the window's first runs, ascending, at most 8
+    }>
+  }>
+}
+```
+
+The count stops at 96 (every fifteen minutes for a whole day) so a very frequent Routine costs a bounded amount of work; `more` says the window holds more than that. `timeZone` lets a caller in another zone say which zone a Routine's schedule is written in.
+
+**`400 Bad Request`**: `bounds` is missing, has fewer than 2 or more than 64 edges, is not strictly ascending integers, or spans more than 62 days:
+
+```json
+{
+  "error": "bounds must be 2 to 64 ascending epoch-ms integers spanning at most 62 days",
+  "code": "invalid_bounds"
+}
+```
+
+**`500 Internal Server Error`**: the Routine ledger could not be read:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+# Three local days starting at a midnight
+curl 'http://localhost:18790/api/schedules/occurrences?bounds=1791777600000,1791864000000,1791950400000,1792036800000'
+```
+
+---
+
 ## Error envelope
 
 Every error response on these routes is the standard envelope plus a structural `code`: `{ error: string, code?: string }`. The `code` is a stable, branch-on-able discriminant (never parse the message prose):
@@ -516,6 +575,7 @@ Every error response on these routes is the standard envelope plus a structural 
 | `invalid_cron_spec`           | 400    | The cron spec parses as neither a cron expression nor `once@<iso>`     |
 | `bound_recurring_schedule`    | 400    | A recurring spec was bound to an existing one-shot-only team task      |
 | `invalid_routine_target`      | 400    | A Routine's team or agent is missing, archived, or does not match      |
+| `invalid_bounds`              | 400    | The occurrence windows are missing, unordered, too many, or too wide   |
 | `unsupported_schedule_write`  | 403    | The target source's manageability tier forbids the action              |
 | `unknown_schedule`            | 404    | The composite id matched no source, or is unknown within it            |
 | `duplicate_firing_owner`      | 409    | The bound team task already has a different firing owner; do not retry |

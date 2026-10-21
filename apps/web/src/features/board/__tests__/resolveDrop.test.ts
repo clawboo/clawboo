@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { BoardTask } from '@/lib/boardClient'
 
+import { boardColumnOf } from '../boardStatus'
 import { resolveDrop } from '../resolveDrop'
 
 const tasks: BoardTask[] = [
@@ -51,6 +52,18 @@ describe('resolveDrop', () => {
     // A card already optimistically moved to in_review resolves its next move from there.
     const moved: BoardTask[] = [{ id: 't1', status: 'in_review', title: 'A' }]
     expect(resolveDrop('t1', 'done', moved)).toEqual({
+      taskId: 't1',
+      from: 'in_review',
+      to: 'done',
+    })
+  })
+
+  it('is a no-op when a card is dropped on the column it is drawn in', () => {
+    // A Verifying card (in_review) sits in In progress. Dropping it there must not
+    // pull it out of verification with a legal in_review → in_progress move.
+    const verifying: BoardTask[] = [{ id: 't1', status: 'in_review', title: 'A' }]
+    expect(resolveDrop('t1', 'in_progress', verifying, boardColumnOf)).toBeNull()
+    expect(resolveDrop('t1', 'done', verifying, boardColumnOf)).toEqual({
       taskId: 't1',
       from: 'in_review',
       to: 'done',

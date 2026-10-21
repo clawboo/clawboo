@@ -38,8 +38,17 @@ export const updateTaskBody = z
     // human deciding to ship despite a non-promotable verdict). Only meaningful
     // alongside `status: 'done'`; the route records the override in the audit log.
     humanOverride: z.boolean().optional(),
+    // When a move to done or cancelled finished, if not now (epoch ms): a person
+    // marking work done on the day it was really done. Only meaningful with one of
+    // those two statuses; the repository checks it falls between the task's
+    // creation and now.
+    completedAt: z.number().int().positive().optional(),
   })
   .refine((b) => Object.keys(b).length > 0, { message: 'at least one field required' })
+  .refine((b) => b.completedAt === undefined || b.status === 'done' || b.status === 'cancelled', {
+    message: 'completedAt goes with a move to done or cancelled',
+    path: ['completedAt'],
+  })
 export type UpdateTaskBody = z.infer<typeof updateTaskBody>
 
 export const claimBody = z.object({

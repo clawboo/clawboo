@@ -41,6 +41,8 @@ Each row shows the routine's name and status, where it goes (for example `Resear
 | `finished`                      | A one-time routine that already ran                                  |
 | `disabled`                      | An OpenClaw cron job that is turned off on the Gateway               |
 
+The [Board](/using/board#routine-runs) shows every routine's upcoming runs on its calendar, in **To do** on the days they will run, tagged **Routine**. Click one there to open the same routine.
+
 Click a row to open it. The three buttons at the right of a row are shortcuts for **Pause** or **Resume** (**Disable** or **Enable** on an OpenClaw cron job), **Run now**, and **Delete**. OpenClaw cron jobs are created on the Gateway, not here, and have no **Edit**.
 
 <Note>

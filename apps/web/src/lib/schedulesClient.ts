@@ -10,10 +10,15 @@ import type {
   ScheduleRecord,
   ScheduleSourceReadStatus,
   ScheduleUpdatePatch,
+  WindowOccurrences,
 } from '@clawboo/scheduler'
 import { apiFetch } from '@clawboo/control-client'
 
-export type { ScheduleRecord, ScheduleSourceReadStatus } from '@clawboo/scheduler'
+export type {
+  ScheduleRecord,
+  ScheduleSourceReadStatus,
+  WindowOccurrences,
+} from '@clawboo/scheduler'
 
 export interface SchedulesView {
   schedules: ScheduleRecord[]
@@ -31,6 +36,45 @@ export async function fetchSchedules(): Promise<SchedulesView> {
     return { schedules: body.schedules ?? [], sources: body.sources ?? [], ok: true }
   } catch {
     return { schedules: [], sources: [], ok: false }
+  }
+}
+
+/** One routine's upcoming runs, one entry per window the caller asked about. */
+export interface RoutineOccurrences {
+  schedule: ScheduleRecord
+  windows: WindowOccurrences[]
+}
+
+export interface OccurrencesView {
+  routines: RoutineOccurrences[]
+  /** The IANA zone the scheduler fires in, when the server said. */
+  timeZone: string | null
+  /** False when the read failed, so a caller keeps what it already shows. */
+  ok: boolean
+}
+
+/**
+ * The upcoming runs of clawboo's routines, projected by the server onto
+ * consecutive windows: window `i` is `[bounds[i], bounds[i + 1])`. A calendar
+ * passes its local midnights. Never throws.
+ */
+export async function fetchRoutineOccurrences(
+  bounds: readonly number[],
+  teamId?: string | null,
+): Promise<OccurrencesView> {
+  const params = new URLSearchParams({ bounds: bounds.join(',') })
+  if (teamId) params.set('teamId', teamId)
+  try {
+    const res = await apiFetch(`/api/schedules/occurrences?${params.toString()}`)
+    if (!res.ok) return { routines: [], timeZone: null, ok: false }
+    const body = (await res.json()) as { routines?: RoutineOccurrences[]; timeZone?: unknown }
+    return {
+      routines: Array.isArray(body.routines) ? body.routines : [],
+      timeZone: typeof body.timeZone === 'string' && body.timeZone ? body.timeZone : null,
+      ok: true,
+    }
+  } catch {
+    return { routines: [], timeZone: null, ok: false }
   }
 }
 

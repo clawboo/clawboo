@@ -222,7 +222,7 @@ export function ToolApprovalCard({ approval, onResolve, compact = false }: ToolA
             type="checkbox"
             checked={remember}
             onChange={(e) => setRemember(e.target.checked)}
-            className="size-3.5 cursor-pointer accent-[rgb(var(--primary-rgb))]"
+            className="size-3.5 cursor-pointer accent-[var(--foreground)]"
           />
           {isExec
             ? // The Gateway's entry is bound to the command AND the directory it

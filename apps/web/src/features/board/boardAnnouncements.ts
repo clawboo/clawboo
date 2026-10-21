@@ -44,6 +44,9 @@ export interface BoardDragData {
   fromColumn: string
   /** Display title, already defaulted — `BoardTask.title` is optional. */
   title: string
+  /** The card sits on today's row. One that sits on another day asks which day
+   *  it finished when it is moved to Done or Cancelled. Defaults to true. */
+  sitsToday: boolean
 }
 
 function dragData(active: { data: { current?: Record<string, unknown> } }): BoardDragData {
@@ -53,6 +56,7 @@ function dragData(active: { data: { current?: Record<string, unknown> } }): Boar
     fromStatus,
     fromColumn: typeof d?.fromColumn === 'string' ? d.fromColumn : fromStatus,
     title: typeof d?.title === 'string' ? d.title : 'this task',
+    sitsToday: d?.sitsToday !== false,
   }
 }
 
@@ -128,5 +132,44 @@ export const boardScreenReaderInstructions: ScreenReaderInstructions = {
 /** Hoisted so the `accessibility` prop object identity is stable too. */
 export const BOARD_ACCESSIBILITY = {
   announcements: boardAnnouncements,
+  screenReaderInstructions: boardScreenReaderInstructions,
+} as const
+
+// ─── Calendar layout ────────────────────────────────────────────────────────
+// In the calendar a card keeps its day when it changes column, except a move
+// to Done or Cancelled: finished work sits on the day it finished. A card on
+// today's row stays there; one on another day asks which day. The drag
+// sentences say which, since the card can jump.
+
+const FINISHING = new Set(['done', 'cancelled'])
+
+/** What a finishing drop does to the card's day, or null for any other move. */
+function finishingNote(
+  active: { data: { current?: Record<string, unknown> } },
+  over: { id: string | number } | null,
+): string | null {
+  if (!over) return null
+  const { fromStatus, fromColumn, sitsToday } = dragData(active)
+  const to = String(over.id)
+  if (to === fromColumn || !FINISHING.has(to) || !canTransition(fromStatus, to)) return null
+  return sitsToday ? 'It will sit on today’s row.' : 'You will pick the day it finished.'
+}
+
+export const calendarAnnouncements: Announcements = {
+  ...boardAnnouncements,
+  onDragOver(args) {
+    const base = boardAnnouncements.onDragOver!(args)
+    const note = finishingNote(args.active, args.over)
+    return note ? `${base} ${note}` : base
+  },
+  onDragEnd(args) {
+    const base = boardAnnouncements.onDragEnd!(args)
+    const note = finishingNote(args.active, args.over)
+    return note ? `${base} ${note}` : base
+  },
+}
+
+export const CALENDAR_ACCESSIBILITY = {
+  announcements: calendarAnnouncements,
   screenReaderInstructions: boardScreenReaderInstructions,
 } as const

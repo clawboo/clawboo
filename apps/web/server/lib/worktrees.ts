@@ -366,6 +366,20 @@ export async function actOnTaskWorkspace(
     mcpBaseUrl: opts.mcpBaseUrl,
   })
 
+  // A person finished or cancelled the task while its check ran. Their move is
+  // the outcome: the verdict stays on the task as a record of what the check
+  // found, but nothing moves it and no one is told it was routed for review.
+  const decided = getTask(db, taskId)?.status
+  if (decided === 'done' || decided === 'cancelled') {
+    return {
+      ok: true,
+      action: 'complete',
+      complete,
+      taskStatus: decided,
+      verified: verdict.status,
+    }
+  }
+
   let taskStatus: string
   if (verdict.status === 'pass') {
     // The intrinsic gate sees a promotable (`pass`) verdict and allows it.

@@ -28,9 +28,16 @@ export function attentionForTasks(
 ): Map<string, TaskAttention | null> {
   const ledgers = listExecutionsForTasks(
     db,
-    // Only these two statuses can ever need a person; skip the ledger read for
-    // the rest of the board.
-    rows.filter((t) => t.status === 'todo' || t.status === 'blocked').map((t) => t.id),
+    // Only these can ever need a person; skip the ledger read for the rest of
+    // the board.
+    rows
+      .filter(
+        (t) =>
+          t.status === 'todo' ||
+          t.status === 'blocked' ||
+          (t.status === 'in_progress' && !t.assigneeAgentId),
+      )
+      .map((t) => t.id),
   )
   const out = new Map<string, TaskAttention | null>()
   for (const t of rows) {
@@ -41,6 +48,7 @@ export function attentionForTasks(
         sourceDelegationId: t.sourceDelegationId,
         execs: ledgers.get(t.id) ?? [],
         verificationBlocked: verificationBlocks(t.verification),
+        assigneeAgentId: t.assigneeAgentId,
       }),
     )
   }

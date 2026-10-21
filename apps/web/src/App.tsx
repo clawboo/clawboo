@@ -10,6 +10,7 @@ import { UpdateChip } from '@/features/promo/UpdateChip'
 import { AppTopBar } from '@/features/promo/AppTopBar'
 import { SettingsModal } from '@/features/settings/SettingsModal'
 import { ConfirmDialog } from '@/features/shared/ConfirmDialog'
+import { FinishPromptDialog } from '@/features/board/FinishPromptDialog'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
 import { useViewStore } from '@/stores/view'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
@@ -88,6 +89,9 @@ export function App() {
           window.confirm). Outside the inert app-shell + above the settings
           modal scrim so an imperative confirm() is always interactive. */}
       <ConfirmDialog />
+      {/* Finishing a task by hand (Done or Cancelled) asks which day, from the
+          board's drag or the task drawer. Same root placement as the confirm. */}
+      <FinishPromptDialog />
     </Providers>
   )
 }

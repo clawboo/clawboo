@@ -81,6 +81,20 @@ describe('board REST: run cost on every card', () => {
     expect(costed.estimated).toBe(false)
   })
 
+  it('lists a running task with when its run started, and null for a task with no run', () => {
+    const db = getDb()
+    const idle = createTask(db, { title: 'Not running', teamId: 'team1' })
+    const live = createTask(db, { title: 'Running', teamId: 'team1' })
+    const exec = createExecutionProcess(db, { taskId: live.id, executorType: 'claude-code' })
+
+    const r = mockRes()
+    boardListGET(req({}, {}, { teamId: 'team1' }), r.res)
+    expect(r.statusCode()).toBe(200)
+    const cards = (r.body() as { tasks: Array<Card & { runningSince: number | null }> }).tasks
+    expect(cards.find((c) => c.id === live.id)!.runningSince).toBe(exec.startedAt)
+    expect(cards.find((c) => c.id === idle.id)!.runningSince).toBeNull()
+  })
+
   it('a single task and a newly created one carry runCost too', () => {
     const db = getDb()
     const t = createTask(db, { title: 'Estimated', teamId: 'team1' })

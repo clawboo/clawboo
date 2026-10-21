@@ -84,14 +84,18 @@ export function statusOptions(from: string): TaskStatus[] {
   return TASK_STATUSES.filter((s) => reachable.has(s))
 }
 
+/** Statuses only an agent's run puts a task in. */
+const RUN_STATUSES = new Set<string>(['in_progress', 'in_review'])
+
 /**
- * The statuses a PERSON may pick in the status editor. `in_review` is left out
- * unless the task is already there: it is the automated verification step (the
- * builder's work being checked), and choosing it by hand would park a card under
- * a "Verifying" badge with nothing verifying it.
+ * The statuses a PERSON may pick in the status editor. `in_progress` and
+ * `in_review` are left out unless the task is already there: a task is in
+ * progress because an agent is running it, and in review because its work is
+ * being verified. Choosing either by hand starts no run and no check, so the
+ * card would look worked on while nothing works on it.
  */
 export function manualStatusOptions(from: string): TaskStatus[] {
-  return statusOptions(from).filter((s) => s !== 'in_review' || s === from)
+  return statusOptions(from).filter((s) => !RUN_STATUSES.has(s) || s === from)
 }
 
 // ─── Needs you ──────────────────────────────────────────────────────────────
@@ -107,6 +111,7 @@ const ATTENTION_REASONS = new Set<string>([
   'needs_review',
   'blocked',
   'unassigned',
+  'unstarted',
 ])
 
 /** How each reason reads on a card: a short badge and one line of guidance. */
@@ -143,6 +148,11 @@ export const ATTENTION_META: Record<
     label: 'Unassigned',
     tone: 'warning',
     hint: 'No agent will pick this up until you assign one.',
+  },
+  unstarted: {
+    label: 'Not started',
+    tone: 'warning',
+    hint: 'It was moved to In progress by hand, which starts no run. Retry it or give it to an agent.',
   },
 }
 

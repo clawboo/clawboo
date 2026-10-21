@@ -11,7 +11,13 @@ export {
   InvalidRoutineTargetError,
 } from './errors'
 export { ONCE_PREFIX, parseCronSpec, isOnceSpec, type ParsedSpec } from './spec'
-export { nextOccurrence, probeCronSpec } from './occurrence'
+export {
+  nextOccurrence,
+  occurrencesInWindows,
+  probeCronSpec,
+  type OccurrenceWindowOptions,
+  type WindowOccurrences,
+} from './occurrence'
 export {
   ROUTINE_TARGETS,
   routineTargetOf,

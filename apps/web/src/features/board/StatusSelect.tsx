@@ -6,16 +6,18 @@
 // the state machine), minus the automated verification step (see
 // manualStatusOptions), updates optimistically for a snappy feel, and rolls back +
 // toasts if the write is rejected. Terminal tasks (done / cancelled) have no legal
-// moves, so the control locks. The agent-release (`→ todo`) confirm gate lives in
-// `useStatusMutation`.
+// moves, so the control locks. The questions a move asks first (the agent-release
+// confirm, the finish day for Done and Cancelled) live in `useStatusMutation`.
 
 import { useEffect, useState } from 'react'
 
 import { Select } from '@/features/shared/Select'
 import { Spinner } from '@/features/shared/Spinner'
 
+import type { BoardTask } from '@/lib/boardClient'
+
 import { STATUS_LABEL, isTerminalStatus, manualStatusOptions, statusLabel } from './boardStatus'
-import { useStatusMutation } from './useStatusMutation'
+import { useStatusMutation, type StatusCommit } from './useStatusMutation'
 
 export interface StatusSelectProps {
   taskId: string
@@ -23,11 +25,23 @@ export interface StatusSelectProps {
   /** The agent currently assigned to the task, if any. Present ⇒ moving the task
    *  to `todo` would unassign a live run, so we confirm before doing so. */
   assigneeAgentId?: string | null
+  /** The task as the drawer shows it, for what a finishing move asks (its day,
+   *  its check, a run in flight). */
+  task?: BoardTask
+  /** The caller posts the success message itself. */
+  quiet?: boolean
   /** Notifies the parent of a committed change so it can keep its copy in sync. */
-  onChange?: (next: string) => void
+  onChange?: (next: string, commit: StatusCommit) => void
 }
 
-export function StatusSelect({ taskId, status, assigneeAgentId, onChange }: StatusSelectProps) {
+export function StatusSelect({
+  taskId,
+  status,
+  assigneeAgentId,
+  task,
+  quiet,
+  onChange,
+}: StatusSelectProps) {
   const mutate = useStatusMutation()
   const [value, setValue] = useState(status)
   const [saving, setSaving] = useState(false)
@@ -59,11 +73,13 @@ export function StatusSelect({ taskId, status, assigneeAgentId, onChange }: Stat
     // shared hook; StatusSelect only owns its own optimistic value + spinner. `saving`
     // flips on inside applyOptimistic (after the confirm gate passes and the write
     // begins), so the spinner/disabled-select never show during the confirm wait.
-    const ok = await mutate({
+    const commit = await mutate({
       taskId,
       from: value,
       to: next,
       assigneeAgentId,
+      task,
+      quiet,
       applyOptimistic: () => {
         setValue(next)
         setSaving(true)
@@ -71,7 +87,7 @@ export function StatusSelect({ taskId, status, assigneeAgentId, onChange }: Stat
       rollback: () => setValue(prev),
     })
     setSaving(false)
-    if (ok) onChange?.(next)
+    if (commit) onChange?.(next, commit)
   }
 
   return (
