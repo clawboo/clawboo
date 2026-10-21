@@ -27,6 +27,7 @@ import {
   setBudgetLimit,
   setTaskVerification,
   getBudget,
+  updateStatus,
   type ClawbooDb,
   type DbAgent,
   type DbScheduledRun,
@@ -39,6 +40,7 @@ import {
   ROUTINE_OPENCLAW_EXECUTOR,
   type OperatorClientLike,
 } from '../openclawDispatch'
+import { noteHumanMove } from '../../teamChat/humanMove'
 
 // ── Local clone of the adapter package's unpublished FakeGatewayClient ──────
 class FakeOperatorClient {
@@ -749,5 +751,68 @@ describe('dispatchConnectedSubstrate', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  describe('a person moving the card while the run goes', () => {
+    // The real OpenClawAdapter over the fake client: the Gateway never answers, so
+    // only a stop can end the run before the watchdog.
+    async function startSilentRun() {
+      const agentRow = seedAgent()
+      const run = seedRoutine(agentRow.id)
+      const taskId = seedTask()
+      const client = new FakeOperatorClient()
+      const outcome = dispatchConnectedSubstrate({
+        db,
+        run,
+        template: TEMPLATE,
+        agentRow,
+        taskId,
+        client: client as unknown as OperatorClientLike,
+      })
+      await vi.waitFor(() => expect(listExecutions(db, taskId)[0]?.status).toBe('running'))
+      return { taskId, client, outcome }
+    }
+
+    it.each(['cancelled', 'done'] as const)(
+      'to %s stops the run, and the fire is not a failure',
+      async (to) => {
+        const { taskId, client, outcome } = await startSilentRun()
+
+        // What the board PATCH does: write the person's move, then follow it up.
+        expect(updateStatus(db, taskId, to, { actor: 'person', humanOverride: true }).ok).toBe(true)
+        noteHumanMove(db, { taskId, teamId: 'team-1', from: 'in_progress', to })
+
+        await expect(outcome).resolves.toEqual({ ok: true, taskId })
+        const note = `Stopped: a person moved the card to ${to === 'done' ? 'Done' : 'Cancelled'}.`
+        expect(getTask(db, taskId)?.status).toBe(to)
+        expect(listExecutions(db, taskId)[0]).toMatchObject({ status: 'cancelled', error: note })
+        expect(getComments(db, taskId).map((c) => c.body)).toEqual([note])
+        // The Gateway was told to stop the run.
+        expect(client.calls.some((c) => c.method === 'sessions.abort')).toBe(true)
+        expect(client.subscriberCount()).toBe(0)
+      },
+    )
+
+    it('back to To do stops the run and leaves the task there for its next pickup', async () => {
+      const { taskId, outcome } = await startSilentRun()
+
+      expect(updateStatus(db, taskId, 'todo', { actor: 'person' }).ok).toBe(true)
+      noteHumanMove(db, { taskId, teamId: 'team-1', from: 'in_progress', to: 'todo' })
+
+      await expect(outcome).resolves.toEqual({ ok: true, taskId })
+      expect(getTask(db, taskId)?.status).toBe('todo')
+      expect(listExecutions(db, taskId)[0]?.status).toBe('cancelled')
+    })
+
+    it('leaves a run on another task alone', async () => {
+      const { taskId, outcome } = await startSilentRun()
+      noteHumanMove(db, { taskId: 'another-task', teamId: 'team-1', from: 'todo', to: 'cancelled' })
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      expect(listExecutions(db, taskId)[0]?.status).toBe('running')
+      // The person cancels this one, which ends it.
+      updateStatus(db, taskId, 'cancelled', { actor: 'person' })
+      noteHumanMove(db, { taskId, teamId: 'team-1', from: 'in_progress', to: 'cancelled' })
+      await expect(outcome).resolves.toEqual({ ok: true, taskId })
+    })
   })
 })

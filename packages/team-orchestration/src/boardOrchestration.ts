@@ -138,6 +138,17 @@ const FAIL_EXEC_STATUS: Record<FailReason, CompleteExecutionOutcome['status']> =
   timeout: 'timed_out',
 }
 
+/** A status as a person reads it on the board, for the notes the engine writes. */
+const STATUS_WORD: Record<string, string> = {
+  backlog: 'Backlog',
+  todo: 'To do',
+  in_progress: 'In progress',
+  in_review: 'In review',
+  blocked: 'Blocked',
+  done: 'Done',
+  cancelled: 'Cancelled',
+}
+
 export interface KnownAgent {
   id: string
   name: string
@@ -486,6 +497,24 @@ export interface BoardOrchestrator {
    * lead as a `[Task Update]`.
    */
   dispatchTask(taskId: string): Promise<DispatchOutcome>
+  /**
+   * A PERSON moved this task's card on the board, already written. Their move
+   * is the final word on the run that was working on it:
+   *   · a run in flight is aborted and its execution closed as cancelled, so it
+   *     stops spending and its late result can never override the move;
+   *   · to Done or Cancelled, whoever delegated the task is told a person
+   *     decided it (never asked to retry a task a person cancelled); a task a
+   *     person assigned reports to nobody, as always;
+   *   · back to To do while it was running, it starts again from the beginning
+   *     with the same agent, which is what the board's confirm promised.
+   * `cancelledDependents` are the plan steps the caller cancelled with it, so
+   * the delegator hears the chain ended too.
+   */
+  personMovedTask(
+    taskId: string,
+    to: string,
+    opts?: { cancelledDependents?: Array<{ id: string; title?: string | null }> },
+  ): Promise<void>
   /** Drop all in-memory tracking + timers (team switch / teardown). */
   reset(): void
 }
@@ -674,10 +703,23 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // silent-loss failure detach exists to prevent. The guard is for RUN
     // terminals, where a stale summary really can replay.
     dropSessionTracking(found)
-    // The exec this task was tracking is whatever closed it (the sweep's
-    // `timed_out`). Keeping the id would let a later terminal complete a row that
-    // is already terminal — refused, but misleading.
+    // Usually the exec this task was tracking is already closed by whatever
+    // released it (the sweep's `timed_out`). When the run had not started yet
+    // (its delivery was waiting for the agent), nothing closed it, and a row
+    // left `running` reads as "someone owns this" forever: the pump never
+    // re-fires it and it never surfaces as needing a person. Close it as an
+    // infrastructure release, which the fire policy may re-fire. A row that is
+    // already terminal is left as it is.
+    const execId = taskToExec.get(taskId)
     taskToExec.delete(taskId)
+    if (execId) {
+      void deps.board
+        .completeExecution(execId, {
+          status: 'failed',
+          error: 'Released before its run started.',
+        })
+        .catch(() => undefined)
+    }
     return true
   }
 
@@ -1378,6 +1420,29 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const agentId = deps.agentIdForSession(sessionKey)
     const by = nameOf(agentId)
     const title = taskTitle.get(taskId)
+    // A person finished or cancelled the task while this run was going. Their
+    // move stands: the result is kept on the task, nothing is re-stamped, and the
+    // delegator, already told what the person decided, is not told again.
+    if (await decidedByPerson(taskId)) {
+      const execId = taskToExec.get(taskId)
+      if (execId) {
+        taskToExec.delete(taskId)
+        await deps.board.completeExecution(execId, {
+          status: 'cancelled',
+          error: 'The task was finished by a person before this run ended.',
+        })
+      }
+      if (trimmed)
+        await deps.board.addComment(
+          taskId,
+          `[late result: a person had already finished this task] ${trimmed}`,
+          'agent',
+          agentId ?? undefined,
+        )
+      taskReflectTo.delete(taskId)
+      taskTitle.delete(taskId)
+      return
+    }
     const ok = await deps.board.updateStatus(taskId, 'done')
     if (!ok) {
       // The task was released/reassigned out from under us (e.g. the server stale
@@ -1514,6 +1579,22 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const title = taskTitle.get(taskId)
     const agentId = deps.agentIdForSession(sessionKey)
     const by = nameOf(agentId)
+    // A person finished or cancelled the task while this run was going: the
+    // failure changes nothing. No blocked write, no cancelled plan steps, no
+    // failure report to a delegator who already heard what the person decided.
+    if (await decidedByPerson(taskId)) {
+      const execId = taskToExec.get(taskId)
+      if (execId) {
+        taskToExec.delete(taskId)
+        await deps.board.completeExecution(execId, {
+          status: 'cancelled',
+          error: 'The task was finished by a person before this run ended.',
+        })
+      }
+      taskReflectTo.delete(taskId)
+      taskTitle.delete(taskId)
+      return
+    }
     // Loop breaker: record this (agent, task) failure so a persistently-failing
     // re-delegation is eventually refused in `spawn`.
     if (agentId && title) noteFailure(agentId, title)
@@ -1911,6 +1992,104 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
   }
 
+  /** Is the task already done or cancelled? Only a person's move finishes a task
+   *  under a run the engine is still tracking (the engine's own terminals untrack
+   *  the session first). An unreadable task counts as undecided. */
+  async function decidedByPerson(taskId: string): Promise<boolean> {
+    const detail = await deps.board.getTask(taskId)
+    const status = detail?.task.status
+    return status === 'done' || status === 'cancelled'
+  }
+
+  /** See the interface. */
+  async function personMovedTask(
+    taskId: string,
+    to: string,
+    opts: { cancelledDependents?: Array<{ id: string; title?: string | null }> } = {},
+  ): Promise<void> {
+    const detail = await deps.board.getTask(taskId)
+    // Which session runs the task is read AFTER the await, and nothing below
+    // awaits before the run is stopped and forgotten: while the read was out, that
+    // run may have ended and the session taken another task, which must not be
+    // the one stopped.
+    let sessionKey: string | null = null
+    for (const [sk, tid] of sessionToTask) {
+      if (tid === taskId) {
+        sessionKey = sk
+        break
+      }
+    }
+    const task = detail?.task ?? null
+    const sdid = task ? sdidOf(task) : ''
+    const human = humanTasks.has(taskId) || isHumanAssignment(sdid)
+    const title =
+      taskTitle.get(taskId) ?? (typeof task?.title === 'string' ? task.title : undefined)
+    // Only a task someone delegated is reported; the leader is not told about
+    // work it never handed out.
+    const delegator = human ? null : (taskReflectTo.get(taskId) ?? sdidReflectTo(sdid))
+    const agentId = sessionKey ? deps.agentIdForSession(sessionKey) : sdidAgent(sdid)
+    const wasRunning = sessionKey !== null
+
+    if (sessionKey) {
+      deps.abortSession?.(sessionKey)
+      // Arms the late-replay guard too: the aborted run's last summary must not
+      // seed new delegations.
+      forgetSession(sessionKey)
+      if (pendingStart.get(sessionKey) === taskId) pendingStart.delete(sessionKey)
+    }
+    const execId = taskToExec.get(taskId)
+    if (execId) {
+      taskToExec.delete(taskId)
+      await deps.board.completeExecution(execId, {
+        status: 'cancelled',
+        error: `Stopped: a person moved the card to ${STATUS_WORD[to] ?? to}.`,
+      })
+    }
+    pendingTargets.delete(taskId)
+    humanTasks.delete(taskId)
+    for (const dep of opts.cancelledDependents ?? []) {
+      pendingTargets.delete(dep.id)
+      taskReflectTo.delete(dep.id)
+      taskTitle.delete(dep.id)
+      emit({ id: dep.id, status: 'cancelled', updatedAt: now() })
+    }
+
+    if (to === 'todo') {
+      // Back in the queue. A run that was going starts over now; one that never
+      // started is left to the pump, like any queued task.
+      taskReflectTo.delete(taskId)
+      taskTitle.delete(taskId)
+      if (wasRunning) await dispatchTask(taskId)
+      return
+    }
+
+    if ((to === 'done' || to === 'cancelled') && delegator) {
+      const steps = (opts.cancelledDependents ?? [])
+        .map((d) => `“${(d.title ?? '').slice(0, 40)}”`)
+        .join(', ')
+      const summary =
+        to === 'done'
+          ? `A person marked this done on the board.${wasRunning ? ` ${nameOf(agentId)}'s run was stopped before it reported.` : ''}`
+          : `A person cancelled this on the board. Do not redo it or hand it to anyone again.${
+              steps ? ` The later step(s) waiting on it were cancelled too: ${steps}.` : ''
+            }`
+      const scope = await followUpScopeOf(taskId, delegator)
+      enqueueReflection({
+        toAgentId: delegator,
+        by: nameOf(agentId),
+        title,
+        summary,
+        outcome: to === 'done' ? 'person_done' : 'person_cancelled',
+        taskId,
+        ...(scope ? { forTaskId: scope } : {}),
+      })
+    }
+    taskReflectTo.delete(taskId)
+    taskTitle.delete(taskId)
+    // A person's Done can unblock the steps that waited on it.
+    if (to === 'done') await pumpReady()
+  }
+
   /** See the interface. A person's explicit "run this now". */
   async function dispatchTask(taskId: string): Promise<DispatchOutcome> {
     const detail = await deps.board.getTask(taskId)
@@ -1997,6 +2176,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     markStopped,
     detachTask,
     dispatchTask,
+    personMovedTask,
     taskForSession: (sessionKey) => sessionToTask.get(sessionKey) ?? null,
     execForSession: (sessionKey) => {
       const taskId = sessionToTask.get(sessionKey)

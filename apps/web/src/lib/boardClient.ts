@@ -215,12 +215,15 @@ export async function fetchBoardTasks(teamId?: string): Promise<BoardTask[]> {
  *  can react to it (e.g. offer the human override for a blocking verification gate)
  *  instead of collapsing every failure into a bare boolean. */
 export type StatusChangeReason =
-  'illegal_transition' | 'verification_required' | 'not_found' | 'error'
+  'illegal_transition' | 'verification_required' | 'not_found' | 'invalid_completed_at' | 'error'
 
 export interface StatusChangeResult {
   ok: boolean
   /** Present only on failure. */
   reason?: StatusChangeReason
+  /** On a move to Cancelled: the plan steps that waited on it and were cancelled
+   *  with it. */
+  cancelledDependents?: Array<{ id: string; title: string }>
 }
 
 /**
@@ -235,15 +238,32 @@ export interface StatusChangeResult {
 export async function updateStatusResult(
   taskId: string,
   status: string,
-  opts: { humanOverride?: boolean } = {},
+  opts: { humanOverride?: boolean; completedAt?: number } = {},
 ): Promise<StatusChangeResult> {
   try {
     const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}`, {
       method: 'PATCH',
       headers: JSON_HEADERS,
-      body: JSON.stringify({ status, ...(opts.humanOverride ? { humanOverride: true } : {}) }),
+      body: JSON.stringify({
+        status,
+        ...(opts.humanOverride ? { humanOverride: true } : {}),
+        // Only a move to Done or Cancelled carries a finish time.
+        ...(opts.completedAt !== undefined && (status === 'done' || status === 'cancelled')
+          ? { completedAt: Math.round(opts.completedAt) }
+          : {}),
+      }),
     })
-    if (r.ok) return { ok: true }
+    if (r.ok) {
+      const body = (await r.json().catch(() => null)) as {
+        cancelledDependents?: Array<{ id?: unknown; title?: unknown }>
+      } | null
+      const steps = Array.isArray(body?.cancelledDependents)
+        ? body.cancelledDependents
+            .filter((d): d is { id: string; title?: unknown } => typeof d?.id === 'string')
+            .map((d) => ({ id: d.id, title: typeof d.title === 'string' ? d.title : '' }))
+        : []
+      return steps.length > 0 ? { ok: true, cancelledDependents: steps } : { ok: true }
+    }
     const body = (await r.json().catch(() => null)) as { error?: string } | null
     return { ok: false, reason: (body?.error as StatusChangeReason) ?? 'error' }
   } catch {

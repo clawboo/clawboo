@@ -107,6 +107,13 @@ export interface TeamOrchestrator {
   /** A person asked for this task to run now (created for an agent from the
    *  board, retried, or just assigned). See the engine's `dispatchTask`. */
   dispatchTask(taskId: string): Promise<DispatchOutcome>
+  /** A person moved this task's card (already written). Stops the run working
+   *  on it and tells its delegator. See the engine's `personMovedTask`. */
+  personMovedTask(
+    taskId: string,
+    to: string,
+    opts?: { cancelledDependents?: Array<{ id: string; title?: string | null }> },
+  ): Promise<void>
   /** Tear down timers + the engine (idle eviction / shutdown). */
   dispose(): void
 }
@@ -522,6 +529,11 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       touch()
       await ready // the Boo-Zero bootstrap and the first resume come first
       return engine.dispatchTask(taskId)
+    },
+    async personMovedTask(taskId, to, opts): Promise<void> {
+      touch()
+      await ready
+      await engine.personMovedTask(taskId, to, opts)
     },
     signalAgent(agentId: string, text: string): void {
       const sk = buildTeamSessionKey(agentId, teamId)

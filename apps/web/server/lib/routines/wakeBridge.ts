@@ -360,6 +360,10 @@ export async function dispatchRoutine(
     if (result.reason === 'conflict') return { ok: true, taskId: task.id }
     return settle({ ok: false, taskId: task.id, error: `dispatch refused: ${result.reason}` })
   }
+  // A person moved the card while it ran, which stopped the run. Their move is
+  // the task's outcome: the fire did not fail, so the routine stays armed and the
+  // task stays where they put it.
+  if (result.stoppedByPerson) return { ok: true, taskId: task.id }
   if (result.doneReason !== 'success') {
     return settle({
       ok: false,

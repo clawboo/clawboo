@@ -6,7 +6,9 @@
 //     it, or an agent marked it blocked;
 //   · it is `todo` but the dispatcher will never fire it: no agent is bound to
 //     it, the user stopped its last run, or it failed MAX_AUTO_FIRES times in a
-//     row and was parked.
+//     row and was parked;
+//   · it is `in_progress` with no agent on it and no run going: moved there by
+//     hand, which starts nothing, so it would sit there looking worked on.
 //
 // Everything else (queued work the pump will fire, a run in flight, a finished
 // or cancelled task, a deliberately parked backlog item) returns null.
@@ -34,6 +36,8 @@ export type AttentionReason =
   | 'blocked'
   /** No agent is bound to it, so no one will pick it up. */
   | 'unassigned'
+  /** In progress with no agent and no run: nothing is working on it. */
+  | 'unstarted'
 
 export interface TaskAttention {
   reason: AttentionReason
@@ -62,6 +66,8 @@ export interface AttentionInput {
   execs: readonly LedgerRun[]
   /** Verification returned a verdict that cannot be promoted to done. */
   verificationBlocked?: boolean
+  /** The agent working on it, for an in-progress task. */
+  assigneeAgentId?: string | null
 }
 
 /** Why a task needs a person, or null when the board will move it on its own. */
@@ -91,6 +97,10 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
       }
     }
     return null
+  }
+
+  if (input.status === 'in_progress' && !input.assigneeAgentId && last !== 'running') {
+    return { reason: 'unstarted', failedRuns: 0 }
   }
 
   return null

@@ -431,6 +431,146 @@ describe('TaskDetailDrawer', () => {
     ).toBeInTheDocument()
   })
 
+  describe('runtime', () => {
+    /** The drawer for this task, with nothing else recorded. */
+    function taskHandlers(task: Record<string, unknown>) {
+      return [
+        http.get('/api/board/t1', () =>
+          HttpResponse.json({
+            task: { id: 't1', title: 'Ship it', ...task },
+            comments: [],
+            ancestors: [],
+          }),
+        ),
+        http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+        http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+        http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      ]
+    }
+
+    /** The value beside the Overview's Runtime label. */
+    async function runtimeRow(): Promise<string | null> {
+      const label = await screen.findByText('Runtime')
+      return label.nextElementSibling?.textContent ?? null
+    }
+
+    it("names an open task's runtime from its agent, not the engine's stored placeholder", async () => {
+      // The team engine stores 'openclaw' on a task until its run ends, whatever
+      // the agent runs on, so open work reads the agent's own runtime.
+      useFleetStore.setState({
+        agents: [{ id: 'agent-7', name: 'Coder', runtime: 'codex' } as AgentState],
+        selectedAgentId: null,
+      })
+      server.use(
+        ...taskHandlers({
+          status: 'in_progress',
+          assigneeAgentId: 'agent-7',
+          assigneeRuntime: 'openclaw',
+        }),
+      )
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      expect(await runtimeRow()).toBe('Codex')
+    })
+
+    it('names a finished task by the runtime its run recorded', async () => {
+      useFleetStore.setState({
+        agents: [{ id: 'agent-7', name: 'Coder', runtime: 'codex' } as AgentState],
+        selectedAgentId: null,
+      })
+      server.use(
+        ...taskHandlers({
+          status: 'done',
+          assigneeAgentId: 'agent-7',
+          assigneeRuntime: 'claude-code',
+        }),
+      )
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      expect(await runtimeRow()).toBe('Claude Code')
+    })
+
+    it('says Not assigned when the task has no agent and no runtime', async () => {
+      useFleetStore.setState({ agents: [], selectedAgentId: null })
+      server.use(...taskHandlers({ status: 'todo' }))
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      expect(await runtimeRow()).toBe('Not assigned')
+    })
+
+    it('reads the runtime of the agent a waiting task is bound to', async () => {
+      // A person handed the task to an agent; it waits in To do for that agent's
+      // turn with no assignee yet.
+      useFleetStore.setState({
+        agents: [{ id: 'agent-9', name: 'Writer', runtime: 'hermes' } as AgentState],
+        selectedAgentId: null,
+      })
+      server.use(
+        ...taskHandlers({
+          status: 'todo',
+          sourceDelegationId: 'assign:n1:agent:agent-9:origin:human',
+        }),
+      )
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      expect(await runtimeRow()).toBe('Hermes')
+    })
+
+    it("falls back to the agent's runtime when a finished task recorded none", async () => {
+      useFleetStore.setState({
+        agents: [{ id: 'agent-7', name: 'Coder', runtime: 'hermes' } as AgentState],
+        selectedAgentId: null,
+      })
+      server.use(...taskHandlers({ status: 'done', assigneeAgentId: 'agent-7' }))
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      expect(await runtimeRow()).toBe('Hermes')
+    })
+
+    it('names a cancelled task by the runtime its run recorded, like a done one', async () => {
+      useFleetStore.setState({
+        agents: [{ id: 'agent-7', name: 'Coder', runtime: 'hermes' } as AgentState],
+        selectedAgentId: null,
+      })
+      server.use(
+        ...taskHandlers({
+          status: 'cancelled',
+          assigneeAgentId: 'agent-7',
+          assigneeRuntime: 'codex',
+        }),
+      )
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      expect(await runtimeRow()).toBe('Codex')
+    })
+
+    it.each([
+      ['an open task whose agent runs it', 'in_progress', 'openclaw', 'acme'],
+      ['a finished task that recorded it', 'done', 'acme', 'codex'],
+    ])(
+      'names a runtime the board has no brand for by its id: %s',
+      async (_case, status, recorded, agentRuntime) => {
+        useFleetStore.setState({
+          agents: [{ id: 'agent-7', name: 'Coder', runtime: agentRuntime } as AgentState],
+          selectedAgentId: null,
+        })
+        server.use(
+          ...taskHandlers({ status, assigneeAgentId: 'agent-7', assigneeRuntime: recorded }),
+        )
+        render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+        expect(await runtimeRow()).toBe('acme')
+      },
+    )
+
+    it('claims no runtime for open work whose agent the fleet does not know', async () => {
+      // The stored 'openclaw' is the engine's placeholder, not what the agent runs on.
+      useFleetStore.setState({ agents: [], selectedAgentId: null })
+      server.use(
+        ...taskHandlers({
+          status: 'in_progress',
+          assigneeAgentId: 'ghost',
+          assigneeRuntime: 'openclaw',
+        }),
+      )
+      render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+      expect(await runtimeRow()).toBe('Unknown')
+    })
+  })
+
   describe('cost', () => {
     /** The drawer for a task with this `runCost` and these ledger rows. */
     function costHandlers(runCost: unknown, executions: unknown[] = []) {

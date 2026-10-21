@@ -548,7 +548,8 @@ export function releaseTask(db: ClawbooDb, taskId: string): void {
 
 // ─── Status transitions (state-machine enforced) ─────────────────────────────
 
-export type UpdateStatusReason = 'not_found' | 'illegal_transition' | 'verification_required'
+export type UpdateStatusReason =
+  'not_found' | 'illegal_transition' | 'verification_required' | 'invalid_completed_at'
 export interface UpdateStatusResult {
   ok: boolean
   task?: DbTask
@@ -562,7 +563,21 @@ export interface UpdateStatusOptions {
   /** Bypass the intrinsic `→done` verification gate. The ONLY way a task with a
    *  non-promotable verdict can reach `done`; the caller MUST audit the override. */
   humanOverride?: boolean
+  /** When a move to `done` or `cancelled` finished, if not now: a person marking
+   *  work done on the day it was really done. It must fall between the task's
+   *  creation and now, else the move is refused with `invalid_completed_at`.
+   *  Ignored for any other status. */
+  completedAt?: number
+  /** Who made the move, carried on the lifecycle event. `person` is a human
+   *  moving the card (the board, the task drawer), which the engine treats as
+   *  the final word on that task: it stops the run and does not report its
+   *  late result as the task's outcome. */
+  actor?: 'person'
 }
+
+/** How far ahead of the server clock a person's finish time may be (clock skew
+ *  between their browser and this machine). */
+const COMPLETED_AT_SKEW_MS = 5 * 60_000
 
 /** Lightweight read of the persisted verification cell for the intrinsic `→done`
  *  gate. A full zod parse happens on WRITE (`setTaskVerification`); here a tiny
@@ -611,11 +626,22 @@ export function updateStatus(
       return { ok: false, reason: 'verification_required' }
     }
     const now = Date.now()
+    // A finish time is recorded once, when the task first reaches done or
+    // cancelled. Writing the same terminal status again (a run's late result
+    // after a person already marked the task done) must not move it to now.
+    const finishing = isTerminal(to) && from !== to
+    let completedAt = now
+    if (finishing && opts.completedAt !== undefined) {
+      const at = opts.completedAt
+      if (!Number.isFinite(at) || at < row.createdAt || at > now + COMPLETED_AT_SKEW_MS)
+        return { ok: false, reason: 'invalid_completed_at' }
+      completedAt = Math.min(at, now)
+    }
     tx.update(tasks)
       .set({
         status: to,
         updatedAt: now,
-        ...(isTerminal(to) ? { completedAt: now } : {}),
+        ...(finishing ? { completedAt } : {}),
         // A task moved back to `todo` is released for re-claim — clear the assignee
         // so the atomic claim (`assignee IS NULL`) can re-acquire it (matches
         // releaseTask / orphan reconciliation, which also unassign on release).
@@ -638,6 +664,7 @@ export function updateStatus(
       taskId,
       teamId: result.task.teamId ?? null,
       status: to,
+      ...(opts.actor ? { actor: opts.actor } : {}),
     })
   return result
 }
@@ -668,8 +695,22 @@ export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFiel
   return getTask(db, taskId)
 }
 
-/** The statuses a person can hand a task over from: nothing is running it. */
+/** The statuses a person can hand a task over from: nothing is running it. An
+ *  `in_progress` task qualifies only when it is stranded there (see
+ *  `isStrandedInProgress`). */
 const ASSIGNABLE_STATUSES: ReadonlySet<TaskStatus> = new Set(['todo', 'backlog', 'blocked'])
+
+/** In progress with no agent on it and no run going: a card moved there by hand,
+ *  which starts nothing. A person may hand it over or retry it like a stopped one. */
+export function isStrandedInProgress(db: ClawbooDb | BoardTx, task: DbTask): boolean {
+  if (task.status !== 'in_progress' || task.assigneeAgentId) return false
+  const running = db
+    .select({ id: executionProcesses.id })
+    .from(executionProcesses)
+    .where(and(eq(executionProcesses.taskId, task.id), eq(executionProcesses.status, 'running')))
+    .get()
+  return !running
+}
 
 export type AssignTaskResult =
   | { ok: true; task: DbTask; from: TaskStatus }
@@ -696,7 +737,8 @@ export function assignTaskDelegation(
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
     const from = row.status as TaskStatus
-    if (row.dropped || !ASSIGNABLE_STATUSES.has(from) || !canTransition(from, 'todo')) {
+    const assignable = ASSIGNABLE_STATUSES.has(from) || isStrandedInProgress(tx, row)
+    if (row.dropped || !assignable || !canTransition(from, 'todo')) {
       return { ok: false, reason: 'not_assignable' }
     }
     tx.update(tasks)

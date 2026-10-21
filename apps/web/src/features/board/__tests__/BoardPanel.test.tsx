@@ -16,6 +16,7 @@ import { useViewStore } from '@/stores/view'
 import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
 import { BoardPanel } from '../BoardPanel'
+import { resetBoardStorage } from './resetBoardStorage'
 
 /** One team with two agents: enough for the New task dialog to have a choice. */
 const ALPHA = {
@@ -78,6 +79,8 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
 beforeEach(() => {
   // teamFilter init = selectedTeamId ?? 'all' → keep it 'all' so the fetch has no ?teamId.
   useTeamStore.setState({ teams: [], selectedTeamId: null })
+  // The calendar remembers its view per browser; every test starts on the default.
+  resetBoardStorage()
   useToastStore.setState({ toasts: [] }) // isolate toast assertions across tests
 })
 afterEach(() => cleanup())
@@ -106,8 +109,8 @@ describe('BoardPanel', () => {
     )
     render(<BoardPanel />)
     const hint = await screen.findByTestId('board-agent-hint')
-    expect(hint).toHaveTextContent(/AI agents continuously create and move work/i)
-    expect(hint).toHaveTextContent(/hand a task to an agent yourself/i)
+    expect(hint).toHaveTextContent(/Agents create and move work here/i)
+    expect(hint).toHaveTextContent(/hand one a task too/i)
   })
 
   it("shows each card's run cost, marks an estimate, and shows none when no run recorded one", async () => {
@@ -176,6 +179,11 @@ describe('BoardPanel', () => {
     render(<BoardPanel />)
     const empty = await screen.findByTestId('board-empty')
     expect(within(empty).getByText('No tasks yet')).toBeInTheDocument()
+    // A Boo, not a generic icon in a disc: the drawing is the mascot's svg.
+    const art = empty.querySelector('svg')
+    expect(art).not.toBeNull()
+    expect(art?.classList.contains('lucide')).toBe(false)
+    expect(empty.querySelector('.lucide-sparkles')).toBeNull()
     // The empty state offers the same manual escape hatch as the header.
     expect(within(empty).getByRole('button', { name: /New task/i })).toBeInTheDocument()
   })
@@ -496,7 +504,14 @@ describe('BoardPanel', () => {
     board = [{ id: 't1', title: 'Ship it', status: 'cancelled' }]
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
 
-    // The card follows the server to Cancelled — it is NOT stuck in Done.
+    // The card follows the server to Cancelled; it is NOT stuck in Done. Cancelled
+    // starts folded into a rail that keeps its count; opening it shows the card.
+    await waitFor(() =>
+      expect(screen.getByTestId('board-column-cancelled')).toHaveAccessibleName(
+        'Cancelled, 1 task',
+      ),
+    )
+    await user.click(screen.getByTestId('board-cancelled-rail'))
     expect(
       await within(screen.getByTestId('board-column-cancelled')).findByTestId('board-card'),
     ).toBeInTheDocument()
@@ -685,6 +700,10 @@ describe('BoardPanel', () => {
 
   it('confirms before a drag that unassigns a running agent (→ To do)', async () => {
     let patched: { status?: string } | null = null
+    // An open task's card names its agent's runtime, read from the fleet.
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder', runtime: 'claude-code' } as never],
+    })
     server.use(
       http.get('/api/board', () =>
         HttpResponse.json({
@@ -696,6 +715,8 @@ describe('BoardPanel', () => {
               assigneeAgentId: 'agent-7',
               assigneeRuntime: 'claude-code',
               verification: JSON.stringify({ status: 'fail' }),
+              // Bound to its agent, so To do is where it waits to be picked up again.
+              sourceDelegationId: 'd1:agent:agent-7:reflectTo:lead',
             },
           ],
         }),
@@ -727,14 +748,15 @@ describe('BoardPanel', () => {
     await user.click(within(dialog).getByTestId('confirm-ok'))
     await waitFor(() => expect(patched).toEqual({ status: 'todo' }))
 
-    // The commit mirrors the server's →todo release: it also clears assignee/runtime/verdict,
-    // so the card in To do no longer shows the stale 'claude-code' runtime or the misleading
-    // 'fail' verdict — the reflection is complete, not just the column. (Deleting the →todo
-    // branch in commitStatus fails this.)
+    // The commit mirrors the server's →todo release: it also clears the assignee and the
+    // verdict, so the card in To do no longer shows the misleading 'fail' verdict; the
+    // reflection is complete, not just the column. (Deleting the →todo branch in
+    // commitStatus fails this.) It keeps the agent it is bound to, whose runtime the
+    // fleet names, and does not pretend to be OpenClaw's.
     const todoCard = () => within(screen.getByTestId('board-column-todo')).getByTestId('board-card')
-    await waitFor(() => expect(within(todoCard()).queryByText('claude-code')).toBeNull())
-    expect(within(todoCard()).queryByText('fail')).toBeNull()
-    expect(within(todoCard()).getByText('openclaw')).toBeInTheDocument()
+    await waitFor(() => expect(within(todoCard()).queryByText('fail')).toBeNull())
+    expect(within(todoCard()).getByText('claude-code')).toBeInTheDocument()
+    expect(within(todoCard()).queryByText('openclaw')).toBeNull()
   })
 
   it('offers "Complete anyway" when a drag to Done hits the verification gate', async () => {
@@ -847,11 +869,11 @@ describe('BoardPanel', () => {
       within(screen.getByTestId('board-column-todo')).getByTestId('board-card'),
     ).toBeInTheDocument()
 
-    // Open the drawer and pick the In progress target.
+    // Open the drawer and pick the Backlog target.
     await user.click(screen.getByTestId('board-card'))
     await screen.findByTestId('task-detail-drawer')
     await user.click(screen.getByTestId('task-status-select'))
-    const option = await screen.findByRole('option', { name: 'In progress' })
+    const option = await screen.findByRole('option', { name: 'Backlog' })
 
     // Snapshot the board-list fetch count right before the commit. Nothing in the window
     // below fetches the list, so the only thing that can move the card is the optimistic
@@ -861,10 +883,10 @@ describe('BoardPanel', () => {
     const getsBeforeMove = boardGets
     await user.click(option)
 
-    // The card is in the In progress column right away — optimistic, not poll-driven.
+    // The card is in the Backlog column right away: optimistic, not poll-driven.
     await waitFor(() =>
       expect(
-        within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+        within(screen.getByTestId('board-column-backlog')).getByTestId('board-card'),
       ).toBeInTheDocument(),
     )
     expect(within(screen.getByTestId('board-column-todo')).queryByTestId('board-card')).toBeNull()
@@ -881,7 +903,7 @@ describe('BoardPanel', () => {
     // closes the drawer and the next Tab restarts at the top of the document.
     await waitFor(() =>
       expect(
-        within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+        within(screen.getByTestId('board-column-backlog')).getByTestId('board-card'),
       ).toHaveFocus(),
     )
 
@@ -890,7 +912,7 @@ describe('BoardPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(boardGets).toBeGreaterThan(getsBeforeMove))
     expect(
-      within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
+      within(screen.getByTestId('board-column-backlog')).getByTestId('board-card'),
     ).toBeInTheDocument()
     expect(screen.getAllByTestId('board-card')).toHaveLength(1)
   })
@@ -919,7 +941,7 @@ describe('BoardPanel', () => {
       http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
       http.patch('/api/board/t1', () => {
         patchCalls++
-        return new HttpResponse(null, { status: 500 }) // legal move todo→in_progress, refused
+        return new HttpResponse(null, { status: 500 }) // legal move todo→backlog, refused
       }),
     )
     const user = userEvent.setup()
@@ -929,7 +951,7 @@ describe('BoardPanel', () => {
     await user.click(screen.getByTestId('board-card'))
     await screen.findByTestId('task-detail-drawer')
     await user.click(screen.getByTestId('task-status-select'))
-    const option = await screen.findByRole('option', { name: 'In progress' })
+    const option = await screen.findByRole('option', { name: 'Backlog' })
     const getsBeforeMove = boardGets
     await user.click(option)
 
@@ -939,14 +961,14 @@ describe('BoardPanel', () => {
     )
     // ...driven by a REAL server rejection: the PATCH fired exactly once. This is what
     // distinguishes a 500 from a client-side illegal-transition refusal that never sends a
-    // request — todo→in_progress is legal, so the request goes out and comes back refused.
+    // request: todo→backlog is legal, so the request goes out and comes back refused.
     expect(patchCalls).toBe(1)
     // ...and the board card never moved: still in To do, exactly one card, and no refetch.
     expect(
       within(screen.getByTestId('board-column-todo')).getByTestId('board-card'),
     ).toBeInTheDocument()
     expect(
-      within(screen.getByTestId('board-column-in_progress')).queryByTestId('board-card'),
+      within(screen.getByTestId('board-column-backlog')).queryByTestId('board-card'),
     ).toBeNull()
     expect(screen.getAllByTestId('board-card')).toHaveLength(1)
     expect(boardGets).toBe(getsBeforeMove)

@@ -109,6 +109,36 @@ describe('taskAttention: the reason a card shows', () => {
 
 describe('taskAttention: every other status moves on its own', () => {
   it.each(['backlog', 'in_progress', 'in_review', 'done', 'cancelled'])('%s', (status) => {
-    expect(taskAttention({ status, sourceDelegationId: null, execs: runs('failed') })).toBeNull()
+    expect(
+      taskAttention({
+        status,
+        sourceDelegationId: null,
+        execs: runs('failed'),
+        assigneeAgentId: 'ada',
+      }),
+    ).toBeNull()
+  })
+})
+
+describe('taskAttention: in progress with nothing working on it', () => {
+  it('needs a person when no agent holds it and no run is going', () => {
+    // A card moved to In progress by hand: no claim, no run.
+    expect(taskAttention({ status: 'in_progress', execs: [] })).toEqual({
+      reason: 'unstarted',
+      failedRuns: 0,
+    })
+    expect(
+      taskAttention({ status: 'in_progress', execs: runs('cancelled'), assigneeAgentId: null }),
+    ).toEqual({ reason: 'unstarted', failedRuns: 0 })
+  })
+
+  it('is left alone while an agent holds it, or while a run is going', () => {
+    // An agent that claimed it through the board's tools works without a run row.
+    expect(taskAttention({ status: 'in_progress', execs: [], assigneeAgentId: 'ada' })).toBeNull()
+    expect(taskAttention({ status: 'in_progress', execs: runs('running') })).toBeNull()
+  })
+
+  it('never applies to a task under verification', () => {
+    expect(taskAttention({ status: 'in_review', execs: [] })).toBeNull()
   })
 })

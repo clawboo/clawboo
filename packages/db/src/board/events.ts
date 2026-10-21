@@ -25,7 +25,15 @@ export type BoardLifecycleEvent =
       sourceDelegationId: string | null
     }
   | { kind: 'task_claimed'; taskId: string; teamId: string | null; assigneeAgentId: string }
-  | { kind: 'status_changed'; taskId: string; teamId: string | null; status: string }
+  | {
+      kind: 'status_changed'
+      taskId: string
+      teamId: string | null
+      status: string
+      /** `person` when a human moved the card; absent for every other writer
+       *  (the engine, an agent's tool call, a sweep, verification). */
+      actor?: 'person'
+    }
   | {
       kind: 'task_released'
       taskId: string

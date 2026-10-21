@@ -377,3 +377,133 @@ export function runtimeDisplayName(id: string): string {
   if (id === 'openclaw') return 'OpenClaw'
   return BRANDED_RUNTIMES.has(id) ? RUNTIME_CATALOG[id as RuntimeId].name : id
 }
+
+// ─── Cadence in plain words ──────────────────────────────────────────────────
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+function clockLabel(hour: number, minute: number): string {
+  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function ordinal(n: number): string {
+  const tens = n % 100
+  if (tens >= 11 && tens <= 13) return `${n}th`
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`
+}
+
+function inRange(v: string, lo: number, hi: number): boolean {
+  return /^\d+$/.test(v) && Number(v) >= lo && Number(v) <= hi
+}
+
+/** Weekdays a day-of-week field names (0 is Sunday; 7 also means Sunday), or
+ *  null for a form this does not read (names, steps). */
+function parseWeekdays(field: string): Set<number> | null {
+  const days = new Set<number>()
+  for (const part of field.split(',')) {
+    const range = /^(\d)-(\d)$/.exec(part)
+    if (range) {
+      const from = Number(range[1])
+      const to = Number(range[2])
+      if (from > 7 || to > 7 || from > to) return null
+      for (let d = from; d <= to; d++) days.add(d % 7)
+    } else if (inRange(part, 0, 7)) {
+      days.add(Number(part) % 7)
+    } else {
+      return null
+    }
+  }
+  return days
+}
+
+function listWords(words: string[]): string {
+  if (words.length <= 1) return words.join('')
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`
+}
+
+/**
+ * A routine's schedule as a person says it: "Weekdays at 9:00 AM", "Every
+ * hour", "Mondays at 9:00 AM", "Every 15 minutes". Common five-field cron forms
+ * and one-shots are read; anything else falls back to `humanCron`, which names a
+ * preset or shows the expression as written.
+ */
+export function describeCadence(spec: string): string {
+  const s = spec.trim()
+  if (isOnceSpec(s)) {
+    const ms = Date.parse(s.slice(ONCE_PREFIX.length))
+    return Number.isNaN(ms) ? s : `Once, ${formatWhen(ms)}`
+  }
+  const fields = s.split(/\s+/)
+  if (fields.length !== 5) return humanCron(s)
+  const [min, hour, dom, mon, dow] = fields as [string, string, string, string, string]
+  const fixedTime = inRange(min, 0, 59) && inRange(hour, 0, 23)
+  const at = fixedTime ? clockLabel(Number(hour), Number(min)) : ''
+
+  if (mon !== '*') return humanCron(s)
+  if (dom !== '*') {
+    return dow === '*' && fixedTime && inRange(dom, 1, 31)
+      ? `Monthly on the ${ordinal(Number(dom))} at ${at}`
+      : humanCron(s)
+  }
+
+  // A cadence within the day, before any day-of-week narrowing.
+  let within: string | null = null
+  if (fixedTime) {
+    within = null
+  } else if (hour === '*') {
+    if (min === '*') within = 'Every minute'
+    else {
+      const every = /^\*\/(\d+)$/.exec(min)
+      if (every)
+        within = Number(every[1]) === 1 ? 'Every minute' : `Every ${Number(every[1])} minutes`
+      else if (inRange(min, 0, 59))
+        within = Number(min) === 0 ? 'Every hour' : `Every hour at :${min.padStart(2, '0')}`
+    }
+  } else {
+    const everyHours = /^\*\/(\d+)$/.exec(hour)
+    if (everyHours && inRange(min, 0, 59)) {
+      const n = Number(everyHours[1])
+      const base = n === 1 ? 'Every hour' : `Every ${n} hours`
+      within = Number(min) === 0 ? base : `${base} at :${min.padStart(2, '0')}`
+    }
+  }
+  if (!fixedTime && within === null) return humanCron(s)
+
+  if (dow === '*') return within ?? `Daily at ${at}`
+
+  const days = parseWeekdays(dow)
+  if (!days || days.size === 0) return humanCron(s)
+  const sorted = [...days].sort((a, b) => a - b)
+  const key = sorted.join()
+  if (days.size === 7) return within ?? `Daily at ${at}`
+  if (within) {
+    const on =
+      key === '1,2,3,4,5'
+        ? 'on weekdays'
+        : key === '0,6'
+          ? 'on weekends'
+          : days.size === 1
+            ? `on ${WEEKDAY_NAMES[sorted[0]!]}s`
+            : `on ${listWords(sorted.map((d) => WEEKDAY_NAMES[d]!.slice(0, 3)))}`
+    return `${within} ${on}`
+  }
+  if (key === '1,2,3,4,5') return `Weekdays at ${at}`
+  if (key === '0,6') return `Weekends at ${at}`
+  if (days.size === 1) return `${WEEKDAY_NAMES[sorted[0]!]}s at ${at}`
+  return `${listWords(sorted.map((d) => WEEKDAY_NAMES[d]!.slice(0, 3)))} at ${at}`
+}
+
+/** What a fire of this routine does, in one honest sentence. */
+export function fireSummary(
+  rec: Pick<ScheduleRecord, 'target' | 'teamName' | 'agentName'>,
+): string {
+  if (routineKindOf(rec) === 'team') {
+    const team = rec.teamName ? `the ${rec.teamName} team chat` : 'its team chat'
+    const lead = rec.agentName ?? 'the team lead'
+    return `When it runs, it posts to ${team}, and ${lead} takes it from there.`
+  }
+  return `When it runs, it becomes a task for ${rec.agentName ?? 'its agent'}.`
+}

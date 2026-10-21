@@ -12,7 +12,7 @@
 // Icons: pass lucide icons as children alongside the label; use `loading` for
 // an inline spinner. `IconButton` is the square icon-only variant.
 
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 
 import { Spinner } from './Spinner'
 
@@ -49,6 +49,8 @@ function variantClasses(variant: ButtonVariant): string {
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** Reaches the <button> through `rest` (React 19 passes `ref` as a prop). */
+  ref?: Ref<HTMLButtonElement>
   variant?: ButtonVariant
   size?: ButtonSize
   loading?: boolean

@@ -80,6 +80,7 @@ import {
 import { budgetPreflight } from './budgetPreflight'
 import { getMcpAttachSecret } from './mcpAttachSecret'
 import { buildResumeNote } from './resumeNote'
+import { registerRunStop, type RunStopHandle } from './runStops'
 import { verifyMaxAttempts } from './verification'
 import { DEFAULTS } from './defaults'
 import { describeDegradations, planDegradations } from './degradation'
@@ -214,6 +215,9 @@ export type RunTaskResult =
        *  fix loop re-dispatches (outside the home mutex) or, on exhaustion,
        *  writes the parked alert. Inner runs only REPORT; the wrapper decides. */
       needsVerifyFix?: boolean
+      /** A person moved the task's card and that stopped the run (see
+       *  `stopTaskRuns`). Their move is the outcome, not a failure. */
+      stoppedByPerson?: boolean
     }
 
 function defaultCompact(text: string): string {
@@ -336,7 +340,28 @@ async function acquireWorkspace(
  * too-deep). The caller (REST handler / live smoke / test) supplies the adapter
  * factory + run context.
  */
-export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResult> {
+export async function runTaskOnRuntime(caller: RunTaskInput): Promise<RunTaskResult> {
+  // One controller for this run, aborted by the caller's own signal or by a
+  // person moving the task's card (`stopTaskRuns`), so every abort check below
+  // sees either.
+  const controller = new AbortController()
+  const forward = (): void => controller.abort()
+  if (caller.abortSignal?.aborted) forward()
+  else caller.abortSignal?.addEventListener('abort', forward, { once: true })
+  const input: RunTaskInput = { ...caller, abortSignal: controller.signal }
+  const stop = registerRunStop(input.taskId, forward)
+  try {
+    return await runTaskOnRuntimeInner(input, stop)
+  } finally {
+    caller.abortSignal?.removeEventListener('abort', forward)
+    stop.release()
+  }
+}
+
+async function runTaskOnRuntimeInner(
+  input: RunTaskInput,
+  stop: RunStopHandle,
+): Promise<RunTaskResult> {
   // Trace per MISSION: every run of one delegation tree shares the root task's id
   // as the trace key, so a multi-agent task renders as ONE trace.
   const traceId = missionRootId(input.db, input.taskId)
@@ -351,7 +376,7 @@ export async function runTaskOnRuntime(input: RunTaskInput): Promise<RunTaskResu
   // sweep. Every expected outcome already releases on its own path. Shared across
   // fix cycles: a cycle re-dispatches the SAME claim, so the newest cycle's
   // execution row is the one a throw has to close.
-  const claimState: ClaimState = { claimed: false }
+  const claimState: ClaimState = { claimed: false, stop }
   const run = (attempt: RunTaskInput): Promise<RunTaskResult> =>
     withTaskSpan(
       {
@@ -452,6 +477,8 @@ interface ClaimState {
   claimed: boolean
   /** Set once the execution row exists, so an unexpected throw can close it. */
   execId?: string
+  /** How a person's move stops this run, and the note it left. */
+  stop?: RunStopHandle
 }
 
 async function runTaskInner(
@@ -1523,7 +1550,13 @@ async function runTaskInner(
       }
     }
   } else {
-    addComment(db, taskId, `Run ${doneReason}: ${safeSummary || '(no output)'}`, 'system')
+    const stopNote = doneReason === 'aborted' ? (claimState.stop?.note ?? null) : null
+    addComment(
+      db,
+      taskId,
+      stopNote ?? `Run ${doneReason}: ${safeSummary || '(no output)'}`,
+      'system',
+    )
     // BIND the result. `completeExecutionProcess` refuses (returns null) when
     // the row is already terminal — a stale sweep got there first. Emitting
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.
@@ -1609,7 +1642,9 @@ async function runTaskInner(
       await writeTaskHandoff(taskId, cleared).catch(() => undefined)
     }
     releaseTask(db, taskId) // back to todo — retryable
-    status = 'todo'
+    // A person's move may already have put it somewhere else (releaseTask only
+    // touches a task still in progress), so report where it really is.
+    status = getTask(db, taskId)?.status ?? 'todo'
   }
 
   return {
@@ -1623,5 +1658,6 @@ async function runTaskInner(
     usedWorktree: cwd != null,
     degradations: degrNotes,
     ...(needsVerifyFix ? { needsVerifyFix: true } : {}),
+    ...(doneReason === 'aborted' && claimState.stop?.note ? { stoppedByPerson: true } : {}),
   }
 }

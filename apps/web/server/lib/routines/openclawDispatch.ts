@@ -37,6 +37,7 @@ import type { TaskTemplate } from '@clawboo/scheduler'
 import { KeyedMutex } from '@clawboo/worktrees'
 
 import { budgetPreflight } from '../budgetPreflight'
+import { registerRunStop, type RunStopHandle } from '../runStops'
 import { emitEvent } from '../obs'
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import type { RoutineDispatchOutcome } from './wakeBridge'
@@ -156,8 +157,16 @@ async function dispatchConnectedSubstrateInner(
   // and the card disagreeing. This is the THIRD claiming drain; the executor
   // runner and the team orchestrator's serverDeliver already beat.
   const stopBeat = startTaskHeartbeat(db, taskId, { assigneeAgentId: run.agentId })
+  // A person moving the card stops the run (see runStops). The drain watches for
+  // that beside the Gateway's events, so it ends at once rather than at the
+  // watchdog.
+  let wakeOnStop: () => void = () => {}
+  const stopped = new Promise<'stopped'>((resolve) => {
+    wakeOnStop = () => resolve('stopped')
+  })
+  const stop = registerRunStop(taskId, () => wakeOnStop())
   try {
-    return await drainClaimedRoutineRun(input, gatewayAgentId, missionId)
+    return await drainClaimedRoutineRun(input, gatewayAgentId, missionId, stop, stopped)
   } catch (err) {
     // Whatever the drain did not settle itself. The claim is ours, so hand the
     // task back instead of leaving it in progress with nothing driving it.
@@ -168,6 +177,7 @@ async function dispatchConnectedSubstrateInner(
     }
     return { ok: false, taskId, error: `run failed: ${errorText(err)}` }
   } finally {
+    stop.release()
     stopBeat()
   }
 }
@@ -182,6 +192,8 @@ async function drainClaimedRoutineRun(
   input: ConnectedDispatchInput,
   gatewayAgentId: string,
   missionId: string,
+  stop: RunStopHandle,
+  stopped: Promise<'stopped'>,
 ): Promise<RoutineDispatchOutcome> {
   const { db, run, template, taskId, client } = input
 
@@ -280,7 +292,7 @@ async function drainClaimedRoutineRun(
         break
       }
       let timer: ReturnType<typeof setTimeout> | undefined
-      let raced: IteratorResult<RuntimeEvent> | 'timeout'
+      let raced: IteratorResult<RuntimeEvent> | 'timeout' | 'stopped'
       try {
         raced = await Promise.race([
           iterator.next(),
@@ -288,10 +300,12 @@ async function drainClaimedRoutineRun(
             timer = setTimeout(() => resolve('timeout'), remaining)
             timer.unref?.()
           }),
+          stopped,
         ])
       } finally {
         if (timer) clearTimeout(timer)
       }
+      if (raced === 'stopped') break
       if (raced === 'timeout') {
         timedOut = true
         break
@@ -339,6 +353,27 @@ async function drainClaimedRoutineRun(
     streamError = errorText(err)
   } finally {
     await Promise.resolve(iterator.return?.()).catch(() => undefined)
+  }
+
+  // A person moved the card while it ran. Their move is the task's outcome, so
+  // this is not a failed fire: the run is stopped, its execution is closed as
+  // cancelled with their note, and the task stays where they put it (the release
+  // below only touches a task still in progress). A result that came in at the
+  // same moment is kept as a comment.
+  if (stop.note !== null) {
+    await adapter.abort(runHandle).catch(() => undefined)
+    settleExec({ status: 'cancelled', error: stop.note }, { status: 'cancelled', error: stop.note })
+    if (terminal?.reason === 'success' && terminal.summary)
+      addComment(
+        db,
+        taskId,
+        `[late result: a person had already moved this task] ${terminal.summary}`,
+        'agent',
+        run.agentId,
+      )
+    addComment(db, taskId, stop.note, 'system')
+    releaseTask(db, taskId)
+    return { ok: true, taskId }
   }
 
   if (streamError !== null) {

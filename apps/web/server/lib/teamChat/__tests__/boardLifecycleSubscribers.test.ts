@@ -170,7 +170,7 @@ describe('board lifecycle subscribers', () => {
     }
   })
 
-  it('a status change to todo or cancelled also detaches (a human moving the card)', () => {
+  it('a status change to todo or cancelled by any other writer also detaches', () => {
     resident = true
     const db = getDb()
     const t = createTask(db, { title: 'dragged', teamId: TEAM })
@@ -178,6 +178,52 @@ describe('board lifecycle subscribers', () => {
     calls.length = 0
     updateStatus(db, t.id, 'todo')
     expect(calls).toContain(`detach:${t.id}`)
+  })
+
+  it('a PERSON moving the card does not detach: the board PATCH stops the run first', () => {
+    // A bare detach would forget the run before `noteHumanMove` could abort it
+    // and close its execution, leaving it spending with nobody tracking it.
+    resident = true
+    const db = getDb()
+    for (const to of ['todo', 'cancelled'] as const) {
+      const t = createTask(db, { title: `moved to ${to}`, teamId: TEAM })
+      claimTask(db, t.id, 'a2')
+      calls.length = 0
+      updateStatus(db, t.id, to, { actor: 'person' })
+      expect(calls.filter((c) => c.startsWith('detach:'))).toEqual([])
+    }
+  })
+
+  it('a person putting a card back to To do pumps the team, so a bound agent picks it up now', async () => {
+    vi.useFakeTimers()
+    try {
+      const db = getDb()
+      // A plain card: its create carries no `:agent:` marker, so it pumps nothing.
+      const t = createTask(db, { title: 'back to the queue', teamId: TEAM })
+      claimTask(db, t.id, 'a2')
+      updateStatus(db, t.id, 'todo', { actor: 'person' })
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(pumped).toEqual([TEAM])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a todo move from anyone else, or a person cancelling, schedules no pump', async () => {
+    vi.useFakeTimers()
+    try {
+      const db = getDb()
+      const swept = createTask(db, { title: 'swept', teamId: TEAM })
+      claimTask(db, swept.id, 'a2')
+      updateStatus(db, swept.id, 'todo')
+      const dropped = createTask(db, { title: 'dropped', teamId: TEAM })
+      claimTask(db, dropped.id, 'a2')
+      updateStatus(db, dropped.id, 'cancelled', { actor: 'person' })
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(pumped).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does NOT build an orchestrator just to detach when none is resident', () => {
