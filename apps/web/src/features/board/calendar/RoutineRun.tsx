@@ -31,6 +31,35 @@ export function routineName(run: RoutineOccurrences): string {
   return s.label || s.agentName || 'Routine'
 }
 
+/**
+ * Whether a fire of this routine is starting or going now. The ticker sets the
+ * next run from when a fire finishes, so while one is in flight the first run
+ * drawn only happens if that fire has finished by then; otherwise it is skipped.
+ */
+export function routineInFlight(run: RoutineOccurrences): 'starting' | 'running' | null {
+  const status = run.schedule.status
+  if (status === 'queued') return 'starting'
+  if (status === 'claimed' || status === 'running') return 'running'
+  return null
+}
+
+/** The routine's first projected run, or null when it has none. */
+function firstRunOf(run: RoutineOccurrences): number | null {
+  for (const w of run.windows) if (w.times[0] != null) return w.times[0]
+  return null
+}
+
+/** What a person reads about the run an in-flight fire may still skip. */
+function onlyIfFinished(run: RoutineOccurrences): string {
+  const now = routineInFlight(run) === 'starting' ? 'is starting now' : 'is running now'
+  return `A run ${now}, so this one happens only if that run has finished by then.`
+}
+
+/** True when `at` is the run an in-flight fire may still skip. */
+export function isConditionalRun(run: RoutineOccurrences, at: number | undefined): boolean {
+  return at != null && routineInFlight(run) != null && at === firstRunOf(run)
+}
+
 /** "24 runs", or "288+ runs" when the day holds more than the server counted. */
 function runCount(day: DayRuns<RoutineOccurrences>): string {
   return day.more ? `${day.count}+ runs` : countLabel(day.count, 'run')
@@ -79,6 +108,7 @@ export function RoutineRunStrip({
   const time = first != null ? timeLabel(first) : ''
   const cadence = describeCadence(day.routine.schedule.cronSpec)
   const many = day.count > 1
+  const conditional = isConditionalRun(day.routine, first) ? onlyIfFinished(day.routine) : null
   return (
     <button
       type="button"
@@ -86,13 +116,15 @@ export function RoutineRunStrip({
       data-routine-id={day.routine.schedule.id}
       data-focus-restore-id={focusId}
       data-next={isNext || undefined}
+      data-conditional={conditional ? true : undefined}
       data-open={open || undefined}
       onClick={(e) => onOpen(e.currentTarget)}
+      title={conditional ?? undefined}
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-label={`Routine, ${name}, ${isNext ? 'next run, ' : ''}${
         many ? `${runCount(day)} from ${time}` : time
-      }, ${cadence}. Upcoming. ${
+      }, ${cadence}. Upcoming.${conditional ? ` ${conditional}` : ''} ${
         routineKindOf(day.routine.schedule) === 'team'
           ? 'It posts to the team chat when it runs.'
           : 'It becomes a task when it runs.'
@@ -210,6 +242,7 @@ export function RoutineRunPopover({
     .flatMap((w) => w.times)
     .filter((t) => t > now)
     .slice(0, 5)
+  const inFlight = routineInFlight(run)
 
   useDismissableLayer({
     active: true,
@@ -288,6 +321,14 @@ export function RoutineRunPopover({
           <div id={upcomingId} className="text-[11px] font-semibold text-muted-foreground">
             Upcoming runs
           </div>
+          {inFlight ? (
+            <p
+              data-testid="calendar-routine-in-flight"
+              className="mt-1 text-[11.5px] leading-snug text-muted-foreground"
+            >
+              {`A run ${inFlight === 'starting' ? 'is starting' : 'is running'} now. The first time below happens only if that run has finished by then; if not, it is skipped.`}
+            </p>
+          ) : null}
           <ul aria-labelledby={upcomingId} className="mt-1.5 flex flex-col gap-1">
             {upcoming.map((t) => (
               <li key={t} className="flex justify-between gap-3 text-[12px] text-foreground">

@@ -225,7 +225,7 @@ capture-phase key listeners anywhere in `apps/web/src`.
 - **`globals.css` is the single source of truth.** Every token value comes from `globals.css`; this page documents what ships.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

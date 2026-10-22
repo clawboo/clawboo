@@ -19,7 +19,7 @@ These live in the left two columns and follow the currently selected team. The t
 
 These open from the nav buttons at the bottom of `AgentListColumn` or from the Settings modal (`Cmd/Ctrl+,`); [Where things live](#where-things-live-nav-slots) says which. Each switches the main content area to a full-screen panel; all are always available (no feature gates).
 
-- **[Board](/using/board)**: The durable kanban board, fused with chat. Columns by task status; cards carry runtime, verification, and cost badges.
+- **[Board](/using/board)**: The durable kanban board, fused with chat, laid out as a calendar: status columns across the top, days down the side, upcoming routine runs on their days, and a **Needs you** column for approvals and stuck tasks. Cards show the agent, the runtime, and a verification mark or the cost.
 - **[Marketplace](/using/marketplace)**: Browse and deploy the 436 first-class agents and 85 workflow teams across a Skills / Agents / Teams tab strip.
 - **[Connectors](/using/connectors)**: Connect MCP servers and apps for your agents to use, and see the grants that govern their tools.
 - **[Cost & budgets](/using/cost-and-budgets)**: The **Tokens Used** dashboard: per-agent and per-team token usage and trends, plus USD budgets via the Governance surface.

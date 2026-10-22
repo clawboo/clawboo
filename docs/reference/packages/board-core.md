@@ -37,10 +37,10 @@ The server stays the authority. Any UI or REST-layer pre-check is fast-fail ergo
 
 ### Types & constants
 
-| Name            | Shape / contract                                                                                                                       |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `TaskStatus`    | `'backlog' \| 'todo' \| 'in_progress' \| 'in_review' \| 'blocked' \| 'done' \| 'cancelled'`.                                           |
-| `TASK_STATUSES` | `readonly TaskStatus[]` — the seven statuses in **lifecycle order**, which is also the board's column order and the status dropdown's. |
+| Name            | Shape / contract                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TaskStatus`    | `'backlog' \| 'todo' \| 'in_progress' \| 'in_review' \| 'blocked' \| 'done' \| 'cancelled'`.                                                                                      |
+| `TASK_STATUSES` | `readonly TaskStatus[]`: the seven statuses in **lifecycle order**. The Board's columns follow it but fold two away: `in_review` shows in In progress and `blocked` in Needs you. |
 
 ## The transition table
 
@@ -71,15 +71,16 @@ Whether a `todo` task will ever be picked up on its own, from two durable facts 
 
 ## Needs-you classification
 
-`taskAttention({ status, sourceDelegationId, execs, verificationBlocked }): TaskAttention | null` says why a task is waiting on a person, or `null` when the board will move it on its own. The server attaches the result to every task it returns (the `attention` field), and the board UI routes every task that has one into its **Needs you** column.
+`taskAttention({ status, sourceDelegationId, execs, verificationBlocked, assigneeAgentId }): TaskAttention | null` says why a task is waiting on a person, or `null` when the board will move it on its own. `assigneeAgentId` is the agent working on the task, read only for an `in_progress` one. The server attaches the result to every task it returns (the `attention` field), and the board UI routes every task that has one into its **Needs you** column.
 
-| Status    | Result                                                                                                                                                               |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `blocked` | Always one: `needs_review` when the verdict blocks, else `timed_out` or `failed` from the last run (with that run's error as `detail`), else `blocked`.              |
-| `todo`    | `unassigned` with no bound agent; `stopped` when the last run was cancelled; `failed` / `timed_out` once parked at `MAX_AUTO_FIRES`; otherwise `null` (queued work). |
-| any other | `null`.                                                                                                                                                              |
+| Status        | Result                                                                                                                                                               |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blocked`     | Always one: `needs_review` when the verdict blocks, else `timed_out` or `failed` from the last run (with that run's error as `detail`), else `blocked`.              |
+| `todo`        | `unassigned` with no bound agent; `stopped` when the last run was cancelled; `failed` / `timed_out` once parked at `MAX_AUTO_FIRES`; otherwise `null` (queued work). |
+| `in_progress` | `unstarted` when no agent is assigned and the last run is not `running`: the card was moved there by hand, which starts nothing. Otherwise `null`.                   |
+| any other     | `null`.                                                                                                                                                              |
 
-`TaskAttention` is `{ reason, failedRuns, detail? }`, where `reason` is an `AttentionReason`.
+`TaskAttention` is `{ reason, failedRuns, detail? }`, where `reason` is an `AttentionReason`: `failed`, `timed_out`, `stopped`, `needs_review`, `blocked`, `unassigned` or `unstarted`.
 
 ## Run cost
 

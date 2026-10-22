@@ -6,7 +6,7 @@ description: Canonical definitions of Clawboo's core terms, each linked to the p
 Definitions of the vocabulary used throughout the Clawboo docs. Each entry is a one- or two-sentence definition with a link to the page that goes deeper. Terms are grouped by area; within a group they are roughly ordered from most-foundational to most-specific.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## Agents and runtimes
@@ -41,9 +41,11 @@ These docs describe Clawboo **v0.3.1**, the current release.
 
 ## The board and orchestration
 
-**the board** (the durable board): the transactional, SQLite-backed kanban board that is the source of truth for team task and coordination state. It survives refresh, supports race-free single-assignee claiming, and is the dispatcher the executor drives. See [the board](/concepts/the-board).
+**the board** (the durable board): the transactional, SQLite-backed kanban board that is the source of truth for team task and coordination state. It survives refresh, supports race-free single-assignee claiming, and is the dispatcher the executor drives. The **Board** view lays it out as a calendar: status columns across the top, days down the side. See [the board](/concepts/the-board) and [using the board](/using/board).
 
-**task**: one kanban card on the board. A task has one of seven statuses (`backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`), an optional assignee, dependencies, and an optional worktree. `done` and `cancelled` are terminal. See [the board](/concepts/the-board).
+**task**: one kanban card on the board. A task has one of seven statuses (`backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`), an optional assignee, dependencies, and an optional worktree. `done` and `cancelled` are terminal. The Board view has no In review or Blocked column: an `in_review` task shows in **In progress** marked **Verifying**, and a `blocked` one in **Needs you**. See [the board](/concepts/the-board).
+
+**Needs you**: the Board's first column, holding pending approvals and every task that will not move until a person acts (a failed, timed-out, stopped, blocked or unassigned task, one whose verification could not pass, or one left in In progress with no agent and no run). In the Today, Week and Month views its items sit in today's row. See [things that need you](/using/board#things-that-need-you).
 
 **atomic claim**: the race-free `UPDATE … WHERE status='todo' AND assignee IS NULL AND dropped=0` that lets at most one caller win a task. An empty result is a conflict that the caller must NOT retry (the "never retry a 409" rule). See [the board](/concepts/the-board) and [board internals](/internals/board-internals).
 

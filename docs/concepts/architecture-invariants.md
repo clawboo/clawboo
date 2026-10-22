@@ -250,7 +250,7 @@ The idempotent schema (7) buys a zero-friction fresh install, `createDb` produce
 - **The schema invariant will likely evolve again.** Preserving real data across an _additive_ schema change is handled. Preserving it across a change that rewrites or removes a column is not, and is the next step whenever one is needed.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

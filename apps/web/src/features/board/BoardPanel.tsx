@@ -73,7 +73,7 @@ import {
   type Landing,
 } from './calendar/CalendarGrid'
 import { CalendarToolbar } from './calendar/CalendarToolbar'
-import { RoutineRunPopover, routineName } from './calendar/RoutineRun'
+import { RoutineRunPopover, isConditionalRun, routineName } from './calendar/RoutineRun'
 import {
   countLabel,
   dayMonth,
@@ -867,6 +867,8 @@ export function BoardPanel() {
         count += r.count
         more ||= r.more
         const first = r.times[0]
+        // A run an in-flight fire may still skip is never firmed up as the next one.
+        if (isConditionalRun(r.routine, first)) continue
         if (first != null && first > now && (next == null || first < next)) next = first
       }
     }

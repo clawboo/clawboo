@@ -1,17 +1,17 @@
 ---
 title: Review and resolve approvals
-description: Use the Approvals panel to allow or deny pending exec approvals, native run_command requests, and the shared tool/delegation queue.
+description: Allow or deny pending exec approvals, native run_command requests, and the shared tool and delegation queue, from the board and the chat composer.
 ---
 
-Use this page when an agent pauses for your decision: an OpenClaw exec command waiting on a gate, a native Boo asking to run one program, or a brokered tool call / risky delegation queued for a human. All three surface in the **Approvals** panel, where you resolve each with an allow or a **Deny**, plus **Always** on the cards that offer it.
+Use this page when an agent pauses for your decision: an OpenClaw exec command waiting on a gate, a native Boo asking to run one program, or a brokered tool call / risky delegation queued for a human. All three surface as approval cards on the board and above the chat composer, where you resolve each with an allow or a **Deny**, plus **Always** on the cards that offer it.
 
-The panel renders three kinds of request, and they are wired differently:
+The cards cover three kinds of request, and they are wired differently:
 
 - **Exec Approvals**: OpenClaw's command-execution gate. One request reaches you two ways at once. It arrives live over your own tab's Gateway connection, and Clawboo's server separately mirrors it into the shared `tool_call_approvals` table as a `kind='exec'` row, which is what keeps the card alive when no tab is open. Either card resolves back through the Gateway, and, when the agent is known, the decision is also logged to Clawboo's history table.
 - **Native `run_command` approvals**: a [Clawboo Native](/runtimes/native) Boo asking to run one program, on a Boo whose shell you switched on. These are Clawboo's own rows end to end, and none of them is ever remembered.
 - **The shared tool-approval queue**: Clawboo's own database-mediated handshake for brokered tool calls and risky delegations. The same queue (and the same resolve buttons) is reused by the [Governance dashboard](/using/governance-dashboard), so there is one resolve path, not two.
 
-Below those, the panel lists the broker's tools with their availability, so you can see at a glance which tools are reachable.
+Which broker tools an agent can reach at all is not shown here: the [Capabilities dashboard](/using/capabilities-dashboard) greys out every tool whose requirement is unmet and lists why.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ There is **no standalone Approvals nav view**. Approvals surface where they were
 </Note>
 
 - Approvals appear in two places, both always available:
-  - The **Needs you** column on the [board](/using/board), the first column, under **Approval pending**. The column is always expanded; it also holds tasks that failed or stalled and are waiting on you.
+  - The **Needs you** column on the [board](/using/board), the first column. It also holds tasks that failed or stalled and are waiting on you; approvals come first, under **Approval pending** when both are there. In the Today, Week and Month views its items sit in today's row, and on a week or month without today the column folds to a narrow rail that takes you back to today. In the All view they fill the column.
   - An **inline tray above the composer** in [group chat](/using/group-chat) and 1:1 [agent chat](/using/agents), scoped to that team or agent (capped at three cards, with a "view on the board" link for the rest).
 - For **exec approvals** to appear, the agent's command-execution policy must be set to ask. Open an OpenClaw agent, go to the **Permissions** tab → **Execution Permissions**, and set **Command Execution** to **Always Ask** or **Ask for Unknown**. Then ask the agent to run a command. It pauses and the request appears here. See [command permissions](/using/command-permissions) for what each posture means.
 - For **native `run_command` approvals** to appear, the Boo's shell must be switched on (**Permissions** tab → **Running commands**) and the run must have a working folder, which in practice means a board task. Every native Boo created through Clawboo's own screens starts with that switch off.
@@ -151,10 +151,6 @@ On a mirrored exec card the answer is worked out on the server when the request 
 For a tool or delegation approval, a prompt is marked unrememberable when it is raised. That covers a call whose run has accumulated the [lethal trifecta](/appendices/glossary) and a call made after the run ingested untrusted content. Both are properties of _this run_ rather than of the tool, so a standing allow would authorize a future run that looks nothing like it. Clawboo also withholds it when it could not read the request confidently, and when the call was made through a brokered app rather than under a grant it could bind a rule to.
 
 When the checkbox is there, its label tells you the scope of what you are about to remember: **Always allow this command in this folder** on an exec card, **Do not ask again for this for 30 days** on a tool or delegation card.
-
-## Tool availability (read-only)
-
-Under the queue, the panel lists every broker tool with an **Available** / **Unavailable** pill, sourced from `GET /api/tools`. A tool is unavailable when an availability requirement (auth, config, env, or plugin) is unmet; the card greys out and its tooltip shows the diagnostics. A non-`safe` risk tool also shows an amber warning icon. This is informational; there are no actions here; it tells you which brokered tools an agent can actually reach.
 
 ## Verify it worked
 

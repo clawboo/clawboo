@@ -159,8 +159,8 @@ Full notes in the [CHANGELOG](./apps/cli/CHANGELOG.md).
   </tr>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/board-kanban.png" alt="The board: a durable kanban where every delegation is a real task carrying runtime and cost badges" />
-      <p align="center"><sub><strong>Board</strong>: every delegation is a real task.</sub></p>
+      <img src="docs/screenshots/board-kanban.png" alt="The board as a calendar: status columns across the days of the week, with tasks that need a person in today's row and routine runs on the days they fire" />
+      <p align="center"><sub><strong>Board</strong>: every delegation is a real task, on the day it happened.</sub></p>
     </td>
     <td width="50%">
       <img src="docs/screenshots/fleet-health.png" alt="The Fleet overview: agent count, task and verify pass rates, 24-hour spend, and per-runtime health" />
