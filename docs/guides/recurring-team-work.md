@@ -128,7 +128,7 @@ After a one-shot runs successfully it reads `finished`: its next run is null and
 
 ## What happens when it fires
 
-When a routine is due, the ticker queues it, atomically claims it, and hands it to the wake-bridge, which branches on the routine's target.
+Until then, its upcoming runs are drawn on the [Board](/using/board#routine-runs) calendar, in **To do** on the days they will run; click one there to see its schedule, run it now, or open the routine. When a routine is due, the ticker queues it, atomically claims it, and hands it to the wake-bridge, which branches on the routine's target.
 
 **A team routine** posts its instructions into the team chat, addressed to the team's lead. The message appears there labeled **Routine** with the routine's name, and the lead's turn is told it came from a schedule, so it carries the work out instead of waiting for someone to answer its questions. The run counts as successful once the lead has the message; what the team then does happens in that chat and on the board, like any other conversation.
 
@@ -154,7 +154,7 @@ A stopped (`error`) routine and a paused routine both never auto-fire; the ticke
 </Info>
 
 <Note>
-A failed dispatch that is really a *lost claim* (some other worker already owns the task, so the work is happening) is recorded as satisfied, not as an error; it does not stop the routine.
+A failed dispatch that is really a *lost claim* (some other worker already owns the task, so the work is happening) is recorded as satisfied, not as an error; it does not stop the routine. So is a run you stop by moving an agent routine's task card on the [board](/using/board) while it works: your move is the task's outcome, so the routine does not stop and the task stays where you put it. A routine's task is not bound to an agent, so one moved back to **To do** waits in **Needs you** until you assign it.
 </Note>
 
 ## Manage a routine
@@ -210,6 +210,7 @@ See [Scheduling: the one-firing-owner invariant](/concepts/scheduling#the-one-fi
 ## Verify it worked
 
 - The routine appears under **Team routines** or **Agent routines** with a live countdown (`in 5m`, `in 1h`).
+- Its next runs appear on the [Board](/using/board#routine-runs) calendar, in **To do** on their days. Pause it and they leave the calendar.
 - When it fires, the pill moves through `queued`, `starting`, and `running`, then back to `on`, and the row shows `ran <relative time>`.
 - A team routine's message appears in the team chat under a **Routine** label, followed by the lead's reply.
 - An agent routine's task appears on [the board](/using/board) with the agent's report on the card.

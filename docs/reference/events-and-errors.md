@@ -93,12 +93,14 @@ A task was atomically claimed by an assignee.
 
 #### `status_changed`
 
-A task transitioned state. `to` is always present; `from` may be null (first transition).
+A task transitioned state. `to` is always present; `from` may be null (first transition). `by: 'person'` marks a move a person made through the board's `PATCH` route. `reason` says why the server moved it: `retry` and `assigned` for a person's Retry or Assign, and `blocker_failed` for a dependent cancelled because a task it waited on failed or was cancelled.
 
 ```ts
 {
   from?: string | null
   to: string
+  by?: 'person'
+  reason?: 'retry' | 'assigned' | 'blocker_failed'
 }
 ```
 

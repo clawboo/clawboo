@@ -49,6 +49,8 @@ flowchart TD
     pass --> done["pass → done<br/>(intrinsic board gate allows)"]
 ```
 
+On the [Board](/using/board#the-columns) there is no In review column: an `in_review` card stays in **In progress** under a **Verifying** mark while the check runs. A task the completion path routes to `blocked` shows in **Needs you**, marked **Needs review** when its verdict cannot be promoted.
+
 ## The two layers
 
 ### The deterministic gate
@@ -122,6 +124,8 @@ After a failing attempt, the loop decides whether to retry or stop. One budget g
 
 The completion path is stricter than the gate: only a clean `pass` lands `done`. A `completed_with_debt` verdict, and any `fail` that has spent the attempt budget, lands `blocked` with a system comment recording how many attempts failed and an inbox notice to the delegator, or to the team leader when the task has no delegator. A `fail` with attempts left reverts to `in_progress` so the next fix cycle can re-dispatch it.
 
+A person's move on the board outranks this path. If someone marks the task done or cancels it while its check is still running, the verdict is still stored on the task as a record of what the check found, but the completion path moves nothing and tells no one the task was routed for review.
+
 ## The intrinsic board gate
 
 The rule above is enforced in the board state machine itself, so it cannot be skipped by reaching `done` through a different door. Every transition to `done` runs a single shared check, `isVerdictPromotable`, against the freshly-read task row inside a `BEGIN IMMEDIATE` transaction:
@@ -133,7 +137,7 @@ The rule above is enforced in the board state machine itself, so it cannot be sk
 
 When the verdict is non-promotable, the transition returns `verification_required`, which the [board REST](/reference/rest-api/board) layer maps to a `409`. The state machine is the backstop for any caller that reaches `done` another way; the worktree completion path is stricter still and promotes only a clean `pass`, so "done means verified" holds at every entry point.
 
-The one escape is `humanOverride`, a human deciding to ship despite a non-promotable verdict. It is the _only_ way a task with a known-failing verdict can reach `done`, and the caller must audit it: the `PATCH /api/board/:taskId` handler writes a `verification` audit row (`{ override: true, route: 'board_patch', priorStatus, to: 'done' }`) whenever an override-to-`done` succeeds. The override is never silent.
+The one escape is `humanOverride`, a human deciding to ship despite a non-promotable verdict. It is the _only_ way a task with a known-failing verdict can reach `done`, and the caller must audit it: the `PATCH /api/board/:taskId` handler writes a `verification` audit row (`{ override: true, route: 'board_patch', priorStatus, to: 'done' }`) whenever an override-to-`done` succeeds. The override is never silent. On the [Board](/using/board#moving-a-task-by-drag-and-drop), moving a card whose stored verdict would block Done, by dragging it or from the task drawer's status editor, asks **Complete … anyway?** before the card moves; confirming sends the override.
 
 <Danger>
 Moving a task back to `todo` **clears the stored verification verdict**, on the `in_progress → todo` re-claim path and on the `blocked → todo` re-queue a human uses after an exhausted fix loop. This is intentional: a release is a cross-runtime rebind boundary, and a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The next runtime re-verifies from scratch.
@@ -157,7 +161,7 @@ Making the gate intrinsic to the state machine, rather than a step the orchestra
 - **The deterministic gate trusts the configured command.** It reads an exit code; it does not validate that the command actually exercises the change. A weak `VERIFY_CMD` yields a weak gate.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

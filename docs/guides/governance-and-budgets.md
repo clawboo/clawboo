@@ -175,7 +175,7 @@ When a risky delegation fires, it calls the delegation-approval endpoint, which 
 2. **Otherwise, a pending approval is created** and the handler _blocks_ on a poll loop until the leader resolves it via the Approvals UI, or until the TTL or the waiter deadline expires.
 3. **The resolution decides.** `allow_once` or `allow_always` lets the delegation proceed; anything else (`deny`, `expired`, `timeout`) skips it, leaving a system comment and a reflection so the leader can revise or reassign.
 
-To resolve one, open the **Approval queue** in the Governance panel (the _same_ shared `ToolApprovalQueue` as the [Approvals panel](/using/approvals), so there is one resolve path). Each pending row shows the tool name, an expiry countdown, the reason, and an args summary, with **Allow Once** / **Always** / **Deny**. These `POST` to `/api/tools/approvals/:id/resolve`.
+To resolve one, open the **Approval queue** in the Governance panel (the _same_ shared `ToolApprovalQueue` as the [approval cards](/using/approvals) on the board and in chat, so there is one resolve path). Each pending row shows the tool name, an expiry countdown, the reason, and an args summary, with **Allow Once** / **Always** / **Deny**. These `POST` to `/api/tools/approvals/:id/resolve`.
 
 <Info>
 The client-side delegation-approval call **fails closed**. If the approval endpoint is unreachable, the request maps to `timeout`, a non-approving resolution, never `allow_once`. The whole point of the gate is human sign-off for a destructive action, so an unreachable endpoint must not auto-approve. Only *risky* delegations reach this path, so the strictness can never deadlock ordinary team work.
@@ -208,7 +208,7 @@ A forgotten approval **times out rather than deadlocks**: each approval carries 
 <a id="boundaries"></a>
 
 <Note>
-**The OpenClaw path records spend at the terminal, so it cannot auto-abort mid-run.** OpenClaw emits no incremental cost events (only a final cost on `done`), so there is no per-event crossing signal for the budget kill-switch to fire on during a run. Its budgets are instead enforced by a *pre-flight gate* on the **next** dispatch (the runner refuses a dispatch with reason `budget_paused` before the claim when a relevant `cap`-paused budget already exists), not a mid-run kill. This is a documented asymmetry with runtimes that stream per-turn cost (like the native runtime). The `tenant` scope and `tenantId` column are a dormant future seam; Clawboo runs as a single implicit tenant in v0.3.1.
+**The OpenClaw path records spend at the terminal, so it cannot auto-abort mid-run.** OpenClaw emits no incremental cost events (only a final cost on `done`), so there is no per-event crossing signal for the budget kill-switch to fire on during a run. Its budgets are instead enforced by a *pre-flight gate* on the **next** dispatch (the runner refuses a dispatch with reason `budget_paused` before the claim when a relevant `cap`-paused budget already exists), not a mid-run kill. This is a documented asymmetry with runtimes that stream per-turn cost (like the native runtime). The `tenant` scope and `tenantId` column are a dormant future seam; Clawboo runs as a single implicit tenant in v0.5.0.
 </Note>
 
 ## Related

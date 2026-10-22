@@ -128,7 +128,7 @@ An agent fire **materializes the board task**: either the existing task the Rout
 
 The **one-shot path** is the ordinary executor pipeline: claim the board task, run the adapter, verify, and complete. With no `repoPath` in the template there is no repository to branch a worktree from, so the fire runs the way the agent works a task delegated in team chat, without a checkout; a template that names a `repoPath` keeps its `kind`, and a file-changing kind gets a worktree of that repository. A lost claim is treated as success: someone else already owns the task, so the work is happening.
 
-The **connected path** exists because an OpenClaw agent runs over its _live_ Gateway connection; the one-shot runner refuses such a runtime by design. So a separate operator dispatcher claims the board task, opens a stable per-Routine session over the server-held operator client, and drains the adapter's event stream to a terminal `done`, bounded by a watchdog (10 minutes by default, overridable with `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`). The agent's summary is posted on the task as its report. The watchdog is the documented degradation: a pure dispatch-and-record with no closer would leak `in_progress` board tasks, so on timeout the dispatcher aborts the run and releases the task. Clawboo does **not** create a Gateway cron entry here: that would be the runtime's own-life domain.
+The **connected path** exists because an OpenClaw agent runs over its _live_ Gateway connection; the one-shot runner refuses such a runtime by design. So a separate operator dispatcher claims the board task, opens a stable per-Routine session over the server-held operator client, and drains the adapter's event stream to a terminal `done`, bounded by a watchdog (10 minutes by default, overridable with `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`). The agent's summary is posted on the task as its report. The watchdog is the documented degradation: a pure dispatch-and-record with no closer would leak `in_progress` board tasks, so on timeout the dispatcher aborts the run and releases the task. A person moving the task's card on the board ends the run at once instead of at the watchdog: its execution is closed as `cancelled` with the person's note, and a result that lands at the same moment is kept as a comment. Clawboo does **not** create a Gateway cron entry here: that would be the runtime's own-life domain.
 
 When an agent fire fails, the task it minted is set aside: moved from `todo` to `blocked` with a system comment naming the agent and the error. Left in `todo`, it would sit on the board looking like pending work that any agent's `claim_task` could pick up, while the Routine files a fresh task on its next fire anyway. A task bound at registration is the board's own and is left exactly as the runner left it.
 
@@ -152,7 +152,7 @@ When a fire fails, the ledger row moves to `error` with the failure recorded in 
 
 This is deliberate. Autonomous scheduled work must never silently retry-burn: a Routine that fails every fire and keeps retrying would spend a budget, churn the board, and bury the real problem. Stopping the Routine surfaces the failure (the Routines view marks it failed, shows the error, and offers Resume) and stops the bleeding. A successful fire, by contrast, re-arms cleanly at its next occurrence; a one-shot self-disables.
 
-A failed dispatch that is _really_ a lost claim is not an error at all, it means another worker already owns the task, the work is happening, and the fire is recorded as satisfied.
+A failed dispatch that is _really_ a lost claim is not an error at all, it means another worker already owns the task, the work is happening, and the fire is recorded as satisfied. So is a fire whose run a person stopped by moving the task's card on the [board](/using/board): their move is the task's outcome, so the Routine is not halted (it re-arms as after any successful fire) and the task stays where they put it.
 
 ## The unified schedules surface
 
@@ -164,6 +164,8 @@ The [Routines view](/using/routines) reads _both_ domains through one merged vie
 There is deliberately no third source. Claude Code, Codex, Hermes, and native have no live native scheduler that Clawboo drives: scheduling any of them _is_ a Clawboo Routine. The Gateway is the only runtime with an own-life cron Clawboo surfaces.
 
 The trait's contract has a load-bearing property: **`read()` never rejects**. A source whose backend is down (a disconnected Gateway) returns a degraded status with whatever records it can; a stale cache, or none, so one dead source can never take the merged view down. The REST `GET /api/schedules` therefore always returns `200`, with per-source degradation reported as data, and each record is enriched with its team and agent names (for a team Routine, the agent is the team's current lead). Writes route by owner: an `observe-only` source refuses with `403`, a `team-task` create into a runtime-own-life source returns `422`, an unknown id returns `404`, an illegal transition or ownership conflict returns `409`, and a write against a disconnected Gateway returns `503`. The `manageability` tier is a structural gate; the UI is a pure function of it and can never offer an action the owning system forbids.
+
+One read sits beside the merged list: `GET /api/schedules/occurrences` projects the upcoming runs of Clawboo's own Routines onto the days the [Board](/using/board#routine-runs) calendar shows. It runs on the server because the ticker evaluates cron in the server's time zone, so its times are the instants the Routines will fire. Only Routines that will fire are projected (not paused, parked in `error`, spent, or aimed at a team or agent that could no longer receive a fire), and the Gateway's own cron jobs never are.
 
 <Note>
 The Routines view reads and writes exclusively through this unified `/api/schedules` surface. Gateway cron jobs are reached server-side via the `OpenClawGatewayCronScheduleSource`; the browser never speaks the Gateway's `cron.*` RPC directly.
@@ -183,11 +185,11 @@ The error-halts policy trades autonomy for safety: a Routine that fails stops it
 
 - **Not a runtime's own scheduler.** Clawboo never fires team work into a runtime's own-life cron, and never auto-creates own-life crons. The Gateway-cron source is an operator surface over schedules the Gateway owns, not their owner.
 - **No native scheduler for the one-shot runtimes.** Claude Code, Codex, Hermes, and native have no live scheduler Clawboo drives; scheduling them is a Clawboo Routine. `hermes gateway` is deliberately never launched.
-- **Human participants are a seam, not a feature.** An agent Routine targeting a `participantKind: 'human'` agent reaches a typed `NotImplementedError`; the intended future shape is a scheduled board ping, not a spawned process. It is reachable and typed, but not built in v0.3.1.
+- **Human participants are a seam, not a feature.** An agent Routine targeting a `participantKind: 'human'` agent reaches a typed `NotImplementedError`; the intended future shape is a scheduled board ping, not a spawned process. It is reachable and typed, but not built in v0.5.0.
 - **Single implicit tenant today.** Every ledger row carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

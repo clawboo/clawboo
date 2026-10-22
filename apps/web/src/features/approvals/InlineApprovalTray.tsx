@@ -77,7 +77,7 @@ export function InlineApprovalTray({ agentId, teamId }: InlineApprovalTrayProps)
           onClick={() => useViewStore.getState().navigateTo('board')}
           className="cursor-pointer rounded-md py-1 text-center text-[10px] font-medium text-muted-foreground transition hover:text-primary"
         >
-          +{overflow} more — view on the board
+          +{overflow} more, view on the board
         </button>
       )}
     </div>

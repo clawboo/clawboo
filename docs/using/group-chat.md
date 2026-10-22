@@ -74,7 +74,7 @@ The agent chips below the transcript are shortcuts; clicking one inserts its `@m
 
 ### 5. Watch delegations land on the board
 
-When the leader (or any agent) emits a structured delegation, the server orchestrator turns it into a durable **board task** that appears inline in the chat timeline as a `BoardTaskCard`. This is the chat-fused board: the board is canonical, the chat is narration.
+When the leader (or any agent) emits a structured delegation, the server orchestrator turns it into a durable **board task** that appears inline in the chat timeline as a `BoardTaskCard`. This is the chat-fused board: the board is canonical, the chat is narration. The expand icon on a card opens that task on the [Board](/using/board) with its detail drawer open, and a task waiting on a person says why (for example **Failed** or **Stopped**) and offers **Resolve on board**.
 
 A delegation is a structured directive, not prose; the engine reads only typed signals: a `delegate` or `sessions_send` tool-call, or a `<delegate to="@Name">task</delegate>` (or multi-step `<plan>`) directive parsed once from the agent's terminal turn. Per delegation, the per-team server orchestrator (`getTeamOrchestrator`, over the shared `createBoardOrchestrator` core) does this:
 
@@ -122,16 +122,16 @@ Every team also has a durable **peer-chat room** underneath the group chat, wher
 
 ## Options / variations
 
-| Action                      | How                                                        | What it does                                                                                                 |
-| --------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Address the leader          | Send with no `@`                                           | Routes to Boo Zero (default), then team-internal lead, then first member                                     |
-| Address one teammate        | `@AgentName your message`                                  | Longest-prefix match at message start; `@mention` stripped before the agent sees it                          |
-| Address Boo Zero explicitly | `@Boo Zero …`                                              | Boo Zero is in the mention roster even though it is teamless                                                 |
-| Add a durable rule          | `/rule <text>`                                             | Persists to `/api/team-rules/:teamId`; injected on every future turn                                         |
-| Start a fresh conversation  | `/reset` or `/new`                                         | Ends what every teammate is carrying and drops a divider. No message is removed. See [Agents](/using/agents) |
-| Stop the team               | Click the red Stop button                                  | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`                             |
-| Insert a mention            | Click an agent chip                                        | Inserts `@AgentName` into the composer                                                                       |
-| Read further back           | Click **Load earlier messages** at the top of the timeline | Reveals 100 more items; the chat renders the most recent ~150 by default so a long session stays responsive  |
+| Action                      | How                                                        | What it does                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Address the leader          | Send with no `@`                                           | Routes to Boo Zero (default), then team-internal lead, then first member                                                          |
+| Address one teammate        | `@AgentName your message`                                  | Longest-prefix match at message start; `@mention` stripped before the agent sees it                                               |
+| Address Boo Zero explicitly | `@Boo Zero …`                                              | Boo Zero is in the mention roster even though it is teamless                                                                      |
+| Add a durable rule          | `/rule <text>`                                             | Persists to `/api/team-rules/:teamId`; injected on every future turn                                                              |
+| Start a fresh conversation  | `/reset` or `/new`                                         | Ends what every teammate is carrying and drops a divider. No message is removed. See [Agents](/using/agents)                      |
+| Stop the team               | Click the red Stop button                                  | `POST /api/teams/:id/chat/stop`: aborts in-flight runs, releases tasks to `todo`, where they wait in **Needs you** as **Stopped** |
+| Insert a mention            | Click an agent chip                                        | Inserts `@AgentName` into the composer                                                                                            |
+| Read further back           | Click **Load earlier messages** at the top of the timeline | Reveals 100 more items; the chat renders the most recent ~150 by default so a long session stays responsive                       |
 
 ## Verify it worked
 

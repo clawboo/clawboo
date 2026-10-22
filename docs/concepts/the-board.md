@@ -19,6 +19,10 @@ The board is the substrate beneath [delegation and orchestration](/concepts/dele
 
 A task moves through seven statuses. The full set is `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, and `cancelled`. `done` and `cancelled` are terminal; they have no outgoing transitions. A newly created task defaults to `todo` (immediately claimable) unless the caller asks for `backlog` (triage-only, not yet ready to work).
 
+<Note>
+The Board panel does not give every status a column of its own. It shows **Needs you**, Backlog, To do, In progress, Done and Cancelled: an `in_review` task stays in In progress under a **Verifying** mark while its check runs, and every `blocked` task needs a person, so it sits in Needs you. Needs you also holds the other tasks nothing will move on their own, which the server works out from each task's status, bound agent, run ledger and verdict (the task's `attention`), for example an `in_progress` task with no agent and no running run (`unstarted`). The statuses and the transition table below are unchanged by this grouping. See [Using the board](/using/board#the-columns).
+</Note>
+
 ```mermaid
 stateDiagram-v2
     [*] --> backlog: create (status: backlog)
@@ -68,8 +72,10 @@ The transition table is the single authority on what is legal. It is declared ex
 A few rules are worth calling out:
 
 - **Same-status is an idempotent no-op** and always allowed, so re-emitting a transition does no harm.
-- **`in_progress → todo` is the release path.** A task can fall back to `todo` to be re-claimed; doing so clears the assignee (and the assignee runtime), so the [atomic claim](#the-atomic-claim) can re-acquire it. It also clears the stored verification verdict, because releasing for re-claim is a cross-runtime rebind boundary; a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The release also detaches the task from any resident team orchestrator still mapping it to a session, since that mapping would otherwise keep refusing the re-claim.
+- **`in_progress → todo` is the release path.** A task can fall back to `todo` to be re-claimed; doing so clears the assignee (and the assignee runtime), so the [atomic claim](#the-atomic-claim) can re-acquire it. It also clears the stored verification verdict, because releasing for re-claim is a cross-runtime rebind boundary; a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The release also detaches the task from any resident team orchestrator still mapping it to a session, since that mapping would otherwise keep refusing the re-claim. (When a person makes the move, the person-move handling below stops that run instead.)
 - **`in_progress` and `in_review` are "locked" statuses.** While a task is in one of them it is actively owned, and its assignee must not be reassigned.
+- **A finished task records when it finished.** The first move to `done` or `cancelled` stamps `completed_at`; writing the same terminal status again (a run's late result, say) does not move it. A person finishing a task by hand may give an earlier time, the day the work was really done, as long as it falls between the task's creation and now; otherwise the move is refused with `invalid_completed_at`. The board's calendar places finished work on that day.
+- **A person's move is final.** A status change through the board's `PATCH` route (the Board panel and the task drawer) is a person deciding the task. Unless it moves the task into `in_progress` or `in_review`, it stops the run working on the task, whichever path started it (the team engine, the executor runner, or an OpenClaw routine fire), and closes that run's execution as `cancelled`. A cancel also cancels the plan steps waiting on the task (see [Dependencies](#dependencies)), whoever delegated the task is told when a person marks it done or cancels it, and the run's late result no longer overrides the move. Moved back to `todo`, a task bound to an agent is started again (or left to the ready-pump, which the move wakes), and one with no agent bound waits in Needs you. See [Delegation and orchestration](/concepts/delegation-and-orchestration#failure-handling).
 
 Status changes go through one function that enforces the table against the freshly read row, inside a write transaction, so a stale pre-check from a concurrent caller can never sneak through. A REST-layer pre-check, if any, is only fast-fail ergonomics; the transactional check is the real gate. An illegal transition returns a `409` from the REST layer.
 
@@ -107,7 +113,7 @@ Tasks form a blocks / blocked-by graph in the `task_deps` table. Linking a depen
 
 A task is **ready** when it is `todo`, not dropped, and _every_ one of its dependencies is `done`. Plans become dependency chains: each step depends on the prior step, and an orchestration ready-pump fires the next step the moment its blocker completes. Ready tasks are ordered by priority (descending), then by recency.
 
-Dependencies also drive failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit as permanent ghost `todo` cards. The board can cancel the still-pending (`todo` / `backlog`) transitive dependents of a failed task via a recursive walk of the dependency graph, returning the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched.
+Dependencies also drive failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit as permanent ghost `todo` cards. The board can cancel the still-pending (`todo` / `backlog`) transitive dependents of a failed task via a recursive walk of the dependency graph, returning the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched. The same walk runs when a person cancels a task on the board: a cancelled step can never be `done`, so the steps waiting on it are cancelled with it and returned to the caller.
 
 The board similarly walks the _parent_ chain (via the self-referential `parent_task_id`) with a recursive query to compute a task's ancestors, which is how delegation depth is enforced: the orchestrator and the board's capped create path refuse a _create_ once the parent's ancestor chain has reached the depth ceiling (default 2), while the executor runner refuses a _dispatch_ only for a task whose own ancestor chain is already past it. The two comparisons differ on purpose: the invariant is that anything creatable is dispatchable, so a task sitting exactly at the ceiling still runs. That create path adds two ceilings of its own: a per-parent live-child count (default 24), so an agent looping on `create_subtask` cannot quietly fill the board with rows, and a rolling-window rate on ROOT creation (default 30 per 5 minutes), which bounds the other runaway shape: a loop that files parentless tasks forever. Both recursive reads validate their raw SQL output with a schema at runtime rather than trusting the type system over a raw query.
 
@@ -168,10 +174,10 @@ SQLite is a deliberate choice: it ships in-process, needs no server, and, with t
 
 - **Not a general-purpose project tracker.** The board exists to coordinate agent execution, not to replace a human-facing issue tracker. Its statuses, transitions, and recovery passes are tuned for runtime-driven work.
 - **Not the agent or session registry.** The board references agents and sessions by id and owns no agent identity, agent files, or live session state. Those belong to the registry of record and the runtime.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.5.0. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

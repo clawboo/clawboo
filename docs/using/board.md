@@ -7,7 +7,7 @@ Use this page when you want to see what your team is actually doing; the durable
 
 The Board panel lives in the `BoardPanel` React module and reads `GET /api/board`, plus `GET /api/schedules/occurrences` for the upcoming routine runs its calendar shows; the detail drawer (`TaskDetailDrawer`) reads `GET /api/board/:taskId`, `GET /api/board/:taskId/executions`, and `GET /api/board/:taskId/workspace/detail`. For the underlying model, the state machine, the atomic claim, and dependency chains, see [The board](/concepts/the-board). For the full request/response shapes, see the [Board API reference](/reference/rest-api/board).
 
-![The board: status columns with task cards carrying runtime and cost badges](/images/board-kanban.png)
+![The board in Week view: status columns across the days of the week, tasks that need a person in today's row, and routine runs on the days they fire](/images/board-kanban.png)
 
 ## Prerequisites
 
@@ -95,7 +95,7 @@ What changed while you watched is not repeated here: an agent's moves made while
 
 ### Routine runs
 
-The upcoming runs of your [routines](/using/routines) appear in **To do**, on the days they will run. A run is not a task yet, so it looks different from a card: a dashed outline in To do's blue with a fine pencil hatch, no badges and no drag handle. The routine's name comes first, and under it a repeat icon and the time. In the current week or month the next run firms up to a solid edge with a dot before its time. A run whose time has passed leaves the calendar, and what it made appears instead. A routine that runs several times in a day shows once that day, with the count ("6 runs") after the time of the first one.
+The upcoming runs of your [routines](/using/routines) appear in **To do**, on the days they will run. A run is not a task yet, so it looks different from a card: a dashed outline in To do's blue with a fine pencil hatch, no badges and no drag handle. The routine's name comes first, and under it a repeat icon and the time. In the current week or month the next run firms up to a solid edge with a dot before its time. While a routine is running, its next run is not firmed up: the scheduler sets that run from when the current one finishes, so the run on the calendar happens only if the current one has finished by then, and the run and its popover say so. A run whose time has passed leaves the calendar, and what it made appears instead. A routine that runs several times in a day shows once that day, with the count ("6 runs") after the time of the first one.
 
 When an agent routine runs, it becomes a real task card on that same day. A team routine posts to its team chat, where the lead takes it from there, and the tasks the team then creates appear as they are made.
 

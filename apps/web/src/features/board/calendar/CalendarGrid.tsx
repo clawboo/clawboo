@@ -71,7 +71,7 @@ import {
   type TaskBuckets,
 } from './calendarModel'
 import { RollingCount } from './RollingCount'
-import { RoutineRunStrip } from './RoutineRun'
+import { RoutineRunStrip, isConditionalRun } from './RoutineRun'
 
 // The widths add up to 1120px with Cancelled folded, which fits the board's
 // share of a 1440px screen beside the app's sidebars: every column on screen,
@@ -829,7 +829,8 @@ function Cell({
       ) : null}
       {shownRuns.map((r) => {
         const focusId = `routine-run:${r.routine.schedule.id}:${row.key}`
-        const isNext = nextRunAt != null && r.times[0] === nextRunAt
+        const isNext =
+          nextRunAt != null && r.times[0] === nextRunAt && !isConditionalRun(r.routine, r.times[0])
         return (
           <RoutineRunStrip
             key={r.routine.schedule.id}

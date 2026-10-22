@@ -52,7 +52,7 @@ The sidebar nav is deliberately short, six work surfaces plus the Settings gear:
 | Block     | Item                          | View it opens                                 |
 | --------- | ----------------------------- | --------------------------------------------- |
 | Primary   | **Atlas** _(All Teams)_       | The global Ghost Graph                        |
-| Primary   | **Board**                     | The durable kanban board                      |
+| Primary   | **Board**                     | The durable task board, by status and by day  |
 | Primary   | **Marketplace**               | Browse 436 agents and 85 teams                |
 | Primary   | **Connectors**                | Connect MCP servers and apps for your agents  |
 | Secondary | **Fleet** _(Overview)_        | Fleet-health summary                          |
@@ -131,7 +131,7 @@ Clicking an agent opens a three-panel detail view: a chat panel on the left, a s
 
 - Click a **team icon** to open its group chat and watch the team collaborate.
 - Open **Atlas** to see how all your teams relate under Boo Zero.
-- Open the **Board** to see delegated work as durable, claimable tasks.
+- Open the **Board** to see delegated work as durable, claimable tasks, laid out by status and by day, with anything waiting on you in **Needs you**.
 - Open **Settings**, then **Runtimes**, to connect Claude Code, Codex, Hermes, or OpenClaw alongside the native runtime.
 
 ## See also

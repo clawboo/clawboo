@@ -86,7 +86,7 @@ A cap hit is logged to the audit log below (event type `cap_hit`).
 
 ### 6. Resolve approvals
 
-The **Approval queue** section embeds the shared `ToolApprovalQueue`, the _same_ queue and resolve UX as the [Approvals panel](/using/approvals), so there is one resolve path. It is no longer only tool and delegation rows: Clawboo's server mirrors OpenClaw's exec approvals into this same queue as `kind='exec'` rows, and a native Boo's `run_command` request lands here too, so a command waiting on a human shows up on this screen as well.
+The **Approval queue** section embeds the shared `ToolApprovalQueue`, the _same_ queue and resolve UX as the [approval cards](/using/approvals) on the board and in chat, so there is one resolve path. It is no longer only tool and delegation rows: Clawboo's server mirrors OpenClaw's exec approvals into this same queue as `kind='exec'` rows, and a native Boo's `run_command` request lands here too, so a command waiting on a human shows up on this screen as well.
 
 A pending row shows the tool name or the command, an expiry countdown, and an args summary, and on a connector call it quotes the agent's own note where it gave one. A command row never shows a reason: it shows the command and the folder, even on a native `run_command` request, whose stated reason is stored but not displayed. It carries two buttons plus, when the decision can be remembered at all, an **Always** checkbox you tick before allowing:
 
