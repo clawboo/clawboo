@@ -35,6 +35,12 @@
  *      throws on boot ships byte-identical HTML and leaves the user on a blank
  *      page. A headless-Chromium pass closes that gap.
  *
+ *   6. The server must survive `npm install -g clawboo@latest` replacing its
+ *      package folder, which the in-app update does. A server running inside
+ *      that folder is left in a deleted directory, and so is everything it
+ *      starts: npm exits with code 7, the OpenClaw CLI refuses to run, and the
+ *      restart into the new version dies while loading.
+ *
  * Test scenario:
  *   1.  Refuse to run if a Clawboo dashboard already answers in the CLI's
  *       18790-18809 discovery window — the CLI would attach to it and every
@@ -181,6 +187,9 @@ let cleanupRunning = false
 let reuseFake = null
 let reuseProc = null
 let reuseTmpDir = null
+// Owned by the deleted-directory boot (step 20).
+let orphanProc = null
+let orphanTmpDir = null
 
 async function cleanup() {
   cleanupRunning = true
@@ -201,7 +210,7 @@ async function cleanup() {
   if (clawbooPort) {
     await killByPort(clawbooPort)
   }
-  for (const proc of [cliProc, reuseProc]) {
+  for (const proc of [cliProc, reuseProc, orphanProc]) {
     if (proc && !proc.killed) {
       try {
         proc.kill('SIGTERM')
@@ -220,7 +229,7 @@ async function cleanup() {
       await new Promise((resolve) => server.close(() => resolve()))
     }
   }
-  for (const dir of [tmpDir, shadowBinDir, packDir, installDir, reuseTmpDir]) {
+  for (const dir of [tmpDir, shadowBinDir, packDir, installDir, reuseTmpDir, orphanTmpDir]) {
     if (dir) {
       try {
         await fs.rm(dir, { recursive: true, force: true })
@@ -1360,7 +1369,156 @@ async function main() {
   //     running in the 18790-18809 window.
   if (!(await assertReusesRunningDashboard(cliPath, installDir, cliEnvPath))) return
 
+  // 20. Test 9: the server survives `npm install -g clawboo@latest` replacing
+  //     its package folder (what the in-app update does). It must not run
+  //     inside that folder, and the installed server.js must boot from a
+  //     directory that has been deleted, which is where the update's restart
+  //     launches the new version from when the old server sat inside it.
+  if (!(await assertSurvivesPackageReplacement(packageDir, cliEnvPath))) return
+
   log('All clean-install smoke tests passed.')
+}
+
+// ─── Package replacement ─────────────────────────────────────────────────────
+
+/** The process listening on `port`, POSIX only. */
+async function listenerPid(port) {
+  try {
+    const out = await runCmd('lsof', ['-ti', `tcp:${port}`, '-sTCP:LISTEN'])
+    const pid = Number(out.trim().split('\n')[0])
+    return Number.isInteger(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
+/** A process's working directory, or null where it cannot be read. */
+async function processCwd(pid) {
+  if (process.platform === 'linux') {
+    try {
+      return await fs.readlink(`/proc/${pid}/cwd`)
+    } catch {
+      return null
+    }
+  }
+  try {
+    const out = await runCmd('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'])
+    const line = out.split('\n').find((l) => l.startsWith('n'))
+    return line ? line.slice(1) : null
+  } catch {
+    return null
+  }
+}
+
+/** A free TCP port outside the CLI's discovery window. */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer()
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address()
+      srv.close(() => resolve(port))
+    })
+  })
+}
+
+async function assertSurvivesPackageReplacement(packageDir, envPath) {
+  if (IS_WINDOWS) {
+    // Windows refuses to delete a directory a process is using, so a server
+    // cannot be left in a deleted one there.
+    log('skipping the deleted-directory checks on Windows')
+    return true
+  }
+  const realPackageDir = await fs.realpath(packageDir)
+
+  // (a) The server the CLI started is not running inside the package folder.
+  const pid = clawbooPort ? await listenerPid(clawbooPort) : null
+  const serverCwd = pid ? await processCwd(pid) : null
+  if (serverCwd === null) {
+    log("could not read the server's working directory here; skipped that check")
+  } else {
+    const rel = path.relative(realPackageDir, await fs.realpath(serverCwd).catch(() => serverCwd))
+    if (rel === '' || !rel.startsWith('..')) {
+      fail(
+        `the server runs inside its package folder (${serverCwd}); \`npm install -g\` replaces ` +
+          'that folder and leaves the server, and everything it starts, in a deleted directory',
+      )
+      return false
+    }
+    log(`✓ the server runs outside its package folder (${serverCwd})`)
+  }
+
+  // (b) The installed server.js boots when started from a deleted directory.
+  orphanTmpDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-orphan-')))
+  const home = path.join(orphanTmpDir, 'home')
+  const doomed = path.join(orphanTmpDir, 'doomed')
+  await fs.mkdir(path.join(home, '.openclaw'), { recursive: true })
+  await fs.mkdir(path.join(home, '.clawboo'), { recursive: true })
+  // A Gateway URL nothing listens on, so this server never knocks on a real one.
+  await fs.writeFile(
+    path.join(home, '.clawboo', 'settings.json'),
+    JSON.stringify({ gateway: { url: 'ws://127.0.0.1:9' } }),
+  )
+  await fs.mkdir(doomed)
+  const port = await freePort()
+  const logPath = path.join(orphanTmpDir, 'server.log')
+  const logFile = await fs.open(logPath, 'w')
+  // The shell enters the directory, deletes it, then becomes the server, so
+  // the server starts with a working directory that no longer exists.
+  orphanProc = spawn(
+    '/bin/sh',
+    [
+      '-c',
+      // Absolute rmdir: the shadow PATH carries only what the CLI needs.
+      'cd "$1" && /bin/rmdir "$1" && exec "$2" "$3"',
+      'sh',
+      doomed,
+      process.execPath,
+      path.join(packageDir, 'dist', 'server.js'),
+    ],
+    {
+      env: {
+        PATH: envPath,
+        HOME: home,
+        OPENCLAW_STATE_DIR: path.join(home, '.openclaw'),
+        CLAWBOO_API_PORT: String(port),
+        NODE_ENV: 'production',
+      },
+      stdio: ['ignore', logFile.fd, logFile.fd],
+    },
+  )
+  await logFile.close()
+
+  const deadline = Date.now() + READY_TIMEOUT_MS
+  let answered = false
+  while (Date.now() < deadline && orphanProc.exitCode === null) {
+    const res = await httpGet(`http://127.0.0.1:${port}/api/settings`).catch(() => null)
+    if (res?.ok) {
+      answered = true
+      break
+    }
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  const serverLog = await fs.readFile(logPath, 'utf8').catch(() => '')
+  try {
+    orphanProc.kill('SIGTERM')
+  } catch {
+    /* already gone */
+  }
+  if (!answered) {
+    fail('the installed server did not start from a deleted working directory')
+    console.error('--- server output ---\n' + serverLog.slice(-3000))
+    return false
+  }
+  if (!serverLog.includes('working directory no longer exists')) {
+    fail(
+      'the server answered, but its working directory was not the deleted one; the check proved nothing',
+    )
+    console.error('--- server output ---\n' + serverLog.slice(-3000))
+    return false
+  }
+  log('✓ the installed server boots from a deleted working directory')
+  return true
 }
 
 /** Fork-path banners from apps/cli/src/index.ts — their ABSENCE proves reuse. */

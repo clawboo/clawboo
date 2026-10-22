@@ -1,3 +1,7 @@
+// MUST stay the first import: it moves a server started in a deleted working
+// directory into one that exists, before express (via depd) calls process.cwd().
+import './lib/cwdGuard'
+
 import http from 'node:http'
 import path from 'node:path'
 

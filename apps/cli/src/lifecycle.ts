@@ -20,6 +20,7 @@ import { createConnection } from 'net'
 import { fork, spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 
 import { resolveClawbooDir } from '@clawboo/config'
 
@@ -277,8 +278,14 @@ export function findMonorepoRoot(): string | null {
     }
   }
 
-  // Walk up from cwd
-  let dir = process.cwd()
+  // Walk up from cwd, unless the shell is sitting in a directory that has been
+  // deleted, in which case there is nothing to walk.
+  let dir: string
+  try {
+    dir = process.cwd()
+  } catch {
+    dir = __dirname
+  }
   for (let i = 0; i < 10; i++) {
     if (!candidates.includes(dir)) candidates.push(dir)
     const parent = path.dirname(dir)
@@ -340,6 +347,36 @@ export async function fetchServerVersion(
 }
 
 // ─── Server lifecycle ─────────────────────────────────────────────────────────
+
+/**
+ * The bundled server's working directory: clawboo's own directory, never the
+ * package folder. `npm install -g clawboo@latest` replaces the package folder,
+ * so a server started inside it is left in a directory that no longer exists,
+ * and every process it starts after that fails: the in-app update's npm exits
+ * with code 7, the OpenClaw CLI refuses to run, and the restart into the new
+ * version dies while loading.
+ */
+export function serverWorkingDir(): string {
+  try {
+    const dir = resolveClawbooDir()
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    return dir
+  } catch {
+    return os.homedir()
+  }
+}
+
+/**
+ * Where the user ran `clawboo`, for the server's "near where you started"
+ * suggestions. Empty when the shell's directory has been deleted.
+ */
+export function launchDirEnv(): NodeJS.ProcessEnv {
+  try {
+    return { CLAWBOO_LAUNCH_DIR: process.cwd() }
+  } catch {
+    return {}
+  }
+}
 
 export type LaunchMode = 'bundled' | 'dev'
 
@@ -411,9 +448,10 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
 
   if (mode === 'bundled') {
     const child = fork(bundledServerPath, [], {
-      cwd: __dirname,
+      cwd: serverWorkingDir(),
       env: {
         ...process.env,
+        ...launchDirEnv(),
         NODE_ENV: 'production',
         // The running clawboo version, so the server's self-version check
         // ("update available" chip, and this CLI's own discovery check on the
@@ -445,7 +483,13 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
     const child = onWindows
       ? spawn(`npx tsx "${devServerPath!}"`, {
           cwd: monorepoRoot!,
-          env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION, ...pinned },
+          env: {
+            ...process.env,
+            ...launchDirEnv(),
+            NODE_ENV: 'production',
+            CLAWBOO_VERSION: VERSION,
+            ...pinned,
+          },
           detached: true,
           stdio: childStdio,
           shell: true,
@@ -453,7 +497,13 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
         })
       : spawn('npx', ['tsx', devServerPath!], {
           cwd: monorepoRoot!,
-          env: { ...process.env, NODE_ENV: 'production', CLAWBOO_VERSION: VERSION, ...pinned },
+          env: {
+            ...process.env,
+            ...launchDirEnv(),
+            NODE_ENV: 'production',
+            CLAWBOO_VERSION: VERSION,
+            ...pinned,
+          },
           detached: true,
           stdio: childStdio,
         })

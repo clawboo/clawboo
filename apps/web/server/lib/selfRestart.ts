@@ -23,6 +23,8 @@
  */
 import { spawn } from 'node:child_process'
 
+import { liveCwd } from './cwdGuard'
+
 const FLUSH_DELAY_MS = 400
 
 export interface SelfRestartDeps {
@@ -56,6 +58,10 @@ export function restartIntoLatest(port: number, deps: SelfRestartDeps = {}): voi
 
   try {
     const child = spawn(process.execPath, [entry], {
+      // Never inherit this process's directory: after `npm install -g` it can be
+      // inside the package folder that was just replaced, and the successor
+      // would die while loading.
+      cwd: liveCwd(),
       detached: true,
       stdio: 'ignore',
       env,

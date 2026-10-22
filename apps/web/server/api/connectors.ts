@@ -69,6 +69,7 @@ import {
   getAccessToken,
 } from '../lib/connectors/oauthFlow'
 import { clearOAuth, isAuthorized } from '../lib/connectors/oauthStore'
+import { launchDir } from '../lib/cwdGuard'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
 import { isTransient, retryTransient } from '../lib/connectors/transientRetry'
@@ -554,7 +555,7 @@ export function connectorsPathSuggestionsGET(req: Request, res: Response): void 
     if (slug === 'sqlite') {
       // Depth-2 walk from where clawboo was launched, for files that look like
       // databases. Capped, sorted for a stable order, symlinks not followed.
-      const root = process.cwd()
+      const root = launchDir()
       const found: string[] = []
       const walk = (dir: string, depth: number): void => {
         if (depth > 2 || found.length >= 25) return
@@ -574,7 +575,7 @@ export function connectorsPathSuggestionsGET(req: Request, res: Response): void 
       walk(root, 0)
       for (const f of found.sort().slice(0, 5)) offer(path.basename(f), f, false)
     } else {
-      offer('Where clawboo runs', process.cwd(), true)
+      offer('Where you started clawboo', launchDir(), true)
       const home = homedir()
       offer('Documents', path.join(home, 'Documents'), true)
       offer('Desktop', path.join(home, 'Desktop'), true)

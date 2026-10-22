@@ -25,6 +25,7 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, 
 | `CLAWBOO_UI_DIR`                      | State & paths      | `<server>/ui`                    | server boot (production static serving) |
 | `CLAWBOO_SERVER_PATH`                 | State & paths      | (auto-discovered)                | CLI dev-fallback launch                 |
 | `CLAWBOO_MCP_BIN_DIR`                 | State & paths      | (set by CLI)                     | `GET /api/mcp/config` stdio snippet     |
+| `CLAWBOO_LAUNCH_DIR`                  | State & paths      | (set by CLI)                     | connector folder suggestions            |
 | `CLAWBOO_CATALOG_INDEX_URL`           | State & paths      | (a raw githubusercontent URL)    | marketplace catalog resolution          |
 | `CLAWBOO_API_PORT`                    | Ports & binding    | `18790` (auto-scan)              | `resolveApiPort()`                      |
 | `CLAWBOO_API_PORT_START`              | Ports & binding    | `18790`                          | `resolveApiPort()` scan start           |
@@ -126,6 +127,13 @@ The in-process Express server resolves its DB path through `getDbPath()` → `~/
 - **Read by**: `GET /api/mcp/config` in `apps/web/server/api/mcp.ts`. Set by the CLI on the forked server to `<bundle dir>/bin`.
 - **Purpose**: tells the server where the bundled MCP stdio bins live so `/api/mcp/config?transport=stdio` can emit a correct `node <bin>` attach snippet. When unset, only the HTTP transport attach config is emitted.
 - **Default**: set by the CLI; otherwise unset (HTTP attach still works).
+
+### `CLAWBOO_LAUNCH_DIR`
+
+- **Read by**: `launchDir()` in `apps/web/server/lib/cwdGuard.ts`, for the connector setup's folder suggestions (a database or folder near where you started Clawboo).
+- **Set by**: the CLI, on the server it starts, to the directory you ran `clawboo` from. The server itself runs in the Clawboo directory, not there, so it needs to be told.
+- **Purpose**: keeps "near where you started" suggestions meaningful now that the server's own working directory is the Clawboo directory. A value that is relative or names a directory that no longer exists is ignored.
+- **Default**: set by the CLI; otherwise the server's working directory.
 
 ### `CLAWBOO_CATALOG_INDEX_URL`
 
