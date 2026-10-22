@@ -1463,17 +1463,18 @@ async function assertSurvivesPackageReplacement(packageDir, envPath) {
   const port = await freePort()
   const logPath = path.join(orphanTmpDir, 'server.log')
   const logFile = await fs.open(logPath, 'w')
-  // The shell enters the directory, deletes it, then becomes the server, so
-  // the server starts with a working directory that no longer exists.
+  // A small Node bootstrap enters the directory, deletes it, then loads the
+  // installed server, so the server starts with a working directory that no
+  // longer exists. Entering it first matters: Node caches the working directory,
+  // and only a successful chdir clears that cache, so the server's own
+  // process.cwd() then really fails. No shell is involved; the paths are
+  // arguments, never part of a command line.
   orphanProc = spawn(
-    '/bin/sh',
+    process.execPath,
     [
-      '-c',
-      // Absolute rmdir: the shadow PATH carries only what the CLI needs.
-      'cd "$1" && /bin/rmdir "$1" && exec "$2" "$3"',
-      'sh',
+      '-e',
+      'const [dir, server] = process.argv.slice(1); process.chdir(dir); require("node:fs").rmdirSync(dir); require(server)',
       doomed,
-      process.execPath,
       path.join(packageDir, 'dist', 'server.js'),
     ],
     {
