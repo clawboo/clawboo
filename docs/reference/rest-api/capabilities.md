@@ -212,7 +212,7 @@ Toggles an existing capability identified by its composite `id`. The handler res
 
 ### Action: `approve`
 
-Resolves a pending tool-call approval row (the same `tool_call_approvals` handshake the Approvals panel uses, approval ids carry no source prefix, so this is not a source-routed write). The resolve is idempotent: a row already resolved is a no-op and returns the existing row.
+Resolves a pending tool-call approval row (the same `tool_call_approvals` handshake the approval cards on the board and in chat resolve through; approval ids carry no source prefix, so this is not a source-routed write). The resolve is idempotent: a row already resolved is a no-op and returns the existing row.
 
 **Request body**:
 

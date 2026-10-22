@@ -123,6 +123,13 @@ When a task is blocked by failure, its downstream plan steps can never become re
 
 A user pressing **Stop** is deliberately _not_ a failure. Stop is detected as a generation change since the delegation was dispatched; the task is released cleanly back to `todo` (re-runnable), with no `blocked`, no dependent cancellation, and no failure reflection, releasing the work the user just halted, not re-amplifying it. Stop also reaches work that has not started yet. A reply or task released to its agent before the Stop, but whose run had not started yet (it was waiting behind another run on the same agent, or was still starting), never starts, and such a task is released back to `todo` the same way. A run delivered before the Stop that finishes after it starts no new delegations.
 
+A person moving a task's card on the [board](/using/board) is not a failure either, and it outranks the run. The board's `PATCH` route stops the run working on the task, whether the team engine, the executor runner, or an OpenClaw routine fire started it, and closes its execution as `cancelled`. A cancel also cancels the task's still-pending (`todo` / `backlog`) dependents, as a failure does. Then the orchestrator:
+
+- tells whoever delegated the task when the person marked it done or cancelled it, with a `[Task Update]` entry whose outcome is `person_done` or `person_cancelled`. A cancelled entry tells the delegator not to redo the work or hand it to anyone again, and names the plan steps cancelled with it. When no engine is running for the team, the delegator gets a mailbox notice it reads at its next turn instead. A person-assigned task reports to nobody, as always;
+- never lets the stopped run's late outcome override the move: a late result is kept only as a comment on the task, and a late failure changes nothing (no `blocked`, no cancelled dependents, no failure reflection);
+- starts a task moved back to `todo` again from the beginning with the same agent when a run was going, and otherwise leaves it to the ready-pump, which the move wakes;
+- runs the ready-pump after a person's Done, since the steps that waited on the task may now be ready.
+
 ## Design rationale and trade-offs
 
 Prose-scanning orchestration is fundamentally a heuristic: an LLM is a creative writer and will always invent a delegation phrasing the regex didn't anticipate. The earlier engine's nine natural-language patterns were a maintenance treadmill, and a missed pattern meant a silently dropped delegation. The structured-first contract flips the burden: the agent is constrained to a machine-parseable directive, so a routed delegation comes from explicit intent rather than a guess. The cost is that the agent must be _told_ the contract (the `AGENTS.md` instructions) and the parser must tolerate weak-model drift, which it does, by anchoring on the closing tag.
@@ -139,7 +146,7 @@ The depth cap, the report-up-to-a-single-reduce-point discipline, the fan-out ca
 - **The orchestrator coordinates; it does not execute.** It creates, claims, delivers, and reflects. The actual work happens inside the delegate's runtime, and the result is reported up as a condensed summary, never the raw transcript.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

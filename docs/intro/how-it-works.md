@@ -66,7 +66,7 @@ There is one non-HTTP path: the browser opens a WebSocket to the same-origin `/a
 
 ### 3. The board is the durable source of truth
 
-When a team delegates work, the work becomes a row in SQLite. The [board](/concepts/the-board), `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`, is the transactional substrate for all coordination. An agent picks up work by **atomically claiming** a task (a single conditional `UPDATE` that exactly one concurrent caller can win; a lost claim is a `409` the caller never retries), a run is recorded as an `execution_processes` ledger row, and the outcome lands back on the board. Refresh the page, restart the server, or run a dozen agents against the one database file; the board survives all of it, with a WAL-based contention recipe and two startup/interval reconciliation passes that recover crashed and abandoned work.
+When a team delegates work, the work becomes a row in SQLite. The [board](/concepts/the-board), `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`, is the transactional substrate for all coordination. An agent picks up work by **atomically claiming** a task (a single conditional `UPDATE` that exactly one concurrent caller can win; a lost claim is a `409` the caller never retries), a run is recorded as an `execution_processes` ledger row, and the outcome lands back on the board. A person working the [Board](/using/board) by hand has the last word: moving a card stops the run working on that task, and the agent that delegated it hears what the person decided. Refresh the page, restart the server, or run a dozen agents against the one database file; the board survives all of it, with a WAL-based contention recipe and two startup/interval reconciliation passes that recover crashed and abandoned work.
 
 SQLite is more than the board. The same database file is the agent [registry of record](/appendices/glossary) (synced from the Gateway), shared [memory](/concepts/memory), the [governance](/concepts/governance) ledger, and the observability [event log](/concepts/observability). There is **no migration ladder**; the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` is the sole schema source, applied once when a database is opened, so the file is immediately usable. Opening an older file also adds any columns it is missing, derived from that same DDL. See the [database schema](/reference/database-schema#upgrading-an-existing-database).
 
@@ -99,13 +99,13 @@ Every coordination action, a task created, a delegation routed, a run started, a
 
 ## Boundaries and non-goals
 
-- **Not multi-machine in v0.3.1.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
+- **Not multi-machine in v0.5.0.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
 - **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token, or the server refuses to start).
 - **OpenClaw is special.** Four runtimes go through the uniform executor runner; OpenClaw is a connected substrate driven over a live WebSocket and refused by the runner, a deliberate asymmetry, not an inconsistency.
 - **This is the overview, not the spec.** Each layer here has a concept page with the real mechanics, and a reference page with the exact routes, shapes, and defaults. Follow the links.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

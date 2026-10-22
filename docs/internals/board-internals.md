@@ -5,11 +5,11 @@ description: 'The board data-access layer: the atomic claim, the transactional s
 
 [The board](/concepts/the-board) is Clawboo's durable task-coordination substrate. This page is the implementation deep-dive for people working _on_ it: the single data-access layer that owns every board write, the conditional-UPDATE claim that makes single-assignee work race-free, the state machine that enforces legal transitions inside a write transaction, the SQLite contention recipe that keeps many concurrent writers honest, the recursive CTEs that walk the dependency and parent graphs, and the two reconciliation passes that recover stuck work.
 
-Everything here lives in `packages/db/src/board/`: four modules: `repository.ts` (the data access), `contention.ts` (the write recipe), `schemas.ts` (the zod shapes for REST bodies and raw-CTE results), and `verification.ts` (verdict persistence — `setTaskVerification` — feeding the intrinsic `→ done` gate). The pure transition rules sit one package over, in [`@clawboo/board-core`](/reference/packages/board-core), and are re-exported through `@clawboo/db` unchanged. The connection-level pragmas they depend on are set in `packages/db/src/db.ts`. If you want the _why_ behind the board's existence, narration-vs-authority, the worktree linkage, read [the concept page](/concepts/the-board) first; this page assumes it.
+Everything here lives in `packages/db/src/board/`. The core is four modules: `repository.ts` (the data access), `contention.ts` (the write recipe), `schemas.ts` (the zod shapes for REST bodies and raw-CTE results), and `verification.ts` (verdict persistence through `setTaskVerification`, feeding the intrinsic `→ done` gate). Beside them sit `events.ts` (the in-process lifecycle bus every repository write publishes to after commit) and the read helpers the board REST routes attach to each task: `attention.ts` (why a task needs a person), `runCost.ts` (what its runs cost) and `runningSince.ts` (when its current run started). The pure transition rules sit one package over, in [`@clawboo/board-core`](/reference/packages/board-core), and are re-exported through `@clawboo/db` unchanged. The connection-level pragmas they depend on are set in `packages/db/src/db.ts`. If you want the _why_ behind the board's existence, narration-vs-authority, the worktree linkage, read [the concept page](/concepts/the-board) first; this page assumes it.
 
 ## What it is, and what it isn't
 
-The board data-access layer is **the only place in the codebase that touches the board tables**. `apps/web` never reaches a board table with raw Drizzle; it calls a repository function. That is deliberate: it keeps query construction out of the app, and it is the single seam a future SQLite→Postgres or multi-tenant swap would target. Every read that could be tenant-scoped takes an optional `scope` argument carrying a `tenantId`; the column exists on every board table but no filtering is active in v0.3.1.
+The board data-access layer is **the only place in the codebase that touches the board tables**. `apps/web` never reaches a board table with raw Drizzle; it calls a repository function. That is deliberate: it keeps query construction out of the app, and it is the single seam a future SQLite→Postgres or multi-tenant swap would target. Every read that could be tenant-scoped takes an optional `scope` argument carrying a `tenantId`; the column exists on every board table but no filtering is active in v0.5.0.
 
 It is **not** an ORM-over-everything layer. It is a hand-written set of typed functions over five tables (`tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`), each function doing exactly one board operation. The pure transition rules live apart from the data access so they are unit-testable without a database; the contention helpers live apart so the rest of the repository reads as plain Drizzle.
 
@@ -49,16 +49,21 @@ flowchart TD
     E -->|no| RIL[reason: illegal_transition]
     E -->|yes| F{to === done<br/>and verdict non-promotable<br/>and not humanOverride?}
     F -->|yes| RVR[reason: verification_required]
-    F -->|no| G[UPDATE status, updatedAt<br/>+ completedAt if terminal<br/>+ clear assignee/verdict if → todo]
+    F -->|no| CA{first reach of a terminal status<br/>with opts.completedAt outside<br/>createdAt .. now + 5 min?}
+    CA -->|yes| RCA[reason: invalid_completed_at]
+    CA -->|no| G[UPDATE status, updatedAt<br/>+ completedAt on first reaching a terminal status<br/>+ clear assignee/verdict if → todo]
     G --> H[ok: task]
+    H --> EV[after commit: emit status_changed<br/>with actor when given]
 ```
 
 The row is read **inside** the `BEGIN IMMEDIATE` transaction, so the transition is checked against the freshly read status; two concurrent callers cannot both pass a stale pre-check. Any pre-check the REST layer does first is purely fast-fail ergonomics; the transactional check is the real gate. An illegal transition surfaces as `409` from the REST handler.
 
 Two side effects fire inside that same write:
 
-- **Terminal states set `completedAt`.** Reaching `done` or `cancelled` stamps the completion timestamp.
+- **Reaching a terminal state sets `completedAt`, once.** The first move to `done` or `cancelled` stamps the completion timestamp. Writing the same terminal status again (a run's late result after a person already marked the task done) leaves it alone. `opts.completedAt` back-dates the stamp, for a person marking work done on the day it was really done: it must fall between the task's `createdAt` and now plus five minutes of clock skew (a time inside that skew is recorded as now), else the move is refused with `invalid_completed_at`. It is ignored for any other status.
 - **`→ todo` is the release path, and it unassigns.** Moving a task back to `todo` clears `assigneeAgentId`, `assigneeRuntime`, **and** the stored `verification` verdict. The assignee clear is what lets the [atomic claim](#the-atomic-claim) re-acquire the task (the claim guards on `assignee IS NULL`); without it, every re-fire of a released task would `409`. The verdict clear is the cross-runtime rebind boundary: a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. `releaseTask` performs the same three-field clear directly for the `in_progress → todo` case.
+
+After the transaction commits, `updateStatus` publishes a `status_changed` event on the lifecycle bus (`events.ts`), so no subscriber can act on an uncommitted transition. `opts.actor: 'person'` rides on that event when a human made the move; every other writer (the engine, an agent's tool call, a sweep, verification) leaves it absent. The board's `PATCH` route is the one caller that sets it, and subscribers use it to leave a person's move to that route: it stops the run working on the task and tells the delegator (see [`PATCH /api/board/:taskId`](/reference/rest-api/board)). A person's move back to `todo` also wakes the team's dispatch pump.
 
 ### The intrinsic verification gate
 
@@ -123,6 +128,8 @@ That zero-row result is **data, not an error**. `claimTask` distinguishes the tw
 
 Stale re-claim of a dead, abandoned `in_progress` task is deliberately **not** the claim's job. The claim's `WHERE` only matches `todo`, so an abandoned `in_progress` task is invisible to it. Liveness lives in one place; [reconciliation](#orphan-and-stale-reconciliation) releases such a task back to `todo`, after which an ordinary claim re-acquires it. Keeping the claim a pure mutex and liveness a separate pass is what makes both correct.
 
+Reconciliation only reaps work that has a `running` execution. An `in_progress` task with **no** assignee and no running execution was moved there by hand, which starts nothing, so no pass will ever move it. `isStrandedInProgress` recognizes it, the needs-you rule reports it as `unstarted`, and a person hands it back: `assignTaskDelegation` (re-bind to an agent and release to `todo`, in one `BEGIN IMMEDIATE` transaction) and the retry route both accept it as they accept a `todo`, `backlog` or `blocked` task.
+
 ## Dependencies and the recursive CTEs
 
 Tasks form a blocks / blocked-by graph in `task_deps`, with a composite primary key on `(task_id, depends_on_task_id)` that prevents duplicate edges. `linkDep` writes the whole edge inside `immediateWrite`: it rejects a self-link outright, then probes reachability with a recursive CTE and throws `TaskDependencyCycleError` when `taskId` is already upstream of `dependsOnTaskId` — that is, when the new edge would close a direct or transitive cycle. Only after the probe does it insert, still with `onConflictDoNothing`, so re-linking an existing edge remains a harmless no-op. Probe and insert share one `BEGIN IMMEDIATE` transaction, so two concurrent links cannot race a cycle into the graph.
@@ -181,7 +188,7 @@ The board owns _pointers_ into the worktree subsystem, not the worktree itself. 
 
 Each spawned run is an `execution_processes` row, a per-run ledger for any executor. `createExecutionProcess` opens it (started `running`); `completeExecutionProcess` closes it with an outcome (`succeeded`, `failed`, `timed_out`, or `cancelled`) plus an optional token/cost ledger and git before/after commit checkpoints. The close is guarded on `status = 'running'`, so a terminal row is immutable: the first terminal wins, and a losing writer gets `null` back and appends no second `execution_completed`. That guard is load-bearing because the ledger is the dispatch pump's fire-policy input, where `cancelled` means user Stop; a late abort overwriting an already-swept `timed_out` row would reclassify infra death as user intent and park refireable work for good. By convention an exec row is opened only _after_ a successful claim, because this ledger is exactly what crash recovery reads on restart.
 
-Each run also records what it cost on its own row: `costUsd`, its tokens, and a `costSource` (`reported` when the runtime priced the run, `token-estimate` or `char-estimate` when Clawboo did). The team orchestrator's drain writes them at the run's end through `recordExecutionUsage`, which matches the row whatever its status, because a Stop or the idle watchdog closes the row before the run's own terminal arrives. It touches only the cost, token and `runtime` columns and never the status, completion time, summary or error, so the first-terminal-wins rule above still holds. `tasks.cost_usd` is the sum of the task's rows, recomputed in the same transaction as each cost write rather than added to, so rewriting a run's cost never counts it twice. The board reads each task's total and whether any of it is estimated (`runCostForTasks`, one ledger read per board) with the pure `summarizeRunCost` from `@clawboo/board-core`.
+Each run also records what it cost on its own row: `costUsd`, its tokens, and a `costSource` (`reported` when the runtime priced the run, `token-estimate` or `char-estimate` when Clawboo did). The team orchestrator's drain writes them at the run's end through `recordExecutionUsage`, which matches the row whatever its status, because a Stop or the idle watchdog closes the row before the run's own terminal arrives. It touches only the cost, token and `runtime` columns and never the status, completion time, summary or error, so the first-terminal-wins rule above still holds. `tasks.cost_usd` is the sum of the task's rows, recomputed in the same transaction as each cost write rather than added to, so rewriting a run's cost never counts it twice. The board reads each task's total and whether any of it is estimated (`runCostForTasks`, one ledger read per board) with the pure `summarizeRunCost` from `@clawboo/board-core`. `runningSinceForTasks` reads when each task's newest `running` execution started (its `startedAt`, else `claimedAt`, else `createdAt`) with one read of the running rows, which is how an In progress card shows how long its run has been going.
 
 ## The contention recipe
 
@@ -250,10 +257,10 @@ The cost is a second persistence layer beside each runtime's own session state, 
 
 - **Not the agent or session registry.** The board references agents, runtimes, and sessions by id (soft refs, no foreign key) and owns no agent identity, agent files, or live session state. Those belong to the [registry of record](/appendices/glossary) and the [runtime](/appendices/glossary). Only the internal `parent_task_id` self-reference is FK-enforced.
 - **Not a general-purpose tracker.** The statuses, transitions, and recovery passes are tuned for runtime-driven agent execution, not for a human-facing issue tracker.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.3.1. Multi-tenant scoping is a future seam, not a shipped feature.
+- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.5.0. Multi-tenant scoping is a future seam, not a shipped feature.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

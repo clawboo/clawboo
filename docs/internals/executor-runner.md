@@ -76,7 +76,7 @@ flowchart TD
 
 Everything that can refuse the dispatch without mutating the board runs _before_ the claim, so a misrouted or over-budget call never opens an execution row or spawns a process. In order:
 
-1. **Aborted waiter.** A run can sit queued behind a same-identity dispatch in the home mutex for up to `CLAWBOO_HOME_MUTEX_ACQUIRE_MS` (10 minutes by default); a waiter still stuck past that is behind a wedged holder and rejects with a typed `MutexAcquireTimeoutError` instead of queueing forever. If the caller disconnected meanwhile (its `AbortController` fired), the runner bails and returns `conflict` before the claim, so a dead waiter never mutates the board.
+1. **Aborted waiter.** A run can sit queued behind a same-identity dispatch in the home mutex for up to `CLAWBOO_HOME_MUTEX_ACQUIRE_MS` (10 minutes by default); a waiter still stuck past that is behind a wedged holder and rejects with a typed `MutexAcquireTimeoutError` instead of queueing forever. If the caller disconnected meanwhile (its `AbortController` fired), or a person moved the task's card (see [stopped by a person](#stopped-by-a-person)), the runner bails and returns `conflict` before the claim, so a dead waiter never mutates the board.
 2. **Task existence** → `not_found`.
 3. **Depth bound.** Recursion is bounded via the board's ancestor chain: a task whose ancestor count is **past** `MAX_SPAWN_DEPTH` (2) is refused with `too_deep`. This is the single-reduce-point invariant; children never fan out past the depth ceiling.
 
@@ -129,6 +129,10 @@ A persistent-home runtime also gets a stable per-identity `homeDir` under Clawbo
 - **`done`**: captures the reason and summary, then breaks the inner loop.
 
 An injected `abortSignal` (the REST handler wires it to `res.on('close')`) aborts the live run if the dispatch client disconnects, so a hung CLI doesn't keep burning with no operator-facing kill. The handle is re-read each time the listener fires, so it aborts the _current_ run even across a rotation.
+
+#### Stopped by a person
+
+A person moving the task's card on the board stops the run too. `runTaskOnRuntime` folds the caller's `abortSignal` and a person's stop into one `AbortController`, and registers the run with the per-task run-stop registry (`registerRunStop` in `apps/web/server/lib/runStops.ts`) for as long as it lives, fix cycles included. After the board `PATCH` writes the move, `noteHumanMove` calls `stopTaskRuns(taskId, note)` (for every move except into `in_progress` or `in_review`), which aborts the controller and leaves the note, for example `Stopped: a person moved the card to Done.` The run then takes the non-success terminal below. The OpenClaw routine dispatcher registers with the same registry; the team engine stops the runs it started itself (`personMovedTask`).
 
 #### The budget kill-switch
 
@@ -183,11 +187,13 @@ After the loop, exactly one terminal branch runs.
   | `fail` with attempts left                           | `in_progress` (reverted with a structured `{what, why, howToFix}` fix note, re-dispatched as a fix cycle)    |
   | `fail` at the attempt budget                        | `blocked` (the fix loop is exhausted; the budget is `CLAWBOO_MAX_FIX_CYCLES` + 1, default 2)                 |
 
+  If a person moved the task to `done` or `cancelled` while the check ran, their move stands: the verdict stays on the task as a record, but nothing moves the task and no one is told it was routed for review.
+
   The critic that produces the verdict reuses _this run's adapter factory_ on a detached, push-less checkout with a fresh session and **no builder `homeDir`**; builder ≠ judge at the run level. An operator can also make the judge a different model via `CLAWBOO_REVIEWER_MODEL`. See [Verification](/concepts/verification).
 
 - **Without a worktree** (a research/conversational success): `updateStatus(db, taskId, 'done')`.
 
-**Non-success.** A system comment records the outcome; the execution is closed `cancelled` (aborted) or `failed` with the scrubbed summary. A terminal `done{reason: 'error'}` is classified through the taxonomy and alerts on an unknown (harness-bug) class. A run that _attempted_ a native resume and failed clears the persisted session id (keyed structurally on the attempt, never on an error string), so the next dispatch falls back to the prose handoff instead of retrying into the same stale id forever. Finally `releaseTask` returns the task to `todo`, retryable.
+**Non-success.** A system comment records the outcome (for a run a person stopped, the comment is their stop note instead of the usual `Run aborted: …`); the execution is closed `cancelled` (aborted) or `failed` with the scrubbed summary. A terminal `done{reason: 'error'}` is classified through the taxonomy and alerts on an unknown (harness-bug) class. A run that _attempted_ a native resume and failed clears the persisted session id (keyed structurally on the attempt, never on an error string), so the next dispatch falls back to the prose handoff instead of retrying into the same stale id forever. Finally `releaseTask` returns a task still `in_progress` to `todo`, retryable. A task a person already moved stays where they put it, and the result reports its real status; a run a person stopped also returns `stoppedByPerson: true` on its `RunTaskResult`, so a caller treats the move as the outcome rather than a failure (a routine fire stopped this way stays armed).
 
 ### Degradation planning
 
@@ -223,7 +229,7 @@ The cost is a second concurrency boundary (the per-identity home mutex) layered 
 - **Best-effort lineage and handoff.** Session-codec serialization, rotation lineage, and the native-session-id persistence never fail a completed run; losing native resume degrades gracefully to the prose handoff, which is the designed cross-runtime path anyway.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## See also

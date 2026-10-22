@@ -46,8 +46,11 @@ const panels = [
   {
     loop: 'board-scope',
     title: 'One board, every team',
-    body: 'Work moves from backlog to done in columns you can see, scoped to one team or to all of them at once.',
-    alt: 'The board scoped to the Growth team with seven tasks, then widened to every team at eighteen, then scrolled to the blocked and done columns.',
+    body: "Work moves from backlog to done in columns laid out by day, scoped to one team or to all of them at once, with what needs you in today's row.",
+    // The board became a calendar in 0.5.0: status columns across the top,
+    // days down the side. The loop ends on a routine's upcoming runs, which
+    // are drawn on the days they fire.
+    alt: "The board in Week view, scoped to the Growth team with seven tasks, then widened to every team at eighteen: two tasks that need a person arrive in today's row, and a routine's upcoming runs open from Thursday.",
   },
   {
     src: agentDetail,

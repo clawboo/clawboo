@@ -1,15 +1,15 @@
 ---
 title: Changelog
-description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.3.1.
+description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.5.0.
 ---
 
-Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 30 `@clawboo/*` workspace packages (25 top-level plus 5 runtime adapters under `packages/adapters/`), but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
+Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 33 `@clawboo/*` workspace packages (27 top-level plus 6 runtime adapters under `packages/adapters/`), but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, `@composio/client`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
 
 Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which re-runs the full PR gate (`build`, `lint`, `typecheck`, `test`) plus the bundled-CLI clean-install smoke test, and then runs `pnpm changeset publish`. Every check on that path is offline: nothing fetches an upstream repository, so an upstream outage cannot hold up a release. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
-  The current npm `latest` is **`clawboo@0.3.1`**, the version these docs describe, so `npx clawboo`
-  installs v0.3.1.
+  The current npm `latest` is **`clawboo@0.5.0`**, the version these docs describe, so `npx clawboo`
+  installs v0.5.0.
 </Note>
 
 <Warning>
@@ -25,6 +25,8 @@ Clawboo follows [Changesets](https://github.com/changesets/changesets). A change
 
 | Version | Tag             | npm        | Theme                                                                                          |
 | ------- | --------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| 0.5.0   | `clawboo@0.5.0` | published  | The Board as a calendar, honest task costs, a quieter team chat                                |
+| 0.4.0   | `clawboo@0.4.0` | published  | Connectors, a memory graph, building on the graph, Routines, a Needs you column                |
 | 0.3.1   | `clawboo@0.3.1` | published  | Team-chat reliability, live status badges, per-runtime provider manager                        |
 | 0.3.0   | `clawboo@0.3.0` | published  | Native-first: run Gateway-free on one provider key, mixed-runtime teams, live native team chat |
 | 0.2.0   | `clawboo@0.2.0` | published  | The liberated cut, full multi-runtime orchestrator                                             |
@@ -39,7 +41,63 @@ Clawboo follows [Changesets](https://github.com/changesets/changesets). A change
 | 0.1.1   | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone)                                              |
 | 0.1.0   | `clawboo@0.1.0` | deprecated | Initial package scaffold                                                                       |
 
-The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap that made Clawboo runtime-agnostic, and 0.3.0 is the product that leap made possible: native-first, so the first run needs one provider key and nothing else. 0.3.1 is the follow-up patch that made the native path trustworthy day to day.
+The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap that made Clawboo runtime-agnostic, and 0.3.0 is the product that leap made possible: native-first, so the first run needs one provider key and nothing else. 0.3.1 is the follow-up patch that made the native path trustworthy day to day. 0.4.0 widened what a team can reach (connectors) and remember (a memory graph), and 0.5.0 turned the Board into a calendar.
+
+---
+
+## 0.5.0, the Board as a calendar
+
+The Board is now a calendar and a task board at once, and moving a card by hand now does what it says. See [The Board](/using/board).
+
+**The Board**
+
+- **Days as rows.** Status columns run across the top and days run down the side. Week is the default; Today, Month and All are a click (or **D**, **W**, **M**, **A**) away. Open work sits on the day it was added, and work that reaches Done or Cancelled moves to the day it finished. Open work from before the range gathers in an Earlier row, and empty days fold into a thin seam you can open.
+- **Needs you lives in today.** Approvals and stuck tasks sit in today's row with Retry, Assign and Dismiss, and tasks that broke the same way share one card.
+- **Routines on their days.** Each routine's upcoming runs show in To do on the days they will run, from the new `GET /api/schedules/occurrences`. A Routines switch hides them.
+- **Since you last looked, and Find.** A line under the title says what changed while you were away, and the changed cards carry a dot until you look. **/** finds any task or routine.
+- **Calmer cards.** One detail row: the agent, its runtime, one status mark or the cost, and when the card was added or finished. Unassigned work no longer claims to run on OpenClaw.
+
+**Moving cards by hand**
+
+- A drop goes to the column under the pointer and nowhere else.
+- In progress takes no card by hand, because that started nothing. A card left there shows in Needs you as Not started.
+- Finishing a card asks which day it finished when it sits on another day, and the board `PATCH` takes a `completedAt`. Cancelling always asks, and cancels the plan steps that were waiting on it.
+- Moving a card an agent is working on stops that run, its late result can no longer override you, and whoever delegated the task is told.
+
+**Also in this release**
+
+- **Honest task costs.** A task's cost is the sum of every run, failed ones included. A run with no reported charge is priced from its token usage and marked as an estimate.
+- **A quieter team chat.** A teammate's reply reaches the chat only when you addressed it or it is the lead's summary, and Stop also stops a run that was about to start.
+- **Routing by role.** On the lead's turn the roster lists each teammate's runtime and a one-line role, so Boo Zero routes work by what a teammate does.
+
+---
+
+## 0.4.0, connectors, a memory graph and Routines
+
+**Connectors**
+
+- **A Connectors directory.** The marketplace gains a Connectors tab: curated MCP connectors Clawboo runs itself, plus Gmail, Slack, Jira and more through Composio. Turning one on is a switch, and sharing it with an agent is an edge on the Ghost Graph that is also the permission the tool broker enforces. See [Connectors](/using/connectors).
+
+**The Ghost Graph**
+
+- **Build on the graph.** Every Boo carries one visible port. Pull a thread onto a node to connect it, or let go on empty canvas to pick a skill, a connector or a new agent, already wired. Routes, skills and shares all come off the same way, and a share has an Undo. See [Ghost Graph](/using/ghost-graph).
+
+**Memory**
+
+- **Team memory is a graph that learns.** Memory is a sidebar view where facts cluster and link by similarity. Agents report whether a recalled fact helped, so a fact two teammates found useful is surfaced first and one that misled someone leaves automatic recall. Every recalled line carries an id the agent can cite. See [Memory browser](/using/memory-browser).
+
+**Work**
+
+- **Routines.** The Scheduler is now Routines, and a routine targets a team or one agent. A team routine posts its instructions into the team chat for the lead; an agent routine files a task for that agent. See [Routines](/using/routines).
+- **Needs you, and tasks for one agent.** The Board gains a Needs you column for approvals and stuck tasks, with Retry, Assign and Dismiss. **New task** asks for a team, then an agent, and only that agent works on it.
+
+**Platform**
+
+- **The catalog leaves the package.** The agent and team catalog is fetched at runtime instead of bundled, and grew to nineteen packs, each naming its source repository, commit and licence.
+- **OpenClaw 2026.9.** The Gateway pin moves from `~2026.5` to `~2026.9`, with the fixes that line needed.
+- **Served under a path.** `CLAWBOO_BASE_PATH` mounts the whole app under a URL prefix behind a reverse proxy.
+- **In-place database upgrades.** A column added to an existing table now reaches an existing `clawboo.db` instead of failing on first use.
+- **Coordination that stays awake.** A board lifecycle bus and run liveness checks keep agents from going stale mid-task, and a team-chat run that ends without an answer now says why.
 
 ---
 

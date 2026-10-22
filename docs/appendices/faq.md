@@ -6,7 +6,7 @@ description: 'Common questions about Clawboo: runtimes, data location, local-fir
 Short, grounded answers to the questions that come up most. Each answer links to the page that covers the topic in full.
 
 <Note>
-These docs describe Clawboo **v0.3.1**, the current release.
+These docs describe Clawboo **v0.5.0**, the current release.
 </Note>
 
 ## Do I need OpenClaw to use Clawboo?
@@ -64,6 +64,8 @@ Clawboo tracks per-agent and per-team spend in the [cost dashboard](/using/cost-
 Yes, with guardrails. **Routines** schedule recurring team-task work on a cron expression (or a one-shot `once@<iso>`); the schedule is a durable ledger row, so it survives restarts and a boot-resume reconstructs every active routine from the database. See [scheduling](/concepts/scheduling) and the [recurring team work guide](/guides/recurring-team-work).
 
 Pair Routines with [governance](/concepts/governance) before leaving a fleet unattended: budgets (track-and-warn by default, hard-cap opt-in), tool-loop circuit breakers, depth/fan-out/cost caps, and approval gates are the controls that keep an unsupervised run from running away. Verification ([builder ≠ judge](/concepts/verification)) keeps "done" meaning _verified_ rather than merely claimed.
+
+When you come back, the [Board](/using/board) says what changed while you were away, shows upcoming routine runs on their days, and keeps anything waiting on you (an approval, a failed or stopped task) in **Needs you**.
 
 ## Can an agent run shell commands on my machine?
 

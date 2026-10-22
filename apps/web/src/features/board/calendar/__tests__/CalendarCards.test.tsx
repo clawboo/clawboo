@@ -514,3 +514,60 @@ describe('which run strips are drawn in full', () => {
     expectLine(other, friday, 'Evening wrap')
   })
 })
+
+describe('a routine that is running now', () => {
+  it('marks the run it may still skip and firms up the next certain run instead', async () => {
+    const now = freezeAtWednesdayNoon()
+    const thursday = addDays(startOfDay(now), 1) + 10 * HOUR
+    const friday = addDays(startOfDay(now), 2) + 10 * HOUR
+    const running: ScheduleRecord = { ...ROUTINE, status: 'running' }
+    serve(
+      [{ id: 't', title: 'Any task', status: 'todo', createdAt: now - HOUR }],
+      [{ routine: running, at: [thursday, friday] }],
+    )
+    const user = userEvent.setup()
+    renderBoard()
+    await waitFor(() => expect(screen.getAllByTestId('calendar-routine-run')).toHaveLength(2))
+
+    // Thursday's run happens only if the current fire has finished by then, so it
+    // says so and is not drawn as the next run.
+    const maybe = stripIn(todoCell(thursday), running)
+    expect(maybe).toHaveAttribute('data-conditional', 'true')
+    expect(maybe).not.toHaveAttribute('data-next')
+    expect(maybe).toHaveAttribute(
+      'title',
+      'A run is running now, so this one happens only if that run has finished by then.',
+    )
+    expect(maybe.getAttribute('aria-label')).toContain('happens only if that run has finished')
+
+    // Friday's run is not in question, and it is the next one.
+    const sure = stripIn(todoCell(friday), running)
+    expect(sure).not.toHaveAttribute('data-conditional')
+    expect(sure).toHaveAttribute('data-next', 'true')
+
+    // The popover says the same.
+    await user.click(maybe)
+    const popover = await screen.findByTestId('calendar-routine-popover')
+    expect(within(popover).getByTestId('calendar-routine-in-flight')).toHaveTextContent(
+      'A run is running now. The first time below happens only if that run has finished by then; if not, it is skipped.',
+    )
+  })
+
+  it('says nothing of the kind for a routine that is waiting for its time', async () => {
+    const now = freezeAtWednesdayNoon()
+    const thursday = addDays(startOfDay(now), 1) + 10 * HOUR
+    serve(
+      [{ id: 't', title: 'Any task', status: 'todo', createdAt: now - HOUR }],
+      [{ routine: ROUTINE, at: [thursday] }],
+    )
+    const user = userEvent.setup()
+    renderBoard()
+    await waitFor(() => expect(screen.getAllByTestId('calendar-routine-run')).toHaveLength(1))
+    const strip = stripIn(todoCell(thursday), ROUTINE)
+    expect(strip).not.toHaveAttribute('data-conditional')
+    expect(strip).not.toHaveAttribute('title')
+    await user.click(strip)
+    const popover = await screen.findByTestId('calendar-routine-popover')
+    expect(within(popover).queryByTestId('calendar-routine-in-flight')).toBeNull()
+  })
+})

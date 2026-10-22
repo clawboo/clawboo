@@ -76,7 +76,7 @@ curl http://localhost:18790/api/tools
 
 ## `GET /api/tools/approvals`
 
-Returns the pending tool-approval queue, the `tool_call_approvals` rows with `status = 'pending'` that have not passed their `expiresAt`, newest first. Each row's `argsSummary` (scrubbed JSON written by the broker) is masked again at this boundary via `redactJsonString`. This is the queue the Approvals panel and the Governance dashboard render through the shared tool-approval queue UI; the broker (in either the Express process or an MCP stdio bin) polls the same rows for resolution.
+Returns the pending tool-approval queue, the `tool_call_approvals` rows with `status = 'pending'` that have not passed their `expiresAt`, newest first. Each row's `argsSummary` (scrubbed JSON written by the broker) is masked again at this boundary via `redactJsonString`. This is the queue the board's Needs you column, the in-chat approval tray and the Governance dashboard render; the broker (in either the Express process or an MCP stdio bin) polls the same rows for resolution.
 
 The queue holds **two kinds of row**, told apart by `kind`. A `tool` row is held inside this process, either by the broker blocked in `waitForApproval` or by the native shell polling the row it just wrote; a `run_command` card is the second kind. An `exec` row is a shell command an OpenClaw agent asked to run: the **Gateway** is holding it, and clawboo mirrors the request into a row so the card survives a closed tab, a refresh, and a tab opened halfway through the window. A mirrored row carries `toolName: 'exec'`, `toolClass: 'destructive'`, and the command's first 200 characters as `toolSummary`.
 

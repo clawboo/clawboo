@@ -426,7 +426,7 @@ When the server is bound to a loopback interface (the default) there is no auth 
 - [Governance concepts](/concepts/governance), budgets, the kill-switch, circuit breakers, caps, and approvals
 - [Verification (builder ≠ judge)](/concepts/verification), what produces `verification` audit events
 - [Governance dashboard](/using/governance-dashboard), the UI over these routes
-- [Approvals panel](/using/approvals), where a leader resolves a delegation approval
+- [Approvals](/using/approvals), where you resolve a delegation approval from the board or the chat
 - [Tools & MCP API](/reference/rest-api/tools-and-mcp), `/api/tools/approvals*`, the `tool_call_approvals` resolve path the handshake reuses
 - [Production defaults](/operating/production-defaults), the warn-mode budget posture
 - [Environment variables](/reference/environment-variables), `CLAWBOO_APPROVAL_TTL_MS` and the reaper interval
