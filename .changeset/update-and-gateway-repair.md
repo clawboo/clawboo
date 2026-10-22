@@ -9,3 +9,5 @@ Updating from the dashboard keeps working after the first update, and the OpenCl
 When an update fails, the chip now shows npm's own reason (a missing version, a network failure, a permission problem, a package whose install script failed) instead of only an exit code.
 
 **OpenClaw Gateway.** A newer OpenClaw can refuse to start until `openclaw doctor --fix` migrates data an older version wrote. When Clawboo starts the Gateway and OpenClaw asks for that, Clawboo runs `openclaw doctor --fix --non-interactive` once and starts the Gateway again, leaving any launchd or systemd Gateway service alone. A Gateway that fails to start for another stated reason now reports that reason at once instead of after a 60-second wait.
+
+**Board.** While one of a routine's runs is still going, the calendar marks the right next run: a later run the same day can be the next one, and a run is only shown as possibly skipped while it is the first still on the calendar.

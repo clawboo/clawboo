@@ -8,8 +8,8 @@ Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a 
 Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which re-runs the full PR gate (`build`, `lint`, `typecheck`, `test`) plus the bundled-CLI clean-install smoke test, and then runs `pnpm changeset publish`. Every check on that path is offline: nothing fetches an upstream repository, so an upstream outage cannot hold up a release. The full mechanics are in [Release process](/internals/release-process).
 
 <Note>
-  The current npm `latest` is **`clawboo@0.5.0`**, the version these docs describe, so `npx clawboo`
-  installs v0.5.0.
+  The current npm `latest` is **`clawboo@0.5.0`**, the version these docs describe, so `npx
+  clawboo@latest` installs v0.5.0.
 </Note>
 
 <Warning>
@@ -53,7 +53,7 @@ The Board is now a calendar and a task board at once, and moving a card by hand 
 
 - **Days as rows.** Status columns run across the top and days run down the side. Week is the default; Today, Month and All are a click (or **D**, **W**, **M**, **A**) away. Open work sits on the day it was added, and work that reaches Done or Cancelled moves to the day it finished. Open work from before the range gathers in an Earlier row, and empty days fold into a thin seam you can open.
 - **Needs you lives in today.** Approvals and stuck tasks sit in today's row with Retry, Assign and Dismiss, and tasks that broke the same way share one card.
-- **Routines on their days.** Each routine's upcoming runs show in To do on the days they will run, from the new `GET /api/schedules/occurrences`. A Routines switch hides them.
+- **Routines on their days.** Each routine's upcoming runs show in To do on the days they are scheduled, from the new `GET /api/schedules/occurrences`. While a routine's run is still going, its next scheduled run is marked as one that is skipped if that run has not finished by then. A Routines switch hides them.
 - **Since you last looked, and Find.** A line under the title says what changed while you were away, and the changed cards carry a dot until you look. **/** finds any task or routine.
 - **Calmer cards.** One detail row: the agent, its runtime, one status mark or the cost, and when the card was added or finished. Unassigned work no longer claims to run on OpenClaw.
 
