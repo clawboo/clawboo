@@ -36,7 +36,7 @@ npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo` downloads and runs the latest package (currently `0.5.0`) without adding anything to your global `node_modules`.
+The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo@latest` downloads and runs the latest package (currently `0.5.0`) without adding anything to your global `node_modules`. Keep the `@latest`: a bare `npx clawboo` can reuse an older build already in npm's cache.
 
 **Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.5.0`, then begins starting the dashboard.
 

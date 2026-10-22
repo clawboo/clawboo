@@ -842,14 +842,17 @@ export function BoardPanel() {
     () =>
       range
         ? bucketRuns(
-            routines.map((r) => ({
-              routine: r,
-              windows: r.windows.map((w) => {
+            routines.map((r) => {
+              const windows = r.windows.map((w) => {
                 const times = w.times.filter((t) => t > firedBefore)
                 const fired = w.times.length - times.length
                 return fired === 0 ? w : { ...w, times, count: Math.max(0, w.count - fired) }
-              }),
-            })),
+              })
+              // The routine carries what is left too, so a run is judged against the
+              // runs still on the calendar: once a projected run has passed, the next
+              // one is the run an in-flight fire may skip.
+              return { routine: { ...r, windows }, windows }
+            }),
             range,
           )
         : NO_RUNS,
@@ -866,10 +869,14 @@ export function BoardPanel() {
       for (const r of list) {
         count += r.count
         more ||= r.more
-        const first = r.times[0]
-        // A run an in-flight fire may still skip is never firmed up as the next one.
-        if (isConditionalRun(r.routine, first)) continue
-        if (first != null && first > now && (next == null || first < next)) next = first
+        // The routine's earliest certain run that day. A run an in-flight fire may
+        // still skip is never firmed up as the next one, but a later run the same
+        // day can be.
+        for (const t of r.times) {
+          if (t <= now || isConditionalRun(r.routine, t)) continue
+          if (next == null || t < next) next = t
+          break
+        }
       }
     }
     return { count, more, next }

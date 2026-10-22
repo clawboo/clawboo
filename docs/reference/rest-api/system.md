@@ -303,24 +303,32 @@ Drives the Gateway process lifecycle. The `action` field selects the operation. 
 
 #### Event catalog (`start` / `restart`)
 
-| `type`     | When                                                                             | Payload fields                                                  |
-| ---------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `progress` | `restart` stop phase                                                             | `step: 'stopping'`, `message`                                   |
-| `progress` | Spawn start, or joining an in-flight launch                                      | `step: 'starting'`, `message`                                   |
-| `progress` | Each poll while waiting for the port to bind                                     | `step: 'waiting'`, `message` (`Waiting for gateway... (n/120)`) |
-| `output`   | Per non-empty stdout/stderr line from the Gateway                                | `line`                                                          |
-| `complete` | Port became reachable, or already running                                        | `success: true`, `pid` (or `port` / `message`)                  |
-| `error`    | OpenClaw missing, spawn throws/errors, internal throw, or the 60s poll times out | `code`, `message`                                               |
+| `type`     | When                                                                                                                                          | Payload fields                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `progress` | `restart` stop phase                                                                                                                          | `step: 'stopping'`, `message`                                   |
+| `progress` | Spawn start, or joining an in-flight launch                                                                                                   | `step: 'starting'`, `message`                                   |
+| `progress` | Each poll while waiting for the port to bind                                                                                                  | `step: 'waiting'`, `message` (`Waiting for gateway... (n/120)`) |
+| `progress` | The Gateway asked for `openclaw doctor --fix` and the repair is running, or another start is already running it                               | `step: 'repairing'`, `message`                                  |
+| `output`   | Per non-empty stdout/stderr line from the Gateway, and from the repair                                                                        | `line`                                                          |
+| `complete` | Port became reachable, or already running                                                                                                     | `success: true`, `pid` (or `port` / `message`)                  |
+| `error`    | OpenClaw missing, spawn throws/errors, the Gateway exits with a stated reason, the repair fails, an internal throw, or the 60s poll times out | `code`, `message`                                               |
 
 Terminal `error` `code` values:
 
-| `code`          | Meaning                                                           |
-| --------------- | ----------------------------------------------------------------- |
-| `NOT_INSTALLED` | OpenClaw binary not found                                         |
-| `SPAWN_THROW`   | The `spawn` call threw synchronously                              |
-| `SPAWN_ERROR`   | The child emitted an `error` event                                |
-| `TIMEOUT`       | The port did not become reachable within ~60s (120 × 500ms polls) |
-| `INTERNAL`      | An unexpected throw after the SSE headers were sent               |
+| `code`                | Meaning                                                                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `NOT_INSTALLED`       | OpenClaw binary not found                                                                                                               |
+| `SPAWN_THROW`         | The `spawn` call threw synchronously                                                                                                    |
+| `SPAWN_ERROR`         | The child emitted an `error` event                                                                                                      |
+| `TIMEOUT`             | The port did not become reachable within ~60s (120 × 500ms polls); the message carries the Gateway's stated reason when its log has one |
+| `GATEWAY_EXITED`      | The Gateway exited before binding and its log says why (`Gateway failed to start: ...`); reported at once rather than after the poll    |
+| `DOCTOR_FIX_FAILED`   | The Gateway asked for `openclaw doctor --fix` and running it failed; the message carries doctor's last line                             |
+| `DOCTOR_FIX_REQUIRED` | The Gateway still asked for `openclaw doctor --fix` after the repair ran once                                                           |
+| `INTERNAL`            | An unexpected throw after the SSE headers were sent                                                                                     |
+
+**Automatic repair.** After an OpenClaw upgrade the Gateway can refuse to start until its data is migrated (for example `Legacy workspace setup state requires migration for ~/.openclaw/workspace; run openclaw doctor --fix`). When a launch exits with that request, the handler runs `openclaw doctor --fix --non-interactive` once, with `OPENCLAW_SERVICE_REPAIR_POLICY=external` so doctor never installs, loads or restarts a launchd or systemd Gateway service, streams its output, and launches again. Only the failure line of that launch counts, so a passing mention of doctor elsewhere in the log never triggers it. A second `start` or `restart` that arrives while the repair runs waits for it instead of launching against data that is mid-migration. The repair has a 5-minute limit.
+
+Every launch, and the repair, runs with an explicit working directory that exists: the OpenClaw CLI refuses to start in a deleted one.
 
 When the port becomes reachable, the handler syncs the `.env` token into settings and best-effort reconnects the server-side AgentSource before emitting `complete`. A `start` that finds the port already reachable emits `complete` immediately with `message: 'Gateway already running'`; a `start` that finds an alive-but-not-yet-bound managed PID joins that in-flight launch instead of spawning a duplicate.
 
@@ -593,24 +601,29 @@ Only a `global` install can succeed: an `npx` run lives in npm's version-hashed 
 
 ### Event stream
 
-| `type`                | When                                                                            | Payload fields                  |
-| --------------------- | ------------------------------------------------------------------------------- | ------------------------------- |
-| `unsupported`         | `installMethod` is not `global`                                                 | `method`, `command`, `message`  |
-| `progress`            | Install start                                                                   | `step: 'installing'`, `message` |
-| `output`              | Per non-empty stdout/stderr line from npm                                       | `line`                          |
-| `error`               | EACCES detected, spawn throws, child errors, or a non-zero exit                 | `code`, `message`               |
-| `installed-elsewhere` | npm exited 0 but the on-disk version did not change, or the API port is unknown | `version`, `message`            |
-| `installed`           | npm exited 0 and the on-disk version changed                                    | `version`                       |
-| `restarting`          | Immediately before the successor is launched                                    | `port`, `version`               |
+| `type`                | When                                                                            | Payload fields                                                    |
+| --------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `unsupported`         | `installMethod` is not `global`                                                 | `method`, `command`, `message`                                    |
+| `progress`            | Install start                                                                   | `step: 'installing'`, `message`                                   |
+| `output`              | Per non-empty stdout/stderr line from npm                                       | `line`                                                            |
+| `error`               | Spawn throws, the child errors, or npm exits non-zero; at most one per stream   | `code`, `message`, and on a non-zero exit `exitCode` and `detail` |
+| `installed-elsewhere` | npm exited 0 but the on-disk version did not change, or the API port is unknown | `version`, `message`                                              |
+| `installed`           | npm exited 0 and the on-disk version changed                                    | `version`                                                         |
+| `restarting`          | Immediately before the successor is launched                                    | `port`, `version`                                                 |
 
-| `code`        | Meaning                                                         |
-| ------------- | --------------------------------------------------------------- |
-| `EACCES`      | stderr matched `EACCES` / "permission denied" — needs elevation |
-| `SPAWN_THROW` | The `spawn` call threw synchronously                            |
-| `SPAWN_ERROR` | The child emitted an `error` event                              |
-| `EXIT_<code>` | Non-zero npm exit (e.g. `EXIT_1`)                               |
+| `code`        | Meaning                                                                                  |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `EACCES`      | npm's output named `EACCES`, `EPERM` or "permission denied": the install needs elevation |
+| npm's code    | npm printed its own code (`ETARGET`, `ENOTFOUND`, ...)                                   |
+| `EXIT_<code>` | A non-zero npm exit that printed no code of its own (e.g. `EXIT_7`)                      |
+| `SPAWN_THROW` | The `spawn` call threw synchronously                                                     |
+| `SPAWN_ERROR` | The child emitted an `error` event                                                       |
 
-After `restarting`, the server launches a successor pinned to the same port (`CLAWBOO_API_PORT`) and told to wait for that port to free (`CLAWBOO_AWAIT_PORT`), then exits so the successor can bind. The successor is started with `CLAWBOO_VERSION` deliberately **removed** so it recomputes its version from the freshly-installed manifest rather than inheriting the pre-update value. The browser is already polling the same origin and reloads once the successor answers.
+On a non-zero exit, `detail` is npm's own reason in one line (the `Error:` line, or the first line of its error block, or the name of a package whose install script failed), and `message` leads with it, so the chip shows why rather than only an exit code. `detail` is `null` when npm's output named no reason.
+
+npm runs with an explicit working directory that exists. npm reads its working directory before anything else and exits with code 7 when it has been deleted, which is where a server started inside the replaced package folder used to sit.
+
+After `restarting`, the server launches a successor pinned to the same port (`CLAWBOO_API_PORT`) and told to wait for that port to free (`CLAWBOO_AWAIT_PORT`), then exits so the successor can bind. The successor gets an explicit working directory that exists, never the old server's, and a server that does start in a deleted directory moves into the Clawboo directory before loading anything else. The successor is started with `CLAWBOO_VERSION` deliberately **removed** so it recomputes its version from the freshly-installed manifest rather than inheriting the pre-update value. The browser is already polling the same origin and reloads once the successor answers.
 
 <Note>
 The `installed-elsewhere` event is the guard against a hot-swap into stale bytes: if the global install landed somewhere this running copy does not point at, restarting would just re-run the old code, so the server stays up and asks you to restart manually instead.

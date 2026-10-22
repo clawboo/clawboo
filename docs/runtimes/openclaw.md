@@ -237,6 +237,10 @@ Two scoping facts follow from the Gateway config being process-wide:
 **A down Gateway doesn't block you if you have other agents.** When the browser can't reach the Gateway on load, a **pure-OpenClaw** user gets the connect / offline screen. But if you also have Native, Codex, Claude Code, or Hermes agents, Clawboo loads your dashboard anyway and floats a **reconnect banner** at the top instead of blocking, so you keep working with those agents. The banner's **Reconnect** starts the Gateway if needed and brings your OpenClaw agents back online.
 </Note>
 
+<Note>
+**The Gateway asks for `openclaw doctor --fix` after an OpenClaw upgrade.** A newer OpenClaw can refuse to start until it has migrated data an older one wrote, with a line such as `Gateway failed to start: Legacy workspace setup state requires migration ... run openclaw doctor --fix` in `~/.clawboo/gateway.log`. When Clawboo starts the Gateway and sees that, it runs `openclaw doctor --fix --non-interactive` once, then starts it again; the progress shows "Running openclaw doctor --fix". It tells doctor to leave launchd and systemd Gateway services alone. If the repair fails, the error carries doctor's last line: run `openclaw doctor --fix` in a terminal to see the whole report, then start the Gateway again.
+</Note>
+
 <Danger>
 **`POST /api/runtimes/openclaw/...` returns `404`.** OpenClaw is not a `/api/runtimes` runtime; only `claude-code`, `codex`, `hermes`, and `clawboo-native` are. Drive OpenClaw through `/api/system/*` and `/api/gateway/ws`, not the runtime install/connect/run routes.
 </Danger>

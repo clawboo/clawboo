@@ -71,7 +71,7 @@ import {
   type TaskBuckets,
 } from './calendarModel'
 import { RollingCount } from './RollingCount'
-import { RoutineRunStrip, isConditionalRun } from './RoutineRun'
+import { RoutineRunStrip } from './RoutineRun'
 
 // The widths add up to 1120px with Cancelled folded, which fits the board's
 // share of a 1440px screen beside the app's sidebars: every column on screen,
@@ -829,20 +829,20 @@ function Cell({
       ) : null}
       {shownRuns.map((r) => {
         const focusId = `routine-run:${r.routine.schedule.id}:${row.key}`
-        const isNext =
-          nextRunAt != null && r.times[0] === nextRunAt && !isConditionalRun(r.routine, r.times[0])
+        // The day can hold the next run behind a first run that may be skipped.
+        const nextAt = nextRunAt != null && r.times.includes(nextRunAt) ? nextRunAt : null
         return (
           <RoutineRunStrip
             key={r.routine.schedule.id}
             day={r}
-            isNext={isNext}
+            nextAt={nextAt}
             accent={accent}
             focusId={focusId}
             open={states.openRunKey === focusId}
             onOpen={(anchor) => onRunOpen(r.routine, anchor)}
             // Today's runs and the next one get the full strip; every other run
             // is one line, so a busy routine week does not crowd out the work.
-            line={(row.kind === 'day' && row.compact) || !(tone.today || isNext)}
+            line={(row.kind === 'day' && row.compact) || !(tone.today || nextAt != null)}
           />
         )
       })}

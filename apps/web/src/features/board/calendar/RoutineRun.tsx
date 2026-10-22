@@ -43,16 +43,24 @@ export function routineInFlight(run: RoutineOccurrences): 'starting' | 'running'
   return null
 }
 
-/** The routine's first projected run, or null when it has none. */
+/**
+ * The routine's first run, or null when it has none. The Board hands over each
+ * routine with the runs that have passed already removed, so this is the first
+ * run still on the calendar.
+ */
 function firstRunOf(run: RoutineOccurrences): number | null {
   for (const w of run.windows) if (w.times[0] != null) return w.times[0]
   return null
 }
 
-/** What a person reads about the run an in-flight fire may still skip. */
-function onlyIfFinished(run: RoutineOccurrences): string {
+/**
+ * What a person reads about the run an in-flight fire may still skip. `at` names
+ * it when the strip leads with a different time.
+ */
+function onlyIfFinished(run: RoutineOccurrences, at?: number): string {
   const now = routineInFlight(run) === 'starting' ? 'is starting now' : 'is running now'
-  return `A run ${now}, so this one happens only if that run has finished by then.`
+  const which = at != null ? `the one at ${timeLabel(at)}` : 'this one'
+  return `A run ${now}, so ${which} happens only if that run has finished by then.`
 }
 
 /** True when `at` is the run an in-flight fire may still skip. */
@@ -83,7 +91,7 @@ export function RoutineTag() {
  */
 export function RoutineRunStrip({
   day,
-  isNext,
+  nextAt,
   accent,
   focusId,
   open,
@@ -91,8 +99,8 @@ export function RoutineRunStrip({
   line = false,
 }: {
   day: DayRuns<RoutineOccurrences>
-  /** This day holds the soonest run on screen. */
-  isNext: boolean
+  /** The soonest run on screen, when this day holds it; null otherwise. */
+  nextAt: number | null
   /** The column's colour, as a CSS colour. */
   accent: string
   /** Lets the popover hand focus back to this strip if a re-render replaced it. */
@@ -105,10 +113,19 @@ export function RoutineRunStrip({
 }) {
   const name = routineName(day.routine)
   const first = day.times[0]
-  const time = first != null ? timeLabel(first) : ''
+  const isNext = nextAt != null
+  // When the day's first run may be skipped, the next certain one later that day
+  // is the time worth reading, so the strip leads with it and says which run is
+  // in question.
+  const shown = nextAt ?? first
+  const leadsLater = shown != null && first != null && shown !== first
+  const time = shown != null ? timeLabel(shown) : ''
+  const firstTime = first != null ? timeLabel(first) : ''
   const cadence = describeCadence(day.routine.schedule.cronSpec)
   const many = day.count > 1
-  const conditional = isConditionalRun(day.routine, first) ? onlyIfFinished(day.routine) : null
+  const conditional = isConditionalRun(day.routine, first)
+    ? onlyIfFinished(day.routine, leadsLater ? first : undefined)
+    : null
   return (
     <button
       type="button"
@@ -122,9 +139,11 @@ export function RoutineRunStrip({
       title={conditional ?? undefined}
       aria-haspopup="dialog"
       aria-expanded={open}
-      aria-label={`Routine, ${name}, ${isNext ? 'next run, ' : ''}${
-        many ? `${runCount(day)} from ${time}` : time
-      }, ${cadence}. Upcoming.${conditional ? ` ${conditional}` : ''} ${
+      aria-label={`Routine, ${name}, ${
+        isNext ? (leadsLater ? `next run at ${time}, ` : 'next run, ') : ''
+      }${many ? `${runCount(day)} from ${firstTime}` : firstTime}, ${cadence}. Upcoming.${
+        conditional ? ` ${conditional}` : ''
+      } ${
         routineKindOf(day.routine.schedule) === 'team'
           ? 'It posts to the team chat when it runs.'
           : 'It becomes a task when it runs.'

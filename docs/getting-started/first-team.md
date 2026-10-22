@@ -83,7 +83,7 @@ For each delegation, the engine:
 2. **Delivers the task** to that agent's session through a non-destructive queue (a busy agent's task waits for its turn boundary; it never interrupts an in-flight run).
 3. **Reports the result back** when the agent finishes: the task moves to `done` and a report-up summary lands on the board.
 
-You see this in the chat as a **Board task** card, a labeled row with a status pill that flips live from **Queued** to **Working** to **Done**, plus the assignee's avatar and name. The board is the source of truth; the card is a read-only projection of it, so it survives a page refresh. Completed tasks are also batched into a `[Task Update]` narration delivered back to the leader for synthesis. The expand icon on the card opens the same task on the [Board](/using/board), where it sits in today's row under its status.
+You see this in the chat as a **Board task** card, a labeled row with a status pill that flips live from **Queued** to **Working** to **Done**, plus the assignee's avatar and name. The board is the source of truth; the card is a read-only projection of it, so it survives a page refresh. Completed tasks are also batched into a `[Task Update]` narration delivered back to the leader for synthesis. The expand icon on the card opens the same task on the [Board](/using/board), under its status.
 
 **Expected result:** at least one Board task card appears inline in the chat, its status pill advancing to **Done**, and the leader synthesizes the teammate's work back to you.
 

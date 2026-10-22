@@ -29,7 +29,7 @@ graph TD
 
 ## Version posture
 
-The CLI is `clawboo@0.5.0` in `apps/cli/package.json` and `CHANGELOG.md`, and v0.5.0 is published: the npm `latest` dist-tag is **`clawboo@0.5.0`** and the `clawboo@0.5.0` git tag exists, so `npx clawboo` installs 0.5.0.
+The CLI is `clawboo@0.5.0` in `apps/cli/package.json` and `CHANGELOG.md`, and v0.5.0 is published: the npm `latest` dist-tag is **`clawboo@0.5.0`** and the `clawboo@0.5.0` git tag exists, so `npx clawboo@latest` installs 0.5.0.
 
 The CLI's runtime version string comes from the build, not from reading `package.json` at runtime: `apps/cli/tsup.config.ts` injects `define: { __CLI_VERSION__: JSON.stringify(pkg.version) }`, and `src/index.ts` reads `__CLI_VERSION__` into `VERSION` (falling back to `'0.0.0-dev'` when the define is absent, e.g. running the TS directly in dev). So `clawboo --version` reports whatever version was set in `package.json` at build time.
 

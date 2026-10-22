@@ -31,6 +31,8 @@ import { providerStatus } from '../lib/providerKeys'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
 import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
+import { gatewayFailureReason, needsDoctorFix, runDoctorFix } from '../lib/openclawRepair'
+import { liveCwd } from '../lib/cwdGuard'
 import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '@clawboo/model-catalog'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -814,6 +816,13 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
 }
 
 // POST /api/system/gateway
+/**
+ * The `openclaw doctor --fix` a Gateway start is running, if any. A second
+ * start (another Retry click, another tab) waits for it instead of launching a
+ * Gateway against data that is halfway through a migration.
+ */
+let gatewayRepairInFlight: Promise<unknown> | null = null
+
 export async function gatewayControlPOST(req: Request, res: Response): Promise<void> {
   try {
     const body = req.body as Record<string, unknown> | undefined
@@ -863,6 +872,15 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
     res.setHeader('Connection', 'keep-alive')
     res.flushHeaders()
 
+    if (gatewayRepairInFlight) {
+      sendEvent(res, {
+        type: 'progress',
+        step: 'repairing',
+        message: 'Waiting for the OpenClaw update to finish…',
+      })
+      await gatewayRepairInFlight.catch(() => {})
+    }
+
     if (action === 'restart') {
       sendEvent(res, { type: 'progress', step: 'stopping', message: 'Stopping gateway...' })
       await stopGateway(port)
@@ -870,17 +888,32 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       await new Promise((r) => setTimeout(r, 500))
     }
 
+    // One terminal event per stream. A launch can end several ways (reachable,
+    // timed out, exited, repair failed) and the first to happen wins.
+    let ended = false
+    const end = (event: Record<string, unknown>): void => {
+      if (ended) return
+      ended = true
+      sendEvent(res, event)
+      res.end()
+    }
+
     // Reusable polling helper — called from BOTH the "spawn fresh" path and
     // the "join existing launch" path (when a previous request already
     // spawned the Gateway and we just need to wait for it to bind). Polls
     // for 60s total (120 × 500ms). 15s was too short for Windows where the
     // Gateway can take 30-50s to bind on cold start — see v0.1.7 round-2.
+    // A new launch (after a repair) supersedes the previous poll via `pollToken`.
     const maxAttempts = 120
+    let pollToken = 0
     const pollUntilReachable = (reportPid: number | undefined): void => {
+      const token = ++pollToken
       let attempts = 0
       const poll = async () => {
+        if (ended || token !== pollToken) return
         attempts++
         const reachable = await probeGatewayPort(port)
+        if (ended || token !== pollToken) return
         if (reachable) {
           // Sync .env token → Clawboo settings so the proxy uses the correct token.
           // The .env file is the Gateway's source of truth for auth tokens.
@@ -890,17 +923,18 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
           void getRegistry()
             .reconnect()
             .catch(() => {})
-          sendEvent(res, { type: 'complete', success: true, pid: reportPid ?? null, port })
-          res.end()
+          end({ type: 'complete', success: true, pid: reportPid ?? null, port })
           return
         }
         if (attempts >= maxAttempts) {
-          sendEvent(res, {
+          const reason = gatewayFailureReason(readLogFrom(launchOffset))
+          end({
             type: 'error',
             code: 'TIMEOUT',
-            message: `Gateway did not become reachable within ${maxAttempts / 2}s`,
+            message: reason
+              ? `Gateway did not start: ${reason}`
+              : `Gateway did not become reachable within ${maxAttempts / 2}s`,
           })
-          res.end()
           return
         }
         sendEvent(res, {
@@ -914,17 +948,50 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       setTimeout(() => void poll(), 500)
     }
 
+    // The Gateway's stdout/stderr go to a LOG FILE, NOT the parent's pipes, so the
+    // process is TRULY detached and survives a parent (dashboard-server) restart.
+    // With piped stdio, a parent restart closes the pipes' read ends and the Gateway
+    // dies on its next write (EPIPE) — which silently defeated `detached: true` and
+    // was a top cause of "OpenClaw is healthy but team chat is dead". We tail the file
+    // below to keep streaming the live startup log to the SSE.
+    const gatewayLogPath = path.join(resolveClawbooDir(), 'gateway.log')
+    const logSize = (): number => {
+      try {
+        return fs.existsSync(gatewayLogPath) ? fs.statSync(gatewayLogPath).size : 0
+      } catch {
+        return 0
+      }
+    }
+    /** What the log gained since `offset` (one launch's own lines), and where it ends. */
+    const readLogChunk = (offset: number): { text: string; end: number } => {
+      try {
+        const size = fs.statSync(gatewayLogPath).size
+        if (size <= offset) return { text: '', end: offset }
+        const fd = fs.openSync(gatewayLogPath, 'r')
+        try {
+          const buf = Buffer.alloc(size - offset)
+          fs.readSync(fd, buf, 0, buf.length, offset)
+          return { text: buf.toString(), end: size }
+        } finally {
+          fs.closeSync(fd)
+        }
+      } catch {
+        return { text: '', end: offset }
+      }
+    }
+    const readLogFrom = (offset: number): string => readLogChunk(offset).text
+    let launchOffset = logSize()
+
     // Check if already running (for start only)
     if (action === 'start') {
       const reachable = await probeGatewayPort(port)
       if (reachable) {
-        sendEvent(res, {
+        end({
           type: 'complete',
           success: true,
           message: 'Gateway already running',
           port,
         })
-        res.end()
         return
       }
       // Mid-launch detection — if a previous request spawned the Gateway
@@ -957,53 +1024,139 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
     // Find openclaw binary
     const oc = await detectOpenClaw()
     if (!oc.installed || !oc.path) {
-      sendEvent(res, { type: 'error', code: 'NOT_INSTALLED', message: 'OpenClaw is not installed' })
-      res.end()
+      end({ type: 'error', code: 'NOT_INSTALLED', message: 'OpenClaw is not installed' })
       return
     }
+    const openclawPath = oc.path
 
-    sendEvent(res, {
-      type: 'progress',
-      step: 'starting',
-      message: `Starting gateway on port ${port}...`,
-    })
-
-    // `shell: isWindows` — required by Node 18.20.2+ / 20.12.2+ / 22+ when
-    // oc.path resolves to openclaw.cmd on Windows (CVE-2024-27980 fix).
-    // Without it, spawn throws EINVAL synchronously after SSE headers are
-    // flushed, and the SPA sees a dropped stream as "Network error".
-    // `windowsHide: isWindows` — hide the cmd.exe console window so the
-    // Gateway start doesn't flash a black terminal in front of the dashboard.
-    // The Gateway's stdout/stderr go to a LOG FILE, NOT the parent's pipes, so the
-    // process is TRULY detached and survives a parent (dashboard-server) restart.
-    // With piped stdio, a parent restart closes the pipes' read ends and the Gateway
-    // dies on its next write (EPIPE) — which silently defeated `detached: true` and
-    // was a top cause of "OpenClaw is healthy but team chat is dead". We tail the file
-    // below to keep streaming the live startup log to the SSE.
-    const gatewayLogPath = path.join(resolveClawbooDir(), 'gateway.log')
-    let tailOffset = 0
-    try {
-      tailOffset = fs.existsSync(gatewayLogPath) ? fs.statSync(gatewayLogPath).size : 0
-    } catch {
-      tailOffset = 0
-    }
-    let logFd: number | null = null
-    try {
-      logFd = fs.openSync(gatewayLogPath, 'a')
-    } catch {
-      logFd = null
+    // Tail the log file → SSE `output` events until the SSE stream ends (the port
+    // poll completes or times out). Best-effort; a read failure just skips a tick.
+    let tailOffset = launchOffset
+    const tailGatewayLog = (): void => {
+      if (res.writableEnded) return
+      const { text, end: logEnd } = readLogChunk(tailOffset)
+      if (text) {
+        tailOffset = logEnd
+        for (const line of text.split('\n').filter(Boolean)) {
+          sendEvent(res, { type: 'output', line })
+        }
+      }
+      if (!res.writableEnded) setTimeout(tailGatewayLog, 400)
     }
 
-    let child
-    try {
-      child = spawn(oc.path, ['gateway', '--port', String(port), '--allow-unconfigured'], {
-        detached: true,
-        // File-backed (not parent pipes) so the Gateway outlives a server restart.
-        stdio: ['ignore', logFd ?? 'ignore', logFd ?? 'ignore'],
-        shell: isWindows,
-        windowsHide: isWindows,
-      })
-    } catch (err) {
+    let repairAttempted = false
+
+    /**
+     * A launch that exits before the port answers. When OpenClaw says why, say
+     * it now rather than after the 60s poll. When the reason is that
+     * `openclaw doctor --fix` must run, run it once and launch again.
+     */
+    const onLaunchExit = async (code: number | null, pid: number | undefined): Promise<void> => {
+      if (ended) return
+      const recorded = readGatewayPid()
+      if (pid && recorded?.pid === pid) removeGatewayPid()
+      if (code === 0) return // left to the poll, as before
+      // Another Gateway may hold the port (a service, a second launch): the poll decides.
+      if (await probeGatewayPort(port)) return
+      if (ended) return
+
+      const launchLog = readLogFrom(launchOffset)
+      if (needsDoctorFix(launchLog)) {
+        if (repairAttempted) {
+          end({
+            type: 'error',
+            code: 'DOCTOR_FIX_REQUIRED',
+            message:
+              'OpenClaw still asks for `openclaw doctor --fix` after Clawboo ran it. Run it in a terminal to see what it needs, then try again.',
+          })
+          return
+        }
+        repairAttempted = true
+        pollToken++ // the failed launch's poll stops here
+        sendEvent(res, {
+          type: 'progress',
+          step: 'repairing',
+          message:
+            'OpenClaw needs a one-time update to its data before the gateway can start. Running openclaw doctor --fix…',
+        })
+        const repair = runDoctorFix(openclawPath, (line) => {
+          if (!ended) sendEvent(res, { type: 'output', line })
+        })
+        gatewayRepairInFlight = repair
+        const result = await repair
+        if (gatewayRepairInFlight === repair) gatewayRepairInFlight = null
+        if (ended) return
+        if (!result.ok) {
+          end({
+            type: 'error',
+            code: 'DOCTOR_FIX_FAILED',
+            message: `OpenClaw needs \`openclaw doctor --fix\`, and running it failed: ${result.error ?? 'unknown error'}. Run it in a terminal, then try again.`,
+          })
+          return
+        }
+        sendEvent(res, {
+          type: 'progress',
+          step: 'starting',
+          message: `OpenClaw is updated. Starting gateway on port ${port}...`,
+        })
+        launch()
+        return
+      }
+
+      const reason = gatewayFailureReason(launchLog)
+      if (reason) {
+        end({ type: 'error', code: 'GATEWAY_EXITED', message: `Gateway did not start: ${reason}` })
+      }
+      // No stated reason: keep polling, the timeout reports what it can.
+    }
+
+    /** Spawn the Gateway, detached, logging to gateway.log. */
+    const launch = (): void => {
+      launchOffset = logSize()
+      tailOffset = Math.min(tailOffset, launchOffset)
+
+      let logFd: number | null = null
+      try {
+        logFd = fs.openSync(gatewayLogPath, 'a')
+      } catch {
+        logFd = null
+      }
+
+      // `shell: isWindows` — required by Node 18.20.2+ / 20.12.2+ / 22+ when
+      // oc.path resolves to openclaw.cmd on Windows (CVE-2024-27980 fix).
+      // Without it, spawn throws EINVAL synchronously after SSE headers are
+      // flushed, and the SPA sees a dropped stream as "Network error".
+      // `windowsHide: isWindows` — hide the cmd.exe console window so the
+      // Gateway start doesn't flash a black terminal in front of the dashboard.
+      // `cwd: liveCwd()`: never inherit a deleted directory, since the OpenClaw CLI
+      // refuses to start in one ("process.cwd failed").
+      let child
+      try {
+        child = spawn(openclawPath, ['gateway', '--port', String(port), '--allow-unconfigured'], {
+          cwd: liveCwd(),
+          detached: true,
+          // File-backed (not parent pipes) so the Gateway outlives a server restart.
+          stdio: ['ignore', logFd ?? 'ignore', logFd ?? 'ignore'],
+          shell: isWindows,
+          windowsHide: isWindows,
+        })
+      } catch (err) {
+        if (logFd !== null) {
+          try {
+            fs.closeSync(logFd)
+          } catch {
+            /* best-effort */
+          }
+        }
+        end({
+          type: 'error',
+          code: 'SPAWN_THROW',
+          message: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
+
+      // The child inherited its own dup of the fd; close the parent's copy.
       if (logFd !== null) {
         try {
           fs.closeSync(logFd)
@@ -1011,61 +1164,31 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
           /* best-effort */
         }
       }
-      sendEvent(res, {
-        type: 'error',
-        code: 'SPAWN_THROW',
-        message: err instanceof Error ? err.message : String(err),
+
+      child.unref()
+
+      if (child.pid) {
+        writeGatewayPid(child.pid, port)
+      }
+
+      const pid = child.pid
+      child.on('error', (err) => {
+        removeGatewayPid()
+        end({ type: 'error', code: 'SPAWN_ERROR', message: String(err) })
       })
-      res.end()
-      return
+      child.on('exit', (code) => void onLaunchExit(code, pid))
+
+      // Begin polling for the freshly-spawned child
+      pollUntilReachable(pid)
     }
 
-    // The child inherited its own dup of the fd; close the parent's copy.
-    if (logFd !== null) {
-      try {
-        fs.closeSync(logFd)
-      } catch {
-        /* best-effort */
-      }
-    }
-
-    child.unref()
-
-    if (child.pid) {
-      writeGatewayPid(child.pid, port)
-    }
-
-    // Tail the log file → SSE `output` events until the SSE stream ends (the port
-    // poll completes or times out). Best-effort; a read failure just skips a tick.
-    const tailGatewayLog = (): void => {
-      if (res.writableEnded) return
-      try {
-        const size = fs.statSync(gatewayLogPath).size
-        if (size > tailOffset) {
-          const fd = fs.openSync(gatewayLogPath, 'r')
-          const buf = Buffer.alloc(size - tailOffset)
-          fs.readSync(fd, buf, 0, buf.length, tailOffset)
-          fs.closeSync(fd)
-          tailOffset = size
-          for (const line of buf.toString().split('\n').filter(Boolean)) {
-            sendEvent(res, { type: 'output', line })
-          }
-        }
-      } catch {
-        /* best-effort */
-      }
-      if (!res.writableEnded) setTimeout(tailGatewayLog, 400)
-    }
-    setTimeout(tailGatewayLog, 300)
-
-    child.on('error', (err) => {
-      sendEvent(res, { type: 'error', code: 'SPAWN_ERROR', message: String(err) })
-      removeGatewayPid()
-      res.end()
+    sendEvent(res, {
+      type: 'progress',
+      step: 'starting',
+      message: `Starting gateway on port ${port}...`,
     })
-
-    // Begin polling for the freshly-spawned child
-    pollUntilReachable(child.pid)
+    launch()
+    setTimeout(tailGatewayLog, 300)
 
     // Do NOT kill detached child on client disconnect
     res.on('close', () => {

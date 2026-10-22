@@ -33,7 +33,7 @@ npm install -g clawboo
 clawboo
 ```
 
-Prefer not to install? `npx clawboo` runs the latest instead. Either way, the CLI prints the Clawboo logo, does a quick informational probe of the OpenClaw Gateway port (`localhost:18789`), starts the bundled dashboard server, then opens your browser at the discovered URL.
+Prefer not to install? `npx clawboo@latest` runs the latest instead. Either way, the CLI prints the Clawboo logo, does a quick informational probe of the OpenClaw Gateway port (`localhost:18789`), starts the bundled dashboard server, then opens your browser at the discovered URL.
 
 **Expected result:** your terminal shows `Dashboard started` and `Clawboo opened at http://localhost:18790` (or the next free port in the `18790–18809` range), and the dashboard loads. Because this is a fresh machine, the onboarding wizard appears.
 

@@ -553,6 +553,57 @@ describe('a routine that is running now', () => {
     )
   })
 
+  it('leads with a later run the same day when the first may be skipped', async () => {
+    const now = freezeAtWednesdayNoon()
+    const maybeAt = now + 2 * HOUR
+    const sureAt = now + 4 * HOUR
+    const tomorrow = addDays(startOfDay(now), 1) + 10 * HOUR
+    const running: ScheduleRecord = { ...ROUTINE, status: 'running' }
+    serve(
+      [{ id: 't', title: 'Any task', status: 'todo', createdAt: now - HOUR }],
+      [{ routine: running, at: [maybeAt, sureAt, tomorrow] }],
+    )
+    renderBoard()
+    await waitFor(() => expect(screen.getAllByTestId('calendar-routine-run')).toHaveLength(2))
+
+    // Today's second run is certain, so it is the next run: the strip shows its
+    // time and names the earlier one as the run in question.
+    const today = stripIn(todoCell(now), running)
+    expect(today).toHaveAttribute('data-next', 'true')
+    expect(today).toHaveAttribute('data-conditional', 'true')
+    expect(today).toHaveTextContent(timeLabel(sureAt))
+    expect(today).toHaveAttribute(
+      'title',
+      `A run is running now, so the one at ${timeLabel(maybeAt)} happens only if that run has finished by then.`,
+    )
+    expect(today.getAttribute('aria-label')).toContain(
+      `next run at ${timeLabel(sureAt)}, 2 runs from ${timeLabel(maybeAt)}`,
+    )
+    expect(stripIn(todoCell(tomorrow), running)).not.toHaveAttribute('data-next')
+  })
+
+  it('judges a run against the runs still on the calendar once the first has passed', async () => {
+    const now = freezeAtWednesdayNoon()
+    // The projection still holds a run that has passed while the fire runs on;
+    // the calendar drops it, so the next run is now the one the fire may skip.
+    const passed = now - 30 * MINUTE
+    const nextAt = now + 3 * HOUR
+    const tomorrow = addDays(startOfDay(now), 1) + 10 * HOUR
+    const running: ScheduleRecord = { ...ROUTINE, status: 'running' }
+    serve(
+      [{ id: 't', title: 'Any task', status: 'todo', createdAt: now - HOUR }],
+      [{ routine: running, at: [passed, nextAt, tomorrow] }],
+    )
+    renderBoard()
+    await waitFor(() => expect(screen.getAllByTestId('calendar-routine-run')).toHaveLength(2))
+
+    const today = stripIn(todoCell(now), running)
+    expect(today).toHaveTextContent(timeLabel(nextAt))
+    expect(today).toHaveAttribute('data-conditional', 'true')
+    expect(today).not.toHaveAttribute('data-next')
+    expect(stripIn(todoCell(tomorrow), running)).toHaveAttribute('data-next', 'true')
+  })
+
   it('says nothing of the kind for a routine that is waiting for its time', async () => {
     const now = freezeAtWednesdayNoon()
     const thursday = addDays(startOfDay(now), 1) + 10 * HOUR
