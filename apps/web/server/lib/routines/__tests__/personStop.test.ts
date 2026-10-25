@@ -7,6 +7,7 @@
 // the wake bridge files the task and dispatches it through the real executor
 // runner, and the runtime hangs until it is aborted.
 
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -192,6 +193,10 @@ describe('a person moving a routine fire’s card while it runs', () => {
       const kinds = listEvents(db).map((e) => e.kind)
       expect(kinds).toContain('routine_completed')
       expect(kinds).not.toContain('routine_error')
+
+      // Everything ran on this suite's own connection. Opening the server's
+      // database as well would leave a handle Windows refuses to delete.
+      expect(existsSync(path.join(home, '.clawboo', 'clawboo.db'))).toBe(false)
     },
   )
 })

@@ -671,10 +671,11 @@ export function hasTeamOrchestrator(teamId: string, roomId: string | null = null
 }
 
 /** The room a board task is driven from (its own active room, else the team's
- *  default room). See `roomIdForTask`. */
-export function orchestratorRoomForTask(taskId: string): string | null {
+ *  default room). See `roomIdForTask`. Read through `db` when the caller holds a
+ *  connection, else through the server's. */
+export function orchestratorRoomForTask(taskId: string, db?: ClawbooDb): string | null {
   try {
-    return roomIdForTask(getDb(), taskId)
+    return roomIdForTask(db ?? getDb(), taskId)
   } catch {
     return null
   }
@@ -684,14 +685,17 @@ export function orchestratorRoomForTask(taskId: string): string | null {
 export function getTaskOrchestrator(
   teamId: string,
   taskId: string,
-  opts?: { mcpBaseUrl?: string | null },
+  opts?: { mcpBaseUrl?: string | null; db?: ClawbooDb },
 ): TeamOrchestrator {
-  return getTeamOrchestrator(teamId, { ...opts, roomId: orchestratorRoomForTask(taskId) })
+  return getTeamOrchestrator(teamId, {
+    mcpBaseUrl: opts?.mcpBaseUrl ?? null,
+    roomId: orchestratorRoomForTask(taskId, opts?.db),
+  })
 }
 
 /** True when the orchestrator that owns a board task is resident. */
-export function hasTaskOrchestrator(teamId: string, taskId: string): boolean {
-  return hasTeamOrchestrator(teamId, orchestratorRoomForTask(taskId))
+export function hasTaskOrchestrator(teamId: string, taskId: string, db?: ClawbooDb): boolean {
+  return hasTeamOrchestrator(teamId, orchestratorRoomForTask(taskId, db))
 }
 
 /** A room was archived: Stop its cascade (a clean release to `todo`, never a

@@ -360,9 +360,11 @@ export function createClaudeCodeDriver(
     let usage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
     let sawUsage = false
     try {
-      const mod = await (deps.loadSdk ?? loadAgentSdk)()
+      // The brief goes in first: a steer can arrive while the SDK is still loading,
+      // and it must reach the CLI after the task it steers.
       const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
       input.push(userMessage(prompt))
+      const mod = await (deps.loadSdk ?? loadAgentSdk)()
       const options: Record<string, unknown> = {
         abortController: abort,
         // Headless worker: clawboo gates risky tools externally (board/approvals)

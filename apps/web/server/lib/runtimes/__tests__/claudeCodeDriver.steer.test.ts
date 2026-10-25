@@ -228,6 +228,31 @@ describe('createClaudeCodeDriver: steering through streaming input', () => {
     await expect(driver.steer!('late')).resolves.toBe(false)
   })
 
+  it('a steer sent while the SDK is still loading reaches the CLI after the brief', async () => {
+    const sdkLoaded = deferred<SdkModule>()
+    const received: string[] = []
+    const { sdk } = scriptedSdk(async function* (input) {
+      const first = (await input.next()).value as SdkUserMessage
+      const second = (await input.next()).value as SdkUserMessage
+      received.push(first.message.content, second.message.content)
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: 'ok',
+        user_message_uuids: [first.uuid, second.uuid],
+      }
+    })
+    const driver = createClaudeCodeDriver(OPTS, CTX, { loadSdk: () => sdkLoaded.promise })
+    const seen: ClaudeNativeEvent[] = []
+    driver.onEvent((ev) => seen.push(ev))
+    await driver.start()
+    const taken = driver.steer!('Keep it short.')
+    sdkLoaded.resolve(sdk)
+    await expect(taken).resolves.toBe(true)
+    await until(() => seen.some((e) => e.type === 'result'))
+    expect(received).toEqual(['write the post', 'Keep it short.'])
+  })
+
   it('passes the prompt as a stream, never as a string', async () => {
     const { sdk, options } = scriptedSdk(async function* (input) {
       const first = (await input.next()).value as SdkUserMessage

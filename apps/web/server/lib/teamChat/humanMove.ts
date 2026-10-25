@@ -57,8 +57,8 @@ export function noteHumanMove(db: ClawbooDb, move: HumanMove): void {
     log.error({ err, taskId }, 'stopping a run for a person’s move failed')
   }
   if (!teamId) return
-  if (hasTaskOrchestrator(teamId, taskId)) {
-    void getTaskOrchestrator(teamId, taskId, { mcpBaseUrl: null })
+  if (hasTaskOrchestrator(teamId, taskId, db)) {
+    void getTaskOrchestrator(teamId, taskId, { mcpBaseUrl: null, db })
       .personMovedTask(taskId, to, { cancelledDependents: move.cancelledDependents ?? [] })
       .catch((err: unknown) => log.error({ err, taskId, teamId }, 'person-move handling failed'))
     return
