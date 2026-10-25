@@ -21,7 +21,7 @@ import {
   type InjectionFinding,
 } from '@clawboo/db'
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
-import { eq, sql, inArray } from 'drizzle-orm'
+import { eq, sql, inArray, like } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
@@ -35,6 +35,7 @@ import {
 } from '../lib/runtimes/native/agentConfigStore'
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { ensureNativeBooZero, resolveBooZero } from '../lib/teamChat/booZero'
+import { nativeTeamSessionKeysForAgentLike } from '../lib/teamChat/nativeTeamSession'
 
 // The source throws Error('gateway_disconnected') when a write/file/session op
 // needs a live Gateway but the server-side connection is down.
@@ -484,6 +485,10 @@ function deleteLocalAgentRows(agentId: string): void {
   // Per-agent KV settings (no FK to `agents`) — wipe in lock-step.
   db.delete(settings)
     .where(inArray(settings.key, perAgentSettingKeys(agentId)))
+    .run()
+  // Its team and chat-room leader resume pointers (one per team and per room).
+  db.delete(settings)
+    .where(like(settings.key, nativeTeamSessionKeysForAgentLike(agentId)))
     .run()
   db.delete(agents).where(eq(agents.id, agentId)).run()
 }

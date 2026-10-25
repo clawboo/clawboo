@@ -1,6 +1,7 @@
 // In-memory HermesDriver double for the adapter contract + unit tests. Mirrors
 // the other adapter fakes. Test-only (src/testing).
 
+import type { SteerOptions } from '@clawboo/executor'
 import type { RecordedCall } from '@clawboo/executor/contract'
 
 import type { HermesDriver, HermesNativeEvent } from '../types'
@@ -32,5 +33,15 @@ export class FakeHermesDriver implements HermesDriver {
 
   async writeContext(key: string, value: string): Promise<void> {
     this.calls.push({ method: 'writeContext', params: { key, value } })
+  }
+
+  /** What `steer` answers: true (the run took it), false (the run had ended) or
+   *  an Error (the runtime refused it). */
+  steerAnswer: boolean | Error = true
+
+  async steer(text: string, opts?: SteerOptions): Promise<boolean> {
+    this.calls.push({ method: 'steer', params: { text, ...(opts ? { opts } : {}) } })
+    if (this.steerAnswer instanceof Error) throw this.steerAnswer
+    return this.steerAnswer
   }
 }

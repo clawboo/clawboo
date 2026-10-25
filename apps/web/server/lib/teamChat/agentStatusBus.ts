@@ -16,6 +16,11 @@
 export interface AgentStatusUpdate {
   agentId: string
   status: 'running' | 'idle' | 'error'
+  /** For a team channel: the chat room the run belongs to (null = the team's
+   *  own group chat). Lets each room's composer count only its own activity; the
+   *  badge itself is the agent's, whichever room it is working in. Not kept in
+   *  the snapshot. */
+  roomId?: string | null
 }
 
 type Listener = (update: AgentStatusUpdate) => void

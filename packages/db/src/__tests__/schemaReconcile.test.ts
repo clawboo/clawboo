@@ -494,6 +494,9 @@ describe('reconcileSchema: an existing database is brought up to the current sch
     expect(ensureSchema(db).added).toEqual([])
   })
 
+  // Removing and restoring every addable column takes seconds, and more with each
+  // column the schema gains, so the default 5s timeout is too tight on a shared
+  // CI runner.
   it('restores every column an older database could be missing, keeping its rows', () => {
     // Simulate "older schema" the only way that is faithful without shipping a
     // binary fixture: take a current database with data in it and remove each
@@ -544,7 +547,7 @@ describe('reconcileSchema: an existing database is brought up to the current sch
     expect(indexExists(db, 'idx_agents_team_id')).toBe(true)
     expect(indexExists(db, 'idx_tasks_parent_dropped_created')).toBe(true)
     expect(db.all(sql`PRAGMA foreign_key_check`)).toEqual([])
-  })
+  }, 30_000)
 
   it('restores a column that an index depends on, then the index', () => {
     // The case that forces reconcile to run BEFORE the DDL batch. `agents.team_id`
@@ -781,6 +784,9 @@ describe('reconcileSchema: a column it cannot add fails loudly and changes nothi
     // ensureSchema throw; the reconciler must not be the thing that throws first,
     // and must never try to ALTER a view.
     const db = createDb(':memory:')
+    // Every table that references `teams` or `agents` goes first.
+    db.$client.prepare('DROP TABLE room_members').run()
+    db.$client.prepare('DROP TABLE rooms').run()
     db.$client.prepare('DROP TABLE boo_zero_team_briefs').run()
     db.$client.prepare('DROP TABLE agents').run()
     db.$client.prepare('DROP TABLE teams').run()

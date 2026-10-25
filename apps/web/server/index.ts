@@ -14,7 +14,7 @@ import { createLogger } from '@clawboo/logger'
 import {
   listAgentsWithUndeliveredInbox,
   reapOrphanInbox,
-  listTeamsWithFireableDelegations,
+  listRoomsWithFireableDelegations,
   reconcileOrphans,
   reconcileStaleInProgress,
   seedBuiltinTools,
@@ -33,7 +33,11 @@ import { startMemoryEmbedding } from './lib/memoryEmbedding'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
-import { getTeamOrchestrator } from './lib/teamChat/teamOrchestrator'
+import {
+  getTeamOrchestrator,
+  isActiveTeamRoom,
+  orchestratorKey,
+} from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
@@ -519,7 +523,11 @@ async function main() {
     const pump = (): void => {
       try {
         const db = getDb()
-        const wake = new Set(listTeamsWithFireableDelegations(db))
+        // One orchestrator per team chat room, so the scan names the room too
+        // (null = the team's own group chat).
+        const wake = new Map<string, { teamId: string; roomId: string | null }>()
+        for (const r of listRoomsWithFireableDelegations(db))
+          wake.set(orchestratorKey(r.teamId, r.roomId), r)
         // Teams whose agents hold undelivered mailbox rows: waking the team
         // rebuilds its orchestrator; the rows ride the next run's digest (or,
         // for a team that stays idle, wait for the next user turn — waking is
@@ -527,11 +535,15 @@ async function main() {
         // Retention first: drop rows for recipients that no longer exist (and
         // stale rows past the cutoff) so the scan below never wakes a ghost.
         reapOrphanInbox(db)
-        for (const a of listAgentsWithUndeliveredInbox(db)) if (a.teamId) wake.add(a.teamId)
-        for (const teamId of wake) {
-          getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase })
+        for (const a of listAgentsWithUndeliveredInbox(db))
+          if (a.teamId) wake.set(orchestratorKey(a.teamId), { teamId: a.teamId, roomId: null })
+        for (const { teamId, roomId } of wake.values()) {
+          if (!isActiveTeamRoom(teamId, roomId)) continue
+          getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase, roomId })
             .pump()
-            .catch((err: unknown) => log.error({ err, teamId }, 'Board: dispatch pump failed'))
+            .catch((err: unknown) =>
+              log.error({ err, teamId, roomId }, 'Board: dispatch pump failed'),
+            )
         }
       } catch (err) {
         log.error({ err }, 'Board: dispatch pump scan failed (non-fatal)')

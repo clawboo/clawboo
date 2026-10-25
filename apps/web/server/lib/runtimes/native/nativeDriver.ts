@@ -12,7 +12,7 @@ import path from 'node:path'
 
 import type { NativeDriver, NativeEvent } from '@clawboo/adapter-native'
 import { chatMessages, type ClawbooDb } from '@clawboo/db'
-import type { StartOpts } from '@clawboo/executor'
+import type { StartOpts, SteerOptions } from '@clawboo/executor'
 import { isTeamSessionKey, nativeChatSessionKey } from '@clawboo/team-orchestration'
 
 import { getDb } from '../../db'
@@ -39,11 +39,6 @@ export interface NativeDriverDeps {
  *  narrative, never load-bearing. `opts` lets a caller persist a user-facing
  *  META notice instead (e.g. driveAgentChat surfacing a failed run's reason —
  *  a keyless/errored turn must never just silently not respond). */
-/** Reserved `writeContext` key whose value routes into the LIVE conversation's
- *  input queue (mid-run peer signal) instead of a cwd file drop. Namespaced so
- *  it can never collide with a real handoff/context filename. */
-export const NATIVE_SIGNAL_CONTEXT_KEY = '.clawboo/signal'
-
 export function persistNativeChatEntry(
   db: ClawbooDb,
   agentId: string,
@@ -90,6 +85,11 @@ export function createNativeDriver(
   let started = false
   let conversation: Conversation | null = null
   let pendingModel: string | null = null
+  /** Steers (and ambient inputs) that arrived while the run was still being set
+   *  up (config, MCP). */
+  const pendingSteers: string[] = []
+  const pendingAmbient: string[] = []
+  let ended = false
 
   const db = deps.db ?? getDb()
 
@@ -174,6 +174,8 @@ export function createNativeDriver(
         conversation.setModel(pendingModel)
         pendingModel = null
       }
+      for (const text of pendingSteers.splice(0)) conversation.steer(text)
+      for (const text of pendingAmbient.splice(0)) conversation.enqueueUserMessage(text)
       await conversation.run()
     } catch (err) {
       push({
@@ -182,6 +184,8 @@ export function createNativeDriver(
         summary: '',
         errorMessage: err instanceof Error ? err.message : String(err),
       })
+    } finally {
+      ended = true
     }
   }
 
@@ -207,16 +211,22 @@ export function createNativeDriver(
       if (conversation) conversation.setModel(model)
       else pendingModel = model
     },
-    async writeContext(key: string, value: string): Promise<void> {
-      // The reserved SIGNAL key routes INTO the live conversation instead of the
-      // filesystem: the text lands on the conversation's input queue and is read
-      // at its next turn iteration — mid-run peer delivery, the seam the
-      // orchestrator's `signalAgent` pushes through. Every other key keeps the
-      // file-drop contract shared with the CLI runtimes.
-      if (key === NATIVE_SIGNAL_CONTEXT_KEY) {
-        conversation?.enqueueUserMessage(value)
-        return
+    async steer(text: string, opts?: SteerOptions): Promise<boolean> {
+      // Into the live conversation, read at its next turn boundary (see
+      // Conversation.steer). Before the conversation exists, held and handed over
+      // the moment it does. A passive steer (an ambient FYI) rides the ambient
+      // input queue instead, which never keeps a finishing run going.
+      if (ended || !started) return false
+      if (opts?.passive) {
+        if (conversation) conversation.enqueueUserMessage(text)
+        else pendingAmbient.push(text)
+        return true
       }
+      if (conversation) return conversation.steer(text)
+      pendingSteers.push(text)
+      return true
+    },
+    async writeContext(key: string, value: string): Promise<void> {
       if (!ctx.cwd) return
       const target = path.join(ctx.cwd, key)
       await mkdir(path.dirname(target), { recursive: true })

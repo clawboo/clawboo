@@ -1,5 +1,6 @@
 import {
   createAsyncQueue,
+  steerThroughDriver,
   type Capabilities,
   type HealthResult,
   type RunHandle,
@@ -7,6 +8,8 @@ import {
   type RuntimeEvent,
   type SessionCodec,
   type StartOpts,
+  type SteerOptions,
+  type SteerResult,
   type TaskHandle,
 } from '@clawboo/executor'
 
@@ -45,8 +48,11 @@ export class HermesAdapter implements RuntimeAdapter {
       // runtime headless, where the CLI run passes --yolo.
       // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
-      // See claude-code: the spawn driver writes a cwd file nothing reads back.
-      steerable: false,
+      // One-shot `hermes chat -q` has no way in mid-run, so the driver stops the
+      // process and resumes the same session with the steer as the next input.
+      // The stop is absorbed by the driver: the host sees one run, never an
+      // aborted terminal.
+      steering: 'interrupt-resume',
       models: [], // provider-defined — Hermes resolves models via its own provider config
       // Native-preservation seam: a wrapped one-shot whose value COMPOUNDS in
       // its home — one stable home per identity; self-created skills, MEMORY.md
@@ -153,5 +159,9 @@ export class HermesAdapter implements RuntimeAdapter {
 
   async writeContext(run: RunHandle, key: string, value: string): Promise<void> {
     await this.drivers.get(run.sessionKey)?.writeContext(key, value)
+  }
+
+  async steer(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult> {
+    return steerThroughDriver(this.drivers.get(run.sessionKey), text, 'interrupt-resume', opts)
   }
 }

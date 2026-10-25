@@ -156,6 +156,13 @@ function toolResultEvent(runId: string, name: string): RuntimeEvent {
   }
 }
 
+function statusEvent(runId: string, phase: 'init' | 'running'): RuntimeEvent {
+  return { kind: 'status', phase, runId, sessionId: null, ts: 1, seq: 1 }
+}
+function textEvent(runId: string, text: string): RuntimeEvent {
+  return { kind: 'text-delta', text, channel: 'assistant', runId, sessionId: null, ts: 1, seq: 1 }
+}
+
 type DelegationResolution = 'allow_once' | 'allow_always' | 'deny' | 'expired' | 'timeout'
 interface HarnessOpts {
   stopGen?: () => number
@@ -1152,6 +1159,82 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
   })
 
   // ─── coordination hardening (adversarial-review fixes) ──────────────────────
+  // ─── steering: a person's message reaches a running delegate ──────────────
+  // A steer changes the RUN, never the engine's view of it. A runtime that steers
+  // live just keeps streaming; one that stops and resumes (interrupt-and-resume)
+  // re-initializes mid-stream, and its driver absorbs the stop so NO terminal
+  // reaches the engine for it. Either way the stream the engine sees is a single
+  // run: the task stays in progress, mapped to the same session, and ends once.
+  describe('createBoardOrchestrator: steered runs', () => {
+    async function delegateToBug(h: ReturnType<typeof makeHarness>): Promise<string> {
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">write the launch post</delegate>'),
+      )
+      return idsOf(h.board)[0]!
+    }
+
+    it('a steered run completes its task ONCE: no block, no release, a success reflection', async () => {
+      const h = makeHarness()
+      const { board, delivered, orchestrator } = h
+      const t1 = await delegateToBug(h)
+
+      await orchestrator.onEvent(sk('a2'), toolCallEvent('r2', 'shell', { cmd: 'draft' }))
+      // The steer: the stopped process left no terminal; the resumed one re-inits.
+      await orchestrator.onEvent(sk('a2'), statusEvent('r2', 'init'))
+      expect(board.statusOf(t1)).toBe('in_progress')
+      expect(orchestrator.taskForSession(sk('a2'))).toBe(t1)
+      await orchestrator.onEvent(sk('a2'), textEvent('r2', 'Short version.'))
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Short version.'))
+
+      expect(board.statusOf(t1)).toBe('done')
+      expect(board.statusUpdates.filter((u) => u.taskId === t1).map((u) => u.status)).toEqual([
+        'done',
+      ])
+      expect(board.completed).toHaveLength(1)
+      expect(board.completed[0]!.outcome.status).toBe('succeeded')
+      expect(board.execCount).toBe(1)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const r = reflections(delivered)
+      expect(r).toHaveLength(1)
+      expect(r[0]!.task).not.toMatch(/DID NOT COMPLETE/)
+    })
+
+    it('a resumed run keeps the idle watchdog off it while it works', async () => {
+      let clock = 1_000
+      const h = makeHarness({ now: () => clock })
+      const t1 = await delegateToBug(h)
+      clock += DELEGATION_IDLE_TIMEOUT_MS - 1
+      await h.orchestrator.onEvent(sk('a2'), statusEvent('r2', 'init'))
+      clock += DELEGATION_IDLE_TIMEOUT_MS - 1
+      await h.orchestrator.sweepStaleSessions()
+      expect(h.board.statusOf(t1)).toBe('in_progress')
+      expect(h.aborted).toEqual([])
+    })
+
+    it('a steer never shields a run from the person’s Stop: it still releases cleanly', async () => {
+      let gen = 0
+      const h = makeHarness({ stopGen: () => gen })
+      const t1 = await delegateToBug(h)
+      await h.orchestrator.onEvent(sk('a2'), statusEvent('r2', 'init'))
+      gen = 1
+      await h.orchestrator.onEvent(sk('a2'), failedDoneEvent('r2', 'aborted', ''))
+      expect(h.board.statusOf(t1)).toBe('todo')
+      expect(h.board.statusUpdates).not.toContainEqual({ taskId: t1, status: 'blocked' })
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered).some((r) => /DID NOT COMPLETE/.test(r.task))).toBe(false)
+    })
+
+    it('an abort that DID surface would be a failure, which is why the driver must absorb it', async () => {
+      // The guard this whole design leans on: the engine cannot tell a steer's stop
+      // from a genuine abort, so a driver that leaked one would block the task.
+      const h = makeHarness()
+      const t1 = await delegateToBug(h)
+      await h.orchestrator.onEvent(sk('a2'), failedDoneEvent('r2', 'aborted', ''))
+      expect(h.board.statusOf(t1)).toBe('blocked')
+    })
+  })
+
   describe('createBoardOrchestrator — coordination hardening', () => {
     it('serializes two delegations to the SAME agent — both run in order, neither orphaned', async () => {
       const { board, delivered, orchestrator } = makeHarness()

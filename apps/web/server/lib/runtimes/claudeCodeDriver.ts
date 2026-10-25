@@ -8,13 +8,26 @@
 // `mapClaudeEvent` (in @clawboo/adapter-claude-code) turns those into the
 // normalized RuntimeEvent stream. Claude Code reports a real `total_cost_usd`,
 // passed straight through (not estimated).
+//
+// STEERING. The query runs in streaming-input mode (the prompt is an async
+// iterable of user messages, not a string), so a person's steer can be pushed in
+// while the run works. It goes in with priority `next`, which the CLI drains into
+// the running turn at its next boundary as a queued command; one that arrives as
+// the turn is finishing gets a turn of its own. In this mode the CLI emits one
+// `result` per turn and keeps running until its input closes, so the driver holds
+// input open until every message it pushed shows up in a result's
+// `user_message_uuids` (the CLI's record of what each turn consumed), then closes
+// it and reports ONE terminal for the whole run. Verified against the SDK 0.3.268
+// types and its bundled CLI.
+
+import { randomUUID } from 'node:crypto'
 
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import type { ClaudeCodeDriver, ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
 import { buildAttachConfig, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/mcp'
-import type { StartOpts } from '@clawboo/executor'
+import type { StartOpts, SteerOptions } from '@clawboo/executor'
 
 import { buildChildEnv } from './childEnv'
 import type { RuntimeRunContext } from './types'
@@ -42,9 +55,92 @@ interface SdkMessage {
   total_cost_usd?: number
   usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number }
   errors?: string[]
+  /** Client uuids of the user messages the turn has consumed so far (assistant
+   *  and result frames), including any folded into it mid-turn. */
+  user_message_uuids?: string[]
+  user_message_uuid?: string
 }
-interface SdkModule {
-  query(params: { prompt: string; options?: Record<string, unknown> }): AsyncIterable<SdkMessage>
+/** A user message written into a streaming-input query. */
+export interface SdkUserMessage {
+  type: 'user'
+  message: { role: 'user'; content: string }
+  parent_tool_use_id: null
+  uuid: string
+  /** `next`: fold into the running turn at its next boundary. */
+  priority?: 'next'
+}
+export interface SdkModule {
+  query(params: {
+    prompt: AsyncIterable<SdkUserMessage>
+    options?: Record<string, unknown>
+  }): AsyncIterable<SdkMessage>
+}
+
+export interface ClaudeCodeDriverDeps {
+  /** Test seam: a scripted SDK in place of the lazily imported real one. */
+  loadSdk?: () => Promise<SdkModule>
+}
+
+/** The prompt of a streaming-input query: messages pushed in order, read by the
+ *  SDK as an async iterable, ended by `close()`. */
+function createInputStream(): {
+  stream: AsyncIterable<SdkUserMessage>
+  push(msg: SdkUserMessage): boolean
+  close(): void
+  readonly closed: boolean
+} {
+  const items: SdkUserMessage[] = []
+  let wake: (() => void) | null = null
+  let closed = false
+  const notify = (): void => {
+    const w = wake
+    wake = null
+    w?.()
+  }
+  return {
+    stream: {
+      async *[Symbol.asyncIterator]() {
+        while (true) {
+          const next = items.shift()
+          if (next) {
+            yield next
+            continue
+          }
+          if (closed) return
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+        }
+      },
+    },
+    push(msg) {
+      if (closed) return false
+      items.push(msg)
+      notify()
+      return true
+    },
+    close() {
+      closed = true
+      notify()
+    },
+    get closed() {
+      return closed
+    },
+  }
+}
+
+const userMessage = (text: string, priority?: 'next'): SdkUserMessage => ({
+  type: 'user',
+  message: { role: 'user', content: text },
+  parent_tool_use_id: null,
+  uuid: randomUUID(),
+  ...(priority ? { priority } : {}),
+})
+
+/** The uuids a frame says its turn has consumed. */
+function consumedUuidsOf(msg: SdkMessage): string[] {
+  if (Array.isArray(msg.user_message_uuids)) return msg.user_message_uuids
+  return msg.user_message_uuid ? [msg.user_message_uuid] : []
 }
 
 /** The optional runtime dependency this driver needs — named once for the
@@ -209,12 +305,25 @@ function mcpServersFor(
   return servers
 }
 
-export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext): ClaudeCodeDriver {
+export function createClaudeCodeDriver(
+  opts: StartOpts,
+  ctx: RuntimeRunContext,
+  deps: ClaudeCodeDriverDeps = {},
+): ClaudeCodeDriver {
   const handlers = new Set<(ev: ClaudeNativeEvent) => void>()
   const buffered: ClaudeNativeEvent[] = []
   let subscribed = false
   let started = false
   const abort = new AbortController()
+  const input = createInputStream()
+  /** Set once the run's single terminal has been pushed. */
+  let finished = false
+  /** Steers pushed and not yet seen consumed, by uuid -> settle. */
+  const pendingSteers = new Map<string, (taken: boolean) => void>()
+  /** The passive ones among them: an FYI never holds the run open. */
+  const passiveSteers = new Set<string>()
+  /** Every uuid any turn has reported consuming. */
+  const consumed = new Set<string>()
 
   const push = (ev: ClaudeNativeEvent): void => {
     if (!subscribed) {
@@ -224,10 +333,38 @@ export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext):
     for (const h of [...handlers]) h(ev)
   }
 
+  const noteConsumed = (msg: SdkMessage): void => {
+    for (const id of consumedUuidsOf(msg)) {
+      consumed.add(id)
+      const settle = pendingSteers.get(id)
+      if (settle) {
+        pendingSteers.delete(id)
+        settle(true)
+      }
+    }
+  }
+
+  /** The run is over: close input and settle any steer it never read as not taken. */
+  const finish = (terminal: ClaudeNativeEvent): void => {
+    if (finished) return
+    finished = true
+    input.close()
+    for (const settle of pendingSteers.values()) settle(false)
+    pendingSteers.clear()
+    push(terminal)
+  }
+
   async function run(): Promise<void> {
+    // Accumulated across the turns of one run: usage is reported per turn, cost
+    // as a running total (so the latest one is the run's).
+    let usage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
+    let sawUsage = false
     try {
-      const mod = await loadAgentSdk()
+      // The brief goes in first: a steer can arrive while the SDK is still loading,
+      // and it must reach the CLI after the task it steers.
       const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
+      input.push(userMessage(prompt))
+      const mod = await (deps.loadSdk ?? loadAgentSdk)()
       const options: Record<string, unknown> = {
         abortController: abort,
         // Headless worker: clawboo gates risky tools externally (board/approvals)
@@ -250,8 +387,42 @@ export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext):
       // etc. When the key is absent (Keychain/OAuth user), apiKeyEnv is empty and the
       // SDK falls back to the logged-in CLI's own auth (not env-based).
       options['env'] = buildChildEnv(ctx.apiKeyEnv ?? {})
-      for await (const msg of mod.query({ prompt, options })) {
-        for (const ev of translateClaudeMessage(msg)) push(ev)
+      for await (const msg of mod.query({ prompt: input.stream, options })) {
+        if (finished) break
+        if (msg.type === 'assistant') noteConsumed(msg)
+        if (msg.type !== 'result') {
+          for (const ev of translateClaudeMessage(msg)) push(ev)
+          continue
+        }
+        noteConsumed(msg)
+        if (msg.usage) {
+          sawUsage = true
+          usage = {
+            inputTokens: usage.inputTokens + (msg.usage.input_tokens ?? 0),
+            outputTokens: usage.outputTokens + (msg.usage.output_tokens ?? 0),
+            cachedInputTokens: usage.cachedInputTokens + (msg.usage.cache_read_input_tokens ?? 0),
+          }
+        }
+        // A successful turn with a person's steer still unread is not the end of
+        // the run: the CLI starts a turn for it next. Anything else is.
+        const unread = [...pendingSteers.keys()].some((id) => !passiveSteers.has(id))
+        if (msg.subtype === 'success' && unread) continue
+        for (const ev of translateClaudeMessage(msg)) {
+          if (ev.type !== 'result') {
+            push(ev)
+            continue
+          }
+          const { usage: _turnUsage, ...rest } = ev
+          finish(sawUsage ? { ...rest, usage } : rest)
+        }
+      }
+      if (!finished) {
+        finish({
+          type: 'result',
+          ok: false,
+          summary: '',
+          errorMessage: 'Claude Code ended without reporting a result',
+        })
       }
     } catch (err) {
       // An abort WE asked for is not a failure. The SDK rejects its iterator when
@@ -261,10 +432,10 @@ export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext):
       // blaming the user for the thing they just did. The native, codex and hermes
       // drivers all make this distinction already; this one is the odd one out.
       if (abort.signal.aborted) {
-        push({ type: 'result', ok: true, aborted: true, summary: '' })
+        finish({ type: 'result', ok: true, aborted: true, summary: '' })
         return
       }
-      push({
+      finish({
         type: 'result',
         ok: false,
         summary: '',
@@ -290,6 +461,7 @@ export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext):
     },
     async abort(): Promise<void> {
       abort.abort()
+      input.close()
     },
     async setModel(): Promise<void> {
       // The SDK fixes the model at query() time — no mid-run switch.
@@ -299,6 +471,18 @@ export function createClaudeCodeDriver(opts: StartOpts, ctx: RuntimeRunContext):
       const target = path.join(ctx.cwd, key)
       await mkdir(path.dirname(target), { recursive: true })
       await writeFile(target, value, 'utf8')
+    },
+    steer(text: string, opts?: SteerOptions): Promise<boolean> {
+      if (!started || finished || input.closed) return Promise.resolve(false)
+      const msg = userMessage(text, 'next')
+      if (opts?.passive) passiveSteers.add(msg.uuid)
+      // Resolves when a turn reports consuming it, or false if the run ends first.
+      const taken = new Promise<boolean>((resolve) => pendingSteers.set(msg.uuid, resolve))
+      if (consumed.has(msg.uuid) || !input.push(msg)) {
+        pendingSteers.delete(msg.uuid)
+        return Promise.resolve(false)
+      }
+      return taken
     },
   }
 }

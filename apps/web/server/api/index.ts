@@ -46,7 +46,9 @@ import {
   teamAgentDELETE,
   teamChatIngestPOST,
   teamChatStopPOST,
+  teamChatClearPOST,
 } from './teams'
+import { teamRoomDELETE, teamRoomPATCH, teamRoomsGET, teamRoomsPOST } from './rooms'
 import { teamChatGET, teamChatExchangePOST } from './teamChat'
 import { teamChatStreamGET } from './teamChatStream'
 import {
@@ -282,6 +284,13 @@ router.delete('/api/teams/:id', teamsDELETE)
 router.post('/api/teams/:id/agents', teamAgentPOST)
 router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
 
+// Chat rooms inside a team (subsets of its members, each its own conversation).
+// DELETE archives: the transcript is kept, the room's in-flight work is stopped.
+router.get('/api/teams/:id/rooms', teamRoomsGET)
+router.post('/api/teams/:id/rooms', teamRoomsPOST)
+router.patch('/api/teams/:id/rooms/:roomId', teamRoomPATCH)
+router.delete('/api/teams/:id/rooms/:roomId', teamRoomDELETE)
+
 // Team onboarding (per-team boolean flags for "Know Your Team" gate)
 router.get('/api/teams/:id/onboarding', teamOnboardingGET)
 router.patch('/api/teams/:id/onboarding', teamOnboardingPATCH)
@@ -294,6 +303,7 @@ router.get('/api/teams/:id/activity-summary', teamActivitySummaryGET)
 // Gated to server-orchestrated (native) teams; OpenClaw stays on the browser path
 // until its cutover. Stop is registered before the bare /chat (more specific first).
 router.post('/api/teams/:id/chat/stop', teamChatStopPOST)
+router.post('/api/teams/:id/chat/clear', teamChatClearPOST)
 router.post('/api/teams/:id/chat', teamChatIngestPOST)
 // Live chat transport — SSE tail of the team transcript (committed turns + live
 // token deltas). A pure reader: orchestration runs to completion with no client.

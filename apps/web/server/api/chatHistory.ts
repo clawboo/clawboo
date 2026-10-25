@@ -137,16 +137,17 @@ export async function chatHistoryPOST(req: Request, res: Response): Promise<void
 
 // ─── Session-key parsing ──────────────────────────────────────────────────────
 
-/** Parse a team session key (`agent:<agentId>:team:<teamId>`) into its ids, or
- *  null when the key isn't team-shaped. The key arrives verbatim from the query
- *  string, so the parse is plain single-pass string scanning: cost stays linear
- *  no matter how many `:team:` fragments a hostile key packs in. Ids are
- *  colon-free in practice (native agent ids are slugs, team ids are UUIDs); if a
- *  key does embed extra `:team:` fragments, the rightmost one with a non-empty
- *  id on each side is the separator. */
+/** Parse a team session key (`agent:<agentId>:team:<teamId>`, optionally with a
+ *  chat room's `:room:<roomId>` suffix) into its ids, or null when the key isn't
+ *  team-shaped. The key arrives verbatim from the query string, so the parse is
+ *  plain single-pass string scanning: cost stays linear no matter how many
+ *  `:team:` fragments a hostile key packs in. Ids are colon-free in practice
+ *  (native agent ids are slugs, team and room ids are UUIDs); if a key does embed
+ *  extra `:team:` fragments, the rightmost one with a non-empty id on each side is
+ *  the separator, and a trailing `:room:<id>` with a colon-free id is the room. */
 export function parseTeamSessionKey(
   sessionKey: string,
-): { agentId: string; teamId: string } | null {
+): { agentId: string; teamId: string; roomId: string | null } | null {
   const prefix = 'agent:'
   const sep = ':team:'
   // Ids never contain line breaks; a key smuggling one is malformed input.
@@ -157,7 +158,16 @@ export function parseTeamSessionKey(
   // fall back to the previous one (which always has a non-empty tail).
   if (at !== -1 && at + sep.length === rest.length) at = rest.lastIndexOf(sep, at - 1)
   if (at <= 0) return null
-  return { agentId: rest.slice(0, at), teamId: rest.slice(at + sep.length) }
+  const agentId = rest.slice(0, at)
+  const tail = rest.slice(at + sep.length)
+  const roomSep = ':room:'
+  const roomAt = tail.lastIndexOf(roomSep)
+  if (roomAt > 0) {
+    const roomId = tail.slice(roomAt + roomSep.length)
+    if (roomId.length > 0 && !roomId.includes(':'))
+      return { agentId, teamId: tail.slice(0, roomAt), roomId }
+  }
+  return { agentId, teamId: tail, roomId: null }
 }
 
 // ─── Ending a conversation ────────────────────────────────────────────────────
@@ -177,10 +187,12 @@ function dropResumePointers(db: ReturnType<typeof getDb>, sessionKey: string): v
   // (see driveAgentChat). Starting fresh means the next turn must not resume it.
   const nativeMatch = sessionKey.match(/^agent:(.+):native$/)
   if (nativeMatch) setSetting(db, nativeChatSessionSettingKey(nativeMatch[1]!), '')
-  // A native TEAM session (`agent:<id>:team:<teamId>`) carries the same resumable
-  // continuity for the leader/user-facing turn, under a per-(agent, team) pointer.
+  // A native TEAM session (`agent:<id>:team:<teamId>`, or a chat room's
+  // `...:room:<roomId>`) carries the same resumable continuity for the
+  // leader/user-facing turn, under a per-(agent, team, room) pointer.
   const teamKey = parseTeamSessionKey(sessionKey)
-  if (teamKey) setSetting(db, nativeTeamSessionSettingKey(teamKey.agentId, teamKey.teamId), '')
+  if (teamKey)
+    setSetting(db, nativeTeamSessionSettingKey(teamKey.agentId, teamKey.teamId, teamKey.roomId), '')
 }
 
 /**

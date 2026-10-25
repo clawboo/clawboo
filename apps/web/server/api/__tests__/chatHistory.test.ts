@@ -60,7 +60,25 @@ describe('chatHistoryDELETE session-key typing', () => {
 
 describe('parseTeamSessionKey', () => {
   it('splits a team key into its ids', () => {
-    expect(parseTeamSessionKey('agent:a1:team:t1')).toEqual({ agentId: 'a1', teamId: 't1' })
+    expect(parseTeamSessionKey('agent:a1:team:t1')).toEqual({
+      agentId: 'a1',
+      teamId: 't1',
+      roomId: null,
+    })
+  })
+
+  it('splits a chat room key into its ids', () => {
+    expect(parseTeamSessionKey('agent:a1:team:t1:room:r1')).toEqual({
+      agentId: 'a1',
+      teamId: 't1',
+      roomId: 'r1',
+    })
+    // An empty room id is not a room.
+    expect(parseTeamSessionKey('agent:a1:team:t1:room:')).toEqual({
+      agentId: 'a1',
+      teamId: 't1:room:',
+      roomId: null,
+    })
   })
 
   it('returns null for keys that are not team-shaped', () => {
@@ -73,12 +91,14 @@ describe('parseTeamSessionKey', () => {
     expect(parseTeamSessionKey('agent:a:team:b:team:c')).toEqual({
       agentId: 'a:team:b',
       teamId: 'c',
+      roomId: null,
     })
     // The trailing separator leaves an empty team id, so the parse falls back to
     // the previous one, and everything after it is the team id.
     expect(parseTeamSessionKey('agent:a:team:t1:team:')).toEqual({
       agentId: 'a',
       teamId: 't1:team:',
+      roomId: null,
     })
   })
 

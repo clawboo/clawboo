@@ -281,6 +281,62 @@ describe('Conversation turn loop', () => {
     expect(texts.some((t) => t.includes('hi from a teammate'))).toBe(true)
   })
 
+  it('a person’s steer during the final turn gets a turn of its own instead of being dropped', async () => {
+    let conversation: Conversation | null = null
+    let turn = 0
+    const seen: Array<Omit<ProviderTurnParams, 'model'>> = []
+    const client: RoutedProviderClient = {
+      activeModel: () => 'claude-haiku-4-5',
+      activeProvider: () => 'anthropic',
+      setModel: () => undefined,
+      async *streamTurn(p) {
+        seen.push({ ...p, messages: structuredClone(p.messages) })
+        turn += 1
+        if (turn === 1) {
+          yield { type: 'text', delta: 'Here is the long version.' }
+          // The model is finishing (no tool call) when the person's comment lands.
+          expect(conversation!.steer('[person steering your task] Keep it short.')).toBe(true)
+          yield usage(50, 6)
+          return
+        }
+        yield { type: 'text', delta: 'Short version.' }
+        yield usage(60, 3)
+      },
+    }
+    conversation = makeConversation({ client, seenParams: [], setModelCalls: [] })
+    await conversation.run()
+
+    expect(turn).toBe(2)
+    const lastTurnMessages = JSON.stringify(seen[1]!.messages)
+    expect(lastTurnMessages).toContain('Keep it short.')
+    expect(events[events.length - 1]).toMatchObject({
+      type: 'result',
+      ok: true,
+      summary: 'Short version.',
+    })
+    // Once the run has ended, a steer is refused rather than silently lost.
+    expect(conversation.steer('too late')).toBe(false)
+  })
+
+  it('an ambient input arriving during the final turn does NOT keep the loop going', async () => {
+    let conversation: Conversation | null = null
+    let turn = 0
+    const client: RoutedProviderClient = {
+      activeModel: () => 'claude-haiku-4-5',
+      activeProvider: () => 'anthropic',
+      setModel: () => undefined,
+      async *streamTurn() {
+        turn += 1
+        yield { type: 'text', delta: 'Done.' }
+        conversation!.enqueueUserMessage('[team signal] a delegated task just finished')
+        yield usage(10, 2)
+      },
+    }
+    conversation = makeConversation({ client, seenParams: [], setModelCalls: [] })
+    await conversation.run()
+    expect(turn).toBe(1)
+  })
+
   it('persists the transcript to the per-identity home on every terminal', async () => {
     const scripted = scriptedClient([[{ type: 'text', delta: 'ok' }, usage(10, 2)]])
     await makeConversation(scripted).run()

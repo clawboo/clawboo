@@ -88,6 +88,7 @@ export class Conversation {
    *  at the top of the next iteration. Fed by the inbound peer-chat LISTEN pull
    *  (`pullPeerInbox`) and by `enqueueUserMessage`. */
   private readonly pendingInputs: string[] = []
+  private readonly steerInputs: string[] = []
   /** team_chat subscribe cursor (null until the first pull baselines it). */
   private peerCursor: number | null = null
   private nextModel: string | null = null
@@ -110,6 +111,19 @@ export class Conversation {
 
   enqueueUserMessage(text: string): void {
     if (text) this.pendingInputs.push(text)
+  }
+
+  /**
+   * A person steering this run. Read at the next turn boundary like an ambient
+   * input, with one difference: a steer KEEPS THE LOOP GOING. A run about to end
+   * (the model answered without calling a tool) while a steer sits unread gets
+   * another turn to read it, so the person's message is never dropped by a run
+   * that happened to be finishing. False once the run has ended.
+   */
+  steer(text: string): boolean {
+    if (this.finished || !text) return false
+    this.steerInputs.push(text)
+    return true
   }
 
   /** Inbound peer-chat LISTEN: pull new team-room posts (since the run cursor)
@@ -171,7 +185,7 @@ export class Conversation {
       // isn't attached; never forces continuation (a pending input is consumed
       // only if the model keeps the loop alive by calling tools).
       await this.pullPeerInbox()
-      for (const text of this.pendingInputs.splice(0)) {
+      for (const text of [...this.pendingInputs.splice(0), ...this.steerInputs.splice(0)]) {
         this.messages.push({ role: 'user', content: [{ type: 'text', text }] })
       }
       if (this.nextModel) {
@@ -272,6 +286,9 @@ export class Conversation {
 
       if (calls.length === 0) {
         finalText = turnText || finalText
+        // A steer that landed during this turn has not been read yet: give the
+        // model a turn to read it rather than ending on top of it.
+        if (this.steerInputs.length > 0 && turn < maxTurns) continue
         return this.terminal({ ok: true, summary: finalText })
       }
 

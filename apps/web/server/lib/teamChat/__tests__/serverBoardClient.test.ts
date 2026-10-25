@@ -202,4 +202,19 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     expect(cancelled.map((t) => t.id)).toContain(b!.id)
     expect(getTask(db, b!.id)?.status).toBe('cancelled')
   })
+
+  it('a room-scoped client files its tasks in the room and reads only them', async () => {
+    const team = createServerBoardClient(db, { roomId: null })
+    const room = createServerBoardClient(db, { roomId: 'room-1' })
+    const inTeam = await team.createTask({ title: 'team work', teamId: TEAM })
+    const inRoom = await room.createTask({ title: 'room work', teamId: TEAM })
+    expect(getTask(db, inTeam!.id)?.roomId).toBeNull()
+    expect(getTask(db, inRoom!.id)?.roomId).toBe('room-1')
+    expect((await room.listTasks(TEAM)).map((t) => t.id)).toEqual([inRoom!.id])
+    expect((await team.listTasks(TEAM)).map((t) => t.id)).toEqual([inTeam!.id])
+    expect((await room.getReadyTasks(TEAM)).map((t) => t.id)).toEqual([inRoom!.id])
+    expect((await team.getReadyTasks(TEAM)).map((t) => t.id)).toEqual([inTeam!.id])
+    // An unscoped client still sees every room.
+    expect((await createServerBoardClient(db).listTasks(TEAM)).length).toBe(2)
+  })
 })

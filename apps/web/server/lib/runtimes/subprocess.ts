@@ -262,7 +262,26 @@ export interface SpawnDriver<N> {
   abort(): Promise<void>
   setModel(model: string): Promise<void>
   writeContext(key: string, value: string): Promise<void>
+  /**
+   * Replace the running process with another one INSIDE THIS RUN: stop the
+   * current process, wait for it to exit, then spawn the one `next` resolves.
+   * The stopped process's exit is absorbed (no `onClose` terminal, its unparsed
+   * output dropped), so whoever is reading the event stream sees one run that
+   * carries on. This is how a one-shot CLI is steered: stop it, resume the same
+   * session with new input.
+   *
+   * Resolves false, replacing nothing, when there is no process to replace (never
+   * started, already exited, or aborted). If an abort lands while the old process
+   * is stopping, the run ends there with an aborted terminal. If `next` throws or
+   * the replacement cannot be spawned, the run ends with that error.
+   */
+  relaunch(next: () => Promise<ResolvedSpawn>): Promise<boolean>
 }
+
+/** How long a relaunch waits for the stopped process to exit. `killProcessTree`
+ *  escalates to SIGKILL after 3s, so this only bounds a process that survives even
+ *  that. */
+const RELAUNCH_EXIT_WAIT_MS = 10_000
 
 export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> {
   const handlers = new Set<(ev: N) => void>()
@@ -273,6 +292,11 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
   let cwd: string | null = null
   let stdoutAll = ''
   let stderrAll = ''
+  /** Bumped by a relaunch, so the process it replaces closes into nothing. */
+  let generation = 0
+  /** The current process has exited and its terminal was produced. */
+  let exited = false
+  let abortRequested = false
 
   const push = (ev: N): void => {
     if (!subscribed) {
@@ -282,86 +306,106 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
     for (const h of [...handlers]) h(ev)
   }
 
+  /** End the run with the driver's own terminal for a non-exit reason. */
+  const endWith = (code: number | null, signal: NodeJS.Signals | null, stderr: string): void => {
+    exited = true
+    for (const ev of cfg.onClose(code, signal, stdoutAll, stderr)) push(ev)
+  }
+
+  /** Plan + spawn one process for the current generation. */
+  function launch(resolved: ResolvedSpawn): void {
+    let plan: WinSpawnPlan
+    try {
+      // Planning REFUSES a Windows shim path that cmd.exe would substitute before
+      // quotes take effect (`%` or `!`), and that refusal has to end the run the
+      // way a failed resolve does.
+      plan = resolveWindowsSpawn({ command: resolved.command, args: resolved.args })
+    } catch (err) {
+      endWith(null, null, err instanceof Error ? err.message : String(err))
+      return
+    }
+    const gen = generation
+    cwd = resolved.cwd ?? null
+    stdoutAll = ''
+    stderrAll = ''
+    const spawned = spawn(plan.command, plan.args, {
+      cwd: resolved.cwd ?? undefined,
+      // Scrub clawboo's own server secrets before the untrusted agent subprocess
+      // inherits them; the runtime's granted keys (resolved.env) are merged on top.
+      env: buildChildEnv(resolved.env),
+      // NEVER shell:true — an untrusted prompt is passed as argv. The Windows
+      // .cmd/.bat case is handled by resolveWindowsSpawn (cmd.exe + escaping).
+      shell: false,
+      windowsHide: isWindows,
+      // POSIX: become a process-group leader so abort() can SIGTERM the whole
+      // tree (the CLI may spawn grandchildren). We never unref — the run is
+      // tracked + killed explicitly. (No effect on Windows; tree-kill there is
+      // taskkill /T.)
+      detached: !isWindows,
+      ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    child = spawned
+    // Track it so a server shutdown can reap it instead of orphaning it.
+    // (Deregistered in the 'close' handler below.)
+    liveChildren.add(spawned)
+    if (shuttingDown) {
+      // Spawned after shutdown began — it missed the snapshot, so signal it now
+      // rather than let it run on past process exit.
+      try {
+        killProcessTree(spawned)
+      } catch {
+        // Best effort — it may already be gone.
+      }
+    }
+    let buf = ''
+    const current = (): boolean => gen === generation
+    spawned.stdout?.on('data', (d: Buffer) => {
+      if (!current()) return
+      const s = d.toString()
+      stdoutAll += s
+      buf += s
+      let nl: number
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl)
+        buf = buf.slice(nl + 1)
+        if (line.trim()) for (const ev of cfg.parseLine(line)) push(ev)
+      }
+    })
+    spawned.stderr?.on('data', (d: Buffer) => {
+      if (current()) stderrAll += d.toString()
+    })
+    spawned.on('error', (err: Error) => {
+      if (!current()) return
+      for (const ev of cfg.onClose(null, null, stdoutAll, `${stderrAll}\n${err.message}`)) push(ev)
+    })
+    spawned.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      // No longer running — drop it from the shutdown-reap registry.
+      liveChildren.delete(spawned)
+      // A relaunched-away process ends silently: the run goes on without it.
+      if (!current()) return
+      exited = true
+      if (buf.trim()) for (const ev of cfg.parseLine(buf)) push(ev)
+      // A process we asked to stop is reported as stopped however it went: a CLI
+      // that traps SIGTERM exits with a code of its own (hermes -q unwinds via
+      // KeyboardInterrupt), which would otherwise read as a failure.
+      const stoppedBy = abortRequested ? (signal ?? 'SIGTERM') : signal
+      for (const ev of cfg.onClose(code, stoppedBy, stdoutAll, stderrAll)) push(ev)
+    })
+  }
+
   return {
     async start(): Promise<void> {
       if (started) return
       started = true
       let resolved: ResolvedSpawn
-      let plan: WinSpawnPlan
       try {
         resolved = await cfg.resolve()
-        // Planned inside the same guard as resolve(). Planning REFUSES a Windows
-        // shim path that cmd.exe would substitute before quotes take effect (`%`
-        // or `!`), and that refusal has to end the run the way a failed resolve
-        // does. Outside this try it would escape start() as an unhandled
-        // rejection instead of reaching the driver as a reported failure.
-        plan = resolveWindowsSpawn({ command: resolved.command, args: resolved.args })
       } catch (err) {
-        for (const ev of cfg.onClose(
-          null,
-          null,
-          '',
-          err instanceof Error ? err.message : String(err),
-        ))
-          push(ev)
+        endWith(null, null, err instanceof Error ? err.message : String(err))
         return
       }
-      cwd = resolved.cwd ?? null
-      child = spawn(plan.command, plan.args, {
-        cwd: resolved.cwd ?? undefined,
-        // Scrub clawboo's own server secrets before the untrusted agent subprocess
-        // inherits them; the runtime's granted keys (resolved.env) are merged on top.
-        env: buildChildEnv(resolved.env),
-        // NEVER shell:true — an untrusted prompt is passed as argv. The Windows
-        // .cmd/.bat case is handled by resolveWindowsSpawn (cmd.exe + escaping).
-        shell: false,
-        windowsHide: isWindows,
-        // POSIX: become a process-group leader so abort() can SIGTERM the whole
-        // tree (the CLI may spawn grandchildren). We never unref — the run is
-        // tracked + killed explicitly. (No effect on Windows; tree-kill there is
-        // taskkill /T.)
-        detached: !isWindows,
-        ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      // Track it so a server shutdown can reap it instead of orphaning it.
-      // (Deregistered in the 'close' handler below.)
-      liveChildren.add(child)
-      if (shuttingDown) {
-        // Spawned after shutdown began — it missed the snapshot, so signal it now
-        // rather than let it run on past process exit.
-        try {
-          killProcessTree(child)
-        } catch {
-          // Best effort — it may already be gone.
-        }
-      }
-      const spawned = child
-      let buf = ''
-      child.stdout?.on('data', (d: Buffer) => {
-        const s = d.toString()
-        stdoutAll += s
-        buf += s
-        let nl: number
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl)
-          buf = buf.slice(nl + 1)
-          if (line.trim()) for (const ev of cfg.parseLine(line)) push(ev)
-        }
-      })
-      child.stderr?.on('data', (d: Buffer) => {
-        stderrAll += d.toString()
-      })
-      child.on('error', (err: Error) => {
-        for (const ev of cfg.onClose(null, null, stdoutAll, `${stderrAll}\n${err.message}`))
-          push(ev)
-      })
-      child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
-        // No longer running — drop it from the shutdown-reap registry.
-        liveChildren.delete(spawned)
-        if (buf.trim()) for (const ev of cfg.parseLine(buf)) push(ev)
-        for (const ev of cfg.onClose(code, signal, stdoutAll, stderrAll)) push(ev)
-      })
+      launch(resolved)
     },
 
     onEvent(handler: (ev: N) => void): () => void {
@@ -375,6 +419,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
     },
 
     async abort(): Promise<void> {
+      abortRequested = true
       // Kill the whole process tree (SIGTERM → SIGKILL escalation), not just the
       // direct child — codex/hermes grandchildren would otherwise survive.
       killProcessTree(child)
@@ -389,6 +434,41 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
       const target = path.join(cwd, key)
       await mkdir(path.dirname(target), { recursive: true })
       await writeFile(target, value, 'utf8')
+    },
+
+    async relaunch(next: () => Promise<ResolvedSpawn>): Promise<boolean> {
+      const old = child
+      if (!old || exited || abortRequested) return false
+      // From here the old process belongs to no one: its exit is absorbed.
+      generation += 1
+      const gone =
+        old.exitCode !== null || old.signalCode !== null
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              old.once('close', () => resolve())
+              const timer = setTimeout(resolve, RELAUNCH_EXIT_WAIT_MS)
+              ;(timer as { unref?: () => void }).unref?.()
+            })
+      killProcessTree(old)
+      await gone
+      if (abortRequested) {
+        // Stopped while it was being replaced: that is the run's end.
+        endWith(null, 'SIGTERM', stderrAll)
+        return false
+      }
+      let resolved: ResolvedSpawn
+      try {
+        resolved = await next()
+      } catch (err) {
+        endWith(null, null, err instanceof Error ? err.message : String(err))
+        throw err
+      }
+      if (abortRequested) {
+        endWith(null, 'SIGTERM', stderrAll)
+        return false
+      }
+      launch(resolved)
+      return true
     },
   }
 }

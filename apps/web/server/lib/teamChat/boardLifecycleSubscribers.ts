@@ -34,7 +34,12 @@ import { createLogger } from '@clawboo/logger'
 import { getDb } from '../db'
 import { recipientFor } from './inboxNotices'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
-import { getTeamOrchestrator, hasTeamOrchestrator } from './teamOrchestrator'
+import {
+  getTaskOrchestrator,
+  hasTaskOrchestrator,
+  orchestratorKey,
+  orchestratorRoomForTask,
+} from './teamOrchestrator'
 
 const log = createLogger('board-lifecycle')
 
@@ -43,20 +48,24 @@ const SDID_AGENT_RE = /:agent:/
 
 const TERMINAL_EXEC_STATUSES = new Set(['succeeded', 'failed', 'timed_out'])
 
-/** Debounce: at most one scheduled pump per team per window. */
+/** Debounce: at most one scheduled pump per team chat room per window. */
 const pendingPumps = new Map<string, ReturnType<typeof setTimeout>>()
 const PUMP_DEBOUNCE_MS = 2_000
 
-function schedulePump(teamId: string, mcpBaseUrl: string | null): void {
-  if (pendingPumps.has(teamId)) return
+/** Pump the orchestrator of the room that owns `taskId` (each room has its own
+ *  engine, and only that one sees the task's room on the board). */
+function schedulePump(teamId: string, taskId: string, mcpBaseUrl: string | null): void {
+  const roomId = orchestratorRoomForTask(taskId)
+  const key = orchestratorKey(teamId, roomId)
+  if (pendingPumps.has(key)) return
   const t = setTimeout(() => {
-    pendingPumps.delete(teamId)
-    getTeamOrchestrator(teamId, { mcpBaseUrl })
+    pendingPumps.delete(key)
+    getTaskOrchestrator(teamId, taskId, { mcpBaseUrl })
       .pump()
-      .catch((err: unknown) => log.error({ err, teamId }, 'wake-on-work pump failed'))
+      .catch((err: unknown) => log.error({ err, teamId, roomId }, 'wake-on-work pump failed'))
   }, PUMP_DEBOUNCE_MS)
   ;(t as { unref?: () => void }).unref?.()
-  pendingPumps.set(teamId, t)
+  pendingPumps.set(key, t)
 }
 
 function statusForSse(
@@ -126,9 +135,11 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
           (ev.status === 'todo' || ev.status === 'cancelled')))
     ) {
       const teamId = ev.teamId
-      if (hasTeamOrchestrator(teamId)) {
+      if (hasTaskOrchestrator(teamId, ev.taskId)) {
         try {
-          getTeamOrchestrator(teamId, { mcpBaseUrl: opts.mcpBaseUrl }).detachTask(ev.taskId)
+          getTaskOrchestrator(teamId, ev.taskId, { mcpBaseUrl: opts.mcpBaseUrl }).detachTask(
+            ev.taskId,
+          )
         } catch (err) {
           log.error({ err, taskId: ev.taskId, teamId }, 'detach-on-release failed')
         }
@@ -145,7 +156,7 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
         ev.kind === 'task_released' ||
         (ev.kind === 'status_changed' && ev.actor === 'person' && ev.status === 'todo'))
     ) {
-      schedulePump(ev.teamId, opts.mcpBaseUrl)
+      schedulePump(ev.teamId, ev.taskId, opts.mcpBaseUrl)
     }
 
     // 3 + 4. Terminal notification for a delegated task. The mailbox row is
@@ -182,11 +193,12 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
             taskId: ev.taskId,
             body,
           })
-        if (ev.teamId && hasTeamOrchestrator(ev.teamId)) {
+        if (ev.teamId && hasTaskOrchestrator(ev.teamId, ev.taskId)) {
           // Additive ambient mid-run signal to a LIVE recipient run (native
           // routes it into the conversation; other runtimes hear the mailbox
-          // row via the MCP piggyback / next digest).
-          getTeamOrchestrator(ev.teamId, { mcpBaseUrl: opts.mcpBaseUrl }).signalAgent(
+          // row via the MCP piggyback / next digest). The task's room: the
+          // recipient delegated it there, so that is where it is listening.
+          getTaskOrchestrator(ev.teamId, ev.taskId, { mcpBaseUrl: opts.mcpBaseUrl }).signalAgent(
             recipient,
             `[team signal] A delegated task just finished (${ev.status}). Details follow at your next turn or tool call.`,
           )

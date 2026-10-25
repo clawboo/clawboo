@@ -37,6 +37,7 @@ import {
 } from '@clawboo/db'
 import { and, eq, isNull, like, sql } from 'drizzle-orm'
 
+import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
 import {
   readRuntimeAgentFile,
   runtimeAgentFileKey,
@@ -272,6 +273,10 @@ export class RuntimeAgentSource implements AgentSource {
       .run()
     db.delete(settings)
       .where(like(settings.key, `${runtimeAgentFileKey(id, '')}%`))
+      .run()
+    // A Codex lead's team and chat-room resume pointers (see nativeTeamSession).
+    db.delete(settings)
+      .where(like(settings.key, nativeTeamSessionKeysForAgentLike(id)))
       .run()
     db.delete(agents)
       .where(and(eq(agents.id, id), eq(agents.sourceId, this.id)))

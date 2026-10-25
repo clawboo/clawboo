@@ -18,7 +18,13 @@ export type {
   StartOpts,
   RunHandle,
   SessionCodec,
+  SteeringMode,
+  SteerOptions,
+  SteerResult,
 } from './types'
+export { steeringOf } from './types'
+export type { SteerableDriver } from './steer'
+export { steerThroughDriver } from './steer'
 
 export type { IntegrationHome, RuntimeIntegrationPlan } from './integration'
 export { resolveRuntimeIntegration } from './integration'

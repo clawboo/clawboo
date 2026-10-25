@@ -32,8 +32,8 @@ import {
 const calls: string[] = []
 const pumped: string[] = []
 let resident = false
-vi.mock('../teamOrchestrator', () => ({
-  getTeamOrchestrator: (teamId: string) => ({
+vi.mock('../teamOrchestrator', () => {
+  const orchestrator = (teamId: string) => ({
     pump: async () => {
       calls.push(`pump:${teamId}`)
       pumped.push(teamId)
@@ -43,11 +43,21 @@ vi.mock('../teamOrchestrator', () => ({
       return true
     },
     signalAgent: () => undefined,
-  }),
-  // Flipped per test: most of this suite is about the durable mailbox half,
-  // where no orchestrator is resident.
-  hasTeamOrchestrator: () => resident,
-}))
+  })
+  return {
+    getTeamOrchestrator: orchestrator,
+    // Task-routed callers reach the task's chat room's engine; every task in this
+    // suite is in the team's own group chat.
+    getTaskOrchestrator: orchestrator,
+    // Flipped per test: most of this suite is about the durable mailbox half,
+    // where no orchestrator is resident.
+    hasTeamOrchestrator: () => resident,
+    hasTaskOrchestrator: () => resident,
+    orchestratorKey: (teamId: string, roomId?: string | null) =>
+      roomId ? `${teamId}:room:${roomId}` : teamId,
+    orchestratorRoomForTask: () => null,
+  }
+})
 
 const { getDb, resetDb } = await import('../../db')
 const { registerBoardLifecycleSubscribers, resetBoardLifecycleRegistration } =

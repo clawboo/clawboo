@@ -21,6 +21,43 @@ export type ParticipantKind = 'agent' | 'human'
  */
 export type RuntimeClass = 'wrapped-oneshot' | 'connected-substrate' | 'native'
 
+/** How a runtime takes a message mid-run. See `Capabilities.steering`. */
+export type SteeringMode = 'live' | 'interrupt-resume' | 'none'
+
+/**
+ * What became of a `steer()`. `delivered` means the runtime accepted the message
+ * for THIS run: the model will see it before the run ends. It does not mean the
+ * model has read it yet. Anything else is a plain refusal the caller can fall
+ * back from (the mailbox already holds the message).
+ */
+export type SteerResult =
+  | { delivered: true; mode: 'live' | 'interrupt-resume' }
+  | {
+      delivered: false
+      /** `no-run`: nothing is running for this handle. `run-ended`: the run
+       *  finished (or is finishing) before the message could go in.
+       *  `unsupported`: this runtime, or this run, has no mid-run channel.
+       *  `rejected`: the runtime refused it (the detail says why). */
+      reason: 'no-run' | 'run-ended' | 'unsupported' | 'rejected'
+      detail?: string
+    }
+
+/** How a steer should behave. */
+export interface SteerOptions {
+  /**
+   * An ambient FYI rather than a person's instruction: deliver it if the run reads
+   * input again, but never keep a finishing run going for it, and never stop a run
+   * to take it (an `interrupt-resume` runtime refuses a passive steer). The
+   * mailbox stays its delivery of record.
+   */
+  passive?: boolean
+}
+
+/** The steering mode a capability set declares, absence read as `none`. */
+export function steeringOf(caps: Capabilities): SteeringMode {
+  return caps.steering ?? 'none'
+}
+
 /**
  * A runtime's CLAIM about the home dir it accrues state in. The HOST decides
  * where that home actually lives — adapters stay pure and never compute paths.
@@ -52,19 +89,23 @@ export interface Capabilities {
    */
   toolApproval: boolean
   /**
-   * Text written with `writeContext` reaches the MODEL during the run it is
-   * written into.
+   * How `steer()` gets a message to the model DURING the run it is aimed at.
    *
-   * OPTIONAL, and absence means NO: a host must not inject into a run whose
-   * adapter makes no claim. Declaring only what is true is the whole point, since
-   * an aspirational capability is worse than an absent one. The native runtime
-   * routes the reserved signal key straight into the conversation's input queue,
-   * so the model reads it at its next turn iteration. The spawned CLIs write a
-   * file into the run's cwd, which nothing reads back, and OpenClaw sets an agent
-   * file the running session does not re-read. For those, mid-run delivery is a
-   * fiction and the durable mailbox is the real channel.
+   *  - `live`: the runtime takes the message into the running turn at its next
+   *    boundary (a tool call or a model call) without stopping anything.
+   *  - `interrupt-resume`: the runtime has no way in mid-run, so the driver stops
+   *    the current process and resumes the same session with the message as the
+   *    next input. In-flight tool work is lost; the run itself is not. The host
+   *    sees ONE run: the stop is absorbed by the driver and never surfaces as a
+   *    terminal, so it can never be mistaken for a failure or a user Stop.
+   *  - `none` (or absent): no mid-run channel. The durable mailbox is the only
+   *    delivery, at the agent's next run.
+   *
+   * OPTIONAL, and absence means `none`: a host must not steer a run whose adapter
+   * makes no claim. Declaring only what is true is the whole point, since an
+   * aspirational capability is worse than an absent one.
    */
-  steerable?: boolean
+  steering?: SteeringMode
   /** Model identifiers this runtime can use (may be empty when unknown). */
   models: string[]
   /**
@@ -178,6 +219,12 @@ export interface RuntimeAdapter {
   abort(run: RunHandle): Promise<void>
   setModel(run: RunHandle, model: string): Promise<void>
   writeContext(run: RunHandle, key: string, value: string): Promise<void>
+  /**
+   * Put a message in front of the model during this run, the way the adapter's
+   * `capabilities().steering` says. Present only on adapters that declare a mode
+   * other than `none`. Never throws: a failure is a `{ delivered: false }`.
+   */
+  steer?(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult>
   readonly sessionCodec?: SessionCodec
   dispose?(): Promise<void>
 }

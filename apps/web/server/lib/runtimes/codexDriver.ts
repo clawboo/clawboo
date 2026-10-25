@@ -1,4 +1,9 @@
-// Real Codex driver — spawns `codex exec --json` in an ISOLATED `CODEX_HOME`
+// Real Codex driver. A run is hosted in `codex app-server` (see
+// ./codexAppServerDriver), which is what lets a person steer it mid-turn; the
+// `codex exec --json` driver below is the fallback for a Codex without app-server.
+// Both share the home preparation here.
+//
+// The exec driver spawns `codex exec --json` in an ISOLATED `CODEX_HOME`
 // (never touches the user's `~/.codex`), with a generated `config.toml` that
 // points Codex's MCP client at clawboo's hosted Tasks/Memory/Tools servers. The
 // stdout JSON-lines stream is parsed best-effort into the adapter's
@@ -38,6 +43,7 @@ import type { StartOpts } from '@clawboo/executor'
 
 import { resolveRuntimeBin } from '../platform'
 import { userCodexAuthPath } from './codexAuth'
+import { createCodexAppServerDriver, type CodexAppServerDeps } from './codexAppServerDriver'
 import { createSpawnDriver } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
@@ -223,7 +229,71 @@ export function translateCodexEvent(raw: unknown, state: CodexRunState): CodexNa
   return []
 }
 
-export function createCodexDriver(opts: StartOpts, ctx: RuntimeRunContext): CodexDriver {
+/**
+ * Make the run's CODEX_HOME ready: the MANAGED (persistent, per-identity) home
+ * when the caller resolved one from the adapter's integration plan, the legacy
+ * throwaway mkdtemp otherwise. Seeds the user's `codex login` and writes the MCP
+ * config. Throws (the run then fails with that message) when a managed home has
+ * no usable credential.
+ */
+export async function prepareCodexHome(
+  ctx: RuntimeRunContext,
+): Promise<{ codexHome: string; managed: boolean }> {
+  const managed = Boolean(ctx.homeDir)
+  const codexHome = ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-codex-home-')))
+  if (managed) await mkdir(codexHome, { recursive: true, mode: 0o700 })
+  // Seed the user's ChatGPT-OAuth login so the run authenticates with their
+  // `codex login` account. Freshness-aware for a managed home (see seedCodexAuth);
+  // never writes back to ~/.codex.
+  await seedCodexAuth(codexHome)
+  // FAIL-FAST guard (managed homes only — the Paperclip codex-local pattern):
+  // no usable provisioned credential + no API key env ⇒ an explicit error the
+  // engine can reflect, never an unauthenticated request with a cryptic 401.
+  // The throwaway path keeps its historic lenient behavior (codex surfaces its
+  // own auth error), so nothing else changes shape.
+  if (
+    managed &&
+    !hasUsableCodexAuth(path.join(codexHome, 'auth.json')) &&
+    Object.keys(ctx.apiKeyEnv ?? {}).length === 0
+  ) {
+    throw new Error(
+      `no Codex credentials provisioned for managed home ${codexHome} — ` +
+        'run `codex login` in your terminal, then retry',
+    )
+  }
+  if (ctx.mcpBaseUrl) {
+    // Sanity: buildAttachConfig stays the source of truth for the URLs.
+    void buildAttachConfig({
+      runtime: 'codex',
+      server: 'tasks',
+      transport: 'http',
+      httpBaseUrl: ctx.mcpBaseUrl,
+    })
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      codexConfigToml(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined),
+      'utf8',
+    )
+  }
+  return { codexHome, managed }
+}
+
+/** The Codex driver: app-server, falling back to `exec` (see the file header). */
+export function createCodexDriver(
+  opts: StartOpts,
+  ctx: RuntimeRunContext,
+  deps: Partial<Pick<CodexAppServerDeps, 'command' | 'args' | 'handshakeTimeoutMs'>> = {},
+): CodexDriver {
+  return createCodexAppServerDriver(opts, ctx, {
+    ...deps,
+    prepareHome: () => prepareCodexHome(ctx),
+    fallback: () => createCodexExecDriver(opts, ctx),
+  })
+}
+
+/** One-shot `codex exec --json`: the fallback for a Codex without app-server. A
+ *  run on it cannot be steered. */
+export function createCodexExecDriver(opts: StartOpts, ctx: RuntimeRunContext): CodexDriver {
   const state: CodexRunState = {
     lastText: '',
     usage: { inputTokens: 0, outputTokens: 0 },
@@ -232,45 +302,7 @@ export function createCodexDriver(opts: StartOpts, ctx: RuntimeRunContext): Code
 
   return createSpawnDriver<CodexNativeEvent>({
     async resolve() {
-      // MANAGED (persistent, per-identity) home when the caller resolved one from
-      // the adapter's integration plan; the legacy throwaway mkdtemp otherwise.
-      const managed = Boolean(ctx.homeDir)
-      const codexHome =
-        ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-codex-home-')))
-      if (managed) await mkdir(codexHome, { recursive: true, mode: 0o700 })
-      // Seed the user's ChatGPT-OAuth login so the run authenticates with their
-      // `codex login` account. Freshness-aware for a managed home (see seedCodexAuth);
-      // never writes back to ~/.codex.
-      await seedCodexAuth(codexHome)
-      // FAIL-FAST guard (managed homes only — the Paperclip codex-local pattern):
-      // no usable provisioned credential + no API key env ⇒ an explicit error the
-      // engine can reflect, never an unauthenticated request with a cryptic 401.
-      // The throwaway path keeps its historic lenient behavior (codex surfaces its
-      // own auth error), so nothing else changes shape.
-      if (
-        managed &&
-        !hasUsableCodexAuth(path.join(codexHome, 'auth.json')) &&
-        Object.keys(ctx.apiKeyEnv ?? {}).length === 0
-      ) {
-        throw new Error(
-          `no Codex credentials provisioned for managed home ${codexHome} — ` +
-            'run `codex login` in your terminal, then retry',
-        )
-      }
-      if (ctx.mcpBaseUrl) {
-        // Sanity: buildAttachConfig stays the source of truth for the URLs.
-        void buildAttachConfig({
-          runtime: 'codex',
-          server: 'tasks',
-          transport: 'http',
-          httpBaseUrl: ctx.mcpBaseUrl,
-        })
-        await writeFile(
-          path.join(codexHome, 'config.toml'),
-          codexConfigToml(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined),
-          'utf8',
-        )
-      }
+      const { codexHome, managed } = await prepareCodexHome(ctx)
       const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
       const model = ctx.model ?? opts.model
       // Headless: emit JSONL events; the worktree is our isolation, so bypass

@@ -1,8 +1,17 @@
 // The persistent, per-team SERVER orchestrator — the host that makes the pure
 // engine (`createBoardOrchestrator`) run server-side, survive client disconnect,
-// and resume after a restart. A process-singleton `Map<teamId, …>` lazily builds
-// ONE long-lived engine per active team and holds its timers (the idle watchdog +
-// the engine's internal reflect window) across REST requests.
+// and resume after a restart. A process-singleton `Map` lazily builds ONE
+// long-lived engine per active team CHAT ROOM and holds its timers (the idle
+// watchdog + the engine's internal reflect window) across REST requests.
+//
+// A team's own group chat is its default room (room id null, the plain team
+// session keys). Each extra room is its own instance with its own engine, keyed
+// `<teamId>:room:<roomId>`: its roster is the room's members plus the universal
+// Boo Zero, its session keys carry the room, and its board client sees only the
+// room's tasks, so two rooms never adopt each other's work. An agent active in
+// two rooms runs one turn at a time anyway: serverDeliver holds the per-identity
+// home mutex (persistent-home runtimes) or the per-agent connected mutex
+// (OpenClaw) for each run, and both are process-wide, not per instance.
 //
 // This is the deps RE-BINDING of the pure engine: every dep the (now-retired) browser
 // binding used to wire from React/Zustand is here bound to a server source —
@@ -13,7 +22,8 @@
 // loop breakers) are UNCHANGED — they live inside the ported engine.
 
 import { compactToolResultMarkdown } from '@clawboo/compaction'
-import { enqueueInbox, type ClawbooDb } from '@clawboo/db'
+import { enqueueInbox, getActiveRoom, type ClawbooDb } from '@clawboo/db'
+import { steeringOf } from '@clawboo/executor'
 import { createLogger } from '@clawboo/logger'
 import {
   agentIdFromSessionKey,
@@ -36,11 +46,10 @@ import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
-import { NATIVE_SIGNAL_CONTEXT_KEY } from '../runtimes/native/nativeDriver'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
 import { createServerDeliver, type RunEntry } from './serverDeliver'
-import { activeTeamAgents, resolveTeamLeadId } from './teamLead'
+import { roomIdForTask, roomLeadId, roomMembers } from './roomRoster'
 
 const log = createLogger('team-orchestrator')
 
@@ -84,6 +93,8 @@ export type EnqueueUserMessageResult =
 
 export interface TeamOrchestrator {
   readonly teamId: string
+  /** The chat room this instance drives; null = the team's own group chat. */
+  readonly roomId: string | null
   /** Ingest a user message (202-style fire-and-forget): resolve the target, persist
    *  the user message, then run the target's turn — the engine reacts to its events. */
   enqueueUserMessage(input: EnqueueUserMessageInput): Promise<EnqueueUserMessageResult>
@@ -94,10 +105,10 @@ export interface TeamOrchestrator {
    *  sessions are skipped and the atomic claim-409 arbitrates double-fires. */
   pump(): Promise<void>
   /** Ambient mid-run push: deliver a short signal INTO an agent's live run via
-   *  the adapter's writeContext seam (the native driver routes the reserved key
-   *  into the conversation's input queue, read at its next turn iteration).
-   *  Best-effort no-op when the agent has no live run — durable delivery is the
-   *  mailbox's job, not this seam's. */
+   *  the adapter's `steer` seam, on runtimes that take it live (see
+   *  `Capabilities.steering`). Best-effort no-op when the agent has no live run,
+   *  or its runtime would have to stop the run to take it. Durable delivery is
+   *  the mailbox's job, not this seam's. */
   signalAgent(agentId: string, text: string): void
   /** An out-of-band release (stale sweep, orphan reap, a human moving the card)
    *  freed a task this engine may still have mapped to a session. Forget it, so
@@ -130,16 +141,23 @@ interface Instance {
 
 const instances = new Map<string, Instance>()
 
-function knownAgents(db: ClawbooDb, teamId: string): KnownAgent[] {
-  const members = activeTeamAgents(db, teamId).map((a) => ({ id: a.id, name: a.name }))
+/** The singleton key: the team id for its default room, else `<teamId>:room:<roomId>`. */
+export function orchestratorKey(teamId: string, roomId: string | null = null): string {
+  return roomId ? `${teamId}:room:${roomId}` : teamId
+}
+
+/** The room's roster: its live members plus the universal Boo Zero (see ./roomRoster).
+ *  For the default room, the team's active members plus Boo Zero, as before rooms. */
+function knownAgents(db: ClawbooDb, teamId: string, roomId: string | null): KnownAgent[] {
+  const members = roomMembers(db, teamId, roomId)
   const bz = booZeroForTeam(db, teamId)
   if (bz && !members.some((a) => a.id === bz.id)) members.push(bz)
   return members
 }
 
-/** The team's reduce point (see ./teamLead): Boo Zero, else the team's own lead
- *  while an active member, else the first active member. */
-const resolveLeaderId = resolveTeamLeadId
+/** The room's reduce point (see ./roomRoster): Boo Zero, else the team's own lead
+ *  while a member of the room, else the room's first member. */
+const resolveLeaderId = roomLeadId
 
 /** Server-side @mention resolution (longest-prefix match), replicating the
  *  browser's `parseMention` — which stays browser-only (it has several SPA-feature
@@ -157,7 +175,7 @@ function mentionTarget(message: string, roster: KnownAgent[]): string | null {
   return null
 }
 
-function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
+function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string | null): Instance {
   const db = getDb()
   let serverStopGen = 0
   let lastActivityAt = Date.now()
@@ -191,6 +209,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
   const deliver = createServerDeliver({
     db,
     teamId,
+    chatRoomId: roomId,
     mcpBaseUrl,
     nudge,
     abortMap,
@@ -215,7 +234,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // The SAME resolution the engine uses for its reduce point, so "who leads" has
     // one answer whether the question comes from the reflection router or from the
     // prompt builder.
-    leaderAgentId: () => resolveLeaderId(db, teamId),
+    leaderAgentId: () => resolveLeaderId(db, teamId, roomId),
     // STRIPS CONNECTOR-ASK MARKERS, because this path's context is what teaches
     // them (buildServerTeamContext). Persisting raw text shipped the marker to
     // the reader verbatim, with no card, on exactly the turns taught to emit it.
@@ -225,7 +244,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     persistTurn: (sk, text) => {
       const agentId = agentIdFromSessionKey(sk)
       if (!agentId) return false
-      return persistAssistantTurnWithAsk(db, { teamId, agentId, text })
+      return persistAssistantTurnWithAsk(db, { teamId, roomId, agentId, text })
     },
     // A system notice, not the agent's turn: `role: 'system'` also keeps it clear
     // of the assistant-only control-token drop, so a failure reason can never be
@@ -235,6 +254,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       if (!agentId) return false
       return persistTeamChatEntry(db, {
         teamId,
+        roomId,
         agentId,
         text,
         role: 'system',
@@ -247,7 +267,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // Left-pane liveness: fan run-boundary working/idle signals to the team's status
     // bus, which each open team-chat SSE stream forwards as a `status` event; the
     // thin client patches the fleet store so the sidebar badges track the cascade.
-    publishStatus: (agentId, status) => publishAgentStatus(teamId, { agentId, status }),
+    publishStatus: (agentId, status) => publishAgentStatus(teamId, { agentId, status, roomId }),
   })
 
   // A run registers in `abortMap` only AFTER `adapter.start` resolves — behind a
@@ -261,10 +281,12 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
 
   const engine = createBoardOrchestrator({
     teamId,
-    board: createServerBoardClient(db),
-    known: () => knownAgents(db, teamId),
-    leaderAgentId: () => resolveLeaderId(db, teamId),
-    sessionKeyForAgent: (id) => buildTeamSessionKey(id, teamId),
+    // Room-scoped: the tasks this engine creates carry its room, and its reads
+    // (projection load, ready pump, resume) see only its room's tasks.
+    board: createServerBoardClient(db, { roomId }),
+    known: () => knownAgents(db, teamId, roomId),
+    leaderAgentId: () => resolveLeaderId(db, teamId, roomId),
+    sessionKeyForAgent: (id) => buildTeamSessionKey(id, teamId, roomId),
     // "A live run owns this session" answered from the map that already tracks
     // exactly that, rather than a marker kept for this one question: `abortMap`
     // is populated only after `adapter.start` resolves and cleared on BOTH the
@@ -300,6 +322,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
           try {
             persistTeamChatEntry(db, {
               teamId,
+              roomId,
               agentId: alertAgentId,
               text,
               role: 'system',
@@ -390,12 +413,13 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
     // failing silently is precisely the case an operator needs to see.
     engine
       .sweepStaleSessions()
-      .catch((err: unknown) => log.error({ err, teamId }, 'idle-watchdog sweep failed'))
+      .catch((err: unknown) => log.error({ err, teamId, roomId }, 'idle-watchdog sweep failed'))
   }, SWEEP_INTERVAL_MS)
   sweep.unref?.()
 
   const orchestrator: TeamOrchestrator = {
     teamId,
+    roomId,
     async enqueueUserMessage(input: EnqueueUserMessageInput): Promise<EnqueueUserMessageResult> {
       touch()
       // Ensure the DEFAULT-NATIVE Boo Zero exists BEFORE resolving the roster/leader.
@@ -406,8 +430,12 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       // chatted and the native team went empty" bug.)
       await ready
       const stimulus = input.stimulus
-      const roster = knownAgents(db, teamId)
-      if (roster.length === 0) return { ok: false, error: 'The team has no active members.' }
+      const roster = knownAgents(db, teamId, roomId)
+      if (roster.length === 0)
+        return {
+          ok: false,
+          error: roomId ? 'The room has no active members.' : 'The team has no active members.',
+        }
       // Target priority: explicit targetAgentId > @mention > leader > first member.
       // For an OpenClaw team the leader IS Boo Zero (the universal reduce-point,
       // injected into the roster by `knownAgents`); a native team routes to its own
@@ -417,13 +445,17 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
           ? input.targetAgentId
           : null
       const targetId =
-        explicit ?? mentionTarget(stimulus, roster) ?? resolveLeaderId(db, teamId) ?? roster[0]!.id
+        explicit ??
+        mentionTarget(stimulus, roster) ??
+        resolveLeaderId(db, teamId, roomId) ??
+        roster[0]!.id
       const origin: TurnOrigin = input.routine
         ? { kind: 'schedule', routineName: input.routine.name }
         : HUMAN_TURN
       // Persist the user message under the target's team key (observability seed).
       persistTeamChatEntry(db, {
         teamId,
+        roomId,
         agentId: targetId,
         text: stimulus,
         role: 'user',
@@ -441,7 +473,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       })
       // Run the target's turn through the SAME deliver primitive: it streams the
       // agent's events into the engine, which reacts to any `<delegate>`/`<plan>`.
-      const sk = buildTeamSessionKey(targetId, teamId)
+      const sk = buildTeamSessionKey(targetId, teamId, roomId)
       // The user's own turn has no delegator to reflect a failure to, so on a failed
       // deliver we RECOVER in place rather than dumping the burden on the user: if the
       // cause is a down OpenClaw operator connection (the Gateway process can be up while
@@ -460,6 +492,7 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
           : errorText(err)
         persistTeamChatEntry(db, {
           teamId,
+          roomId,
           agentId: targetId,
           text: operatorStillDown
             ? 'Could not reach your OpenClaw agents — the Gateway may not be running. Start it from System settings, then send again.'
@@ -536,19 +569,18 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
       await engine.personMovedTask(taskId, to, opts)
     },
     signalAgent(agentId: string, text: string): void {
-      const sk = buildTeamSessionKey(agentId, teamId)
+      const sk = buildTeamSessionKey(agentId, teamId, roomId)
       const entry = abortMap.get(sk)
       if (!entry) return // no live run — the mailbox/digest covers delivery
-      // ASK, don't hope. On a non-steerable runtime `writeContext` still resolves,
-      // it just writes somewhere no model reads: a cwd file for the spawned CLIs,
-      // a Gateway agent file for OpenClaw. Calling it there looks like delivery in
-      // the logs while delivering nothing, which is worse than not calling it —
-      // the durable mailbox is what actually reaches those runtimes, and it has
-      // already recorded this notice by the time we get here.
-      if (!entry.adapter.capabilities().steerable) return
-      void entry.adapter
-        .writeContext(entry.run, NATIVE_SIGNAL_CONTEXT_KEY, text)
-        .catch(() => undefined)
+      // ASK, don't hope: only a runtime that declares a mid-run channel is
+      // steered. And only a LIVE one: this is an ambient FYI, and stopping a run
+      // to resume it with an FYI (the `interrupt-resume` runtimes) would throw
+      // away its in-flight tool work for a message the mailbox delivers anyway,
+      // since it has already recorded this notice by the time we get here.
+      if (steeringOf(entry.adapter.capabilities()) !== 'live' || !entry.adapter.steer) return
+      // Passive: it rides along if the run reads input again, and never keeps a
+      // finishing run going for an FYI.
+      void entry.adapter.steer(entry.run, text, { passive: true }).catch(() => undefined)
     },
     dispose(): void {
       clearInterval(sweep)
@@ -570,11 +602,12 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
         // throw would skip every remaining team). A best-effort notice must never
         // be the thing that breaks teardown.
         try {
-          const roster = knownAgents(db, teamId)
+          const roster = knownAgents(db, teamId, roomId)
           const names = stranded.map((id) => roster.find((a) => a.id === id)?.name ?? id)
           persistTeamChatEntry(db, {
             teamId,
-            agentId: resolveLeaderId(db, teamId) ?? stranded[0]!,
+            roomId,
+            agentId: resolveLeaderId(db, teamId, roomId) ?? stranded[0]!,
             text:
               `Parked mid-task work for ${names.join(', ')}. ` +
               'Their tasks stay on the board and resume when you reopen this team.',
@@ -611,25 +644,85 @@ function buildInstance(teamId: string, mcpBaseUrl: string | null): Instance {
   }
 }
 
-/** Get (or lazily build) the persistent orchestrator for a team. Concurrent first
+/** Get (or lazily build) the persistent orchestrator for a team chat room (the
+ *  team's own group chat when `opts.roomId` is absent/null). Concurrent first
  *  calls get the same instance (the Map set is synchronous); the nudge queue
- *  serializes their deliveries. */
+ *  serializes their deliveries. The caller is responsible for the room being one
+ *  of the team's active rooms (the REST routes check; `getTaskOrchestrator`
+ *  falls back to the default room for a task whose room is gone). */
 export function getTeamOrchestrator(
   teamId: string,
-  opts?: { mcpBaseUrl?: string | null },
+  opts?: { mcpBaseUrl?: string | null; roomId?: string | null },
 ): TeamOrchestrator {
-  let inst = instances.get(teamId)
+  const roomId = opts?.roomId ?? null
+  const key = orchestratorKey(teamId, roomId)
+  let inst = instances.get(key)
   if (!inst) {
-    inst = buildInstance(teamId, opts?.mcpBaseUrl ?? null)
-    instances.set(teamId, inst)
+    inst = buildInstance(teamId, roomId, opts?.mcpBaseUrl ?? null)
+    instances.set(key, inst)
   }
   inst.touch()
   return inst.orchestrator
 }
 
-/** True when a team has a live orchestrator (introspection / tests). */
-export function hasTeamOrchestrator(teamId: string): boolean {
-  return instances.has(teamId)
+/** True when a team chat room has a live orchestrator (introspection / tests). */
+export function hasTeamOrchestrator(teamId: string, roomId: string | null = null): boolean {
+  return instances.has(orchestratorKey(teamId, roomId))
+}
+
+/** The room a board task is driven from (its own active room, else the team's
+ *  default room). See `roomIdForTask`. Read through `db` when the caller holds a
+ *  connection, else through the server's. */
+export function orchestratorRoomForTask(taskId: string, db?: ClawbooDb): string | null {
+  try {
+    return roomIdForTask(db ?? getDb(), taskId)
+  } catch {
+    return null
+  }
+}
+
+/** The orchestrator that owns a board task: its room's, built on demand. */
+export function getTaskOrchestrator(
+  teamId: string,
+  taskId: string,
+  opts?: { mcpBaseUrl?: string | null; db?: ClawbooDb },
+): TeamOrchestrator {
+  return getTeamOrchestrator(teamId, {
+    mcpBaseUrl: opts?.mcpBaseUrl ?? null,
+    roomId: orchestratorRoomForTask(taskId, opts?.db),
+  })
+}
+
+/** True when the orchestrator that owns a board task is resident. */
+export function hasTaskOrchestrator(teamId: string, taskId: string, db?: ClawbooDb): boolean {
+  return hasTeamOrchestrator(teamId, orchestratorRoomForTask(taskId, db))
+}
+
+/** A room was archived: Stop its cascade (a clean release to `todo`, never a
+ *  failure reflection) and drop its instance, so nothing keeps running in a
+ *  conversation nobody can see. A no-op when the room has no live instance. */
+export function retireRoomOrchestrator(teamId: string, roomId: string): void {
+  const key = orchestratorKey(teamId, roomId)
+  const inst = instances.get(key)
+  if (!inst) return
+  try {
+    inst.orchestrator.stop()
+    inst.dispose()
+  } catch (err) {
+    log.error({ err, teamId, roomId }, 'team-orchestrator room retire failed')
+  }
+  instances.delete(key)
+}
+
+/** True when `roomId` is one of the team's active rooms (null = the default room,
+ *  always valid). */
+export function isActiveTeamRoom(teamId: string, roomId: string | null): boolean {
+  if (roomId === null) return true
+  try {
+    return getActiveRoom(getDb(), teamId, roomId) !== null
+  } catch {
+    return false
+  }
 }
 
 /** Test/shutdown helper: dispose + drop all live orchestrators. */
@@ -655,14 +748,14 @@ export function resetTeamOrchestrators(): void {
  */
 export function evictIdleOrchestrators(now: number = Date.now()): number {
   let evicted = 0
-  for (const [teamId, inst] of instances) {
+  for (const [key, inst] of instances) {
     if (!shouldEvictInstance(now - inst.getLastActivity(), inst.isQuiescent())) continue
     try {
       inst.dispose()
     } catch (err) {
-      log.error({ err, teamId }, 'team-orchestrator eviction dispose failed')
+      log.error({ err, key }, 'team-orchestrator eviction dispose failed')
     }
-    instances.delete(teamId)
+    instances.delete(key)
     evicted++
   }
   return evicted

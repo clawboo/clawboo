@@ -2,6 +2,7 @@
 // the Claude Code / OpenClaw fakes: stores handlers, fans `emit`ed native events
 // synchronously, records side-effect calls. Test-only (src/testing).
 
+import type { SteerOptions } from '@clawboo/executor'
 import type { RecordedCall } from '@clawboo/executor/contract'
 
 import type { CodexDriver, CodexNativeEvent } from '../types'
@@ -33,5 +34,15 @@ export class FakeCodexDriver implements CodexDriver {
 
   async writeContext(key: string, value: string): Promise<void> {
     this.calls.push({ method: 'writeContext', params: { key, value } })
+  }
+
+  /** What `steer` answers: true (the run took it), false (the run had ended) or
+   *  an Error (the runtime refused it). */
+  steerAnswer: boolean | Error = true
+
+  async steer(text: string, opts?: SteerOptions): Promise<boolean> {
+    this.calls.push({ method: 'steer', params: { text, ...(opts ? { opts } : {}) } })
+    if (this.steerAnswer instanceof Error) throw this.steerAnswer
+    return this.steerAnswer
   }
 }
