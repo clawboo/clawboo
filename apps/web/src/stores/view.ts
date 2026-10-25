@@ -38,7 +38,14 @@ export type ViewMode =
   | { type: 'nav'; view: NavView }
   | { type: 'welcome' }
   | { type: 'booZero' }
-  | { type: 'groupChat'; teamId: string }
+  | {
+      type: 'groupChat'
+      teamId: string
+      /** One of the team's chat rooms; null/absent = the team's own group chat. */
+      roomId?: string | null
+    }
+  /** The team's overview: its graph and every task from all its rooms. */
+  | { type: 'teamspace'; teamId: string }
 
 /** A task the Board should open in its detail drawer the next time it renders
  *  (set by "Open on board" from a chat task card). `nonce` makes a second
@@ -71,12 +78,52 @@ interface ViewStore {
   /** Open the Boo Zero standalone view. */
   openBooZero: () => void
 
-  /** Open the team group chat view. */
-  openGroupChat: (teamId: string) => void
+  /** Open the team group chat view, or one of the team's chat rooms. */
+  openGroupChat: (teamId: string, roomId?: string | null) => void
 
-  /** Whether Column 2 (AgentListColumn) is collapsed. */
+  /** Open the team's overview (graph + tasks from every room). */
+  openTeamspace: (teamId: string) => void
+
+  /** Whether the whole left sidebar (team rail + agent column) is collapsed. */
   columnCollapsed: boolean
   toggleColumnCollapsed: () => void
+  setColumnCollapsed: (collapsed: boolean) => void
+  /** Width of the agent column in px, set by dragging its right edge. */
+  sidebarWidth: number
+  setSidebarWidth: (width: number) => void
+}
+
+/** The agent column's natural width: below it the content is clipped and faded. */
+export const SIDEBAR_NATURAL_WIDTH = 236
+export const SIDEBAR_MIN_WIDTH = 176
+export const SIDEBAR_MAX_WIDTH = 420
+
+const SIDEBAR_WIDTH_KEY = 'clawboo.sidebar.width'
+const SIDEBAR_COLLAPSED_KEY = 'clawboo.sidebar.collapsed'
+
+export function clampSidebarWidth(width: number): number {
+  return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)))
+}
+
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStored(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Private mode / blocked storage: the layout still works, it just isn't remembered.
+  }
+}
+
+function initialSidebarWidth(): number {
+  const n = Number(readStored(SIDEBAR_WIDTH_KEY))
+  return Number.isFinite(n) && n > 0 ? clampSidebarWidth(n) : SIDEBAR_NATURAL_WIDTH
 }
 
 export const useViewStore = create<ViewStore>((set) => ({
@@ -98,8 +145,28 @@ export const useViewStore = create<ViewStore>((set) => ({
 
   openBooZero: () => set({ viewMode: { type: 'booZero' } }),
 
-  openGroupChat: (teamId) => set({ viewMode: { type: 'groupChat', teamId } }),
+  openGroupChat: (teamId, roomId = null) =>
+    set({
+      viewMode: roomId ? { type: 'groupChat', teamId, roomId } : { type: 'groupChat', teamId },
+    }),
 
-  columnCollapsed: false,
-  toggleColumnCollapsed: () => set((s) => ({ columnCollapsed: !s.columnCollapsed })),
+  openTeamspace: (teamId) => set({ viewMode: { type: 'teamspace', teamId } }),
+
+  columnCollapsed: readStored(SIDEBAR_COLLAPSED_KEY) === '1',
+  toggleColumnCollapsed: () =>
+    set((s) => {
+      writeStored(SIDEBAR_COLLAPSED_KEY, s.columnCollapsed ? '0' : '1')
+      return { columnCollapsed: !s.columnCollapsed }
+    }),
+  setColumnCollapsed: (collapsed) => {
+    writeStored(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+    set({ columnCollapsed: collapsed })
+  },
+
+  sidebarWidth: initialSidebarWidth(),
+  setSidebarWidth: (width) => {
+    const next = clampSidebarWidth(width)
+    writeStored(SIDEBAR_WIDTH_KEY, String(next))
+    set({ sidebarWidth: next })
+  },
 }))

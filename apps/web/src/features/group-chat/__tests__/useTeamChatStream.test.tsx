@@ -36,13 +36,16 @@ function Harness({
   es,
   onActivity,
   enabled = true,
+  roomId = null,
 }: {
   es: FakeEventSource
   onActivity: () => void
   enabled?: boolean
+  roomId?: string | null
 }): null {
   useTeamChatStream({
     teamId: 't1',
+    roomId,
     enabled,
     onActivity,
     eventSourceFactory: () => es as unknown as EventSource,
@@ -73,6 +76,43 @@ afterEach(() => {
     streamingText: new Map(),
     streamStartedAt: new Map(),
     lastTokenUsage: new Map(),
+  })
+})
+
+describe('useTeamChatStream in a chat room', () => {
+  it("opens the room's stream and counts only the room's board and status frames as activity", () => {
+    let opened = ''
+    const es = new FakeEventSource('')
+    const onActivity = vi.fn()
+    function RoomHarness(): null {
+      useTeamChatStream({
+        teamId: 't1',
+        roomId: 'r9',
+        enabled: true,
+        onActivity,
+        eventSourceFactory: (url) => {
+          opened = url
+          return es as unknown as EventSource
+        },
+      })
+      return null
+    }
+    render(<RoomHarness />)
+    expect(opened).toContain('/api/teams/t1/chat/stream?roomId=r9')
+    act(() => {
+      es.emit('board', JSON.stringify({ id: 'x', status: 'todo', roomId: null }))
+      es.emit('status', JSON.stringify({ agentId: 'a2', status: 'running', roomId: 'other' }))
+    })
+    expect(onActivity).not.toHaveBeenCalled()
+    act(() => {
+      es.emit('board', JSON.stringify({ id: 'y', status: 'todo', roomId: 'r9' }))
+    })
+    expect(onActivity).toHaveBeenCalledTimes(1)
+    act(() => {
+      // A frame that names no room still counts, as it did before rooms.
+      es.emit('status', JSON.stringify({ agentId: 'a2', status: 'idle' }))
+    })
+    expect(onActivity).toHaveBeenCalledTimes(2)
   })
 })
 

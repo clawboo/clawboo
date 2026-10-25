@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Save } from 'lucide-react'
 import {
   EditorView,
@@ -24,19 +24,17 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { DisplayNameEditor } from '@/features/boo-zero/DisplayNameEditor'
 import { GlobalBriefEditor } from '@/features/boo-zero/GlobalBriefEditor'
-import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
-import { BrowserPanel } from '@/features/workspace/BrowserPanel'
 import { Button } from '@/features/shared/Button'
 import { Spinner } from '@/features/shared/Spinner'
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
 // `'brief'` is Boo-Zero-only — gated by `isBooZero` at the tab-list level.
-// `'activity'` is the live obs terminal for this agent. `'workspace'` is the
-// read-only view of the agent's task worktree (tree + now line + diff).
-type EditorTab =
-  'personality' | 'permissions' | 'activity' | 'browser' | 'workspace' | 'brief' | AgentFileName
+// `'workspace'` is the read-only view of the agent's task worktree (tree + now
+// line + diff). (Tasks, the browser and the activity feed are cards of their own,
+// from the top bar.)
+type EditorTab = 'personality' | 'permissions' | 'workspace' | 'brief' | AgentFileName
 
 const FILE_TAB_LABELS: Record<AgentFileName, string> = {
   'SOUL.md': 'SOUL',
@@ -51,28 +49,59 @@ const FILE_TAB_LABELS: Record<AgentFileName, string> = {
 function getTabLabel(tab: EditorTab): string {
   if (tab === 'personality') return 'Personality'
   if (tab === 'permissions') return 'Permissions'
-  if (tab === 'activity') return 'Activity'
   if (tab === 'workspace') return 'Workspace'
-  if (tab === 'browser') return 'Browser'
   if (tab === 'brief') return 'Brief'
   return FILE_TAB_LABELS[tab] ?? tab.replace('.md', '')
 }
 
 /** Type guard: is this tab one of the file-backed CodeMirror tabs? */
 function isAgentFileTab(tab: EditorTab): tab is AgentFileName {
+  return tab !== 'personality' && tab !== 'permissions' && tab !== 'workspace' && tab !== 'brief'
+}
+
+function SectionPill({
+  label,
+  active,
+  dirty = false,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  /** Unsaved edits somewhere under it. */
+  dirty?: boolean
+  onClick: () => void
+}) {
   return (
-    tab !== 'personality' &&
-    tab !== 'permissions' &&
-    tab !== 'activity' &&
-    tab !== 'workspace' &&
-    tab !== 'browser' &&
-    tab !== 'brief'
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={[
+        'inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors duration-150',
+        active
+          ? 'bg-foreground/[0.07] font-medium text-foreground'
+          : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
+      ].join(' ')}
+    >
+      {label}
+      {dirty && <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-amber" />}
+    </button>
   )
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function InlineEditor({ agentId, agentName }: { agentId: string; agentName: string }) {
+export function InlineEditor({
+  agentId,
+  agentName,
+  trailing,
+}: {
+  agentId: string
+  agentName: string
+  /** Shown at the end of the section row (the card's window buttons). */
+  trailing?: ReactNode
+}) {
   const {
     files,
     loading,
@@ -113,10 +142,8 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
 
   const allTabs: EditorTab[] = useMemo(
     () => [
-      'personality',
-      'activity',
       'workspace',
-      'browser',
+      'personality',
       // Permissions is shown where something actually READS it, which is the same
       // rule as the file tabs above: never show an editor whose bytes no driver
       // will ever consult.
@@ -142,6 +169,12 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
   )
 
   const [activeTab, setActiveTab] = useState<EditorTab>('personality')
+  const sectionTabs = useMemo(() => allTabs.filter((t) => !isAgentFileTab(t)), [allTabs])
+  // The file last open under Files, so coming back to Files reopens it.
+  const lastFileTabRef = useRef<AgentFileName | null>(null)
+  useEffect(() => {
+    if (isAgentFileTab(activeTab)) lastFileTabRef.current = activeTab
+  }, [activeTab])
 
   // Fall back when the OPEN tab stops being offered. `allTabs` is per-agent and
   // per-runtime, so a tab can disappear under a selection that is still active:
@@ -274,37 +307,71 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
         background: 'var(--background)',
       }}
     >
-      {/* Tab bar */}
-      <div className="flex shrink-0 items-center gap-0.5 border-b border-border bg-card px-2">
-        {allTabs.map((tab) => {
-          const isActive = tab === activeTab
-          const dirty = isAgentFileTab(tab) && isDirty(tab)
-          return (
-            <button
+      {/* Sections, as pills: its Workspace, who it is (Personality, Permissions,
+          Brief), and its Agent Files.
+          The files themselves get their own row, only under Agent Files, so a file
+          editor is never mistaken for a live view or a setting. This row is
+          also the card's top row, so it carries the window buttons. */}
+      <div className="flex shrink-0 items-center gap-1 border-b border-border bg-card py-1.5 pl-2 pr-1.5">
+        <div
+          role="tablist"
+          aria-label="Agent details"
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-1"
+        >
+          {sectionTabs.map((tab) => (
+            <SectionPill
               key={tab}
-              type="button"
+              label={getTabLabel(tab)}
+              active={tab === activeTab}
               onClick={() => setActiveTab(tab)}
-              className={[
-                'relative -mb-px inline-flex items-center gap-1.5 px-2.5 pb-2 pt-2.5 font-mono text-[11px] uppercase tracking-[0.14em]',
-                'transition-colors duration-150 cursor-pointer',
-                isActive
-                  ? 'font-semibold text-foreground'
-                  : 'font-medium text-foreground/45 hover:text-foreground/75',
-              ].join(' ')}
-            >
-              {getTabLabel(tab)}
-              {dirty && <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-amber" />}
-              <span
-                aria-hidden
-                className="absolute inset-x-0 -bottom-px h-0.5 rounded-full transition-opacity duration-150"
-                style={{ background: 'var(--primary)', opacity: isActive ? 1 : 0 }}
-              />
-            </button>
-          )
-        })}
+            />
+          ))}
+          {visibleFileTabs.length > 0 && (
+            <SectionPill
+              label="Agent Files"
+              active={isFileTab}
+              dirty={visibleFileTabs.some((t) => isDirty(t))}
+              onClick={() => {
+                const last = lastFileTabRef.current
+                setActiveTab(last && visibleFileTabs.includes(last) ? last : visibleFileTabs[0]!)
+              }}
+            />
+          )}
+        </div>
+        {trailing && (
+          <div className="flex shrink-0 items-center gap-0.5 self-start">{trailing}</div>
+        )}
+      </div>
 
-        {/* Save button — only for file tabs */}
-        {isFileTab && (
+      {isFileTab && (
+        <div className="flex shrink-0 items-center gap-0.5 border-b border-border bg-card px-2">
+          {visibleFileTabs.map((tab) => {
+            const isActive = tab === activeTab
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={[
+                  'relative -mb-px inline-flex items-center gap-1.5 px-2.5 pb-2 pt-2.5 font-mono text-[11px] uppercase tracking-[0.14em]',
+                  'transition-colors duration-150 cursor-pointer',
+                  isActive
+                    ? 'font-semibold text-foreground'
+                    : 'font-medium text-foreground/45 hover:text-foreground/75',
+                ].join(' ')}
+              >
+                {getTabLabel(tab)}
+                {isDirty(tab) && (
+                  <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-amber" />
+                )}
+                <span
+                  aria-hidden
+                  className="absolute inset-x-0 -bottom-px h-0.5 rounded-full transition-opacity duration-150"
+                  style={{ background: 'var(--primary)', opacity: isActive ? 1 : 0 }}
+                />
+              </button>
+            )
+          })}
           <div className="ml-auto py-1">
             <Button
               variant={isFileDirty ? 'primary' : 'secondary'}
@@ -317,8 +384,8 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
               Save
             </Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Content area */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
@@ -356,27 +423,11 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
           </div>
         )}
 
-        {/* Activity tab — the live obs terminal for this agent. */}
-        {activeTab === 'activity' && (
-          <div style={{ height: '100%', padding: '12px 16px', minHeight: 0 }}>
-            <ActivityTerminal scope={{ agentId }} fill hideHeader />
-          </div>
-        )}
-
         {/* Workspace tab: read-only view of the agent's task worktree. The
             panel owns its own layout, so no padding wrapper here. */}
         {activeTab === 'workspace' && (
           <div style={{ height: '100%', minHeight: 0 }}>
             <WorkspacePanel agentId={agentId} />
-          </div>
-        )}
-
-        {/* Browser tab — the newest frame this agent captured. Always present
-            rather than gated on having one, so the empty state can explain what
-            would fill it; a tab that appears mid-run would be worse. */}
-        {activeTab === 'browser' && (
-          <div style={{ height: '100%', minHeight: 0 }}>
-            <BrowserPanel agentId={agentId} />
           </div>
         )}
 
@@ -427,15 +478,11 @@ export function InlineEditor({ agentId, agentName }: { agentId: string; agentNam
             ? `${agentName} · Personality`
             : activeTab === 'permissions'
               ? `${agentName} · Permissions`
-              : activeTab === 'activity'
-                ? `${agentName} · Activity — live tool calls, results, errors`
-                : activeTab === 'workspace'
-                  ? `${agentName} · Workspace · the task worktree, read-only`
-                  : activeTab === 'browser'
-                    ? `${agentName} · Browser — the last screenshot this agent captured`
-                    : activeTab === 'brief'
-                      ? `${agentName} · Brief — display name + global brief`
-                      : AGENT_FILE_META[activeTab].hint}
+              : activeTab === 'workspace'
+                ? `${agentName} · Workspace · the task worktree, read-only`
+                : activeTab === 'brief'
+                  ? `${agentName} · Brief — display name + global brief`
+                  : AGENT_FILE_META[activeTab].hint}
         </span>
         <span>
           <span className={anyDirty ? 'text-amber' : 'text-mint'}>

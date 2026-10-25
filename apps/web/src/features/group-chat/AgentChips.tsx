@@ -28,9 +28,9 @@ export const AgentChips = memo(function AgentChips({ agents, onTag }: AgentChips
           title={`Tag @${agent.name}`}
         >
           <AgentBooAvatar agentId={agent.id} size={18} />
-          <span className="max-w-[80px] truncate text-[11px] font-medium">
-            {agent.name.split(' ')[0]}
-          </span>
+          {/* The full name: a first word alone reads "Boo Zero" as "Boo", which
+              looks like another member rather than the room's leader. */}
+          <span className="max-w-[96px] truncate text-[11px] font-medium">{agent.name}</span>
         </button>
       ))}
     </div>

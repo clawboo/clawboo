@@ -11,7 +11,7 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { ScheduleRecord } from '@clawboo/scheduler'
 
@@ -597,6 +597,14 @@ describe('quiet days and today', () => {
   })
 
   it('gives a day with only routine runs a thin row, its runs on one line', async () => {
+    // Pinned to a Wednesday: the run below is tomorrow, and it is only marked as
+    // the next run on a range that also holds today, so tomorrow must fall in
+    // this week whichever day the suite runs on (or the locale starts its week).
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 21, 9, 0))
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
     serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }])
     const runAt = addDays(startOfDay(Date.now()), 1) + 10 * HOUR
     server.use(

@@ -22,6 +22,9 @@ export interface Team {
    * path is gated OFF for them. OpenClaw teams are false → legacy browser path.
    */
   serverOrchestrated: boolean
+  /** When the team's General chat was last cleared (epoch ms). Its chat stops
+   *  showing the board tasks made before then; the board keeps them. */
+  chatClearedAt?: number | null
 }
 
 // ─── Store ───────────────────────────────────────────────────────────────────

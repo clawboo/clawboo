@@ -132,7 +132,7 @@ test.describe('Server-orchestrated OpenClaw round-trip (no browser orchestration
     await openGroupChat(page)
 
     // Send a user message → the server engine delivers it over the operator connection.
-    const composer = page.getByPlaceholder(/Message team/)
+    const composer = page.getByPlaceholder(/Message General/)
     await expect(composer).toBeVisible({ timeout: 15_000 })
     await composer.fill('Please research the answer.')
     await composer.press('Enter')

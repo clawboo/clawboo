@@ -84,7 +84,7 @@ function RowIcon({ rec }: { rec: ScheduleRecord }) {
   return <RuntimeGlyph id={rec.runtime} size={28} />
 }
 
-function RoutineRow({
+export function RoutineRow({
   rec,
   onOpen,
   onChanged,

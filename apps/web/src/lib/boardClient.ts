@@ -318,6 +318,26 @@ async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> 
   }
 }
 
+/** A person's comment on a task. `forwarded` = the server passed it on to the
+ *  task's agent (its mailbox, plus a steer into the run working on the task). */
+export async function postTaskComment(
+  taskId: string,
+  body: string,
+): Promise<{ ok: boolean; forwarded: boolean }> {
+  try {
+    const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/comments`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ body, authorType: 'user' }),
+    })
+    if (!r.ok) return { ok: false, forwarded: false }
+    const payload = (await r.json().catch(() => null)) as { forwarded?: boolean } | null
+    return { ok: true, forwarded: payload?.forwarded === true }
+  } catch {
+    return { ok: false, forwarded: false }
+  }
+}
+
 /** Run a task again: one that failed, timed out, was stopped, or was parked
  *  after failing repeatedly. It goes straight back to its agent. */
 export function retryTask(taskId: string): Promise<HandOffResult> {

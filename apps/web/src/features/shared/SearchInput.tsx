@@ -8,6 +8,9 @@ export interface SearchInputProps {
   onChange: (v: string) => void
   placeholder?: string
   size?: 'sm' | 'md' | 'lg'
+  /** `quiet`: a soft fill with no border or focus glow, for a field that opens
+   *  inside a tight row (the sidebar's top row) where the glow would spill. */
+  variant?: 'outline' | 'quiet'
   autoFocus?: boolean
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
   className?: string
@@ -27,6 +30,7 @@ export function SearchInput({
   onChange,
   placeholder = 'Search…',
   size = 'md',
+  variant = 'outline',
   autoFocus,
   onKeyDown,
   className = '',
@@ -55,8 +59,12 @@ export function SearchInput({
         data-testid={dataTestId}
         spellCheck={false}
         className={[
-          'w-full border border-border bg-surface text-foreground outline-none transition',
-          'placeholder:text-foreground/35 focus:border-primary focus:ring-4 focus:ring-primary/15',
+          'w-full border text-foreground outline-none transition placeholder:text-foreground/35',
+          variant === 'quiet'
+            ? // The `!` beats the app-wide :focus-visible outline, which a text field
+              // always matches; the firmer border is this field's focus mark.
+              'border-transparent bg-foreground/[0.05] focus:border-foreground/25 focus:bg-foreground/[0.03] focus-visible:outline-none!'
+            : 'border-border bg-surface focus:border-primary focus:ring-4 focus:ring-primary/15',
           d.wrap,
         ].join(' ')}
       />

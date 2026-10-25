@@ -38,6 +38,7 @@ import type {
   CapabilityGroupMember,
   TeamRootNodeData,
   GhostGraphScope,
+  GraphRoomScope,
 } from './types'
 
 /** Stable, render-safe node-key slug from a capability's sourceKey. */
@@ -225,7 +226,10 @@ function runtimeDefaultModelLabel(runtime?: string | null): string {
 // `GhostGraphPanel` is mounted at any time — so the singleton-state
 // assumption holds even with two scopes in the codebase.
 
-export function useGraphData(scope: GhostGraphScope = 'team'): void {
+export function useGraphData(
+  scope: GhostGraphScope = 'team',
+  room: GraphRoomScope | null = null,
+): void {
   // Atlas layout mode. Read at the top so the trunk-attribution
   // loop can skip itself in radial mode (where leftmost/middle/rightmost
   // detection by sorted X would be wrong) and every dep edge can be stamped
@@ -249,18 +253,24 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   // In atlas scope we ignore `selectedTeamId` and pull every agent into the
   // canvas. In team scope we filter to the selected team (null = no team
   // currently selected; show all as before).
+  // A chat room draws only its members (Boo Zero is added back below). Keyed on
+  // the joined ids so a new array with the same members doesn't rebuild.
+  const roomId = scope === 'team' ? (room?.id ?? null) : null
+  const roomMemberKey = roomId && room ? room.memberIds.join(',') : null
   const filteredAgents = useMemo(() => {
-    const base =
+    const onTeam =
       scope === 'atlas'
         ? agents
         : selectedTeamId
           ? agents.filter((a) => a.teamId === selectedTeamId)
           : agents
+    const members = roomMemberKey === null ? null : new Set(roomMemberKey.split(','))
+    const base = members ? onTeam.filter((a) => members.has(a.id)) : onTeam
     // Hide the OpenClaw Gateway default ("main") when it isn't the identified Boo
     // Zero — a teamless system agent, not a team member. Team-selected views
     // already exclude it (it's teamless); this covers atlas + the no-team peek.
     return base.filter((a) => !isHiddenGatewayDefault(a, gatewayMainAgentId, booZeroAgentId))
-  }, [agents, selectedTeamId, scope, gatewayMainAgentId, booZeroAgentId])
+  }, [agents, selectedTeamId, scope, roomMemberKey, gatewayMainAgentId, booZeroAgentId])
 
   // Resolve Boo Zero (universal team leader). When relevant (team is
   // selected in team-scope, or always in atlas-scope), we include Boo Zero
@@ -324,17 +334,24 @@ export function useGraphData(scope: GhostGraphScope = 'team'): void {
   // panel in the future.
   const prevTeamIdRef = useRef(selectedTeamId)
   const prevScopeRef = useRef(scope)
+  const prevRoomIdRef = useRef(roomId)
   useEffect(() => {
-    if (prevTeamIdRef.current === selectedTeamId && prevScopeRef.current === scope) return
+    if (
+      prevTeamIdRef.current === selectedTeamId &&
+      prevScopeRef.current === scope &&
+      prevRoomIdRef.current === roomId
+    )
+      return
     prevTeamIdRef.current = selectedTeamId
     prevScopeRef.current = scope
+    prevRoomIdRef.current = roomId
     const store = useGraphStore.getState()
     store.resetLayout()
     store.setNodes([])
     store.setEdges([])
     store.setGraphScopeKey(null) // cleared until the new scope's structural rebuild lands
     useGraphStore.setState({ agentFiles: new Map() })
-  }, [selectedTeamId, scope])
+  }, [selectedTeamId, scope, roomId])
 
   // Stable string keys for dependency comparison
   const agentStructureKey = graphAgents.map((a) => `${a.id}:${a.name}`).join('|')

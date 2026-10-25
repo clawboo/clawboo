@@ -3,13 +3,14 @@
 // There is no edge-drawing mode to arm: every Boo's port is always live, so the
 // old Connect toggle was a second way to do the same thing and is gone from
 // both scopes. Both scopes lead with the + button, which puts a connector, skill
-// or agent on the canvas attached to nothing. Both carry the activity feed,
-// each scoped to what the canvas draws: every team in Atlas, one team in its own
-// graph.
+// or agent on the canvas attached to nothing. Activity is not on the canvas: the
+// org chart opens its dock from the view's top bar (through the activityOpen
+// props), and a graph inside a chat view gets an Activity card instead.
 //
 // Only `<ReactFlow>` is stubbed (see GhostGraph.deleteKey.test.tsx for why);
 // the toolbar and the docks render for real.
 
+import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { http, HttpResponse } from 'msw'
@@ -72,15 +73,33 @@ function renderGraph(scope: 'atlas' | 'team') {
   )
 }
 
+/** The org chart's wiring: the dock's open state lives with the top bar. */
+function ControlledAtlas() {
+  const [open, setOpen] = useState(false)
+  return (
+    <ReactFlowProvider>
+      <button type="button" onClick={() => setOpen((v) => !v)}>
+        Top bar activity
+      </button>
+      <GhostGraph scope="atlas" activityOpen={open} onActivityOpenChange={setOpen} />
+    </ReactFlowProvider>
+  )
+}
+
 describe('GhostGraph command bar', () => {
   it.each(['atlas', 'team'] as const)('has no Connect toggle in the %s scope', (scope) => {
     renderGraph(scope)
     expect(screen.queryByRole('button', { name: /connect agents|drawing edges/i })).toBeNull()
   })
 
-  it("opens every team's trail from Atlas", async () => {
-    renderGraph('atlas')
-    fireEvent.click(screen.getByRole('button', { name: 'Activity feed (all teams)' }))
+  it.each(['atlas', 'team'] as const)('has no Activity button on the %s canvas', (scope) => {
+    renderGraph(scope)
+    expect(screen.queryByRole('button', { name: /activity/i })).toBeNull()
+  })
+
+  it("opens every team's trail from the org chart's top bar", async () => {
+    render(<ControlledAtlas />)
+    fireEvent.click(screen.getByRole('button', { name: 'Top bar activity' }))
 
     expect(screen.getByRole('complementary', { name: 'Activity, all teams' })).toHaveAttribute(
       'aria-hidden',
@@ -90,25 +109,19 @@ describe('GhostGraph command bar', () => {
     expect(obsQueries.every((q) => !q.includes('teamId='))).toBe(true)
   })
 
-  it("opens this team's trail from a team graph", async () => {
-    renderGraph('team')
-    fireEvent.click(screen.getByRole('button', { name: 'Activity feed (this team)' }))
-
-    expect(screen.getByRole('complementary', { name: 'Activity, Growth Studio' })).toHaveAttribute(
-      'aria-hidden',
-      'false',
-    )
-    await waitFor(() => expect(obsQueries.some((q) => q.includes('teamId=t1'))).toBe(true))
+  it('mounts no activity dock in a graph inside a chat view', () => {
+    const { container } = renderGraph('team')
+    expect(container.querySelector('[aria-label^="Activity"]')).toBeNull()
   })
 
   it('keeps the two right-edge docks from stacking', () => {
-    const { container } = renderGraph('team')
-    fireEvent.click(screen.getByRole('button', { name: 'Activity feed (this team)' }))
+    const { container } = render(<ControlledAtlas />)
+    fireEvent.click(screen.getByRole('button', { name: 'Top bar activity' }))
     fireEvent.click(screen.getByRole('button', { name: 'Agent browser' }))
 
     // By attribute: a closed dock is aria-hidden, which is the point, and a
     // hidden element has no accessible name for a role query to match.
-    expect(container.querySelector('[aria-label="Activity, Growth Studio"]')).toHaveAttribute(
+    expect(container.querySelector('[aria-label="Activity, all teams"]')).toHaveAttribute(
       'aria-hidden',
       'true',
     )

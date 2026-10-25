@@ -1,22 +1,26 @@
 import { listAgents } from '@clawboo/control-client'
 import { agentRecordToFleetState } from '@/lib/agentSourceClient'
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Brain,
-  ChevronRight,
-  Gauge,
   Ghost,
+  Home,
   KanbanSquare,
+  MoreHorizontal,
   Network,
+  Pin,
   Plus,
   Settings,
   Plug,
+  Search,
   ShoppingCart,
   Trash2,
   type LucideIcon,
 } from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
+import { GroupAvatar } from '@/components/GroupAvatar'
+import { SidebarToggle } from '@/features/layout/SidebarToggle'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
@@ -28,14 +32,17 @@ import { CreateBooModal } from '@/features/fleet/CreateBooModal'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
-import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
+import { useBooZeroStore, identifyBooZero, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
 import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
-import { aggregateTeamStatus } from '@/lib/teamStatus'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useChatStore } from '@/stores/chat'
+import { useRoomStore, useTeamRooms, type Room } from '@/stores/rooms'
+import { RoomDialog } from '@/features/group-chat/RoomDialog'
+import { RoomActionsMenu } from '@/features/group-chat/RoomActionsMenu'
+import { DEFAULT_ROOM_NAME, updateRoom } from '@/lib/roomsClient'
 import type { AgentStatus } from '@clawboo/gateway-client'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -55,7 +62,7 @@ function AgentAvatar({ agent, selected }: { agent: AgentState; selected: boolean
   return (
     <span
       aria-hidden
-      className="inline-flex shrink-0 rounded-lg bg-background transition-all duration-200"
+      className="inline-flex shrink-0 rounded-lg bg-background transition-[box-shadow] duration-200"
       style={{
         boxShadow: selected
           ? '0 0 0 2px rgb(var(--primary-rgb) / 0.55)'
@@ -145,7 +152,8 @@ function AgentRow({
   agent: AgentState
   selected: boolean
   onSelect: () => void
-  onDelete: () => void
+  /** Absent for an agent that can't be deleted from here (Boo Zero). */
+  onDelete?: () => void
 }) {
   // Compute the live activity verb. Subscribe to the chat-store
   // maps via single-value selectors keyed by sessionKey so unrelated agents'
@@ -177,10 +185,10 @@ function AgentRow({
         <AgentAvatar agent={agent} selected={selected} />
         <div className="min-w-0 flex-1">
           <p
-            className="truncate text-[12px] font-medium leading-tight text-text"
+            className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium leading-tight text-text"
             style={{ fontFamily: 'var(--font-body)' }}
           >
-            {agent.name}
+            <span className="truncate">{agent.name}</span>
           </p>
           <div className="mt-1 flex items-center gap-2">
             <StatusBadge status={agent.status} label={verb} />
@@ -195,19 +203,21 @@ function AgentRow({
         </div>
       </button>
 
-      <button
-        type="button"
-        aria-label={`Delete ${agent.name}`}
-        onClick={(e) => {
-          e.stopPropagation()
-          onDelete()
-        }}
-        // See FleetSidebar's twin: revealing the icon is not enough on its own,
-        // `text-secondary/40` stays under the contrast floor once focused.
-        className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-      >
-        <Trash2 className="h-3 w-3" strokeWidth={2} />
-      </button>
+      {onDelete && (
+        <button
+          type="button"
+          aria-label={`Delete ${agent.name}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          // See FleetSidebar's twin: revealing the icon is not enough on its own,
+          // `text-secondary/40` stays under the contrast floor once focused.
+          className="shrink-0 rounded p-1 text-secondary/40 opacity-0 transition-all hover:text-destructive focus-visible:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <Trash2 className="h-3 w-3" strokeWidth={2} />
+        </button>
+      )}
     </motion.div>
   )
 }
@@ -224,33 +234,21 @@ interface NavItem {
   subtitle?: string
 }
 
-const PRIMARY_NAV: NavItem[] = [
-  // `'graph'` opens Atlas — the global all-teams view with Boo Zero at
-  // the top of the hierarchy. Renamed from "Ghost Graph" because the
-  // team-scoped Ghost Graph still lives inside Group Chat; this slot is
-  // now specifically the org-wide map. Subtitle clarifies that Atlas is
-  // cross-team (vs. the per-team Ghost Graph users see inside Group Chat).
-  { id: 'graph', icon: Network, subtitle: '(All Teams)' },
+// The sidebar's nav, in order (the team's Home sits above it when a team is open, and
+// Settings below it). Settings opens the modal that houses the management /
+// config / insights surfaces (Providers, Runtimes, Fleet, Capabilities, Routines,
+// Tokens Used, Observability, Governance, System, System Health). Memory is
+// DELIBERATELY in both places: here as the graph + list, in the modal as a list
+// (see stores/settingsModal.ts).
+const NAV: NavItem[] = [
+  // `'graph'` is the Org chart: every team, with Boo Zero at the top.
+  { id: 'graph', icon: Network },
   { id: 'board', icon: KanbanSquare },
-  { id: 'marketplace', icon: ShoppingCart },
   // Its own destination rather than a Marketplace tab: connecting a tool the
-  // agents will use is not the same errand as shopping for a team template,
-  // and burying it three clicks deep is what made it hard to find.
+  // agents will use is not the same errand as shopping for a team template.
   { id: 'connectors', icon: Plug },
-]
-
-// Second nav block: Fleet + the Settings gear (rendered after this list). Settings
-// opens the modal that houses the management / config / insights surfaces (Runtimes,
-// Memory, Capabilities, Routines, Tokens Used, Observability, Governance, System,
-// System Health) so the sidebar stays short.
-// Approvals moved into the Board (its "Needs you" column) + inline
-// above the chat composer, so the sidebar no longer carries a separate item.
-const SECONDARY_NAV: NavItem[] = [
-  { id: 'fleet', icon: Gauge, subtitle: '(Overview)' },
-  // Memory is DELIBERATELY in both the sidebar (graph hero + list) and the
-  // Settings modal (list-only, with an "Open full view" escape hatch) — see
-  // the note in stores/settingsModal.ts.
-  { id: 'memory', icon: Brain, subtitle: '(Team Knowledge)' },
+  { id: 'memory', icon: Brain },
+  { id: 'marketplace', icon: ShoppingCart },
 ]
 
 // One consistent nav row — neutral active surface + a brand-red active icon
@@ -298,170 +296,260 @@ function NavButton({
   )
 }
 
-// ─── Group chat row ─────────────────────────────────────────────────────────
+// ─── Home row + the team's mascots ───────────────────────────────────────────
 //
-// Single-row horizontal button: avatar stack (the "team photo") on the
-// LEFT, "Group Chat" label + chevron on the RIGHT. Earlier vertical
-// designs (label-above-photo) read as a section heading because of the
-// stacked vertical layout — putting everything on one row of similar
-// height to the agent rows below makes it unambiguously a button while
-// still showing off the team identity through the live Boo avatars.
-//
-//   - Up to MAX_VISIBLE_AVATARS Boos are shown; remaining ones collapse
-//     into a "+N" badge at the end of the stack.
-//   - The leader (when known) is placed FIRST so it sits at the front of
-//     the overlap stack.
-//   - Each avatar has a 2px ring in the surface color so adjacent
-//     overlapping avatars read as separate faces, not a blurred mass.
-//     The ring color is FIXED — earlier versions switched it to the team
-//     accent on selection but the colored rings read as congested.
-//   - Right side: "Group Chat" label + a chevron-right icon. The
-//     chevron is the standard "navigate to" affordance so the button
-//     reads as interactive even when nothing is hovered.
-//   - Selection feedback is via the surface background only (lightens
-//     on hover, lightens further when active).
+// The Home row opens the team's dashboards and artifacts. The mascot grid shows
+// every agent, named, wrapping onto more rows as the team grows (Boo Zero last).
 
-// Avatars are 28px so 4 of them + the "Group Chat" label + status badge
-// all fit on a single line within the 191px-wide column. (At 30px the
-// stack ate just enough horizontal space that "Group Chat" overflowed
-// its container by 1px and triggered the truncate ellipsis.) The right
-// side mirrors the agent row's layout — name on top, status badge below
-// — so the Group Chat row reads as a structural peer of the agent rows.
-//   - Team has 1–4 agents: show ALL of them (no "+N" badge needed)
-//   - Team has 5+ agents:  show 3 avatars + "+N" badge
-// This caps the avatar stack at 4 items wide regardless of team size.
-const GROUP_CHAT_AVATAR_SIZE = 28
-const GROUP_CHAT_STRIDE = 18 // 28 - 18 = 10px overlap between adjacent avatars
-const GROUP_CHAT_MAX_VISIBLE_NO_OVERFLOW = 4
-const GROUP_CHAT_MAX_VISIBLE_WITH_OVERFLOW = 3
+const TEAMSPACE_MASCOT = 42
 
-function orderTeamAgentsForPhoto(team: Team, teamAgents: AgentState[]): AgentState[] {
-  if (!team.leaderAgentId) return teamAgents
-  const leaderIndex = teamAgents.findIndex((a) => a.id === team.leaderAgentId)
-  if (leaderIndex <= 0) return teamAgents
-  // Move leader to position 0; preserve relative order of the rest.
-  const reordered = [...teamAgents]
-  const [leader] = reordered.splice(leaderIndex, 1)
-  if (leader) reordered.unshift(leader)
-  return reordered
-}
-
-function GroupChatRow({
+/** The team's Home (its dashboards and artifacts), styled like the nav rows. */
+function TeamspaceButton({
   team,
-  teamAgents,
   isActive,
   onClick,
 }: {
   team: Team
-  teamAgents: AgentState[]
   isActive: boolean
   onClick: () => void
 }) {
-  const ordered = orderTeamAgentsForPhoto(team, teamAgents)
-  // If the team is small enough to show every agent, do so. Otherwise
-  // cap at WITH_OVERFLOW so the "+N" badge fits alongside the label.
-  const willOverflow = ordered.length > GROUP_CHAT_MAX_VISIBLE_NO_OVERFLOW
-  const visibleCount = willOverflow ? GROUP_CHAT_MAX_VISIBLE_WITH_OVERFLOW : ordered.length
-  const visible = ordered.slice(0, visibleCount)
-  const overflow = Math.max(0, ordered.length - visibleCount)
-  // Ring color reads from the live `--surface` CSS variable so it stays
-  // invisible against the column background in both light and dark modes.
-  const ringColor = 'var(--surface)'
-
-  const aggregateStatus = aggregateTeamStatus(ordered)
-
   return (
     <button
       type="button"
-      data-testid="group-chat-row"
+      data-testid="teamspace-row"
+      aria-current={isActive ? 'page' : undefined}
       onClick={onClick}
-      title={`${team.name} — Group Chat (${ordered.length} agent${ordered.length === 1 ? '' : 's'})`}
+      title={`${team.name} Home: dashboards and artifacts`}
       className={[
-        // A distinct bordered "entry" card (unlike the borderless agent
-        // rows) so the Group Chat CTA reads as the obvious place to click
-        // into the team. Active = a gentle brand-red tint + red border.
-        'group flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left cursor-pointer',
-        'transition-all duration-150',
+        'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-150',
         isActive
-          ? 'border-primary/45 bg-primary/[0.07]'
-          : 'border-border bg-foreground/[0.025] hover:border-border-strong hover:bg-foreground/[0.05]',
+          ? 'bg-foreground/[0.06] font-semibold text-foreground'
+          : 'font-medium text-foreground/60 hover:bg-foreground/[0.035] hover:text-foreground/90',
       ].join(' ')}
     >
-      {/* Team photo — overlapping Boo avatars on the left. The stack fits
-          its actual avatars (only one Group Chat row is ever visible at a
-          time, so no cross-team alignment is needed) — this keeps the
-          "Group Chat" label snug against the photo instead of leaving a
-          gap sized for a full 4-avatar stack. */}
-      <div className="flex shrink-0 items-center">
-        {visible.map((agent, i) => (
-          <div
-            key={agent.id}
-            title={agent.name}
-            style={{
-              marginLeft: i === 0 ? 0 : -(GROUP_CHAT_AVATAR_SIZE - GROUP_CHAT_STRIDE),
-              width: GROUP_CHAT_AVATAR_SIZE,
-              height: GROUP_CHAT_AVATAR_SIZE,
-              borderRadius: '50%',
-              border: `2px solid ${ringColor}`,
-              overflow: 'hidden',
-              flexShrink: 0,
-              // Earlier (leftmost) avatars sit ON TOP — the leader is at
-              // index 0, so they dominate the front of the team photo.
-              zIndex: visible.length - i,
-              boxShadow: 'var(--shadow-raised)',
-              background: 'var(--background)',
-            }}
-          >
-            <AgentBooAvatar agentId={agent.id} size={GROUP_CHAT_AVATAR_SIZE} />
-          </div>
-        ))}
-        {overflow > 0 && (
-          <div
-            title={`${overflow} more ${overflow === 1 ? 'agent' : 'agents'}`}
-            className="flex shrink-0 items-center justify-center bg-muted text-[11px] font-bold text-foreground/75"
-            style={{
-              marginLeft: -(GROUP_CHAT_AVATAR_SIZE - GROUP_CHAT_STRIDE),
-              width: GROUP_CHAT_AVATAR_SIZE,
-              height: GROUP_CHAT_AVATAR_SIZE,
-              borderRadius: '50%',
-              border: `2px solid ${ringColor}`,
-              zIndex: 0,
-              fontFamily: 'var(--font-mono)',
-              letterSpacing: '0.02em',
-            }}
-          >
-            +{overflow}
-          </div>
-        )}
-      </div>
-
-      {/* Right side — "Group Chat" name on top, aggregate status badge
-          below, sitting right beside the team photo. */}
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p
-          className={[
-            'truncate text-[12.5px] font-semibold leading-tight',
-            isActive ? 'text-primary' : 'text-foreground',
-          ].join(' ')}
-        >
-          Group Chat
-        </p>
-        <div className="flex items-center">
-          <StatusBadge status={aggregateStatus} />
-        </div>
-      </div>
-
-      {/* Trailing chevron — signals this row navigates INTO the team chat
-          (a clear "click me" affordance distinct from the agent rows). */}
-      <ChevronRight
-        size={15}
-        strokeWidth={2.25}
-        className={[
-          'shrink-0 transition-transform duration-150 group-hover:translate-x-0.5',
-          isActive ? 'text-primary' : 'text-foreground/35',
-        ].join(' ')}
+      <Home
+        size={17}
+        strokeWidth={2}
+        aria-hidden
+        style={{ color: isActive ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.45)' }}
       />
+      <span className="truncate">Home</span>
     </button>
+  )
+}
+
+function MascotTile({
+  agent,
+  selected,
+  onOpen,
+}: {
+  agent: AgentState
+  selected: boolean
+  onOpen: () => void
+}) {
+  const working = agent.status === 'running'
+  const failed = agent.status === 'error'
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={agent.name}
+      aria-current={selected ? 'page' : undefined}
+      data-testid={`teamspace-mascot-${agent.id}`}
+      className={[
+        'group/mascot flex min-w-0 cursor-pointer flex-col items-center gap-1.5 rounded-xl px-0.5 pb-1.5 pt-2 transition-colors duration-150',
+        selected ? 'bg-foreground/[0.06]' : 'hover:bg-foreground/[0.04]',
+      ].join(' ')}
+    >
+      <span
+        className="relative inline-flex transition-transform duration-150 group-hover/mascot:-translate-y-0.5"
+        aria-hidden
+      >
+        <AgentBooAvatar agentId={agent.id} size={TEAMSPACE_MASCOT} />
+        {(working || failed) && (
+          <span
+            className={[
+              'absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-surface',
+              working ? 'animate-pulse bg-mint' : 'bg-destructive',
+            ].join(' ')}
+          />
+        )}
+      </span>
+      <span
+        className={[
+          'w-full truncate text-center text-[11px] leading-tight',
+          selected
+            ? 'font-semibold text-foreground'
+            : 'text-muted-foreground group-hover/mascot:text-foreground',
+        ].join(' ')}
+      >
+        {agent.name}
+      </span>
+    </button>
+  )
+}
+
+// ─── Chat rooms (below the agent list) ───────────────────────────────────────
+// A team's extra conversations, each with some of its members. Lighter than the
+// Group Chat card: borderless, a small member stack and the room's name.
+
+// The room's picture: its members' faces in one circle (see GroupAvatar).
+const ROOM_AVATAR_SIZE = 32
+
+/** Inline rename for a room row: Enter or leaving the field saves, Escape cancels. */
+function RoomRenameInput({ room, onDone }: { room: Room; onDone: () => void }) {
+  const [value, setValue] = useState(room.name)
+  const ref = useRef<HTMLInputElement>(null)
+  const finished = useRef(false)
+
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [])
+
+  const commit = async () => {
+    if (finished.current) return
+    finished.current = true
+    onDone()
+    const name = value.trim()
+    if (!name || name === room.name) return
+    const result = await updateRoom(room.teamId, room.id, { name })
+    if (result.ok) useRoomStore.getState().upsert(result.room)
+    else useToastStore.getState().addToast({ type: 'error', message: result.error })
+  }
+
+  return (
+    <input
+      ref={ref}
+      value={value}
+      maxLength={80}
+      aria-label="Room name"
+      data-testid="room-rename-input"
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          void commit()
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          e.stopPropagation()
+          finished.current = true
+          onDone()
+        }
+      }}
+      className="min-w-0 flex-1 rounded-md border border-primary/50 bg-surface px-1.5 py-0.5 text-[12.5px] font-medium text-foreground outline-none"
+    />
+  )
+}
+
+function RoomRow({
+  room,
+  memberIds,
+  isActive,
+  onClick,
+  fixed = false,
+}: {
+  room: Room
+  /** The room's members still on the team (what the room's chat actually has). */
+  memberIds: string[]
+  isActive: boolean
+  onClick: () => void
+  /** The General room (the team's own chat): always pinned, and its only
+   *  action is clearing the chat. */
+  fixed?: boolean
+}) {
+  const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const pinned = fixed || room.pinnedAt != null
+  // `--group-ring` matches the row's own background, so the group picture's
+  // discs cut cleanly out of each other on a plain, hovered or selected row.
+  const rowClass = [
+    'flex w-full items-center gap-2.5 rounded-lg py-1.5 pl-2.5 pr-8 text-left',
+    'transition-colors duration-150',
+    isActive
+      ? 'bg-primary/[0.07] [--group-ring:color-mix(in_oklab,var(--primary)_7%,var(--surface))]'
+      : 'hover:bg-foreground/[0.05] [--group-ring:var(--surface)] hover:[--group-ring:color-mix(in_oklab,var(--foreground)_5%,var(--surface))]',
+  ].join(' ')
+
+  const avatars = <GroupAvatar agentIds={memberIds} size={ROOM_AVATAR_SIZE} />
+
+  return (
+    <div className="group relative">
+      {renaming ? (
+        <div className={rowClass}>
+          {avatars}
+          <RoomRenameInput room={room} onDone={() => setRenaming(false)} />
+        </div>
+      ) : (
+        <button
+          type="button"
+          data-testid={fixed ? 'group-chat-row' : 'room-row'}
+          aria-current={isActive ? 'page' : undefined}
+          onClick={onClick}
+          title={
+            fixed
+              ? `${room.name}: everyone on the team`
+              : `${room.name} (${memberIds.length} member${memberIds.length === 1 ? '' : 's'})`
+          }
+          className={`${rowClass} cursor-pointer`}
+        >
+          {avatars}
+          <span
+            className={[
+              'min-w-0 flex-1 truncate text-[12.5px]',
+              isActive ? 'font-semibold text-primary' : 'font-medium text-foreground',
+            ].join(' ')}
+          >
+            {room.name}
+            {fixed && (
+              <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+                (Main Room)
+              </span>
+            )}
+          </span>
+        </button>
+      )}
+      {!renaming && (
+        <>
+          {/* Pinned rooms show a pin where the "..." button appears on hover. */}
+          {pinned && !menuAnchor && (
+            <Pin
+              size={11}
+              strokeWidth={2.25}
+              aria-label="Pinned"
+              className="pointer-events-none absolute right-2.5 top-1/2 -mt-[5.5px] text-muted-foreground transition-opacity duration-150 group-focus-within:opacity-0 group-hover:opacity-0"
+            />
+          )}
+          <button
+            type="button"
+            aria-label={`More actions for ${room.name}`}
+            aria-haspopup="menu"
+            aria-expanded={menuAnchor != null}
+            data-testid={fixed ? 'general-actions' : 'room-actions'}
+            onClick={(e) => setMenuAnchor(e.currentTarget.getBoundingClientRect())}
+            className={[
+              'absolute right-1 top-1/2 -mt-3 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground',
+              'transition-opacity duration-150 hover:bg-foreground/[0.08] hover:text-foreground',
+              menuAnchor
+                ? 'bg-foreground/[0.08] text-foreground opacity-100'
+                : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100',
+            ].join(' ')}
+          >
+            <MoreHorizontal size={15} strokeWidth={2} aria-hidden />
+          </button>
+        </>
+      )}
+      {menuAnchor && (
+        <RoomActionsMenu
+          room={room}
+          anchor={menuAnchor}
+          onClose={() => setMenuAnchor(null)}
+          onRename={() => setRenaming(true)}
+          general={fixed}
+        />
+      )}
+    </div>
   )
 }
 
@@ -488,7 +576,43 @@ export function AgentListColumn() {
   const settingsOpen = useSettingsModalStore((s) => s.open)
 
   const [query, setQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const columnCollapsed = useViewStore((s) => s.columnCollapsed)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showRoomDialog, setShowRoomDialog] = useState(false)
+
+  // The selected team's chat rooms, read when the team is selected.
+  const rooms = useTeamRooms(selectedTeamId)
+  // The team's own group chat, shown as the first room: always pinned, with
+  // everyone on the team in it.
+  const generalRoom = useMemo<Room | null>(() => {
+    if (!selectedTeamId) return null
+    return {
+      id: '',
+      teamId: selectedTeamId,
+      name: DEFAULT_ROOM_NAME,
+      memberIds: agents
+        .filter(
+          (a) =>
+            a.teamId === selectedTeamId &&
+            !isHiddenGatewayDefault(a, gatewayMainAgentId, booZeroAgentId),
+        )
+        .map((a) => a.id),
+      pinnedAt: null,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+  }, [agents, selectedTeamId, gatewayMainAgentId, booZeroAgentId])
+
+  // Pinned rooms first (most recently pinned on top), then newest first.
+  const orderedRooms = useMemo(
+    () =>
+      [...rooms].sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) || b.createdAt - a.createdAt),
+    [rooms],
+  )
+  useEffect(() => {
+    if (selectedTeamId) void useRoomStore.getState().load(selectedTeamId)
+  }, [selectedTeamId])
 
   // Tick counter for "seen X ago" labels — paused while the tab is hidden, with
   // one catch-up tick on return (same rationale as FleetSidebar).
@@ -524,6 +648,56 @@ export function AgentListColumn() {
     }
     return list
   }, [agents, selectedTeamId, query, gatewayMainAgentId, booZeroAgentId])
+
+  // The team's members regardless of the search: the mascot grid, and
+  // whether the team has anyone at all.
+  const teamMembers = useMemo(
+    () =>
+      selectedTeamId
+        ? agents.filter(
+            (a) =>
+              a.teamId === selectedTeamId &&
+              !isHiddenGatewayDefault(a, gatewayMainAgentId, booZeroAgentId),
+          )
+        : [],
+    [agents, selectedTeamId, gatewayMainAgentId, booZeroAgentId],
+  )
+  const hasTeam = selectedTeam != null && teamMembers.length > 0
+  // The team's mascots, with Boo Zero (who leads every team) last. The search narrows them.
+  const cardAgents = useMemo(() => {
+    const bz = booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null
+    const lead = bz && selectedTeamId && isBooZeroEligibleForTeam(bz, selectedTeamId) ? bz : null
+    return lead ? [...teamMembers.filter((a) => a.id !== lead.id), lead] : teamMembers
+  }, [agents, booZeroAgentId, selectedTeamId, teamMembers])
+  const mascotAgents = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? cardAgents.filter((a) => a.name.toLowerCase().includes(q)) : cardAgents
+  }, [cardAgents, query])
+  const isViewingAgent = (agentId: string) =>
+    (viewMode.type === 'agent' && viewMode.agentId === agentId) ||
+    (viewMode.type === 'booZero' && agentId === booZeroAgentId)
+  const deleteAgent = (agent: AgentState) => {
+    if (!client) return
+    void (async () => {
+      if (
+        !(await confirm({
+          title: `Delete ${agent.name}?`,
+          message: 'This cannot be undone.',
+          confirmLabel: 'Delete',
+          tone: 'danger',
+        }))
+      )
+        return
+      try {
+        await deleteAgentOperation(agent.id, agent.sessionKey)
+      } catch (err) {
+        useToastStore.getState().addToast({
+          type: 'error',
+          message: `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        })
+      }
+    })()
+  }
 
   const handleSelectAgent = useCallback(
     (agentId: string) => {
@@ -567,30 +741,63 @@ export function AgentListColumn() {
   )
 
   return (
-    <div
-      className="flex h-full flex-col border-r border-border bg-surface"
-      style={{ width: 236, flexShrink: 0 }}
-      data-testid="agent-list-column"
-    >
-      {/* Team header */}
-      <div className="flex items-center justify-between px-3.5 pb-2.5 pt-4">
-        <h2 className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          {selectedTeam ? selectedTeam.name : 'All Agents'}
-          {filtered.length > 0 && (
-            <span className="ml-1.5 tabular-nums text-foreground/30">{filtered.length}</span>
-          )}
-        </h2>
-      </div>
-
-      {/* Search */}
-      <div className="px-3 pb-2.5">
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search agents…"
-          size="sm"
-          aria-label="Search agents"
-        />
+    // Width, border and the drag handle belong to the sidebar shell (AppSidebar),
+    // which lays this out at its natural width or wider and clips it when narrower.
+    <div className="flex h-full w-full flex-col bg-surface" data-testid="agent-list-column">
+      {/* Top row: the team's name, a search icon that opens into a field in this
+          same row, and the sidebar toggle. */}
+      <div className="flex h-11 shrink-0 items-center gap-1 pl-3.5 pr-2 pt-1.5">
+        {searchOpen ? (
+          <div
+            className="min-w-0 flex-1"
+            onBlur={(e) => {
+              if (!query && !e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                setSearchOpen(false)
+              }
+            }}
+          >
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Search agents…"
+              size="sm"
+              variant="quiet"
+              aria-label="Search agents"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setQuery('')
+                  setSearchOpen(false)
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            <h2 className="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              {selectedTeam ? selectedTeam.name : 'All Agents'}
+            </h2>
+            <button
+              type="button"
+              aria-label="Search agents"
+              data-testid="agent-search-open"
+              onClick={() => setSearchOpen(true)}
+              className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground/80"
+            >
+              <Search size={16} strokeWidth={1.9} aria-hidden />
+            </button>
+          </>
+        )}
+        {/* In the hover peek of a collapsed sidebar the rail holds the toggle,
+            right under the pointer that opened the peek. */}
+        {!columnCollapsed && (
+          <SidebarToggle
+            collapsed={false}
+            onClick={() => useViewStore.getState().setColumnCollapsed(true)}
+          />
+        )}
       </div>
 
       {/* Agent list — grows to fill the space between search and the
@@ -600,91 +807,129 @@ export function AgentListColumn() {
           `flex-1` instead anchors it to a clear top-half, with Create Boo
           and the global nav (Atlas, Marketplace, Approvals, etc.) all
           sitting at the bottom edge. */}
+      {/* The team's mascots stay put above the scrolling list. */}
+      {hasTeam && selectedTeam && (
+        <div className="px-2 pb-2">
+          <div
+            className="grid max-h-[36vh] gap-x-0.5 gap-y-1 overflow-y-auto"
+            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))' }}
+            data-testid="team-mascots"
+          >
+            {mascotAgents.map((agent) => (
+              <MascotTile
+                key={agent.id}
+                agent={agent}
+                selected={isViewingAgent(agent.id)}
+                onOpen={() => handleSelectAgent(agent.id)}
+              />
+            ))}
+          </div>
+          {query && mascotAgents.length === 0 && (
+            <p className="px-3 py-2 text-center text-[12px] text-secondary/50">No agents match.</p>
+          )}
+        </div>
+      )}
       <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2" data-testid="fleet-agent-list">
-        {selectedTeam && filtered.length > 0 && (
-          <>
-            <GroupChatRow
-              team={selectedTeam}
-              teamAgents={filtered}
-              isActive={viewMode.type === 'groupChat' && viewMode.teamId === selectedTeam.id}
-              onClick={() => useViewStore.getState().openGroupChat(selectedTeam.id)}
-            />
-            <div className="mx-2.5 my-1 border-t border-border" />
-          </>
+        {/* No team selected: every agent, flat. A team with nobody in it yet: its empty state. */}
+        {!hasTeam && (
+          <AnimatePresence initial={false}>
+            {filtered.length === 0 ? (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="px-3 py-6 text-center"
+              >
+                {query ? (
+                  <p className="text-[12px] text-secondary/50">No agents match.</p>
+                ) : showEmpty ? (
+                  <EmptyState
+                    icon={Ghost}
+                    title="No Boos yet"
+                    helper="Deploy a team from the Marketplace to get started."
+                    paddingTop={16}
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => useViewStore.getState().navigateTo('graph')}
+                        className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
+                      >
+                        Deploy a team →
+                      </button>
+                    }
+                  />
+                ) : (
+                  <p className="text-[12px] text-secondary/50">No agents connected.</p>
+                )}
+              </motion.div>
+            ) : (
+              <motion.div key="list" exit={{ opacity: 0 }} className="flex flex-col gap-0.5">
+                {filtered.map((agent) => (
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    // Highlight only when actually viewing this agent's
+                    // detail page. Reading from `viewMode` (instead of
+                    // `selectedAgentId`) ensures the row drops its
+                    // highlight as soon as the user navigates to Group
+                    // Chat / a nav view — the previously-selected agent
+                    // shouldn't keep looking active when something else
+                    // is on screen.
+                    selected={viewMode.type === 'agent' && viewMode.agentId === agent.id}
+                    onSelect={() => handleSelectAgent(agent.id)}
+                    onDelete={() => deleteAgent(agent)}
+                  />
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
         )}
-        <AnimatePresence initial={false}>
-          {filtered.length === 0 ? (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="px-3 py-6 text-center"
-            >
-              {query ? (
-                <p className="text-[12px] text-secondary/50">No agents match.</p>
-              ) : showEmpty ? (
-                <EmptyState
-                  icon={Ghost}
-                  title="No Boos yet"
-                  helper="Deploy a team from the Marketplace to get started."
-                  paddingTop={16}
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => useViewStore.getState().navigateTo('graph')}
-                      className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
-                    >
-                      Deploy a team →
-                    </button>
+        {/* Rooms come after the 1:1 agents: the team's extra conversations,
+            each with some of its members. */}
+        {hasTeam && selectedTeam && (
+          <>
+            <div className="flex flex-col gap-0.5 pt-1" data-testid="room-list">
+              <button
+                type="button"
+                data-testid="new-room-button"
+                onClick={() => setShowRoomDialog(true)}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-3 pr-2 text-left text-[12px] font-medium text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.05] hover:text-foreground"
+              >
+                <Plus size={14} strokeWidth={2.25} aria-hidden />
+                New room
+              </button>
+              {generalRoom && (
+                <RoomRow
+                  room={generalRoom}
+                  memberIds={generalRoom.memberIds}
+                  isActive={
+                    viewMode.type === 'groupChat' &&
+                    viewMode.teamId === selectedTeam.id &&
+                    !viewMode.roomId
                   }
+                  onClick={() => useViewStore.getState().openGroupChat(selectedTeam.id)}
+                  fixed
                 />
-              ) : (
-                <p className="text-[12px] text-secondary/50">No agents connected.</p>
               )}
-            </motion.div>
-          ) : (
-            <motion.div key="list" exit={{ opacity: 0 }} className="flex flex-col gap-0.5">
-              {filtered.map((agent) => (
-                <AgentRow
-                  key={agent.id}
-                  agent={agent}
-                  // Highlight only when actually viewing this agent's
-                  // detail page. Reading from `viewMode` (instead of
-                  // `selectedAgentId`) ensures the row drops its
-                  // highlight as soon as the user navigates to Group
-                  // Chat / a nav view — the previously-selected agent
-                  // shouldn't keep looking active when something else
-                  // is on screen.
-                  selected={viewMode.type === 'agent' && viewMode.agentId === agent.id}
-                  onSelect={() => handleSelectAgent(agent.id)}
-                  onDelete={() => {
-                    if (!client) return
-                    void (async () => {
-                      if (
-                        !(await confirm({
-                          title: `Delete ${agent.name}?`,
-                          message: 'This cannot be undone.',
-                          confirmLabel: 'Delete',
-                          tone: 'danger',
-                        }))
-                      )
-                        return
-                      try {
-                        await deleteAgentOperation(agent.id, agent.sessionKey)
-                      } catch (err) {
-                        useToastStore.getState().addToast({
-                          type: 'error',
-                          message: `Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`,
-                        })
-                      }
-                    })()
-                  }}
+              {orderedRooms.map((room) => (
+                <RoomRow
+                  key={room.id}
+                  room={room}
+                  memberIds={room.memberIds.filter((id) =>
+                    agents.some((a) => a.id === id && a.teamId === selectedTeam.id),
+                  )}
+                  isActive={
+                    viewMode.type === 'groupChat' &&
+                    viewMode.teamId === selectedTeam.id &&
+                    viewMode.roomId === room.id
+                  }
+                  onClick={() => useViewStore.getState().openGroupChat(selectedTeam.id, room.id)}
                 />
               ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Create Boo */}
@@ -705,30 +950,20 @@ export function AgentListColumn() {
       {/* Divider between Create Boo and nav */}
       <div className="mx-3 my-2 border-t border-border" />
 
-      {/* Primary nav */}
+      {/* Nav: Home (when a team is open), the work surfaces, then Settings. */}
       <div className="flex flex-col gap-0.5 px-2">
-        {PRIMARY_NAV.map((item) => (
-          <NavButton
-            key={item.id}
-            item={item}
-            active={viewMode.type === 'nav' && viewMode.view === item.id}
-            onClick={() => useViewStore.getState().navigateTo(item.id)}
+        {hasTeam && selectedTeam && (
+          <TeamspaceButton
+            team={selectedTeam}
+            isActive={viewMode.type === 'teamspace' && viewMode.teamId === selectedTeam.id}
+            onClick={() => useViewStore.getState().openTeamspace(selectedTeam.id)}
           />
-        ))}
-      </div>
-
-      {/* Divider */}
-      <div className="mx-3 my-1.5 border-t border-border" />
-
-      {/* Second nav block: Fleet + Settings (Settings opens the modal that houses
-          the management / config / insights surfaces). */}
-      <div className="flex flex-col gap-0.5 px-2">
-        {SECONDARY_NAV.map((item) => (
+        )}
+        {NAV.map((item) => (
           <NavButton
             key={item.id}
             item={item}
             active={viewMode.type === 'nav' && viewMode.view === item.id}
-            badge={0}
             onClick={() => useViewStore.getState().navigateTo(item.id)}
           />
         ))}
@@ -766,6 +1001,13 @@ export function AgentListColumn() {
         onClose={() => setShowCreateModal(false)}
         onCreated={(agentId) => void handleBooCreated(agentId)}
       />
+      {selectedTeam && (
+        <RoomDialog
+          open={showRoomDialog}
+          onClose={() => setShowRoomDialog(false)}
+          teamId={selectedTeam.id}
+        />
+      )}
     </div>
   )
 }

@@ -767,6 +767,7 @@ export function RoutineDialog({
   record,
   directory,
   preferredTeamId,
+  presetAgent,
   onClose,
   onChanged,
   onOpenTask,
@@ -777,6 +778,9 @@ export function RoutineDialog({
   directory: RoutineDirectory
   /** A new routine starts on this team (the one being looked at), when it exists. */
   preferredTeamId?: string | null
+  /** A new routine starts as an agent routine for this agent (opened from the
+   *  agent's own view). */
+  presetAgent?: { id: string; teamId: string | null }
   onClose: () => void
   onChanged: () => void
   onOpenTask: (taskId: string) => void
@@ -785,9 +789,18 @@ export function RoutineDialog({
   // What the form starts from, captured once when it opens: the list behind this
   // dialog refreshes every few seconds, and that must not reset what is being
   // typed. Null while reading an existing routine.
-  const [seed, setSeed] = useState<RoutineFormValues | null>(() =>
-    target.mode === 'create' ? emptyRoutineForm(directory.teams, preferredTeamId) : null,
-  )
+  const [seed, setSeed] = useState<RoutineFormValues | null>(() => {
+    if (target.mode !== 'create') return null
+    const empty = emptyRoutineForm(directory.teams, preferredTeamId)
+    return presetAgent
+      ? {
+          ...empty,
+          kind: 'agent',
+          teamId: presetAgent.teamId ?? NO_TEAM,
+          agentId: presetAgent.id,
+        }
+      : empty
+  })
   const editing = seed !== null
   const [busy, setBusy] = useState(false)
 

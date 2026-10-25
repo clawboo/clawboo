@@ -29,8 +29,7 @@ import { computeOrbitalPositions } from '@/features/graph/computeOrbitalPosition
 import { installSkillForAgent } from '@/features/graph/operations/installSkill'
 import { ThreadPicker } from '@/features/graph/ThreadPicker'
 import { useThreadDrop } from '@/features/graph/useThreadDrop'
-import { ActivityDock } from '@/features/graph/ActivityDock'
-import { BarBtn, BarDivider } from '@/features/graph/toolbar'
+import { BarBtn } from '@/features/graph/toolbar'
 import { useAddToGraph } from '@/features/graph/useAddToGraph'
 import {
   isLooseNodeId,
@@ -50,7 +49,7 @@ import { nativeProviderIdForGroup } from '@/lib/nativeModelCatalog'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
-import { Plus, Terminal } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { apiFetch, setAgentModel } from '@clawboo/control-client'
 import type { GraphNode, GraphEdge, BooNodeData, SkillNodeData } from '@/features/graph/types'
 
@@ -769,11 +768,6 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
 
   // ── Default model (fetched once, shared with the graph's model orbital) ────
   const defaultModel = useOpenclawDefaultModel()
-  // The live activity dock, scoped to this one agent: the same toggle and panel
-  // Atlas and a team's graph carry, so every graph answers "what is it doing"
-  // the same way.
-  const [showActivity, setShowActivity] = useState(false)
-
   // The + button, as on every graph. No new agent here: this canvas draws one
   // Boo, so a second would be made somewhere it cannot show.
   const { getNodes, getEdges, getZoom, screenToFlowPosition } = useReactFlow()
@@ -853,7 +847,7 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
     <div ref={frameRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       <MiniGraphInner agentId={agentId} />
 
-      {/* Top-right: add and activity, beside the model selector. */}
+      {/* Top-right: the + button, beside the model selector. */}
       {agent && (
         <div
           style={{
@@ -879,14 +873,6 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
               active={add.anchor !== null}
               onClick={add.toggle}
             />
-            <BarDivider />
-            <BarBtn
-              icon={Terminal}
-              label={showActivity ? 'Hide activity feed' : 'Activity feed (this agent)'}
-              tint="mint"
-              active={showActivity}
-              onClick={() => setShowActivity((v) => !v)}
-            />
           </div>
           <AgentModelControl
             runtime={agent.runtime}
@@ -909,13 +895,6 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
           />
         </div>
       )}
-
-      <ActivityDock
-        open={showActivity}
-        onClose={() => setShowActivity(false)}
-        scope={{ agentId }}
-        scopeLabel={agent?.name ?? 'this agent'}
-      />
 
       {add.anchor && (
         <ThreadPicker

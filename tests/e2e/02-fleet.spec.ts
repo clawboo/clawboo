@@ -20,7 +20,10 @@ test.describe('Fleet Sidebar', () => {
     await expect(sidebar.getByText('Research Boo')).toBeVisible({ timeout: 5_000 })
 
     // Click on Research Boo — clicking directly opens agent detail view
-    const agentRow = page.locator('[data-testid="fleet-agent-row-a2"]')
+    // A team's agents show as mascot tiles; with no team selected, as list rows.
+    const agentRow = page
+      .locator('[data-testid="teamspace-mascot-a2"], [data-testid="fleet-agent-row-a2"]')
+      .first()
     await agentRow.click()
 
     // The chat panel header should show the selected agent name

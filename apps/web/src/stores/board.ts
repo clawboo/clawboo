@@ -27,11 +27,17 @@ export interface BoardTaskView {
    *  means not known for the current status (a status frame that carried no
    *  verdict); readers fall back to the status via `taskAttentionOf`. */
   attention?: TaskAttention | null
+  /** The chat room the task belongs to; null (or absent) = the team's own group chat. */
+  roomId?: string | null
   createdAt: number
   updatedAt: number
 }
 
-function mergeTask(existing: BoardTaskView | undefined, change: BoardChange): BoardTaskView {
+/** A board change as the chat stream carries it: the engine's fields plus the
+ *  task's room, which the server reads off the row. */
+export type BoardChangeFrame = BoardChange & { roomId?: string | null }
+
+function mergeTask(existing: BoardTaskView | undefined, change: BoardChangeFrame): BoardTaskView {
   const incomingUpdatedAt = change.updatedAt ?? existing?.updatedAt ?? Date.now()
   // A strictly-OLDER change must not regress a field: a reconnect `load()` snapshot can
   // predate a live board frame received during the connect gap, and copying its stale
@@ -57,6 +63,8 @@ function mergeTask(existing: BoardTaskView | undefined, change: BoardChange): Bo
         : status === existing?.status
           ? existing.attention
           : undefined,
+    // A task never changes room; a frame that did not say keeps the known one.
+    roomId: change.roomId !== undefined ? change.roomId : (existing?.roomId ?? null),
     createdAt: change.createdAt ?? existing?.createdAt ?? Date.now(),
     updatedAt,
   }
@@ -68,7 +76,7 @@ interface BoardStoreState {
   /** Authoritative snapshot from REST (merge, never clear — refresh-survival). */
   load: (teamId: string) => Promise<void>
   /** Apply one orchestrator mutation (LWW by updatedAt). */
-  applyChange: (teamId: string, change: BoardChange) => void
+  applyChange: (teamId: string, change: BoardChangeFrame) => void
   reset: (teamId: string) => void
 }
 
@@ -91,6 +99,7 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
             assigneeAgentId: r.assigneeAgentId ?? null,
             parentTaskId: r.parentTaskId ?? null,
             attention: taskAttentionOf(r),
+            roomId: typeof r.roomId === 'string' ? r.roomId : null,
             createdAt: r.createdAt,
             updatedAt: r.updatedAt,
           }),

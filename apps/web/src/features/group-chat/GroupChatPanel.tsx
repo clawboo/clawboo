@@ -10,15 +10,19 @@ import { useConnectionStore } from '@/stores/connection'
 import { taskAttentionOf } from '@/features/board/boardStatus'
 import { useBoardStore } from '@/stores/board'
 import { useBooZeroStore, isBooZeroEligibleForTeam } from '@/stores/booZero'
+import { useRoom } from '@/stores/rooms'
+import { DEFAULT_ROOM_NAME } from '@/lib/roomsClient'
 import { connectionStatusTone } from '@/features/connection/connectionStatusDisplay'
 import { agentIdFromSessionKey, buildTeamSessionKey } from '@/lib/sessionUtils'
 import {
   isResetCommand,
   resetConversationContext,
+  resetOpenClawTeammates,
   RESET_FAILED_NOTICE,
 } from '@/features/chat/resetConversation'
 import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
+import { inRoom } from './teamTasks'
 import { sendServerTeamMessage, stopServerTeam } from './serverTeamChatSend'
 import { appendRule, fetchTeamRules, parseRuleCommand, saveTeamRules } from '@/lib/teamRules'
 import { nextSeq } from '@/lib/sequenceKey'
@@ -60,9 +64,14 @@ const SERVER_BUSY_GRACE_IDLE_MS = 3_000
 
 export function GroupChatPanel({
   teamId,
+  roomId = null,
   embedded = false,
 }: {
   teamId: string
+  /** One of the team's chat rooms; null = the team's own group chat. A room is
+   *  the same chat with a subset of the team: its own transcript (room session
+   *  keys), its own engine on the server, and only its own task cards. */
+  roomId?: string | null
   /**
    * When true, suppresses the local header (the unified `GroupChatViewHeader`
    * rendered above the graph + chat split owns team identity).
@@ -70,6 +79,9 @@ export function GroupChatPanel({
   embedded?: boolean
 }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
+  const room = useRoom(teamId, roomId)
+  // Everything that resets on a team switch resets on a room switch too.
+  const chatKey = roomId ? `${teamId}:room:${roomId}` : teamId
   const agents = useFleetStore((s) => s.agents)
   const connectionStatus = useConnectionStore((s) => s.status)
   const connectionTone = connectionStatusTone(connectionStatus)
@@ -81,7 +93,15 @@ export function GroupChatPanel({
   // value — zero visible re-arrangement.
   const streamStartedAtMap = useChatStore((s) => s.streamStartedAt)
 
-  const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
+  // The agents this chat is between: the whole team for its own group chat, the
+  // room's members (who are still on the team) for a room. Named `teamAgents`
+  // because every downstream use (roster, routing, chips) wants exactly this set.
+  const teamAgents = useMemo(() => {
+    const onTeam = agents.filter((a) => a.teamId === teamId)
+    if (!roomId) return onTeam
+    const members = new Set(room?.memberIds ?? [])
+    return onTeam.filter((a) => members.has(a.id))
+  }, [agents, teamId, roomId, room])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const booZeroAgent = useMemo(
     () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
@@ -163,17 +183,27 @@ export function GroupChatPanel({
   const knownAgentNames = useMemo(() => participants.map((a) => a.name), [participants])
   const composerRef = useRef<MessageComposerHandle>(null)
 
-  // Team-scoped sessionKeys for isolation from 1:1 agent chat
+  // Team-scoped sessionKeys for isolation from 1:1 agent chat (room-scoped in a room)
   const teamSessionKeys = useMemo(
-    () => new Map(participants.map((a) => [a.id, buildTeamSessionKey(a.id, teamId)])),
-    [participants, teamId],
+    () => new Map(participants.map((a) => [a.id, buildTeamSessionKey(a.id, teamId, roomId)])),
+    [participants, teamId, roomId],
   )
 
   // ── Server-orchestrated live transport (the only team-chat transport) ──────
   // The analog of `useGatewayEvents`: feed the team's SSE transcript stream
   // (committed turns + live token deltas) into the chat store. Every frame bumps
   // the activity-window busy signal. Browser team orchestration is retired.
-  useTeamChatStream({ teamId, enabled: true, onActivity: bumpActivity })
+  // Who is in this chat, as a stable string: the stream reopens when it changes
+  // (a member added to a room starts streaming without a reload).
+  const rosterKey = useMemo(
+    () =>
+      participants
+        .map((a) => a.id)
+        .sort()
+        .join('|'),
+    [participants],
+  )
+  useTeamChatStream({ teamId, roomId, rosterKey, enabled: true, onActivity: bumpActivity })
 
   // ── Merge all team transcripts (using team-scoped sessionKeys) ────────────
   const mergedEntries = useMemo(() => {
@@ -261,7 +291,7 @@ export function GroupChatPanel({
     announceRef.current = { count: 0, key: '' }
     openedAtRef.current = Date.now()
     setAnnouncement(null)
-  }, [teamId])
+  }, [chatKey])
 
   useEffect(() => {
     const n = topLevelBlocks.length
@@ -281,7 +311,7 @@ export function GroupChatPanel({
     if (blockTimestamp(last) < openedAtRef.current) return
     const text = describeBlock(last, nameFor, agentIdFromSessionKey)
     if (text) setAnnouncement({ key, text })
-  }, [topLevelBlocks, nameFor, teamId])
+  }, [topLevelBlocks, nameFor, chatKey])
 
   // Author-grouping + stable keys, resolved ONCE per transcript change. Streams
   // and board tasks take no part in the Slack/Discord author-grouping rhythm, so
@@ -335,11 +365,12 @@ export function GroupChatPanel({
   // the set of participant IDs actually changes (team switch, agent added/removed).
   const participantSignature = useMemo(
     () =>
+      `${chatKey}#` +
       participants
         .map((a) => a.id)
         .sort()
         .join('|'),
-    [participants],
+    [participants, chatKey],
   )
   // Stash the latest array/map refs so the effect can read them at fire
   // time without participating in the dependency list. We DELIBERATELY do
@@ -449,7 +480,11 @@ export function GroupChatPanel({
       const tasks = useBoardStore.getState().tasksByTeam.get(teamId)
       const cascadeActive = tasks
         ? [...tasks.values()].some(
-            (t) => t.status !== 'done' && t.status !== 'cancelled' && !taskAttentionOf(t),
+            (t) =>
+              inRoom(t, roomId) &&
+              t.status !== 'done' &&
+              t.status !== 'cancelled' &&
+              !taskAttentionOf(t),
           )
         : false
       const grace = cascadeActive ? SERVER_BUSY_GRACE_CASCADE_MS : SERVER_BUSY_GRACE_IDLE_MS
@@ -458,13 +493,13 @@ export function GroupChatPanel({
       }
     }, 1000)
     return () => clearInterval(id)
-  }, [serverBusy, activeStreams.length, teamId])
+  }, [serverBusy, activeStreams.length, teamId, roomId])
 
-  // Reset the busy signal when switching teams.
+  // Reset the busy signal when switching teams or rooms.
   useEffect(() => {
     setServerBusy(false)
     lastActivityRef.current = 0
-  }, [teamId])
+  }, [chatKey])
 
   // ── Interleaved render timeline ───────────────────────────────────────────
   // Committed blocks and active streaming cards merged into ONE chronologically-
@@ -476,10 +511,22 @@ export function GroupChatPanel({
   // Board projection (flag-on) — READ-ONLY in render. The Map ref changes on
   // every change-feed update (intended re-render); it MUST NOT feed any effect.
   const boardTasksMap = useBoardStore((s) => s.tasksByTeam.get(teamId))
+  // Only this room's tasks: the team's own group chat shows the tasks with no
+  // room, a room shows its own.
+  // A cleared chat starts over: tasks made before the clear stay on the board,
+  // not in the chat.
+  const clearedAt = (roomId ? room?.chatClearedAt : team?.chatClearedAt) ?? null
   const boardTaskList = useMemo(
     () =>
-      boardTasksMap ? [...boardTasksMap.values()].filter((t) => t.status !== 'cancelled') : [],
-    [boardTasksMap],
+      boardTasksMap
+        ? [...boardTasksMap.values()].filter(
+            (t) =>
+              t.status !== 'cancelled' &&
+              inRoom(t, roomId) &&
+              (clearedAt == null || t.createdAt >= clearedAt),
+          )
+        : [],
+    [boardTasksMap, roomId, clearedAt],
   )
   type RenderItem =
     | {
@@ -535,7 +582,7 @@ export function GroupChatPanel({
   // WITHOUT a `key` prop, so a team switch changes props without remounting.
   const { hiddenCount, loadEarlier } = useRenderWindow({
     total: renderItems.length,
-    resetKey: teamId,
+    resetKey: chatKey,
     scrollRef,
     atBottom,
   })
@@ -597,28 +644,9 @@ export function GroupChatPanel({
         // command has to reach the runtime too. Without this one boo in the room
         // answers from a thread the divider says the room has let go of, which is
         // worse than not resetting because it is invisible.
-        const client = useConnectionStore.getState().client
-        if (client) {
-          await Promise.all(
-            participants
-              .filter((a) => a.runtime === 'openclaw')
-              .map(async (a) => {
-                const sk = teamSessionKeys.get(a.id)
-                if (!sk) return
-                try {
-                  await client.call('chat.send', {
-                    sessionKey: sk,
-                    message: '/reset',
-                    deliver: false,
-                    idempotencyKey: crypto.randomUUID(),
-                  })
-                } catch {
-                  // Best-effort per teammate: one unreachable boo must not stop the
-                  // rest of the room from starting fresh.
-                }
-              }),
-          )
-        }
+        await resetOpenClawTeammates(useConnectionStore.getState().client, participants, (id) =>
+          teamSessionKeys.get(id),
+        )
         useChatStore.getState().appendTranscript(firstSk, [
           divider ?? {
             entryId: crypto.randomUUID(),
@@ -701,8 +729,12 @@ export function GroupChatPanel({
       // (possibly cross-team) one — so display + routing stay consistent. When
       // Boo Zero belongs to a different team it's excluded here too, and the
       // message falls to this team's own leader / first member.
-      const targetId =
-        targetAgentId ?? teamBooZeroAgent?.id ?? team?.leaderAgentId ?? teamAgents[0]?.id
+      // The team's own lead only while it is in this chat (a room may leave it out).
+      const leadHere =
+        team?.leaderAgentId && teamAgents.some((a) => a.id === team.leaderAgentId)
+          ? team.leaderAgentId
+          : null
+      const targetId = targetAgentId ?? teamBooZeroAgent?.id ?? leadHere ?? teamAgents[0]?.id
       if (!targetId) return
       const targetSk = teamSessionKeys.get(targetId)
       if (!targetSk) return
@@ -711,6 +743,7 @@ export function GroupChatPanel({
       setServerBusy(true)
       await sendServerTeamMessage({
         teamId,
+        roomId,
         targetAgentId: targetId,
         targetSessionKey: targetSk,
         message,
@@ -718,6 +751,7 @@ export function GroupChatPanel({
     },
     [
       teamId,
+      roomId,
       team?.leaderAgentId,
       teamBooZeroAgent,
       mentionAgentList,
@@ -806,7 +840,6 @@ export function GroupChatPanel({
                   {participants.slice(0, 4).map((agent, idx) => (
                     <div
                       key={agent.id}
-                      className="rounded-full ring-2 ring-background"
                       style={{
                         marginLeft: idx === 0 ? 0 : -10,
                         zIndex: participants.length - idx,
@@ -833,7 +866,7 @@ export function GroupChatPanel({
                     letterSpacing: '-0.01em',
                   }}
                 >
-                  {team?.name ? `Welcome to ${team.name}` : 'Welcome to the team'}
+                  {`Welcome to ${room ? room.name : DEFAULT_ROOM_NAME}`}
                 </p>
                 <p className="max-w-[300px] text-[13px] leading-relaxed text-foreground/50">
                   Send a message to start, or ping a teammate with{' '}
@@ -940,14 +973,18 @@ export function GroupChatPanel({
         ref={composerRef as RefObject<MessageComposerHandle | null>}
         onSend={handleSend}
         disabled={!canSend}
-        placeholder="Message team… (@name to target)"
+        placeholder={`Message ${room ? room.name : DEFAULT_ROOM_NAME}… (@name to target)`}
         mentionAgents={mentionAgentList}
         // Stop button — replaces Send while the team is working (running OR
         // mid-stream). POSTs /chat/stop; the server owns the abort + clean release.
         isActive={running || activeStreams.length > 0}
         onStop={() => {
           setServerBusy(false)
-          void stopServerTeam({ teamId, sessionKeys: Array.from(teamSessionKeys.values()) })
+          void stopServerTeam({
+            teamId,
+            roomId,
+            sessionKeys: Array.from(teamSessionKeys.values()),
+          })
         }}
       />
     </div>

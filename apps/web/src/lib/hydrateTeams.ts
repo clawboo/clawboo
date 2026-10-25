@@ -23,6 +23,7 @@ export async function hydrateTeams(): Promise<void> {
         isArchived: number
         agentCount: number
         serverOrchestrated?: boolean
+        chatClearedAt?: number | null
       }[]
       assignments?: { agentId: string; teamId: string }[]
     }

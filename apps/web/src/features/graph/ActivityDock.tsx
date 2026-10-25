@@ -7,11 +7,9 @@ import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 // ─── ActivityDock ────────────────────────────────────────────────────────────
 //
-// The live "what is it doing" terminal, docked to a graph's right edge. Every
-// graph canvas mounts one, scoped to what that canvas draws: Atlas to every
-// team, a group chat's graph to its team, the 1:1 mini graph to its one agent.
-// One component so the three read as the same control rather than three
-// lookalikes that drift.
+// The live "what is it doing" terminal, docked to the org chart's right edge and
+// scoped to every team. The agent page and the team chats show the same
+// terminal in an Activity card instead.
 //
 // Always mounted so the slide animates both ways; the obs subscription is gated
 // on `open`, so a closed dock tails nothing.

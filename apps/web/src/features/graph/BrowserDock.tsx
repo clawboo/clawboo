@@ -34,7 +34,7 @@
 // rather than re-picked: a panel that eases differently from the rest of the
 // app is the tell that it was bolted on.
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import { apiFetch } from '@clawboo/control-client'
 
@@ -173,6 +173,9 @@ export function BrowserDock({
   selectedTeamId,
   onSelectTeam,
   onClose,
+  variant = 'dock',
+  windowActions,
+  onAgentClick,
 }: {
   open: boolean
   agents: readonly DockAgent[]
@@ -183,7 +186,15 @@ export function BrowserDock({
   selectedTeamId: string | null
   onSelectTeam: (teamId: string) => void
   onClose: () => void
+  /** `dock` floats over a graph's right edge (the org chart). `card` fills a
+   *  card in a chat view's card stack: always open, in flow, no Escape layer. */
+  variant?: 'dock' | 'card'
+  /** Card only: buttons for the window's top-right corner (maximize, close). */
+  windowActions?: ReactNode
+  /** A person picked a face (not the dock's own pick of the freshest frame). */
+  onAgentClick?: (agentId: string) => void
 }) {
+  const isCard = variant === 'card'
   const panelRef = useRef<HTMLDivElement>(null)
   // A CSS transition does NOT honour prefers-reduced-motion on its own, and a
   // 420px surface sweeping across the viewport is exactly the motion the
@@ -257,7 +268,107 @@ export function BrowserDock({
   // documented dismissal did nothing. Focus is deliberately NOT trapped: this
   // floats beside the graph rather than over it, and trapping would make Tab
   // feel broken on the canvas.
-  useDismissableLayer({ active: open, level: 'popover', onEscape: onClose })
+  useDismissableLayer({ active: open && !isCard, level: 'popover', onEscape: onClose })
+
+  // What the screen shows: the latest capture, or why there is none.
+  const screenBody = (
+    <>
+      {src && meta && meta.restored && (
+        // WHEN. Only rendered when the answer is not "just now": a frame
+        // restored from disk can be hours old, and shown plainly it is the
+        // panel asserting that an idle Boo is browsing.
+        //
+        // The dock is otherwise chromeless on purpose. This is the exception
+        // because it is not decoration: it is the difference between a view
+        // and a claim.
+        <span
+          style={{
+            position: 'absolute',
+            left: 8,
+            bottom: 8,
+            zIndex: 1,
+            fontSize: 10,
+            lineHeight: 1.4,
+            padding: '3px 7px',
+            borderRadius: 999,
+            color: 'var(--surface)',
+            background: 'rgb(15 23 42 / 0.62)',
+            backdropFilter: 'blur(4px)',
+            pointerEvents: 'none',
+            maxWidth: 'calc(100% - 16px)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Before the restart
+        </span>
+      )}
+      {src && meta ? (
+        <img
+          // `ts` in the key remounts on a new frame. The URL is stable by
+          // design ("the latest frame"), so without this the panel would show
+          // the first screenshot for the rest of the run.
+          key={meta.ts}
+          src={src}
+          alt={`Screenshot captured by ${meta.toolName}`}
+          title={`${meta.toolName} · ${new Date(meta.ts).toLocaleTimeString()}`}
+          // Fitted inside the fixed window, never driving its size. A
+          // landscape grab fills it; a portrait one letterboxes, which is what
+          // a phone screenshot looks like in any desktop viewer.
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+          }}
+        />
+      ) : (
+        <p
+          className="text-muted-foreground"
+          style={{ fontSize: 12, padding: '0 24px', textAlign: 'center', lineHeight: 1.6 }}
+        >
+          {!checked
+            ? ''
+            : agents.length === 0
+              ? 'No agents on this graph yet.'
+              : selectedAgent && !usesClawbooBrowser(selectedAgent)
+                ? // A DIFFERENT SILENCE, and the one that reads worst if it is
+                  // not said out loud. This Boo runs somewhere with its own
+                  // tools, so it can open a page through its own runtime and
+                  // clawboo never sees it. Saying "hasn't opened a page" here
+                  // asserts something false about a Boo that may be browsing
+                  // right now, just not through us.
+                  `${selectedAgent.name} runs on ${runtimeLabel(selectedAgent.runtime)} and browses with its own tools, so its screen is not visible here.`
+                : grant === 'missing'
+                  ? 'No browser granted to this Boo.'
+                  : // The honest empty state for a Boo that CAN be seen: the
+                    // browser is granted and connected, and it simply has not
+                    // opened anything.
+                    'This Boo has not opened a page yet.'}
+        </p>
+      )}
+    </>
+  )
+
+  if (isCard) {
+    return (
+      <CardWindow
+        agents={agents}
+        selectedAgentId={selectedAgentId}
+        frames={frames}
+        onPick={(id) => {
+          onSelectAgent(id)
+          onAgentClick?.(id)
+        }}
+        windowActions={windowActions}
+      >
+        {screenBody}
+      </CardWindow>
+    )
+  }
 
   return (
     <div
@@ -436,8 +547,8 @@ export function BrowserDock({
           )}
 
           {/* ── Faces ── avatar only: each Boo already has its own colour and
-              face, and a name beside every one would out-weigh the picture it
-              sits above. The name is on hover and in the accessible name. */}
+                face, and a name beside every one would out-weigh the picture it
+                sits above. The name is on hover and in the accessible name. */}
           <div
             // A tablist is only a tablist when it HAS tabs. On an empty team this
             // row holds one line of prose and no `role="tab"` at all, which trips
@@ -498,7 +609,10 @@ export function BrowserDock({
                   aria-label={hasFrame ? `${agent.name} — has a frame` : agent.name}
                   title={agent.name}
                   tabIndex={open ? 0 : -1}
-                  onClick={() => onSelectAgent(agent.id)}
+                  onClick={() => {
+                    onSelectAgent(agent.id)
+                    onAgentClick?.(agent.id)
+                  }}
                   className="relative grid shrink-0 cursor-pointer place-items-center rounded-full transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
                   style={{
                     width: 30,
@@ -513,7 +627,7 @@ export function BrowserDock({
                 >
                   <AgentBooAvatar agentId={agent.id} size={20} />
                   {/* Has something to show. Never the only signal — the selected
-                      face is also discs-and-full-opacity, and the name says so. */}
+                        face is also discs-and-full-opacity, and the name says so. */}
                   {hasFrame && (
                     <span
                       aria-hidden
@@ -568,84 +682,113 @@ export function BrowserDock({
           placeItems: 'center',
         }}
       >
-        {src && meta && meta.restored && (
-          // WHEN. Only rendered when the answer is not "just now": a frame
-          // restored from disk can be hours old, and shown plainly it is the
-          // panel asserting that an idle Boo is browsing.
-          //
-          // The dock is otherwise chromeless on purpose. This is the exception
-          // because it is not decoration: it is the difference between a view
-          // and a claim.
-          <span
-            style={{
-              position: 'absolute',
-              left: 8,
-              bottom: 8,
-              zIndex: 1,
-              fontSize: 10,
-              lineHeight: 1.4,
-              padding: '3px 7px',
-              borderRadius: 999,
-              color: 'var(--surface)',
-              background: 'rgb(15 23 42 / 0.62)',
-              backdropFilter: 'blur(4px)',
-              pointerEvents: 'none',
-              maxWidth: 'calc(100% - 16px)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Before the restart
-          </span>
-        )}
-        {src && meta ? (
-          <img
-            // `ts` in the key remounts on a new frame. The URL is stable by
-            // design ("the latest frame"), so without this the panel would show
-            // the first screenshot for the rest of the run.
-            key={meta.ts}
-            src={src}
-            alt={`Screenshot captured by ${meta.toolName}`}
-            title={`${meta.toolName} · ${new Date(meta.ts).toLocaleTimeString()}`}
-            // Fitted inside the fixed window, never driving its size. A
-            // landscape grab fills it; a portrait one letterboxes, which is what
-            // a phone screenshot looks like in any desktop viewer.
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'block',
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-            }}
-          />
-        ) : (
-          <p
-            className="text-muted-foreground"
-            style={{ fontSize: 12, padding: '0 24px', textAlign: 'center', lineHeight: 1.6 }}
-          >
-            {!checked
-              ? ''
-              : agents.length === 0
-                ? 'No agents on this graph yet.'
-                : selectedAgent && !usesClawbooBrowser(selectedAgent)
-                  ? // A DIFFERENT SILENCE, and the one that reads worst if it is
-                    // not said out loud. This Boo runs somewhere with its own
-                    // tools, so it can open a page through its own runtime and
-                    // clawboo never sees it. Saying "hasn't opened a page" here
-                    // asserts something false about a Boo that may be browsing
-                    // right now, just not through us.
-                    `${selectedAgent.name} runs on ${runtimeLabel(selectedAgent.runtime)} and browses with its own tools, so its screen is not visible here.`
-                  : grant === 'missing'
-                    ? 'No browser granted to this Boo.'
-                    : // The honest empty state for a Boo that CAN be seen: the
-                      // browser is granted and connected, and it simply has not
-                      // opened anything.
-                      'This Boo has not opened a page yet.'}
-          </p>
-        )}
+        {screenBody}
       </div>
+    </div>
+  )
+}
+
+// ─── As a window in a chat view ─────────────────────────────────────────────
+
+/** The window's top bar: the agent faces and the window buttons. */
+const CARD_BAR = 36
+/** The screen's shape, as a number (WINDOW_ASPECT). */
+const CARD_ASPECT = 16 / 10
+
+/**
+ * The browser as a window in a chat view's card stack: one card, like the ones
+ * beside it, with the agent faces and the window buttons in its top bar and the
+ * screen below at the browser's landscape shape. The whole window scales to fit
+ * the panel it is given, never stretching the screen to the panel's shape.
+ */
+function CardWindow({
+  agents,
+  selectedAgentId,
+  frames,
+  onPick,
+  windowActions,
+  children,
+}: {
+  agents: readonly DockAgent[]
+  selectedAgentId: string | null
+  frames: ReadonlyMap<string, unknown>
+  onPick: (agentId: string) => void
+  windowActions?: ReactNode
+  children: ReactNode
+}) {
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null)
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return
+      const { width, height } = entry.contentRect
+      setBox((prev) =>
+        prev && prev.w === width && prev.h === height ? prev : { w: width, h: height },
+      )
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // As wide as the panel allows while the screen keeps its shape.
+  const width = box ? Math.max(0, Math.min(box.w, (box.h - CARD_BAR) * CARD_ASPECT)) : null
+  const size =
+    width === null
+      ? { width: '100%', height: '100%' }
+      : { width, height: width / CARD_ASPECT + CARD_BAR }
+
+  return (
+    <div ref={boxRef} className="flex h-full w-full justify-center">
+      <section
+        aria-label="Agent browser"
+        className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface"
+        style={{ ...size, boxShadow: 'var(--shadow-floating)' }}
+      >
+        <div
+          className="flex shrink-0 items-center gap-2 border-b border-border pl-2 pr-1.5"
+          style={{ height: CARD_BAR }}
+        >
+          <div
+            role="tablist"
+            aria-label="Agents"
+            className="flex min-w-0 items-center gap-0.5 overflow-hidden"
+          >
+            {agents.map((agent) => {
+              const active = agent.id === selectedAgentId
+              const hasFrame = frames.get(agent.id) != null
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-label={hasFrame ? `${agent.name}, has a frame` : agent.name}
+                  title={agent.name}
+                  onClick={() => onPick(agent.id)}
+                  className="relative grid h-[26px] w-[26px] shrink-0 cursor-pointer place-items-center rounded-full transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
+                  style={{
+                    background: active ? 'rgb(var(--primary-rgb) / 0.14)' : 'transparent',
+                    opacity: active ? 1 : 0.55,
+                  }}
+                >
+                  <AgentBooAvatar agentId={agent.id} size={18} />
+                  {hasFrame && (
+                    <span
+                      aria-hidden
+                      className="absolute bottom-0.5 right-0.5 h-[5px] w-[5px] rounded-full bg-mint"
+                      style={{ boxShadow: '0 0 0 1.5px var(--surface)' }}
+                    />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">{windowActions}</div>
+        </div>
+        <div className="relative grid min-h-0 flex-1 place-items-center">{children}</div>
+      </section>
     </div>
   )
 }
