@@ -1359,8 +1359,10 @@ export function GhostGraph({
     getNode,
     screenToFlowPosition,
     expandBoo,
-    // A team graph's new agents join its team when the source Boo has none.
+    // A team graph's new agents join its team when the source Boo has none,
+    // and a room's graph's new agents join the room as well.
     fallbackTeamId: scope === 'team' ? (obsTeamId ?? null) : null,
+    roomId: scope === 'team' ? (room?.id ?? null) : null,
   })
 
   // ── The + button ── the same picker with no agent behind it. A new agent
@@ -1711,10 +1713,9 @@ export function GhostGraph({
             tint="neutral"
             active={showBrowserDock}
             onClick={() => {
-              setShowBrowserDock((v) => {
-                if (!v) onActivityOpenChange?.(false)
-                return !v
-              })
+              const next = !showBrowserDock
+              if (next) onActivityOpenChange?.(false)
+              setShowBrowserDock(next)
             }}
           />
         )}

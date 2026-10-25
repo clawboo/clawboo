@@ -6,9 +6,6 @@ import { connectorBySlug } from '@clawboo/connector-catalog'
 import { useBrokeredApps } from '@/features/connectors/useBrokeredApps'
 import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
 import { connectConnector, signInConnector } from '@/features/marketplace/connectConnector'
-import { updateRoom } from '@/lib/roomsClient'
-import { useRoomStore } from '@/stores/rooms'
-import { useToastStore } from '@/stores/toast'
 
 import {
   describeLoose,
@@ -26,7 +23,7 @@ import {
   type LooseKind,
   type Obstacle,
 } from './looseNodes'
-import { spawnAgent } from './operations/spawnNode'
+import { joinRoom, spawnAgent } from './operations/spawnNode'
 import type { ThreadOption } from './ThreadPicker'
 import { threadOptionsFor } from './threadOptions'
 
@@ -282,26 +279,4 @@ export function useAddToGraph({
   )
 
   return { anchor, options, toggle, close, pick, createAgent, reseat }
-}
-
-/** Add a just-created agent to a chat room's members. */
-async function joinRoom(
-  teamId: string,
-  roomId: string,
-  agent: { agentId: string; name: string },
-): Promise<void> {
-  const room = useRoomStore
-    .getState()
-    .roomsByTeam.get(teamId)
-    ?.find((r) => r.id === roomId)
-  if (!room) return
-  const result = await updateRoom(teamId, roomId, {
-    memberIds: [...new Set([...room.memberIds, agent.agentId])],
-  })
-  if (result.ok) useRoomStore.getState().upsert(result.room)
-  else
-    useToastStore.getState().addToast({
-      type: 'error',
-      message: `${agent.name} was created but could not join ${room.name}: ${result.error}`,
-    })
 }

@@ -1,12 +1,16 @@
 // useThreadDrop: the thread picker shared by the Ghost Graph and the agent
 // view's mini graph. A Boo's thread let go on empty space opens the picker where
-// it fell; a tile's thread has nothing it can become, so it opens nothing.
+// it fell; a tile's thread has nothing it can become, so it opens nothing. A new
+// agent made from a thread joins the source's team, and on a room's graph the
+// room as well.
 
 import { act, renderHook } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { server } from '@/__vitest__/mswServer'
+import type { Room } from '@/lib/roomsClient'
+import { useRoomStore } from '@/stores/rooms'
 
 import type { GraphNode } from '../types'
 import { useThreadDrop } from '../useThreadDrop'
@@ -70,5 +74,99 @@ describe('useThreadDrop', () => {
       }),
     )
     expect(result.current.threadOptions).toEqual([])
+  })
+})
+
+describe('New agent from a thread', () => {
+  const ROOM: Room = {
+    id: 'R1',
+    teamId: 'T',
+    name: 'Design',
+    memberIds: ['a1'],
+    pinnedAt: null,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+
+  let created: unknown = null
+  let roomPatch: unknown = null
+  let routed: string | null = null
+
+  beforeEach(() => {
+    created = null
+    roomPatch = null
+    routed = null
+    useRoomStore.setState({ roomsByTeam: new Map([['T', [ROOM]]]), loadedTeams: new Set(['T']) })
+    server.use(
+      http.post('/api/agents', async ({ request }) => {
+        created = await request.json()
+        return HttpResponse.json({ agent: { id: 'a2' } }, { status: 201 })
+      }),
+      http.patch('/api/teams/T/rooms/R1', async ({ request }) => {
+        roomPatch = await request.json()
+        return HttpResponse.json({ room: { ...ROOM, memberIds: ['a1', 'a2'] } })
+      }),
+      http.get('/api/agents/:id/files/:name', () =>
+        HttpResponse.json({ name: 'AGENTS.md', content: '# AGENTS\n' }),
+      ),
+      http.put('/api/agents/:id/files/:name', async ({ request }) => {
+        routed = ((await request.json()) as { content: string }).content
+        return HttpResponse.json({ name: 'AGENTS.md', content: routed })
+      }),
+    )
+  })
+
+  /** Pull a thread off `source`, let it go on empty canvas, and name the agent. */
+  async function dropAndCreate(
+    source: GraphNode,
+    opts: { fallbackTeamId: string | null; roomId: string | null },
+  ) {
+    const { result } = renderHook(() =>
+      useThreadDrop({
+        nodes: [source],
+        getNode: (id) => (id === source.id ? source : undefined),
+        screenToFlowPosition: (p) => p,
+        ...opts,
+      }),
+    )
+    act(() =>
+      result.current.openFromDrop(new MouseEvent('mouseup', { clientX: 300, clientY: 200 }), {
+        id: source.id,
+        type: 'boo',
+      }),
+    )
+    await act(() => result.current.createAgent('Bea'))
+  }
+
+  const teamBoo = {
+    ...boo,
+    data: { ...(boo.data as object), teamId: 'T' },
+  } as unknown as GraphNode
+
+  it("on a room's graph, joins the room as well as the source's team", async () => {
+    await dropAndCreate(teamBoo, { fallbackTeamId: 'T', roomId: 'R1' })
+    expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
+    expect(roomPatch).toEqual({ memberIds: ['a1', 'a2'] })
+    expect(useRoomStore.getState().roomsByTeam.get('T')?.[0]?.memberIds).toEqual(['a1', 'a2'])
+    // The thread's routing line still lands on the source agent.
+    expect(routed).toContain('Bea')
+  })
+
+  it("on the team's own graph, joins the team and no room", async () => {
+    await dropAndCreate(teamBoo, { fallbackTeamId: 'T', roomId: null })
+    expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
+    expect(roomPatch).toBeNull()
+  })
+
+  it('a thread off teamless Boo Zero on a room graph lands the agent in the room', async () => {
+    const booZero = {
+      id: 'boo-bz',
+      type: 'boo',
+      position: { x: 0, y: 0 },
+      data: { agentId: 'bz', name: 'Boo Zero', status: 'idle', teamId: null },
+    } as unknown as GraphNode
+    await dropAndCreate(booZero, { fallbackTeamId: 'T', roomId: 'R1' })
+    expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
+    expect(roomPatch).toEqual({ memberIds: ['a1', 'a2'] })
   })
 })

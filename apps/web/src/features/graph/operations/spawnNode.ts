@@ -16,6 +16,8 @@
 
 import { apiFetch } from '@clawboo/control-client'
 
+import { updateRoom } from '@/lib/roomsClient'
+import { useRoomStore } from '@/stores/rooms'
 import { useToastStore } from '@/stores/toast'
 import { useGraphStore } from '../store'
 
@@ -129,4 +131,32 @@ export async function joinTeam(
   }
   useGraphStore.getState().triggerRefresh()
   return true
+}
+
+/**
+ * Add a just-created agent to a chat room's members.
+ *
+ * A room's graph draws only the room's members, so an agent created on it
+ * joins the room as well as the team. The room is looked up under `teamId`,
+ * so an agent of another team never joins it.
+ */
+export async function joinRoom(
+  teamId: string,
+  roomId: string,
+  agent: SpawnAgentResult,
+): Promise<void> {
+  const room = useRoomStore
+    .getState()
+    .roomsByTeam.get(teamId)
+    ?.find((r) => r.id === roomId)
+  if (!room) return
+  const result = await updateRoom(teamId, roomId, {
+    memberIds: [...new Set([...room.memberIds, agent.agentId])],
+  })
+  if (result.ok) useRoomStore.getState().upsert(result.room)
+  else
+    useToastStore.getState().addToast({
+      type: 'error',
+      message: `${agent.name} was created but could not join ${room.name}: ${result.error}`,
+    })
 }

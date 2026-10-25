@@ -13,7 +13,7 @@ import { connectorSlugFromId } from './nodes/connectorTile'
 import { grantConnectorToAgent } from './operations/grantConnector'
 import { installSkillForAgent } from './operations/installSkill'
 import { withRoutingAppended } from './operations/routingLine'
-import { spawnAgent } from './operations/spawnNode'
+import { joinRoom, spawnAgent } from './operations/spawnNode'
 import { useGraphStore } from './store'
 import type { ThreadOption } from './ThreadPicker'
 import { threadOptionsFor } from './threadOptions'
@@ -53,6 +53,8 @@ export interface UseThreadDropOptions {
   expandBoo?: (booNodeId: string) => void
   /** The team a new agent joins when the Boo the thread came from has none. */
   fallbackTeamId: string | null
+  /** On a room's graph, the room a new agent joins as well. */
+  roomId?: string | null
 }
 
 export function useThreadDrop({
@@ -61,6 +63,7 @@ export function useThreadDrop({
   screenToFlowPosition,
   expandBoo,
   fallbackTeamId,
+  roomId = null,
 }: UseThreadDropOptions) {
   const [threadDrop, setThreadDrop] = useState<ThreadDropState | null>(null)
 
@@ -227,6 +230,9 @@ export function useThreadDrop({
       const teamId = sourceTeamId ?? fallbackTeamId
       const created = await spawnAgent(name, drop.flow, { teamId })
       if (!created) return
+      // A room's graph draws only the room's members, so an agent made there
+      // joins the room too.
+      if (teamId && roomId) await joinRoom(teamId, roomId, created)
       // The routing line the thread implied. Best-effort: the agent exists
       // either way, and a failed route is recoverable by drawing it again.
       const sourceId = drop.fromNodeId.startsWith('boo-') ? drop.fromNodeId.slice(4) : null
@@ -244,7 +250,7 @@ export function useThreadDrop({
         }
       }
     },
-    [threadDrop, fallbackTeamId, getNode],
+    [threadDrop, fallbackTeamId, roomId, getNode],
   )
 
   /**
