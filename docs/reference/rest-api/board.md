@@ -74,6 +74,7 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
     status: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
     priority: number
     teamId: string | null
+    roomId: string | null // the chat room it was delegated in; null = the team's General chat
     assigneeAgentId: string | null
     assigneeRuntime: string | null
     parentTaskId: string | null
@@ -428,6 +429,13 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 
 Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The handler emits a `comment_added` event and narrates a truncated form of the comment into the team chat room (best-effort, after the write). The handler does not 404 a missing task before inserting; the comment row is created against the supplied `taskId`.
 
+A `user` comment is also passed on to the task's assignee, unless the task is unassigned, `done` or `cancelled`:
+
+1. **The mailbox**, always first. The comment lands in the assignee's inbox, which every run reads when it starts. A queued or retried task finds it there, and so does the next turn of a running task when the steer below did not deliver it first.
+2. **A steer into the running run**, when the task is `in_progress` and a run is working on it. How the message gets in depends on the runtime (see [steering a running task](/runtimes/index#steering-a-running-task)). When the steer lands, the mailbox row is marked delivered so the agent does not read the comment a second time at its next run. When it does not land (the run already finished, or the runtime has no way in), the mailbox row stays and carries it.
+
+The steer runs in the background: the response does not wait for it.
+
 - **Path params**: `taskId`.
 - **Request body** (validated by `commentBody`):
 
@@ -461,6 +469,7 @@ Adds a comment to a task (discussion or a system note). `authorType` defaults to
     tenantId: string | null
     createdAt: number
   }
+  forwarded: boolean // true when a `user` comment was put in the assignee's mailbox
 }
 ```
 

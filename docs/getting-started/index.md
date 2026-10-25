@@ -76,7 +76,7 @@ This path involves more moving parts (a separate CLI and a long-lived Gateway pr
 - [Quickstart: the native runtime (no Gateway)](/getting-started/quickstart-native): the recommended ~60-second path
 - [Quickstart: OpenClaw](/getting-started/quickstart-openclaw): the Gateway path
 - [Deploy your first team and watch it collaborate](/getting-started/first-team)
-- [Dashboard tour](/getting-started/dashboard-tour): Atlas, the Ghost Graph, the sidebar, and the view modes
+- [Dashboard tour](/getting-started/dashboard-tour): the sidebar, the Org chart, the Ghost Graph, and the view modes
 
 ## See also
 

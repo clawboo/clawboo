@@ -11,7 +11,7 @@ These docs describe Clawboo **v0.5.0**, the current release.
 
 ## Do I need OpenClaw to use Clawboo?
 
-No. OpenClaw is one of the five [runtimes](/runtimes/index), not a hard dependency. The built-in **Clawboo Native** runtime ships inside the server (`builtIn: true`, nothing to install) and needs only a provider API key; paste an Anthropic, OpenAI, or OpenRouter key and you have a working team with no OpenClaw Gateway anywhere. The native-first onboarding flow does exactly this: it seeds a leader + specialist team and drops you straight into chat.
+No. OpenClaw is one of the five [runtimes](/runtimes/index), not a hard dependency. The built-in **Clawboo Native** runtime ships inside the server (`builtIn: true`, nothing to install) and needs only a provider connection: paste an Anthropic, OpenAI, or OpenRouter key, or pick a local Ollama, which needs no key, and you have a working team with no OpenClaw Gateway anywhere. The native-first onboarding flow does exactly this: you connect a provider, pick a starter team from the marketplace, and land in its General chat.
 
 OpenClaw remains a first-class secondary path if you already run it, see the [OpenClaw runtime](/runtimes/openclaw) page. For the no-Gateway flow, see [Quickstart (native)](/getting-started/quickstart-native).
 
@@ -37,7 +37,7 @@ Clawboo verifies a provider key before it stores one — on onboarding's **Conti
 
 ## Where is my data stored?
 
-Everything Clawboo owns lives under `~/.clawboo/` (override with the `CLAWBOO_HOME` environment variable). That directory holds the SQLite database `clawboo.db` (the agent registry, board, memory, chat history, settings, governance ledger, and event log, 28 tables in one file), `settings.json`, the encrypted secrets vault, the proxy device identity, the API-port file, and task worktrees.
+Everything Clawboo owns lives under `~/.clawboo/` (override with the `CLAWBOO_HOME` environment variable). That directory holds the SQLite database `clawboo.db` (the agent registry, board, memory, chat history, settings, governance ledger, and event log, 35 tables in one file), `settings.json`, the encrypted secrets vault, the proxy device identity, the API-port file, and task worktrees.
 
 Clawboo only ever _reads_ OpenClaw's `~/.openclaw/` directory for interop; it never writes there. The full file/dir map, backup instructions, and the WAL-sidecar detail are in [data and state](/operating/data-and-state).
 
@@ -98,14 +98,14 @@ If you set `CLAWBOO_HOME`, substitute that directory for `~/.clawboo` in both co
 
 The full reset is destructive; it removes the vault, the proxy device identity, and all teams/board/chat/memory data. Back up `~/.clawboo` first if any of it matters. Full instructions and the WAL-sidecar caveat are in [data and state → hard reset](/operating/data-and-state#hard-reset).
 
-## What's the difference between Atlas and the Ghost Graph?
+## What's the difference between the Org chart and the Ghost Graph?
 
 They are two scopes of the same node-graph surface (`GhostGraphScope = 'atlas' | 'team'`):
 
-- **Ghost Graph (team scope)** renders one team: its Boos, their skills, and the routing edges between them. It is embedded inside the team's group chat.
-- **Atlas (atlas scope)** is the global, all-teams view: Boo Zero presides at the top over per-team rows. You reach it from the dedicated Atlas nav button.
+- **Ghost Graph (team scope)** renders one team: its Boos, their skills, and the routing edges between them. It is the **Team graph** card beside the team's chat; in a room, the same card is titled **Room graph** and draws that room.
+- **The Org chart** (formerly Atlas, which is why its scope is still `atlas` in the code) is the global, all-teams view: Boo Zero presides over every team, at the center in the default radial layout or at the top of a tree. Open it from the sidebar's **Org chart** row or with Cmd/Ctrl+1.
 
-So "the Ghost Graph" usually means the per-team canvas, and "Atlas" is the zoomed-out, whole-fleet org chart. Both share the same rendering, layout, and team-halo machinery. See [using the Ghost Graph](/using/ghost-graph) and the [glossary](/appendices/glossary).
+So "the Ghost Graph" usually means the per-team canvas, and the Org chart is the zoomed-out, whole-fleet view. Both share the same rendering and layout machinery; the team halos, the Tree/Radial toggle, and the Activity and browser docks are on the Org chart only. See [using the Ghost Graph](/using/ghost-graph) and the [glossary](/appendices/glossary).
 
 ## Can I use a local model?
 
@@ -134,7 +134,7 @@ Verification. Clawboo separates the builder from the judge: a completed file-mut
 ## See also
 
 - [Known issues](/appendices/known-issues), candid limitations and dormant seams
-- [Glossary](/appendices/glossary), canonical definitions of Boo, Boo Zero, Atlas, the board, runtimes, and more
+- [Glossary](/appendices/glossary), canonical definitions of Boo, Boo Zero, the Org chart, the board, runtimes, and more
 - [Getting started](/getting-started/index), the two install paths
 - [Operating Clawboo](/operating/index), deployment, security, data, and defaults
 - [Runtimes](/runtimes/index), the five runtimes and their capability matrix

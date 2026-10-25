@@ -94,7 +94,7 @@ A team's leader is **Boo Zero** by default (the universal, teamless leader that 
 
 There are two ways work flows across a mixed team. Both land on the same board.
 
-**a. From group chat (the chat-fused path).** Open the team's [Group Chat](/using/group-chat), pass the one-time Know-Your-Team gate, and send a message. The leader triages it and emits structured delegations (`<delegate to="@Name">…</delegate>` or a `<plan>`); the always-on orchestration engine turns each one into a durable **board task**, claims it for the target, delivers it, and reflects the result back to the leader as a `[Task Update]`. This is the [chat-fused board](/using/group-chat#5-watch-delegations-land-on-the-board): the board is canonical, the chat is narration.
+**a. From group chat (the chat-fused path).** Open the team's chat (**General**, in the agent column; see [group chat](/using/group-chat)), pass the one-time Know-Your-Team gate, and send a message. The leader triages it and emits structured delegations (`<delegate to="@Name">…</delegate>` or a `<plan>`); the always-on orchestration engine turns each one into a durable **board task**, claims it for the target, delivers it, and reflects the result back to the leader as a `[Task Update]`. This is the [chat-fused board](/using/group-chat#5-watch-delegations-land-on-the-board): the board is canonical, the chat is narration.
 
 ```mermaid
 sequenceDiagram

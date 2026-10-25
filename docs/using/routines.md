@@ -45,6 +45,8 @@ The [Board](/using/board#routine-runs) shows every routine's upcoming runs on it
 
 Click a row to open it. The three buttons at the right of a row are shortcuts for **Pause** or **Resume** (**Disable** or **Enable** on an OpenClaw cron job), **Run now**, and **Delete**. OpenClaw cron jobs are created on the Gateway, not here, and have no **Edit**.
 
+An agent's page lists the agent routines that send that agent work in its **Tasks & Routines** card, under its tasks, as the same rows with the same shortcuts. **New routine** there opens the dialog already set up as an agent task for that agent. See [Agents](/using/agents).
+
 <Note>
 When the OpenClaw Gateway is disconnected, the list still loads. If you use OpenClaw, an amber notice says its cron jobs are hidden until it reconnects, or that the list shown is the last one the Gateway sent.
 </Note>

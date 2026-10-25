@@ -32,6 +32,7 @@ interface RuntimeAdapter {
   abort(run: RunHandle): Promise<void>
   setModel(run: RunHandle, model: string): Promise<void>
   writeContext(run: RunHandle, key: string, value: string): Promise<void>
+  steer?(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult>
   readonly sessionCodec?: SessionCodec
   dispose?(): Promise<void>
 }
@@ -51,15 +52,16 @@ interface RuntimeAdapter {
 
 `capabilities()` returns a `Capabilities` block describing what the runtime can do and how it composes with the host. The base flags are concrete runtime properties:
 
-| Field                  | Type       | Meaning                                                                                                        |
-| ---------------------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
-| `streaming`            | `boolean`  | Emits incremental text deltas (vs. a whole message at turn end).                                               |
-| `mcp`                  | `boolean`  | Can discover and call MCP tool servers.                                                                        |
-| `worktrees`            | `boolean`  | Runs work in isolated git worktrees.                                                                           |
-| `resume`               | `boolean`  | Can resume a prior session from a serialized handle.                                                           |
-| `toolApproval`         | `boolean`  | Surfaces tool-approval gates the host must resolve.                                                            |
-| `models`               | `string[]` | Model ids the runtime can use (may be empty when unknown).                                                     |
-| `contextWindowTokens?` | `number`   | The context window, when known. Drives the proactive rotation watermark; omitted/0 leaves the watermark inert. |
+| Field                  | Type                                     | Meaning                                                                                                                                    |
+| ---------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `streaming`            | `boolean`                                | Emits incremental text deltas (vs. a whole message at turn end).                                                                           |
+| `mcp`                  | `boolean`                                | Can discover and call MCP tool servers.                                                                                                    |
+| `worktrees`            | `boolean`                                | Runs work in isolated git worktrees.                                                                                                       |
+| `resume`               | `boolean`                                | Can resume a prior session from a serialized handle.                                                                                       |
+| `toolApproval`         | `boolean`                                | Surfaces tool-approval gates the host must resolve.                                                                                        |
+| `models`               | `string[]`                               | Model ids the runtime can use (may be empty when unknown).                                                                                 |
+| `contextWindowTokens?` | `number`                                 | The context window, when known. Drives the proactive rotation watermark; omitted/0 leaves the watermark inert.                             |
+| `steering?`            | `'live' \| 'interrupt-resume' \| 'none'` | How `steer()` gets a message into a run that is already working. Omitted ⇒ `'none'`. See [`steer()`](#steer-a-message-into-a-running-run). |
 
 On top of the base flags sits the **native-preservation seam**, a block of optional fields that let the host route a runtime to the right integration depth _by construction_, never by branching on a runtime id:
 
@@ -107,7 +109,19 @@ The three side-effecting methods map onto the runtime's own controls:
 
 - `abort(run)` cancels the live run. The OpenClaw adapter does a _two-tier teardown_: a surgical per-run `chat.abort` when a `runId` is bound, plus a heavier session-level `sessions.abort` backstop _always_, covering the runId-not-yet-bound race and any queued/pending work.
 - `setModel(run, model)` switches the model mid-session.
-- `writeContext(run, key, value)` writes a context file (e.g. updating an agent file).
+- `writeContext(run, key, value)` writes a context file (e.g. updating an agent file). It is **not** a mid-run channel: a spawned CLI never reads the file back during the run, and OpenClaw's running session does not re-read an agent file. Use `steer()` for that.
+
+### `steer()`: a message into a running run
+
+`steer(run, text, opts?)` puts a message in front of the model during the run it is aimed at; it is how a person's comment on a task reaches the agent working on it. The adapter declares how in `capabilities().steering`:
+
+- `'live'`: the runtime takes the message into the turn in progress at its next boundary without stopping anything (native, OpenClaw, Claude Code, Codex).
+- `'interrupt-resume'`: the runtime has no way in mid-run, so the driver stops the process and resumes the same session with the message as the next input (Hermes). The stop is **absorbed inside the driver**: it never surfaces as a terminal event, so the host sees one run that carries on. This is load-bearing: an aborted terminal would reach the team engine's failure path (block the task, fail the execution, reflect a failure to the delegator).
+- `'none'` or omitted: no mid-run channel. A host must not call `steer()` on such a run.
+
+`steer()` is optional and never throws. It resolves a `SteerResult`: `{ delivered: true, mode }` when the runtime accepted the message for this run (the model will see it before the run ends), or `{ delivered: false, reason }` with `reason` one of `no-run`, `run-ended`, `unsupported`, `rejected` (plus an optional `detail`). A caller falls back to durable delivery on any refusal; the server's comment path writes the agent's mailbox first and steers second, and marks the mailbox row delivered only when the steer lands.
+
+`SteerOptions.passive` marks an ambient FYI rather than a person's instruction: deliver it if the run reads input again, but never keep a finishing run going for it and never stop a run to take it (an `'interrupt-resume'` adapter refuses a passive steer). The per-run-driver adapters share their `steer()` body through `steerThroughDriver(driver, text, mode, opts)`; `steeringOf(caps)` reads an omitted claim as `'none'`.
 
 ### Optional members: `sessionCodec` and `dispose`
 

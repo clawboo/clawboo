@@ -193,6 +193,12 @@ Answering **Always** to a command prompt records a standing permission that outl
 
 The list is read when the tab opens, on its **Refresh** button, and after a revoke attempt, so a permission minted by answering **Always** while the tab is open shows up once you refresh. If that policy cannot be read at all, the panel says so and names how many rules the document last held, rather than showing an empty list over rules that are still being enforced. See [Working with agents](/using/agents) for the tab, and [Approvals](/using/approvals) for answering a prompt in the first place.
 
+## Steering a running task
+
+When you comment on a task an OpenClaw agent is working on, Clawboo sends the comment with `chat.send` and `queueMode: 'steer'` over the server's operator connection. The Gateway puts it into the session's active run at the next runtime boundary (before the next tool launch or model call) without stopping the tool that is running, and confirms it with a `chat` final carrying the steer's own run id once the message is committed to the transcript. Clawboo filters that frame out of the run's event stream, so it can never be mistaken for the run's own end.
+
+If the active run cannot take the steer (it is not streaming, or it is about to finish), the Gateway would queue the message as a follow-up turn after the run, which nobody would be watching. So when the run ends with a steer still unread, Clawboo cancels it (`chat.abort` with the steer's run id) and leaves the comment in the agent's mailbox for its next run. Verified against OpenClaw 2026.9.2's `chat.send` handler. See [steering a running task](/runtimes/index#steering-a-running-task).
+
 ## Why OpenClaw can't be run by the per-task executor
 
 The other four runtimes execute a board task by spawning a one-shot process: claim the task, provision a worktree, run the CLI/SDK, report up. OpenClaw is a **connected substrate**; its runs ride the live Gateway session over the server's long-lived connection, so the one-shot executor runner refuses it **by construction**, before any board mutation:

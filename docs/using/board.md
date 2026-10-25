@@ -20,10 +20,10 @@ The Board panel is always available. Its subsystem is always on, so the panel re
 
 ## Open the board
 
-Click **Board** (the kanban-square icon) in the primary nav of the left sidebar, or press **`Cmd/Ctrl + 4`**. The panel mounts in the main content area.
+Click **Board** (the kanban-square icon) in the sidebar's nav, or press **`Cmd/Ctrl + 2`**. The panel mounts in the main content area.
 
 <Note>
-The number shortcuts cover four of the sidebar surfaces: `Cmd/Ctrl+1` Atlas, `+2` Fleet, `+3` Marketplace, `+4` Board. Connectors and Memory sit in the sidebar without one, and the rest (Routines, Tokens Used, System, and so on) live in the Settings modal (`Cmd/Ctrl+,`).
+The number shortcuts open four of the sidebar's views: `Cmd/Ctrl+1` the Org chart, `+2` Board, `+3` Connectors, `+4` Memory. Marketplace sits in the sidebar without one, and the rest (Fleet, Routines, Tokens Used, System, and so on) live in the Settings modal (`Cmd/Ctrl+,`).
 </Note>
 
 ## The calendar
@@ -272,6 +272,8 @@ A live terminal (`ActivityTerminal`) scoped to this task, the streaming tool-cal
 
 The task's comment log, oldest first, each entry attributed the way you would say it: the agent by name, **You** for your own actions (a retry, an assignment), and **Clawboo** for the notes the orchestrator writes itself (a run failing, a result arriving late, a limit being hit). The agent's report when it finishes lands here too.
 
+The drawer shows the log. To add a comment, open the task in a team chat's [Tasks card](/using/group-chat#the-tasks-card) or in its agent's **Tasks & Routines** card, which have a comment box. A comment you post on an open task is passed on to the agent assigned to it. It goes into the agent's mailbox, which it reads when its next run starts, and, when the task is in progress, straight into the run that is working on it: at the run's next step on Clawboo Native, Claude Code, Codex and OpenClaw, or by pausing and resuming the same session on Hermes. When the running agent takes it, it is not delivered a second time later. A comment on a finished or cancelled task stays on the card only. See [Steering a running task](/runtimes/index#steering-a-running-task).
+
 ### Lineage / deps
 
 The task's ancestor chain (the parent-task lineage from the recursive-CTE `ancestors` read), rendered as a chain of short ids (`a1b2c3d4 → …`). A top-level task reads "Top-level task (no ancestors)."
@@ -299,9 +301,12 @@ How it works:
 
 - **Projection store.** `GroupChatPanel` renders cards from a read-only board projection store (`useBoardStore`), _not_ from the chat transcript. On opening a team it loads the authoritative snapshot via `boardClient.listTasks(teamId)` (a `GET /api/board?teamId=…` read), so the cards survive a page refresh. The orchestrator's client-derived change-feed then applies live mutations (`applyChange`) to the same store, merged last-write-wins by `updatedAt`.
 - **Interleaving by `createdAt`.** Each non-`cancelled` board task is placed into the timeline at its `createdAt` timestamp, alongside the chat blocks and any live streaming cards. So a task card appears in causal position, right where the delegation happened, and is not appended to the bottom.
+- **One chat's tasks.** A team's **General** chat shows the tasks delegated in General, and each [room](/using/group-chat#rooms) shows only its own. After you [clear a chat](/using/group-chat#clear-a-chat), the cards made before the clear leave its timeline; the tasks stay on the board.
 - **Live status.** The `BoardTaskCard` shows the task title, a status pill (Queued, Working, Verifying, Done, Cancelled), and the assignee's avatar + name. A task that needs you says why instead (**Failed**, **Timed out**, **Stopped**, **Unassigned**), with a **Resolve on board** link. As the board change-feed flips the task's status, the card's pill updates in place. A completed (`done`) card also shows the report-up summary, and a failed one shows the reason; because both are board _comments_ (not task-row fields), a card reloaded after a refresh fetches them lazily from `GET /api/board/:taskId`.
 - **The trail.** **Comments & activity** at the foot of each card opens, inside the card, the task's comment log and its live activity feed (tool calls, results, errors). It is folded away by default so the timeline stays readable; open it to see how a task reached its result or why it failed. If the comments cannot be loaded, the trail says so and offers **Retry**.
 - **Open on board.** The expand icon beside the status pill switches to the Board with that task's detail drawer open. If the Board is filtered to a different team, the filter switches to the task's team so its card is not hidden. **All teams** already shows the card, so it stays as it is. In Week or Month view the calendar moves to the day the card sits on and brings it into view, so closing the drawer lands on the card.
+
+Beside the conversation, a team chat's **Tasks** card lists that chat's tasks in sections (Needs you, In progress, To do, Done, Cancelled). Opening one there shows its progress, its comments and the comment box that steers its agent, and **Open on Board** in the card's header does what the expand icon does. An agent's page has the same list for the tasks assigned to that agent, in its **Tasks & Routines** card. See [The Tasks card](/using/group-chat#the-tasks-card).
 
 <Info>
 The chat-fused board cards and the standalone Board panel read the same canonical board. The panel is the cross-team operator view; the inline cards are the per-team narration. Neither is a write path back to the board; a chat message describes a decision; the [board mutation](/concepts/the-board) *is* the decision.

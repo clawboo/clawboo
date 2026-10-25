@@ -3,17 +3,18 @@ title: 'Using Clawboo: the feature map'
 description: A navigation index to every Clawboo dashboard feature, grouped by where it lives in the UI.
 ---
 
-Clawboo's dashboard is a single window split into three columns: a leftmost team-icon strip, an agent/nav column, and the main content area. The main area is a [discriminated `ViewMode`](/appendices/glossary): selecting a team opens its **group chat**, clicking an agent opens its **detail view**, and the sidebar's nav buttons and the Settings modal switch the main area to one of fifteen full-screen **nav panels** (`NAV_VIEWS` in `stores/view.ts`, each mapped to a lazily-loaded feature component by `NavPanel` in `features/layout/navPanels.tsx`, which also wraps each panel in its own error boundary). A few surfaces, Teams, Group chat, Agents, Boo Zero, and Theming, are reached through the sidebar, agent rows, the group-chat row, or the theme toggle rather than a nav button. This page is mostly navigation; each linked how-to grounds itself in its own feature module and backing API route(s).
+Clawboo's dashboard is a single window: a sidebar on the left (the team rail and an agent column you can resize or collapse) and the main content area. The main area is a [discriminated `ViewMode`](/appendices/glossary): clicking a team icon opens the team's **Home**, its rooms open a **team chat**, clicking an agent opens its **agent page**, and the sidebar's nav buttons and the Settings modal switch the main area to one of fifteen full-screen **nav panels** (`NAV_VIEWS` in `stores/view.ts`, each mapped to a lazily-loaded feature component by `NavPanel` in `features/layout/navPanels.tsx`, which also wraps each panel in its own error boundary). A few surfaces, Teams, Group chat, Agents, Boo Zero, Home, and Theming, are reached through the team rail, the agent column's mascot grid and rooms list, the Home row, or the theme toggle rather than a nav button. This page is mostly navigation; each linked how-to grounds itself in its own feature module and backing API route(s).
 
 ## Team-scoped surfaces
 
-These live in the left two columns and follow the currently selected team. The team-icon strip (`TeamSidebar`) and the agent/group-chat column (`AgentListColumn`) drive them.
+These live in the sidebar and follow the currently selected team. The team rail (`TeamSidebar`) and the agent column (`AgentListColumn`) drive them.
 
-- **[Teams](/using/teams)**: Create and manage teams, set the team leader, capture per-team rules, and pick a color collection. Reached from the team-icon strip's **+ Create team** button and right-click context menu.
-- **[Group chat](/using/group-chat)**: The team's collaboration room, opened by clicking a team icon or the **Group Chat** row in the agent column. Gated once per team by the "Know Your Team" onboarding flow before the composer unlocks.
-- **[Ghost Graph & Atlas](/using/ghost-graph)**: The team's agent topology (embedded in group chat) and the global all-teams **Atlas** view (the `graph` nav slot, labeled **Atlas (All Teams)**). Halos, team badges, peacock expand/collapse, the Boo port and the + button for building on the canvas, and the activity dock live here.
-- **[Agents](/using/agents)**: Click any agent row to open its detail view: chat, the SOUL / IDENTITY / TOOLS / AGENTS file editors, and the personality sliders.
-- **[Boo Zero](/using/boo-zero)**: The universal team leader. Its standalone view (opened from the mascot icon) hosts the display name and global brief; per-team briefs and rules live behind the gear in the group-chat header.
+- **[Teams](/using/teams)**: Create and manage teams, set the team leader, capture per-team rules, and pick a color collection. Reached from the team rail's **+** (Create a team) button and right-click context menu.
+- **[Group chat](/using/group-chat)**: The team's collaboration room, opened from **General** in the agent column's rooms list. A team can add more **rooms**, each a subset of its members with its own conversation, and any chat can be cleared from its row's **"..."** menu. Gated once per team by the "Know Your Team" onboarding flow before the composer unlocks.
+- **[Ghost Graph & Org chart](/using/ghost-graph)**: The team's agent topology (the **Team graph** card beside a team's chat) and the all-teams **Org chart** (formerly Atlas; the `graph` nav slot). Halos, team badges, peacock expand/collapse, the Boo port and the + button for building on the canvas, and the Org chart's activity and browser docks live here.
+- **[Agents](/using/agents)**: Click any tile in the mascot grid to open that agent's page: its chat, with cards beside it for its graph, tasks and routines, browser, activity, and details (the personality sliders and the agent-file editors).
+- **[Boo Zero](/using/boo-zero)**: The universal team leader. Its standalone view (opened from the mascot icon) hosts the display name and global brief; per-team briefs and rules live behind the gear in a team chat's header.
+- **[Home](/getting-started/dashboard-tour#home)**: Each team's Home, opened from its icon in the team rail or the **Home** row at the top of the nav. For now it is a placeholder for the team's dashboards and the artifacts its agents make.
 
 ## Org-wide nav panels
 
@@ -38,28 +39,28 @@ These open from the nav buttons at the bottom of `AgentListColumn` or from the S
 
 ## Where things live (nav slots)
 
-The fifteen nav panels map one-to-one to `NavView` ids. The table is the same wiring `ContentArea` uses, so it doubles as a reference for the `navigateTo(view)` action. Six panels live in the sidebar, and four of them have a number shortcut: `Cmd/Ctrl+1–4` is Atlas, Fleet, Marketplace, Board. The Settings modal (`Cmd/Ctrl+,`) holds the other nine, plus Memory, which is in both places on purpose: the sidebar opens it full-screen with its graph, and Settings shows the list.
+The fifteen nav panels map one-to-one to `NavView` ids. The table is the same wiring `ContentArea` uses, so it doubles as a reference for the `navigateTo(view)` action. Five panels live in the sidebar nav, in this order: Org chart, Board, Connectors, Memory, Marketplace. The first four have a number shortcut, `Cmd/Ctrl+1` to `Cmd/Ctrl+4`, in that order. The Settings modal (`Cmd/Ctrl+,`) holds the other ten, Fleet among them, plus Memory, which is in both places on purpose: the sidebar opens it full-screen with its graph, and Settings shows the list. A team's **Home** row sits above the nav when a team is selected, but Home is a view of its own, not a nav panel. `Cmd/Ctrl+\` collapses or expands the sidebar.
 
-| Nav id (`NavView`) | Label             | Lives in              | Page                                                      |
-| ------------------ | ----------------- | --------------------- | --------------------------------------------------------- |
-| `graph`            | Atlas (All Teams) | Sidebar, `Cmd/Ctrl+1` | [Ghost Graph & Atlas](/using/ghost-graph)                 |
-| `board`            | Board             | Sidebar, `Cmd/Ctrl+4` | [Board](/using/board)                                     |
-| `marketplace`      | Marketplace       | Sidebar, `Cmd/Ctrl+3` | [Marketplace](/using/marketplace)                         |
-| `connectors`       | Connectors        | Sidebar               | [Connectors](/using/connectors)                           |
-| `fleet`            | Fleet (Overview)  | Sidebar, `Cmd/Ctrl+2` | [Dashboard tour](/getting-started/dashboard-tour)         |
-| `memory`           | Memory            | Sidebar and Settings  | [Memory browser](/using/memory-browser)                   |
-| `providers`        | Providers         | Settings (Workspace)  | [Connecting runtimes](/runtimes/connecting-runtimes)      |
-| `runtimes`         | Runtimes          | Settings (Workspace)  | [Connecting runtimes](/runtimes/connecting-runtimes)      |
-| `capabilities`     | Capabilities      | Settings (Workspace)  | [Capabilities dashboard](/using/capabilities-dashboard)   |
-| `routines`         | Routines          | Settings (Workspace)  | [Routines](/using/routines)                               |
-| `cost`             | Tokens Used       | Settings (Insights)   | [Cost & budgets](/using/cost-and-budgets)                 |
-| `obs`              | Observability     | Settings (Insights)   | [Observability dashboard](/using/observability-dashboard) |
-| `governance`       | Governance        | Settings (Insights)   | [Governance dashboard](/using/governance-dashboard)       |
-| `system`           | System            | Settings (System)     | [System & maintenance](/using/system-maintenance)         |
-| `health`           | System Health     | Settings (System)     | [System health](/using/system-health)                     |
+| Nav id (`NavView`) | Label         | Lives in                                        | Page                                                      |
+| ------------------ | ------------- | ----------------------------------------------- | --------------------------------------------------------- |
+| `graph`            | Org chart     | Sidebar, `Cmd/Ctrl+1`                           | [Ghost Graph & Org chart](/using/ghost-graph)             |
+| `board`            | Board         | Sidebar, `Cmd/Ctrl+2`                           | [Board](/using/board)                                     |
+| `connectors`       | Connectors    | Sidebar, `Cmd/Ctrl+3`                           | [Connectors](/using/connectors)                           |
+| `memory`           | Memory        | Sidebar (`Cmd/Ctrl+4`) and Settings (Workspace) | [Memory browser](/using/memory-browser)                   |
+| `marketplace`      | Marketplace   | Sidebar                                         | [Marketplace](/using/marketplace)                         |
+| `providers`        | Providers     | Settings (Workspace)                            | [Connecting runtimes](/runtimes/connecting-runtimes)      |
+| `runtimes`         | Runtimes      | Settings (Workspace)                            | [Connecting runtimes](/runtimes/connecting-runtimes)      |
+| `capabilities`     | Capabilities  | Settings (Workspace)                            | [Capabilities dashboard](/using/capabilities-dashboard)   |
+| `routines`         | Routines      | Settings (Workspace)                            | [Routines](/using/routines)                               |
+| `fleet`            | Fleet         | Settings (Insights)                             | [Dashboard tour](/getting-started/dashboard-tour)         |
+| `cost`             | Tokens Used   | Settings (Insights)                             | [Cost & budgets](/using/cost-and-budgets)                 |
+| `obs`              | Observability | Settings (Insights)                             | [Observability dashboard](/using/observability-dashboard) |
+| `governance`       | Governance    | Settings (Insights)                             | [Governance dashboard](/using/governance-dashboard)       |
+| `system`           | System        | Settings (System)                               | [System & maintenance](/using/system-maintenance)         |
+| `health`           | System Health | Settings (System)                               | [System health](/using/system-health)                     |
 
 <Note>
-The `fleet` panel (a read-only overview) does not have its own how-to; it is covered in the [dashboard tour](/getting-started/dashboard-tour).
+The `fleet` panel (a read-only overview, in the Settings modal under Insights) does not have its own how-to; it is covered in the [dashboard tour](/getting-started/dashboard-tour).
 
 **Approvals is not a nav slot.** It has a how-to page ([Approvals](/using/approvals)) but no `NavView` id: approvals render in the [board](/using/board)'s **Needs you** column and in an inline tray above the [group-chat](/using/group-chat) composer.
 </Note>
@@ -68,7 +69,7 @@ The `fleet` panel (a read-only overview) does not have its own how-to; it is cov
 
 ## See also
 
-- [Dashboard tour](/getting-started/dashboard-tour): Atlas, the sidebar, and the view modes, end to end
+- [Dashboard tour](/getting-started/dashboard-tour): the sidebar, the Org chart, and the view modes, end to end
 - [First team](/getting-started/first-team): deploy a team and watch it collaborate
 - [Concepts](/concepts/index): the models behind these features (the board, peer chat, verification, governance)
 - [Runtimes overview](/runtimes/index): the five runtime classes and the capability matrix

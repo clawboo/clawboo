@@ -61,7 +61,7 @@ Clawboo is for a developer running **a team of AI agents**, not a single assista
 - you want to mix runtimes on one team, a native agent that needs no Gateway, a Claude Code worker, a Hermes teammate that keeps its own skills and memory, and have them coordinate instead of running in separate windows;
 - you need coordination that _survives a refresh_: a durable board, race-free claiming, crash recovery, and cross-runtime handoff, not a chat scrollback you have to babysit;
 - you want a USD budget, a kill-switch, and a verification gate around agentic work before you let several agents loose on a repo;
-- you want one place to see what the fleet is doing, a [Ghost Graph](/using/ghost-graph) and [Atlas](/using/ghost-graph) over a single event log, with traces, fleet-health, and cost.
+- you want one place to see what the fleet is doing, a [Ghost Graph](/using/ghost-graph) per team and an all-teams [Org chart](/using/ghost-graph) over a single event log, with traces, fleet-health, and cost.
 
 If you only run one agent at a time, the standalone runtime is enough. Clawboo's surface area earns its keep when there are several agents, several runtimes, and a need for the work to be durable and bounded.
 

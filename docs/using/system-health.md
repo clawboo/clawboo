@@ -3,7 +3,7 @@ title: Check System Health
 description: Read the boot-probe checklist, the degraded/fatal banner, resolved runtime state, and re-run the probe from the System Health panel.
 ---
 
-Use this page when you want to know whether your Clawboo install is sound: which foundations passed at boot, what the server resolved (state dir, database, port), and what production posture it is running with. The **System Health** panel is the always-visible surface over the [boot probe](/appendices/glossary); it is a normal navigation item.
+Use this page when you want to know whether your Clawboo install is sound: which foundations passed at boot, what the server resolved (state dir, database, port), and what production posture it is running with. The **System Health** panel is the always-available surface over the [boot probe](/appendices/glossary); it is a regular item in the Settings modal.
 
 The panel (`SystemHealthPanel`) is backed by `/api/health`. The boot probe runs once on every server start and is cached; the panel reads that cached report and can recompute it on demand.
 

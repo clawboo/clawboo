@@ -1,11 +1,11 @@
 ---
 title: Create and manage teams
-description: Create a team from a marketplace template or empty, set leaders and rules, pick color collections, and archive or delete it.
+description: Create a team from a marketplace template or empty, find its Home and its chats (General plus rooms), set leaders and rules, pick color collections, and archive or delete it.
 ---
 
-Use this page when you want to group [Boos](/appendices/glossary) into a team, the unit Clawboo coordinates as one chat room and one shared plane. A team is a row in SQLite (`teams`) plus the agents whose `team_id` points at it; everything else (the group chat, the [Ghost Graph](/using/ghost-graph) scope, [Boo Zero](/using/boo-zero)'s per-team brief, the durable rules) hangs off that row.
+Use this page when you want to group [Boos](/appendices/glossary) into a team, the unit Clawboo coordinates as one shared plane: its chats (a General chat plus any rooms you add), its board, memory, brief and rules all belong to the team. A team is a row in SQLite (`teams`) plus the agents whose `team_id` points at it; everything else (its chats, its [Ghost Graph](/using/ghost-graph), [Boo Zero](/using/boo-zero)'s per-team brief, the durable rules) hangs off that row.
 
-You manage teams from two places in the dashboard: the **team sidebar** (the leftmost 60px column, `TeamSidebar`) for creating, switching, archiving, and deleting, and the **team header** inside a team's group chat (`GroupChatViewHeader`) for its brief and rules. Both are backed by `/api/teams*` and `/api/team-rules/*`.
+You manage teams from two places in the dashboard: the **team rail** (the leftmost 60px column of the sidebar, `TeamSidebar`) for creating, switching, archiving, and deleting, and the **chat header** of the team's General chat or any of its rooms (`GroupChatViewHeader`) for its brief and rules. Both are backed by `/api/teams*` and `/api/team-rules/*`.
 
 For a guided first run, start with [Deploy your first team](/getting-started/first-team). For the conceptual model (why a team has a shared plane and a private plane), see [Teams and planes](/concepts/teams-and-planes).
 
@@ -22,7 +22,7 @@ A team is a Clawboo-native record. Deploying a populated template creates each a
 
 ### 1. Open the team browser
 
-In the team sidebar, click the dashed **+** button (`title="Create a team"`). It takes you to the **Marketplace → Teams** tab, the one canonical place to browse and deploy a team. Press **Deploy** on any team card (or the **Start from scratch** card, for a blank team) to open `CreateTeamModal` at its **customize** step.
+In the team rail, click the dashed **+** button (tooltip **Create a team**). It takes you to the **Marketplace → Teams** tab, the one canonical place to browse and deploy a team. Press **Deploy** on any team card (or the **Start from scratch** card, for a blank team) to open `CreateTeamModal` at its **customize** step.
 
 The modal is a four-step flow (**pick → customize → deploy → complete**), but the **pick** step only appears on the first-run welcome screen, before you have any teams; every other entry, the marketplace **Deploy** buttons and **Start from scratch**, jumps straight to **customize**. When the pick step does show, it renders the same team showcase described next.
 
@@ -33,7 +33,7 @@ The modal is a four-step flow (**pick → customize → deploy → complete**), 
 The Teams tab, and the first-run pick step, list the team catalog with a search box and two filter rows:
 
 - **Category pills**: the popular categories inline, the rest folded under a **+N more** toggle; only categories that actually have templates render.
-- **Source pills**: `All`, `Clawboo`, `Agency Agents`, each with a colored dot.
+- **Pack pills**: `All`, then one pill for each pack in the catalog, each with a colored dot.
 
 Press **Deploy** on a team card to advance to **customize** pre-filled with that template's name, icon, and color. Press the **Start from scratch** card to advance with a blank `New Team` / `👻` placeholder and no agents.
 
@@ -49,7 +49,7 @@ The **customize** step has three sections:
 | **Runtime (per agent)** | The runtime each roster agent runs on, chosen from a per-row dropdown                          | `agents.runtime` (at create)                                                                               |
 | **Model (per agent)**   | The model an agent runs on, from a dropdown next to its runtime (Native, OpenClaw, and Hermes) | native `AgentConfig.primaryModel`; OpenClaw `agents.list[]` override; Hermes `execConfig` (via OpenRouter) |
 
-The accent color and the teammate color collection are independent: the accent tints the team badge and its [Ghost Graph](/using/ghost-graph) halo, while the collection decides how the member Boos are colored. The roster preview seeds its palette with a client-minted team id so the colors you see here match the deployed team exactly (per-team hue rotation).
+The accent color and the teammate color collection are independent: the accent tints the team badge and its halo on the [Org chart](/using/ghost-graph), while the collection decides how the member Boos are colored. The roster preview seeds its palette with a client-minted team id so the colors you see here match the deployed team exactly (per-team hue rotation).
 
 The eight color collections are `vivid-pop`, `dusty-pastel-pro`, `coastal-mist`, `executive-jewel`, `sharp-saas`, `soft-neutral-editorial`, `monochrome-accent`, and `classic`. `classic` is the default and uses the legacy per-Boo tints (it ignores the hue-rotation seed).
 
@@ -89,7 +89,21 @@ Along the way the deploy loop also:
 - **Generates Boo Zero's per-team brief** (`PUT /api/boo-zero/team-briefs/:id`, best-effort).
 - **Enables agent-to-agent coordination** (`PATCH /api/system/openclaw-config { agentToAgent: { enabled: true } }`) if any agent's `AGENTS.md` has `@`-routing, non-fatal if it fails.
 
-When the loop finishes you land in the new team's group chat.
+When the loop finishes you land in the new team's **General** chat.
+
+## Find your way around a team
+
+The sidebar has two parts: the **team rail** on the left and the **agent column** beside it.
+
+- **Team rail.** One icon per team, with the Boo Zero mascot at the top and the dashed **+** at the bottom. Click a team's icon to select the team and open its **Home**. Right-click it for the team's actions (see [Archive and delete](#archive-and-delete)).
+- **Home.** A placeholder for now: it says that the team's dashboards, and the artifacts its agents make, will live there. The **Home** row in the agent column's nav opens it too.
+- **Agent column.** With a team selected, it shows the team's name and a search icon that filters the agents, then the team's agents as a grid of mascot tiles (a pulsing mint dot marks the ones working, a red dot any in error, and Boo Zero comes last). Click a tile to open that agent's page (see [Working with agents](/using/agents)). Below the tiles come the team's chats, then **Create Boo** (while an OpenClaw Gateway is connected) and the nav.
+
+## A team's chats: General and rooms
+
+The agent column lists the team's chats under a **New room** button. **General** comes first, labelled **General (Main Room)**: the team's own group chat, with everyone on the team in it, always pinned. Your **rooms** follow, pinned ones first. A room is a subset of the team's members with its own conversation and its own task cards; **New room** asks for a name and at least one member, then opens the room's chat. Boo Zero leads General and every room, and is never a member you pick. The team's rules, brief, memory and board stay team-wide, whichever chat you are in.
+
+Each chat's row has a **...** menu with **Clear chat**, which takes the chat's messages off the screen (they are set aside, not deleted) and has every agent start that conversation fresh; its tasks stay on the board and in the chat's **Tasks** card. A room's menu also has **Pin** (or **Unpin**), **Rename** and **Delete**. See [Group chat](/using/group-chat) for working in General and in rooms.
 
 ## Leaders
 
@@ -98,7 +112,7 @@ A team's leader is **not** forced to the first agent. Clawboo's model is:
 - **Boo Zero is the universal leader of every team.** It is teamless in the database and participates in each team via a team-scoped session.
 - **`teams.leaderAgentId` is the optional _team-internal lead_**, a second-tier coordinator that sits below Boo Zero. The deploy loop sets it only when it detects a genuine leadership role in the roster (CTO, Team Lead, and similar archetypes). When no leader role is detected, the `PATCH /api/teams/:id` writes `null` so the column stays accurate on re-deploys.
 
-At runtime, `resolveTeamLeader` resolves the effective leader in priority order: Boo Zero if it exists in the fleet, else the team-internal lead if it is a member of this team, else the first member, else `null` (an empty team with no Boo Zero).
+At runtime, `resolveTeamLeader` resolves the effective leader in priority order: Boo Zero if it exists in the fleet, else the team-internal lead if it is a member of this team, else the first member, else `null` (an empty team with no Boo Zero). A room follows the same order among its own members: a message goes to the member you `@mention`, else Boo Zero, else the team-internal lead if it is in the room, else the room's first member.
 
 <Note>
 To change the internal lead later, `PATCH /api/teams/:id` with `{ "leaderAgentId": "<agentId>" }` (or `null` to clear it). The PATCH body accepts any subset of `name`, `icon`, `color`, `colorCollectionId`, `isArchived`, and `leaderAgentId`.
@@ -110,15 +124,15 @@ Team rules are durable, user-set instructions injected into the message preamble
 
 There are two ways to set them.
 
-### From the rules editor (gear in the team header)
+### From the rules editor (the gear in a team chat's header)
 
-Inside a team's group chat, click **Brief & Rules** (the gear button in `GroupChatViewHeader`). This opens `TeamSettingsSheet`, which stacks the team's icon/accent/collection pickers, the per-team **Brief**, and the **Rules** editor.
+In the team's General chat or any of its rooms, click the gear in the header (`GroupChatViewHeader`); its tooltip reads `<team name> brief & rules`. This opens `TeamSettingsSheet`, which stacks the team's icon/accent/collection pickers, the per-team **Brief**, and the **Rules** editor.
 
 The Rules editor (`TeamRulesEditor`) is a plain textarea, one rule per line. It loads via `GET /api/team-rules/:teamId` and saves the whole text via `PUT /api/team-rules/:teamId` with `{ content }`. The Save button is disabled until the content is dirty.
 
 ### From the `/rule` slash command
 
-In the team chat composer, type `/rule <text>` and send. This is intercepted **before** the message is routed to any agent:
+In the composer of the team's General chat or any of its rooms, type `/rule <text>` and send. This is intercepted **before** the message is routed to any agent:
 
 ```text
 /rule delegate via <delegate>, don't do the work yourself
@@ -134,14 +148,14 @@ The `/rule ` prefix must be followed by whitespace and a non-empty body. `/rule`
 
 Two color choices are independent:
 
-- The **accent color** (`teams.color`) tints the team badge in the sidebar and the team's Ghost Graph halo. Pick it in the customize step or later in the settings sheet (`TeamAccentPicker`).
+- The **accent color** (`teams.color`) tints the team's icon in the team rail, its badge on the graphs, and its halo on the Org chart. Pick it in the customize step or later in the settings sheet (`TeamAccentPicker`).
 - The **color collection** (`teams.colorCollectionId`) decides how member Boos are colored. Pick it with `TeamColorCollectionPicker` in the customize step or the settings sheet. The roster preview updates live.
 
 Both the customize step and the settings sheet write the collection through `PATCH /api/teams/:id` (the sheet does it optimistically; the store updates first, then persists).
 
 ## Archive and delete
 
-Right-click a team's icon in the sidebar to open `TeamContextMenu`. It has four actions:
+Right-click a team's icon in the team rail to open `TeamContextMenu`. It has four actions:
 
 | Action                      | What it does                                                                           | Route                                      |
 | --------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------ |
@@ -150,7 +164,7 @@ Right-click a team's icon in the sidebar to open `TeamContextMenu`. It has four 
 | **Delete team only**        | Deletes the team and **orphans** its agents (sets each member's `team_id` to `null`)   | `DELETE /api/teams/:id`                    |
 | **Delete with agents**      | Deletes the agents from the Gateway first, then deletes the team                       | per-agent delete + `DELETE /api/teams/:id` |
 
-Both delete actions prompt with a `window.confirm` first. **Delete team only** keeps your agents; they just become unassigned. **Delete with agents** permanently removes the agents from the runtime before removing the team; if the connection drops mid-loop you may get a partial result and a toast reporting how many of N were removed.
+Both delete actions ask you to confirm first. **Delete team only** keeps your agents; they just become unassigned. **Delete with agents** permanently removes the agents from the runtime before removing the team; if the connection drops mid-loop you may get a partial result and a toast reporting how many of N were removed.
 
 <Danger>
 `DELETE /api/teams/:id` also cleans up the team's durable `settings` rows: `team-rules:<teamId>` and `team-onboarding:<teamId>`, and the `boo_zero_team_briefs` row FK-cascades. Deleting a team therefore discards its rules, onboarding state, and Boo Zero brief permanently. There is no migration ladder and no undo; archive instead if you only want to hide it.
@@ -160,7 +174,7 @@ Both delete actions prompt with a `window.confirm` first. **Delete team only** k
 
 - `GET /api/teams` returns the team with an `agentCount` (a subquery over `agents.team_id`). A freshly created empty team reports `agentCount: 0`; a deployed template reports its member count. The response also includes an `assignments` array (`{ agentId, teamId }`) so the client can patch its fleet store.
 - Pass `?includeArchived=true` to `GET /api/teams` to see archived teams; without it, archived teams are filtered out.
-- After deploy, the team's group chat opens and its Ghost Graph shows the new Boos. The header **Brief & Rules** button is present once a team is active.
+- After deploy, the team's General chat opens and its **Team graph** card shows the new Boos. The brief & rules gear sits in the chat header.
 - After `/rule`, re-open the rules editor (or `GET /api/team-rules/:teamId`); your line should be present as a `- ` bullet.
 
 ## Troubleshooting
@@ -181,8 +195,8 @@ Both delete actions prompt with a `window.confirm` first. **Delete team only** k
 
 - [Deploy your first team](/getting-started/first-team), the guided happy path
 - [Teams and planes](/concepts/teams-and-planes), the conceptual model (shared plane vs private plane)
-- [Group chat](/using/group-chat), the team chat surface and the Know-Your-Team gate
+- [Group chat](/using/group-chat), the team's General chat, its rooms, and the Know-Your-Team gate
 - [Boo Zero](/using/boo-zero), the universal leader, briefs, and display name
-- [The Ghost Graph](/using/ghost-graph), the per-team graph scope and halos
+- [The Ghost Graph](/using/ghost-graph), a team's graph, and the Org chart with its team halos
 - [Marketplace](/using/marketplace), browse and deploy the 436 agents / 85 teams
 - [`/api/teams` reference](/reference/rest-api/teams), full request/response shapes

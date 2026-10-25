@@ -155,7 +155,7 @@ This is why, for example, the board's `repository.ts` and the events `policy/` d
 
 ### 5. Every graph edge maps to real state, no decorative edges
 
-The Ghost Graph and [Atlas](/appendices/glossary) render edges, and every edge corresponds to real configuration or board state. There are three edge kinds, each with a concrete source:
+The Ghost Graph and the [Org chart](/appendices/glossary) (formerly Atlas) render edges, and every edge corresponds to real configuration or board state. There are three edge kinds, each with a concrete source:
 
 - **Dependency edges (Boo → Boo)** come from parsing each agent's `AGENTS.md` routing rules. `buildGraphElements` runs `parseAgentsMd(files.agentsMd, agentNames)` and emits one `dependency` edge per resolved `@mention` route, a real routing instruction the agent will act on.
 - **Skill edges and resource edges (Boo → tool)** come from the unified capability inventory. They are built from `files.capabilities`, real `CapabilityRecord` entries from the [capability registry](/concepts/capabilities), and the server-evaluated `available` flag drives whether a node renders greyed.
@@ -170,7 +170,7 @@ const caps = files?.capabilities // real inventory
 // → 'skill' / 'resource' nodes + edges per capability
 ```
 
-There is one honest nuance. To make the spanning tree readable, the graph synthesizes a small set of **structural** edges: Boo Zero to each team (hub-spoke), and invisible `team-root` junctions in Atlas. These are not decorative; they encode the real team-membership hierarchy, and they are explicitly tagged `isSynthetic: true` so any consumer that scans for _AGENTS.md_ routing (such as "Refresh Protocol") skips them. The single exception that is purely a graph-layer attribute is Boo Zero's "Leadership" orbital, which the code documents as "NOT a capability record; it's a graph-layer attribute" with a reserved `clawboo-leadership-` id that can never collide with a real skill.
+There is one honest nuance. To make the spanning tree readable, the graph synthesizes a small set of **structural** edges: Boo Zero to each team (hub-spoke), and invisible `team-root` junctions in the Org chart. These are not decorative; they encode the real team-membership hierarchy, and they are explicitly tagged `isSynthetic: true` so any consumer that scans for _AGENTS.md_ routing (such as "Refresh Protocol") skips them. The single exception that is purely a graph-layer attribute is Boo Zero's "Leadership" orbital, which the code documents as "NOT a capability record; it's a graph-layer attribute" with a reserved `clawboo-leadership-` id that can never collide with a real skill.
 
 So the rule reads precisely: **no edge is decorative**; every edge maps to a routing rule, a capability, or a real team-membership relationship, and the one synthesized non-routing attribute is flagged and reserved.
 

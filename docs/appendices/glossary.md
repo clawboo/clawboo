@@ -11,19 +11,21 @@ These docs describe Clawboo **v0.5.0**, the current release.
 
 ## Agents and runtimes
 
-**Boo**: Clawboo's name for an agent: one participant in a team, rendered as a ghost-lobster avatar. Every Boo is backed by a real agent record from an [AgentSource](#agentsource); there are no decorative agents. See [the agent model](/concepts/agent-model).
+**Boo**: Clawboo's name for an agent: one participant in a team, rendered as a ghost-lobster avatar. Every Boo is backed by a real agent record from an AgentSource; there are no decorative agents. See [the agent model](/concepts/agent-model).
 
 **Boo Zero**: the universal team leader, runtime-neutral and native by default. It is identified from the registry's `defaultId` (`resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), falling back to the first teamless agent, then the first agent overall. The same Boo Zero leads every team regardless of runtime. Boo Zero is teamless in the database but participates in every team via team-scoped sessions. See [the agent model](/concepts/agent-model) and [Boo Zero briefs](/using/boo-zero).
 
-**runtime**: the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`. Each is wrapped behind one [RuntimeAdapter](#runtimeadapter) interface so a team can mix runtimes. See [runtimes overview](/runtimes/index).
+**runtime**: the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`. Each is wrapped behind one RuntimeAdapter interface so a team can mix runtimes. See [runtimes overview](/runtimes/index).
 
 **the 5 runtimes**: `openclaw` (the OpenClaw Gateway), `clawboo-native` (the in-process harness), `claude-code`, `codex`, and `hermes`. The four non-OpenClaw runtimes are declared in `descriptor.ts`; OpenClaw is the fifth, handled separately because it is a connected substrate rather than a CLI/SDK Clawboo spawns. See [runtimes overview](/runtimes/index).
 
 **native runtime**: `clawboo-native`, Clawboo's own in-process conversational harness. It talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama), runs with no OpenClaw Gateway, and is `builtIn` (ships inside the server, nothing to install; connect by pasting a provider key). See [the native runtime](/runtimes/native).
 
-**RuntimeAdapter**: the single TypeScript interface every runtime implements (`id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`). Adapters wrap a black-box runtime and normalize its native signals into a [RuntimeEvent](#runtimeevent) stream; Clawboo supervises and relays, it does not reimplement runtime loops. See [the RuntimeAdapter trait](/internals/runtime-adapter).
+**RuntimeAdapter**: the single TypeScript interface every runtime implements (`id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`, and an optional `steer()`). Adapters wrap a black-box runtime and normalize its native signals into a RuntimeEvent stream; Clawboo supervises and relays, it does not reimplement runtime loops. See [the RuntimeAdapter trait](/internals/runtime-adapter).
 
 **RuntimeEvent**: the normalized 7-variant lifecycle union every adapter emits: `text-delta`, `tool-call`, `tool-result`, `status`, `cost`, `done`, and `error`. It is what lets one orchestrator drive heterogeneous runtimes off a single event shape. See [the RuntimeAdapter trait](/internals/runtime-adapter).
+
+**steering**: getting a message to an agent while its run is still going, so a person's comment on an in-progress task reaches the agent working on it instead of waiting for its next run. Each runtime declares how through `capabilities().steering`: `live` (the message joins the running turn at its next step; native, Claude Code, Codex, OpenClaw), `interrupt-resume` (the run is stopped and the same session resumed with the message; Hermes), or `none`. See [steering a running task](/runtimes/index#steering-a-running-task).
 
 **AgentSource**: the registry seam that answers "where does the agent list come from?" Reads are SQLite-backed (so they work even when the upstream is down); writes, file I/O, and sessions go to the upstream and mirror into SQLite. `AgentSource` is about _who exists_; `RuntimeAdapter` is about _how agents run_; the two must not entangle. See [the AgentSource registry of record](/internals/agent-source).
 
@@ -31,13 +33,19 @@ These docs describe Clawboo **v0.5.0**, the current release.
 
 ## Teams and planes
 
-**team**: a named group of Boos. A team has a leader (Boo Zero by default), an emoji/color, durable rules, and a shared room. Teams are the unit of collaboration. See [teams and planes](/concepts/teams-and-planes).
+**team**: a named group of Boos. A team has a leader (Boo Zero by default), an emoji/color, durable rules, its own group chat (**General**), and any rooms opened inside it. Teams are the unit of collaboration. See [teams and planes](/concepts/teams-and-planes).
 
 **shared plane**: everything Clawboo owns and coordinates across runtimes: the registry, the board, team chat, scheduling, shared memory, the tools broker, verification, governance, the event log, and the worktree system-of-record. See [teams and planes](/concepts/teams-and-planes).
 
 **private plane**: everything a single runtime keeps to itself: its own messaging channels, its own cron/heartbeat, its private cognitive memory and self-improvement, its built-in tools, and its native session resume. Clawboo observes the private plane but never clobbers it. The split is resolved from a runtime's capabilities by `resolveRuntimeIntegration`. See [teams and planes](/concepts/teams-and-planes).
 
 **Know Your Team gate**: a once-per-team onboarding flow that runs before the group-chat composer unlocks. It has two phases: a "Meet your team" welcome (roster plus the leader), then a user self-introduction that is persisted and injected into every team turn's context. Cascade prevention lives in the server orchestrator, so the gate no longer needs an agent-introduction round. See [group chat](/using/group-chat).
+
+**room**: a conversation inside a team between a subset of its members, with its own transcript, its own orchestrator, and its own task cards. Boo Zero presides over every room without being a member, and the team's rules, brief, memory and board stay team-wide. Deleting a room archives it: the conversation is kept, its work stops, and its tasks stay on the board. Not the same thing as the peer-chat team room below. See [rooms](/using/group-chat#rooms).
+
+**General**: a team's own group chat, its default room, labelled **General (Main Room)** in the sidebar's rooms list. It is always pinned, and it can be cleared but not renamed or deleted. See [group chat](/using/group-chat).
+
+**Clear chat**: the **...** menu action that empties one chat (General or a room). It asks first, then sets the messages aside on the server rather than deleting them, and the agents start that conversation fresh (OpenClaw teammates get a `/reset`). The chat stops showing the task cards made before the clear, but the board and the chat's **Tasks** card keep them, and other chats are not touched. See [clear a chat](/using/group-chat#clear-a-chat).
 
 ## The board and orchestration
 
@@ -141,7 +149,9 @@ These docs describe Clawboo **v0.5.0**, the current release.
 
 **Ghost Graph**: the React Flow canvas that renders a team's Boos, their skills/resources as orbital nodes, and their delegation edges, with optional team halos and click-to-expand. See [the Ghost Graph](/using/ghost-graph).
 
-**Atlas**: the global, all-teams view of the Ghost Graph: Boo Zero presides at the top over per-team rows. Reached via the dedicated Atlas nav button. See [the Ghost Graph](/using/ghost-graph).
+**Org chart** (formerly **Atlas**): the global, all-teams view of the Ghost Graph. Boo Zero presides over every team, at the center in the default radial layout or at the top of a tree. Open it from the sidebar's **Org chart** row or with Cmd/Ctrl+1. The code still calls it `atlas` (the graph scope, and the `atlas-radial` / `atlas-top-down` layouts). See [the Ghost Graph](/using/ghost-graph).
+
+**Home**: a team's own page, opened from the team's icon on the rail or the sidebar's **Home** row. Today it is a placeholder for the team's dashboards and the artifacts its agents make. See [the dashboard tour](/getting-started/dashboard-tour#home).
 
 **marketplace**: the in-app catalog of 436 first-class agents and 85 workflow teams across nineteen packs, two of Clawboo's own and seventeen adapted from upstream repositories (sixteen MIT-licensed, one Apache-2.0). The content is hand-maintained JSON under the repository's `catalog/` folder, excluded from the npm tarball and fetched at runtime from `/api/catalog/*`; only the built-in pack is compiled in, so first-run onboarding works offline. Deploying an entry writes its markdown body to the agent's files. See [the marketplace](/using/marketplace) and [the marketplace catalog reference](/reference/marketplace-catalog).
 

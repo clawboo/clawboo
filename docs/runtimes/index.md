@@ -14,7 +14,7 @@ This page introduces the five runtimes, the three **runtime classes** that deter
 | `clawboo-native` | Clawboo Native | An in-process conversational harness that talks to provider SDKs directly | Built in: paste a provider key, no Gateway, no install        |
 | `openclaw`       | OpenClaw       | An agent run by the external OpenClaw Gateway                             | A connected substrate driven over a live WebSocket connection |
 | `claude-code`    | Claude Code    | The Claude Code agent SDK, spawned per run                                | External CLI Clawboo installs; head-less API key              |
-| `codex`          | Codex          | OpenAI's `codex exec` agent, spawned per run                              | External CLI Clawboo installs; interactive ChatGPT OAuth      |
+| `codex`          | Codex          | OpenAI's Codex agent, hosted per run in `codex app-server`                | External CLI Clawboo installs; interactive ChatGPT OAuth      |
 | `hermes`         | Hermes         | The Hermes agent CLI, spawned per run                                     | External CLI Clawboo installs; head-less API key              |
 
 The four non-OpenClaw runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) are declared in a single descriptor and reachable through `/api/runtimes`. OpenClaw is the fifth, handled separately because it is a connected substrate (see [runtime classes](#runtime-classes)), not a CLI/SDK Clawboo spawns and not a member of the `/api/runtimes` id set. Its lifecycle (Gateway install, device pairing, channels) lives on its own page.
@@ -51,17 +51,18 @@ Each adapter answers `capabilities()` with a fixed shape. The fields below come 
 
 ### Execution capabilities
 
-| Capability                                    | `clawboo-native` | `openclaw`            | `claude-code`     | `codex`           | `hermes`          |
-| --------------------------------------------- | ---------------- | --------------------- | ----------------- | ----------------- | ----------------- |
-| `streaming` (incremental text deltas)         | yes              | yes                   | yes               | yes               | **no**            |
-| `mcp` (can call MCP tool servers)             | yes              | **no**                | yes               | yes               | yes               |
-| `worktrees` (isolated git worktrees)          | yes              | **no**                | yes               | yes               | yes               |
-| `resume` (resume a prior session)             | yes              | yes                   | yes               | yes               | yes               |
-| `toolApproval` (surfaces tool-approval gates) | yes              | yes                   | yes               | yes               | yes               |
-| `contextWindowTokens`                         | 200000           | _(omitted)_           | 200000            | _(omitted)_       | _(omitted)_       |
-| `runtimeClass`                                | `native`         | `connected-substrate` | `wrapped-oneshot` | `wrapped-oneshot` | `wrapped-oneshot` |
+| Capability                                    | `clawboo-native` | `openclaw`            | `claude-code`     | `codex`           | `hermes`           |
+| --------------------------------------------- | ---------------- | --------------------- | ----------------- | ----------------- | ------------------ |
+| `streaming` (incremental text deltas)         | yes              | yes                   | yes               | yes               | **no**             |
+| `mcp` (can call MCP tool servers)             | yes              | **no**                | yes               | yes               | yes                |
+| `worktrees` (isolated git worktrees)          | yes              | **no**                | yes               | yes               | yes                |
+| `resume` (resume a prior session)             | yes              | yes                   | yes               | yes               | yes                |
+| `toolApproval` (surfaces tool-approval gates) | yes              | yes                   | yes               | yes               | yes                |
+| `contextWindowTokens`                         | 200000           | _(omitted)_           | 200000            | _(omitted)_       | _(omitted)_        |
+| `steering` (takes input mid-run)              | `live`           | `live`                | `live`            | `live`            | `interrupt-resume` |
+| `runtimeClass`                                | `native`         | `connected-substrate` | `wrapped-oneshot` | `wrapped-oneshot` | `wrapped-oneshot`  |
 
-`streaming: false` on Hermes is a permanent asymmetry, not a missing feature: Hermes has no native token stream, so the host derives its lifecycle from the structured output instead. `mcp: false` and `worktrees: false` on OpenClaw reflect that OpenClaw agents run in Gateway-owned workspaces under OpenClaw's own sandbox; Clawboo never retargets a live OpenClaw agent's cwd, and OpenClaw attaches Clawboo's [MCP servers](/operating/mcp-servers) through the Gateway config rather than the adapter. `contextWindowTokens` drives the proactive session-rotation watermark; when it is omitted (or 0), rotation fires only on an explicit `max_turns` signal.
+`streaming: false` on Hermes is a permanent asymmetry, not a missing feature: Hermes has no native token stream, so the host derives its lifecycle from the structured output instead. `mcp: false` and `worktrees: false` on OpenClaw reflect that OpenClaw agents run in Gateway-owned workspaces under OpenClaw's own sandbox; Clawboo never retargets a live OpenClaw agent's cwd, and OpenClaw attaches Clawboo's [MCP servers](/operating/mcp-servers) through the Gateway config rather than the adapter. `contextWindowTokens` drives the proactive session-rotation watermark; when it is omitted (or 0), rotation fires only on an explicit `max_turns` signal. `steering` says how a message reaches a run that is already working; see [steering a running task](#steering-a-running-task).
 
 ### Native-preservation seam
 
@@ -81,7 +82,7 @@ How those claims resolve through `resolveRuntimeIntegration`:
 - **`clawboo-native`**: `home: persistent (per-identity)`, `preserveMemory: true`. Clawboo materializes a stable per-identity home and its persisted conversation transcripts survive and resume across dispatches. No native skills dir (capabilities ride the shared [tools broker](/concepts/capabilities)), no channels (the shared spine is its only voice).
 - **`openclaw`**: `home: connected`. The Gateway owns its own state dir entirely, so the host provisions and preserves nothing; `preserveSkills`/`preserveMemory` resolve to `false` because there is nothing host-managed to keep. `useGatewayChannels` is `true` (`nativeChannels: 'gateway'`); OpenClaw's own channels and cron are runtime-native and the host never serves or co-runs them.
 - **`claude-code`**: `home: ephemeral`. A stateless wrapped one-shot: the cognition is the model, no durable cross-run substrate exists to preserve. `nativeHome` is omitted, so the SDK runs against the user's real HOME / Keychain auth.
-- **`codex`**: `home: persistent (per-identity)`. The host materializes a managed per-agent `CODEX_HOME`, so Codex sessions survive across runs and `codex exec resume` gives a Codex leader real conversation continuity. The preserve flags stay `false` (no native skills/memory substrate); the durable state is the session files plus a seeded copy of the user's `~/.codex/auth.json` (parse-validated, freshness-checked, never written back; see [Codex](/runtimes/codex)).
+- **`codex`**: `home: persistent (per-identity)`. The host materializes a managed per-agent `CODEX_HOME`, so Codex threads survive across runs and resuming the previous thread (`thread/resume`) gives a Codex leader real conversation continuity. The preserve flags stay `false` (no native skills/memory substrate); the durable state is the session files plus a seeded copy of the user's `~/.codex/auth.json` (parse-validated, freshness-checked, never written back; see [Codex](/runtimes/codex)).
 - **`hermes`**: `home: persistent (per-identity)`, `preserveSkills: true`, `preserveMemory: true`. The Hermes self-improvement loop compounds in one stable home per identity: self-created skills, `MEMORY.md`, and `state.db` accrue across runs.
 
 ### Models
@@ -98,9 +99,29 @@ An empty `models` array does not mean "no models"; it means the list is owned el
 
 ## How a runtime is wired
 
-Each non-OpenClaw runtime is a pure [RuntimeAdapter](/internals/runtime-adapter) constructed with a per-run driver factory: the adapter wraps a black-box runtime and the factory supplies the real driver (the Claude Agent SDK, `codex exec`, the `hermes` CLI, or the in-process native harness). The adapters live in dependency-light packages that import only `@clawboo/executor`; the real subprocess/SDK drivers live server-side so the browser bundle never sees them. All five adapters are always available; actual usability depends on install and credential state at run time, not on a flag.
+Each non-OpenClaw runtime is a pure [RuntimeAdapter](/internals/runtime-adapter) constructed with a per-run driver factory: the adapter wraps a black-box runtime and the factory supplies the real driver (the Claude Agent SDK, `codex app-server`, the `hermes` CLI, or the in-process native harness). The adapters live in dependency-light packages that import only `@clawboo/executor`; the real subprocess/SDK drivers live server-side so the browser bundle never sees them. All five adapters are always available; actual usability depends on install and credential state at run time, not on a flag.
 
 Health for the CLI runtimes is "the binary resolves", checked via `resolveRuntimeBin`, which probes `PATH` **and** the well-known user-install dirs (so a Hermes binary in the Python user-site bin reads healthy even though that dir is usually off the server's PATH). Native health is "any routable provider key (or `OLLAMA_BASE_URL`) resolves", no binary, no network call.
+
+## Steering a running task
+
+When you comment on a task that an agent is working on (from the Tasks card in the team chat, or `POST /api/board/:taskId/comments` with `authorType: 'user'`), the comment is passed to the agent two ways. It always goes into the agent's mailbox, which every run reads when it starts, so a task that is queued, retried, or picked up later still sees it. And if a run is working on that task right now, the comment is **steered into that run**, so the agent reads it before the run ends instead of at its next run. When the steer lands, the mailbox copy is marked delivered so the agent does not read it twice.
+
+How the comment gets into a running run is the runtime's business, and each adapter declares it in `capabilities().steering`:
+
+- **`live`**: the runtime takes the message into the turn in progress at its next boundary (a tool call or a model call) without stopping anything.
+- **`interrupt-resume`**: the runtime has no way in once a run has started, so Clawboo stops the run's process and resumes the same session with the comment as the next input. The tool call in flight at that moment is lost; the run is not. The stop is absorbed inside the driver: the orchestrator sees one run that carries on, so the task stays in progress with the same agent, and nothing reads the stop as a failure or as you pressing Stop.
+- **`none`**: no mid-run channel; the mailbox is the only delivery, at the agent's next run.
+
+| Runtime          | `steering`         | How a comment reaches a running task                                                                                  |
+| ---------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `clawboo-native` | `live`             | Queued into the conversation and read at its next turn; a run that was about to finish takes one more turn to read it |
+| `openclaw`       | `live`             | `chat.send` with `queueMode: 'steer'` into the session's active run                                                   |
+| `claude-code`    | `live`             | A user message pushed into the SDK's streaming input, folded into the running turn                                    |
+| `codex`          | `live`             | `turn/steer` on the app-server's in-progress turn                                                                     |
+| `hermes`         | `interrupt-resume` | The `hermes chat -q` process is stopped and the same session resumed with the comment                                 |
+
+A comment that cannot get into the run (the run ended a moment earlier, or the runtime refused it) is not lost: it stays in the mailbox for the agent's next run. Small team notices (for example "a task you delegated just finished") use the same channel in a passive form: they ride along if the run reads input again, but never keep a finishing run going and never stop a run to deliver an FYI.
 
 ## Boundaries and non-goals
 

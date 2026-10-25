@@ -133,9 +133,9 @@ Back on **Add more runtimes**, click **Continue**. The wizard advances to the **
 
 Then the **Your team is ready** screen shows the roster and a **"Led by ..."** badge for Boo Zero; click **Open my dashboard**. You land in the dashboard connected to the Gateway ("gateway" mode), in your new team's group chat, which opens on a one-time **introduce yourself** screen.
 
-To build a team of OpenClaw agents, open the **Marketplace** (or **+ Create team** in the leftmost sidebar), pick a template, and choose **OpenClaw** as the runtime for its members. Deploy creates the team and its agents: it `POST /api/teams` to create the team, writes each agent's SOUL.md, IDENTITY.md, TOOLS.md, and an enhanced AGENTS.md with the team roster and collaboration protocol, assigns each agent to the team, sets the team-internal lead when one is detected, and, when any agent has `@mention` routing, enables agent-to-agent coordination in the Gateway config. See [Deploy your first team](/getting-started/first-team) for the full team-building flow.
+To build a team of OpenClaw agents, open the **Marketplace** (the **+** button, Create a team, at the bottom of the team rail opens its Teams tab), pick a template, and choose **OpenClaw** as the runtime for its members. Deploy creates the team and its agents: it `POST /api/teams` to create the team, writes each agent's SOUL.md, IDENTITY.md, TOOLS.md, and an enhanced AGENTS.md with the team roster and collaboration protocol, assigns each agent to the team, sets the team-internal lead when one is detected, and, when any agent has `@mention` routing, enables agent-to-agent coordination in the Gateway config. See [Deploy your first team](/getting-started/first-team) for the full team-building flow.
 
-**Expected result:** the new team appears in the sidebar, connected to the Gateway, and opens directly in its group chat.
+**Expected result:** the new team appears in the team rail, connected to the Gateway, and opens directly in its group chat.
 
 ## What you should see
 
@@ -152,7 +152,7 @@ The wizard's Add-runtimes detour walked the full OpenClaw setup: it detected you
 ## Next steps
 
 - [Deploy and watch your first team collaborate](/getting-started/first-team)
-- [Tour the dashboard: Atlas, Ghost Graph, and the view modes](/getting-started/dashboard-tour)
+- [Tour the dashboard: the sidebar, the Org chart, and the view modes](/getting-started/dashboard-tour)
 - [The OpenClaw runtime in depth: connections, channels, memory scope](/runtimes/openclaw)
 - [System API reference: status, install, configure, gateway, device](/reference/rest-api/system)
 - [Concept: the agent model and the five runtime classes](/concepts/agent-model)
