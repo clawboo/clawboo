@@ -26,8 +26,7 @@ import { useEffect, useRef } from 'react'
 import type { AgentStatus } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 
-import type { BoardChange } from '@/features/group-chat/boardOrchestration'
-import { useBoardStore } from '@/stores/board'
+import { useBoardStore, type BoardChangeFrame } from '@/stores/board'
 import { useChatStore } from '@/stores/chat'
 import { useFleetStore } from '@/stores/fleet'
 import { apiUrl } from '@clawboo/control-client'
@@ -86,6 +85,9 @@ export function applyDeltaFrame(raw: string): void {
 export interface TeamAgentStatusUpdate {
   agentId: string
   status: 'running' | 'idle' | 'error'
+  /** The chat room the run is in (null = the team's own group chat); absent on
+   *  a connect-time snapshot replay. */
+  roomId?: string | null
 }
 
 const AGENT_STATUS_VALUES = new Set<string>(['running', 'idle', 'error'])
@@ -98,38 +100,52 @@ const AGENT_STATUS_VALUES = new Set<string>(['running', 'idle', 'error'])
  *  patches STATUS ONLY — never `runId`: that field belongs to the Gateway 1:1
  *  path (the surgical `chat.abort(sessionKey, runId)` Stop), and a team-run
  *  terminal must not clobber a concurrent 1:1 run's live handle. */
-export function applyAgentStatusFrame(raw: string): void {
+export function applyAgentStatusFrame(raw: string): TeamAgentStatusUpdate | null {
   let update: TeamAgentStatusUpdate
   try {
     update = JSON.parse(raw) as TeamAgentStatusUpdate
   } catch {
-    return
+    return null
   }
   if (!update || typeof update.agentId !== 'string' || !AGENT_STATUS_VALUES.has(update.status))
-    return
+    return null
   const fleet = useFleetStore.getState()
   fleet.patchAgent(update.agentId, { status: update.status as AgentStatus })
   if (update.status !== 'running') fleet.updateLastSeen(update.agentId, Date.now())
+  return update
 }
 
 /** Apply a board-projection change frame: last-write-wins into the board store for
  *  the given team. Cursor-less/ephemeral; a gap-missed change is reconciled by the
  *  `open`-triggered `load(teamId)`. */
-export function applyBoardChangeFrame(teamId: string, raw: string): void {
-  let change: BoardChange
+export function applyBoardChangeFrame(teamId: string, raw: string): BoardChangeFrame | null {
+  let change: BoardChangeFrame
   try {
-    change = JSON.parse(raw) as BoardChange
+    change = JSON.parse(raw) as BoardChangeFrame
   } catch {
-    return
+    return null
   }
-  if (!change || typeof change.id !== 'string') return
+  if (!change || typeof change.id !== 'string') return null
   useBoardStore.getState().applyChange(teamId, change)
+  return change
+}
+
+/** Whether a team-wide frame (a board change, a status) is this room's activity.
+ *  A frame that names no room is counted, as it always was. */
+function isThisRoom(frameRoomId: string | null | undefined, roomId: string | null): boolean {
+  return frameRoomId === undefined || (frameRoomId ?? null) === roomId
 }
 
 export type EventSourceFactory = (url: string) => EventSource
 
 export interface UseTeamChatStreamParams {
   teamId: string
+  /** One of the team's chat rooms; null/absent = the team's own group chat. */
+  roomId?: string | null
+  /** Changes when the chat's members change. The server fixes a stream's session
+   *  keys when it opens, so a member added while the chat is open would not stream
+   *  until the next reconnect; a new value here reopens the stream at once. */
+  rosterKey?: string
   enabled: boolean
   /** Fired on every frame (committed OR delta) — drives the composer's activity-
    *  window busy signal. */
@@ -143,6 +159,8 @@ export interface UseTeamChatStreamParams {
  *  `/api/chat-history` hydration in that case. Reopens on `teamId` change. */
 export function useTeamChatStream({
   teamId,
+  roomId = null,
+  rosterKey = '',
   enabled,
   onActivity,
   eventSourceFactory,
@@ -159,7 +177,8 @@ export function useTeamChatStream({
       (typeof EventSource !== 'undefined' ? (url: string) => new EventSource(url) : null)
     if (!factory) return
 
-    const es = factory(apiUrl(`/api/teams/${encodeURIComponent(teamId)}/chat/stream`))
+    const roomQuery = roomId ? `?roomId=${encodeURIComponent(roomId)}` : ''
+    const es = factory(apiUrl(`/api/teams/${encodeURIComponent(teamId)}/chat/stream${roomQuery}`))
 
     const onCommitted = (e: MessageEvent): void => {
       applyCommittedFrame(e.data as string)
@@ -169,13 +188,17 @@ export function useTeamChatStream({
       applyDeltaFrame(e.data as string)
       onActivityRef.current?.()
     }
+    // Board and status frames are team-wide (the board and the badges are), so
+    // each is applied whatever room it came from but only counts as THIS chat's
+    // activity when it is from this room: another room's cascade must not hold
+    // this composer on Stop.
     const onBoard = (e: MessageEvent): void => {
-      applyBoardChangeFrame(teamId, e.data as string)
-      onActivityRef.current?.()
+      const change = applyBoardChangeFrame(teamId, e.data as string)
+      if (change && isThisRoom(change.roomId, roomId)) onActivityRef.current?.()
     }
     const onStatus = (e: MessageEvent): void => {
-      applyAgentStatusFrame(e.data as string)
-      onActivityRef.current?.()
+      const update = applyAgentStatusFrame(e.data as string)
+      if (update && isThisRoom(update.roomId, roomId)) onActivityRef.current?.()
     }
     // On (re)connect, reconcile any board change missed during the gap (board frames
     // are cursor-less). Idempotent last-write-wins merge; the initial-connect load is
@@ -197,5 +220,6 @@ export function useTeamChatStream({
       es.removeEventListener('open', onOpen)
       es.close()
     }
-  }, [teamId, enabled, eventSourceFactory])
+    // `rosterKey` is read by nothing inside: it is here to reopen the stream.
+  }, [teamId, roomId, rosterKey, enabled, eventSourceFactory])
 }

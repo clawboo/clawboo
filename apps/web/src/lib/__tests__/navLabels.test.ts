@@ -25,7 +25,7 @@ describe('NAV_VIEW_LABELS', () => {
     // team-scoped Ghost Graph inside Group Chat kept the old name. Deriving any
     // of these from the id would put the wrong word in the sidebar, in the
     // Settings nav, AND in the failure copy.
-    expect(NAV_VIEW_LABELS.graph).toBe('Atlas')
+    expect(NAV_VIEW_LABELS.graph).toBe('Org chart')
     expect(NAV_VIEW_LABELS.cost).toBe('Tokens Used')
     expect(NAV_VIEW_LABELS.obs).toBe('Observability')
     expect(NAV_VIEW_LABELS.health).toBe('System Health')

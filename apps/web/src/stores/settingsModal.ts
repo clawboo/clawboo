@@ -15,6 +15,7 @@ export type SettingsView = Extract<
   NavView,
   | 'runtimes'
   | 'providers'
+  | 'fleet'
   | 'memory'
   | 'capabilities'
   | 'routines'
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS_VIEW: SettingsView = 'runtimes'
 export const SETTINGS_VIEWS: readonly SettingsView[] = [
   'runtimes',
   'providers',
+  'fleet',
   'memory',
   'capabilities',
   'routines',

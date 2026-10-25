@@ -12,7 +12,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { agents, createRoom, teams, type ClawbooDb } from '@clawboo/db'
 import type {
@@ -41,6 +41,13 @@ const PERSISTENT_CAPS: Capabilities = {
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 async function settle(n = 6): Promise<void> {
   for (let i = 0; i < n; i++) await tick()
+}
+
+/** Wait until the adapter has started `n` runs. A run starts after file I/O
+ *  (the agent's home directory), which a fixed number of ticks cannot outwait
+ *  on a loaded machine. */
+async function startsReach(adapter: { starts: unknown[] }, n: number): Promise<void> {
+  await vi.waitFor(() => expect(adapter.starts).toHaveLength(n), { timeout: 5000 })
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -178,13 +185,13 @@ describe('serverDeliver across chat rooms', () => {
     // Both rooms address Ada at once.
     void team(buildTeamSessionKey('a1', 'T'), 'a1', 'from the team chat', HUMAN_TURN)
     void design(buildTeamSessionKey('a1', 'T', roomId), 'a1', 'from the room', HUMAN_TURN)
+    await startsReach(adapter, 1)
     await settle()
     // Only one run started: the second waits on the same home lock.
     expect(adapter.starts).toHaveLength(1)
 
     adapter.finishRun(0)
-    await settle()
-    expect(adapter.starts).toHaveLength(2)
+    await startsReach(adapter, 2)
     expect(adapter.maxLive).toBe(1)
     // Each run went out on its own room's session key.
     expect(adapter.starts.map((s) => s.sessionKey).sort()).toEqual(
@@ -198,7 +205,7 @@ describe('serverDeliver across chat rooms', () => {
     const adapter = new GatedAdapter()
     const design = room(roomId, adapter)
     void design(buildTeamSessionKey('a1', 'T', roomId), 'a1', 'plan it', HUMAN_TURN)
-    await settle()
+    await startsReach(adapter, 1)
     const roomContext = adapter.starts[0]?.context ?? ''
     expect(roomContext).toContain('Bea')
     expect(roomContext).not.toContain('Cy')
@@ -208,7 +215,7 @@ describe('serverDeliver across chat rooms', () => {
     // The team's own group chat still lists everyone.
     const team = room(null, adapter)
     void team(buildTeamSessionKey('a1', 'T'), 'a1', 'plan it', HUMAN_TURN)
-    await settle()
+    await startsReach(adapter, 2)
     const teamContext = adapter.starts[1]?.context ?? ''
     expect(teamContext).toContain('Bea')
     expect(teamContext).toContain('Cy')

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
@@ -13,6 +13,13 @@ import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
 import { refreshTeamAgentsMd } from '@/lib/createAgent'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
+import { SidebarToggle } from './SidebarToggle'
+import type { PeekAnchor } from './sidebarPeek'
+
+/** The rail's top padding (`pt-1.5`), so a peek toggle can land on its anchor. */
+const RAIL_PAD_TOP = 6
+/** The rail is 60px wide and the toggle 32px: keep it inside the rail. */
+const MAX_TOGGLE_LEFT = 28
 
 // ─── RailTip ─────────────────────────────────────────────────────────────────
 
@@ -151,7 +158,15 @@ function TeamIcon({
 
 // ─── TeamSidebar ─────────────────────────────────────────────────────────────
 
-export function TeamSidebar() {
+/** The sidebar toggle normally sits in the agent column's top row. The rail shows
+ *  its own only when there is no agent column (Boo Zero's view), and in the
+ *  collapsed sidebar's hover peek, where it sits right under the pointer that
+ *  opened the peek; `peek` makes it read "expand" and dock the sidebar. */
+export function TeamSidebar({
+  peek = false,
+  showToggle = true,
+  toggleAnchor = null,
+}: { peek?: boolean; showToggle?: boolean; toggleAnchor?: PeekAnchor | null } = {}) {
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const selectTeam = useTeamStore((s) => s.selectTeam)
@@ -377,16 +392,34 @@ export function TeamSidebar() {
     }
   }, [mascotMenu])
 
-  const isBooZero = useViewStore((s) => s.viewMode.type === 'booZero')
-  const columnCollapsed = useViewStore((s) => s.columnCollapsed)
-
   const activeTeams = teams.filter((t) => !t.isArchived)
 
   return (
     <div
       data-testid="team-sidebar"
-      className="flex h-full w-[60px] shrink-0 flex-col items-center gap-2 border-r border-border bg-background pb-3 pt-3"
+      className="flex h-full w-[60px] shrink-0 flex-col items-center gap-2 border-r border-border bg-background pb-3 pt-1.5"
     >
+      {/* The toggle lives here only when there is no agent column to hold it,
+          and in the peek. There it lands exactly on the header toggle that
+          opened the peek, so the click that follows docks the sidebar. */}
+      {showToggle && (
+        <div
+          className="flex h-8 shrink-0 self-stretch"
+          style={
+            toggleAnchor
+              ? {
+                  paddingLeft: Math.min(Math.max(0, toggleAnchor.left), MAX_TOGGLE_LEFT),
+                  marginTop: Math.max(0, toggleAnchor.top - RAIL_PAD_TOP),
+                }
+              : { paddingLeft: 8 }
+          }
+        >
+          <SidebarToggle
+            collapsed={peek}
+            onClick={() => useViewStore.getState().setColumnCollapsed(!peek)}
+          />
+        </div>
+      )}
       <MascotIcon
         selected={selectedTeamId === null}
         onClick={() => {
@@ -411,7 +444,7 @@ export function TeamSidebar() {
             selected={team.id === selectedTeamId}
             onClick={() => {
               selectTeam(team.id)
-              useViewStore.getState().openGroupChat(team.id)
+              useViewStore.getState().openTeamspace(team.id)
             }}
             onContextMenu={(e) => {
               e.preventDefault()
@@ -430,30 +463,6 @@ export function TeamSidebar() {
           className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border border-dashed border-border-strong bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:border-primary hover:text-primary hover:bg-primary/[0.06]"
         >
           <Plus size={16} strokeWidth={2} />
-        </button>
-      </RailTip>
-
-      {/* Column 2 collapse/expand toggle */}
-      <RailTip label={columnCollapsed || isBooZero ? 'Expand sidebar' : 'Collapse sidebar'}>
-        <button
-          aria-label={columnCollapsed || isBooZero ? 'Expand sidebar' : 'Collapse sidebar'}
-          onClick={() => {
-            if (isBooZero) {
-              useViewStore.getState().navigateTo('graph')
-              if (useViewStore.getState().columnCollapsed) {
-                useViewStore.getState().toggleColumnCollapsed()
-              }
-            } else {
-              useViewStore.getState().toggleColumnCollapsed()
-            }
-          }}
-          className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border-none bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:bg-foreground/[0.05] hover:text-foreground/70"
-        >
-          {columnCollapsed || isBooZero ? (
-            <PanelLeftOpen size={16} strokeWidth={2} />
-          ) : (
-            <PanelLeftClose size={16} strokeWidth={2} />
-          )}
         </button>
       </RailTip>
 

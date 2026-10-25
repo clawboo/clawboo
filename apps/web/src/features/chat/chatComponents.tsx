@@ -36,7 +36,11 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import { useViewStore } from '@/stores/view'
 import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
-import { agentIdFromSessionKey, teamIdFromSessionKey } from '@clawboo/team-orchestration'
+import {
+  agentIdFromSessionKey,
+  roomIdFromSessionKey,
+  teamIdFromSessionKey,
+} from '@clawboo/team-orchestration'
 import { sendServerTeamMessage } from '@/features/group-chat/serverTeamChatSend'
 import {
   connectorBySlug,
@@ -571,6 +575,8 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
                 setResumeState('sending')
                 void sendServerTeamMessage({
                   teamId,
+                  // The card's own chat room: the ask was raised there.
+                  roomId: roomIdFromSessionKey(sessionKey),
                   targetAgentId: agentId,
                   targetSessionKey: sessionKey,
                   message: `${done.map((d) => d.displayName).join(' and ')} ${

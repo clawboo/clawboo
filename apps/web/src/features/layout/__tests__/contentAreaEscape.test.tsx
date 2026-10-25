@@ -150,7 +150,7 @@ describe('ContentArea — Escape arbitration', () => {
 
     await user.keyboard('{Meta>}2{/Meta}')
 
-    expect(useViewStore.getState().viewMode).toMatchObject({ type: 'nav', view: 'fleet' })
+    expect(useViewStore.getState().viewMode).toMatchObject({ type: 'nav', view: 'board' })
   })
 
   it('hands Escape back to the app shell once the dialog closes', async () => {

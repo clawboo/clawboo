@@ -4,6 +4,7 @@ import { NavPanel } from './navPanels'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
+import { TeamspaceView } from '@/features/group-chat/TeamspaceView'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
 import { hasOpenLayer } from '@/features/shared/useDismissableLayer'
 import { NAV_VIEW_LABELS } from '@/lib/navLabels'
@@ -11,6 +12,7 @@ import { WelcomeState } from './WelcomeState'
 import { useViewStore } from '@/stores/view'
 import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { useTeamStore } from '@/stores/team'
+import { useRoomStore } from '@/stores/rooms'
 import { useFleetStore } from '@/stores/fleet'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import type { NavView } from '@/stores/view'
@@ -84,14 +86,31 @@ export function ContentArea() {
     }
   }, [viewMode, booZeroAgentId, agents])
 
-  // Edge case: team deleted while viewing its group chat → navigate to welcome
+  // Edge case: team deleted while viewing its group chat or teamspace → welcome
   useEffect(() => {
-    if (viewMode.type === 'groupChat') {
+    if (viewMode.type === 'groupChat' || viewMode.type === 'teamspace') {
       if (!teams.some((t) => t.id === viewMode.teamId)) {
         useViewStore.getState().setViewMode({ type: 'welcome' })
       }
     }
   }, [viewMode, teams])
+
+  // Edge case: the chat room being viewed was deleted (archived), here or in
+  // another tab → fall back to the team's own group chat. Only once the team's
+  // rooms have loaded, so a deep link to a room is not bounced while they load.
+  const roomsByTeam = useRoomStore((s) => s.roomsByTeam)
+  const roomsLoaded = useRoomStore((s) => s.loadedTeams)
+  useEffect(() => {
+    if (viewMode.type !== 'groupChat' || !viewMode.roomId) return
+    if (!roomsLoaded.has(viewMode.teamId)) {
+      void useRoomStore.getState().load(viewMode.teamId)
+      return
+    }
+    const rooms = roomsByTeam.get(viewMode.teamId) ?? []
+    if (!rooms.some((r) => r.id === viewMode.roomId)) {
+      useViewStore.getState().openGroupChat(viewMode.teamId)
+    }
+  }, [viewMode, roomsByTeam, roomsLoaded])
 
   // ── Global keyboard shortcuts ──────────────────────────────────────────────
   useEffect(() => {
@@ -132,7 +151,8 @@ export function ContentArea() {
         if (
           viewMode.type === 'agent' ||
           viewMode.type === 'booZero' ||
-          viewMode.type === 'groupChat'
+          viewMode.type === 'groupChat' ||
+          viewMode.type === 'teamspace'
         ) {
           e.preventDefault()
           useFleetStore.getState().selectAgent(null)
@@ -164,7 +184,8 @@ export function ContentArea() {
         const num = parseInt(e.key, 10)
         if (num >= 1 && num <= 4) {
           e.preventDefault()
-          const views: NavView[] = ['graph', 'fleet', 'marketplace', 'board']
+          // The first four sidebar rows: Org chart, Board, Connectors, Memory.
+          const views: NavView[] = ['graph', 'board', 'connectors', 'memory']
           useViewStore.getState().navigateTo(views[num - 1]!)
         }
       }
@@ -204,9 +225,16 @@ export function ContentArea() {
       viewContent = booZeroAgentId ? <AgentDetailView agentId={booZeroAgentId} /> : <WelcomeState />
       break
     case 'groupChat':
-      viewKey = `group-chat-${viewMode.teamId}`
-      viewLabel = 'the team space'
-      viewContent = <GroupChatView teamId={viewMode.teamId} />
+      // Keyed by the room as well: each room is its own conversation, so a switch
+      // remounts the team space rather than carrying one room's state into another.
+      viewKey = `group-chat-${viewMode.teamId}${viewMode.roomId ? `-room-${viewMode.roomId}` : ''}`
+      viewLabel = viewMode.roomId ? 'the chat room' : 'the team space'
+      viewContent = <GroupChatView teamId={viewMode.teamId} roomId={viewMode.roomId ?? null} />
+      break
+    case 'teamspace':
+      viewKey = `teamspace-${viewMode.teamId}`
+      viewLabel = 'the team home'
+      viewContent = <TeamspaceView teamId={viewMode.teamId} />
       break
     case 'nav':
       viewKey = `nav-${viewMode.view}`

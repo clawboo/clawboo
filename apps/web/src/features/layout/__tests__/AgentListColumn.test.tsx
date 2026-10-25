@@ -106,20 +106,44 @@ describe('AgentListColumn', () => {
 
     renderColumn(<AgentListColumn />)
 
-    expect(screen.getByTestId('fleet-agent-row-a1')).toBeInTheDocument()
-    expect(screen.getByTestId('fleet-agent-row-a2')).toBeInTheDocument()
-    expect(screen.queryByTestId('fleet-agent-row-a3')).not.toBeInTheDocument()
+    // A team's agents are its mascots at the top of the column.
+    expect(screen.getByTestId('teamspace-mascot-a1')).toBeInTheDocument()
+    expect(screen.getByTestId('teamspace-mascot-a2')).toBeInTheDocument()
+    expect(screen.queryByTestId('teamspace-mascot-a3')).not.toBeInTheDocument()
 
-    // The header shows the team name + the filtered count. Scoped to the
-    // heading so a stray "2" elsewhere in the column can't satisfy it.
+    // The header shows just the team name, no member count.
     const heading = screen.getByRole('heading', { level: 2 })
-    expect(heading).toHaveTextContent('Alpha')
-    expect(heading).toHaveTextContent('2')
-    // A team with members gets the group-chat row above the list.
+    expect(heading).toHaveTextContent(/^Alpha$/)
+    // A team with members gets its Home row and the General room.
+    expect(screen.getByTestId('teamspace-row')).toBeInTheDocument()
     expect(screen.getByTestId('group-chat-row')).toBeInTheDocument()
 
     // The panel hydrates from the store, never from the network, on mount.
     expect(vi.mocked(listAgents)).not.toHaveBeenCalled()
+  })
+
+  it("shows the team's mascots with Boo Zero last; the Home row and a mascot navigate", async () => {
+    useFleetStore.setState({
+      agents: [
+        agent({ id: 'a1', name: 'Research Boo', teamId: 't1' }),
+        agent({ id: 'bz', name: 'Boo Zero', teamId: null }),
+      ],
+    })
+    useBooZeroStore.setState({ booZeroAgentId: 'bz' })
+    useTeamStore.setState({ teams: [team({ id: 't1', name: 'Alpha' })], selectedTeamId: 't1' })
+
+    renderColumn(<AgentListColumn />)
+    const tiles = within(screen.getByTestId('team-mascots')).getAllByTestId(/^teamspace-mascot-/)
+    expect(tiles.map((t) => t.dataset.testid)).toEqual([
+      'teamspace-mascot-a1',
+      'teamspace-mascot-bz',
+    ])
+
+    await userEvent.click(screen.getByTestId('teamspace-row'))
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'teamspace', teamId: 't1' })
+
+    await userEvent.click(screen.getByTestId('teamspace-mascot-bz'))
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'agent', agentId: 'bz' })
   })
 
   it('hides the OpenClaw Gateway default agent — but only when it is NOT Boo Zero', () => {
@@ -147,7 +171,11 @@ describe('AgentListColumn', () => {
     })
     renderColumn(<AgentListColumn />)
 
+    // The search is an icon in the top row that opens into a field in place.
+    expect(screen.queryByRole('textbox', { name: 'Search agents' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('agent-search-open'))
     const search = screen.getByRole('textbox', { name: 'Search agents' })
+    expect(search).toHaveFocus()
     await userEvent.type(search, 'rese') // case-insensitive substring match
 
     expect(screen.getByTestId('fleet-agent-row-a1')).toBeInTheDocument()
@@ -162,6 +190,11 @@ describe('AgentListColumn', () => {
     await userEvent.clear(search)
     expect(screen.getByTestId('fleet-agent-row-a1')).toBeInTheDocument()
     expect(screen.getByTestId('fleet-agent-row-a2')).toBeInTheDocument()
+
+    // Escape closes the field back to the icon.
+    await userEvent.type(search, '{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Search agents' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-search-open')).toBeInTheDocument()
   })
 
   it('clicking a row opens that agent; the nav rows navigate and open settings', async () => {

@@ -31,7 +31,11 @@ import type { LayoutData, GhostGraphScope } from './types'
 // dragged positions persist independently; switching modes loads the
 // correct set or starts fresh.
 
-export function useGraphPersistence(scope: GhostGraphScope = 'team') {
+export function useGraphPersistence(
+  scope: GhostGraphScope = 'team',
+  /** A chat room's graph keeps its own positions, apart from the team's. */
+  roomId: string | null = null,
+) {
   const { setSavedPositions } = useGraphStore()
   const gatewayUrl = useConnectionStore((s) => s.gatewayUrl)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
@@ -46,7 +50,9 @@ export function useGraphPersistence(scope: GhostGraphScope = 'team') {
     scope === 'atlas'
       ? `atlas-${atlasLayout}`
       : selectedTeamId
-        ? `team-${selectedTeamId}`
+        ? roomId
+          ? `team-${selectedTeamId}-room-${roomId}`
+          : `team-${selectedTeamId}`
         : 'default'
 
   // The persistence scope key. In NATIVE mode there is no Gateway, so

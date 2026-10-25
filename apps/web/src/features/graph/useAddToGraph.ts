@@ -23,7 +23,7 @@ import {
   type LooseKind,
   type Obstacle,
 } from './looseNodes'
-import { spawnAgent } from './operations/spawnNode'
+import { joinRoom, spawnAgent } from './operations/spawnNode'
 import type { ThreadOption } from './ThreadPicker'
 import { threadOptionsFor } from './threadOptions'
 
@@ -67,6 +67,8 @@ export interface UseAddToGraphOptions {
   barRef: RefObject<HTMLElement | null>
   /** The team a new agent joins, or null where this canvas cannot show one. */
   newAgentTeamId: string | null
+  /** On a room's graph, the room a new agent joins as well. */
+  newAgentRoomId?: string | null
 }
 
 export function useAddToGraph({
@@ -78,6 +80,7 @@ export function useAddToGraph({
   paneRef,
   barRef,
   newAgentTeamId,
+  newAgentRoomId = null,
 }: UseAddToGraphOptions) {
   /** Where the picker opens, in screen pixels, or null while it is closed. */
   const [anchor, setAnchor] = useState<XYPosition | null>(null)
@@ -263,13 +266,16 @@ export function useAddToGraph({
       if (!newAgentTeamId) return
       const c = spawnCenter(BOO_RADIUS)
       // A Boo's position is the top-left of its footprint, with the Boo centred.
-      await spawnAgent(
+      const created = await spawnAgent(
         name,
         { x: c.x - BOO_FOOTPRINT / 2, y: c.y - BOO_FOOTPRINT / 2 },
         { teamId: newAgentTeamId },
       )
+      // A room's graph draws only the room's members, so an agent made there
+      // joins the room too.
+      if (created && newAgentRoomId) await joinRoom(newAgentTeamId, newAgentRoomId, created)
     },
-    [newAgentTeamId, spawnCenter],
+    [newAgentTeamId, newAgentRoomId, spawnCenter],
   )
 
   return { anchor, options, toggle, close, pick, createAgent, reseat }

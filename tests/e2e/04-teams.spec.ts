@@ -29,7 +29,7 @@ test.describe('Teams', () => {
 
     // Default view is Atlas (the 'graph' nav slot now renders the global
     // all-teams view) — scope to main content area to avoid nav button ambiguity
-    await expect(page.getByRole('main').getByText('Atlas — All Teams')).toBeVisible({
+    await expect(page.getByRole('main').getByText('Org chart — All Teams')).toBeVisible({
       timeout: 5_000,
     })
 

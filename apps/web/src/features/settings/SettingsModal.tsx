@@ -5,6 +5,7 @@ import {
   BarChart3,
   Brain,
   Cpu,
+  Gauge,
   HeartPulse,
   KeyRound,
   Puzzle,
@@ -70,6 +71,7 @@ const GROUPS: SettingsGroup[] = [
   {
     label: 'Insights',
     items: [
+      { id: 'fleet', icon: Gauge, keywords: 'agents overview status running fleet' },
       {
         id: 'cost',
         icon: BarChart3,

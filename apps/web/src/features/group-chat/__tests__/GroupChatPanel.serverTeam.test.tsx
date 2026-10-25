@@ -94,7 +94,7 @@ describe('GroupChatPanel — server-orchestrated branch', () => {
     )
 
     // The composer is ENABLED despite `client === null` (native canSend).
-    const textarea = await screen.findByPlaceholderText(/Message team/i)
+    const textarea = await screen.findByPlaceholderText(/Message General/i)
     expect(textarea).not.toBeDisabled()
 
     // Send → REST ingest with { message, targetAgentId: leader(a1), entryId }.

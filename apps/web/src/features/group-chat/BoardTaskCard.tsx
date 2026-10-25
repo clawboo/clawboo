@@ -59,7 +59,7 @@ const PILL: Record<TaskStatus, { tone: StatusTone; label: string }> = {
   cancelled: { tone: 'error', label: 'Cancelled' },
 }
 
-function toneFor(task: BoardTaskView): { tone: StatusTone; label: string } {
+export function toneFor(task: BoardTaskView): { tone: StatusTone; label: string } {
   // A task that needs a person says WHY ("Failed", "Stopped", "Unassigned"),
   // rather than reading as queued or plain blocked work.
   const attention = taskAttentionOf(task)

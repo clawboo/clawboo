@@ -143,9 +143,9 @@ export function WelcomeState() {
     },
     {
       num: '3',
-      text: 'Open the Atlas to see all your teams',
+      text: 'Open the Org chart to see all your teams',
       action: () => useViewStore.getState().navigateTo('graph'),
-      actionLabel: 'Open Atlas',
+      actionLabel: 'Open Org chart',
     },
   ]
 
@@ -268,7 +268,7 @@ export function WelcomeState() {
         <div className="relative z-10 mt-1 flex gap-2">
           {(
             [
-              { label: 'Atlas', icon: Network, view: 'graph' as const },
+              { label: 'Org chart', icon: Network, view: 'graph' as const },
               { label: 'Marketplace', icon: ShoppingCart, view: 'marketplace' as const },
               { label: 'Cost', icon: BarChart3, view: 'cost' as const },
             ] as { label: string; icon: LucideIcon; view: 'graph' | 'marketplace' | 'cost' }[]

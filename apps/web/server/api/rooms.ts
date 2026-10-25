@@ -14,6 +14,7 @@
 
 import type { Request, Response } from 'express'
 import {
+  addRoomMembers,
   archiveRoom,
   createRoom,
   getActiveRoom,
@@ -73,12 +74,21 @@ function readMembers(
   db: ClawbooDb,
   teamId: string,
   raw: unknown,
+  field: 'memberIds' | 'addMemberIds' = 'memberIds',
 ): { ok: true; memberIds: string[] } | { ok: false; error: string } {
   if (!Array.isArray(raw) || raw.some((id) => typeof id !== 'string' || id.length === 0)) {
-    return { ok: false, error: 'memberIds must be an array of agent ids' }
+    return { ok: false, error: `${field} must be an array of agent ids` }
   }
   const memberIds = [...new Set(raw as string[])]
-  if (memberIds.length === 0) return { ok: false, error: 'a room needs at least one member' }
+  if (memberIds.length === 0) {
+    return {
+      ok: false,
+      error:
+        field === 'memberIds'
+          ? 'a room needs at least one member'
+          : 'addMemberIds must name at least one agent',
+    }
+  }
   const invalid = invalidRoomMembers(db, teamId, memberIds)
   if (invalid.length > 0) {
     return { ok: false, error: `not active members of this team: ${invalid.join(', ')}` }
@@ -140,7 +150,9 @@ export function teamRoomsPOST(req: Request, res: Response): void {
 }
 
 // ─── PATCH /api/teams/:id/rooms/:roomId ──────────────────────────────────────
-// Body: partial { name?, memberIds?, pinned? }
+// Body: partial { name?, memberIds?, addMemberIds?, pinned? }. `memberIds`
+// replaces the roster; `addMemberIds` adds to it, so two adds sent at the same
+// time both land.
 
 export function teamRoomPATCH(req: Request, res: Response): void {
   const teamId = req.params['id'] as string | undefined
@@ -149,12 +161,26 @@ export function teamRoomPATCH(req: Request, res: Response): void {
     res.status(400).json({ error: 'team id and room id required' })
     return
   }
-  const body = (req.body ?? {}) as { name?: unknown; memberIds?: unknown; pinned?: unknown }
+  const body = (req.body ?? {}) as {
+    name?: unknown
+    memberIds?: unknown
+    addMemberIds?: unknown
+    pinned?: unknown
+  }
   if (body.pinned !== undefined && typeof body.pinned !== 'boolean') {
     res.status(400).json({ error: 'pinned must be true or false' })
     return
   }
-  if (body.name === undefined && body.memberIds === undefined && body.pinned === undefined) {
+  if (body.memberIds !== undefined && body.addMemberIds !== undefined) {
+    res.status(400).json({ error: 'send memberIds or addMemberIds, not both' })
+    return
+  }
+  if (
+    body.name === undefined &&
+    body.memberIds === undefined &&
+    body.addMemberIds === undefined &&
+    body.pinned === undefined
+  ) {
     res.status(400).json({ error: 'nothing to change' })
     return
   }
@@ -181,11 +207,21 @@ export function teamRoomPATCH(req: Request, res: Response): void {
       }
       memberIds = members.memberIds
     }
+    let addMemberIds: string[] | null = null
+    if (body.addMemberIds !== undefined) {
+      const members = readMembers(db, teamId, body.addMemberIds, 'addMemberIds')
+      if (!members.ok) {
+        res.status(400).json({ error: members.error })
+        return
+      }
+      addMemberIds = members.memberIds
+    }
     if (name !== null) renameRoom(db, roomId, name)
     if (typeof body.pinned === 'boolean') setRoomPinned(db, roomId, body.pinned)
     // A removed member's in-flight turn finishes; the room's next turns no
     // longer list or route to it (the roster is read fresh every turn).
     if (memberIds !== null) setRoomMembers(db, roomId, memberIds)
+    if (addMemberIds !== null) addRoomMembers(db, roomId, addMemberIds)
     const room = getActiveRoom(db, teamId, roomId)
     if (!room) {
       res.status(404).json({ error: 'room not found' })

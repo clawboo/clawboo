@@ -603,6 +603,9 @@ function isActive(): boolean {
 
 export const graphPhysics = {
   initialize,
+  /** Stop the loop without clearing the particles (while something else moves
+   *  the nodes, such as the org chart turning to a team). `initialize` after. */
+  pause: stopLoop,
   pinNode,
   unpinNode,
   wake,

@@ -31,7 +31,6 @@ import {
   Pin,
   Plus,
   RefreshCw,
-  Terminal,
   X,
   ZoomIn,
   ZoomOut,
@@ -40,6 +39,13 @@ import { Button, IconButton } from '@/features/shared/Button'
 import { BarBtn, BarDivider } from './toolbar'
 import { RadialLayoutIcon, TreeLayoutIcon } from './layoutIcons'
 import { ActivityDock } from './ActivityDock'
+import {
+  focusedTeamPose,
+  planTeamRotation,
+  posedPositions,
+  teamRestSnapshot,
+  withOrbitals,
+} from './rotateGraph'
 import { useGraphStore } from './store'
 import { useGraphData } from './useGraphData'
 import { useGraphPersistence } from './useGraphPersistence'
@@ -88,6 +94,7 @@ import type {
   GraphEdge,
   LayoutData,
   GhostGraphScope,
+  GraphRoomScope,
 } from './types'
 
 interface ContextMenuState {
@@ -101,6 +108,12 @@ interface ContextMenuState {
 // the JS twin of the app's signature cubic-bezier(0.32, 0.72, 0, 1): fast
 // start, long soft landing. (easeOutQuart is the closest analytic curve.)
 const easePremium = (t: number) => 1 - Math.pow(1 - t, 4)
+/** The org chart's turn to a team starts and ends gently. */
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+/** The browser dock's inset from the canvas edge (BrowserDock's EDGE). */
+const DOCK_EDGE = 16
+/** Room left between a team turned to the dock and the dock itself. */
+const DOCK_GAP = 24
 
 // Where to open the Boo context menu when there are no pointer coordinates (the
 // keyboard path). The node element is the 280 x 280 transparent envelope, so its
@@ -238,7 +251,7 @@ function LayoutModeSegment({
   return (
     <div
       role="radiogroup"
-      aria-label="Atlas layout"
+      aria-label="Org chart layout"
       className="flex items-center gap-0.5 rounded-md bg-[rgb(var(--foreground-rgb)/0.05)] p-0.5"
     >
       {opts.map((o) => {
@@ -276,7 +289,23 @@ function LayoutModeSegment({
 // `scope` controls global-vs-team data behavior + halos UX (see
 // `GhostGraphPanel` for the full contract). Defaults to `'team'`.
 
-export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {}) {
+export function GhostGraph({
+  scope = 'team',
+  room = null,
+  activityOpen,
+  onActivityOpenChange,
+  showBrowser = true,
+}: {
+  scope?: GhostGraphScope
+  room?: GraphRoomScope | null
+  /** The agent browser dock and its toolbar button. A graph inside a chat view
+   *  turns them off: its view gives the browser a card of its own. */
+  showBrowser?: boolean
+  /** The activity dock, opened from the view's top bar (the org chart). A graph
+   *  inside a chat view leaves these unset: its Activity is a card of its own. */
+  activityOpen?: boolean
+  onActivityOpenChange?: (open: boolean) => void
+} = {}) {
   const {
     nodes,
     edges,
@@ -323,12 +352,15 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // it expands the MiniMap back when the user wants to navigate a large graph.
   const [showMiniMap, setShowMiniMap] = useState(false)
 
-  // The live activity dock: every team's trail in Atlas, this team's in a team
-  // graph. See ActivityDock.
-  const [showActivityDock, setShowActivityDock] = useState(false)
-  // Browser dock: the right-edge twin of the activity dock above. Opening one
-  // closes the other, since they share the edge.
+  // The live activity dock (every team's trail), opened from the top bar.
+  // See ActivityDock.
+  const showActivityDock = activityOpen ?? false
+  // Browser dock: the right-edge twin of the activity dock. Opening one closes
+  // the other, since they share the edge.
   const [showBrowserDock, setShowBrowserDock] = useState(false)
+  useEffect(() => {
+    if (activityOpen) setShowBrowserDock(false)
+  }, [activityOpen])
   // Shared by the toolbar shift and the canvas pan, so all three moving parts
   // honour the setting together rather than one of them still sliding.
   const dockReduceMotion = useReducedMotion()
@@ -408,8 +440,8 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
   // AND it scopes the persistence key so Atlas and the team-scoped Ghost
   // Graph don't overwrite each other's saved positions (Atlas's positions
   // are global; the team chat's positions are per-team).
-  useGraphData(scope)
-  const { savePositions, isLoaded } = useGraphPersistence(scope)
+  useGraphData(scope, room)
+  const { savePositions, isLoaded } = useGraphPersistence(scope, room?.id ?? null)
 
   // Wire physics wake callback — when a boo node is dragged, wake the physics engine
   useEffect(() => {
@@ -558,6 +590,214 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     )
   }, [showBrowserDock, hasRunLayout, getViewport, setViewport, dockReduceMotion, dockWidth])
 
+  // TURN TO A TEAM. On the radial org chart, picking a team in the browser
+  // dock turns the whole graph around Boo Zero until that team points right,
+  // so it lands beside the dock; the camera then slides it in next to the dock.
+  // The tree layout has no hinge to turn on, so it only gets the camera.
+  const turnRafRef = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (turnRafRef.current !== null) cancelAnimationFrame(turnRafRef.current)
+    },
+    [],
+  )
+
+  const bringTeamBesideDock = useCallback(
+    (teamId: string) => {
+      const members = useGraphStore
+        .getState()
+        .nodes.filter(
+          (n) =>
+            (n.type === 'boo' || n.type === 'team-root') &&
+            (n.data as { teamId?: string | null }).teamId === teamId,
+        )
+      if (members.length === 0) return
+      let minX = Infinity
+      let maxX = -Infinity
+      let minY = Infinity
+      let maxY = -Infinity
+      for (const n of members) {
+        const w = n.measured?.width ?? n.width ?? 0
+        const h = n.measured?.height ?? n.height ?? 0
+        minX = Math.min(minX, n.position.x)
+        maxX = Math.max(maxX, n.position.x + w)
+        minY = Math.min(minY, n.position.y)
+        maxY = Math.max(maxY, n.position.y + h)
+      }
+      const vp = getViewport()
+      const left = minX * vp.zoom + vp.x
+      const right = maxX * vp.zoom + vp.x
+      const middle = ((minY + maxY) / 2) * vp.zoom + vp.y
+      // The team's right edge just short of the dock, unless that would push
+      // its left edge off the canvas.
+      let dx = containerSize.w - DOCK_EDGE - dockWidth - DOCK_GAP - right
+      if (left + dx < DOCK_EDGE) dx = DOCK_EDGE - left
+      const dy = containerSize.h / 2 - middle
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+      void setViewport(
+        { ...vp, x: vp.x + dx, y: vp.y + dy },
+        dockReduceMotion ? { duration: 0 } : { duration: 450, ease: easePremium },
+      )
+    },
+    [getViewport, setViewport, containerSize.w, containerSize.h, dockWidth, dockReduceMotion],
+  )
+
+  // The team whose agent the browser dock last brought forward (radial only),
+  // with where its junction and members stood before, so it settles back to
+  // exactly that when another team is picked or the dock closes.
+  const focusRef = useRef<{
+    teamId: string
+    agentId: string
+    rest: Map<string, { x: number; y: number }>
+  } | null>(null)
+
+  /** Move the graph: every node from where it is toward `to` (or staying put),
+   *  turned by `turn` around `pivot`, eased over `duration` ms. */
+  const animateGraph = useCallback(
+    (opts: {
+      to: ReadonlyMap<string, { x: number; y: number }>
+      pivot: { x: number; y: number } | null
+      turn: number
+      duration: number
+      /** Keep the result across a reload (a turn; a focus is momentary). */
+      save: boolean
+      onDone?: () => void
+    }) => {
+      if (turnRafRef.current !== null) {
+        cancelAnimationFrame(turnRafRef.current)
+        turnRafRef.current = null
+      }
+      const state = useGraphStore.getState()
+      const from = new globalThis.Map(state.nodes.map((n) => [n.id, n.position] as const))
+      const to = withOrbitals(state.edges, from, opts.to)
+      // The physics loop would write its own particle positions back over the
+      // move; it is rebuilt from where the nodes land.
+      graphPhysics.pause()
+      const apply = (progress: number) => {
+        const latest = useGraphStore.getState().nodes
+        const next = posedPositions(latest, from, to, opts.pivot, opts.turn, progress)
+        useGraphStore.getState().setNodes(
+          latest.map((n) => {
+            const p = next.get(n.id)
+            return p ? { ...n, position: p } : n
+          }),
+        )
+      }
+      const finish = () => {
+        turnRafRef.current = null
+        const done = useGraphStore.getState()
+        // Rebuilt from where the nodes landed, then a gentle settle, as after a
+        // layout, so Boos packed close ease apart.
+        graphPhysics.initialize(done.nodes, done.edges)
+        graphPhysics.wake(0.25)
+        if (opts.save) {
+          const positions = { ...done.savedPositions }
+          for (const n of done.nodes) if (from.has(n.id)) positions[n.id] = n.position
+          savePositions(positions)
+        }
+        opts.onDone?.()
+      }
+      if (dockReduceMotion) {
+        apply(1)
+        finish()
+        return
+      }
+      const t0 = performance.now()
+      const step = (now: number) => {
+        const p = Math.min(1, (now - t0) / opts.duration)
+        apply(easeInOutCubic(p))
+        if (p < 1) turnRafRef.current = requestAnimationFrame(step)
+        else finish()
+      }
+      turnRafRef.current = requestAnimationFrame(step)
+    },
+    [savePositions, dockReduceMotion],
+  )
+
+  /** Where the focused team stood before its focus, so it settles back there
+   *  (empty when no team is focused). */
+  const settleFocus = useCallback((): Map<string, { x: number; y: number }> => {
+    const focus = focusRef.current
+    focusRef.current = null
+    return focus ? new globalThis.Map(focus.rest) : new globalThis.Map()
+  }, [])
+
+  const turnToTeam = useCallback(
+    (teamId: string) => {
+      if (scope !== 'atlas' || teamId === UNTEAMED) return
+      const plan =
+        atlasLayout === 'radial' ? planTeamRotation(useGraphStore.getState().nodes, teamId) : null
+      const turn = plan && Math.abs(plan.turn) >= 0.01 ? plan.turn : 0
+      const settle = settleFocus()
+      if (turn === 0 && settle.size === 0) {
+        bringTeamBesideDock(teamId)
+        return
+      }
+      animateGraph({
+        to: settle,
+        pivot: plan?.pivot ?? null,
+        turn,
+        duration: 900,
+        save: true,
+        onDone: () => bringTeamBesideDock(teamId),
+      })
+    },
+    [scope, atlasLayout, settleFocus, animateGraph, bringTeamBesideDock],
+  )
+
+  /** Bring an agent forward, toward the dock: its team's edge from Boo Zero
+   *  shortens, drawing the others back, and the agent steps out ahead. */
+  const focusAgent = useCallback(
+    (agentId: string) => {
+      if (scope !== 'atlas' || atlasLayout !== 'radial') return
+      const teamId = allAgents.find((a) => a.id === agentId)?.teamId
+      if (!teamId) return
+      const nodes = useGraphStore.getState().nodes
+      // Re-focusing within a team poses it from where it stood before the
+      // first focus; a new team is recorded as it stands now.
+      const prev = focusRef.current
+      const sameTeam = prev?.teamId === teamId
+      const to = sameTeam ? new globalThis.Map<string, { x: number; y: number }>() : settleFocus()
+      const rest = sameTeam && prev ? prev.rest : teamRestSnapshot(nodes, teamId)
+      // Graph nodes are keyed `boo-<agentId>`.
+      const pose = focusedTeamPose(nodes, teamId, `boo-${agentId}`, rest)
+      if (!pose) return
+      for (const [id, p] of pose) to.set(id, p)
+      focusRef.current = { teamId, agentId, rest }
+      animateGraph({
+        to,
+        pivot: null,
+        turn: 0,
+        duration: 650,
+        save: false,
+        onDone: () => bringTeamBesideDock(teamId),
+      })
+    },
+    [scope, atlasLayout, allAgents, settleFocus, animateGraph, bringTeamBesideDock],
+  )
+
+  // Opening the dock turns the graph to its team; closing it lets a focused
+  // team settle back. Refs, so a new team or callback never re-fires this.
+  const dockTeamIdRef = useRef(dockTeamId)
+  dockTeamIdRef.current = dockTeamId
+  const turnToTeamRef = useRef(turnToTeam)
+  turnToTeamRef.current = turnToTeam
+  const animateGraphRef = useRef(animateGraph)
+  animateGraphRef.current = animateGraph
+  const wasDockOpenRef = useRef(showBrowserDock)
+  useEffect(() => {
+    const was = wasDockOpenRef.current
+    wasDockOpenRef.current = showBrowserDock
+    if (showBrowserDock && !was && dockTeamIdRef.current) {
+      turnToTeamRef.current(dockTeamIdRef.current)
+    } else if (!showBrowserDock && was) {
+      const settle = settleFocus()
+      if (settle.size > 0) {
+        animateGraphRef.current({ to: settle, pivot: null, turn: 0, duration: 650, save: false })
+      }
+    }
+  }, [showBrowserDock, settleFocus])
+
   // MiniMap stays small relative to the canvas — ~16% wide, ~22% tall, with
   // sensible min/max so it neither becomes invisible on tiny panels nor
   // dominates the canvas on large ones.
@@ -638,6 +878,12 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
 
     if (layoutRanRef.current) return
     layoutRanRef.current = true
+    // A fresh layout replaces any turn or focus still moving the nodes.
+    if (turnRafRef.current !== null) {
+      cancelAnimationFrame(turnRafRef.current)
+      turnRafRef.current = null
+    }
+    focusRef.current = null
 
     // Increment generation only when actually starting ELK computation.
     const generation = ++elkGenerationRef.current
@@ -1113,8 +1359,10 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     getNode,
     screenToFlowPosition,
     expandBoo,
-    // A team graph's new agents join its team when the source Boo has none.
+    // A team graph's new agents join its team when the source Boo has none,
+    // and a room's graph's new agents join the room as well.
     fallbackTeamId: scope === 'team' ? (obsTeamId ?? null) : null,
+    roomId: scope === 'team' ? (room?.id ?? null) : null,
   })
 
   // ── The + button ── the same picker with no agent behind it. A new agent
@@ -1134,6 +1382,7 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
     paneRef: wrapperRef,
     barRef: commandBarRef,
     newAgentTeamId,
+    newAgentRoomId: scope === 'team' ? (room?.id ?? null) : null,
   })
   reseatLooseRef.current = add.reseat
 
@@ -1451,61 +1700,52 @@ export function GhostGraph({ scope = 'team' }: { scope?: GhostGraphScope } = {})
           </>
         )}
 
-        {/* WATCH: the two right-edge docks, for what the agents are doing and
-            what one of them is looking at. Both scopes carry both. They share
-            the edge, so opening one closes the other rather than stacking them.
-            Only prefix a divider when a cluster precedes it, so a team graph
-            that has not laid out yet never shows a leading rule. */}
-        {(hasRunLayout || scope === 'atlas') && <BarDivider />}
-        <BarBtn
-          icon={Terminal}
-          label={
-            showActivityDock
-              ? 'Hide activity feed'
-              : scope === 'atlas'
-                ? 'Activity feed (all teams)'
-                : 'Activity feed (this team)'
-          }
-          tint="mint"
-          active={showActivityDock}
-          onClick={() =>
-            setShowActivityDock((v) => {
-              if (!v) setShowBrowserDock(false)
-              return !v
-            })
-          }
-        />
-        <BarBtn
-          icon={Globe}
-          label={showBrowserDock ? 'Hide browser' : 'Agent browser'}
-          tint="neutral"
-          active={showBrowserDock}
-          onClick={() => {
-            setShowBrowserDock((v) => {
-              if (!v) setShowActivityDock(false)
-              return !v
-            })
-          }}
-        />
+        {/* WATCH: the agent browser, a right-edge dock showing what an agent is
+            looking at. (Activity is in the view's top bar.) It shares the edge
+            with the activity dock, so opening one closes the other. Only
+            prefix a divider when a cluster precedes it, so a team graph that
+            has not laid out yet never shows a leading rule. */}
+        {showBrowser && (hasRunLayout || scope === 'atlas') && <BarDivider />}
+        {showBrowser && (
+          <BarBtn
+            icon={Globe}
+            label={showBrowserDock ? 'Hide browser' : 'Agent browser'}
+            tint="neutral"
+            active={showBrowserDock}
+            onClick={() => {
+              const next = !showBrowserDock
+              if (next) onActivityOpenChange?.(false)
+              setShowBrowserDock(next)
+            }}
+          />
+        )}
       </div>
 
-      <ActivityDock
-        open={showActivityDock}
-        onClose={() => setShowActivityDock(false)}
-        scope={scope === 'atlas' ? {} : { teamId: obsTeamId ?? undefined }}
-        scopeLabel={scope === 'atlas' ? 'all teams' : (scopedTeamName ?? 'this team')}
-      />
+      {onActivityOpenChange && (
+        <ActivityDock
+          open={showActivityDock}
+          onClose={() => onActivityOpenChange(false)}
+          scope={scope === 'atlas' ? {} : { teamId: obsTeamId ?? undefined }}
+          scopeLabel={scope === 'atlas' ? 'all teams' : (scopedTeamName ?? 'this team')}
+        />
+      )}
 
-      <BrowserDock
-        open={showBrowserDock}
-        teams={dockTeams}
-        selectedTeamId={dockTeamId}
-        onSelectTeam={setDockTeamId}
-        agents={dockAgents}
-        selectedAgentId={dockAgentId}
-        onSelectAgent={setDockAgentId}
-        onClose={() => setShowBrowserDock(false)}
-      />
+      {showBrowser && (
+        <BrowserDock
+          open={showBrowserDock}
+          teams={dockTeams}
+          selectedTeamId={dockTeamId}
+          onSelectTeam={(teamId) => {
+            setDockTeamId(teamId)
+            turnToTeam(teamId)
+          }}
+          agents={dockAgents}
+          selectedAgentId={dockAgentId}
+          onSelectAgent={setDockAgentId}
+          onAgentClick={focusAgent}
+          onClose={() => setShowBrowserDock(false)}
+        />
+      )}
 
       {/* ── Bottom-right viewport bar ──────────────────────────────────────
           Custom zoom / fit / lock / minimap in the SAME glass dialect as the

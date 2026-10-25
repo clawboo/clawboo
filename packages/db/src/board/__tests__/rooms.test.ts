@@ -17,6 +17,7 @@ import {
 } from '../repository'
 import {
   activeRoomMemberIds,
+  addRoomMembers,
   archiveRoom,
   createRoom,
   getActiveRoom,
@@ -89,6 +90,15 @@ describe('rooms', () => {
     const room = createRoom(db, { teamId: 'T', name: 'A', memberIds: ['a1', 'a2'] })
     expect(renameRoom(db, room.id, 'B')?.name).toBe('B')
     expect(setRoomMembers(db, room.id, ['a3', 'a2'])?.memberIds).toEqual(['a2', 'a3'])
+  })
+
+  it('adds members without dropping any, so two adds from the same roster both land', () => {
+    const room = createRoom(db, { teamId: 'T', name: 'A', memberIds: ['a1'] })
+    // Two callers that both read the roster as [a1] before either wrote.
+    addRoomMembers(db, room.id, ['a2'])
+    expect(addRoomMembers(db, room.id, ['a3'])?.memberIds).toEqual(['a1', 'a2', 'a3'])
+    // Adding a current member is a no-op that keeps its join order.
+    expect(addRoomMembers(db, room.id, ['a1', 'a2'])?.memberIds).toEqual(['a1', 'a2', 'a3'])
   })
 
   it('archives instead of deleting', () => {

@@ -76,7 +76,7 @@ const STEPS: Step[] = [
     target: 'fleet-agent-list',
     eyebrow: 'Your team',
     title: 'Meet your Boos',
-    body: 'Every agent on your team lives here. Click a Boo to chat one-to-one, or open Group Chat to brief the whole room at once.',
+    body: 'Every agent on your team lives here. Click a Boo to chat one-to-one, or open the General room to brief the whole team at once.',
     icon: Users,
     pad: 6,
     radius: 14,
@@ -85,9 +85,9 @@ const STEPS: Step[] = [
     kind: 'spot',
     key: 'atlas',
     target: 'nav-graph',
-    eyebrow: 'Atlas',
+    eyebrow: 'Org chart',
     title: 'See the whole org',
-    body: 'Atlas maps every team and how your agents connect: one live, cross-team org-graph.',
+    body: 'The Org chart maps every team and how your agents connect, live, across teams.',
     icon: Network,
     enter: () => nav().navigateTo('graph'),
   },
@@ -125,7 +125,7 @@ const STEPS: Step[] = [
     key: 'finish',
     variant: 'finish',
     title: "You're all set",
-    body: 'Open Group Chat and tell Boo Zero what you need. It delegates to the right Boos and coordinates the work for you.',
+    body: 'Open the General room and tell Boo Zero what you need. It delegates to the right Boos and coordinates the work for you.',
   },
 ]
 
@@ -617,7 +617,7 @@ function CenterBody({
             data-testid="tour-open-chat"
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition hover:brightness-[1.06] active:scale-[0.98]"
           >
-            Open Group Chat <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
+            Open General <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
           </button>
         ) : (
           <button

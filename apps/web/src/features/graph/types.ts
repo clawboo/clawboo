@@ -341,3 +341,10 @@ export interface ParsedBinding {
 export interface LayoutData {
   positions: Record<string, { x: number; y: number }>
 }
+
+/** A chat room inside the team: the team graph then draws only its members
+ *  (plus Boo Zero, who leads every room). */
+export interface GraphRoomScope {
+  id: string
+  memberIds: string[]
+}

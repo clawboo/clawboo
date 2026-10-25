@@ -2,11 +2,12 @@
 // states: the onboarding gate (full-window, NO graph — the user is still being
 // introduced to the team, so the team showcase stays out of the way), a brief
 // neutral placeholder while onboarding state hydrates, and the settled "team
-// space" split (Ghost Graph on top, group chat on bottom).
+// space" split (group chat on the left, Ghost Graph card on the right). In the
+// team space the header moves inside the chat pane (see TeamSpaceSplit).
 //
 // The transition is owned by `TeamSpaceSplit`: when the user finishes the gate,
-// it swaps to the split and the graph "opens" down from the top into its slot
-// while the chat settles below — but ONLY when the user actually came THROUGH
+// it swaps to the split and the graph "opens" down from the top of its card
+// while the chat settles beside it, but ONLY when the user actually came THROUGH
 // the gate this session (`sawGateRef`). Returning users (already onboarded when
 // the view mounts) never set the ref, so they land on the split instantly.
 //
@@ -31,6 +32,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useRoom, useRoomStore } from '@/stores/rooms'
 import { LazyBoundary } from '@/features/shared/LazyBoundary'
 import { createRetryableLazy } from '@/lib/lazyRetry'
 import { buildTeamSessionKey } from '@/lib/sessionUtils'
@@ -44,10 +46,32 @@ const teamSpaceSplitSource = createRetryableLazy(() =>
   import('./TeamSpaceSplit').then((m) => ({ default: m.TeamSpaceSplit })),
 )
 
-export function GroupChatView({ teamId }: { teamId: string }) {
+export function GroupChatView({
+  teamId,
+  roomId = null,
+}: {
+  teamId: string
+  /** One of the team's chat rooms; null = the team's own group chat. */
+  roomId?: string | null
+}) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
+  const room = useRoom(teamId, roomId)
   const agents = useFleetStore((s) => s.agents)
   const teamAgents = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
+  // The agents this conversation is between: the room's members, or the whole
+  // team for its own group chat. Onboarding is the team's, so the gate below
+  // still introduces the whole team (a room of an onboarded team skips it).
+  const chatAgents = useMemo(() => {
+    if (!roomId) return teamAgents
+    const members = new Set(room?.memberIds ?? [])
+    return teamAgents.filter((a) => members.has(a.id))
+  }, [teamAgents, roomId, room])
+
+  // A room's members come from the room list; read it if this view opened first.
+  useEffect(() => {
+    if (roomId && !useRoomStore.getState().loadedTeams.has(teamId))
+      void useRoomStore.getState().load(teamId)
+  }, [teamId, roomId])
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const booZeroAgent = useMemo(
     () => (booZeroAgentId ? (agents.find((a) => a.id === booZeroAgentId) ?? null) : null),
@@ -71,8 +95,8 @@ export function GroupChatView({ teamId }: { teamId: string }) {
   // returning users can see their existing transcripts the moment the team space
   // settles (or skip the gate entirely if onboarding is complete on the server).
   useEffect(() => {
-    for (const agent of teamAgents) {
-      const teamSk = buildTeamSessionKey(agent.id, teamId)
+    for (const agent of chatAgents) {
+      const teamSk = buildTeamSessionKey(agent.id, teamId, roomId)
       const existing = useChatStore.getState().transcripts.get(teamSk)
       if (existing && existing.length > 0) continue
       apiFetch(`/api/chat-history?sessionKey=${encodeURIComponent(teamSk)}`)
@@ -84,11 +108,14 @@ export function GroupChatView({ teamId }: { teamId: string }) {
         })
         .catch(() => {})
     }
-  }, [teamAgents, teamId])
+  }, [chatAgents, teamId, roomId])
+
+  // The settled team space renders the header inside its chat pane.
+  const settled = !isLoading && onboardingComplete
 
   return (
     <div className="flex h-full flex-col">
-      <GroupChatViewHeader team={team} />
+      {!settled && <GroupChatViewHeader team={team} room={room} />}
       <div className="flex-1 min-h-0">
         {isLoading ? (
           // Hydrating onboarding state — a full-window neutral beat with NO
@@ -110,18 +137,28 @@ export function GroupChatView({ teamId }: { teamId: string }) {
           </div>
         ) : (
           // Settled team space — when the user came through the gate this
-          // session, the split plays its "open" animation (graph grows down
-          // from the top into its slot; chat settles below). The split is
+          // session, the split plays its "open" animation (the graph reveals
+          // down from the top of its card). The split is
           // lazy-loaded (it owns the team-scoped Ghost Graph + React Flow/ELK),
-          // so we hold a neutral full-window beat while its chunk resolves —
-          // matching the hydrating placeholder above, so there's no flash.
+          // so we hold a neutral full-window beat (header kept) while its chunk
+          // resolves, matching the hydrating placeholder above, so there's no flash.
           <LazyBoundary
             source={teamSpaceSplitSource}
             label="the team space"
-            suspenseFallback={<div className="h-full bg-background" />}
+            suspenseFallback={
+              <div className="flex h-full flex-col">
+                <GroupChatViewHeader team={team} room={room} showCounts={false} />
+                <div className="min-h-0 flex-1 bg-background" />
+              </div>
+            }
             render={(TeamSpaceSplit) => (
               <div className="h-full">
-                <TeamSpaceSplit teamId={teamId} animateOpen={sawGateRef.current} />
+                <TeamSpaceSplit
+                  teamId={teamId}
+                  roomId={roomId}
+                  team={team}
+                  animateOpen={sawGateRef.current}
+                />
               </div>
             )}
             logContext={{ teamId }}

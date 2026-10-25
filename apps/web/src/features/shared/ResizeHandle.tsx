@@ -24,8 +24,51 @@ const GRIP_COLOR_HOVER = 'rgb(var(--foreground-rgb, 232 232 232) / 0.7)'
 const ACCENT_FILL = 'rgb(var(--primary-rgb) / 0.35)'
 const HANDLE_THICKNESS = 5
 
-export function ResizeHandle({ direction }: { direction: 'horizontal' | 'vertical' }) {
+// Gap between floating cards: no groove, just empty space the width of the
+// gutter, with a short grip pill that appears on hover.
+const GAP_THICKNESS = 8
+
+function GapHandle({ isHorizontal }: { isHorizontal: boolean }) {
+  return (
+    <Separator
+      className="resize-handle group"
+      style={{
+        width: isHorizontal ? GAP_THICKNESS : '100%',
+        height: isHorizontal ? '100%' : GAP_THICKNESS,
+        background: 'transparent',
+        position: 'relative',
+        flexShrink: 0,
+        cursor: isHorizontal ? 'col-resize' : 'row-resize',
+      }}
+    >
+      <span
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-1/2 rounded-full bg-foreground/25 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+        style={{
+          width: isHorizontal ? 3 : 32,
+          height: isHorizontal ? 32 : 3,
+          marginLeft: isHorizontal ? -1.5 : -16,
+          marginTop: isHorizontal ? -16 : -1.5,
+        }}
+      />
+    </Separator>
+  )
+}
+
+export function ResizeHandle({
+  direction,
+  variant = 'groove',
+}: {
+  direction: 'horizontal' | 'vertical'
+  /** `gap` = the empty gutter between floating cards. */
+  variant?: 'groove' | 'gap'
+}) {
   const isHorizontal = direction === 'horizontal'
+  if (variant === 'gap') return <GapHandle isHorizontal={isHorizontal} />
+  return <GrooveHandle isHorizontal={isHorizontal} />
+}
+
+function GrooveHandle({ isHorizontal }: { isHorizontal: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const fillRef = useRef<HTMLDivElement>(null)
   const gripDotsRef = useRef<HTMLDivElement>(null)

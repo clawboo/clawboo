@@ -4,6 +4,7 @@
 
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
+import { CollapsedSidebarToggle } from '@/features/layout/SidebarToggle'
 
 export interface PanelHeaderProps {
   title: ReactNode
@@ -36,6 +37,8 @@ export function PanelHeader({
       ].join(' ')}
     >
       <div className="flex min-w-0 items-center gap-3">
+        {/* Collapsed, the sidebar's expand toggle leads the title. */}
+        <CollapsedSidebarToggle className="-ml-3 -mr-1" />
         {Icon ? (
           <span
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"

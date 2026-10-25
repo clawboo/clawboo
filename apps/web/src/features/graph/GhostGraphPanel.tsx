@@ -1,38 +1,54 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
-import { Ghost } from 'lucide-react'
+import { Ghost, Terminal } from 'lucide-react'
 import { GhostGraph } from './GhostGraph'
 import { useGraphStore } from './store'
 import { useTeamStore } from '@/stores/team'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { countOf } from './capabilityVocabulary'
-import { countGraphSkills, type GhostGraphScope } from './types'
+import { countGraphSkills, type GhostGraphScope, type GraphRoomScope } from './types'
+import { CollapsedSidebarToggle } from '@/features/layout/SidebarToggle'
+import { PaneToggle } from '@/features/shared/FloatingCard'
 
 export type { GhostGraphScope }
 
 export function GhostGraphPanel({
   embedded = false,
   scope = 'team',
+  room = null,
 }: {
   embedded?: boolean
   scope?: GhostGraphScope
+  /** Draw only this room's members (team scope). */
+  room?: GraphRoomScope | null
 } = {}) {
   const { isLoadingFiles, filesError, nodes } = useGraphStore()
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  // The activity dock, toggled from this panel's top bar. An embedded graph has
+  // no top bar here; its view gives Activity a card of its own.
+  const [activityOpen, setActivityOpen] = useState(false)
 
+  const roomId = room?.id ?? null
   const prevTeamIdRef = useRef(selectedTeamId)
   const prevScopeRef = useRef(scope)
+  const prevRoomIdRef = useRef(roomId)
   useEffect(() => {
-    if (prevTeamIdRef.current === selectedTeamId && prevScopeRef.current === scope) return
+    if (
+      prevTeamIdRef.current === selectedTeamId &&
+      prevScopeRef.current === scope &&
+      prevRoomIdRef.current === roomId
+    )
+      return
     prevTeamIdRef.current = selectedTeamId
     prevScopeRef.current = scope
+    prevRoomIdRef.current = roomId
     const store = useGraphStore.getState()
     store.resetLayout()
     store.setNodes([])
     store.setEdges([])
     useGraphStore.setState({ agentFiles: new Map() })
-  }, [selectedTeamId, scope])
+  }, [selectedTeamId, scope, roomId])
   const selectedTeam = useTeamStore((s) =>
     s.selectedTeamId ? (s.teams.find((t) => t.id === s.selectedTeamId) ?? null) : null,
   )
@@ -45,9 +61,10 @@ export function GhostGraphPanel({
       {!embedded && (
         <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
           <div className="flex items-center gap-2">
+            <CollapsedSidebarToggle />
             <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               {scope === 'atlas'
-                ? 'Atlas — All Teams'
+                ? 'Org chart — All Teams'
                 : selectedTeam
                   ? `${selectedTeam.name} — Ghost Graph`
                   : 'Ghost Graph'}
@@ -59,10 +76,19 @@ export function GhostGraphPanel({
               </span>
             )}
           </div>
-          {/* GitHub Star CTA — integrated into the toolbar so this view
-              doesn't need the global AppTopBar (which is hidden for
-              nav:'graph'). Saves 44 px by reusing the existing toolbar. */}
-          <GitHubStarButton />
+          <div className="flex items-center gap-2">
+            <PaneToggle
+              icon={Terminal}
+              label="activity"
+              open={activityOpen}
+              onClick={() => setActivityOpen((v) => !v)}
+              testId="pane-toggle-graph-activity"
+            />
+            {/* GitHub Star CTA — integrated into the toolbar so this view
+                doesn't need the global AppTopBar (which is hidden for
+                nav:'graph'). Saves 44 px by reusing the existing toolbar. */}
+            <GitHubStarButton />
+          </div>
         </div>
       )}
 
@@ -100,7 +126,16 @@ export function GhostGraphPanel({
         )}
 
         <ReactFlowProvider key={`${scope}:${selectedTeamId ?? 'none'}`}>
-          <GhostGraph scope={scope} />
+          {embedded ? (
+            <GhostGraph scope={scope} room={room} showBrowser={false} />
+          ) : (
+            <GhostGraph
+              scope={scope}
+              room={room}
+              activityOpen={activityOpen}
+              onActivityOpenChange={setActivityOpen}
+            />
+          )}
         </ReactFlowProvider>
       </div>
 

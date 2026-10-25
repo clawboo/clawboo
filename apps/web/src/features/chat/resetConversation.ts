@@ -20,6 +20,7 @@
 // set of tools the boo chooses to call, so the divider promises only what is true.
 
 import { apiFetch } from '@clawboo/control-client'
+import type { GatewayClient } from '@clawboo/gateway-client'
 import type { TranscriptEntry } from '@clawboo/protocol'
 
 /**
@@ -66,4 +67,36 @@ export async function resetConversationContext(
   } catch {
     return null
   }
+}
+
+/**
+ * Send `/reset` to each OpenClaw teammate's session. Their conversations live in
+ * the Gateway, so dropping clawboo's resume pointers on the server does not end
+ * them, and without this they would answer from a thread the chat has let go of.
+ * Best-effort per teammate; a no-op without a Gateway connection.
+ */
+export async function resetOpenClawTeammates(
+  client: Pick<GatewayClient, 'call'> | null,
+  teammates: ReadonlyArray<{ id: string; runtime?: string | null }>,
+  sessionKeyFor: (agentId: string) => string | undefined,
+): Promise<void> {
+  if (!client) return
+  await Promise.all(
+    teammates
+      .filter((a) => a.runtime === 'openclaw')
+      .map(async (a) => {
+        const sessionKey = sessionKeyFor(a.id)
+        if (!sessionKey) return
+        try {
+          await client.call('chat.send', {
+            sessionKey,
+            message: '/reset',
+            deliver: false,
+            idempotencyKey: crypto.randomUUID(),
+          })
+        } catch {
+          // One unreachable teammate must not stop the rest from starting fresh.
+        }
+      }),
+  )
 }

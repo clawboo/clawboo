@@ -1,3 +1,4 @@
+import { CollapsedSidebarToggle } from '@/features/layout/SidebarToggle'
 import { GitHubStarButton } from './GitHubStarButton'
 
 // AppTopBar — slim in-flow top strip (44 px) rendered above `ContentArea`
@@ -21,9 +22,12 @@ export function AppTopBar() {
   return (
     <div
       data-testid="app-top-bar"
-      className="flex h-11 shrink-0 items-center justify-end border-b border-border bg-background px-3"
+      className="flex h-11 shrink-0 items-center border-b border-border bg-background px-3"
     >
-      <GitHubStarButton />
+      <CollapsedSidebarToggle />
+      <span className="ml-auto">
+        <GitHubStarButton />
+      </span>
     </div>
   )
 }

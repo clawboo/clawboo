@@ -3,6 +3,7 @@
 import ELK from 'elkjs/lib/elk.bundled.js'
 import type { ElkNode } from 'elkjs'
 import type { GraphNode, GraphEdge, LayoutData } from './types'
+import { ATLAS_RADIAL_MEMBER_RADIUS, ATLAS_RADIAL_TEAM_RADIUS, radialFanArc } from './radialLayout'
 
 // ─── Singleton ELK instance ───────────────────────────────────────────────────
 
@@ -390,11 +391,6 @@ export async function computeAtlasLayout(
 //   outward.
 // ──────────────────────────────────────────────────────────────────────────────
 
-const ATLAS_RADIAL_TEAM_RADIUS = 600 // distance from BZ centre to team-root centre
-const ATLAS_RADIAL_MEMBER_RADIUS = 320 // distance from team-root centre to each member centre
-const ATLAS_RADIAL_MAX_FAN_ARC = (Math.PI * 60) / 180 // cap each team's fan at 60°
-const ATLAS_RADIAL_PER_MEMBER_ARC = Math.PI / 9 // ≈ 20° per member, capped by the max above
-
 export async function computeAtlasRadialLayout(
   nodes: GraphNode[],
   _primaryDepEdges: GraphEdge[],
@@ -446,11 +442,8 @@ export async function computeAtlasRadialLayout(
   }
 
   if (numTeams > 0) {
-    // Each team gets an equal angular slice. Cap each team's fan so adjacent
-    // teams don't overlap their member arcs.
-    const anglePerTeam = (2 * Math.PI) / numTeams
-    const fanArcCap = Math.min(ATLAS_RADIAL_MAX_FAN_ARC, anglePerTeam * 0.7)
-
+    // Each team gets an equal angular slice, its fan capped so adjacent teams
+    // don't overlap their member arcs (radialFanArc).
     for (let i = 0; i < numTeams; i++) {
       const teamId = orderedTeamIds[i]!
       // Start at -π/2 (12 o'clock); proceed clockwise.
@@ -462,10 +455,7 @@ export async function computeAtlasRadialLayout(
       const sortedMembers = [...members].sort((a, b) => a.id.localeCompare(b.id))
       const numMembers = sortedMembers.length
 
-      // Fan arc: small for singletons (direct outward), grows with member
-      // count, capped by per-team angular budget.
-      const fanArc =
-        numMembers <= 1 ? 0 : Math.min(fanArcCap, (numMembers - 1) * ATLAS_RADIAL_PER_MEMBER_ARC)
+      const fanArc = radialFanArc(numMembers, numTeams)
 
       for (let j = 0; j < numMembers; j++) {
         const member = sortedMembers[j]!

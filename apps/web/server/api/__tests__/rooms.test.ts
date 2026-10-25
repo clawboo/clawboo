@@ -138,6 +138,25 @@ describe('rooms REST', () => {
     expect(wrongTeam.status()).toBe(404)
   })
 
+  it('adds members without replacing the roster, so two adds sent together both land', () => {
+    const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
+    const patch = (body: unknown): { status: number; body: unknown } => {
+      const r = fakeRes()
+      teamRoomPATCH(req({ id: 'T', roomId: room.id }, body), r.res)
+      return { status: r.status(), body: r.body() }
+    }
+
+    // Two clients that both saw the roster as [a1] each add one agent.
+    expect(patch({ addMemberIds: ['a2'] }).status).toBe(200)
+    const both = patch({ addMemberIds: ['a3'] })
+    expect((both.body as RoomBody).room.memberIds).toEqual(['a1', 'a2', 'a3'])
+
+    expect(patch({ addMemberIds: ['x1'] }).status).toBe(400)
+    expect(patch({ addMemberIds: [] }).status).toBe(400)
+    expect(patch({ addMemberIds: 'a2' }).status).toBe(400)
+    expect(patch({ memberIds: ['a1'], addMemberIds: ['a2'] }).status).toBe(400)
+  })
+
   it('pins and unpins a room, and refuses a pinned value that is not a boolean', () => {
     const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
     expect(room.pinnedAt).toBeNull()
