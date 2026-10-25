@@ -38,6 +38,7 @@ import { KeyedMutex } from '@clawboo/worktrees'
 
 import { budgetPreflight } from '../budgetPreflight'
 import { registerRunStop, type RunStopHandle } from '../runStops'
+import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import type { RoutineDispatchOutcome } from './wakeBridge'
@@ -61,6 +62,9 @@ export interface ConnectedAdapterLike {
   start: OpenClawAdapter['start']
   events: OpenClawAdapter['events']
   abort: OpenClawAdapter['abort']
+  /** Present on the real adapter: lets a person's comment steer the run. */
+  capabilities?: OpenClawAdapter['capabilities']
+  steer?: OpenClawAdapter['steer']
 }
 
 export interface ConnectedDispatchInput {
@@ -271,6 +275,8 @@ async function drainClaimedRoutineRun(
   // events are remembered but only `done` (or the watchdog) is terminal.
   const deadline = Date.now() + watchdogMs(input.watchdogMs)
   const iterator = adapter.events(runHandle)[Symbol.asyncIterator]()
+  // A person commenting on the task steers this run while it works (see runSteers).
+  const steerHandle = registerRunSteer(taskId, adapter, runHandle)
   let terminal: (RuntimeEvent & { kind: 'done' }) | null = null
   let lastError: string | null = null
   let stopForBudget: string | null = null
@@ -352,6 +358,7 @@ async function drainClaimedRoutineRun(
   } catch (err) {
     streamError = errorText(err)
   } finally {
+    steerHandle.release()
     await Promise.resolve(iterator.return?.()).catch(() => undefined)
   }
 

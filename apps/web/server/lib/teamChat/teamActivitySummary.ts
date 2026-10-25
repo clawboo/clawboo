@@ -23,7 +23,7 @@ import type { TranscriptEntry } from '@clawboo/protocol'
 import { agentIdFromSessionKey, shouldDropAssistantTurn } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
-import { resolveTeamSessionKeys } from '../../api/teamChatStream'
+import { resolveAllTeamSessionKeys } from '../../api/teamChatStream'
 
 /** Total character budget for the whole block. The board summary is kept whole (short
  *  + highest-signal); the brief is capped (a team's stored brief can be a long
@@ -93,7 +93,9 @@ function buildBoardBlock(db: ClawbooDb, teamId: string): string | null {
  *  oldest lines) to fit `maxChars`. Null when there is no meaningful chat. */
 function buildChatBlock(db: ClawbooDb, teamId: string, maxChars: number): string | null {
   if (maxChars <= 0) return null
-  const sessionKeys = resolveTeamSessionKeys(db, teamId)
+  // Every chat room of the team, its own group chat included: the summary is of
+  // the team's work, wherever it was discussed.
+  const sessionKeys = resolveAllTeamSessionKeys(db, teamId)
   const rows = listRecentChatMessages(db, { sessionKeys, limit: CHAT_MESSAGE_LIMIT })
   if (rows.length === 0) return null
   const nameMap = buildAgentNameMap(db)

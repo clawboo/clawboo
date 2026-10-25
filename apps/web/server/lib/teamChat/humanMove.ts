@@ -17,7 +17,7 @@ import { isHumanAssignment } from '@clawboo/board-core'
 import { createLogger } from '@clawboo/logger'
 
 import { stopTaskRuns } from '../runStops'
-import { getTeamOrchestrator, hasTeamOrchestrator } from './teamOrchestrator'
+import { getTaskOrchestrator, hasTaskOrchestrator } from './teamOrchestrator'
 
 const log = createLogger('human-move')
 
@@ -57,8 +57,8 @@ export function noteHumanMove(db: ClawbooDb, move: HumanMove): void {
     log.error({ err, taskId }, 'stopping a run for a person’s move failed')
   }
   if (!teamId) return
-  if (hasTeamOrchestrator(teamId)) {
-    void getTeamOrchestrator(teamId, { mcpBaseUrl: null })
+  if (hasTaskOrchestrator(teamId, taskId)) {
+    void getTaskOrchestrator(teamId, taskId, { mcpBaseUrl: null })
       .personMovedTask(taskId, to, { cancelledDependents: move.cancelledDependents ?? [] })
       .catch((err: unknown) => log.error({ err, taskId, teamId }, 'person-move handling failed'))
     return

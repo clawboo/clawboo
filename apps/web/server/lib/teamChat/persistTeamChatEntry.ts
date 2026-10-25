@@ -43,6 +43,9 @@ function nextServerSeq(): number {
 
 export interface PersistTeamChatEntryInput {
   teamId: string
+  /** The team chat room the entry belongs to; null/absent = the team's own
+   *  group chat (the plain team key). */
+  roomId?: string | null
   agentId: string
   text: string
   role: TranscriptEntryRole
@@ -72,7 +75,7 @@ export function persistTeamChatEntry(db: ClawbooDb, input: PersistTeamChatEntryI
   // so a thin client that skips the render filter still shows a clean chat. Meta
   // ([Task Update]) and user entries pass through untouched.
   if (input.role === 'assistant' && shouldDropAssistantTurn(input.text)) return false
-  const sessionKey = buildTeamSessionKey(input.agentId, input.teamId)
+  const sessionKey = buildTeamSessionKey(input.agentId, input.teamId, input.roomId)
   const now = Date.now()
   const entry: TranscriptEntry = {
     entryId: input.entryId ?? randomUUID(),

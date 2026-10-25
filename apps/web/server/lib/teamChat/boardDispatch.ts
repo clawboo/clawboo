@@ -1,4 +1,5 @@
-// A person asked for a board task to run: hand it to its team's orchestrator.
+// A person asked for a board task to run: hand it to the orchestrator of the team
+// chat room the task belongs to (the team's own group chat for most tasks).
 //
 // Detached on purpose. Starting a run can wait a long time for an agent that is
 // busy elsewhere (its home or connected-agent mutex is held by another run), and
@@ -8,7 +9,7 @@
 
 import { createLogger } from '@clawboo/logger'
 
-import { getTeamOrchestrator } from './teamOrchestrator'
+import { getTaskOrchestrator } from './teamOrchestrator'
 
 const log = createLogger('board-dispatch')
 
@@ -17,7 +18,7 @@ export function requestTaskDispatch(
   taskId: string,
   mcpBaseUrl: string | null,
 ): void {
-  getTeamOrchestrator(teamId, { mcpBaseUrl })
+  getTaskOrchestrator(teamId, taskId, { mcpBaseUrl })
     .dispatchTask(taskId)
     .then((outcome) => log.debug({ teamId, taskId, outcome }, 'board task dispatch'))
     .catch((err: unknown) => log.error({ err, teamId, taskId }, 'board task dispatch failed'))

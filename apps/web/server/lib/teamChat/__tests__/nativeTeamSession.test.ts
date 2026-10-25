@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   nativeTeamSessionKeysForAgentLike,
+  nativeTeamSessionKeysForRoomLike,
   nativeTeamSessionKeysForTeamLike,
+  nativeTeamSessionRoomKeysForTeamLike,
   nativeTeamSessionSettingKey,
   teamResumeEligible,
 } from '../nativeTeamSession'
@@ -23,6 +25,36 @@ describe('nativeTeamSession keys', () => {
     expect(a).not.toBe(b)
     // Distinct from the 1:1 `native-chat-session:<agentId>` namespace.
     expect(a.startsWith('native-team-session:')).toBe(true)
+  })
+
+  it('a chat room gets its own pointer; the default room keeps the original key', () => {
+    expect(nativeTeamSessionSettingKey('native-bz-1', 'team-9', null)).toBe(
+      'native-team-session:native-bz-1:team-9',
+    )
+    expect(nativeTeamSessionSettingKey('native-bz-1', 'team-9', 'room-3')).toBe(
+      'native-team-session:native-bz-1:team-9:room:room-3',
+    )
+  })
+
+  it('room sweep patterns reach the room pointers the team pattern does not', () => {
+    const like = (pattern: string, key: string): boolean =>
+      new RegExp(
+        `^${pattern
+          .split('%')
+          .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('.*')}$`,
+      ).test(key)
+    const roomKey = nativeTeamSessionSettingKey('a1', 'team-9', 'room-3')
+    const teamKey = nativeTeamSessionSettingKey('a1', 'team-9')
+    expect(like(nativeTeamSessionKeysForTeamLike('team-9'), teamKey)).toBe(true)
+    expect(like(nativeTeamSessionKeysForTeamLike('team-9'), roomKey)).toBe(false)
+    expect(like(nativeTeamSessionRoomKeysForTeamLike('team-9'), roomKey)).toBe(true)
+    expect(like(nativeTeamSessionRoomKeysForTeamLike('team-9'), teamKey)).toBe(false)
+    expect(like(nativeTeamSessionKeysForRoomLike('team-9', 'room-3'), roomKey)).toBe(true)
+    expect(like(nativeTeamSessionKeysForRoomLike('team-9', 'room-4'), roomKey)).toBe(false)
+    // The agent pattern covers both, so an agent delete sweeps every room.
+    expect(like(nativeTeamSessionKeysForAgentLike('a1'), roomKey)).toBe(true)
+    expect(like(nativeTeamSessionKeysForAgentLike('a1'), teamKey)).toBe(true)
   })
 
   it('builds team + agent LIKE sweep patterns', () => {

@@ -1,4 +1,4 @@
-import type { StartOpts, Usage } from '@clawboo/executor'
+import type { StartOpts, SteerOptions, Usage } from '@clawboo/executor'
 
 /**
  * A native lifecycle event from a running Claude Code session, lightly
@@ -50,6 +50,10 @@ export interface ClaudeCodeDriver {
   setModel(model: string): Promise<void>
   /** Persist a context file/value into the run's workspace. */
   writeContext(key: string, value: string): Promise<void>
+  /** Push a user message into the running turn (streaming input). False once
+   *  the run has ended; throws when the runtime refused it. Optional so a test
+   *  double without it simply cannot be steered. */
+  steer?(text: string, opts?: SteerOptions): Promise<boolean>
 }
 
 /** Fresh driver per run — the adapter calls this in `start()`. */

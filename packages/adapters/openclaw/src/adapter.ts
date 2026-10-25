@@ -7,6 +7,8 @@ import {
   type RuntimeAdapter,
   type RuntimeEvent,
   type StartOpts,
+  type SteerOptions,
+  type SteerResult,
   type TaskHandle,
 } from '@clawboo/executor'
 
@@ -34,6 +36,49 @@ const runIdOf = (frame: EventFrame): string | undefined => {
 }
 
 const HEALTH_TIMEOUT_MS = 2000
+
+// ─── Steering ────────────────────────────────────────────────────────────────
+//
+// A steer is a `chat.send` with `queueMode: 'steer'`: the Gateway puts it into the
+// session's ACTIVE run at the next runtime boundary (a tool launch or a model call)
+// without stopping anything. Verified against OpenClaw 2026.9.2's chat.send handler.
+// Two of its behaviors shape everything below:
+//
+//  1. An ACCEPTED steer is closed out with a `chat` FINAL frame carrying the
+//     steer's own runId (its idempotencyKey), once the runtime has committed the
+//     message to the transcript. Read as the run's final, that frame would end a
+//     run that is still working. So a steer's runId is remembered, and every
+//     frame carrying it is kept out of the run's event stream.
+//  2. A steer the active run could NOT take is not dropped: it becomes a FOLLOW-UP
+//     turn queued behind the run. Nothing would observe that turn, so when the
+//     run ends with a steer still unread it is cancelled (`chat.abort` by its
+//     runId cancels a queued turn) and reported as not delivered; the mailbox
+//     still holds the message for the agent's next run.
+
+/** How long a steer's runId stays on the filter list after it is issued. */
+const STEER_RUN_ID_TTL_MS = 30 * 60_000
+
+/** Run ids that belong to steers, never to a run. Module-level, not per adapter:
+ *  each team delivery builds its own adapter, and a stray steer frame must not be
+ *  taken for the NEXT run on the session either. */
+const steerRunIds = new Set<string>()
+
+function rememberSteerRunId(id: string): void {
+  steerRunIds.add(id)
+  const timer = setTimeout(() => steerRunIds.delete(id), STEER_RUN_ID_TTL_MS)
+  ;(timer as { unref?: () => void }).unref?.()
+}
+
+const chatStateOf = (frame: EventFrame): string | undefined => {
+  if (frame.event !== 'chat') return undefined
+  const p = payloadRecord(frame)
+  return p && typeof p['state'] === 'string' ? p['state'] : undefined
+}
+
+const chatErrorOf = (frame: EventFrame): string | undefined => {
+  const p = payloadRecord(frame)
+  return p && typeof p['errorMessage'] === 'string' ? p['errorMessage'] : undefined
+}
 
 /** The subset of the chat.send response we inspect. The happy path carries NONE
  *  of these (the runId binds later via the frame stream), so a no-run check can
@@ -67,6 +112,11 @@ export class OpenClawAdapter implements RuntimeAdapter {
   readonly id = 'openclaw'
   readonly participantKind = 'agent' as const
 
+  /** Sessions with a run this adapter started whose terminal has not been seen. */
+  private readonly liveRuns = new Set<string>()
+  /** Steers sent into a live run and not yet read, by session: runId -> settle. */
+  private readonly pendingSteers = new Map<string, Map<string, (r: SteerResult) => void>>()
+
   constructor(private readonly client: OpenClawGatewayClient) {}
 
   capabilities(): Capabilities {
@@ -76,9 +126,10 @@ export class OpenClawAdapter implements RuntimeAdapter {
       worktrees: false,
       resume: true,
       toolApproval: true,
-      // `writeContext` sets an AGENT FILE on the Gateway. The running session
-      // does not re-read it, so it never reaches a live run.
-      steerable: false,
+      // `chat.send` with `queueMode: 'steer'` goes into the active run at its
+      // next boundary (see Steering above). `writeContext` is NOT a mid-run
+      // channel: it sets an agent file the running session does not re-read.
+      steering: 'live',
       models: [],
       // Native-preservation seam: a CONNECTED SUBSTRATE — runs ride the LIVE
       // Gateway session over this adapter's long-lived client; the one-shot
@@ -128,6 +179,7 @@ export class OpenClawAdapter implements RuntimeAdapter {
       const status = res && typeof res === 'object' && res.status ? ` (status: ${res.status})` : ''
       throw new Error(`chat.send was acknowledged but did not start a run${status}`)
     }
+    this.liveRuns.add(opts.sessionKey)
     return { adapterId: this.id, sessionKey: opts.sessionKey, runId: null }
   }
 
@@ -141,11 +193,14 @@ export class OpenClawAdapter implements RuntimeAdapter {
     // `events()` and the first `next()` are buffered, not dropped.
     const unsubscribe = this.client.onEvent((frame: EventFrame) => {
       if (sessionKeyOf(frame) !== run.sessionKey) return
+      const rid = runIdOf(frame)
+      // A steer's own frames (its closing final above all) are not the run's.
+      if (rid && steerRunIds.has(rid)) return
       // Late-bind / re-bind the runId from the frame (a new run on the same
       // long-lived session carries a new runId; we track the latest).
-      const rid = runIdOf(frame)
       if (rid) run.runId = rid
       const ctx: MapContext = { runId: run.runId, sessionId: run.sessionKey }
+      let ended = false
       for (const ev of mapFrameToRuntimeEvents(
         frame,
         ctx,
@@ -154,9 +209,12 @@ export class OpenClawAdapter implements RuntimeAdapter {
         accumulated,
       )) {
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') accumulated += ev.text
+        if (ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)) ended = true
         queue.push(ev)
       }
+      if (ended) endRun()
     })
+    const endRun = (): void => this.endRun(run.sessionKey)
 
     return {
       [Symbol.asyncIterator](): AsyncIterator<RuntimeEvent> {
@@ -164,6 +222,9 @@ export class OpenClawAdapter implements RuntimeAdapter {
         return {
           next: () => inner.next(),
           return: () => {
+            // The consumer stopped observing: as far as the host is concerned the
+            // run is over, so nothing should still be waiting to get into it.
+            endRun()
             unsubscribe()
             return inner.return
               ? inner.return()
@@ -193,5 +254,90 @@ export class OpenClawAdapter implements RuntimeAdapter {
 
   async writeContext(run: RunHandle, key: string, value: string): Promise<void> {
     await this.client.agents.files.set(agentIdFromSessionKey(run.sessionKey), key, value)
+  }
+
+  /**
+   * Steer the session's active run (see Steering above). Resolves once the
+   * outcome is known: delivered when the Gateway reports the message committed to
+   * the run, not delivered when the run ended first (the unread steer is then
+   * cancelled so it can't start a turn nobody is watching) or the Gateway refused it.
+   * A steer here never extends a run (an unread one is cancelled when the run
+   * ends), so a passive steer needs no different handling.
+   */
+  async steer(run: RunHandle, text: string, _opts?: SteerOptions): Promise<SteerResult> {
+    const sessionKey = run.sessionKey
+    if (!this.liveRuns.has(sessionKey)) return { delivered: false, reason: 'run-ended' }
+    const steerRunId = crypto.randomUUID()
+    rememberSteerRunId(steerRunId)
+    return new Promise<SteerResult>((resolve) => {
+      let settled = false
+      const off = this.client.onEvent((frame: EventFrame) => {
+        if (runIdOf(frame) !== steerRunId) return
+        const state = chatStateOf(frame)
+        if (state === 'final') settle({ delivered: true, mode: 'live' })
+        else if (state === 'aborted') settle({ delivered: false, reason: 'run-ended' })
+        else if (state === 'error')
+          settle({
+            delivered: false,
+            reason: 'rejected',
+            ...(chatErrorOf(frame) ? { detail: chatErrorOf(frame) } : {}),
+          })
+      })
+      const settle = (result: SteerResult): void => {
+        if (settled) return
+        settled = true
+        off()
+        this.pendingSteers.get(sessionKey)?.delete(steerRunId)
+        resolve(result)
+      }
+      let waiting = this.pendingSteers.get(sessionKey)
+      if (!waiting) {
+        waiting = new Map()
+        this.pendingSteers.set(sessionKey, waiting)
+      }
+      waiting.set(steerRunId, settle)
+      this.client
+        .call<ChatSendResult>('chat.send', {
+          sessionKey,
+          message: text,
+          deliver: false,
+          idempotencyKey: steerRunId,
+          queueMode: 'steer',
+        })
+        .then(
+          (res) => {
+            if (isNoRunAck(res)) {
+              const status = res && typeof res === 'object' && res.status ? res.status : 'no run'
+              settle({ delivered: false, reason: 'rejected', detail: status })
+            } else if (!this.liveRuns.has(sessionKey)) {
+              // The run ended while the send was in flight.
+              this.cancelSteer(sessionKey, steerRunId)
+              settle({ delivered: false, reason: 'run-ended' })
+            }
+          },
+          (err: unknown) =>
+            settle({
+              delivered: false,
+              reason: 'rejected',
+              detail: err instanceof Error ? err.message : String(err),
+            }),
+        )
+    })
+  }
+
+  /** The run on this session is over: cancel every steer it never read. */
+  private endRun(sessionKey: string): void {
+    this.liveRuns.delete(sessionKey)
+    const waiting = this.pendingSteers.get(sessionKey)
+    if (!waiting) return
+    this.pendingSteers.delete(sessionKey)
+    for (const [steerRunId, settle] of waiting) {
+      this.cancelSteer(sessionKey, steerRunId)
+      settle({ delivered: false, reason: 'run-ended' })
+    }
+  }
+
+  private cancelSteer(sessionKey: string, steerRunId: string): void {
+    void this.client.chat.abort(sessionKey, steerRunId).catch(() => undefined)
   }
 }

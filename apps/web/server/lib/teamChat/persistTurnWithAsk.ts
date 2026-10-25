@@ -25,21 +25,28 @@ import { persistTeamChatEntry } from './persistTeamChatEntry'
  */
 export function persistAssistantTurnWithAsk(
   db: ClawbooDb,
-  input: { teamId: string; agentId: string; text: string },
+  input: { teamId: string; roomId?: string | null; agentId: string; text: string },
 ): boolean {
+  const roomId = input.roomId ?? null
   const ask = extractConnectorAsk(input.text)
   if (ask.slugs.length > 0) {
     try {
       persistTeamChatEntry(db, {
         teamId: input.teamId,
+        roomId,
         agentId: input.agentId,
         text: connectorAskBody(ask.slugs),
         role: 'system',
         kind: 'meta',
-        // Deterministic per (team, agent, slugs): a re-driven turn or a repeated
-        // ask lands on ON CONFLICT DO NOTHING instead of stacking a second
-        // identical card under the first.
-        entryId: connectorAskEntryId(input.teamId, input.agentId, ask.slugs),
+        // Deterministic per (team, room, agent, slugs): a re-driven turn or a
+        // repeated ask lands on ON CONFLICT DO NOTHING instead of stacking a
+        // second identical card under the first. The room is part of the scope
+        // so the same ask in another room still gets its own card.
+        entryId: connectorAskEntryId(
+          roomId ? `${input.teamId}:room:${roomId}` : input.teamId,
+          input.agentId,
+          ask.slugs,
+        ),
       })
     } catch {
       /* the offer is best-effort: never fail a turn that produced an answer */
@@ -47,6 +54,7 @@ export function persistAssistantTurnWithAsk(
   }
   return persistTeamChatEntry(db, {
     teamId: input.teamId,
+    roomId,
     agentId: input.agentId,
     text: ask.body,
     role: 'assistant',

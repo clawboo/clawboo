@@ -25,6 +25,18 @@
 // match simply means a fresh session next dispatch — never a failure. The
 // terminal `result` is synthesized on process exit, the reliable path. (Argv
 // shape per the preserved-runtime adapter.)
+//
+// STEERING is interrupt-and-resume, because one-shot `hermes chat -q` takes no
+// input once started (its live `/steer` exists only in `hermes acp`). `steer()`
+// stops the process and resumes the SAME session in the SAME home with the steer
+// as the next input, all inside this one run (`createSpawnDriver.relaunch`): the
+// stopped process's exit is absorbed, so the host never sees an aborted terminal
+// and nothing reads the stop as a failure or a Stop. Verified against hermes-agent
+// 0.15.2: a SIGTERM'd `-q` run is interrupted gracefully, its session was created
+// at start and its messages persisted after each tool batch, but it prints no
+// session line, so a run whose id is not already known resumes with `--continue`
+// (the newest session in this home, which under the per-identity home mutex is
+// the stopped run). The tool call in flight at the stop is lost; the run is not.
 
 import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
@@ -156,6 +168,11 @@ export async function buildHermesSpawnPlan(
   opts: StartOpts,
   ctx: RuntimeRunContext,
   home: ProvisionedHermesHome,
+  /** `continueLatest`: resume the most recent session in this home
+   *  (`--continue`) when no session id is known. Used to resume a run that was
+   *  stopped to take a steer: one-shot `-Q` prints its session id only at a
+   *  clean exit, and the stopped run is the newest session in its home. */
+  extra: { continueLatest?: boolean } = {},
 ): Promise<ResolvedSpawn> {
   const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
   const explicitModel = ctx.model ?? opts.model
@@ -237,6 +254,8 @@ export async function buildHermesSpawnPlan(
     ...(model ? ['-m', model] : []),
     ...(resume ? ['--resume', resume] : []),
     ...(providerFlag ? ['--provider', providerFlag] : []),
+    // Last: its session name is optional, so nothing may follow it as a value.
+    ...(!resume && extra.continueLatest && !home.created ? ['--continue'] : []),
   ]
   // Resolve the absolute path — Hermes lives in the Python user-site bin
   // (e.g. ~/Library/Python/<ver>/bin), off the server's PATH, so a bare
@@ -256,14 +275,28 @@ export async function buildHermesSpawnPlan(
   }
 }
 
+/** The input a stopped run resumes with: the steer(s), then why it stopped. */
+export function hermesSteerPrompt(texts: string[]): string {
+  return [
+    ...texts,
+    'Your run was paused so you could read this. Carry on with the task from where you left off, taking it into account.',
+  ].join('\n\n')
+}
+
 export function createHermesDriver(opts: StartOpts, ctx: RuntimeRunContext): HermesDriver {
   const state: HermesRunState = { lastText: '', sawResult: false }
+  /** The home the run started in: a resume must land in the same one. */
+  let homeDir: string | null = null
+  /** Steers waiting for the next relaunch, and the promise that settles them. */
+  let batch: { texts: string[]; result: Promise<boolean> } | null = null
+  /** Relaunches run one after another. */
+  let chain: Promise<unknown> = Promise.resolve()
 
-  return createSpawnDriver<HermesNativeEvent>({
+  const spawn = createSpawnDriver<HermesNativeEvent>({
     async resolve() {
       // Persistent per-identity home when the runner materialized one;
       // otherwise a throwaway home (the conservative one-shot default).
-      const homeDir = ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-home-')))
+      homeDir = ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-home-')))
       const home = await provisionHermesHome(homeDir, {
         mcpJson: ctx.mcpBaseUrl
           ? hermesMcpConfig(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
@@ -312,4 +345,45 @@ export function createHermesDriver(opts: StartOpts, ctx: RuntimeRunContext): Her
       ]
     },
   })
+
+  /** The resumed process: same home, same flags, the steers as its input. A
+   *  session id the run already knows (a resumed session keeps its id) is resumed
+   *  by id; otherwise the newest session in the home, which is the stopped run. */
+  async function resumePlan(texts: string[]): Promise<ResolvedSpawn> {
+    if (!homeDir) throw new Error('hermes run has no home to resume in')
+    const known = state.sessionId ?? ctx.resume ?? null
+    // The stopped process printed nothing worth keeping (-Q prints at the end).
+    state.lastText = ''
+    return buildHermesSpawnPlan(
+      { ...opts, context: null, message: hermesSteerPrompt(texts) },
+      { ...ctx, resume: known },
+      { home: homeDir, created: false, seededConfig: false, seededAuth: false },
+      { continueLatest: known === null },
+    )
+  }
+
+  return {
+    ...spawn,
+    steer(text: string): Promise<boolean> {
+      if (state.sawResult) return Promise.resolve(false)
+      // A steer that arrives before the queued relaunch starts rides along with it.
+      if (batch) {
+        batch.texts.push(text)
+        return batch.result
+      }
+      const mine: { texts: string[]; result: Promise<boolean> } = {
+        texts: [text],
+        result: Promise.resolve(false),
+      }
+      mine.result = chain.then(async () => {
+        // From here on, a new steer forms the next batch.
+        if (batch === mine) batch = null
+        if (state.sawResult) return false
+        return spawn.relaunch(() => resumePlan(mine.texts))
+      })
+      batch = mine
+      chain = mine.result.catch(() => false)
+      return mine.result
+    },
+  }
 }

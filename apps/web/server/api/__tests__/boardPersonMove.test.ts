@@ -38,14 +38,20 @@ vi.mock('../../lib/teamChat/boardDispatch', () => ({
 /** What the route asked a resident engine to do, and whether one is resident. */
 const engineCalls: Array<{ taskId: string; to: string; opts: unknown }> = []
 let resident = false
-vi.mock('../../lib/teamChat/teamOrchestrator', () => ({
-  getTeamOrchestrator: () => ({
+vi.mock('../../lib/teamChat/teamOrchestrator', () => {
+  const orchestrator = () => ({
     personMovedTask: async (taskId: string, to: string, opts: unknown) => {
       engineCalls.push({ taskId, to, opts })
     },
-  }),
-  hasTeamOrchestrator: () => resident,
-}))
+  })
+  return {
+    getTeamOrchestrator: orchestrator,
+    // A person's move reaches the engine of the task's chat room.
+    getTaskOrchestrator: orchestrator,
+    hasTeamOrchestrator: () => resident,
+    hasTaskOrchestrator: () => resident,
+  }
+})
 
 const { getDb, resetDb } = await import('../../lib/db')
 const { boardGetGET, boardRetryPOST, boardUpdatePATCH } = await import('../board')

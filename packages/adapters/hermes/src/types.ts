@@ -1,4 +1,4 @@
-import type { StartOpts, Usage } from '@clawboo/executor'
+import type { StartOpts, SteerOptions, Usage } from '@clawboo/executor'
 
 /**
  * A native lifecycle event from a headless Hermes run. Hermes has no live token
@@ -39,6 +39,11 @@ export interface HermesDriver {
   abort(): Promise<void>
   setModel(model: string): Promise<void>
   writeContext(key: string, value: string): Promise<void>
+  /** Stop the running process and resume the same session with `text` as the
+   *  next input, inside this one run. False once the run has ended; throws when
+   *  the resume could not be started. Optional so a test double without it
+   *  simply cannot be steered. */
+  steer?(text: string, opts?: SteerOptions): Promise<boolean>
 }
 
 export type HermesDriverFactory = (opts: StartOpts) => HermesDriver

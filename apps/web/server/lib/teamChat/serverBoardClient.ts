@@ -42,6 +42,17 @@ import type {
 
 import { emitEvent } from '../obs'
 
+export interface ServerBoardClientOptions {
+  /**
+   * Bind the client to ONE chat room of the team: every task it creates belongs
+   * to that room, and the engine's board reads (its projection load, ready pump
+   * and resume) see only that room's tasks, so two rooms' engines never adopt
+   * each other's work. `null` is the team's default room (the tasks with no
+   * room). Omitted = no room scoping at all (tests, tools that read every room).
+   */
+  roomId?: string | null
+}
+
 /**
  * Build a `BoardClient` over a held SQLite handle + a team scope. The engine
  * calls it the same way it calls the browser's REST client; every method
@@ -49,11 +60,16 @@ import { emitEvent } from '../obs'
  * and a claim conflict surfaces as `{ ok: false, reason: 'conflict' }` (never
  * retried).
  */
-export function createServerBoardClient(db: ClawbooDb): BoardClient {
+export function createServerBoardClient(
+  db: ClawbooDb,
+  opts: ServerBoardClientOptions = {},
+): BoardClient {
+  const scoped = 'roomId' in opts
+  const roomId = opts.roomId ?? null
   return {
     async createTask(input: CreateTaskInput): Promise<BoardTask | null> {
       try {
-        const task = createTask(db, input)
+        const task = createTask(db, scoped ? { ...input, roomId } : input)
         emitEvent(db, {
           kind: 'task_created',
           taskId: task.id,
@@ -210,7 +226,7 @@ export function createServerBoardClient(db: ClawbooDb): BoardClient {
 
     async getReadyTasks(teamId): Promise<BoardTask[]> {
       try {
-        return getReadyTasks(db, { teamId }) as BoardTask[]
+        return getReadyTasks(db, scoped ? { teamId, roomId } : { teamId }) as BoardTask[]
       } catch {
         return []
       }
@@ -234,7 +250,7 @@ export function createServerBoardClient(db: ClawbooDb): BoardClient {
 
     async listTasks(teamId): Promise<BoardTask[]> {
       try {
-        return listTasks(db, { teamId }) as BoardTask[]
+        return listTasks(db, scoped ? { teamId, roomId } : { teamId }) as BoardTask[]
       } catch {
         return []
       }

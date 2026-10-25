@@ -27,6 +27,7 @@ import { listLiveConnectors } from '../connectors/supervisor'
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
 import { buildConnectorAwareness } from './connectorAwareness'
+import { roomMemberIdSet } from './roomRoster'
 import { formatLeaderRoster, readTeammateRole } from './teammateRoles'
 
 /** Durable team rules (settings key `team-rules:<teamId>`, JSON `{ content }`). */
@@ -55,12 +56,16 @@ function readUserIntroText(db: ClawbooDb, teamId: string): string {
 }
 
 /** Live teammates for the team, recipient and archived agents excluded, oldest
- *  first so the roster reads the same from turn to turn. */
+ *  first so the roster reads the same from turn to turn. In a chat room other
+ *  than the team's default one, only the room's members: a teammate outside the
+ *  room is not someone this conversation can hand work to. */
 function readTeammates(
   db: ClawbooDb,
   teamId: string,
   selfAgentId: string,
+  roomId: string | null,
 ): Array<{ id: string; name: string; runtime: string | null }> {
+  const inRoom = roomId === null ? null : roomMemberIdSet(db, teamId, roomId)
   return db
     .select({
       id: agents.id,
@@ -72,7 +77,7 @@ function readTeammates(
     .where(eq(agents.teamId, teamId))
     .orderBy(asc(agents.createdAt), asc(agents.id))
     .all()
-    .filter((a) => !a.archivedAt && a.id !== selfAgentId)
+    .filter((a) => !a.archivedAt && a.id !== selfAgentId && (inRoom === null || inRoom.has(a.id)))
 }
 
 /** The roster; null when there are no teammates. Every turn gets the names. The
@@ -84,8 +89,9 @@ function buildRosterBlock(
   teamId: string,
   selfAgentId: string,
   isLeader: boolean,
+  roomId: string | null,
 ): string | null {
-  const mates = readTeammates(db, teamId, selfAgentId)
+  const mates = readTeammates(db, teamId, selfAgentId, roomId)
   if (mates.length === 0) return null
   if (isLeader) {
     const block = formatLeaderRoster(
@@ -93,7 +99,8 @@ function buildRosterBlock(
     )
     if (block) return block
   }
-  return `Your teammates on this team: ${mates.map((m) => m.name).join(', ')}.`
+  const where = roomId === null ? 'on this team' : 'in this chat room'
+  return `Your teammates ${where}: ${mates.map((m) => m.name).join(', ')}.`
 }
 
 /** The runtime of the recipient agent (drives the OpenClaw coordination block). */
@@ -290,12 +297,15 @@ export function buildScheduledRoutineBlock(routineName: string): string {
 }
 
 /** Compose the volatile team-context preamble for a team run. Returns null when
- *  there is nothing to say (no rules, no intro, no other teammates). */
+ *  there is nothing to say (no rules, no intro, no other teammates). The rules
+ *  and the user's intro are team-wide; the roster is the chat room's (`roomId`
+ *  null = the team's default room, which is the whole team). */
 export function buildServerTeamContext(
   db: ClawbooDb,
   teamId: string,
   selfAgentId: string,
   framing: TurnFraming,
+  roomId: string | null = null,
 ): string | null {
   const runtime = readAgentRuntime(db, selfAgentId)
   const rulesContent = readTeamRulesContent(db, teamId).trim()
@@ -311,7 +321,7 @@ export function buildServerTeamContext(
   const introText = framing.isUserFacing ? readUserIntroText(db, teamId).trim() : ''
   const aboutUserBlock = introText ? `[About the User]\n${introText}\n[End About the User]` : null
 
-  const rosterBlock = buildRosterBlock(db, teamId, selfAgentId, framing.isLeader)
+  const rosterBlock = buildRosterBlock(db, teamId, selfAgentId, framing.isLeader, roomId)
   // The coordination rules come AFTER the roster (so the teammate names are in view):
   // OpenClaw agents get the delegate-protocol block; a native LEADER turn gets the
   // behavioral-guidance block; a worker gets the guardrail; a follow-up gets the

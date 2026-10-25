@@ -1,18 +1,34 @@
 import crypto from 'node:crypto'
 import type { Request, Response } from 'express'
-import { setSetting, teams, agents, settings } from '@clawboo/db'
+import { chatMessages, setSetting, teams, agents, settings } from '@clawboo/db'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 import { getRegistry } from '../lib/agentSource/registry'
 import { ensureNativeBooZero } from '../lib/teamChat/booZero'
-import { nativeTeamSessionKeysForTeamLike } from '../lib/teamChat/nativeTeamSession'
+import {
+  nativeTeamSessionKeysForTeamLike,
+  nativeTeamSessionRoomKeysForTeamLike,
+  nativeTeamSessionSettingKey,
+} from '../lib/teamChat/nativeTeamSession'
+import { resolveTeamSessionKeys } from './teamChatStream'
+import { chatClearedAt, chatClearedSettingKey } from '../lib/teamChat/chatCleared'
 import { getTenantId } from '../lib/tenant'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import {
   resolveServerOrchestrated,
   serverOrchestratedSettingKey,
 } from '../lib/teamChat/resolveServerOrchestrated'
-import { getTeamOrchestrator, hasTeamOrchestrator } from '../lib/teamChat/teamOrchestrator'
+import {
+  getTeamOrchestrator,
+  hasTeamOrchestrator,
+  isActiveTeamRoom,
+} from '../lib/teamChat/teamOrchestrator'
+
+/** The chat room a request names (`roomId` in the body or query); null = the
+ *  team's own group chat. Anything that is not a non-empty string is the default. */
+function requestedRoomId(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.length > 0 ? raw : null
+}
 
 // ─── GET /api/teams ──────────────────────────────────────────────────────────
 // Returns all teams with an agentCount for each, plus agent→team assignments.
@@ -53,6 +69,7 @@ export function teamsGET(req: Request, res: Response): void {
     const teamsWithFlag = rows.map((t) => ({
       ...t,
       serverOrchestrated: resolveServerOrchestrated(db, t.id),
+      chatClearedAt: chatClearedAt(db, t.id),
     }))
 
     res.json({ teams: teamsWithFlag, assignments })
@@ -222,9 +239,10 @@ export function teamsPATCH(req: Request, res: Response): void {
 //   - `team-rules:<teamId>`     — user-captured rules
 //   - `team-onboarding:<teamId>` — onboarding flags + user intro text
 //   - `native-team-session:<agentId>:<teamId>` — native leader session-resume
-//     pointers (one per team member; the amnesia-fix continuity handles)
-// The `boo_zero_team_briefs` table FK-cascades on team delete (see schema),
-// so that one cleans itself.
+//     pointers (one per team member; the amnesia-fix continuity handles), and the
+//     same pointers for the team's chat rooms (`...:<teamId>:room:<roomId>`)
+// The `boo_zero_team_briefs` and `rooms` tables FK-cascade on team delete (see
+// schema; room memberships cascade with their rooms), so those clean themselves.
 
 export function teamsDELETE(req: Request, res: Response): void {
   const teamId = req.params['id'] as string | undefined
@@ -244,7 +262,13 @@ export function teamsDELETE(req: Request, res: Response): void {
     // run unconditionally — `delete ... where` is a no-op when no row
     // matches.
     db.delete(settings)
-      .where(inArray(settings.key, [`team-rules:${teamId}`, `team-onboarding:${teamId}`]))
+      .where(
+        inArray(settings.key, [
+          `team-rules:${teamId}`,
+          `team-onboarding:${teamId}`,
+          chatClearedSettingKey(teamId),
+        ]),
+      )
       .run()
 
     // Sweep every member's native leader session-resume pointer for this team
@@ -253,8 +277,11 @@ export function teamsDELETE(req: Request, res: Response): void {
     db.delete(settings)
       .where(like(settings.key, nativeTeamSessionKeysForTeamLike(teamId)))
       .run()
+    db.delete(settings)
+      .where(like(settings.key, nativeTeamSessionRoomKeysForTeamLike(teamId)))
+      .run()
 
-    // Delete the team (boo_zero_team_briefs FK-cascades).
+    // Delete the team (boo_zero_team_briefs and rooms FK-cascade).
     db.delete(teams).where(eq(teams.id, teamId)).run()
 
     res.json({ ok: true })
@@ -352,6 +379,8 @@ export function teamAgentDELETE(req: Request, res: Response): void {
 }
 
 // ─── POST /api/teams/:id/chat ────────────────────────────────────────────────
+// Body: { message, targetAgentId?, entryId?, roomId? }. `roomId` names one of the
+// team's chat rooms; absent, the message goes to the team's own group chat.
 // Ingest a user message into the team's SERVER orchestrator. Returns 202
 // IMMEDIATELY — the cascade proceeds DETACHED (it must survive the POST ending,
 // so `req.on('close')` is deliberately NOT wired to abort it; closing the client
@@ -366,7 +395,7 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
     return
   }
   const body = req.body as
-    { message?: unknown; targetAgentId?: unknown; entryId?: unknown } | undefined
+    { message?: unknown; targetAgentId?: unknown; entryId?: unknown; roomId?: unknown } | undefined
   const message = typeof body?.message === 'string' ? body.message.trim() : ''
   if (!message) {
     res.status(400).json({ error: 'message required' })
@@ -382,10 +411,15 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
       res.status(404).json({ error: 'team is not server-orchestrated' })
       return
     }
+    const roomId = requestedRoomId(body?.roomId)
+    if (!isActiveTeamRoom(teamId, roomId)) {
+      res.status(404).json({ error: 'room not found' })
+      return
+    }
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
     // Fire-and-forget: the orchestrator owns the long-running cascade. Not awaited
     // (the 202 returns now); not aborted on client disconnect.
-    void getTeamOrchestrator(teamId, { mcpBaseUrl }).enqueueUserMessage({
+    void getTeamOrchestrator(teamId, { mcpBaseUrl, roomId }).enqueueUserMessage({
       stimulus: message,
       targetAgentId,
       userEntryId,
@@ -396,10 +430,62 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
   }
 }
 
+// ─── POST /api/teams/:id/chat/clear ──────────────────────────────────────────
+// Body: { roomId? }. Clears one chat: the team's General chat, or a room's when
+// `roomId` names one. The messages are set aside, not deleted: each
+// row's session key (and entry id) gains a `#cleared:<ts>` suffix, so no reader
+// matches it any more, and the agents' memory of the conversation is dropped so
+// the next reply starts fresh. Other chats are untouched, and the board keeps every
+// task (the chat just stops showing the ones made before the clear).
+
+export function teamChatClearPOST(req: Request, res: Response): void {
+  const teamId = req.params['id'] as string | undefined
+  if (!teamId) {
+    res.status(400).json({ error: 'team id required' })
+    return
+  }
+  try {
+    const db = getDb()
+    const exists = db.select({ id: teams.id }).from(teams).where(eq(teams.id, teamId)).get()
+    if (!exists) {
+      res.status(404).json({ error: 'team not found' })
+      return
+    }
+    const roomId = requestedRoomId((req.body as { roomId?: unknown } | undefined)?.roomId)
+    if (!isActiveTeamRoom(teamId, roomId)) {
+      res.status(404).json({ error: 'room not found' })
+      return
+    }
+    const keys = resolveTeamSessionKeys(db, teamId, roomId)
+    const clearedAt = Date.now()
+    const suffix = `#cleared:${clearedAt}`
+    const cleared =
+      keys.length > 0
+        ? db
+            .update(chatMessages)
+            .set({
+              sessionKey: sql`${chatMessages.sessionKey} || ${suffix}`,
+              entryId: sql`${chatMessages.entryId} || ${suffix}`,
+            })
+            .where(inArray(chatMessages.sessionKey, keys))
+            .run().changes
+        : 0
+    for (const key of keys) {
+      const agentId = key.slice('agent:'.length, key.indexOf(':team:'))
+      if (agentId) setSetting(db, nativeTeamSessionSettingKey(agentId, teamId, roomId), '')
+    }
+    setSetting(db, chatClearedSettingKey(teamId, roomId), String(clearedAt))
+    res.json({ ok: true, clearedAt, cleared })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
 // ─── POST /api/teams/:id/chat/stop ───────────────────────────────────────────
-// User Stop: bump the orchestrator's stop generation + abort in-flight runs (a
-// clean release to `todo`, never a failure reflection). A no-op when no
-// orchestrator is live (idle-evicted / never started).
+// Body: { roomId? }. User Stop for one chat room (the team's own group chat when
+// absent): bump that orchestrator's stop generation + abort its in-flight runs (a
+// clean release to `todo`, never a failure reflection). Other rooms keep going.
+// A no-op when no orchestrator is live (idle-evicted / never started).
 
 export function teamChatStopPOST(req: Request, res: Response): void {
   const teamId = req.params['id'] as string | undefined
@@ -413,7 +499,8 @@ export function teamChatStopPOST(req: Request, res: Response): void {
       res.status(404).json({ error: 'team is not server-orchestrated' })
       return
     }
-    if (hasTeamOrchestrator(teamId)) getTeamOrchestrator(teamId).stop()
+    const roomId = requestedRoomId((req.body as { roomId?: unknown } | undefined)?.roomId)
+    if (hasTeamOrchestrator(teamId, roomId)) getTeamOrchestrator(teamId, { roomId }).stop()
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

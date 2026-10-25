@@ -781,6 +781,9 @@ describe('reconcileSchema: a column it cannot add fails loudly and changes nothi
     // ensureSchema throw; the reconciler must not be the thing that throws first,
     // and must never try to ALTER a view.
     const db = createDb(':memory:')
+    // Every table that references `teams` or `agents` goes first.
+    db.$client.prepare('DROP TABLE room_members').run()
+    db.$client.prepare('DROP TABLE rooms').run()
     db.$client.prepare('DROP TABLE boo_zero_team_briefs').run()
     db.$client.prepare('DROP TABLE agents').run()
     db.$client.prepare('DROP TABLE teams').run()

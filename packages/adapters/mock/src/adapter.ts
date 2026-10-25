@@ -82,9 +82,9 @@ export class MockAdapter implements RuntimeAdapter {
       worktrees: false,
       resume: false,
       toolApproval: false,
-      // Nothing reads a mid-run write here, so say so: the host must route a
-      // signal to the durable mailbox instead of pretending this delivered.
-      steerable: false,
+      // No mid-run channel, so say so: the host must route a signal to the
+      // durable mailbox instead of pretending this delivered.
+      steering: 'none',
       models: ['mock'],
       // The native-preservation seam is deliberately OMITTED, which resolves to
       // an EPHEMERAL home. A mock run is therefore not serialized on the
@@ -206,8 +206,7 @@ export class MockAdapter implements RuntimeAdapter {
   }
 
   async writeContext(): Promise<void> {
-    // Declared `steerable: false`, so the host should never call this. A no-op
-    // rather than a throw: an honest capability declaration is the guarantee,
-    // and throwing here would turn a host bug into a run failure.
+    // Nothing reads a context write mid-run here. A no-op rather than a throw:
+    // throwing would turn a host bug into a run failure.
   }
 }

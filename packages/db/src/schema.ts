@@ -242,6 +242,57 @@ export const booZeroTeamBriefs = sqliteTable('boo_zero_team_briefs', {
 export type DbBooZeroTeamBrief = typeof booZeroTeamBriefs.$inferSelect
 export type DbBooZeroTeamBriefInsert = typeof booZeroTeamBriefs.$inferInsert
 
+// ─── rooms + room_members ─────────────────────────────────────────────────────
+// Extra chat rooms inside ONE team, each a subset of the team's members. The
+// team's own group chat is the implicit default room and has no row (room id
+// NULL wherever a room id appears), so its history never moved. Team rules,
+// brief, memory and the board stay team-wide. A room is archived, never
+// deleted: its transcript stays readable under its session keys.
+//
+// Membership is a table rather than a JSON list on the room: the room FK
+// cascades it away, the PK dedupes it, the agent FK sweeps it when an agent row
+// is deleted, and an edit is a set-replace in one transaction instead of a
+// read-modify-write of a blob.
+
+export const rooms = sqliteTable(
+  'rooms',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    tenantId: text('tenant_id'), // dormant multi-tenant seam
+    archivedAt: integer('archived_at'),
+    pinnedAt: integer('pinned_at'), // pinned to the top of the sidebar's room list (epoch ms)
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [index('idx_rooms_team').on(t.teamId)],
+)
+
+export type DbRoom = typeof rooms.$inferSelect
+export type DbRoomInsert = typeof rooms.$inferInsert
+
+export const roomMembers = sqliteTable(
+  'room_members',
+  {
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    agentId: text('agent_id')
+      .notNull()
+      .references((): AnySQLiteColumn => agents.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.roomId, t.agentId] }),
+    index('idx_room_members_agent').on(t.agentId),
+  ],
+)
+
+export type DbRoomMember = typeof roomMembers.$inferSelect
+
 // ─── approval_history ─────────────────────────────────────────────────────────
 
 export const approvalHistory = sqliteTable(
@@ -303,9 +354,13 @@ export const tasks = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
     completedAt: integer('completed_at'),
+    // The chat room the task was delegated in (see `rooms`). NULL = the team's own
+    // group chat (the default room), which is every task created before rooms.
+    roomId: text('room_id'),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),
+    index('idx_tasks_team_room').on(t.teamId, t.roomId),
     index('idx_tasks_assignee').on(t.assigneeAgentId),
     index('idx_tasks_parent').on(t.parentTaskId),
     // Serves BOTH guarded-create counts, which run while the write lock is held:

@@ -58,6 +58,7 @@ import { emitEvent } from '../lib/obs'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
+import { forwardPersonComment } from '../lib/teamChat/taskSteer'
 import {
   actOnTaskWorkspace,
   getTaskWorkspace,
@@ -508,6 +509,7 @@ export function boardCommentPOST(req: Request, res: Response): void {
     // Narrate the comment into the team room so every peer sees it, not just the
     // leader (best-effort, AFTER the canonical write; never a write path back).
     const task = getTask(db, taskId)
+    let forwarded = false
     if (task) {
       const author = parsed.data.authorAgentId ?? parsed.data.authorType
       reflectToRoom(
@@ -515,8 +517,13 @@ export function boardCommentPOST(req: Request, res: Response): void {
         task.teamId,
         `${author} on "${task.title}": ${parsed.data.body.slice(0, 160)}`,
       )
+      // A person's comment is meant for the agent doing the work: pass it on
+      // (mailbox, plus a steer into the run working on the task).
+      if (parsed.data.authorType === 'user') {
+        forwarded = forwardPersonComment(db, task, parsed.data.body)
+      }
     }
-    res.json({ ok: true, comment })
+    res.json({ ok: true, comment, forwarded })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

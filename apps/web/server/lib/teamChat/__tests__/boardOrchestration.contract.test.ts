@@ -11,10 +11,18 @@
 // and reads live status from the real DB (for the status assertions). Task ids are
 // the real UUIDs the repo issues — the contract captures them dynamically from
 // `board.created`, so nothing is hardcoded to `task-N`.
+//
+// The suite runs twice: once over the team's own group chat (no room) and once
+// over a ROOM-scoped client, the way a chat room's engine binds it. The room run
+// also seeds a live delegation in the team's default room; if room scoping leaked,
+// the room engine's resume would adopt it and the scenarios that hand work to
+// that agent would wait on a session that is not theirs.
 
 import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+
+import { describe } from 'vitest'
 
 import {
   claimTask,
@@ -51,6 +59,8 @@ class RealCascadeBoard implements CascadeBoard {
   private dir: string
   private db: ClawbooDb
   private real: BoardClient
+  /** Undefined = an unscoped client (the team's group chat, as before rooms). */
+  private readonly roomId: string | undefined
 
   created: BoardTask[] = []
   claims: string[] = []
@@ -63,10 +73,33 @@ class RealCascadeBoard implements CascadeBoard {
   onCreate?: () => void
   onClaim?: () => void
 
-  constructor() {
+  constructor(roomId?: string) {
+    this.roomId = roomId
     this.dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-cascade-'))
     this.db = createDb(path.join(this.dir, 'clawboo.db'))
-    this.real = createServerBoardClient(this.db)
+    this.real =
+      roomId === undefined
+        ? createServerBoardClient(this.db)
+        : createServerBoardClient(this.db, { roomId })
+    if (roomId !== undefined) {
+      // Another chat's live work: a delegation in the team's default room, held by
+      // an agent the scenarios delegate to.
+      const noise = createTask(this.db, {
+        teamId: TEAM,
+        title: 'default-room work',
+        sourceDelegationId: 'rN:deleg:agent:a2:reflectTo:leader',
+      })
+      claimTask(this.db, noise.id, 'a2')
+      createExecutionProcess(this.db, { taskId: noise.id, executorType: 'openclaw' })
+    }
+  }
+
+  /** This board's tasks: its room's when room-scoped. */
+  private ownTasks() {
+    return listTasks(
+      this.db,
+      this.roomId === undefined ? { teamId: TEAM } : { teamId: TEAM, roomId: this.roomId },
+    )
   }
 
   // ── BoardClient (recorded + delegated to the real client) ──
@@ -143,10 +176,10 @@ class RealCascadeBoard implements CascadeBoard {
     return this.depShadow.get(taskId) ?? []
   }
   taskCount(): number {
-    return listTasks(this.db, { teamId: TEAM }).length
+    return this.ownTasks().length
   }
   allStatuses(): string[] {
-    return listTasks(this.db, { teamId: TEAM }).map((t) => t.status)
+    return this.ownTasks().map((t) => t.status)
   }
   forceRelease(taskId: string): void {
     // Simulate an EXTERNAL release (the server stale-sweep): route through the repo
@@ -163,6 +196,7 @@ class RealCascadeBoard implements CascadeBoard {
       teamId: TEAM,
       title: input.title,
       sourceDelegationId: input.sourceDelegationId ?? undefined,
+      ...(this.roomId !== undefined ? { roomId: this.roomId } : {}),
     })
     claimTask(this.db, t.id, input.assigneeAgentId)
     // A refresh scenario normally has a live ENGINE run behind the row; the
@@ -187,3 +221,7 @@ class RealCascadeBoard implements CascadeBoard {
 }
 
 runCascadeContract({ makeBoard: () => new RealCascadeBoard() })
+
+describe('in a chat room', () => {
+  runCascadeContract({ makeBoard: () => new RealCascadeBoard('room-1') })
+})

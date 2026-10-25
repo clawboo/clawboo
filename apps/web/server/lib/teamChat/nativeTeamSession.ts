@@ -12,11 +12,21 @@
 // A pointer is written only for the LEADER / user-facing team session (never a
 // delegated CHILD task run — its continuity is the executor's AGENT_HANDOFF path).
 // Cleared on team delete + team-history reset; swept on agent delete.
+//
+// A team's extra chat ROOMS are separate conversations, so each gets its own
+// pointer, suffixed `:room:<roomId>` (Boo Zero leading the default room and a
+// room must not resume one conversation into the other). The default room keeps
+// the original key, so existing pointers stay valid.
 
 /** The settings-KV key holding the LATEST native harness session id for `agentId`'s
- *  leader/user-facing turns on `teamId`. */
-export function nativeTeamSessionSettingKey(agentId: string, teamId: string): string {
-  return `native-team-session:${agentId}:${teamId}`
+ *  leader/user-facing turns on `teamId` (and room, when not the default room). */
+export function nativeTeamSessionSettingKey(
+  agentId: string,
+  teamId: string,
+  roomId?: string | null,
+): string {
+  const base = `native-team-session:${agentId}:${teamId}`
+  return roomId ? `${base}:room:${roomId}` : base
 }
 
 /** SQL LIKE pattern matching every team-session pointer for a team (all members) —
@@ -27,8 +37,20 @@ export function nativeTeamSessionKeysForTeamLike(teamId: string): string {
   return `native-team-session:%:${teamId}`
 }
 
-/** SQL LIKE pattern matching every team-session pointer for an agent (all teams) —
- *  used to sweep the pointers when an agent is deleted. */
+/** SQL LIKE pattern matching every ROOM pointer for a team (all rooms, all
+ *  members). The team pattern above ends at the team id, so it never reaches a
+ *  room pointer; a team delete sweeps both. */
+export function nativeTeamSessionRoomKeysForTeamLike(teamId: string): string {
+  return `native-team-session:%:${teamId}:room:%`
+}
+
+/** SQL LIKE pattern matching every member's pointer for ONE room (archiving it). */
+export function nativeTeamSessionKeysForRoomLike(teamId: string, roomId: string): string {
+  return `native-team-session:%:${teamId}:room:${roomId}`
+}
+
+/** SQL LIKE pattern matching every team-session pointer for an agent (all teams and
+ *  rooms), used to sweep the pointers when an agent is deleted. */
 export function nativeTeamSessionKeysForAgentLike(agentId: string): string {
   return `native-team-session:${agentId}:%`
 }

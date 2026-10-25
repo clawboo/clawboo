@@ -194,6 +194,29 @@ const SCHEMA_DDL = `
       updated_at INTEGER NOT NULL
     );
 
+    -- ── Chat rooms: extra conversations inside one team (see src/board/rooms.ts) ──
+    -- The team's own group chat is NOT a row here: it is the implicit default room
+    -- (room id NULL everywhere), so its history never moved. A room is archived,
+    -- never deleted, so its transcript stays readable.
+    CREATE TABLE IF NOT EXISTS rooms (
+      id          TEXT    PRIMARY KEY,
+      team_id     TEXT    NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      name        TEXT    NOT NULL,
+      tenant_id   TEXT,
+      archived_at INTEGER,
+      pinned_at   INTEGER,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rooms_team ON rooms (team_id);
+    CREATE TABLE IF NOT EXISTS room_members (
+      room_id    TEXT    NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      agent_id   TEXT    NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (room_id, agent_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_room_members_agent ON room_members (agent_id);
+
     -- ── Durable board — see src/schema.ts for column docs ──────
     CREATE TABLE IF NOT EXISTS tasks (
       id                   TEXT    PRIMARY KEY,
@@ -216,9 +239,11 @@ const SCHEMA_DDL = `
       scheduled_by         TEXT    NOT NULL DEFAULT 'manual',
       created_at           INTEGER NOT NULL,
       updated_at           INTEGER NOT NULL,
-      completed_at         INTEGER
+      completed_at         INTEGER,
+      room_id              TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_team_room   ON tasks (team_id, room_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee    ON tasks (assignee_agent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks (parent_task_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent_dropped_created ON tasks (parent_task_id, dropped, created_at);

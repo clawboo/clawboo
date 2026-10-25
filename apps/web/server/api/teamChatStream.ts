@@ -14,9 +14,21 @@
 // transcript. The double-orchestration firewall stays on the WRITE path (the
 // `/chat` ingest 404s a non-server-orchestrated team); the thin client opens this
 // stream only for server-orchestrated teams.
+//
+// One stream per chat ROOM (`?roomId=`; absent = the team's own group chat): the
+// tail reads that room's session keys and forwards only that room's live tokens.
+// Board and status frames stay team-wide (the board and the badges are), each
+// tagged with the room it came from so a room's composer counts only its own.
 
-import { agents, latestChatMessageId, listChatMessagesSince, type ClawbooDb } from '@clawboo/db'
-import { buildTeamSessionKey } from '@clawboo/team-orchestration'
+import {
+  agents,
+  getActiveRoom,
+  latestChatMessageId,
+  listChatMessagesSince,
+  listRooms,
+  type ClawbooDb,
+} from '@clawboo/db'
+import { buildTeamSessionKey, parseTeamSessionKey } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
@@ -25,27 +37,50 @@ import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/ag
 import { subscribeBoardChange } from '../lib/teamChat/boardChangeBus'
 import { booZeroForTeam } from '../lib/teamChat/booZero'
 import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
+import { roomMembers } from '../lib/teamChat/roomRoster'
 
 const STREAM_POLL_MS = 750
 const STREAM_KEEPALIVE_MS = 20_000
 
-/** The team's member team-keys (`agent:<id>:team:<teamId>`) — the session-key set
- *  the tail filters on. Resolved ONCE at connect (obs-parity); a member added
- *  mid-stream is picked up on the next reconnect. Includes Boo Zero's team-scoped key
- *  for an OpenClaw team (Boo Zero is teamless in the DB but presides over the team as
- *  its universal leader, so its turns must stream too). */
-export function resolveTeamSessionKeys(db: ClawbooDb, teamId: string): string[] {
-  const rows = db
-    .select({ id: agents.id })
-    .from(agents)
-    .where(eq(agents.teamId, teamId))
-    .all() as Array<{ id: string }>
-  const keys = rows.map((r) => buildTeamSessionKey(r.id, teamId))
+/** The member team-keys of one chat room: the session-key set the tail filters
+ *  on. For the team's own group chat (`roomId` null): every agent of the team,
+ *  `agent:<id>:team:<teamId>`. For a room: its live members, keyed with the room.
+ *  Resolved ONCE at connect (obs-parity); a member added mid-stream is picked up on
+ *  the next reconnect. Includes Boo Zero's key (Boo Zero is teamless in the DB but
+ *  presides over the team and every room as its universal leader, so its turns
+ *  must stream too). */
+export function resolveTeamSessionKeys(
+  db: ClawbooDb,
+  teamId: string,
+  roomId: string | null = null,
+): string[] {
+  const ids =
+    roomId === null
+      ? (
+          db
+            .select({ id: agents.id })
+            .from(agents)
+            .where(eq(agents.teamId, teamId))
+            .all() as Array<{
+            id: string
+          }>
+        ).map((r) => r.id)
+      : roomMembers(db, teamId, roomId).map((a) => a.id)
+  const keys = ids.map((id) => buildTeamSessionKey(id, teamId, roomId))
   const bz = booZeroForTeam(db, teamId)
   if (bz) {
-    const bzKey = buildTeamSessionKey(bz.id, teamId)
+    const bzKey = buildTeamSessionKey(bz.id, teamId, roomId)
     if (!keys.includes(bzKey)) keys.push(bzKey)
   }
+  return keys
+}
+
+/** Every chat room's keys for a team: its own group chat plus each active room.
+ *  For readers that summarize the team as a whole (the activity summary). */
+export function resolveAllTeamSessionKeys(db: ClawbooDb, teamId: string): string[] {
+  const keys = resolveTeamSessionKeys(db, teamId)
+  for (const room of listRooms(db, teamId))
+    keys.push(...resolveTeamSessionKeys(db, teamId, room.id))
   return keys
 }
 
@@ -54,10 +89,16 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   const lastEventId =
     typeof req.headers['last-event-id'] === 'string' ? req.headers['last-event-id'] : undefined
   const sinceParam = typeof req.query['since'] === 'string' ? req.query['since'] : undefined
+  const roomParam = typeof req.query['roomId'] === 'string' ? req.query['roomId'] : ''
+  const roomId = roomParam.length > 0 ? roomParam : null
   // Resolve the shared connection BEFORE advertising success: a failure here
   // must surface as a real error response, not a 200 plus a ': connected'
   // marker the client has already been told to trust.
   const db = getDb()
+  if (roomId !== null && !getActiveRoom(db, teamId, roomId)) {
+    res.status(404).json({ error: 'room not found' })
+    return
+  }
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -69,7 +110,7 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   res.flushHeaders?.()
 
   let closed = false
-  const sessionKeys = resolveTeamSessionKeys(db, teamId)
+  const sessionKeys = resolveTeamSessionKeys(db, teamId, roomId)
 
   // A RESUMING client says where it got to and gets everything after that. A FRESH
   // client starts at the head, because it has already loaded each member's recent
@@ -103,8 +144,13 @@ export function teamChatStreamGET(req: Request, res: Response): void {
 
   // Tier 2 — live tokens. Forward the team's in-memory deltas as named `delta`
   // events with NO `id:` line, so they never advance the resume cursor (ephemeral).
+  // The delta bus is per team, so keep only this room's tokens: a delta whose key
+  // names another room (or the team's own group chat, from a room's stream) is
+  // someone else's live card.
   const unsub = subscribeChatDelta(teamId, (delta) => {
     if (closed) return
+    const parts = parseTeamSessionKey(delta.sessionKey)
+    if (!parts || parts.teamId !== teamId || parts.roomId !== roomId) return
     res.write('event: delta\n')
     res.write(`data: ${JSON.stringify(delta)}\n\n`)
   })

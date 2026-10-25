@@ -119,23 +119,41 @@ describe('sweep TTL vs the engine idle watchdog', () => {
 // live. On a spawned CLI that writes a file into the run's cwd and on OpenClaw it
 // sets a Gateway agent file; neither reaches the model mid-run. The call resolved
 // either way, so the failure was invisible: it read as delivery in the logs while
-// delivering nothing. `steerable` makes that a declared fact, and absence means no.
-describe('steerable is declared honestly', () => {
-  it('only the native runtime claims mid-run steering', async () => {
-    const [{ NativeAdapter }, { CodexAdapter }, { ClaudeCodeAdapter }] = await Promise.all([
+// delivering nothing. `steering` makes the mid-run channel a declared fact, with a
+// real `steer()` behind every mode other than `none`, and absence means none.
+describe('steering is declared honestly', () => {
+  it('each runtime declares the mid-run channel its driver really has', async () => {
+    const [
+      { NativeAdapter },
+      { CodexAdapter },
+      { ClaudeCodeAdapter },
+      { HermesAdapter },
+      { OpenClawAdapter },
+    ] = await Promise.all([
       import('@clawboo/adapter-native'),
       import('@clawboo/adapter-codex'),
       import('@clawboo/adapter-claude-code'),
+      import('@clawboo/adapter-hermes'),
+      import('@clawboo/adapter-openclaw'),
     ])
     // `capabilities()` is a static declaration about the runtime, so it must not
     // need a driver. A throwing factory proves that as a side effect.
     const noDriver = (): never => {
       throw new Error('capabilities() must not construct a driver')
     }
-    // The native driver routes the reserved key into the conversation queue.
-    expect(new NativeAdapter(noDriver).capabilities().steerable).toBe(true)
-    // The spawn drivers write a cwd file nothing reads back.
-    expect(new CodexAdapter(noDriver).capabilities().steerable).toBe(false)
-    expect(new ClaudeCodeAdapter(noDriver).capabilities().steerable).toBe(false)
+    const live = [
+      new NativeAdapter(noDriver),
+      new CodexAdapter(noDriver),
+      new ClaudeCodeAdapter(noDriver),
+      new OpenClawAdapter({} as never),
+    ]
+    for (const a of live) {
+      expect(a.capabilities().steering, a.id).toBe('live')
+      expect(typeof a.steer, a.id).toBe('function')
+    }
+    // One-shot `hermes chat -q` takes no input once started.
+    const hermes = new HermesAdapter(noDriver)
+    expect(hermes.capabilities().steering).toBe('interrupt-resume')
+    expect(typeof hermes.steer).toBe('function')
   })
 })

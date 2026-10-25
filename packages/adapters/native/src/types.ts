@@ -1,4 +1,4 @@
-import type { StartOpts, Usage } from '@clawboo/executor'
+import type { StartOpts, SteerOptions, Usage } from '@clawboo/executor'
 
 /**
  * A native lifecycle event from the in-process conversational harness. Unlike
@@ -75,6 +75,10 @@ export interface NativeDriver {
   setModel(model: string): Promise<void>
   /** Persist a context file/value into the run's workspace. */
   writeContext(key: string, value: string): Promise<void>
+  /** Put a person's message in front of the live conversation, read at its next
+   *  turn boundary. False when the run has already ended. Optional so a test
+   *  double without it simply cannot be steered. */
+  steer?(text: string, opts?: SteerOptions): Promise<boolean>
 }
 
 /** Fresh driver per run — the adapter calls this in `start()`. */

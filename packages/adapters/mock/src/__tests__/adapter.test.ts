@@ -56,7 +56,7 @@ describe('MockAdapter', () => {
     // It produces no diff, so a task routed here must not be given a worktree
     // to verify. And it cannot be steered mid-run, so `signalAgent` must skip it.
     expect(caps.worktrees).toBe(false)
-    expect(caps.steerable).toBe(false)
+    expect(caps.steering).toBe('none')
     expect(MOCK_RUNTIME_ID).toBe('clawboo-mock')
   })
 

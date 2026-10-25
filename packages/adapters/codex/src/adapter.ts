@@ -1,5 +1,6 @@
 import {
   createAsyncQueue,
+  steerThroughDriver,
   type Capabilities,
   type HealthResult,
   type RunHandle,
@@ -7,6 +8,8 @@ import {
   type RuntimeEvent,
   type SessionCodec,
   type StartOpts,
+  type SteerOptions,
+  type SteerResult,
   type TaskHandle,
 } from '@clawboo/executor'
 
@@ -15,7 +18,7 @@ import type { CodexDriver, CodexDriverFactory, CodexNativeEvent } from './types'
 
 /**
  * Codex RuntimeAdapter. Same shape as the Claude Code adapter (per-run injected
- * driver, eager subscribe, late-bound runId), driving `codex exec` instead. The
+ * driver, eager subscribe, late-bound runId), driving Codex instead. The
  * runtime differences (no USD cost, thread-id resume) live entirely in
  * `mapCodexEvent` + the driver, so the trait surface is identical.
  */
@@ -25,7 +28,7 @@ export class CodexAdapter implements RuntimeAdapter {
 
   private readonly drivers = new Map<string, CodexDriver>()
   /** Native Codex thread id captured per run (from thread/result frames) — the
-   *  resumable handle the `sessionCodec` serializes for `codex exec resume <id>`. */
+   *  resumable handle the `sessionCodec` serializes so the next run can resume it. */
   private readonly sessionIds = new Map<string, string>()
 
   constructor(
@@ -43,8 +46,9 @@ export class CodexAdapter implements RuntimeAdapter {
       // runtime headless, where the CLI run passes --dangerously-bypass-approvals-and-sandbox.
       // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
-      // See claude-code: the spawn driver writes a cwd file nothing reads back.
-      steerable: false,
+      // The driver hosts the run in `codex app-server`, whose `turn/steer` adds
+      // input to the in-progress turn without stopping it.
+      steering: 'live',
       models: ['gpt-5-codex', 'gpt-5', 'o4-mini'],
       // Native-preservation seam: a wrapped one-shot with a PERSISTENT per-identity
       // CODEX_HOME — the change that gives a Codex LEADER conversational continuity
@@ -157,5 +161,9 @@ export class CodexAdapter implements RuntimeAdapter {
 
   async writeContext(run: RunHandle, key: string, value: string): Promise<void> {
     await this.drivers.get(run.sessionKey)?.writeContext(key, value)
+  }
+
+  async steer(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult> {
+    return steerThroughDriver(this.drivers.get(run.sessionKey), text, 'live', opts)
   }
 }

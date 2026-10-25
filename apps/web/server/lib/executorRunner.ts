@@ -81,6 +81,7 @@ import { budgetPreflight } from './budgetPreflight'
 import { getMcpAttachSecret } from './mcpAttachSecret'
 import { buildResumeNote } from './resumeNote'
 import { registerRunStop, type RunStopHandle } from './runStops'
+import { registerRunSteer, type RunSteerHandle } from './runSteers'
 import { verifyMaxAttempts } from './verification'
 import { DEFAULTS } from './defaults'
 import { describeDegradations, planDegradations } from './degradation'
@@ -350,17 +351,27 @@ export async function runTaskOnRuntime(caller: RunTaskInput): Promise<RunTaskRes
   else caller.abortSignal?.addEventListener('abort', forward, { once: true })
   const input: RunTaskInput = { ...caller, abortSignal: controller.signal }
   const stop = registerRunStop(input.taskId, forward)
+  // The live run, once there is one, so a person's comment on the task can steer
+  // it (`steerTaskRun`). Re-pointed on every rotation.
+  const steerSlot: SteerSlot = { handle: null }
   try {
-    return await runTaskOnRuntimeInner(input, stop)
+    return await runTaskOnRuntimeInner(input, stop, steerSlot)
   } finally {
     caller.abortSignal?.removeEventListener('abort', forward)
     stop.release()
+    steerSlot.handle?.release()
   }
+}
+
+/** Where the inner run parks its steer registration for the outer to release. */
+interface SteerSlot {
+  handle: RunSteerHandle | null
 }
 
 async function runTaskOnRuntimeInner(
   input: RunTaskInput,
   stop: RunStopHandle,
+  steerSlot: SteerSlot,
 ): Promise<RunTaskResult> {
   // Trace per MISSION: every run of one delegation tree shares the root task's id
   // as the trace key, so a multi-agent task renders as ONE trace.
@@ -376,7 +387,7 @@ async function runTaskOnRuntimeInner(
   // sweep. Every expected outcome already releases on its own path. Shared across
   // fix cycles: a cycle re-dispatches the SAME claim, so the newest cycle's
   // execution row is the one a throw has to close.
-  const claimState: ClaimState = { claimed: false, stop }
+  const claimState: ClaimState = { claimed: false, stop, steer: steerSlot }
   const run = (attempt: RunTaskInput): Promise<RunTaskResult> =>
     withTaskSpan(
       {
@@ -479,6 +490,21 @@ interface ClaimState {
   execId?: string
   /** How a person's move stops this run, and the note it left. */
   stop?: RunStopHandle
+  /** Where the live run is registered so a person's comment can steer it. */
+  steer?: SteerSlot
+}
+
+/** Point the task's steer registration at `run` (the first run, or a rotated
+ *  successor, or a fix cycle's re-dispatch). */
+function pointSteerAt(
+  claimState: ClaimState,
+  taskId: string,
+  adapter: RuntimeAdapter,
+  run: RunHandle,
+): void {
+  if (!claimState.steer) return
+  claimState.steer.handle?.release()
+  claimState.steer.handle = registerRunSteer(taskId, adapter, run)
 }
 
 async function runTaskInner(
@@ -775,6 +801,7 @@ async function runTaskInner(
       },
     )
   let run = await startRun(baseSessionKey, assemblePrompt(''))
+  pointSteerAt(claimState, taskId, adapter, run)
   // The run started with the digest in its context — mark the RENDERED rows
   // delivered (truncated-out rows stay undelivered by design).
   if (renderedDigest.includedIds.length > 0) {
@@ -1270,6 +1297,8 @@ async function runTaskInner(
           })
         },
       })
+      // A steer from now on goes to the successor.
+      pointSteerAt(claimState, taskId, adapter, run)
       keepDriving = true
     }
     // else: a clean done, or rotation chain exhausted → fall through to terminal

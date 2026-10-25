@@ -59,6 +59,9 @@ export interface CreateTaskInput {
   tenantId?: string | null
   /** The one-TEAM-TASK-firing-owner label; the Routines engine passes 'clawboo'. */
   scheduledBy?: string
+  /** The chat room the task belongs to. Null/absent = the team's default room. A
+   *  subtask inherits its parent's room when none is given. */
+  roomId?: string | null
 }
 
 /**
@@ -90,6 +93,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     createdAt: now,
     updatedAt: now,
     completedAt: null,
+    roomId: input.roomId ?? null,
   }
 }
 
@@ -120,6 +124,7 @@ export function createSubtask(
     ...input,
     parentTaskId,
     teamId: input.teamId ?? parent?.teamId ?? null,
+    roomId: input.roomId ?? parent?.roomId ?? null,
   })
 }
 
@@ -244,6 +249,7 @@ export function createCappedSubtask(
       ...input,
       parentTaskId,
       teamId: input.teamId ?? parent.teamId ?? null, // inherit, like createSubtask
+      roomId: input.roomId ?? parent.roomId ?? null,
     })
     tx.insert(tasks).values(row).run()
     return { ok: true, task: row }
@@ -321,15 +327,29 @@ export function getTask(db: ClawbooDb, taskId: string): DbTask | null {
   return (db.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined) ?? null
 }
 
+/**
+ * A room filter. `undefined` = every room; `null` = the team's default room only
+ * (the tasks with no room); a string = that room only.
+ */
+export type RoomFilter = string | null | undefined
+
+function roomCondition(roomId: RoomFilter) {
+  if (roomId === undefined) return null
+  return roomId === null ? isNull(tasks.roomId) : eq(tasks.roomId, roomId)
+}
+
 export interface ListTasksFilter extends Scope {
   teamId?: string
   status?: TaskStatus
   includeDropped?: boolean
+  roomId?: RoomFilter
 }
 
 export function listTasks(db: ClawbooDb, filter: ListTasksFilter = {}): DbTask[] {
   const conds = []
   if (filter.teamId) conds.push(eq(tasks.teamId, filter.teamId))
+  const room = roomCondition(filter.roomId)
+  if (room) conds.push(room)
   if (filter.status) conds.push(eq(tasks.status, filter.status))
   if (!filter.includeDropped) conds.push(eq(tasks.dropped, 0))
   if (filter.tenantId) conds.push(eq(tasks.tenantId, filter.tenantId))
@@ -417,18 +437,22 @@ export const isLedgerAutoFireable: (execs: ReadonlyArray<{ status: string }>) =>
   ledgerAllowsAutoFire
 
 /**
- * Teams that have at least one FIREABLE delegation: a READY (deps-satisfied,
- * `todo`, non-dropped) task whose sourceDelegationId carries the `:agent:`
- * target marker AND whose execution ledger permits an auto-fire. The server
- * dispatch pump scans this to know WHICH team orchestrators to (re)build and
- * pump. Precision matters twice over: without the ledger filter one
- * permanently-parked task would rebuild its team's orchestrator every tick
- * forever, and without the readiness filter a dep-blocked plan tail would do
- * the same. The engine's own policy remains the final arbiter of what runs.
+ * The (team, room) pairs that have at least one FIREABLE delegation: a READY
+ * (deps-satisfied, `todo`, non-dropped) task whose sourceDelegationId carries the
+ * `:agent:` target marker AND whose execution ledger permits an auto-fire. The
+ * server dispatch pump scans this to know WHICH team orchestrators to (re)build
+ * and pump; a room has its own orchestrator, so the room is part of the answer
+ * (`roomId` null = the team's default room). Precision matters twice over:
+ * without the ledger filter one permanently-parked task would rebuild its
+ * orchestrator every tick forever, and without the readiness filter a
+ * dep-blocked plan tail would do the same. The engine's own policy remains the
+ * final arbiter of what runs.
  */
-export function listTeamsWithFireableDelegations(db: ClawbooDb): string[] {
+export function listRoomsWithFireableDelegations(
+  db: ClawbooDb,
+): Array<{ teamId: string; roomId: string | null }> {
   const candidates = db
-    .selectDistinct({ teamId: tasks.teamId })
+    .selectDistinct({ teamId: tasks.teamId, roomId: tasks.roomId })
     .from(tasks)
     .where(
       and(
@@ -437,24 +461,29 @@ export function listTeamsWithFireableDelegations(db: ClawbooDb): string[] {
         like(tasks.sourceDelegationId, '%:agent:%'),
       ),
     )
-    .all() as Array<{ teamId: string | null }>
-  const teams = new Set<string>()
+    .all() as Array<{ teamId: string | null; roomId: string | null }>
+  const out: Array<{ teamId: string; roomId: string | null }> = []
   for (const c of candidates) {
-    if (!c.teamId || teams.has(c.teamId)) continue
+    if (!c.teamId) continue
     // Readiness (deps satisfied) comes from the same query the engine's pump
     // uses, so the two views can't drift.
-    const ready = getReadyTasks(db, { teamId: c.teamId }) as Array<{
+    const ready = getReadyTasks(db, { teamId: c.teamId, roomId: c.roomId }) as Array<{
       id: string
       sourceDelegationId?: string | null
     }>
     for (const t of ready) {
       if (!/:agent:/.test(t.sourceDelegationId ?? '')) continue
       if (!isLedgerAutoFireable(listExecutions(db, t.id))) continue
-      teams.add(c.teamId)
+      out.push({ teamId: c.teamId, roomId: c.roomId })
       break
     }
   }
-  return [...teams]
+  return out
+}
+
+/** The teams among `listRoomsWithFireableDelegations`, any room. */
+export function listTeamsWithFireableDelegations(db: ClawbooDb): string[] {
+  return [...new Set(listRoomsWithFireableDelegations(db).map((r) => r.teamId))]
 }
 
 /**
@@ -856,13 +885,18 @@ export function cancelDependents(db: ClawbooDb, taskId: string): DbTask[] {
 }
 
 /** Tasks ready to work: `todo`, not dropped, with every dependency `done`. */
-export function getReadyTasks(db: ClawbooDb, filter: { teamId?: string } & Scope = {}): DbTask[] {
+export function getReadyTasks(
+  db: ClawbooDb,
+  filter: { teamId?: string; roomId?: RoomFilter } & Scope = {},
+): DbTask[] {
   const conds = [
     eq(tasks.status, 'todo'),
     eq(tasks.dropped, 0),
     sql`NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks dt ON dt.id = d.depends_on_task_id WHERE d.task_id = ${tasks.id} AND dt.status != 'done')`,
   ]
   if (filter.teamId) conds.push(eq(tasks.teamId, filter.teamId))
+  const room = roomCondition(filter.roomId)
+  if (room) conds.push(room)
   if (filter.tenantId) conds.push(eq(tasks.tenantId, filter.tenantId))
   return db
     .select()

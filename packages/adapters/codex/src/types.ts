@@ -1,9 +1,10 @@
-import type { StartOpts, Usage } from '@clawboo/executor'
+import type { StartOpts, SteerOptions, Usage } from '@clawboo/executor'
 
 /**
- * A native lifecycle event from a running `codex exec` session, normalized off
- * its `--json` event stream. Two Codex realities are encoded here vs. Claude
- * Code: (1) Codex carries a `thread` (its resume handle), and (2) Codex reports
+ * A native lifecycle event from a running Codex session, normalized off the
+ * app-server's notifications (or, on the fallback, `codex exec --json`). Two
+ * Codex realities are encoded here vs. Claude Code: (1) Codex carries a
+ * `thread` (its resume handle), and (2) Codex reports
  * NO USD cost — a `result` carries token `usage` only, and the mapper marks the
  * derived cost `estimated`. Whether the driver emits incremental `text` events
  * or one block per turn is its choice; the adapter maps either to text-deltas.
@@ -27,8 +28,9 @@ export type CodexNativeEvent =
 
 /**
  * The structural slice of a running Codex session the adapter drives — the
- * injected seam. The real driver spawns `codex exec --json` in an isolated
- * `CODEX_HOME`; tests pass an in-memory double. One driver per run.
+ * injected seam. The real driver hosts the run in `codex app-server` (falling
+ * back to `codex exec --json`) in an isolated `CODEX_HOME`; tests pass an
+ * in-memory double. One driver per run.
  */
 export interface CodexDriver {
   start(): Promise<void>
@@ -36,6 +38,10 @@ export interface CodexDriver {
   abort(): Promise<void>
   setModel(model: string): Promise<void>
   writeContext(key: string, value: string): Promise<void>
+  /** Add input to the in-progress turn (`turn/steer`). False once the run has
+   *  ended; throws when the runtime refused it. Optional so a test double
+   *  without it simply cannot be steered. */
+  steer?(text: string, opts?: SteerOptions): Promise<boolean>
 }
 
 export type CodexDriverFactory = (opts: StartOpts) => CodexDriver

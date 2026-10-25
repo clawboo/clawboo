@@ -63,6 +63,7 @@ import { eq } from 'drizzle-orm'
 import { getRegistry } from '../agentSource/registry'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
+import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
 import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDispatch'
 import { adapterFactoryFor } from '../runtimes'
@@ -75,6 +76,7 @@ import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
 import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
+import { inboxRowBelongsToRoom } from './roomRoster'
 import { buildPeerCatchup } from './peerCatchup'
 import { advanceChatLeaderSeq, loadChatLeaderState } from './leaderState'
 
@@ -102,6 +104,11 @@ export interface RunEntry {
 export interface ServerDeliverDeps {
   db: ClawbooDb
   teamId: string
+  /** The team chat room this orchestrator drives (null/absent = the team's own
+   *  group chat, the default room). It scopes the roster the agent is told about,
+   *  the leader's resume pointer and which mailbox rows a run reads. Not the
+   *  peer-chat `team_chat` room, which stays team-wide. */
+  chatRoomId?: string | null
   mcpBaseUrl: string | null
   nudge: NudgeQueue
   /** sessionKey → live run, so `stop()` / the wedge can abort it. Populated here
@@ -206,6 +213,7 @@ function missionRootId(db: ClawbooDb, taskId: string): string {
 export function createServerDeliver(deps: ServerDeliverDeps) {
   const { db, teamId, mcpBaseUrl, nudge, abortMap, onEvent, onSessionClosed, taskForSession } = deps
   const execForSession = deps.execForSession
+  const chatRoomId = deps.chatRoomId ?? null
   const stopGen = deps.stopGen
   const leaderAgentId = deps.leaderAgentId
   const persistTurn = deps.persistTurn
@@ -727,7 +735,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // (the single choke point covers the user's leader turn AND every delegated
     // child turn). See `contextPreamble.ts`.
     const baseTeamContext = isTeamSessionKey(targetSessionKey)
-      ? buildServerTeamContext(db, teamId, targetAgentId, framing)
+      ? buildServerTeamContext(db, teamId, targetAgentId, framing, chatRoomId)
       : null
     // WHAT IS WAITING is read when the run actually STARTS, never at `deliver`
     // time. `nudge.deliver` FIFO-queues behind a busy session, so reading here in
@@ -743,8 +751,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       roomId: string | null
       throughSeq: number | null
     } => {
+      // Read past the page size, then keep this room's rows: a row about a task
+      // delegated in another chat room waits for that room's run.
       const inboxRows = isTeamSessionKey(targetSessionKey)
-        ? listUndeliveredInbox(db, targetAgentId, { teamId, limit: 20 })
+        ? listUndeliveredInbox(db, targetAgentId, { teamId, limit: 50 })
+            .filter((row) => inboxRowBelongsToRoom(db, row, chatRoomId))
+            .slice(0, 20)
         : []
       // Routed by `kind`, which the mailbox has carried since it shipped and
       // nothing read: a `task_update` is a result to synthesize and an `alert` is
@@ -858,7 +870,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               isTeamSession: isTeamSessionKey(targetSessionKey),
               isTaskRun: holdsWork,
             })
-              ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId)) || null
+              ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)) ||
+                null
               : null
           } else {
             const runtime = resolvedRuntime
@@ -913,7 +926,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 isTeamSession: isTeamSessionKey(targetSessionKey),
                 isTaskRun: holdsWork,
               })
-                ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId)) || null
+                ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)) ||
+                  null
                 : null
               // A coding runtime (hermes/codex/claude-code) may carry a per-agent
               // model + provider chosen at team creation, stored on the row's
@@ -958,7 +972,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             isTeamSession: isTeamSessionKey(targetSessionKey),
             isTaskRun: holdsWork,
           })
-            ? nativeTeamSessionSettingKey(targetAgentId, teamId)
+            ? nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)
             : null
           // A connected substrate serializes on the SHARED per-gateway-agent mutex —
           // cross-subsystem (routines / runTeamExchange / other teams' orchestrators)
@@ -1059,17 +1073,25 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // engine's `await deps.deliver` doesn't serialize the cascade. The home /
             // connected mutex (when held) stays held for the WHOLE drain below.
             started()
-            await drainRun(adapter, run, targetSessionKey, targetAgentId, {
-              runtime: resolvedRuntime,
-              message,
-              contextChars: teamContext ? teamContext.length : 0,
-              resumePointerKey,
-              resumeAttempted: resumeHandle != null,
-              chatVisible,
-              stamp,
-              execId: runExecId,
-              model: configuredModel,
-            })
+            // A task run can be steered while it works: a person commenting on
+            // the task reaches it through the per-task registry (see runSteers).
+            const steerHandle =
+              runTaskId !== null ? registerRunSteer(runTaskId, adapter, run) : null
+            try {
+              await drainRun(adapter, run, targetSessionKey, targetAgentId, {
+                runtime: resolvedRuntime,
+                message,
+                contextChars: teamContext ? teamContext.length : 0,
+                resumePointerKey,
+                resumeAttempted: resumeHandle != null,
+                chatVisible,
+                stamp,
+                execId: runExecId,
+                model: configuredModel,
+              })
+            } finally {
+              steerHandle?.release()
+            }
           }
 
           // A connected substrate (OpenClaw) serializes on the connected mutex; a

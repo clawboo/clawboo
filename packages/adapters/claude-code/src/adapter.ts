@@ -1,5 +1,6 @@
 import {
   createAsyncQueue,
+  steerThroughDriver,
   type Capabilities,
   type HealthResult,
   type RunHandle,
@@ -7,6 +8,8 @@ import {
   type RuntimeEvent,
   type SessionCodec,
   type StartOpts,
+  type SteerOptions,
+  type SteerResult,
   type TaskHandle,
 } from '@clawboo/executor'
 
@@ -47,10 +50,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       // runtime headless, where the SDK run sets permissionMode: 'bypassPermissions'.
       // Isolation for those runs comes from the per-task worktree instead.
       toolApproval: true,
-      // The spawn driver's `writeContext` writes a file into the run's cwd. No
-      // model reads it back mid-run, so mid-run delivery here is a fiction and
-      // the durable mailbox is the real channel.
-      steerable: false,
+      // The driver runs the SDK in streaming-input mode, so a steer is pushed in
+      // as a user message the CLI folds into the running turn at its next
+      // boundary (priority `next`).
+      steering: 'live',
       models: ['sonnet', 'opus', 'haiku'],
       // Claude (Sonnet/Opus) ships a 200k-token context window — drives the
       // proactive session-rotation watermark.
@@ -162,5 +165,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async writeContext(run: RunHandle, key: string, value: string): Promise<void> {
     await this.drivers.get(run.sessionKey)?.writeContext(key, value)
+  }
+
+  async steer(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult> {
+    return steerThroughDriver(this.drivers.get(run.sessionKey), text, 'live', opts)
   }
 }
