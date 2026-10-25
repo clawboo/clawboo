@@ -198,5 +198,5 @@ These docs describe Clawboo **v0.5.0**, the current release.
 - [The board](/concepts/the-board): the durable substrate the server integration and eval suites drive
 - [Executor runner](/internals/executor-runner): the claim→run→verify→handoff flow the all-on integration test exercises
 - [Marketplace catalog](/reference/marketplace-catalog): the pack format and the content gates that run beside these suites
-- [Database schema](/reference/database-schema): the 35 tables the schema-source guard pins
+- [Database schema](/reference/database-schema): the 35 tables whose DDL and Drizzle definitions the schema-source guard compares
 - [Glossary](/appendices/glossary): canonical term definitions

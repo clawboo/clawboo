@@ -65,9 +65,9 @@ Click **Continue** whenever you're ready, with or without connecting anything.
 
 ### 5. Pick and deploy a team
 
-The **Team** step opens Clawboo's team marketplace, the same one you'll use later from the dashboard. Browse the starter teams, pick one, then customize it: rename it, choose a color collection, and set each agent's runtime and model. During onboarding every agent defaults to **Clawboo Native**, so the whole team deploys Gateway-free on the key you just connected. You can still switch any agent to another connected runtime from its picker. Click **Deploy**.
+The **Team** step opens Clawboo's team marketplace, the same one you'll use later from the dashboard. Browse the starter teams, pick one, then customize it: rename it, choose a color collection, and set each agent's runtime and model. During onboarding every agent defaults to the runtime you just connected: **Clawboo Native** for a provider key, or **Codex** if you signed in with ChatGPT. Either way the whole team deploys Gateway-free. You can still switch any agent to another connected runtime from its picker. Click **Deploy**.
 
-**Expected result:** Clawboo creates the team and its `clawboo-native` agents (sharing Clawboo's memory), then advances to the "Your team is ready" screen.
+**Expected result:** Clawboo creates the team and its agents (`clawboo-native`, or `codex` on the ChatGPT path, all sharing Clawboo's memory), then advances to the "Your team is ready" screen.
 
 ### 6. Open your dashboard
 

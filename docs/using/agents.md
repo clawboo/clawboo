@@ -97,8 +97,8 @@ Two name collisions are worth knowing about. `hermes` keeps its own compounding 
 | `IDENTITY.md`  | IDENTITY  | Name, vibe, and emoji.                                                                                                                                                                             |
 | `TOOLS.md`     | TOOLS     | Tool notes for the agent to read. Does not configure tools (the graph's skill nodes come from `/api/capabilities`).                                                                                |
 | `AGENTS.md`    | AGENTS    | Operating instructions, priorities, and routing rules. Drives the dependency edges on the graph.                                                                                                   |
-| `USER.md`      | USER      | Notes about you. Clawboo never writes or reads this; only your Gateway might. Tab appears once the file has content.                                                                               |
-| `HEARTBEAT.md` | HEARTBEAT | Checklist an OpenClaw heartbeat can be pointed at. Clawboo never reads it. Tab appears once the file has content.                                                                                  |
+| `USER.md`      | USER      | Notes about you. Nothing in Clawboo uses this file; only your Gateway might. Tab appears once the file has content.                                                                                |
+| `HEARTBEAT.md` | HEARTBEAT | Checklist an OpenClaw heartbeat can be pointed at. Nothing in Clawboo acts on it. Tab appears once the file has content.                                                                           |
 | `MEMORY.md`    | MEMORY    | Notes for OpenClaw agents. Not the Hermes memory file, and not clawboo memory. Tab appears once the file has content.                                                                              |
 
 ### Steps

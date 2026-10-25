@@ -431,7 +431,7 @@ Adds a comment to a task (discussion or a system note). `authorType` defaults to
 
 A `user` comment is also passed on to the task's assignee, unless the task is unassigned, `done` or `cancelled`:
 
-1. **The mailbox**, always first. The comment lands in the assignee's inbox, which every run reads when it starts, so a queued task, a retried one and the next turn of a running one all see it.
+1. **The mailbox**, always first. The comment lands in the assignee's inbox, which every run reads when it starts. A queued or retried task finds it there, and so does the next turn of a running task when the steer below did not deliver it first.
 2. **A steer into the running run**, when the task is `in_progress` and a run is working on it. How the message gets in depends on the runtime (see [steering a running task](/runtimes/index#steering-a-running-task)). When the steer lands, the mailbox row is marked delivered so the agent does not read the comment a second time at its next run. When it does not land (the run already finished, or the runtime has no way in), the mailbox row stays and carries it.
 
 The steer runs in the background: the response does not wait for it.

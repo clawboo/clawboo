@@ -11,17 +11,17 @@ These docs describe Clawboo **v0.5.0**, the current release.
 
 ## Agents and runtimes
 
-**Boo**: Clawboo's name for an agent: one participant in a team, rendered as a ghost-lobster avatar. Every Boo is backed by a real agent record from an [AgentSource](#agentsource); there are no decorative agents. See [the agent model](/concepts/agent-model).
+**Boo**: Clawboo's name for an agent: one participant in a team, rendered as a ghost-lobster avatar. Every Boo is backed by a real agent record from an AgentSource; there are no decorative agents. See [the agent model](/concepts/agent-model).
 
 **Boo Zero**: the universal team leader, runtime-neutral and native by default. It is identified from the registry's `defaultId` (`resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), falling back to the first teamless agent, then the first agent overall. The same Boo Zero leads every team regardless of runtime. Boo Zero is teamless in the database but participates in every team via team-scoped sessions. See [the agent model](/concepts/agent-model) and [Boo Zero briefs](/using/boo-zero).
 
-**runtime**: the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`. Each is wrapped behind one [RuntimeAdapter](#runtimeadapter) interface so a team can mix runtimes. See [runtimes overview](/runtimes/index).
+**runtime**: the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`. Each is wrapped behind one RuntimeAdapter interface so a team can mix runtimes. See [runtimes overview](/runtimes/index).
 
 **the 5 runtimes**: `openclaw` (the OpenClaw Gateway), `clawboo-native` (the in-process harness), `claude-code`, `codex`, and `hermes`. The four non-OpenClaw runtimes are declared in `descriptor.ts`; OpenClaw is the fifth, handled separately because it is a connected substrate rather than a CLI/SDK Clawboo spawns. See [runtimes overview](/runtimes/index).
 
 **native runtime**: `clawboo-native`, Clawboo's own in-process conversational harness. It talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama), runs with no OpenClaw Gateway, and is `builtIn` (ships inside the server, nothing to install; connect by pasting a provider key). See [the native runtime](/runtimes/native).
 
-**RuntimeAdapter**: the single TypeScript interface every runtime implements (`id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`, and an optional `steer()`). Adapters wrap a black-box runtime and normalize its native signals into a [RuntimeEvent](#runtimeevent) stream; Clawboo supervises and relays, it does not reimplement runtime loops. See [the RuntimeAdapter trait](/internals/runtime-adapter).
+**RuntimeAdapter**: the single TypeScript interface every runtime implements (`id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`, and an optional `steer()`). Adapters wrap a black-box runtime and normalize its native signals into a RuntimeEvent stream; Clawboo supervises and relays, it does not reimplement runtime loops. See [the RuntimeAdapter trait](/internals/runtime-adapter).
 
 **RuntimeEvent**: the normalized 7-variant lifecycle union every adapter emits: `text-delta`, `tool-call`, `tool-result`, `status`, `cost`, `done`, and `error`. It is what lets one orchestrator drive heterogeneous runtimes off a single event shape. See [the RuntimeAdapter trait](/internals/runtime-adapter).
 

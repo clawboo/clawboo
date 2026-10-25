@@ -11,7 +11,7 @@ These docs describe Clawboo **v0.5.0**, the current release.
 
 ## Do I need OpenClaw to use Clawboo?
 
-No. OpenClaw is one of the five [runtimes](/runtimes/index), not a hard dependency. The built-in **Clawboo Native** runtime ships inside the server (`builtIn: true`, nothing to install) and needs only a provider API key; paste an Anthropic, OpenAI, or OpenRouter key and you have a working team with no OpenClaw Gateway anywhere. The native-first onboarding flow does exactly this: you connect a key, pick a starter team from the marketplace, and land in its General chat.
+No. OpenClaw is one of the five [runtimes](/runtimes/index), not a hard dependency. The built-in **Clawboo Native** runtime ships inside the server (`builtIn: true`, nothing to install) and needs only a provider connection: paste an Anthropic, OpenAI, or OpenRouter key, or pick a local Ollama, which needs no key, and you have a working team with no OpenClaw Gateway anywhere. The native-first onboarding flow does exactly this: you connect a provider, pick a starter team from the marketplace, and land in its General chat.
 
 OpenClaw remains a first-class secondary path if you already run it, see the [OpenClaw runtime](/runtimes/openclaw) page. For the no-Gateway flow, see [Quickstart (native)](/getting-started/quickstart-native).
 

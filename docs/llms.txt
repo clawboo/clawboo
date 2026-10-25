@@ -2,7 +2,7 @@
 
 > Clawboo is an open-source, local-first multi-agent mission-control dashboard and orchestrator, installed via `npx clawboo`. Deploy a team of agents across five runtimes (clawboo-native, OpenClaw, Claude Code, Codex, Hermes), watch them collaborate live in group chat and on a durable kanban board, and govern them with builder-not-judge verification, USD budgets, circuit breakers, and an always-on observability event log.
 
-This file indexes the Clawboo documentation for language models. Paths are relative to the documentation root. Documents Clawboo v0.3.1, the current published release (npm `latest` = `clawboo@0.3.1`).
+This file indexes the Clawboo documentation for language models. Paths are relative to the documentation root. Documents Clawboo v0.5.0, the current published release (npm `latest` = `clawboo@0.5.0`).
 
 ## Introduction
 

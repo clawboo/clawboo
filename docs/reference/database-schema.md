@@ -261,7 +261,7 @@ The Routines ledger: durable team-task schedules, the external wake for every ru
 
 ## Memory cluster
 
-A two-tier memory store: declarative facts + versioned procedures, plus the outcome events that feed the learning overlay. Full-text search rides a companion FTS5 virtual table (see [FTS5 search](#fts5-search--memory_facts_fts)); the optional `embedding` BLOB powers vector / hybrid search.
+A two-tier memory store: declarative facts + versioned procedures, plus the outcome events that feed the learning overlay. Full-text search rides a companion FTS5 virtual table (see [FTS5 search](#fts5-search-memory_facts_fts)); the optional `embedding` BLOB powers vector / hybrid search.
 
 ### `memory_facts`
 
