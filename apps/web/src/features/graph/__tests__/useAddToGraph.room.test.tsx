@@ -97,6 +97,8 @@ describe('New agent from the + button', () => {
 describe('joinRoom', () => {
   it('sends joins to one room one at a time, so an older response never lands last', async () => {
     const sent: string[] = []
+    let markFirstSeen!: () => void
+    const firstSeen = new Promise<void>((resolve) => (markFirstSeen = resolve))
     let releaseFirst!: () => void
     const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve))
     server.use(
@@ -104,7 +106,10 @@ describe('joinRoom', () => {
         const agentId = ((await request.json()) as { addMemberIds: string[] }).addMemberIds[0]
         sent.push(agentId ?? '')
         // Hold the first join's response, as a slow network would.
-        if (agentId === 'a2') await firstHeld
+        if (agentId === 'a2') {
+          markFirstSeen()
+          await firstHeld
+        }
         const memberIds = agentId === 'a2' ? ['a1', 'a2'] : ['a1', 'a2', 'a3']
         return HttpResponse.json({ room: { ...ROOM, memberIds } })
       }),
@@ -112,8 +117,10 @@ describe('joinRoom', () => {
 
     const first = joinRoom('T', 'R1', { agentId: 'a2', name: 'Bea' })
     const second = joinRoom('T', 'R1', { agentId: 'a3', name: 'Cy' })
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    // The second join waits for the first: only one request is out.
+    await firstSeen
+    // Leave a second request time to go out, as it would if joins were not
+    // chained. The second join waits for the first: only one request is out.
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(sent).toEqual(['a2'])
 
     releaseFirst()
