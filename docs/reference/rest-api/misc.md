@@ -409,7 +409,15 @@ curl -X DELETE "http://localhost:18790/api/chat-history?sessionKey=<session-key>
 
 ## Graph layout: `/api/graph-layout`
 
-Persists Ghost Graph node positions in the `graph_layouts` table, keyed by the `(name, gatewayUrl)` unique index. `name` distinguishes scopes (e.g. `atlas-radial`, `team-<id>`, `default`).
+Persists Ghost Graph node positions in the `graph_layouts` table, keyed by the `(name, gatewayUrl)` unique index. `name` says which graph a layout belongs to, for example:
+
+| `name`                        | Graph                                                                                               |
+| ----------------------------- | --------------------------------------------------------------------------------------------------- |
+| `atlas-radial`                | The Org chart (formerly Atlas) in its radial layout. The identifier keeps the old name.             |
+| `atlas-top-down`              | The Org chart in its tree layout. Each layout keeps its own positions.                              |
+| `team-<teamId>`               | A team's graph, the **Team graph** card beside the team's General chat                              |
+| `team-<teamId>-room-<roomId>` | A room's graph, the **Room graph** card beside a room's chat, kept apart from the team's own layout |
+| `default`                     | The team-scoped graph when no team is selected                                                      |
 
 ### `GET /api/graph-layout`
 

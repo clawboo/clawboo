@@ -45,7 +45,7 @@ The code listed below ships inside the published `clawboo` package. Most of it i
 | `drizzle-orm`               | Apache-2.0 | Typed schema/query layer over SQLite                                       |
 | `zod`                       | MIT        | Runtime validation across packages                                         |
 | `react`, `react-dom`        | MIT        | Dashboard UI                                                               |
-| `@xyflow/react`             | MIT        | React Flow canvas for the [Ghost Graph / Atlas](/using/ghost-graph)        |
+| `@xyflow/react`             | MIT        | React Flow canvas for the [Ghost Graph and Org chart](/using/ghost-graph)  |
 | `elkjs`                     | EPL-2.0    | Graph layout backend for the Ghost Graph                                   |
 | `framer-motion`             | MIT        | UI animation                                                               |
 | `zustand`                   | MIT        | Client state                                                               |

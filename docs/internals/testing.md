@@ -64,7 +64,7 @@ The most important thing the e2e config does is **never touch the developer's re
 If you add a Playwright helper that deletes or mutates server state, it **must** call `assertSandboxed(request)` first. The mkdtemp + `globalTeardown` pair protects against a misconfigured run, but `assertSandboxed` is the belt-and-suspenders that protects against a *stale unsandboxed server*, the failure mode the other two layers can't catch.
 </Danger>
 
-The specs cover the surfaces a smoke pass cares about: connection and auto-connect, the fleet list and agent detail view, the Ghost Graph canvas, team navigation, the group-chat onboarding gate and two-row layout, the chat → board → chat round-trip, a mid-session Gateway drop and self-healing reconnect (driven through the real `/api/gateway/ws` proxy), the chat transcript's bounded render window and its "Load earlier messages" scroll-anchor restore, the eval-run-from-UI button, and the native-first and coding-agent onboarding flows. The group-chat helper can pre-mark the "Know Your Team" onboarding flags complete so most specs skip the gate, while the gate-specific test exercises it directly.
+The specs cover the surfaces a smoke pass cares about: connection and auto-connect, the fleet list and agent detail view, the Ghost Graph canvas, team navigation, the group-chat onboarding gate and the chat with its graph card beside it, the chat → board → chat round-trip, a mid-session Gateway drop and self-healing reconnect (driven through the real `/api/gateway/ws` proxy), the chat transcript's bounded render window and its "Load earlier messages" scroll-anchor restore, the eval-run-from-UI button, and the native-first and coding-agent onboarding flows. The group-chat helper can pre-mark the "Know Your Team" onboarding flags complete so most specs skip the gate, while the gate-specific test exercises it directly.
 
 ## The clean-install smoke: does `npx clawboo` actually work
 
@@ -198,5 +198,5 @@ These docs describe Clawboo **v0.5.0**, the current release.
 - [The board](/concepts/the-board): the durable substrate the server integration and eval suites drive
 - [Executor runner](/internals/executor-runner): the claim→run→verify→handoff flow the all-on integration test exercises
 - [Marketplace catalog](/reference/marketplace-catalog): the pack format and the content gates that run beside these suites
-- [Database schema](/reference/database-schema): the 28 tables the schema-source guard pins
+- [Database schema](/reference/database-schema): the 35 tables the schema-source guard pins
 - [Glossary](/appendices/glossary): canonical term definitions

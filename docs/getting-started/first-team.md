@@ -32,7 +32,7 @@ You either already have one (from native onboarding) or you deploy one now.
 
 **You already have a team.** During native onboarding you picked a starter team from the marketplace and deployed it (every agent `clawboo-native`). The wizard's "Your team is ready" screen was that team's **Meet your team** beat, so its group chat opens directly on the **introduce yourself** step. Skip to [step 3](#3-run-the-know-your-team-gate) and start from the second screen there; your team already exists.
 
-**Deploy a template team.** The **+** button in the leftmost sidebar takes you to the Marketplace's **Teams** tab (the catalog of 85 teams, 436 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
+**Deploy a template team.** The **+** button (Create a team) at the bottom of the team rail, the sidebar's leftmost strip, takes you to the Marketplace's **Teams** tab (the catalog of 85 teams, 436 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
 
 ![The team showcase, here in the create-team flow: the same curated template grid the Marketplace Teams tab renders, with Details and Deploy buttons](/images/team-gallery.png)
 
@@ -48,7 +48,7 @@ Clawboo now creates the team and its agents in order:
 
 The deploy screen tracks this live: a **Creating _agent name_…** line names the agent being written right now, and a progress bar under it counts `N/M agents`. When the last one lands, the screen flips to a check mark and **"Team deployed!"**, then the modal hands you off.
 
-**Expected result:** after the brief **"Team deployed!"** beat the modal closes itself and you land directly in your new team's group chat, with a success toast confirming the agent count. There is no separate "done" dialog to dismiss.
+**Expected result:** after the brief **"Team deployed!"** beat the modal closes itself and you land directly in your new team's group chat (**General**, in the sidebar's rooms list), with a success toast confirming the agent count. There is no separate "done" dialog to dismiss.
 
 ### 3. Run the "Know Your Team" gate
 
@@ -63,7 +63,7 @@ A team deployed during onboarding opens straight on phase 2: the wizard's "Your 
 
 Your introduction is persisted to SQLite as the source of truth and injected into the team's context preamble on every future message, so every agent always sees it, and Boo Zero replies in-character to acknowledge it.
 
-**Expected result:** the gate closes and the settled **team space** opens, the team's [Ghost Graph](/using/group-chat) on top, the group chat below. You learn what each teammate does by watching the first real task in action, not from a scripted intro round.
+**Expected result:** the gate closes and the settled **team space** opens: the group chat on the left, with the **Team graph** card (the team's [Ghost Graph](/using/ghost-graph)) and the **Tasks** card beside it. You learn what each teammate does by watching the first real task in action, not from a scripted intro round.
 
 ### 4. Send a message in group chat
 
@@ -83,17 +83,17 @@ For each delegation, the engine:
 2. **Delivers the task** to that agent's session through a non-destructive queue (a busy agent's task waits for its turn boundary; it never interrupts an in-flight run).
 3. **Reports the result back** when the agent finishes: the task moves to `done` and a report-up summary lands on the board.
 
-You see this in the chat as a **Board task** card, a labeled row with a status pill that flips live from **Queued** to **Working** to **Done**, plus the assignee's avatar and name. The board is the source of truth; the card is a read-only projection of it, so it survives a page refresh. Completed tasks are also batched into a `[Task Update]` narration delivered back to the leader for synthesis. The expand icon on the card opens the same task on the [Board](/using/board), under its status.
+You see this in the chat as a **Board task** card, a labeled row with a status pill that flips live from **Queued** to **Working** to **Done**, plus the assignee's avatar and name. The board is the source of truth; the card is a read-only projection of it, so it survives a page refresh. Completed tasks are also batched into a `[Task Update]` narration delivered back to the leader for synthesis. The expand icon on the card opens the same task on the [Board](/using/board), under its status. The **Tasks** card beside the chat lists the same tasks, grouped by status.
 
 **Expected result:** at least one Board task card appears inline in the chat, its status pill advancing to **Done**, and the leader synthesizes the teammate's work back to you.
 
 ## What you should see
 
-The settled team space puts the team's Ghost Graph on top and the group chat below, with Board task cards interleaved into the conversation as delegations land:
+The settled team space puts the group chat on the left and the team's cards beside it, with Board task cards interleaved into the conversation as delegations land:
 
 ![Clawboo team space: a team's Ghost Graph on top and group chat below](/images/team-space.png)
 
-The Ghost Graph itself renders the team as an org chart, the leader at the top, teammates below, and the `@mention` routing from each agent's `AGENTS.md` drawn as edges:
+The **Team graph** card renders the team's Ghost Graph as a hierarchy, the leader at the top, teammates below, and the `@mention` routing from each agent's `AGENTS.md` drawn as edges:
 
 ![Clawboo Ghost Graph: agents as Boo nodes connected by delegation edges, the leader at the top](/images/team-graph.png)
 
@@ -107,4 +107,4 @@ Deploying a team created real agent records in SQLite, the [registry of record](
 - [Delegation and orchestration](/concepts/delegation-and-orchestration), how structured signals become board tasks
 - [Peer chat](/concepts/peer-chat), how mixed-runtime agents talk to each other as named peers
 - [Using group chat](/using/group-chat), the group-chat surface in depth, including the gate
-- [Tour the dashboard: Atlas, Ghost Graph, and the view modes](/getting-started/dashboard-tour)
+- [Tour the dashboard: the sidebar, the Org chart, and the view modes](/getting-started/dashboard-tour)

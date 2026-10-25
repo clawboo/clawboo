@@ -13,20 +13,21 @@ If you only need the install/connect/disconnect mechanics shared across runtimes
 
 `HermesAdapter.capabilities()` declares the following. Two facts drive most of Hermes's behavior: it is **non-streaming**, and it is a **persistent-home wrapped one-shot**.
 
-| Capability        | Value                                      | Meaning                                                                                                                                                  |
-| ----------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `streaming`       | `false`                                    | Hermes has no live token stream. The driver derives lifecycle events from the run's structured output + `state.db`, not from scraping rendered text.     |
-| `mcp`             | `true`                                     | Attaches Clawboo's Tasks/Memory/Tools/TeamChat MCP servers.                                                                                              |
-| `worktrees`       | `true`                                     | Runs file-mutating work in an isolated git worktree.                                                                                                     |
-| `resume`          | `true`                                     | Can resume the prior native session via `--resume`.                                                                                                      |
-| `toolApproval`    | `true`                                     | Surfaces tool-approval gates the host resolves.                                                                                                          |
-| `models`          | `[]`                                       | Empty: Hermes resolves models through its own provider config, not a fixed list.                                                                         |
-| `runtimeClass`    | `'wrapped-oneshot'`                        | Spawned per task, not a connected substrate.                                                                                                             |
-| `nativeHome`      | `{ scope: 'per-identity', persist: true }` | One stable home per identity that outlives each run.                                                                                                     |
-| `nativeSkills`    | `'preserve'`                               | The host must keep the home's self-created skills intact across runs.                                                                                    |
-| `nativeMemory`    | `'preserve'`                               | The host must keep the home's `MEMORY.md` / `state.db` intact across runs.                                                                               |
-| `nativeChannels`  | `'none'`                                   | Hermes's own channels are not used for teammate dispatch (it is dispatched only via one-shot `hermes chat`).                                             |
-| `nativeScheduler` | `true`                                     | Informational only; Hermes ships its own cron/heartbeat, which Clawboo's scheduler deliberately does not co-run. See [Scheduling](/concepts/scheduling). |
+| Capability        | Value                                      | Meaning                                                                                                                                                         |
+| ----------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `streaming`       | `false`                                    | Hermes has no live token stream. The driver derives lifecycle events from the run's structured output + `state.db`, not from scraping rendered text.            |
+| `mcp`             | `true`                                     | Attaches Clawboo's Tasks/Memory/Tools/TeamChat MCP servers.                                                                                                     |
+| `worktrees`       | `true`                                     | Runs file-mutating work in an isolated git worktree.                                                                                                            |
+| `resume`          | `true`                                     | Can resume the prior native session via `--resume`.                                                                                                             |
+| `toolApproval`    | `true`                                     | Surfaces tool-approval gates the host resolves.                                                                                                                 |
+| `steering`        | `'interrupt-resume'`                       | One-shot `hermes chat` takes no input once started, so a comment stops the run and resumes the same session with it. See [Steering](#steering-stop-and-resume). |
+| `models`          | `[]`                                       | Empty: Hermes resolves models through its own provider config, not a fixed list.                                                                                |
+| `runtimeClass`    | `'wrapped-oneshot'`                        | Spawned per task, not a connected substrate.                                                                                                                    |
+| `nativeHome`      | `{ scope: 'per-identity', persist: true }` | One stable home per identity that outlives each run.                                                                                                            |
+| `nativeSkills`    | `'preserve'`                               | The host must keep the home's self-created skills intact across runs.                                                                                           |
+| `nativeMemory`    | `'preserve'`                               | The host must keep the home's `MEMORY.md` / `state.db` intact across runs.                                                                                      |
+| `nativeChannels`  | `'none'`                                   | Hermes's own channels are not used for teammate dispatch (it is dispatched only via one-shot `hermes chat`).                                                    |
+| `nativeScheduler` | `true`                                     | Informational only; Hermes ships its own cron/heartbeat, which Clawboo's scheduler deliberately does not co-run. See [Scheduling](/concepts/scheduling).        |
 
 The `nativeHome`/`nativeSkills`/`nativeMemory` claims are what route Hermes to a persistent home **by construction**. The runner reads `resolveRuntimeIntegration(capabilities())`; it branches on the resolved integration plan, never on the runtime id, and a `{ persist: true, scope: 'per-identity' }` claim resolves to a persistent home, materialized once per `(runtime, identity)` under Clawboo's state dir.
 
@@ -129,7 +130,7 @@ Because Hermes has no token stream, the driver derives `RuntimeEvent`s from outp
 
 - `parseHermesLine` parses each stdout line: a JSON frame → a `session_id` line → otherwise plain response text accumulated into the run summary.
 - The `session_id` line is captured **primarily from stderr** in `onClose` (where quiet mode emits it, live-verified against `hermes-agent 0.15.2`); the stdout parse is a forward-compatible tolerance in case a future CLI moves the line.
-- On process exit, `onClose` synthesizes one `result` event. A `SIGTERM`/`SIGKILL` exit (a deliberate abort) is surfaced as a clean `aborted` terminal, not a spurious error; a zero exit is `ok: true`; a non-zero exit carries the stderr as `errorMessage`.
+- On process exit, `onClose` synthesizes one `result` event. A run Clawboo asked to stop is surfaced as a clean `aborted` terminal however the process went (Hermes traps `SIGTERM` and exits through Python's `KeyboardInterrupt`, so its exit is not always a signal), not a spurious error; a zero exit is `ok: true`; any other exit carries the stderr as `errorMessage`.
 
 No `session_id` match simply means a fresh session next dispatch, never a failure.
 
@@ -140,6 +141,16 @@ The native→`RuntimeEvent` mapper (`mapHermesEvent`) emits a `cost` event with 
 ### Session resume
 
 The adapter's `sessionCodec` serializes the captured native session id. On a same-runtime continuation the runner threads it back as `ctx.resume`, and the driver adds `--resume <sessionId>`, but **only into a pre-existing home**: a freshly created home cannot hold the prior session, so `--resume` is skipped for the home's first run.
+
+### Steering: stop and resume
+
+One-shot `hermes chat -q` reads no input once it has started (its live `/steer` command exists only in `hermes acp`, which Clawboo does not drive). So when you comment on a task a Hermes agent is working on, the driver **interrupts and resumes**, all inside the one run:
+
+1. It stops the running process (the same tree kill as an abort) and waits for it to exit. Hermes interrupts its tools and unwinds; the messages of every finished tool batch are already persisted in the home's `state.db`.
+2. It starts a new `hermes chat -q` in the **same home**, with the same flags, and the comment (plus a line saying the run was paused so it could read it) as the prompt. The session resumes by id (`--resume <sessionId>`) when the run already knows it, otherwise with `--continue`, which picks the newest session in the home: a stopped `-Q` run prints no session line, and under the per-identity home lock the newest session is the one just stopped.
+3. The stopped process's exit is absorbed by the driver and never becomes a terminal. The host sees one run that carries on: the task stays in progress with the same agent, the run keeps its execution, and nothing reads the stop as a failure or as you pressing Stop. Only the resumed process's result ends the run.
+
+Comments that arrive together ride one resume. The tool call in flight at the moment of the stop is lost (its batch was not yet persisted); the run, and everything it finished, is not. Small team notices never stop a Hermes run: they wait in the mailbox for its next run. See [steering a running task](/runtimes/index#steering-a-running-task).
 
 ## Provider precedence
 

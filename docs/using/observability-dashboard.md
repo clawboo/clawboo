@@ -18,7 +18,7 @@ There is nothing to configure. The Observability panel is always available. The 
 
 ## Where it lives
 
-Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Observability** under the Insights group (the `Activity` icon). The `Cmd`/`Ctrl`+1–4 quick-nav slots cover four of the sidebar surfaces (Atlas, Fleet, Marketplace, Board); Observability, like the other Settings panels, is reached through the Settings modal instead.
+Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Observability** under the Insights group (the `Activity` icon). The number shortcuts `Cmd/Ctrl+1` to `+4` open four of the sidebar's views (the Org chart, Board, Connectors and Memory); Observability, like the other Settings panels, is reached through the Settings modal instead.
 
 The panel is two columns:
 
@@ -103,16 +103,16 @@ Below the live report is the **Ablation** card. It renders the `±verifier × ±
 
 ### 6. Watch the live activity terminal
 
-![The Atlas Activity dock live-tailing delegate, claim, run, and result events across all teams](/images/activity-feed.png)
+![The Org chart's Activity dock live-tailing delegate, claim, run, and result events across all teams](/images/activity-feed.png)
 
 The same event log feeds a live **activity terminal**, `ActivityTerminal`, a console that backfills the recent window (`GET /api/obs/events`) then live-tails the SSE stream (`GET /api/obs/stream`). It renders tool calls, tool results, errors, cost, and lifecycle events for every runtime uniformly, with a `Live` / `Reconnecting` pulse, tabular timestamps, and expandable tool I/O. It is mounted at four scopes:
 
-| Scope     | Where                                                                                                                                                                     | Filter           |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| Per-task  | The **Activity** section of the task drawer ([the board](/using/board))                                                                                                   | `taskId`         |
-| Per-agent | The **Activity** tab in [agent detail](/using/agents), and the activity dock on that view's mini graph                                                                    | `agentId`        |
-| Per-team  | The activity dock on a team's graph, in its group chat                                                                                                                    | `teamId`         |
-| Global    | The activity dock on Atlas. Every graph's dock is a right-edge slide-in toggled by the `Activity` button on its toolbar ([Ghost Graph](/using/ghost-graph#activity-dock)) | none (all teams) |
+| Scope     | Where                                                                                                                                                                                                                                            | Filter           |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
+| Per-task  | The **Activity** section of the task drawer ([the board](/using/board)), the **Progress** section of a task opened in a team chat's **Tasks** card or an agent's **Tasks & Routines** card, and a chat task card's **Comments & activity** trail | `taskId`         |
+| Per-agent | The **Activity** card on an [agent's page](/using/agents), toggled from its chat header                                                                                                                                                          | `agentId`        |
+| Per-team  | The **Activity** card in a team chat ([General or a room](/using/group-chat#the-chat-and-its-cards)), toggled from its chat header. It covers the whole team, even in a room                                                                     | `teamId`         |
+| Global    | The Activity dock on the Org chart, a right-edge slide-in toggled by the **Activity** button in the Org chart's header ([Ghost Graph](/using/ghost-graph#activity-dock))                                                                         | none (all teams) |
 
 <Note>
 Every runtime's activity reaches the event log **server-side**: the executor runner emits for the native and coding-agent runtimes, and the server-side team orchestrator emits `tool_call` / `tool_result` / `error` (and cost) for OpenClaw as it drives each turn. OpenClaw has a second server-side writer, because an OpenClaw Boo also works when nobody in Clawboo asked it to: a session watcher reads every committed transcript row and emits `tool_call` / `tool_result` for runs started outside Clawboo, such as a cron job the Boo owns, an incoming message on one of its channels, or someone at OpenClaw's own terminal. A run's own stream is addressed to whoever started it, which for those runs is nobody, so watching committed rows is what makes them visible at all. The two writers overlap on every run Clawboo did start, so they share a ledger of tool-call ids and the watcher skips a call the runner already logged; a session whose OpenClaw agent id does not resolve to an agent in your fleet is dropped rather than filed under a guess. A `POST /api/obs/ingest` route remains as a defensive mirror for browser-observed runtime events, restricted to `tool_call`, `tool_result`, `error`, `grant_decision` and `connector_health`; board lifecycle events are always emitted server-side and are never accepted from the browser. This is what makes the terminal uniform across runtimes.
@@ -167,4 +167,4 @@ The SSE stream (`GET /api/obs/stream`) is a short-interval DB-tail on the `seq` 
 - [Events and errors reference](/reference/events-and-errors): every orchestration event kind and the error taxonomy
 - [The board](/using/board): per-task activity and execution ledger
 - [Ghost Graph](/using/ghost-graph): the live graph overlay sourced from the same projection
-- [Agents](/using/agents): the per-agent Activity tab
+- [Agents](/using/agents): the per-agent Activity card

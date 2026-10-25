@@ -42,7 +42,7 @@ The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI 
 
 ### 3. Connect Clawboo Native
 
-The next screen is titled **"Connect your AI provider"**; the key you paste here powers the built-in Clawboo Native runtime. Choose your provider from the grid, **OpenAI** (GPT models, the default), **Anthropic** (Claude models), **OpenRouter** (any model, one key), or **Ollama** (local, no key needed), then paste your API key into the **API Key** field. The step opens on OpenAI with its **Sign in with ChatGPT** (Recommended) auth method already selected, so neither the API Key field nor the model dropdown is on screen yet: click the **API key** card beside it to reveal them, or pick **Anthropic** or **OpenRouter**, which show the key field straight away. Sign in with ChatGPT is the path for a ChatGPT subscription without an API key: it connects the [Codex runtime](/runtimes/codex), and your team deploys on Codex, no key anywhere. The eye icon toggles key visibility. Picking **Ollama** hides the key field. A **model** dropdown lets you pick the team leader's default model, and you can fine-tune any agent's model later from its [detail view](/using/agents).
+The next screen is titled **"Connect your AI provider"**; the key you paste here powers the built-in Clawboo Native runtime. Choose your provider from the grid, **OpenAI** (GPT models, the default), **Anthropic** (Claude models), **OpenRouter** (any model, one key), or **Ollama** (local, no key needed), then paste your API key into the **API Key** field. The step opens on OpenAI with its **Sign in with ChatGPT** (Recommended) auth method already selected, so neither the API Key field nor the model dropdown is on screen yet: click the **API key** card beside it to reveal them, or pick **Anthropic** or **OpenRouter**, which show the key field straight away. Sign in with ChatGPT is the path for a ChatGPT subscription without an API key: it connects the [Codex runtime](/runtimes/codex), and your team deploys on Codex, no key anywhere. The eye icon toggles key visibility. Picking **Ollama** hides the key field. A **model** dropdown lets you pick the team leader's default model, and you can fine-tune any agent's model later from its [agent page](/using/agents).
 
 ![The provider connect step with OpenRouter selected: provider cards, the API key field, and the leader model picker](/images/onboarding-connect-provider.png)
 
@@ -79,7 +79,7 @@ Click **Open my dashboard**.
 
 ## What you should see
 
-The dashboard opens with your team selected and its group chat in view. The sidebar shows your team with the Boos you deployed. You're now in a running team that needs no OpenClaw Gateway. The composer is live: type a request and the leader responds, delegating to a teammate when a task needs hands-on work (see [Deploy your first team](/getting-started/first-team) for the full collaboration loop).
+The dashboard opens with your team selected and its group chat, **General**, in view. The sidebar shows the Boos you deployed as tiles, with General in the rooms list below them. You're now in a running team that needs no OpenClaw Gateway. The composer is live: type a request and the leader responds, delegating to a teammate when a task needs hands-on work (see [Deploy your first team](/getting-started/first-team) for the full collaboration loop).
 
 The team space looks like this:
 
@@ -92,7 +92,7 @@ Connecting the native runtime linked your provider key to `clawboo-native`, Claw
 ## Next steps
 
 - [Deploy and watch your first team collaborate](/getting-started/first-team)
-- [Tour the dashboard: Atlas, Ghost Graph, and the view modes](/getting-started/dashboard-tour)
+- [Tour the dashboard: the sidebar, the Org chart, and the view modes](/getting-started/dashboard-tour)
 - [The native runtime in depth](/runtimes/native)
 - [Connect more runtimes (Claude Code, Codex, Hermes)](/runtimes/connecting-runtimes)
 - [Concept: the agent model and the five runtime classes](/concepts/agent-model)

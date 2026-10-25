@@ -1,17 +1,21 @@
 ---
 title: Teams API
-description: 'REST reference for teams and their sub-resources: CRUD, agent membership, the Know-Your-Team onboarding gate, team rules, and the peer-chat room.'
+description: 'REST reference for teams and their sub-resources: CRUD, agent membership, chat rooms, the Know-Your-Team onboarding gate, team rules, the team chat, and the peer-chat room.'
 ---
 
-REST surface for [teams](/appendices/glossary) and everything scoped to a team: team CRUD, agent→team membership, the per-team "Know Your Team" onboarding flags, the durable team-rules text, the server-orchestrated chat surface (ingest, stop, SSE tail) plus its activity snapshot, and the mixed-runtime peer-chat room (read + the explicit exchange kickoff).
+REST surface for [teams](/appendices/glossary) and everything scoped to a team: team CRUD, agent→team membership, the team's chat rooms, the per-team "Know Your Team" onboarding flags, the durable team-rules text, the server-orchestrated chat surface (ingest, stop, clear, SSE tail) plus its activity snapshot, and the mixed-runtime peer-chat room (read + the explicit exchange kickoff).
 
-Teams are stored in the SQLite `teams` table; agent membership is the nullable `agents.teamId` FK (one-to-one: an agent belongs to at most one team). Onboarding flags and team rules are NOT tables; they are JSON blobs in the `settings` key/value table under the keys `team-onboarding:<teamId>` and `team-rules:<teamId>`. The peer-chat room is the `team_chat` table (the same one the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) writes).
+Teams are stored in the SQLite `teams` table; agent membership is the nullable `agents.teamId` FK (one-to-one: an agent belongs to at most one team). A team's chat rooms are the `rooms` and `room_members` tables. Onboarding flags and team rules are NOT tables; they are JSON blobs in the `settings` key/value table under the keys `team-onboarding:<teamId>` and `team-rules:<teamId>`. The peer-chat room is the `team_chat` table (the same one the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) writes).
 
 <Note>
 Deleting a team **orphans** its agents (sets `agents.teamId = null`) rather than deleting them, and cleans up the team-scoped `settings` rows. The agents themselves are managed through the [agents API](/reference/rest-api/agents).
 </Note>
 
-All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Two different path-param names appear in this group: the team CRUD, onboarding, chat, and activity routes use `:id`, while the team-rules routes use `:teamId`; both are the team id, the difference is purely the registered param name.
+<Note>
+Two different things on this page are called rooms. A team's **chat rooms** (`/api/teams/:id/rooms`, and the `roomId` the chat routes take) are conversations inside the team's group chat, each with a subset of its members. The team's own group chat, **General**, is the default room: it has no room row, and leaving `roomId` out means General. The **peer-chat room** (`/api/team-chat`, whose `roomId` is `team:<teamId>`) is the TeamChat MCP substrate, and its id is never a chat room id.
+</Note>
+
+All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Two different path-param names appear in this group: the team CRUD, rooms, onboarding, chat, and activity routes use `:id` (the single-room routes add `:roomId`), while the team-rules routes use `:teamId`; both are the team id, the difference is purely the registered param name.
 
 ## Routes
 
@@ -23,12 +27,17 @@ All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb
 | DELETE | `/api/teams/:id`                  | Delete a team, orphan its agents, clean team-scoped settings | No      |
 | POST   | `/api/teams/:id/agents`           | Assign (upsert) an agent into the team                       | No      |
 | DELETE | `/api/teams/:id/agents/:agentId`  | Remove an agent from a team                                  | No      |
+| GET    | `/api/teams/:id/rooms`            | List the team's chat rooms                                   | No      |
+| POST   | `/api/teams/:id/rooms`            | Create a chat room from a subset of the team's members (201) | No      |
+| PATCH  | `/api/teams/:id/rooms/:roomId`    | Rename a room, replace its members, or pin it                | No      |
+| DELETE | `/api/teams/:id/rooms/:roomId`    | Archive a room: stop its work, keep its conversation         | No      |
 | GET    | `/api/teams/:id/onboarding`       | Read the per-team onboarding flags + user-intro text         | No      |
 | PATCH  | `/api/teams/:id/onboarding`       | Merge-update the onboarding state                            | No      |
 | GET    | `/api/teams/:id/activity-summary` | Compact brief + board + memory + chat snapshot               | No      |
 | POST   | `/api/teams/:id/chat`             | Ingest a user message into the server orchestrator (202)     | No      |
 | POST   | `/api/teams/:id/chat/stop`        | User Stop: abort in-flight runs, release claimed tasks       | No      |
-| GET    | `/api/teams/:id/chat/stream`      | SSE live-tail of the team transcript                         | SSE     |
+| POST   | `/api/teams/:id/chat/clear`       | Clear General or one room's chat (messages set aside)        | No      |
+| GET    | `/api/teams/:id/chat/stream`      | SSE live-tail of one chat (General or a room)                | SSE     |
 | GET    | `/api/team-rules/:teamId`         | Read the durable team-rules text                             | No      |
 | PUT    | `/api/team-rules/:teamId`         | Replace the team-rules text (4000-char cap)                  | No      |
 | GET    | `/api/team-chat`                  | Cursor-read the team peer-chat room                          | No      |
@@ -38,7 +47,7 @@ All POST/PATCH/PUT routes read a JSON body parsed by `express.json({ limit: '2mb
 
 ## `GET /api/teams`
 
-Lists every team with a computed `agentCount` (a `COUNT(*)` subquery over `agents.team_id`). Also returns the full agent→team assignment list so a client can patch its fleet store after hydration. Archived teams are excluded unless `includeArchived=true`.
+Lists every team with a computed `agentCount` (a `COUNT(*)` subquery over `agents.team_id`). Also returns the full agent→team assignment list so a client can patch its fleet store after hydration. Archived teams are excluded unless `includeArchived=true`. Each team also says whether the server orchestrates it (`serverOrchestrated`) and when its General chat was last cleared (`chatClearedAt`); a room's clear time is on the room (see [`GET /api/teams/:id/rooms`](#get-apiteamsidrooms)).
 
 - **Path params**: none.
 - **Query params**:
@@ -67,6 +76,8 @@ Lists every team with a computed `agentCount` (a `COUNT(*)` subquery over `agent
     createdAt: number
     updatedAt: number
     agentCount: number // COUNT(*) of agents with this team_id
+    serverOrchestrated: boolean // true unless the team opted out (see POST /api/teams/:id/chat)
+    chatClearedAt: number | null // when General's chat was last cleared; null = never
   }>
   assignments: Array<{ agentId: string; teamId: string }> // agents with a non-null teamId
 }
@@ -103,6 +114,7 @@ Creates a team. The server mints a `crypto.randomUUID()` id unless the body supp
   templateId?: string        // null when omitted
   leaderAgentId?: string     // null when omitted
   id?: string                // honored only if it matches the UUID regex; else server-minted
+  serverOrchestrated?: boolean // true also writes team-server-orchestrated:<id> = 'true'
 }
 ```
 
@@ -134,6 +146,7 @@ Creates a team. The server mints a `crypto.randomUUID()` id unless the body supp
     leaderAgentId: string | null
     isArchived: 0
     agentCount: 0
+    serverOrchestrated: boolean
     createdAt: number
     updatedAt: number
   }
@@ -232,7 +245,7 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id> \
 
 ## `DELETE /api/teams/:id`
 
-Deletes the team and orphans its agents. In one handler it (1) sets `teamId = null` on every agent in the team, (2) deletes the team-scoped `settings` rows (`team-rules:<teamId>` and `team-onboarding:<teamId>`), and (3) deletes the team row. The `boo_zero_team_briefs` table FK-cascades on the team delete, so per-team briefs clean themselves.
+Deletes the team and orphans its agents. In one handler it (1) sets `teamId = null` on every agent in the team, (2) deletes the team-scoped `settings` rows (`team-rules:<teamId>`, `team-onboarding:<teamId>`, and General's clear time `team-chat-cleared:<teamId>`) plus every member's native resume pointer for the team and for each of its rooms, and (3) deletes the team row. The `boo_zero_team_briefs` and `rooms` tables FK-cascade on the team delete (room memberships go with their rooms), so per-team briefs and chat rooms clean themselves.
 
 - **Path params**: `id` (team id).
 - **Request body**: none.
@@ -354,6 +367,277 @@ curl -X DELETE http://localhost:18790/api/teams/<team-id>/agents/<agent-id>
 
 ---
 
+## `GET /api/teams/:id/rooms`
+
+Lists the team's chat rooms in creation order, oldest first. Archived rooms (the ones deleted in the UI) are not listed, and neither is General: the team's own group chat is the default room and has no row. An unknown team id is not a 404; it returns an empty list. The sidebar applies its own order (pinned rooms first, most recently pinned on top, then newest first).
+
+- **Path params**: `id` (team id).
+- **Request body**: none.
+
+### Responses
+
+**`400 Bad Request`**: the `:id` segment is missing:
+
+```json
+{ "error": "team id required" }
+```
+
+**`200 OK`**: the team's active rooms:
+
+```ts
+{
+  rooms: Array<{
+    id: string
+    teamId: string
+    name: string
+    memberIds: string[] // stored members, oldest membership first; Boo Zero is never stored
+    pinnedAt: number | null // when it was pinned to the top of the room list; null = not pinned
+    chatClearedAt: number | null // when its chat was last cleared; null = never
+    createdAt: number
+    updatedAt: number
+  }>
+}
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+<Note>
+`memberIds` is the stored membership. The room's live roster, the agents its chat lists and routes to, is that list minus any agent that has since been archived or moved to another team (an agent row that is deleted leaves the list by itself), plus Boo Zero, which presides over every room without being stored as a member.
+</Note>
+
+### Example
+
+```bash
+curl http://localhost:18790/api/teams/<team-id>/rooms
+```
+
+---
+
+## `POST /api/teams/:id/rooms`
+
+Creates a chat room from a name and a subset of the team's members, and returns it with **201**. The name has its whitespace collapsed, is trimmed, and is cut to 80 characters. Duplicate member ids count once. Every member must be an active (not archived) agent of this team. Boo Zero needs no membership, because it presides over every room; the default Boo Zero has no team, so its id is refused as a member like any other agent outside the team. A new room starts unpinned and never cleared.
+
+- **Path params**: `id` (team id).
+- **Request body**:
+
+```ts
+{
+  name: string        // required; whitespace collapsed, trimmed, cut to 80 characters
+  memberIds: string[] // required; one or more active agents of this team
+}
+```
+
+### Responses
+
+The checks run in this order:
+
+**`400 Bad Request`**: the `:id` segment is missing:
+
+```json
+{ "error": "team id required" }
+```
+
+**`400 Bad Request`**: `name` is missing, not a string, or empty once its whitespace is collapsed:
+
+```json
+{ "error": "name required" }
+```
+
+**`404 Not Found`**: no team with that id:
+
+```json
+{ "error": "team not found" }
+```
+
+**`400 Bad Request`**: `memberIds` is missing, not an array, or holds anything other than non-empty strings:
+
+```json
+{ "error": "memberIds must be an array of agent ids" }
+```
+
+**`400 Bad Request`**: `memberIds` is an empty array:
+
+```json
+{ "error": "a room needs at least one member" }
+```
+
+**`400 Bad Request`**: one or more ids are not active agents of this team (the message lists them, comma-separated):
+
+```json
+{ "error": "not active members of this team: <agent-id>, <agent-id>" }
+```
+
+**`201 Created`**: the new room:
+
+```ts
+{
+  room: {
+    id: string
+    teamId: string
+    name: string
+    memberIds: string[] // in the order sent, duplicates dropped
+    pinnedAt: null
+    chatClearedAt: null
+    createdAt: number
+    updatedAt: number
+  }
+}
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/teams/<team-id>/rooms \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Launch prep","memberIds":["<agent-id>","<agent-id>"]}'
+```
+
+---
+
+## `PATCH /api/teams/:id/rooms/:roomId`
+
+Changes a room: rename it, replace or add to its members, or pin or unpin it, in any combination. Every field you send is validated before anything is written. `memberIds` replaces the whole member set; the members you keep keep their place in the roster order. `addMemberIds` adds agents and leaves the current members in place, so two adds sent at the same time both land; the dashboard uses it when an agent made on a room's graph joins that room. Send one or the other, not both. A member you remove finishes the turn it is already running, and the room's next turns no longer list or route to it (the roster is read fresh on every turn). Pinning stamps `pinnedAt` with the current time, even on a room that is already pinned, which moves it to the top of the pinned rooms; unpinning clears it.
+
+- **Path params**: `id` (team id), `roomId` (the room).
+- **Request body** (at least one field):
+
+```ts
+{
+  name?: string           // whitespace collapsed, trimmed, cut to 80 characters
+  memberIds?: string[]    // replaces the member set; same rules as on create
+  addMemberIds?: string[] // adds to the member set; same checks; not with memberIds
+  pinned?: boolean        // true pins (pinnedAt = now), false unpins (pinnedAt = null)
+}
+```
+
+### Responses
+
+The checks run in this order:
+
+**`400 Bad Request`**: a path segment is missing:
+
+```json
+{ "error": "team id and room id required" }
+```
+
+**`400 Bad Request`**: `pinned` is present but not a boolean:
+
+```json
+{ "error": "pinned must be true or false" }
+```
+
+**`400 Bad Request`**: both `memberIds` and `addMemberIds` are present:
+
+```json
+{ "error": "send memberIds or addMemberIds, not both" }
+```
+
+**`400 Bad Request`**: the body has none of `name`, `memberIds`, `addMemberIds`, or `pinned`:
+
+```json
+{ "error": "nothing to change" }
+```
+
+**`404 Not Found`**: no active room with that id in this team (an archived room, or another team's room, is not found):
+
+```json
+{ "error": "room not found" }
+```
+
+**`400 Bad Request`**: `name` is present but not a string, or empty once its whitespace is collapsed:
+
+```json
+{ "error": "name must not be empty" }
+```
+
+**`400 Bad Request`**: `memberIds` is present but invalid, with the same three errors as [`POST /api/teams/:id/rooms`](#post-apiteamsidrooms): `memberIds must be an array of agent ids`, `a room needs at least one member`, or `not active members of this team: <ids>`.
+
+**`400 Bad Request`**: `addMemberIds` is present but invalid: `addMemberIds must be an array of agent ids`, `addMemberIds must name at least one agent`, or `not active members of this team: <ids>`.
+
+**`200 OK`**: the updated room:
+
+```ts
+{
+  room: {
+    id: string
+    teamId: string
+    name: string
+    memberIds: string[]
+    pinnedAt: number | null
+    chatClearedAt: number | null
+    createdAt: number
+    updatedAt: number
+  }
+}
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X PATCH http://localhost:18790/api/teams/<team-id>/rooms/<room-id> \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Launch week","pinned":true}'
+```
+
+---
+
+## `DELETE /api/teams/:id/rooms/:roomId`
+
+Archives the room; nothing is deleted. In one call it stops the room's work (a clean Stop, as [`POST /api/teams/:id/chat/stop`](#post-apiteamsidchatstop) does for this `roomId`: claimed tasks are released to `todo` and nothing is reported as a failure), drops the room's resume pointers (`native-team-session:<agentId>:<teamId>:room:<roomId>`) so no agent resumes the archived conversation, and sets the room's `archived_at`. The conversation stays in `chat_messages` under the room's session keys, the room leaves `GET /api/teams/:id/rooms`, and its tasks stay on the board, where a retry or a reassignment runs them from General. No route removes a room row; deleting the team does (the `rooms` table cascades).
+
+- **Path params**: `id` (team id), `roomId` (the room).
+- **Request body**: none.
+
+### Responses
+
+**`400 Bad Request`**: a path segment is missing:
+
+```json
+{ "error": "team id and room id required" }
+```
+
+**`404 Not Found`**: no active room with that id in this team (including one already archived):
+
+```json
+{ "error": "room not found" }
+```
+
+**`200 OK`**: the room was archived:
+
+```json
+{ "ok": true }
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X DELETE http://localhost:18790/api/teams/<team-id>/rooms/<room-id>
+```
+
+---
+
 ## `GET /api/teams/:id/onboarding`
 
 Reads the per-team "Know Your Team" onboarding state. Both `agentsIntroduced` and `userIntroduced` must be true before the normal group-chat composer unlocks. `userIntroText` is the user's self-introduction, the source of truth injected into the team context preamble on every group-chat message. When no row exists, the default `{ false, false, '' }` is returned.
@@ -450,7 +734,7 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id>/onboarding \
 
 ## `GET /api/teams/:id/activity-summary`
 
-Builds a compact, on-demand snapshot of what a team has been doing, for injection into Boo Zero's **personal** chat when the user `@`-mentions that team. Composed from durable server state in order (brief, board, saved memory, recent chat), so it works regardless of what the browser has loaded. The sections are sized against a 2500-character budget: the Boo-Zero brief is clipped to 900, the board summary and saved memory are kept whole, and the recent-chat section (up to 30 turns, oldest dropped first) gets whatever budget remains.
+Builds a compact, on-demand snapshot of what a team has been doing, for injection into Boo Zero's **personal** chat when the user `@`-mentions that team. Composed from durable server state in order (brief, board, saved memory, recent chat), so it works regardless of what the browser has loaded. The sections are sized against a 2500-character budget: the Boo-Zero brief is clipped to 900, the board summary and saved memory are kept whole, and the recent-chat section (up to 30 turns, oldest dropped first) gets whatever budget remains. The recent chat is drawn from General and every active room, since the summary is of the team's work wherever it was discussed.
 
 - **Path params**: `id` (team id).
 - **Request body**: none.
@@ -491,9 +775,11 @@ curl http://localhost:18790/api/teams/<team-id>/activity-summary
 
 ## `POST /api/teams/:id/chat`
 
-Ingests a user message into the team's **server** orchestrator and returns **202** immediately. The cascade proceeds detached: `req.on('close')` is deliberately not wired to abort it, so closing the client (or the request simply ending) never kills the run. Target resolution is by priority: an explicit `targetAgentId` that is in the roster, then a **leading** `@`-mention (the message must _start_ with `@<agent name>`, and the name must be followed by whitespace or the end of the message; a mention anywhere else in the text is ignored). The user message is persisted under the target's team session key before that agent's turn runs.
+Ingests a user message into one chat's **server** orchestrator and returns **202** immediately: General by default, or the room named by `roomId`. Each chat has its own orchestrator, so a cascade started in a room runs beside the others, and the tasks it delegates are filed with that room's id. The cascade proceeds detached: `req.on('close')` is deliberately not wired to abort it, so closing the client (or the request simply ending) never kills the run.
 
-The route is gated on the double-orchestration firewall: a team that has opted out via the `team-server-orchestrated:<teamId>` setting (value `'false'`) gets a **404**. Only the literal string `'false'` closes the gate, and nothing writes that value today: an absent key resolves to on, and the two paths that do write the key (`POST /api/teams` with `serverOrchestrated: true`, and the native-team onboarding seed) both write `'true'`. So in practice every team is server-orchestrated and the gate passes.
+Target resolution happens within that chat's roster (General: the team's active members plus Boo Zero; a room: its live members plus Boo Zero), by priority: an explicit `targetAgentId` that is in the roster, then a **leading** `@`-mention (the message must _start_ with `@<agent name>`, and the name must be followed by whitespace or the end of the message; a mention anywhere else in the text is ignored), then the chat's lead (Boo Zero, else the team's own lead if it is in the roster, else the first member). The user message is persisted under the target's session key for that chat (`agent:<id>:team:<teamId>` in General, `agent:<id>:team:<teamId>:room:<roomId>` in a room) before that agent's turn runs.
+
+The route is gated on the double-orchestration firewall: a team that has opted out via the `team-server-orchestrated:<teamId>` setting (value `'false'`) gets a **404**. Only the literal string `'false'` closes the gate, and nothing writes that value today: an absent key resolves to on, and the one path that writes the key (`POST /api/teams` with `serverOrchestrated: true`) writes `'true'`. So in practice every team is server-orchestrated and the gate passes.
 
 - **Path params**: `id` (team id).
 - **Request body**:
@@ -501,8 +787,9 @@ The route is gated on the double-orchestration firewall: a team that has opted o
 ```ts
 {
   message: string          // required; trimmed, must be non-empty
-  targetAgentId?: string   // honored only when it matches a roster member
+  targetAgentId?: string   // honored only when it matches a member of the chat's roster
   entryId?: string         // client-minted id for the persisted user entry (SSE dedup)
+  roomId?: string          // the chat room to post into; absent or empty = General
 }
 ```
 
@@ -524,6 +811,12 @@ The route is gated on the double-orchestration firewall: a team that has opted o
 
 ```json
 { "error": "team is not server-orchestrated" }
+```
+
+**`404 Not Found`**: `roomId` names no active room of this team (an unknown or archived room, or another team's):
+
+```json
+{ "error": "room not found" }
 ```
 
 **`202 Accepted`**: the message was enqueued (the run has NOT finished):
@@ -548,16 +841,25 @@ The 202 means "accepted", not "succeeded". Watch the run on `GET /api/teams/:id/
 curl -X POST http://localhost:18790/api/teams/<team-id>/chat \
   -H 'Content-Type: application/json' \
   -d '{"message":"Plan the launch checklist."}'
+
+# Post into a room instead of General
+curl -X POST http://localhost:18790/api/teams/<team-id>/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"@Writer Draft the announcement.","roomId":"<room-id>"}'
 ```
 
 ---
 
 ## `POST /api/teams/:id/chat/stop`
 
-User Stop. Bumps the orchestrator's stop generation **synchronously** (before any await), then aborts every in-flight run through its runtime adapter. In-flight engine work bails at its next checkpoint, and because the generation changed, the resulting aborted terminals are read as a clean Stop rather than a failure: each claimed task is released back to `todo`, with no `blocked` status, no dependent cancellation, and no failure reflection to the delegator. The Stop is made durable in the same call, independently of whether those aborted terminals ever land: queued-but-unsent deliveries are dropped, a delivery already released whose run had not started yet never starts, and every tracked run plus every not-yet-fired ready delegation gets a `cancelled` execution row. That marker is what keeps the board dispatch pump from re-firing the halted cascade. Same server-orchestration gate as the ingest route.
+User Stop for one chat: General by default, or the room named by `roomId`. Only that chat's orchestrator stops; other rooms keep going. Stop bumps the orchestrator's stop generation **synchronously** (before any await), then aborts every in-flight run through its runtime adapter. In-flight engine work bails at its next checkpoint, and because the generation changed, the resulting aborted terminals are read as a clean Stop rather than a failure: each claimed task is released back to `todo`, with no `blocked` status, no dependent cancellation, and no failure reflection to the delegator. The Stop is made durable in the same call, independently of whether those aborted terminals ever land: queued-but-unsent deliveries are dropped, a delivery already released whose run had not started yet never starts, and every tracked run plus every not-yet-fired ready delegation gets a `cancelled` execution row. That marker is what keeps the board dispatch pump from re-firing the halted cascade. Same server-orchestration gate as the ingest route.
 
 - **Path params**: `id` (team id).
-- **Request body**: none.
+- **Request body** (optional):
+
+```ts
+{ roomId?: string } // the chat to stop; absent or empty = General
+```
 
 ### Responses
 
@@ -586,39 +888,112 @@ User Stop. Bumps the orchestrator's stop generation **synchronously** (before an
 ```
 
 <Note>
-Stopping a team with no live orchestrator (never started this process, or idle-evicted after 30 minutes with no run in flight) is a no-op that still returns `{ "ok": true }`.
+Stopping a chat with no live orchestrator (never started this process, or idle-evicted after 30 minutes with no run in flight) is a no-op that still returns `{ "ok": true }`. That includes a `roomId` that names no room at all: unlike the ingest, Stop never answers `room not found`.
 </Note>
 
 ### Example
 
 ```bash
 curl -X POST http://localhost:18790/api/teams/<team-id>/chat/stop
+
+# Stop one room; General and the other rooms keep going
+curl -X POST http://localhost:18790/api/teams/<team-id>/chat/stop \
+  -H 'Content-Type: application/json' \
+  -d '{"roomId":"<room-id>"}'
+```
+
+---
+
+## `POST /api/teams/:id/chat/clear`
+
+Clears one chat: General by default, or the room named by `roomId`. Nothing is deleted. Each of the chat's `chat_messages` rows is set aside by appending `#cleared:<ts>` to its `session_key` and `entry_id`, so no reader matches it again. The route also drops the resume pointers Clawboo keeps for the chat (the `native-team-session:<agentId>:<teamId>` keys, with `:room:<roomId>` in a room), so native and Codex agents start the conversation fresh on their next turn. It does **not** reset an OpenClaw teammate's session: that conversation lives in the Gateway, not in Clawboo. The clear time is stored in `settings` (`team-chat-cleared:<teamId>` for General, `team-chat-cleared:<teamId>:room:<roomId>` for a room); that is what `chatClearedAt` reports on [`GET /api/teams`](#get-apiteams) and [`GET /api/teams/:id/rooms`](#get-apiteamsidrooms). Other chats are not touched. This route has no server-orchestration gate.
+
+The rows set aside are the ones under the chat's session keys at the moment of the clear: each team member's key in General, each live member's room key in a room, plus Boo Zero's key in either.
+
+<Note>
+The UI's **Clear chat** does two things this route does not. First, after the call it sends `/reset` to each of the chat's OpenClaw teammates over the Gateway, exactly as typing `/reset` in the chat does, so in the product every agent starts the conversation fresh. It sends the Gateway's `chat.send` with `message: '/reset'` on each teammate's chat session key (`agent:<id>:team:<teamId>`, with `:room:<roomId>` in a room), only while a Gateway connection is up, skipping any teammate it cannot reach. A direct REST caller gets only the pointer drop. Second, only the chat's timeline stops showing the task cards made before the clear (a task whose `createdAt` is earlier than `chatClearedAt`); the board and the chat's **Tasks** card keep them.
+</Note>
+
+- **Path params**: `id` (team id).
+- **Request body** (optional):
+
+```ts
+{ roomId?: string } // the room to clear; absent or empty = General
+```
+
+### Responses
+
+**`400 Bad Request`**: the `:id` segment is missing:
+
+```json
+{ "error": "team id required" }
+```
+
+**`404 Not Found`**: no team with that id:
+
+```json
+{ "error": "team not found" }
+```
+
+**`404 Not Found`**: `roomId` names no active room of this team:
+
+```json
+{ "error": "room not found" }
+```
+
+**`200 OK`**: the chat was cleared:
+
+```ts
+{
+  ok: true
+  clearedAt: number // epoch ms; also the <ts> in the #cleared:<ts> suffix
+  cleared: number // how many chat_messages rows were set aside
+}
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+# Clear General
+curl -X POST http://localhost:18790/api/teams/<team-id>/chat/clear
+
+# Clear one room
+curl -X POST http://localhost:18790/api/teams/<team-id>/chat/clear \
+  -H 'Content-Type: application/json' \
+  -d '{"roomId":"<room-id>"}'
 ```
 
 ---
 
 ## `GET /api/teams/:id/chat/stream`
 
-Server-Sent Events live-tail of a team's chat transcript, in two tiers. **Tier 1** polls the durable `chat_messages` rows for the team's session keys every 750 ms on the monotonic `id` cursor (up to 500 rows per batch); each row's stored `data` is already a serialized `TranscriptEntry` and goes straight to the wire. **Tier 2** forwards ephemeral in-memory signals (assistant token deltas, board-projection changes, agent status) as _named_ frames with no `id:` line, so they never advance the resume cursor.
+Server-Sent Events live-tail of one chat's transcript: General by default, or the room named by `roomId`. It runs in two tiers. **Tier 1** polls the durable `chat_messages` rows for that chat's session keys every 750 ms on the monotonic `id` cursor (up to 500 rows per batch); each row's stored `data` is already a serialized `TranscriptEntry` and goes straight to the wire. **Tier 2** forwards ephemeral in-memory signals (assistant token deltas, board-projection changes, agent status) as _named_ frames with no `id:` line, so they never advance the resume cursor.
 
-This is a pure **reader**: the stream never drives orchestration, so a server-side cascade runs to completion with zero clients connected. It is ungated by design (tailing `chat_messages` is safe for any team); the double-orchestration firewall lives on the write path. The session-key set (`agent:<id>:team:<teamId>` for each member, plus Boo Zero's team-scoped key) is resolved **once at connect**, so a member added mid-stream is picked up on the next reconnect.
+This is a pure **reader**: the stream never drives orchestration, so a server-side cascade runs to completion with zero clients connected. It is ungated by design (tailing `chat_messages` is safe for any team); the double-orchestration firewall lives on the write path. The session-key set is resolved **once at connect**: in General, `agent:<id>:team:<teamId>` for each team member plus Boo Zero's team-scoped key; in a room, `agent:<id>:team:<teamId>:room:<roomId>` for each live member plus Boo Zero's. A member added mid-stream is picked up on the next reconnect.
 
 - **Path params**: `id` (team id).
 - **Query params**:
 
-| Param   | Type   | Notes                                                                                               |
-| ------- | ------ | --------------------------------------------------------------------------------------------------- |
-| `since` | number | Resume cursor over the `chat_messages` id. Negative/non-finite → `0`. `Last-Event-ID` wins over it. |
+| Param    | Type   | Notes                                                                                                                                                                                                 |
+| -------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roomId` | string | The chat room to tail; absent or empty = General. A value that is not one of the team's active rooms gets a `404` instead of a stream.                                                                |
+| `since`  | number | Resume cursor over the `chat_messages` id; `Last-Event-ID` wins over it. With neither, the stream starts at the newest row and sends only what comes next. A negative or non-numeric value means `0`. |
 
 - **Request body**: none.
 
 <Note>
-This is an SSE route, not request/response. There is no JSON response body; the catalog below describes the wire frames. An unknown team id is not a 404: no session keys match, so the stream opens and stays open emitting only keepalives. Resume replays **committed rows only**: deltas, board changes, and status frames carry no id and are never replayed.
+This is an SSE route, not request/response. Once the stream opens there is no JSON response body; the catalog below describes the wire frames. The one exception comes before it opens: a `roomId` that names no active room of this team (an unknown or archived room, or another team's) gets `404` with `{ "error": "room not found" }`. An unknown team id with no `roomId` is not a 404: no session keys match, so the stream opens and stays open emitting only keepalives. Resume replays **committed rows only**: deltas, board changes, and status frames carry no id and are never replayed.
 </Note>
 
 ### Connection
 
-On open, the handler writes `HTTP/1.1 200` with:
+On open (after the `roomId` check), the handler writes `HTTP/1.1 200` with:
 
 ```http
 Content-Type: text/event-stream; charset=utf-8
@@ -631,16 +1006,18 @@ then emits a `: connected` comment frame, flushes any rows already past the curs
 
 ### Event catalog
 
-| Frame           | When                                                                                                                                  | Shape                                                                                        |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `: connected`   | Immediately on open                                                                                                                   | SSE comment (ignored by `EventSource`)                                                       |
-| _(unnamed)_     | Per committed transcript row (poll every 750 ms)                                                                                      | `id: <row id>` line + `data: <TranscriptEntry json>` line                                    |
-| `event: delta`  | Per live assistant-text delta                                                                                                         | `{ sessionKey, runId, text }`; `text` is the FULL running text so far (replace, not append)  |
-| `event: board`  | Per board mutation on this team, from any write path (the orchestrator, the executor runner, a Tasks MCP tool, the stale sweep, REST) | `{ id, title?, status?, assigneeAgentId?, parentTaskId?, createdAt?, updatedAt?, summary? }` |
-| `event: status` | Per run boundary, plus a snapshot on connect                                                                                          | `{ agentId, status: 'running' \| 'idle' \| 'error' }`                                        |
-| `: keepalive`   | Every 20 s while open                                                                                                                 | SSE comment (keeps the connection warm)                                                      |
+| Frame           | When                                                                                                                                  | Shape                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `: connected`   | Immediately on open                                                                                                                   | SSE comment (ignored by `EventSource`)                                                                            |
+| _(unnamed)_     | Per committed transcript row (poll every 750 ms)                                                                                      | `id: <row id>` line + `data: <TranscriptEntry json>` line                                                         |
+| `event: delta`  | Per live assistant-text delta in this chat                                                                                            | `{ sessionKey, runId, text }`; `text` is the FULL running text so far (replace, not append)                       |
+| `event: board`  | Per board mutation on this team, from any write path (the orchestrator, the executor runner, a Tasks MCP tool, the stale sweep, REST) | `{ id, title?, status?, assigneeAgentId?, parentTaskId?, createdAt?, updatedAt?, summary?, attention?, roomId? }` |
+| `event: status` | Per run boundary, plus a snapshot on connect                                                                                          | `{ agentId, status: 'running' \| 'idle' \| 'error', roomId? }`                                                    |
+| `: keepalive`   | Every 20 s while open                                                                                                                 | SSE comment (keeps the connection warm)                                                                           |
 
 Only the unnamed frames carry an `id:`, so only they move the resume cursor. A client reconciles any board change it missed across a reconnect with a `GET /api/board` reload.
+
+Deltas belong to this chat alone: a stream never forwards another chat's deltas, so General's stream skips every room's, and a room's stream skips General's and the other rooms'. Board and status frames are team-wide, so every stream of the team receives them, each tagged with the chat it came from so a client can keep each chat's task cards and busy state to its own. A board frame's `roomId` is the task's room (`null` = General; left out if the task could not be read), and it carries `attention` (why the task now needs a person, or `null`) only when the change moved the task's status. A run-boundary status frame's `roomId` is the room the run belongs to (`null` = General); the snapshot replayed on connect carries none.
 
 Example frames:
 
@@ -666,6 +1043,9 @@ curl -N http://localhost:18790/api/teams/<team-id>/chat/stream
 
 # Resume from a known transcript row id
 curl -N 'http://localhost:18790/api/teams/<team-id>/chat/stream?since=8121'
+
+# Tail one room instead of General
+curl -N 'http://localhost:18790/api/teams/<team-id>/chat/stream?roomId=<room-id>'
 ```
 
 ---
@@ -907,14 +1287,14 @@ curl -X POST http://localhost:18790/api/team-chat/exchange \
 
 ## Error envelope
 
-Every error response on these routes is the standard envelope `{ error: string }`. The two exceptions are on `/api/team-chat/exchange`: the **409** re-entrancy refusal and the **404**/**422** exchange-refused branches use `{ ok: false, error: string }` (the success shape is `{ ok: true, roomId, result }`). The SSE route `/api/teams/:id/chat/stream` has no error body at all: it commits a `200` event stream up front and swallows transient tail-read errors to keep the connection alive.
+Every error response on these routes is the standard envelope `{ error: string }`. The two exceptions are on `/api/team-chat/exchange`: the **409** re-entrancy refusal and the **404**/**422** exchange-refused branches use `{ ok: false, error: string }` (the success shape is `{ ok: true, roomId, result }`). The SSE route `/api/teams/:id/chat/stream` answers a `roomId` that names no active room with the standard envelope and a `404`, before any stream opens; otherwise it has no error body at all: it commits a `200` event stream up front and swallows transient tail-read errors to keep the connection alive.
 
 ## See also
 
 - [Using teams](/using/teams): create, manage leaders, rules, and color collections in the UI
-- [Group chat + the Know-Your-Team gate](/using/group-chat)
+- [Group chat + the Know-Your-Team gate](/using/group-chat): General, rooms, and Clear chat in the UI
 - [Mixed-runtime peer chat](/concepts/peer-chat): rooms, speaker selection, `isUser=false`
 - [Agents API](/reference/rest-api/agents): the agent registry these team-membership routes reference
 - [Tools & MCP API](/reference/rest-api/tools-and-mcp): the TeamChat MCP server (`/api/mcp/teamchat`) write half
-- [Database schema](/reference/database-schema): the `teams`, `agents`, `settings`, and `team_chat` tables
+- [Database schema](/reference/database-schema): the `teams`, `agents`, `rooms`, `room_members`, `chat_messages`, `settings`, and `team_chat` tables
 - [REST API overview](/reference/rest-api/index)

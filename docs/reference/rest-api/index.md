@@ -1,6 +1,6 @@
 ---
 title: REST API overview
-description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 186 routes.
+description: Base URL, the SPA proxy, the access gate, the WS upgrade, the error envelope, and a grouped index of all 191 routes.
 ---
 
 The Clawboo dashboard server (`apps/web/server/index.ts`) is an Express app wrapped in a raw `http.Server` so it can also handle the WebSocket upgrade for the Gateway proxy. Every JSON route lives under `/api/`, is registered in one router (`apps/web/server/api/index.ts`), and returns the standard `{ error: string }` envelope on failure. This page covers the cross-cutting facts: base URL, the proxy, auth, body limits, the error shape, and the streaming endpoints, then links to the per-resource reference pages.
@@ -102,7 +102,7 @@ A handful of routes deviate from the bare `{ error }` shape, and those deviation
 
 - The native **`/api/runtimes/:id/healthcheck`** route returns `{ ok: false, error }` (success is `{ ok: true }`).
 - **`/api/runtimes/:id/run`** returns `{ ok: false, reason }` on its non-200 board/runtime refusals.
-- **SSE routes** emit `error`-typed event frames inside the stream rather than an HTTP error body (see below).
+- **SSE routes** emit `error`-typed event frames inside the stream rather than an HTTP error body (see below). One exception: `GET /api/teams/:id/chat/stream?roomId=` answers a room it can't find with a JSON **404** before the stream opens.
 
 ## Streaming endpoints (SSE)
 
@@ -120,13 +120,13 @@ event catalog; see [Tools & MCP](/reference/rest-api/tools-and-mcp).) They set `
 
 ## Route index
 
-186 routes across 13 resource groups: **84 GET · 73 POST · 14 DELETE · 8 PATCH · 7 PUT**. Each group has a dedicated reference page.
+191 routes across 13 resource groups: **85 GET · 75 POST · 15 DELETE · 9 PATCH · 7 PUT**. Each group has a dedicated reference page.
 
 | Resource page                                      | Routes | What it covers                                                                                                                      |
 | -------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | [Settings & health](/reference/rest-api/settings)  | 4      | `/api/settings`, `/api/health`, `/api/health/recheck`                                                                               |
 | [Agents](/reference/rest-api/agents)               | 19     | `/api/agents*`: the registry of record, files, sessions, sync, model, 1:1 chat, workspaces, native shell switch                     |
-| [Teams](/reference/rest-api/teams)                 | 16     | `/api/teams*` (incl. chat + activity), `/api/team-rules/:teamId`, `/api/team-chat*`                                                 |
+| [Teams](/reference/rest-api/teams)                 | 21     | `/api/teams*` (incl. chat, chat rooms, clear chat + activity), `/api/team-rules/:teamId`, `/api/team-chat*`                         |
 | [Board](/reference/rest-api/board)                 | 22     | `/api/board*`: tasks, claim, comments, executions, deps, worktree workspace                                                         |
 | [Runtimes](/reference/rest-api/runtimes)           | 18     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                               |
 | [Memory](/reference/rest-api/memory)               | 4      | `/api/memory*`: search, save, browse, provider                                                                                      |
@@ -139,7 +139,7 @@ event catalog; see [Tools & MCP](/reference/rest-api/tools-and-mcp).) They set `
 | [Misc](/reference/rest-api/misc)                   | 53     | connectors, grants, cost-records, chat-history, graph-layout, personality, skills, catalog, exec settings + grants, fleet, boo-zero |
 
 <Note>
-The route counts above sum to 186, matching the router exactly; every registered route belongs to one resource page. Each count is the number of routes `apps/web/server/api/index.ts` registers under that page's prefixes. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page. One gap is worth naming: `GET /api/agents/:agentId/screenshot` and `POST /api/agents/:agentId/screenshot/capture` are counted under Agents and do not yet have a write-up on that page.
+The route counts above sum to 191, matching the router exactly; every registered route belongs to one resource page. Each count is the number of routes `apps/web/server/api/index.ts` registers under that page's prefixes. The "Misc" page is the catch-all for the smaller UI-backing resources that do not warrant their own page. One gap is worth naming: `GET /api/agents/:agentId/screenshot` and `POST /api/agents/:agentId/screenshot/capture` are counted under Agents and do not yet have a write-up on that page.
 </Note>
 
 ## See also

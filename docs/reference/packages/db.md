@@ -9,7 +9,7 @@ description: 'SQLite + Drizzle ORM data layer: schema, board, memory, tools, gov
 **External deps** `better-sqlite3`, `drizzle-orm`, `zod`, `@noble/ed25519`
 
 <Note>
-This is the registry of record. The 28 Drizzle-typed tables + the idempotent `CREATE TABLE IF NOT EXISTS` bootstrap in `ensureSchema` (`schemaBootstrap.ts`) make a fresh file immediately usable; that DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts). Opening an older file also reconciles it, adding any columns it is missing, derived from the same DDL. SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
+This is the registry of record. The 35 Drizzle-typed tables + the idempotent `CREATE TABLE IF NOT EXISTS` bootstrap in `ensureSchema` (`schemaBootstrap.ts`) make a fresh file immediately usable; that DDL is the **sole** schema source; there is no migration ladder (no `db:migrate` / `db:generate` scripts). Opening an older file also reconciles it, adding any columns it is missing, derived from the same DDL. SQLite-native columns (team, personality, runtime, capabilities) are never clobbered by a Gateway re-sync.
 </Note>
 
 The package exposes one barrel ([`src/index.ts`](#source)). It re-exports `schema`, `db`, and eleven domain sub-modules (`board`, `capabilities`, `memory`, `tools`, `governance`, `events`, `sessions`, `routines`, `teamChat`, `inbox`, `chat`) via `export *`. There are no `package.json` subpath `exports`; everything is reachable from `@clawboo/db`.
@@ -277,7 +277,7 @@ Barrel: [`packages/db/src/index.ts`](https://github.com/clawboo/clawboo/blob/mai
 
 ## See also
 
-- [Database schema reference](/reference/database-schema), the 28 tables + ERD.
+- [Database schema reference](/reference/database-schema), the 35 tables + ERD.
 - [The board](/concepts/the-board), state machine, atomic claim, deps.
 - [Memory](/concepts/memory), shared Memory-MCP tier.
 - [Governance](/concepts/governance), budgets, kill-switch, audit.

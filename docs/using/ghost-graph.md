@@ -1,11 +1,11 @@
 ---
-title: Using the Ghost Graph and Atlas
-description: "Read and edit your fleet's org graph: the Boo port and its docking rings, the + button, peacock skill expand, team halos and junction badges, the activity dock, and the Atlas global view."
+title: Using the Ghost Graph and the Org chart
+description: "Read and edit your fleet's org graph: the Boo port and its docking rings, the + button, peacock skill expand, team halos and junction badges, and the all-teams Org chart with its Activity and browser docks."
 ---
 
-Use this page when you want to _see_ how your agents relate: who reports to whom, which skills each Boo carries, and what each one is doing right now. Clawboo renders this as a React Flow canvas in two scopes: **Atlas** (the global all-teams org graph) and the per-team **Ghost Graph** (embedded inside a team's group chat). Both are the same `GhostGraph` component driven by a `scope` prop; what differs is which agents they show and a couple of Atlas-only controls.
+Use this page when you want to _see_ how your agents relate: who reports to whom, which skills each Boo carries, and what each one is doing right now. Clawboo renders this as a React Flow canvas in two scopes. The **Org chart** (formerly Atlas) is the global all-teams org graph. The per-team **Ghost Graph** sits in a card beside a team's chat: **Team graph** in the team's General chat, **Room graph** in a room. Both are the same `GhostGraph` component, driven by a `scope` prop whose values are identifiers that kept the old name (`'atlas'` for the Org chart, `'team'` for a team); what differs is which agents they show and a few Org chart-only controls.
 
-![The Ghost Graph canvas at Atlas scope: Boo nodes, team clusters, dependency edges, and skill orbitals](/images/ghost-graph.png)
+![The Org chart: Boo nodes, team clusters, dependency edges, and skill orbitals](/images/ghost-graph.png)
 
 Every node and edge maps to real state: a [Boo](/appendices/glossary) is a real agent record, a dependency edge is a routing rule in that agent's `AGENTS.md`, and a skill orbital is a capability from the unified inventory. Nothing on the canvas is decorative.
 
@@ -18,21 +18,21 @@ The graph reads your fleet from the agent registry and the capability inventory;
 - A team with at least one agent (Boo) to see anything. An empty fleet shows the "No agents yet" empty state.
 - For removing a routing edge, an active connection (`useConnectionStore.client` non-null).
 
-## Atlas vs the per-team Ghost Graph
+## The Org chart vs a team's graph
 
-| Aspect                            | **Atlas** (`scope = 'atlas'`)                                                                                           | **Per-team Ghost Graph** (`scope = 'team'`)                                                  |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Where it lives                    | The **Atlas (All Teams)** nav button (org-chart icon, top of the primary nav). The nav view id is `graph`.              | The top pane of a team's **group chat** (`TeamSpaceSplit`), rendered `embedded`.             |
-| Which agents                      | Every agent across every team. Ignores the sidebar's selected team.                                                     | Only agents whose `teamId` matches the sidebar's `selectedTeamId`.                           |
-| Boo Zero                          | Synthesized at the top of the org chart with a **Universal Leader** signal; edges fan out to each team's internal lead. | Synthesized into the team's graph as the team's apex.                                        |
-| Team halos toggle                 | Visible (Atlas-only).                                                                                                   | Hidden, and halos are forced off regardless of the sticky toggle value.                      |
-| Atlas layout pill (Tree / Radial) | Visible.                                                                                                                | Not applicable.                                                                              |
-| Activity dock                     | A right-edge slide-in live activity terminal for every team.                                                            | The same dock, scoped to this team.                                                          |
-| Team badge                        | On each team's junction, where its branch meets Boo Zero.                                                               | On the point where Boo Zero's edge splits into the team (or halfway down it, to a lead).     |
-| Browser dock                      | A right-edge slide-in view of the page an agent is looking at, with its team's Boos above it to switch between them.    | Present. What an agent is looking at is as much a team question as an Atlas one.             |
-| Toolbar chrome                    | Shown: Atlas is the view's only identity.                                                                               | The panel toolbar is suppressed (`embedded`); the team chat header owns identity and counts. |
+| Aspect                      | **Org chart** (`scope = 'atlas'`)                                                                                                         | **Team graph** (`scope = 'team'`)                                                                                                                    |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Where it lives              | The **Org chart** row in the sidebar's nav (network icon), or `Cmd/Ctrl+1`. The nav view id is `graph`.                                   | A card beside a team's chat (`TeamSpaceSplit`): **Team graph** in the team's General chat, **Room graph** in a room. Toggle it from the chat header. |
+| Which agents                | Every agent across every team. Ignores the sidebar's selected team.                                                                       | The selected team's agents. A room's graph draws only the room's members.                                                                            |
+| Boo Zero                    | Synthesized as the root with a **Universal Leader** signal; edges fan out to each team's junction.                                        | Synthesized into the graph as the team's apex, in a room's graph too.                                                                                |
+| Team halos toggle           | Visible (Org chart only).                                                                                                                 | Hidden, and halos are forced off regardless of the sticky toggle value.                                                                              |
+| Layout pill (Tree / Radial) | Visible.                                                                                                                                  | Not applicable.                                                                                                                                      |
+| Activity                    | A right-edge [Activity dock](#activity-dock) for every team, toggled from the view's header.                                              | No dock and no button. The chat beside it has an **Activity** card.                                                                                  |
+| Browser                     | A right-edge [browser dock](#browser-dock), opened from the toolbar; in the radial layout the graph turns toward the team you pick in it. | No dock and no button. The chat beside it has a **Browser** card.                                                                                    |
+| Team badge                  | On each team's junction, where its branch meets Boo Zero.                                                                                 | On the point where Boo Zero's edge splits into the team (or halfway down it, to a lead).                                                             |
+| Header                      | Its own header: the view's title, the `N Boos · M skills` count, the Activity toggle, and the GitHub Star.                                | No header of its own. The card's title row carries the name and the count; the chat header owns the team's identity.                                 |
 
-The selected team in the sidebar is **preserved** when you enter Atlas, so the two graphs keep independent saved layouts (Atlas positions are global and split by layout mode; team positions are keyed `team-<id>`). Switching scopes never overwrites the other's positions.
+The selected team in the sidebar is **preserved** when you open the Org chart, and every graph keeps its own saved layout: the Org chart's positions are global and split by layout mode, a team's graph is keyed `team-<id>`, and a room's graph is keyed `team-<id>-room-<roomId>`, so arranging a room's graph never moves the team's. Switching scopes never overwrites another graph's positions.
 
 ## Building on the canvas
 
@@ -47,7 +47,7 @@ While a thread is out, every Boo it can land on raises a dashed **docking ring**
 
 To give an agent a skill or connector another agent already has, drag that tile onto the agent instead: a skill installs (see [Install a skill onto a Boo](#install-a-skill-onto-a-boo)), and a connector opens the dialog that shares it (see [Connectors](/using/connectors)).
 
-The port is on every graph that draws a Boo: Atlas, a team's graph, and the mini graph in an agent's view. The mini graph draws one agent, so there it offers skills and connectors but not a new agent.
+The port is on every graph that draws a Boo: the Org chart, a team's or room's graph, and the mini graph in an agent's **Graph** card. The mini graph draws one agent, so there it offers skills and connectors but not a new agent.
 
 The port and the rings keep a minimum size on screen, so they stay usable when the canvas is zoomed far out. Locking the canvas (the padlock at the bottom right) hides the port and stops drops, along with dragging.
 
@@ -55,7 +55,7 @@ A thread only raises the ports of the Boo it came from: hovering another Boo on 
 
 The picker asks what kind of thing you want first: **Connectors**, **Skills**, or **New agent**. Pick one and it shows that list, ordered so the entries you can finish in a single click come first. The back arrow, Escape, or backspacing to an empty box all return to the choice.
 
-If you already know the name, just type. Searching from the first screen looks across every kind at once and skips the second step, and the last row offers to create an agent named after whatever you typed. A new Boo lands in the same team as the one you pulled from, already routed to it.
+If you already know the name, just type. Searching from the first screen looks across every kind at once and skips the second step, and the last row offers to create an agent named after whatever you typed. A new Boo joins the team of the Boo you pulled from and arrives already routed to it. In a team's or room's graph, a thread off Boo Zero gives it that team, and on a room's graph it joins the room as well.
 
 A connector that needs a key or a folder is listed but greyed, with the reason. Those are set up in [Connectors](/using/connectors), because a credential is a form and not a canvas gesture.
 
@@ -63,17 +63,17 @@ A connector that needs a key or a folder is listed but greyed, with the reason. 
 
 Every graph leads its toolbar with a **+** button, tooltip **Add a connector, skill or agent** (in an agent's mini graph, **Add a connector or skill**). It opens the same picker, with no agent behind it, so what you pick lands on the canvas attached to nothing:
 
-| You pick    | What lands on the canvas                                                                                                                                                               |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A skill     | A loose skill tile                                                                                                                                                                     |
-| A connector | The connector is turned on first if it is not running (a sign-in where it has one), then a loose connector tile                                                                        |
-| New agent   | A new Boo with no routes yet. In a team's graph it joins that team; in Atlas it joins the team selected in the sidebar, and the picker says which. The mini graph offers no new agent. |
+| You pick    | What lands on the canvas                                                                                                                                                                                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A skill     | A loose skill tile                                                                                                                                                                                                                                                                         |
+| A connector | The connector is turned on first if it is not running (a sign-in where it has one), then a loose connector tile                                                                                                                                                                            |
+| New agent   | A new Boo with no routes yet. In a team's graph it joins that team, and in a room's graph it joins the room as well. In the Org chart it joins the team selected in the sidebar, or your first team when none is selected. The picker says which team. The mini graph offers no new agent. |
 
 A loose tile drops in just under the **+** button, clear of the graph, with a dashed ring and **Not attached** under its name. Hover it for its port and a **Drag onto an agent** hint, then drag the thread onto any Boo: that agent gets the skill, or the connector at write access with risky calls still asking first. The tile then leaves the canvas, because the thing now orbits that agent like any other capability. If the agent already has it, a toast says so and nothing is written; let go anywhere else and the tile stays put.
 
-Hover a loose tile for an **x** that takes it back off the canvas. Each graph keeps its own loose tiles (Atlas, each team's graph, each agent's mini graph), they come back after a reload, and the picker never offers a second copy of one already there. A loose tile keeps a readable size when the canvas is zoomed far out, and when a layout change or a smaller window would leave one out of view, it moves back under the **+** button.
+Hover a loose tile for an **x** that takes it back off the canvas. Each graph keeps its own loose tiles (the Org chart, each team's graph, each agent's mini graph; a room's graph shares its team's), they come back after a reload, and the picker never offers a second copy of one already there. A loose tile keeps a readable size when the canvas is zoomed far out, and when a layout change or a smaller window would leave one out of view, it moves back under the **+** button.
 
-Each Boo shows what it carries under its name: `12 capabilities · 1 route`. Hover the count to see what kinds they are, for example `1 skill, 2 tools, 3 connectors, 6 plugins, built-in tools; 1 route`. It counts everything the agent has, including what its ring folds into a group or Atlas cuts, so it is the same number in every view. Clicking the Boo opens the ring, and the count steps aside while the ring is open.
+Each Boo shows what it carries under its name: `12 capabilities · 1 route`. Hover the count to see what kinds they are, for example `1 skill, 2 tools, 3 connectors, 6 plugins, built-in tools; 1 route`. It counts everything the agent has, including what its ring folds into a group or the Org chart cuts, so it is the same number in every view. Clicking the Boo opens the ring, and the count steps aside while the ring is open.
 
 The count beside a graph's title (`3 Boos · 1 skill`) counts skills only: the ones a person installed, never tools, plugins or the built-in tool set.
 
@@ -112,7 +112,7 @@ flowchart TD
 ```
 
 - **Boo nodes** (red dots) are your agents. The leader-rooted spanning tree from `AGENTS.md` routing rules drives the org-chart hierarchy: ELK lays out Boos and the primary dependency edges; secondary routes are revealed only on hover.
-- **Dependency edges** (red, with arrowheads) are agent-to-agent routing: "this agent routes work to the target." Each one is a line in the source agent's `AGENTS.md`, and the `N routes` count under a Boo's name counts exactly those: the routes a person authored, never the invisible backbone Atlas adds to lay teams out.
+- **Dependency edges** (red, with arrowheads) are agent-to-agent routing: "this agent routes work to the target." Each one is a line in the source agent's `AGENTS.md`, and the `N routes` count under a Boo's name counts exactly those: the routes a person authored, never the invisible backbone the Org chart adds to lay teams out.
 - **Skill nodes** (mint circles) and **connector nodes** (violet circles) are each Boo's capabilities, drawn as orbitals around their parent. An OpenClaw plugin is violet too, with a puzzle piece, or with the provider's own logo when the plugin is a model provider such as Anthropic or OpenAI. A tile shows a readable name (`Web Search`, `Device Pair`) and keeps the exact key the runtime reports in its tooltip. They are hidden by default and revealed by [expanding a Boo](#expand-a-boos-skills-peacock). A Boo draws its own per-agent capabilities AND its runtime's shared ones together, so an agent that has picked up a skill of its own keeps the built-ins it already had. An agent with none of its own (Codex, OpenClaw, a not-yet-run Hermes agent) therefore shows exactly its runtime's shared capabilities, so every agent surfaces its attached MCP and built-ins.
 - **Grant edges** connect a Boo to a [connector](/using/connectors) somebody deliberately shared with it. Drag a connector tile onto a second Boo to share it, and use **Stop sharing** on the edge to revoke, which leaves an 8-second Undo. That is distinct from **Turn off**, which stops the connector itself rather than one agent's access to it. Only a deliberate share draws an edge: a connector a Boo's own runtime already attaches is authorized too, but the tile itself is that statement, so drawing it again would be noise. The edge's state is not a second reading of a status column; it is the verdict the tool broker would return for that pair right now, so a grant that has expired or [drifted](/appendices/glossary) renders as expired or drifted because that is what a call would actually do.
 - **Runtime badge + model orbital.** Every Boo carries a small **runtime brand chip** on its avatar, so you can tell Native, OpenClaw, Claude Code, Codex, and Hermes apart at a glance. Expanding a Boo also pops out a **model orbital**, the provider logo plus the LLM it runs on. A model Clawboo has not catalogued still gets a readable name (`MiniMax M2.7` rather than `minimax-m2.7`), and the tooltip keeps the exact model id. Every Boo has one: an account/SDK-default runtime (Codex, Claude Code) shows a neutral "default" chip rather than a specific model, and an OpenClaw agent shows its Gateway default model.
@@ -169,11 +169,11 @@ By default the canvas shows only Boos and dependency edges; skill and connector 
 
 Multiple Boos can be expanded at once; each toggles independently. The camera re-fits to frame only the Boos plus any currently-expanded orbitals, so expanding doesn't shrink your Boos to make room for invisible rings.
 
-**A focused view draws every capability.** In the per-team graph and the agent detail view, the ring grows its radius to fit however many a Boo has, so an agent on a large MCP server reporting forty shows forty. Nothing is rolled into a "+N more" tile.
+**A focused view draws every capability.** In a team's graph and an agent's mini graph, the ring grows its radius to fit however many a Boo has, so an agent on a large MCP server reporting forty shows forty. Nothing is rolled into a "+N more" tile.
 
 **Large read-only sets fold into one tile.** Five or more of one kind that the canvas has no action for fold into a single **group tile**, drawn as a small stack in its members' colour: `41 plugins`, `8 tools`. An OpenClaw Gateway reports forty-odd plugins and every OpenClaw Boo inherits them all, so this is what keeps its ring readable. Click the group tile to list its members, with the provider logos and any that are off; the list scrolls, and closes when you click the canvas. (A locked canvas selects nothing, so unlock it first.) Anything with an action keeps its own tile: a skill a person installed, a connector (it has a toolbar, and a share is drawn as its own edge), and anything asking for a sign-in or showing drift.
 
-**Atlas keeps a ceiling.** The all-teams view pays for tiles in node count across every agent at once, which no amount of radius fixes, so it draws at most 24 per Boo and accounts for the rest in one overflow tile, which counts every capability it hides, including a group's members. Groups fold first, so on a typical install nothing is cut. Open the Boo's own view to see all of them.
+**The Org chart keeps a ceiling.** The all-teams view pays for tiles in node count across every agent at once, which no amount of radius fixes, so it draws at most 24 per Boo and accounts for the rest in one overflow tile, which counts every capability it hides, including a group's members. Groups fold first, so on a typical install nothing is cut. Open the Boo's own view to see all of them.
 
 <Note>
 The MiniMap matches: collapsed skill/connector dots render transparent there, so at rest the MiniMap shows only the Boo dots; expand a Boo and its mint (skill) / violet (connector) dots appear in sync with the canvas. Boo dots carry their **status** colour, so the one view you use when zoomed too far out to read a node still tells you which agents are working and which have failed.
@@ -210,19 +210,17 @@ Drawing the same edge twice is a no-op: if the target is already in the source's
 
 Right-click any Boo for its action menu:
 
-| Item                  | What it does                                                                |
-| --------------------- | --------------------------------------------------------------------------- |
-| **Chat**              | Selects the agent and opens its detail view (1:1 chat).                     |
-| **Edit personality**  | Opens the agent detail view (personality sliders live there).               |
-| **Edit files**        | Opens the agent detail view (SOUL / IDENTITY / TOOLS / AGENTS editor).      |
-| **Select in sidebar** | Highlights the agent in the fleet sidebar without leaving the graph.        |
-| **Delete**            | Deletes the agent (archives it through the runtime + cleans up local rows). |
+| Item                  | What it does                                                                                        |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| **Open agent**        | Opens the agent's page, its 1:1 chat with the graph, files and personality in cards beside it.      |
+| **Select in sidebar** | Selects the agent without leaving the graph or opening its page.                                    |
+| **Delete**            | Deletes the agent at once, with no confirmation (archives it through the runtime + cleans up rows). |
 
-The first three all land in the same place, the [agent detail view](/using/agents). `Select in sidebar` is the highlight-only action; left-click is reserved for peacock expand.
+**Open agent** lands on the [agent's page](/using/agents). Left-click is reserved for the peacock expand.
 
 ### Keyboard
 
-Boo selection, the peacock expand/collapse, and the action menu all have keyboard equivalents; drawing a routing edge, drag-installing a skill, and opening the edge explain panel stay pointer-only. Each Boo is a Tab stop; the Atlas team junctions (the badges repeat the team the Boos below already name) and any collapsed skill/resource orbitals are taken out of the tab order, so you only land on agents and on things you can actually see.
+Boo selection, the peacock expand/collapse, and the action menu all have keyboard equivalents; drawing a routing edge, drag-installing a skill, and opening the edge explain panel stay pointer-only. Each Boo is a Tab stop; the Org chart's team junctions (the badges repeat the team the Boos below already name) and any collapsed skill/resource orbitals are taken out of the tab order, so you only land on agents and on things you can actually see.
 
 | Keys                                      | What it does                                                                                             |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -236,20 +234,20 @@ The `Alt+Enter` alias exists because macOS keyboards have no Menu key and the OS
 
 Click **Re-layout** (top-right, appears once the first layout has run) to recompute positions from scratch. It drops your saved drag positions, re-runs ELK for the Boo hierarchy + orbital math for skills, and persists the fresh positions so a refresh is a no-op. Use it after adding agents or routes if the auto-layout looks tangled.
 
-## Atlas-only controls
+## Org chart-only controls
 
 ### Tree vs Radial layout
 
-In Atlas, a segmented pill in the toolbar toggles the global topology:
+On the Org chart, a segmented pill in the toolbar toggles the global topology:
 
 - **Tree** (`top-down`): Boo Zero at the top, teams in a flat row beneath it (the org-chart sketch).
 - **Radial** (default): Boo Zero at the center with teams arranged as petals around it.
 
-Your choice persists in `localStorage` (`clawboo.atlas.layout`). Each mode keeps its own saved drag positions (`atlas-top-down` vs `atlas-radial`), so flipping modes never drags one mode's coordinates into the other.
+Your choice persists in `localStorage` under the key `clawboo.atlas.layout`. Each mode keeps its own saved drag positions, under the layout names `atlas-top-down` and `atlas-radial`, so flipping modes never drags one mode's coordinates into the other. (The key and the layout names are identifiers that kept the old name.)
 
 ### Team halos
 
-Click **Team halos** (Atlas-only, Pin icon) to draw a colored convex-hull background behind each team's Boos, a visual grouping for the Skills → Agents → Teams hierarchy. It is a pure overlay: it never touches the node tree, physics, or ELK layout. Single-agent teams render no halo (the Boo's team badge is enough); the toggle is off by default.
+Click **Team halos** (Org chart only, Pin icon) to draw a colored convex-hull background behind each team's Boos, a visual grouping for the Skills → Agents → Teams hierarchy. It is a pure overlay: it never touches the node tree, physics, or ELK layout. Single-agent teams render no halo (the Boo's team badge is enough); the toggle is off by default.
 
 ### Team status pills
 
@@ -259,21 +257,31 @@ The pill sits to the right of the badge, level with it. When a line, an agent, a
 
 ## Activity dock
 
-Every graph carries an **Activity** button (Terminal icon) that slides in a right-edge live-activity terminal, sourced from the orchestration event log and scoped to what that graph draws:
+On the Org chart, the **Activity** toggle in the view's header (terminal icon, tooltip **Show activity**, then **Hide activity**) slides in a right-edge live-activity terminal for every team, sourced from the orchestration event log. Close it with the toggle, the X in its header, or `Escape`. It shares the right edge with the [browser dock](#browser-dock), so opening one closes the other. The dock only tails events while it is open.
 
-| Graph                         | Tooltip                        | Shows              |
-| ----------------------------- | ------------------------------ | ------------------ |
-| Atlas                         | **Activity feed (all teams)**  | Every team's trail |
-| A team's graph, in group chat | **Activity feed (this team)**  | That team's trail  |
-| An agent's mini graph         | **Activity feed (this agent)** | That agent's trail |
+A team's graph and an agent's mini graph have no Activity dock and no Activity button: the views they sit in give Activity a card of its own. A team chat's **Activity** card shows the whole team's trail (in a room too), and an agent's page has an **Activity** card for that agent. See [Group chat](/using/group-chat) and [Working with agents](/using/agents).
 
-The tooltip reads **Hide activity feed** while the dock is open. Close it with the button, the X in its header, or `Escape`. It shares the right edge with the agent browser dock, so opening one closes the other. The dock only tails events while it is open.
+## Browser dock
+
+The Org chart's **Agent browser** button (globe icon, last in the toolbar; it reads **Hide browser** while open) slides in the page an agent is looking at, beside the canvas. A row of tabs sits on top, one for each team plus **No team** for teamless agents such as Boo Zero (left out when there is only one to pick); that team's faces sit beneath it, and the selected agent's screen sits below them. Pick a face to see that agent's screen; the dock opens on whichever agent captured a page most recently. Close it with the same button or `Escape`.
+
+A team's graph has no browser dock. Its chat has a **Browser** card instead, with the chat's agents in its top bar.
+
+### Turn and focus
+
+In the radial layout, the Org chart moves to meet the dock:
+
+- **Turn.** Opening the dock, or picking a team in it, turns the graph around Boo Zero until that team points to the right, beside the dock, and the camera slides the team in next to it.
+- **Focus.** Picking an agent's face draws its team's junction back toward Boo Zero, steps that agent forward, and parts the other members around the line to it, keeping their spacing.
+- **Settle.** Picking another team, or closing the dock, settles a focused team back where it stood.
+
+The turn is saved with the layout, so the graph is still turned after a reload; the focus is not. The tree layout has no hinge to turn on, so there picking a team only moves the camera, and picking a face leaves the team as it is. With reduced motion on, these moves happen without animation.
 
 ## Team badges
 
-In Atlas, each team's branch of the chart meets Boo Zero at a junction, and the junction wears the team's badge: the same coloured disc and icon the team has in the sidebar rail, so you can follow a branch back to its team at a glance. Hover it for the team's name; hovering also highlights that team's Boos and dims the rest. It stays a readable size when Atlas is zoomed far out.
+On the Org chart, each team's branch meets Boo Zero at a junction, and the junction wears the team's badge: the same coloured disc and icon the team has in the team rail, so you can follow a branch back to its team at a glance. Hover it for the team's name; hovering also highlights that team's Boos and dims the rest. It stays a readable size when the Org chart is zoomed far out.
 
-A team's own graph, in its group chat, wears the same badge where Boo Zero's edge splits into the team, or halfway down that edge when Boo Zero reaches the team through its lead. The mini graph in an agent's view draws one agent and no junction, so it has no badge.
+A team's own graph (the graph card in its General chat or one of its rooms) wears the same badge where Boo Zero's edge splits into the team, or halfway down that edge when Boo Zero reaches the team through its lead. The mini graph in an agent's view draws one agent and no junction, so it has no badge.
 
 ## The MiniMap
 
@@ -284,12 +292,12 @@ The MiniMap (bottom-right overview) is **hidden by default** to give Boos more c
 - **Skill install**: after installing, the skill orbital appears on the target Boo (expand it to see it) and a success toast fires. The new capability also shows on the [Capabilities dashboard](/using/capabilities-dashboard).
 - **Routing edge added**: a red dependency edge appears between the two Boos; clicking it shows the source agent and `via AGENTS.md` in the explain panel.
 - **Routing edge removed**: the edge disappears and the source agent's `AGENTS.md` no longer mentions the target.
-- **Layout persists**: drag a Boo, then refresh. It stays where you dropped it (positions are saved to `/api/graph-layout`, keyed per scope/team/mode).
+- **Layout persists**: drag a Boo, then refresh. It stays where you dropped it (positions are saved to `/api/graph-layout`, keyed per scope, team, room and layout mode).
 
 ## Troubleshooting
 
 <Warning>
-**Boos pile up at the top-left on a new team, or the layout looks broken after switching Atlas modes.** This happens when stale saved positions partially cover the current node set (e.g. Boo Zero is newly synthesized) or carry the other layout mode's coordinates. Click **Re-layout** to force a fresh ELK pass; it drops the stale positions and re-persists clean ones.
+**Boos pile up at the top-left on a new team, or the layout looks broken after switching the Org chart's layout.** This happens when stale saved positions partially cover the current node set (e.g. Boo Zero is newly synthesized) or carry the other layout mode's coordinates. Click **Re-layout** to force a fresh ELK pass; it drops the stale positions and re-persists clean ones.
 </Warning>
 
 <Warning>
@@ -304,7 +312,7 @@ The MiniMap (bottom-right overview) is **hidden by default** to give Boos more c
 
 - [Using teams](/using/teams), create teams, set the leader that roots the org chart, color collections
 - [Using agents](/using/agents), edit `SOUL` / `IDENTITY` / `TOOLS` / `AGENTS`, personality sliders
-- [Using group chat](/using/group-chat), where the per-team Ghost Graph is embedded
+- [Using group chat](/using/group-chat), where a team's graph sits in a card beside the chat
 - [The board](/concepts/the-board), the durable task board the orchestration runs on
 - [Capabilities dashboard](/using/capabilities-dashboard), the full capability inventory that drives the skill and connector nodes
-- [Observability dashboard](/using/observability-dashboard), the event log behind the Atlas activity dock and the live Boo bubbles
+- [Observability dashboard](/using/observability-dashboard), the event log behind the Org chart's Activity dock, the Activity cards, and the live Boo bubbles

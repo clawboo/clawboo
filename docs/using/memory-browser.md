@@ -20,7 +20,7 @@ Memory is always available; it does not require a [runtime](/appendices/glossary
 
 ## Where it lives
 
-- **Sidebar**: the **Memory** button (the brain icon, _Team Knowledge_) opens Memory full-screen. A **Graph | List** toggle in the header switches views, and your choice is remembered in this browser.
+- **Sidebar**: the **Memory** row (the brain icon) in the sidebar's nav, or **Cmd/Ctrl + 4**, opens Memory full-screen. A **Graph | List** toggle in the header switches views, and your choice is remembered in this browser.
 - **Settings**: **Settings**, then **Memory** under the Workspace group, shows the list only, since the settings window is too small for the graph. **Open full view** closes Settings and opens the full-screen Memory.
 
 ## The graph

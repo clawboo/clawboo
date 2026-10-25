@@ -20,7 +20,7 @@ The Marketplace is browsable with no Gateway and no runtime connected. The agent
 
 ## Where it lives
 
-Open the Marketplace from the **Marketplace** nav button (shopping-cart icon) in the left sidebar, or press **Cmd/Ctrl + 3**. The panel fills the content area with a toolbar (the three tab toggles + sort), a filter bar, and a responsive card grid.
+Open the Marketplace from the **Marketplace** row (shopping-cart icon) in the sidebar's nav, just above **Settings**. It has no number shortcut. The panel fills the content area with a toolbar (the three tab toggles + sort), a filter bar, and a responsive card grid.
 
 The panel opens on the **Teams** tab by default. The toolbar shows all three tab toggles with live counts: `Teams (85)`, `Agents (436)`, `Skills (44)`. Each tab keeps its own search query and filters, so switching tabs never loses your place.
 
@@ -34,7 +34,7 @@ The panel opens on the **Teams** tab by default. The toolbar shows all three tab
 
 ### Teams tab
 
-The default view. Each team renders as a `TeamTemplateCard` showing its emoji, name, agent count, a pack badge, a category label, a **Community** badge when that pack is adapted community work, the description, and the agent roles in the roster. Buttons: **Details** and **Deploy**. The grid leads with a **Curated teams** banner and a **Start from scratch** card (deploy a blank custom team); this tab is also where the sidebar's **+** create-team button lands.
+The default view. Each team renders as a `TeamTemplateCard` showing its emoji, name, agent count, a pack badge, a category label, a **Community** badge when that pack is adapted community work, the description, and the agent roles in the roster. Buttons: **Details** and **Deploy**. The grid leads with a **Curated teams** banner and a **Start from scratch** card (deploy a blank custom team); this tab is also where the **+** (create a team) button on the team rail lands.
 
 ### Agents tab
 
@@ -49,7 +49,7 @@ Adding a skill is different from deploying an agent. **Add** records a **capabil
 </Note>
 
 <Note>
-Connectors used to be a fourth tab here. It is now its own sidebar destination, directly under **Marketplace**. The three tabs above are a catalog you browse once; connecting the tools your agents use is a recurring errand, and it was three clicks deep. See [Connectors](/using/connectors).
+Connectors used to be a fourth tab here. It is now its own row in the sidebar's nav (**Cmd/Ctrl + 3**). The three tabs above are a catalog you browse once; connecting the tools your agents use is a recurring errand, and it was three clicks deep. See [Connectors](/using/connectors).
 </Note>
 
 ## Search and filters
@@ -132,7 +132,7 @@ When the modal finishes, Clawboo selects the new team and opens its **group chat
 
 ## Verify it worked
 
-- After a deploy, the dashboard switches you into the new team's group chat. The team appears in the team sidebar and the [Ghost Graph](/using/ghost-graph).
+- After a deploy, the dashboard switches you into the new team's group chat (**General**). The team appears on the team rail and in the [Ghost Graph](/using/ghost-graph).
 - Open the agent in the fleet; its **IDENTITY.md** should contain the same source text you saw in the agent detail modal.
 - After you **Add** a skill, a success toast confirms it (_"Added … to … tool profile"_), and the skill appears as a capability annotation on the agent in the [Capabilities dashboard](/using/capabilities-dashboard) and on the Ghost Graph.
 

@@ -1,11 +1,11 @@
 ---
 title: Database schema reference
-description: The 28 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
+description: The 35 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
 ---
 
 Clawboo persists all of its durable state in one local SQLite file. This page documents every table defined in `packages/db/src/schema.ts`: purpose, key columns, indexes, and foreign keys, plus how the schema is created and where the file lives.
 
-There are **28 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, and the **team-chat** room substrate. The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
+There are **35 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, **connectors and grants**, and **team chat** (a team's chat rooms, the peer-chat room substrate, and the agent mailbox). The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
 
 <Info>
 There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. Upgrading in place adds columns an older database is missing, derived from that same DDL; changing or removing an existing column is still a reset. See [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
@@ -34,14 +34,22 @@ There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureS
 | `scheduled_runs`       | board        | `id` (text)                     | The Routines ledger: durable team-task schedules                 |
 | `memory_facts`         | memory       | `id` (text)                     | Declarative facts (+ optional embedding BLOB)                    |
 | `memory_procedures`    | memory       | `id` (text)                     | Versioned procedures                                             |
+| `memory_outcomes`      | memory       | `id` (text)                     | Outcome events against facts (the learning overlay's input)      |
 | `tool_registry`        | tools        | `name` (text)                   | Brokered tool descriptors + provenance + enabled flag            |
 | `tool_call_audit`      | tools        | `id` (text)                     | Append-only before/after tool-call audit (secrets scrubbed)      |
 | `tool_call_approvals`  | tools        | `id` (text)                     | Tool-approval handshake, plus mirrored OpenClaw exec approvals   |
+| `tool_result_blobs`    | tools        | `handle` (text)                 | Oversized tool results kept whole, read back by handle           |
 | `budgets`              | governance   | `id` (text)                     | Scoped USD budgets (cap/warn) with cent-exact spend              |
 | `governance_audit`     | governance   | `id` (text)                     | Append-only forensic governance audit                            |
 | `orchestration_events` | obs          | `seq` (autoinc)                 | Append-only orchestration event log (trace + graph source)       |
 | `capabilities`         | capabilities | `id` (text)                     | Unified capability inventory across all runtimes                 |
+| `connectors`           | connectors   | `id` (text)                     | Connectors Clawboo connected itself, one row per instance        |
+| `capability_grants`    | connectors   | `id` (text)                     | The grant spine: one row is both a permission and a graph edge   |
+| `approval_rules`       | connectors   | `id` (text)                     | Remembered **Always** decisions, each bound to a grant           |
+| `rooms`                | team-chat    | `id` (text)                     | A team's chat rooms, each a subset of its members                |
+| `room_members`         | team-chat    | `(room_id, agent_id)`           | Which agents belong to which chat room                           |
 | `team_chat`            | team-chat    | `id` (text)                     | Mixed-runtime peer-chat room substrate                           |
+| `agent_inbox`          | team-chat    | `id` (text)                     | Durable per-agent mailbox for coordination notices               |
 
 Integer columns are epoch-milliseconds when named `*_at` / `*_ms` (e.g. `created_at`, `timestamp_ms`); boolean-ish flags are stored as `INTEGER` `0`/`1` (e.g. `is_archived`, `dropped`, `enabled`, `is_error`, `recovery_tombstone`). JSON payloads are stored as `TEXT` and noted per column.
 
@@ -53,6 +61,9 @@ The diagram shows the FK-enforced edges and the load-bearing soft references (bo
 erDiagram
   teams ||--o{ agents : "team_id (FK)"
   teams ||--o| boo_zero_team_briefs : "team_id (FK, cascade)"
+  teams ||--o{ rooms : "team_id (FK, cascade)"
+  rooms ||--o{ room_members : "room_id (FK, cascade)"
+  agents ||--o{ room_members : "agent_id (FK, cascade)"
   agents ||--o{ cost_records : "agent_id (FK)"
   agents ||--o{ approval_history : "agent_id (FK)"
 
@@ -65,6 +76,7 @@ erDiagram
 
   teams }o..o{ tasks : "team_id (soft ref)"
   agents }o..o{ tasks : "assignee_agent_id (soft ref)"
+  rooms }o..o{ tasks : "room_id (soft ref)"
   scheduled_runs }o..o{ tasks : "fires (soft ref)"
 
   memory_facts {
@@ -110,7 +122,7 @@ erDiagram
 ```
 
 <Note>
-`task_deps`, `task_comments`, `workspaces`, and `execution_processes` reference `tasks(id)` with a real FK. Cross-subsystem references (board `team_id`/`assignee_agent_id`, `tool_call_approvals.task_id`, `scheduled_runs.agent_id`/`team_id`, all memory/obs/governance scope columns) are **soft refs with no FK constraint**; those ids are owned by the Gateway, the chat store, or another source, so the board only references them, never duplicates or constrains them.
+`task_deps`, `task_comments`, `workspaces`, and `execution_processes` reference `tasks(id)` with a real FK. Cross-subsystem references (board `team_id`/`assignee_agent_id`/`room_id`, `tool_call_approvals.task_id`, `scheduled_runs.agent_id`/`team_id`, all memory/obs/governance scope columns) are **soft refs with no FK constraint**; those ids are owned by the Gateway, the chat store, or another source, so the board only references them, never duplicates or constrains them.
 </Note>
 
 ---
@@ -121,6 +133,8 @@ erDiagram
 
 Persisted transcript entries so chat history survives a page refresh. Keyed internally by an autoincrement `id`, but deduplicated on the application-supplied `entry_id` (UUID) for idempotent batch inserts.
 
+A team chat's rows are keyed `agent:<agentId>:team:<teamId>` in General and `agent:<agentId>:team:<teamId>:room:<roomId>` in a [room](#rooms). Clearing a chat sets its rows aside rather than deleting them: `session_key` and `entry_id` both gain a `#cleared:<ts>` suffix, so no reader matches them again (see [`POST /api/teams/:id/chat/clear`](/reference/rest-api/teams#post-apiteamsidchatclear)).
+
 - **Columns**: `id` (PK, autoinc), `session_key`, `gateway_url`, `entry_id`, `timestamp_ms`, `data` (JSON-serialised `TranscriptEntry`).
 - **Indexes**: `uniq_chat_messages_entry_id` (unique on `entry_id`), `idx_chat_messages_session_ts` on `(session_key, timestamp_ms)`, `idx_chat_messages_session_id` on `(session_key, id)` (the tail index the live SSE stream range-seeks on, so each poll is O(new rows) per key instead of an O(history) scan + sort).
 
@@ -130,7 +144,7 @@ Groups of agents deployed together. Holds team identity (name, emoji `icon`, `co
 
 - **Columns**: `id` (PK, text), `name`, `icon`, `color`, `color_collection_id`, `template_id`, `leader_agent_id`, `is_archived` (`0`/`1`), `tenant_id` (dormant), `created_at`, `updated_at`.
 - **Indexes**: `idx_teams_name` on `(name)`.
-- **Referenced by**: `agents.team_id`, `boo_zero_team_briefs.team_id` (cascade).
+- **Referenced by**: `agents.team_id`, `boo_zero_team_briefs.team_id` (cascade), `rooms.team_id` (cascade).
 
 ### `agents`
 
@@ -157,14 +171,14 @@ Per-agent token and USD cost ledger.
 
 ### `graph_layouts`
 
-Saved Ghost Graph / Atlas node and edge positions, keyed per layout name + gateway URL.
+Saved node and edge positions for the Ghost Graph and the Org chart (formerly Atlas), keyed per layout name + gateway URL. The names (`atlas-radial` / `atlas-top-down` for the Org chart's two layouts, `team-<teamId>` for a team's graph, `team-<teamId>-room-<roomId>` for a room's) are listed on the [Misc resources API](/reference/rest-api/misc) page.
 
 - **Columns**: `id` (PK, autoinc), `name` (default `default`), `gateway_url`, `layout_data` (JSON node + edge positions), `created_at`, `updated_at`.
 - **Indexes**: `uniq_graph_layouts_name_url` (unique on `(name, gateway_url)`).
 
 ### `settings`
 
-A typed key/value store. Backs team rules, onboarding flags, the Boo Zero global brief / display name, and any other simple config-by-key. (Keys are documented where they are set: see [Boo Zero](/using/boo-zero) for `boo-zero:global-brief` and `boo-zero:display-name:<agentId>`, and [Using teams](/using/teams) for `team-rules:<teamId>` and `team-onboarding:<teamId>`.)
+A typed key/value store. Backs team rules, onboarding flags, the Boo Zero global brief / display name, and any other simple config-by-key. (Keys are documented where they are set: see [Boo Zero](/using/boo-zero) for `boo-zero:global-brief` and `boo-zero:display-name:<agentId>`, [Using teams](/using/teams) for `team-rules:<teamId>` and `team-onboarding:<teamId>`, and the [Teams API](/reference/rest-api/teams) for the chat-clear times `team-chat-cleared:<teamId>` and `team-chat-cleared:<teamId>:room:<roomId>`.)
 
 - **Columns**: `key` (PK, text), `value` (text), `updated_at`.
 - **Helpers**: `getSetting(db, key)` / `setSetting(db, key, value)` (upsert on conflict).
@@ -205,8 +219,8 @@ The transactional source of truth for team/task coordination state. The board re
 
 The kanban cards.
 
-- **Columns**: `id` (PK, text), `title`, `description`, `status` (default `backlog`; one of `backlog`|`todo`|`in_progress`|`in_review`|`blocked`|`done`|`cancelled`), `priority` (default `0`), `team_id` (soft ref), `assignee_agent_id` (soft ref), `assignee_runtime`, `parent_task_id` (**FK → `tasks.id` self-ref**), `source_delegation_id`, `worktree_ref`, `branch_ref`, `cost_usd` (`REAL`, default `0`; the sum of the task's recorded run costs), `parent_session_id`, `dropped` (`0`/`1` soft-delete), `tenant_id` (dormant), `verification` (JSON `VerificationResult`; `null` until a gate runs; the `in_review → done` gate reads `.status === 'pass'`), `scheduled_by` (default `manual`; the one-firing-owner label, open set: `manual`|`clawboo`|`openclaw`|…), `created_at`, `updated_at`, `completed_at`.
-- **Indexes**: `idx_tasks_team_status` on `(team_id, status)`, `idx_tasks_assignee`, `idx_tasks_parent`, `idx_tasks_parent_dropped_created` on `(parent_task_id, dropped, created_at)`. The composite serves both guarded-create counts, which run while the write lock is held: the per-parent child count (`parent_task_id = ? AND dropped = 0`, an index prefix) and the root-rate count (`parent_task_id IS NULL AND dropped = 0 AND created_at > ?`, equality-equality-range, so the range column comes last). `idx_tasks_parent` is deliberately retained: dropping it from the DDL would not drop it from databases that already bootstrapped it.
+- **Columns**: `id` (PK, text), `title`, `description`, `status` (default `backlog`; one of `backlog`|`todo`|`in_progress`|`in_review`|`blocked`|`done`|`cancelled`), `priority` (default `0`), `team_id` (soft ref), `assignee_agent_id` (soft ref), `assignee_runtime`, `parent_task_id` (**FK → `tasks.id` self-ref**), `source_delegation_id`, `worktree_ref`, `branch_ref`, `cost_usd` (`REAL`, default `0`; the sum of the task's recorded run costs), `parent_session_id`, `dropped` (`0`/`1` soft-delete), `tenant_id` (dormant), `verification` (JSON `VerificationResult`; `null` until a gate runs; the `in_review → done` gate reads `.status === 'pass'`), `scheduled_by` (default `manual`; the one-firing-owner label, open set: `manual`|`clawboo`|`openclaw`|…), `created_at`, `updated_at`, `completed_at`, `room_id` (soft ref → `rooms.id`, no FK; the chat room the task was delegated in, `null` = General, which covers every task created before rooms existed; a subtask inherits its parent's room).
+- **Indexes**: `idx_tasks_team_status` on `(team_id, status)`, `idx_tasks_team_room` on `(team_id, room_id)` (a room's orchestrator and its Tasks card read only that room's tasks), `idx_tasks_assignee`, `idx_tasks_parent`, `idx_tasks_parent_dropped_created` on `(parent_task_id, dropped, created_at)`. The composite serves both guarded-create counts, which run while the write lock is held: the per-parent child count (`parent_task_id = ? AND dropped = 0`, an index prefix) and the root-rate count (`parent_task_id IS NULL AND dropped = 0 AND created_at > ?`, equality-equality-range, so the range column comes last). `idx_tasks_parent` is deliberately retained: dropping it from the DDL would not drop it from databases that already bootstrapped it.
 
 ### `task_deps`
 
@@ -247,17 +261,26 @@ The Routines ledger: durable team-task schedules, the external wake for every ru
 
 ## Memory cluster
 
-A two-tier memory store: declarative facts + versioned procedures. Full-text search rides a companion FTS5 virtual table (see [FTS5 search](#fts5-search--memory_facts_fts)); the optional `embedding` BLOB powers vector / hybrid search.
+A two-tier memory store: declarative facts + versioned procedures, plus the outcome events that feed the learning overlay. Full-text search rides a companion FTS5 virtual table (see [FTS5 search](#fts5-search--memory_facts_fts)); the optional `embedding` BLOB powers vector / hybrid search.
 
 ### `memory_facts`
 
-- **Columns**: `id` (PK, text), `title`, `content`, `tags` (JSON `string[]`, default `[]`), `embedding` (Float32 little-endian BLOB; `null` when no embedding provider, so search falls back to FTS), `embedding_model` (the provider id that produced it), `scope_agent_id`, `scope_team_id`, `tenant_id` (dormant), `created_at`, `updated_at`.
-- **Indexes**: `idx_memory_facts_team` on `(scope_team_id)`, `idx_memory_facts_agent` on `(scope_agent_id)`, `idx_memory_facts_created`.
+- **Columns**: `id` (PK, text), `title`, `content`, `tags` (JSON `string[]`, default `[]`), `embedding` (Float32 little-endian BLOB; `null` when no embedding provider, so search falls back to FTS), `embedding_model` (the provider id that produced it), `scope_agent_id`, `scope_team_id`, `tenant_id` (dormant), `created_by_agent_id`, `created_by_runtime` (`user` = saved from the UI), `source_task_id`, `source_session_key`, `created_at`, `updated_at`.
+- **Indexes**: `idx_memory_facts_team` on `(scope_team_id)`, `idx_memory_facts_agent` on `(scope_agent_id)`, `idx_memory_facts_created`, `idx_memory_facts_model_created` on `(embedding_model, created_at, id)`.
+
+The four `created_by_*` / `source_*` columns are provenance: who or what produced the row. They are nullable, written at save time only, and never affect which scopes can see the fact.
 
 ### `memory_procedures`
 
-- **Columns**: `id` (PK, text), `name`, `version` (default `1`), `content`, `scope_agent_id`, `scope_team_id`, `tenant_id`, `created_at`.
+- **Columns**: `id` (PK, text), `name`, `version` (default `1`), `content`, `scope_agent_id`, `scope_team_id`, `tenant_id`, `created_by_agent_id`, `created_by_runtime`, `source_task_id`, `source_session_key` (the same provenance columns as `memory_facts`), `created_at`.
 - **Indexes**: `idx_memory_procedures_name`, `idx_memory_procedures_team` on `(scope_team_id)`.
+
+### `memory_outcomes`
+
+Append-only outcome events against facts, the input to the derived learning overlay. Explicit feedback (`useful`, `dead_end`, `corrected`) comes from agents and from the UI; `cited` rows are written only by run-start memory injection, and the external input schemas exclude that value, so a usage count cannot be forged. `fact_id` is a soft reference with no FK, matching the rest of the memory cluster.
+
+- **Columns**: `id` (PK, text), `fact_id` (not null, soft ref → `memory_facts.id`), `outcome` (not null; `useful`|`dead_end`|`corrected`|`cited`), `note`, `agent_id`, `team_id`, `task_id`, `runtime`, `created_at`.
+- **Indexes**: `idx_memory_outcomes_fact` on `(fact_id)`, `idx_memory_outcomes_created`.
 
 ---
 
@@ -289,6 +312,13 @@ The DB-mediated approval handshake, uniform across both MCP transports and cross
 A mirrored exec row is keyed by the Gateway's own request id, which is what makes a redelivered request idempotent, and it carries `tool_name` `exec`, `tool_class` `destructive`, `tool_summary` set to the first 200 characters of the command, and `args_summary` set to `{command, cwd}`. See [Approvals](/using/approvals).
 
 `never_remember` is `1` when "Always" must not be offered for this prompt. It is persisted at prompt time rather than recomputed, so the resolve path cannot mint a durable rule the prompt never offered. `grant_id` and `connector_id` name the connector grant the call was decided against, and `rule_reason` is why that decision asked rather than allowed (`policy-always`, `policy-writes`, `risk-destructive`, `risk-external`, `lethal-trifecta`, `tainted-run`, `never-remembered`). `tool_class` and `tool_summary` carry the server's own reading of the tool, so the card never has to guess a risk level from the tool's name.
+
+### `tool_result_blobs`
+
+Tool results too large to hand a model in one piece, kept whole. The full bytes are stored here first and only then trimmed for the transcript, so the trimmed view carries a `handle` and the model can read the rest back through the Tools MCP server's `read_tool_result` tool instead of mistaking a prefix for the whole answer. A handle is an unguessable `tr_` id, because it is a read capability for someone else's payload. One stored result is capped at 8 MiB; past that the row keeps a part and says so (`stored_bytes` < `total_bytes`). Rows older than seven days are reaped by the hourly approval reaper (`CLAWBOO_TOOL_RESULT_TTL_MS`).
+
+- **Columns**: `handle` (PK, text), `tool_name` (not null), `agent_id`, `tenant_id` (dormant), `body` (not null), `total_bytes` (not null; what the tool produced), `stored_bytes` (not null; what was kept), `created_at`.
+- **Indexes**: `idx_tool_result_blobs_created`.
 
 ---
 
@@ -373,11 +403,30 @@ A remembered **Always**, bound to the grant it was approved under. Minted when a
 
 ## Team-chat cluster
 
+Two different things in this cluster are called rooms. `rooms` and `room_members` hold a team's **chat rooms**: conversations inside the team's group chat, whose transcripts live in `chat_messages`. `team_chat` is the **peer-chat** substrate the TeamChat MCP server writes, and its `room_id` (`team:<teamId>`) is never a `rooms.id`.
+
+### `rooms`
+
+A team's chat rooms: extra conversations inside the team's group chat, each between a subset of its members, with its own transcript, its own orchestrator, and its own tasks. The team's own group chat, General, is the implicit default room and has **no** row (a room id is `null` wherever General is meant), so its history never moved. The team's rules, brief, memory, and board stay team-wide, and Boo Zero presides over every room without being a member.
+
+A room is archived, never deleted: archiving sets `archived_at`, which takes the room out of every list, and its transcript stays in `chat_messages` under the room's session keys. The only way a row goes is with its team (`ON DELETE CASCADE`). A room's last clear time is the `settings` key `team-chat-cleared:<teamId>:room:<roomId>`, and the resume pointers of its native and Codex leaders are `native-team-session:<agentId>:<teamId>:room:<roomId>`.
+
+- **Columns**: `id` (PK, text), `team_id` (not null, **FK → `teams.id` `ON DELETE CASCADE`**), `name` (not null; the API collapses its whitespace and caps it at 80 characters), `tenant_id` (dormant), `archived_at` (epoch ms; `null` = active), `pinned_at` (when it was pinned to the top of the room list, epoch ms; `null` = not pinned), `created_at`, `updated_at`.
+- **Indexes**: `idx_rooms_team` on `(team_id)`.
+- **Referenced by**: `room_members.room_id` (cascade), `tasks.room_id` (soft ref).
+
+### `room_members`
+
+Which agents belong to which chat room. Membership is a table rather than a JSON list on the room: the room FK cascades memberships away, the primary key dedupes them, deleting an agent row sweeps that agent's memberships, and a member edit is one set-replace transaction. Membership is stored but never trusted on its own: a room's live roster is its stored members that are still active (not archived) agents of the room's team, so an agent that is archived or moves to another team drops out of every room without a sweep.
+
+- **Columns**: `room_id` (not null, **FK → `rooms.id` `ON DELETE CASCADE`**), `agent_id` (not null, **FK → `agents.id` `ON DELETE CASCADE`**), `created_at` (the join time; the roster is ordered by it, and a member kept across an edit keeps its original time).
+- **Indexes**: composite PK `(room_id, agent_id)`, `idx_room_members_agent` on `(agent_id)`.
+
 ### `team_chat`
 
 The durable group-chat room substrate for mixed-runtime peer chat: every team member posts as a named peer into one room. This is the team's narration transcript, distinct from the leader-orchestrated `task_comments` thread. `seq` is per-room monotonic (assigned in an `immediateWrite` transaction as `MAX(seq)+1 WHERE room_id=?`), so a cursor read (`subscribe`) is stable. The board stays canonical; a post never mutates the board.
 
-- **Columns**: `id` (PK, text), `room_id` (`team:<teamId>` by default; kept distinct from `team_id` for a future multi-room seam), `team_id` (not null), `author_agent_id` (not null; resolved from the MCP connection binding, never spoofable via tool args), `body`, `kind` (default `peer`; `peer` = a teammate's post, `system` = board-mutation narration, `user`), `created_at`, `seq` (per-room monotonic).
+- **Columns**: `id` (PK, text), `room_id` (`team:<teamId>` by default; kept distinct from `team_id` for a future multi-room seam of its own, and never a `rooms.id`), `team_id` (not null), `author_agent_id` (not null; resolved from the MCP connection binding, never spoofable via tool args), `body`, `kind` (default `peer`; `peer` = a teammate's post, `system` = board-mutation narration, `user`), `created_at`, `seq` (per-room monotonic).
 - **Indexes**: `uniq_team_chat_room_seq` (unique on `(room_id, seq)`), `idx_team_chat_team`.
 
 <Note>
@@ -395,7 +444,7 @@ The durable per-agent mailbox: the delivery plane that makes a coordination noti
 
 ## FTS5 search: `memory_facts_fts`
 
-`memory_facts` full-text search rides a companion FTS5 virtual table, `memory_facts_fts`, declared as raw DDL in `createDb` (Drizzle cannot model a virtual table, so it is not in `schema.ts` and not counted among the 28 tables). It mirrors `title`, `content`, and an unindexed `fact_id`, kept in sync by three triggers:
+`memory_facts` full-text search rides a companion FTS5 virtual table, `memory_facts_fts`, declared as raw DDL in `createDb` (Drizzle cannot model a virtual table, so it is not in `schema.ts` and not counted among the 35 tables). It mirrors `title`, `content`, and an unindexed `fact_id`, kept in sync by three triggers:
 
 - `memory_facts_ai`: `AFTER INSERT`: copies the new row into the FTS index.
 - `memory_facts_ad`: `AFTER DELETE`: removes the FTS row.

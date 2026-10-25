@@ -31,6 +31,7 @@ The native adapter reports the following capabilities. Callers branch on these (
 | `worktrees`           | `true`                                                               | Gets an isolated git worktree for file-mutating tasks                            |
 | `resume`              | `true`                                                               | A same-runtime resume reloads the prior transcript                               |
 | `toolApproval`        | `true`                                                               | Tool calls go through the broker's approval pipeline                             |
+| `steering`            | `'live'`                                                             | A comment on the task is read at the next turn (see the turn loop below)         |
 | `models`              | `['claude-haiku-4-5', 'claude-sonnet-4-6', 'gpt-4o-mini', 'gpt-4o']` | A routable surface, not an exhaustive list; `AgentConfig` picks the actual model |
 | `contextWindowTokens` | `200000`                                                             | Conservative floor across providers; drives the session-rotation watermark       |
 | `runtimeClass`        | `'native'`                                                           | Resolves to the native-preservation integration plan                             |
@@ -133,6 +134,7 @@ Some loop properties worth knowing:
 
 - **KV-cache discipline.** The system prompt is the stable tier (the agent's `systemPrompt` plus a _date-only_ stamp, never minute precision, which would bust the cache prefix). The tool universe is built **once** before turn 1 and sorted by name (deterministic order is a cache key). The caller-assembled run context (which already carries the volatile memory block in its tail) arrives as the first user message; nothing volatile ever enters the system prompt.
 - **Per-turn cost.** Each completed provider response emits a `cost` event whose usage and USD are _that turn's deltas_, not a running total. The host's budget kill-switch therefore sees live spend mid-run, not one bill at the end. This is something the wrapped one-shot runtimes can't offer.
+- **Steering.** A comment on the task the run is working on is queued into the conversation and read at the start of the next turn, as a user message. If the model answers without calling a tool while a comment sits unread, the loop runs one more turn so the comment is read rather than dropped. Ambient inputs (a teammate's post, a team notice) use a separate queue that never keeps a finishing run going. See [steering a running task](/runtimes/index#steering-a-running-task).
 - **Terminals.** No tool calls → a clean `success` done. Hitting `maxTurns` is a clean `max_turns` terminal (the host rotates to a fresh successor session carrying a handoff note), distinct from a failure. An abort or a provider error ends the run too; and _every_ terminal persists the transcript.
 
 ## Built-in file tools
@@ -301,7 +303,7 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
 
 ### 3. Deploy a team
 
-A connected native runtime runs any team you deploy. Onboarding creates no team of its own: its last step opens the marketplace, where you pick a team, choose the runtime each member runs on, and deploy it. Later teams come from the same place, through the **+** button in the team sidebar or the Marketplace's **Teams** tab. See [Deploy your first team](/getting-started/first-team).
+A connected native runtime runs any team you deploy. Onboarding creates no team of its own: its last step opens the marketplace, where you pick a team, choose the runtime each member runs on, and deploy it. Later teams come from the same place, through the **+** button on the team rail or the Marketplace's **Teams** tab. See [Deploy your first team](/getting-started/first-team).
 
 ## Verify it worked
 

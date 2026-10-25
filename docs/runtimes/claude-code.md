@@ -20,17 +20,18 @@ Node 22+ and `npm` (bundled with Node); Claude Code installs via `npm install -g
 
 The adapter declares its `capabilities()` so the host routes the run by construction (it never branches on the runtime id). Claude Code's are:
 
-| Capability                                         | Value                          | Meaning                                                                         |
-| -------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------- |
-| `streaming`                                        | `true`                         | Emits incremental text deltas as the model writes                               |
-| `mcp`                                              | `true`                         | Attaches Clawboo's hosted MCP servers (Tasks / Memory / Tools / TeamChat)       |
-| `worktrees`                                        | `true`                         | File-mutating tasks run in an isolated git worktree                             |
-| `resume`                                           | `true`                         | A later run can resume the prior native session                                 |
-| `toolApproval`                                     | `true`                         | Surfaces tool-approval gates the host can resolve                               |
-| `models`                                           | `['sonnet', 'opus', 'haiku']`  | The model families it accepts                                                   |
-| `contextWindowTokens`                              | `200000`                       | Drives the proactive session-rotation watermark                                 |
-| `runtimeClass`                                     | `'wrapped-oneshot'`            | A per-run spawned worker, not a long-lived substrate                            |
-| `nativeSkills` / `nativeMemory` / `nativeChannels` | `'none'` / `'none'` / `'none'` | Stateless; the cognition is the model; no durable per-identity home to preserve |
+| Capability                                         | Value                          | Meaning                                                                             |
+| -------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------- |
+| `streaming`                                        | `true`                         | Emits incremental text deltas as the model writes                                   |
+| `mcp`                                              | `true`                         | Attaches Clawboo's hosted MCP servers (Tasks / Memory / Tools / TeamChat)           |
+| `worktrees`                                        | `true`                         | File-mutating tasks run in an isolated git worktree                                 |
+| `resume`                                           | `true`                         | A later run can resume the prior native session                                     |
+| `toolApproval`                                     | `true`                         | Surfaces tool-approval gates the host can resolve                                   |
+| `steering`                                         | `'live'`                       | A comment is pushed into the running turn (see [steering](#steering-a-running-run)) |
+| `models`                                           | `['sonnet', 'opus', 'haiku']`  | The model families it accepts                                                       |
+| `contextWindowTokens`                              | `200000`                       | Drives the proactive session-rotation watermark                                     |
+| `runtimeClass`                                     | `'wrapped-oneshot'`            | A per-run spawned worker, not a long-lived substrate                                |
+| `nativeSkills` / `nativeMemory` / `nativeChannels` | `'none'` / `'none'` / `'none'` | Stateless; the cognition is the model; no durable per-identity home to preserve     |
 
 Because `runtimeClass` is `wrapped-oneshot` and there is no `nativeHome` claim, the host provisions no persistent home for Claude Code. The SDK runs against your real `HOME` / Keychain auth; nothing native accrues per identity. (Contrast [Hermes](/runtimes/hermes), which keeps a persistent home that compounds skills and memory across runs.)
 
@@ -112,7 +113,7 @@ It is also not a declared dependency of the published `clawboo` package, so **an
 
 ### Message translation
 
-For each run the driver builds the SDK `query()` options from the run context: `cwd` (the worktree), `model`, `resume`, the MCP server config built from `mcpBaseUrl`, `disallowedTools` (the child tool blocklist), and a scrubbed child env with the provider key merged on top. It then translates each SDK message into the adapter's `ClaudeNativeEvent` union, which the pure `mapClaudeEvent` maps into the normalized `RuntimeEvent` stream:
+For each run the driver builds the SDK `query()` options from the run context: `cwd` (the worktree), `model`, `resume`, the MCP server config built from `mcpBaseUrl`, `disallowedTools` (the child tool blocklist), and a scrubbed child env with the provider key merged on top. The query runs in **streaming-input mode**: its prompt is an async stream of user messages rather than a string, which is what lets a comment be pushed in while the run works (see [steering](#steering-a-running-run)). It then translates each SDK message into the adapter's `ClaudeNativeEvent` union, which the pure `mapClaudeEvent` maps into the normalized `RuntimeEvent` stream:
 
 ```mermaid
 flowchart LR
@@ -126,7 +127,7 @@ The `system`/`init` message carries the native session id and model; `assistant`
 
 ### Real USD cost, passed through
 
-Claude Code reports a real `total_cost_usd` per run. The mapper passes it straight through as a concrete `costUsd` on the `cost` and `done` events, not an estimate. (Contrast [Codex](/runtimes/codex), which emits no USD and is estimated.)
+Claude Code reports a real `total_cost_usd` per run. The mapper passes it straight through as a concrete `costUsd` on the `cost` and `done` events, not an estimate. In streaming-input mode that figure is a running total across the run's turns, so the run reports the latest one, and token usage summed over its turns. (Contrast [Codex](/runtimes/codex), which emits no USD and is estimated.)
 
 ### `max_turns` is a clean terminal, not an error
 
@@ -135,6 +136,12 @@ When a run hits its turn ceiling the SDK signals `result.subtype === 'error_max_
 ### Session resume across runs
 
 The adapter's `sessionCodec` serializes the native Claude session id (captured from the `init`/`result` frames). On a later same-runtime run, the executor runner threads that id back into the run context, and the driver sets the SDK's `resume` option, a genuine continuation of the prior session. A cross-runtime pickup (a different runtime resuming the task) rides the prose handoff in `AGENT_HANDOFF.json` instead.
+
+### Steering a running run
+
+When you comment on a task a Claude Code agent is working on, the driver pushes the comment into the query's input as a user message with priority `next`. The CLI folds a `next` message into the turn in progress at its next boundary (after the tool call that is running, before the next model call), so nothing is stopped. A comment that arrives just as the turn is finishing gets a turn of its own, still inside the same run.
+
+In streaming-input mode the CLI reports one `result` per turn and keeps running until its input closes, so the driver keeps input open until every message it pushed appears in a turn's `user_message_uuids` (the CLI's record of what each turn consumed), then closes it. The host sees one run and one terminal either way. A comment that the run never reads (the run ended or failed first) is reported as not delivered and stays in the agent's mailbox for its next run. See [steering a running task](/runtimes/index#steering-a-running-task).
 
 ### Headless permissions
 

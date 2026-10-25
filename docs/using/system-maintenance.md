@@ -24,16 +24,16 @@ Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), th
 
 Earlier releases stacked seven sections here. Five of them now live on the surface that owns them, so the setting sits next to the thing it configures instead of in a catch-all panel:
 
-| What you are looking for                 | Where it lives now                                                                  |
-| ---------------------------------------- | ----------------------------------------------------------------------------------- |
-| Gateway status and **Restart**           | Settings → **Runtimes** → the OpenClaw row → **Manage**, in its **Gateway** block   |
-| Starting a stopped Gateway               | the same row's **Reconnect** action (there is no **Manage** body while offline)     |
-| Stopping the Gateway                     | the same row's **Disconnect** action (there is no standalone Stop button)           |
-| Default model for OpenClaw agents        | that same **Manage** body, under **Default model**                                  |
-| Provider API keys                        | Settings → **Providers** (see [Connecting runtimes](/runtimes/connecting-runtimes)) |
-| Boo Zero's display name and global brief | Boo Zero's own agent view, **Brief** tab (see [Boo Zero](/using/boo-zero))          |
-| A team's brief and rules                 | the gear on that team's chat header ("Team brief & rules")                          |
-| Agent-to-agent coordination              | nothing to turn on: it is always enabled                                            |
+| What you are looking for                 | Where it lives now                                                                                     |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Gateway status and **Restart**           | Settings → **Runtimes** → the OpenClaw row → **Manage**, in its **Gateway** block                      |
+| Starting a stopped Gateway               | the same row's **Reconnect** action (there is no **Manage** body while offline)                        |
+| Stopping the Gateway                     | the same row's **Disconnect** action (there is no standalone Stop button)                              |
+| Default model for OpenClaw agents        | that same **Manage** body, under **Default model**                                                     |
+| Provider API keys                        | Settings → **Providers** (see [Connecting runtimes](/runtimes/connecting-runtimes))                    |
+| Boo Zero's display name and global brief | Boo Zero's agent page, the **Brief** section of its **Details** card (see [Boo Zero](/using/boo-zero)) |
+| A team's brief and rules                 | the gear in the header of the team's chat, in General or any room ("_team name_ brief & rules")        |
+| Agent-to-agent coordination              | nothing to turn on: it is always enabled                                                               |
 
 <Note>
 There is no agent-coordination switch anywhere in the dashboard. Agent-to-agent tooling is enabled unconditionally: onboarding writes `tools.agentToAgent.enabled: true` (and `tools.sessions.visibility: "all"`) into `openclaw.json` when it configures OpenClaw, and team deploys re-assert it. It is the core of the product, not a togglable option.
@@ -60,7 +60,7 @@ It is a default, not an override. A Boo with its own per-agent entry in the Gate
 After a successful write the panel makes a best-effort `config.get()` call on the Gateway `client`. That call is advisory: it is wrapped in its own `try`/`catch`, so a disconnected Gateway changes nothing about the outcome, and the new value is already on disk in `openclaw.json` either way.
 
 <Tip>
-This is the fleet-wide default, and it only decides for a Boo that has no entry of its own. Set or change one agent's entry in its detail view's **Permissions** tab, under **Execution Permissions**; that posture is per-agent, is written to the Gateway, and takes effect on the agent's next message. See [Approvals](/using/approvals) for what happens when an agent does ask.
+This is the fleet-wide default, and it only decides for a Boo that has no entry of its own. Set or change one agent's entry in the **Permissions** section of the **Details** card on its agent page, under **Execution Permissions**; that posture is per-agent, is written to the Gateway, and takes effect on the agent's next message. See [Approvals](/using/approvals) for what happens when an agent does ask.
 </Tip>
 
 ### Check version and updates

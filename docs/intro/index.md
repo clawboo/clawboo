@@ -15,13 +15,13 @@ Clawboo's surface is wide on purpose; it's a mission-control dashboard, not a si
 
 - **Five runtimes, one team.** [clawboo-native](/runtimes/native), [OpenClaw](/runtimes/openclaw), [Claude Code](/runtimes/claude-code), [Codex](/runtimes/codex), and [Hermes](/runtimes/hermes) all join as named peers. Each keeps its own native powers: OpenClaw keeps its channels and heartbeat, Hermes keeps its skills and self-improvement, while coordinating over the shared plane. See the [runtime capability matrix](/runtimes/index).
 - **A durable board fused with live chat.** [The board](/concepts/the-board) is the canonical source of truth for task state; [group chat](/using/group-chat) is its narration. Tasks survive restarts, claims are race-free, and every [delegation](/concepts/delegation-and-orchestration) is a real board mutation; coordination flows over structured lifecycle events, never terminal-output scraping.
-- **Watch agents collaborate.** The [Ghost Graph and Atlas](/using/ghost-graph) render your team as a live org chart; [peer chat](/concepts/peer-chat) lets any runtime lead a bounded multi-turn exchange in one room.
+- **Watch agents collaborate.** The [Ghost Graph](/using/ghost-graph) draws each team as a live graph beside its chat, and the **Org chart** (formerly Atlas) puts every team on one canvas around Boo Zero; [peer chat](/concepts/peer-chat) lets any runtime lead a bounded multi-turn exchange in one room.
 - **Builder ≠ judge verification.** Autonomous completions pass through a [verification gate](/concepts/verification): a deterministic check plus an independent critic. A failing verdict can't reach `done` without an audited override, and ambiguous results are marked `completed_with_debt` rather than silently passed.
 - **Governance and observability, on by default.** [Budgets](/concepts/governance) with spend warnings, depth and fan-out caps, circuit breakers, and approvals, plus an [event log](/concepts/observability) with traces, fleet health, and an error taxonomy. Hard spend caps that auto-pause a run are opt-in.
 - **Shared memory and a capability inventory.** Every runtime reads and writes the same tiered [memory](/concepts/memory) store and shows up in one [capabilities](/concepts/capabilities) dashboard, while its private self-model stays its own.
 - **A 436-agent, 85-team marketplace.** Browse and deploy from a [catalog](/using/marketplace) of curated agents and teams, then customize and route them.
 
-![Atlas: every team as a live org graph around Boo Zero, with labeled team clusters](/images/ghost-graph.png)
+![The Org chart: every team as a live org graph around Boo Zero, with labeled team clusters](/images/ghost-graph.png)
 
 ## Version
 

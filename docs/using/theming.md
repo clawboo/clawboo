@@ -19,13 +19,15 @@ Theming needs nothing connected. The toggle works on the very first screen, befo
 
 ### 1. Find the theme toggle
 
-Open the dashboard. The toggle (`ThemeToggle`) sits at the bottom of the left sidebar (`AgentListColumn`), below a divider, under the navigation buttons. It renders a Lucide icon, the current preference label, and, when you are on **System**, the resolved theme in small uppercase to its right.
+Open the dashboard. The toggle (`ThemeToggle`) sits at the bottom of the sidebar's agent column (`AgentListColumn`), below a divider, under the nav buttons and the Settings gear. It renders a Lucide icon, the current preference label, and, when you are on **System**, the resolved theme in small uppercase to its right.
 
 | Current preference | Icon    | Label    | Right-side hint                                 |
 | ------------------ | ------- | -------- | ----------------------------------------------- |
 | Light              | Sun     | `Light`  | n/a                                             |
 | Dark               | Moon    | `Dark`   | n/a                                             |
 | System             | Monitor | `System` | `light` or `dark` (whatever the OS resolves to) |
+
+If you have collapsed the sidebar, expand it with `Cmd/Ctrl + \` or the expand toggle at the start of the view's header, or hover that toggle to peek at the sidebar and click the theme toggle there. The standalone Boo Zero view shows only the team rail, with no agent column, so open any other view to reach the toggle.
 
 ### 2. Click to cycle
 

@@ -79,7 +79,7 @@ The dashboard's per-row action set is intentionally Enable/Disable only. Install
 
 ### Enable or disable a capability
 
-1. Open **Capabilities** from the sidebar.
+1. Open **Capabilities** in Settings, under the Workspace group.
 2. Find the row. Use a runtime filter pill or scroll to its group.
 3. Confirm the action is offered: the row has an **Enable** (mint) or **Disable** (neutral) button. If it shows `built-in, managed by <runtime>`, it is observe-only and cannot be changed here.
 4. Click the button. The row goes busy (a spinner replaces the action icon) while `POST /api/capabilities/enable` (or `/disable`) runs with `{ id }`.
