@@ -198,6 +198,29 @@ export function setRoomMembers(
   return getRoom(db, roomId)
 }
 
+/** Add members, leaving the room's current ones in place (validated by the
+ *  caller). Use this, not `setRoomMembers`, to add an agent: a replace sent
+ *  from a stale roster drops whoever joined in the meantime, while each add
+ *  inserts only its own rows. */
+export function addRoomMembers(
+  db: ClawbooDb,
+  roomId: string,
+  memberIds: string[],
+): RoomWithMembers | null {
+  const added = [...new Set(memberIds)]
+  const now = Date.now()
+  immediateWrite(db, (tx) => {
+    added.forEach((agentId, i) => {
+      tx.insert(roomMembers)
+        .values({ roomId, agentId, createdAt: now + i })
+        .onConflictDoNothing()
+        .run()
+    })
+    tx.update(rooms).set({ updatedAt: now }).where(eq(rooms.id, roomId)).run()
+  })
+  return getRoom(db, roomId)
+}
+
 /** Archive a room: it leaves every list, and nothing is deleted. */
 export function archiveRoom(db: ClawbooDb, roomId: string): RoomWithMembers | null {
   const now = Date.now()

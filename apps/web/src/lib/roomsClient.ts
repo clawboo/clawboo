@@ -66,10 +66,12 @@ export async function createRoom(
   }
 }
 
+/** `memberIds` replaces the roster; `addMemberIds` adds to it on the server, so
+ *  an add never drops someone who joined after this client read the roster. */
 export async function updateRoom(
   teamId: string,
   roomId: string,
-  patch: { name?: string; memberIds?: string[]; pinned?: boolean },
+  patch: { name?: string; memberIds?: string[]; addMemberIds?: string[]; pinned?: boolean },
 ): Promise<RoomResult> {
   try {
     const res = await apiFetch(`${roomsPath(teamId)}/${encodeURIComponent(roomId)}`, {

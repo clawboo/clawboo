@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { server } from '@/__vitest__/mswServer'
 import type { Room } from '@/lib/roomsClient'
 import { useRoomStore } from '@/stores/rooms'
+import { useToastStore } from '@/stores/toast'
 
 import { useAddToGraph } from '../useAddToGraph'
 
@@ -28,6 +29,7 @@ beforeEach(() => {
   created = null
   roomPatch = null
   useRoomStore.setState({ roomsByTeam: new Map([['T', [ROOM]]]), loadedTeams: new Set(['T']) })
+  useToastStore.setState({ toasts: [] })
   server.use(
     http.get('/api/connectors', () => HttpResponse.json({ connectors: [] })),
     http.get('/api/connectors/configured', () => HttpResponse.json({ slugs: [], supplied: [] })),
@@ -64,7 +66,7 @@ describe('New agent from the + button', () => {
     const { result } = setup('R1')
     await act(() => result.current.createAgent('Bea'))
     expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
-    expect(roomPatch).toEqual({ memberIds: ['a1', 'a2'] })
+    expect(roomPatch).toEqual({ addMemberIds: ['a2'] })
     expect(useRoomStore.getState().roomsByTeam.get('T')?.[0]?.memberIds).toEqual(['a1', 'a2'])
   })
 
@@ -73,5 +75,20 @@ describe('New agent from the + button', () => {
     await act(() => result.current.createAgent('Bea'))
     expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
     expect(roomPatch).toBeNull()
+  })
+
+  it('says so, naming the room, when the agent could not join it', async () => {
+    server.use(
+      http.patch('/api/teams/T/rooms/R1', () =>
+        HttpResponse.json({ error: 'room not found' }, { status: 404 }),
+      ),
+    )
+    const { result } = setup('R1')
+    await act(() => result.current.createAgent('Bea'))
+    expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+      'Bea was created but could not join Design: room not found',
+    )
+    expect(useRoomStore.getState().roomsByTeam.get('T')?.[0]?.memberIds).toEqual(['a1'])
   })
 })

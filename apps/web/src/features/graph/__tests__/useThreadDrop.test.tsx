@@ -146,7 +146,7 @@ describe('New agent from a thread', () => {
   it("on a room's graph, joins the room as well as the source's team", async () => {
     await dropAndCreate(teamBoo, { fallbackTeamId: 'T', roomId: 'R1' })
     expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
-    expect(roomPatch).toEqual({ memberIds: ['a1', 'a2'] })
+    expect(roomPatch).toEqual({ addMemberIds: ['a2'] })
     expect(useRoomStore.getState().roomsByTeam.get('T')?.[0]?.memberIds).toEqual(['a1', 'a2'])
     // The thread's routing line still lands on the source agent.
     expect(routed).toContain('Bea')
@@ -167,6 +167,6 @@ describe('New agent from a thread', () => {
     } as unknown as GraphNode
     await dropAndCreate(booZero, { fallbackTeamId: 'T', roomId: 'R1' })
     expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
-    expect(roomPatch).toEqual({ memberIds: ['a1', 'a2'] })
+    expect(roomPatch).toEqual({ addMemberIds: ['a2'] })
   })
 })
