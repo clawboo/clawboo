@@ -133,19 +133,33 @@ export async function joinTeam(
   return true
 }
 
+/** The last join sent to each room. A join waits for the one before it, so the
+ *  server applies them in order and each response is newer than the last. */
+const roomJoins = new Map<string, Promise<void>>()
+
 /**
  * Add a just-created agent to a chat room's members.
  *
  * A room's graph draws only the room's members, so an agent created on it
  * joins the room as well as the team. The server does the add
  * (`addMemberIds`), so two agents joining at once both stay, and it refuses a
- * room or an agent outside `teamId`.
+ * room or an agent outside `teamId`. Joins to one room go one at a time: if
+ * two ran together, the older response could land last and replace the newer
+ * room in the store, hiding the second agent.
  */
-export async function joinRoom(
-  teamId: string,
-  roomId: string,
-  agent: SpawnAgentResult,
-): Promise<void> {
+export function joinRoom(teamId: string, roomId: string, agent: SpawnAgentResult): Promise<void> {
+  // A join that failed must not stop the ones queued behind it.
+  const previous = (roomJoins.get(roomId) ?? Promise.resolve()).catch(() => undefined)
+  const next = previous.then(() => addToRoom(teamId, roomId, agent))
+  roomJoins.set(roomId, next)
+  const forget = (): void => {
+    if (roomJoins.get(roomId) === next) roomJoins.delete(roomId)
+  }
+  next.then(forget, forget)
+  return next
+}
+
+async function addToRoom(teamId: string, roomId: string, agent: SpawnAgentResult): Promise<void> {
   const result = await updateRoom(teamId, roomId, { addMemberIds: [agent.agentId] })
   if (result.ok) {
     useRoomStore.getState().upsert(result.room)
