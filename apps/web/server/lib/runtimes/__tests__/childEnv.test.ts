@@ -166,18 +166,31 @@ describe('buildChildEnv: a configured proxy never carries loopback traffic', () 
     })
   }
 
-  it("keeps the operator's own exclusions from either spelling, without duplicates", () => {
+  it("keeps the operator's own exclusions, without duplicates", () => {
     process.env['https_proxy'] = 'http://proxy.corp.example:3128'
     process.env['NO_PROXY'] = 'internal.example,localhost'
-    process.env['no_proxy'] = '.corp.example'
     const env = buildChildEnv()
     expect(env['NO_PROXY']).toBe(env['no_proxy'])
-    expect(listed(env['NO_PROXY'])).toEqual([
-      'internal.example',
-      'localhost',
-      '.corp.example',
-      '127.0.0.1',
-      '::1',
-    ])
+    expect(listed(env['NO_PROXY'])).toEqual(['internal.example', 'localhost', '127.0.0.1', '::1'])
   })
+
+  // Windows env names are case-insensitive: the two spellings are one variable
+  // there, so the second assignment below would replace the first, not sit beside it.
+  it.skipIf(process.platform === 'win32')(
+    'merges the exclusions of both spellings when they differ',
+    () => {
+      process.env['https_proxy'] = 'http://proxy.corp.example:3128'
+      process.env['NO_PROXY'] = 'internal.example,localhost'
+      process.env['no_proxy'] = '.corp.example'
+      const env = buildChildEnv()
+      expect(env['NO_PROXY']).toBe(env['no_proxy'])
+      expect(listed(env['NO_PROXY'])).toEqual([
+        'internal.example',
+        'localhost',
+        '.corp.example',
+        '127.0.0.1',
+        '::1',
+      ])
+    },
+  )
 })

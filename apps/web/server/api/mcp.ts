@@ -112,10 +112,28 @@ export function carriesAttachToken(req: IncomingMessage): boolean {
 /** Attach-URL params that are credentials: the access token and the scope and
  *  provenance signatures. Every runtime request carries them, so the request log
  *  keeps each URL but masks these values. */
-const ATTACH_CREDENTIAL_PARAMS_RE = /([?&](?:attachToken|scopeSig|provSig)=)[^&#]*/g
+const ATTACH_CREDENTIAL_PARAMS = new Set(['attachToken', 'scopeSig', 'provSig'])
 
 export function redactAttachCredentials(url: string): string {
-  return url.replace(ATTACH_CREDENTIAL_PARAMS_RE, `$1${REDACTION_MASK}`)
+  const q = url.indexOf('?')
+  if (q === -1) return url
+  const hash = url.indexOf('#', q)
+  const end = hash === -1 ? url.length : hash
+  const query = url
+    .slice(q + 1, end)
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=')
+      if (eq === -1) return pair
+      // Each name is decoded by the same parser `carriesAttachToken` reads with,
+      // so an encoded spelling (`attach%54oken`) is masked exactly when it counts.
+      const name = new URLSearchParams(`${pair.slice(0, eq)}=`).keys().next().value
+      return name !== undefined && ATTACH_CREDENTIAL_PARAMS.has(name)
+        ? `${pair.slice(0, eq + 1)}${REDACTION_MASK}`
+        : pair
+    })
+    .join('&')
+  return `${url.slice(0, q + 1)}${query}${url.slice(end)}`
 }
 
 /** Read the run's authoritative scope from the Memory attach URL query params

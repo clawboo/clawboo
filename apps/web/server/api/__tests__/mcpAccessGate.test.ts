@@ -12,6 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { createAccessGate } from '@clawboo/gateway-proxy'
+import { REDACTION_MASK } from '@clawboo/logger'
 import { MCP_SERVER_NAMES, mcpHttpUrl, signAttachAccess } from '@clawboo/mcp'
 import type { Request, Response } from 'express'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -224,5 +225,19 @@ describe('redactAttachCredentials (the request log)', () => {
 
   it('leaves a URL without credentials untouched', () => {
     expect(redactAttachCredentials('/api/settings?x=1')).toBe('/api/settings?x=1')
+  })
+
+  it('masks a percent-encoded credential name, which the server still reads as one', () => {
+    const token = signAttachAccess(secret())
+    const url = `/api/mcp/tasks?scopeTeamId=T&attach%54oken=${token}&scope%53ig=abc#frag`
+    expect(new URL(url, BASE).searchParams.get('attachToken')).toBe(token)
+    expect(redactAttachCredentials(url)).toBe(
+      `/api/mcp/tasks?scopeTeamId=T&attach%54oken=${REDACTION_MASK}&scope%53ig=${REDACTION_MASK}#frag`,
+    )
+  })
+
+  it('leaves malformed and look-alike names alone', () => {
+    const url = '/api/mcp/tasks?attachToken%ZZ=1&attachTokenX=2&%E0%A4%A=3&flag'
+    expect(redactAttachCredentials(url)).toBe(url)
   })
 })
