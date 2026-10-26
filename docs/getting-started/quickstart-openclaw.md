@@ -1,9 +1,9 @@
 ---
 title: 'Quickstart: the OpenClaw Gateway'
-description: Install Clawboo, connect the native runtime, then add OpenClaw by detecting, installing, and configuring it, starting the Gateway, and approving the device.
+description: Install Clawboo, connect the native runtime, then set up OpenClaw in place on the Add more runtimes step, which installs it, starts the Gateway, and pairs this device.
 ---
 
-By the end of this tutorial you'll have a running OpenClaw Gateway connected to Clawboo, set up from the onboarding wizard's **Add more runtimes** step. Onboarding is native-first, so you connect the native runtime first, then add OpenClaw through its setup detour: detect your environment, install OpenClaw if needed, configure a model provider, start the Gateway, and approve the one-time device pairing. Once OpenClaw is connected you deploy an OpenClaw team from the dashboard.
+By the end of this tutorial you'll have a running OpenClaw Gateway connected to Clawboo, set up from the onboarding wizard's **Add more runtimes** step. Onboarding is native-first, so you connect the native runtime first, then set up OpenClaw inside its row on that same step: Clawboo reuses the credential you already connected, installs OpenClaw if needed, starts the Gateway, and asks you to approve the one-time device pairing. Once OpenClaw is connected you deploy an OpenClaw team from the dashboard.
 
 This is the OpenClaw path. Unlike the other four runtimes, [OpenClaw](/runtimes/openclaw) is a _connected substrate_; Clawboo connects to a running OpenClaw Gateway (a WebSocket server that hosts OpenClaw agents), rather than installing and spawning a CLI per task. If you want a working team with no Gateway at all, the [native runtime quickstart](/getting-started/quickstart-native) is faster: paste one provider key and you're done.
 
@@ -14,13 +14,13 @@ These docs describe Clawboo **v0.5.0**, the current release.
 ## Prerequisites
 
 <Note>
-- **Node.js**: this page installs OpenClaw, which requires `>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`. That is stricter than Clawboo's own `engines` (`node >=22.12.0`), so a Node that runs Clawboo can still be refused by the OpenClaw install. The System Check reports the exact range it wants.
-- **`npm` on your `PATH`**: the install step runs `npm install -g openclaw@~2026.9`.
-- **A provider API key** for whichever model provider you'll configure OpenClaw with (Anthropic, OpenAI, Google, OpenRouter, and others). Ollama needs no key, but it must be running locally.
-- No prior OpenClaw install is required; the wizard can install, configure, and start one for you.
+- **Node.js**: this page installs OpenClaw, which requires `>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`. That is stricter than Clawboo's own `engines` (`node >=22.12.0`), so a Node that runs Clawboo can still be refused by the OpenClaw install. It is not a bare major-version check: Node 22.12 has the right major and is still refused, and Node 23 is excluded outright. The setup does not check your Node version before it installs, so compare `node --version` against that range first.
+- **`npm` on your `PATH`**: the install runs `npm install -g openclaw@~2026.9`.
+- **A credential OpenClaw can use**: any provider key you connect on the provider step (including one under **More providers**), or a ChatGPT sign-in. If you pick Ollama there, the OpenClaw setup asks for an Anthropic, OpenAI, or OpenRouter key before it continues.
+- No prior OpenClaw install is required; the setup installs, configures, and starts one for you.
 </Note>
 
-OpenClaw is a separate project; Clawboo connects to a Gateway you run locally, it does not bundle OpenClaw. The wizard pins the install to `openclaw@~2026.9` deliberately. The pin is not about the connect protocol, which negotiates cleanly across both lines. It holds the OpenClaw **config shape**: 2026.9 moved the agent roster from `agents.list` to `agents.entries` and tightened `config.patch`, and Clawboo writes both.
+OpenClaw is a separate project; Clawboo connects to a Gateway you run locally, it does not bundle OpenClaw. Clawboo pins the install to `openclaw@~2026.9` deliberately. The pin is not about the connect protocol, which negotiates cleanly across both lines. It holds the OpenClaw **config shape**: 2026.9 moved the agent roster from `agents.list` to `agents.entries` and tightened `config.patch`, and Clawboo writes both.
 
 ## Steps
 
@@ -43,93 +43,81 @@ The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI 
 
 **Expected result:** clicking **Get Started** advances to the native connect step. There is no "pick a runtime" screen; native is the default, and OpenClaw is added afterward.
 
-### 3. Connect the native runtime, then choose "Set up OpenClaw"
+### 3. Connect the native runtime, then open the OpenClaw row
 
-Onboarding is native-first, so you connect the built-in native runtime before adding OpenClaw. On the **Connect your AI provider** step, pick a provider and paste a key (or select **Ollama** for a keyless local model), then click **Continue**. Clawboo stores the key and advances to the **Add more runtimes** step (you pick and deploy a team in a later step). (The native connect step is covered in full in [Quickstart: native](/getting-started/quickstart-native).)
+Onboarding is native-first, so you connect the built-in native runtime before adding OpenClaw. On the **Connect your AI provider** step, pick a provider and paste a key (or select **Ollama** for a keyless local model, or keep OpenAI's **Sign in with ChatGPT** method), then click **Continue**. Clawboo stores the credential and advances to the **Add more runtimes** step (you pick and deploy a team in a later step). (The native connect step is covered in full in [Quickstart: native](/getting-started/quickstart-native).)
 
-On **Add more runtimes**, find the **Set up OpenClaw** row and click **Set up OpenClaw**.
+On **Add more runtimes**, every runtime is a row. Find the **OpenClaw** row ("Run OpenClaw agents on a local Gateway"), click its **Set up** button to expand it, then click **Set up OpenClaw**.
 
-**Expected result:** the wizard enters the OpenClaw setup detour at the **System Check** step. Everything in steps 4 to 7 below happens inside this detour, which returns you to **Add more runtimes** when it's done.
+**Expected result:** the row's body turns into a compact **Set up OpenClaw** panel with a **Cancel** button, and the row's footer reads **In setup**. You never leave **Add more runtimes**; steps 4 to 7 below all happen inside this row.
 
 ![The OpenClaw setup running on the Add more runtimes step: install output streams in the terminal log while the Gateway starts](/images/openclaw-inline-setup.png)
 
-### 4. Let Clawboo detect your environment
+### 4. Let Clawboo prepare OpenClaw
 
-The **System Check** step fetches `GET /api/system/status` on mount and shows an animated three-item checklist: **Node.js**, **OpenClaw**, and **Gateway**, each revealed in sequence:
+The panel starts on its own and shows **Preparing OpenClaw…** while it posts `POST /api/system/auto-configure-openclaw`. That call reuses a credential you already connected, so OpenClaw never asks for a key twice. It looks for, in order:
 
-- **Node.js**: a green check when your version satisfies OpenClaw's supported range (a red X naming that range, with a Download link, otherwise). It is not a bare major-version check: Node 22.12 has the right major and is still refused, and Node 23 is excluded outright.
-- **OpenClaw**: green with the detected version when the `openclaw` binary is on your `PATH`; an amber dot reading "Not found" otherwise.
-- **Gateway**: green "Running on :18789" when a managed Gateway process is alive or the port probes reachable; amber "Not running" otherwise.
+1. a connected provider key: the one from the provider step, or any key in the Providers hub;
+2. a ChatGPT-subscription (`openai-codex`) sign-in that OpenClaw already holds.
 
-A single **call-to-action** button at the bottom reflects what's missing. On a fresh box it reads **Install OpenClaw**; once OpenClaw is installed but unconfigured it reads **Set Up OpenClaw**; once configured but the Gateway is down it reads **Start Gateway**; when everything is green it reads **Continue** and auto-advances after ~1.5 seconds.
+When it finds one, it writes OpenClaw's configuration without overwriting anything you already set:
 
-**Expected result:** the checklist resolves, and the CTA tells you the next action. If everything was already green, you skip ahead to the team step (step 8); otherwise click the CTA to proceed through the steps below.
+- **`~/.openclaw/.env`**: keeps an existing `GATEWAY_AUTH_TOKEN` or generates one and, when the credential is a key, adds it under its variable name (for example `ANTHROPIC_API_KEY`). The key also goes into the `auth-profiles.json` of any OpenClaw agents that already exist.
+- **`~/.openclaw/openclaw.json`**: **local mode** (`gateway.mode: 'local'`), plus, only where the field is missing, port `18789`, token auth, a default model under `agents.defaults.model.primary`, and agent-to-agent tooling (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`).
+- **Clawboo's `~/.clawboo/settings.json`**: `gatewayUrl` (`ws://localhost:18789`) and `gatewayToken`.
 
-<Tip>
-If you already run a Gateway on another machine, click **Connect to remote gateway →** at the bottom of System Check to enter a Gateway URL and token directly instead of installing locally.
-</Tip>
+The raw token is **never returned to the browser**; it's persisted server-side, and the same-origin proxy injects it on connect. (`OPENCLAW_STATE_DIR` and `CLAWBOO_HOME` move those two directories.)
 
-### 5. Install OpenClaw
+**Expected result:** with a credential found, the panel goes straight on to installing OpenClaw or starting the Gateway (step 6). Without one, it stops and asks you for one (step 5).
 
-If OpenClaw isn't installed, clicking **Install OpenClaw** opens the **Installing OpenClaw** step, which streams `POST /api/system/install-openclaw`, a Server-Sent Events stream that runs `npm install -g openclaw@~2026.9` and shows live `npm` output in a terminal log.
+### 5. Add a key or sign in with ChatGPT, if asked
 
-The stream emits typed events:
+This step only appears when Preparing finds no credential OpenClaw can use.
 
-| Event `type` | Payload                      | Meaning                                                  |
-| ------------ | ---------------------------- | -------------------------------------------------------- |
-| `progress`   | `{ step, message }`          | Phase marker                                             |
-| `output`     | `{ line }`                   | A line of `npm` output                                   |
-| `error`      | `{ code, message }`          | `EACCES`, `SPAWN_THROW`, `SPAWN_ERROR`, or `EXIT_<code>` |
-| `complete`   | `{ success: true, version }` | Install finished                                         |
+**No provider key** (for example, you chose Ollama on the provider step): the panel reads "Connect a provider key for OpenClaw to use." Pick **Anthropic**, **OpenAI**, or **OpenRouter** from the dropdown, paste the key (the eye icon toggles visibility), and click **Connect & set up** or press Enter. Clawboo saves the key to its vault through `POST /api/providers/:id/connect`, where the Providers hub keeps keys, and the setup starts again at Preparing, which now finds it. The setup does not configure OpenClaw on Ollama.
 
-On `complete`, the step shows "Installed! v…" and auto-advances to configuration after ~1 second.
+**Signed in with ChatGPT** (Codex is connected, but OpenClaw has no sign-in of its own): each runtime keeps its own ChatGPT sign-in, so OpenClaw needs one too. Signing in needs the `openclaw` binary, so the panel first installs OpenClaw if it's missing (**Installing OpenClaw…**, as in step 6) and confirms with an **OpenClaw installed** chip. Click **Sign in with ChatGPT**: Clawboo runs OpenClaw's own browser sign-in (`openclaw models auth login --provider openai-codex`) on your machine, your browser opens on OpenAI's sign-in page, and there is no code to type. Once the sign-in is saved, the setup runs again by itself. **Re-check** runs it again by hand, and **Use an API key instead** switches to the key prompt above. If the one-click sign-in can't run (on Windows, for example), the panel shows that command to copy into a terminal; run it, then click **Re-check**.
 
-**Expected result:** the terminal log fills with `npm` output, then the step reports the installed version and moves on.
+**Expected result:** the panel leaves the prompt and carries on with step 6.
+
+### 6. Install OpenClaw and start the Gateway
+
+If the `openclaw` binary isn't on your `PATH` (the panel checks `GET /api/system/status`), it shows **Installing OpenClaw…** and streams `POST /api/system/install-openclaw`, which runs `npm install -g openclaw@~2026.9`. Live `npm` output scrolls in a terminal log under the label. With OpenClaw already installed, this is skipped.
+
+Next the panel shows **Starting the Gateway…** and streams `POST /api/system/gateway` with `{ "action": "start" }`. A Gateway already answering on port `18789` is used as is. Otherwise Clawboo spawns the Gateway detached (it logs to `~/.clawboo/gateway.log`, which is tailed into the terminal log), polls until the port is reachable (up to 60 seconds), syncs the token, and reconnects Clawboo's server-side agent source. If the Gateway refuses to start until `openclaw doctor --fix` migrates its data, which can happen after an OpenClaw upgrade, Clawboo runs that once and launches again.
+
+**Expected result:** the terminal log fills with `npm` output, then Gateway startup lines, and the panel moves on to connecting.
 
 <Warning>
-A global `npm install` can fail with `EACCES` ("permission denied"). The stream emits an `error` event with code `EACCES`, and the step shows a **How to fix** panel suggesting a Node version manager (nvm/fnm) or Homebrew. Prefer either of those over `sudo`.
+A global `npm install` can fail with `EACCES` ("permission denied"). The panel stops on an error that suggests `sudo npm install -g openclaw@~2026.9`. Prefer a Node version manager (nvm, fnm) or Homebrew's Node, which install global packages without `sudo`, then click **Retry**.
 </Warning>
 
-### 6. Configure a provider
+### 7. Approve the device
 
-The **Set Up OpenClaw** step shows a provider grid: four primary cards (Anthropic, OpenAI, Google, Ollama) plus a "More providers" section (OpenRouter, xAI, Groq, and others). Pick a provider, paste your API key into the **API Key** field (the eye icon toggles visibility), and optionally choose a **Default Model** from the dropdown. Ollama needs no key; selecting it hides the key field.
-
-Clicking **Configure & Start** posts to `POST /api/system/configure-openclaw` with `{ provider, apiKey?, model? }`. The handler:
-
-- writes OpenClaw's `openclaw.json` in **local mode** (`gateway.mode: 'local'`, token auth, agent-to-agent tooling enabled with `tools.sessions.visibility: 'all'`) and a default model under `agents.defaults.model.primary`;
-- generates a Gateway auth token and writes it into OpenClaw's `~/.openclaw/.env` as `GATEWAY_AUTH_TOKEN`, alongside your provider key;
-- saves Clawboo's own `settings.json` (`gatewayUrl`, `gatewayToken`).
-
-The handler returns `{ ok: true, gatewayUrl }`. The raw token is **never returned in the response body**; it's persisted server-side, and the same-origin proxy injects it on connect.
-
-**Expected result:** the button shows "Configuring…", then the wizard advances to the Gateway-start step.
-
-### 7. Start the Gateway and approve the device
-
-The **Starting Gateway** step posts `POST /api/system/gateway` with `{ "action": "start" }`, an SSE stream that spawns the Gateway detached, polls until the port (`18789`) is reachable (up to 60 seconds), syncs the token, and reconnects Clawboo's server-side agent source. On the `complete` event, the step auto-connects a Gateway client through the same-origin WebSocket proxy.
-
-On OpenClaw **2026.5.x and later**, that first connect **fails with `NOT_PAIRED`**; a new device lands in OpenClaw's pending list and must be approved by a human before it can connect:
+With the Gateway up, the panel connects a Gateway client through the same-origin WebSocket proxy. On OpenClaw **2026.5.x and later**, that first connect **fails with `NOT_PAIRED`**; a new device lands in OpenClaw's pending list and must be approved by a human before it can connect:
 
 ```
 GatewayResponseError { code: 'NOT_PAIRED', message: 'pairing required: device is not approved yet' }
 ```
 
-Instead of an error, the step swaps in an **Approve this device** card. Click **Approve this device**. The card hits `POST /api/system/approve-device`, which performs a two-step shell-out against the OpenClaw CLI:
+Instead of an error, the panel swaps in an **Approve this device** card. Click **Approve this device**. The card hits `POST /api/system/approve-device`, which performs a two-step shell-out against the OpenClaw CLI:
 
 1. `openclaw devices approve --latest` runs in **preview** mode: it prints `Approve this exact request with: openclaw devices approve <UUID>` and exits non-zero. Clawboo regex-extracts the UUID from the captured output.
 2. `openclaw devices approve <UUID>` performs the actual approval.
 
-On success, the step automatically retries the original connect with the same URL and token, and the connection completes.
+On success the card reads "Approved. Reconnecting…" and the panel retries the connect with the same settings. If the approval fails, the card shows why, and you can click **Approve this device** again.
 
-**Expected result:** the mascot pulses while the Gateway starts, the **Approve this device** card appears, and after you click it the status flips to **Connected!** The detour then returns you to the **Add more runtimes** step, now showing a **Connected** pill for OpenClaw.
+**Expected result:** the panel shows **OpenClaw connected** with a check mark, collapses about a second later, and the OpenClaw row now reads **Connected**.
 
 <Tip>
 You can pair from a terminal instead: run `openclaw devices approve --latest` to see the request id, then `openclaw devices approve <requestId>`. The approval card surfaces this manual fallback too.
 </Tip>
 
+**If a phase fails**, the panel replaces its progress with the error and a **Retry** button. Gateway errors say why when OpenClaw does (`Gateway did not start: …`); a Gateway that never binds reports `Gateway did not become reachable within 60s`. **Retry** runs the whole setup again from Preparing: it skips the install once OpenClaw is on your `PATH`, and joins a Gateway that is still booting instead of launching a second one. **Cancel** closes the panel at any point before it connects (an install already running still finishes on the server). The row stays open, so you can start again with its **Set up OpenClaw** button, or set OpenClaw up later from **Settings**, then **Runtimes**, whose OpenClaw row runs this same setup.
+
 ### 8. Finish onboarding, then deploy an OpenClaw team
 
-Back on **Add more runtimes**, click **Continue**. The wizard advances to the **Team** step, where you pick a starter team from the marketplace and deploy it. During onboarding every agent defaults to **Clawboo Native**; now that the Gateway is connected you can switch any member to **OpenClaw** from its runtime picker in the customize step.
+Still on **Add more runtimes**, click **Continue**. The wizard advances to the **Team** step, where you pick a starter team from the marketplace and deploy it. During onboarding every agent defaults to **Clawboo Native** (**Codex** if you signed in with ChatGPT); now that the Gateway is connected you can switch any member to **OpenClaw** from its runtime picker in the customize step.
 
 Then the **Your team is ready** screen shows the roster and a **"Led by ..."** badge for Boo Zero; click **Open my dashboard**. You land in the dashboard connected to the Gateway ("gateway" mode), in your new team's group chat, which opens on a one-time **introduce yourself** screen.
 
@@ -147,7 +135,7 @@ The team space looks like this once you start collaborating:
 
 ## What just happened
 
-The wizard's Add-runtimes detour walked the full OpenClaw setup: it detected your environment, installed and configured OpenClaw with your provider key, started the Gateway, and approved this device for pairing. Once the Gateway came up, Clawboo opened two connections to it: a browser-side same-origin proxy connection for the chat/execution stream, and a server-side connection that mirrors the Gateway's agent list into SQLite (the [registry of record](/appendices/glossary), so the fleet survives the Gateway being down). Deploying an OpenClaw team from the dashboard then creates real OpenClaw agents and wires their routing, so they can delegate to each other over the Gateway.
+The inline setup on **Add more runtimes** ran the full OpenClaw setup in place: it configured OpenClaw with the credential you had already connected, installed OpenClaw if it was missing, started the Gateway, and approved this device for pairing. Once the Gateway came up, Clawboo opened two connections to it: a browser-side same-origin proxy connection for the chat/execution stream, and a server-side connection that mirrors the Gateway's agent list into SQLite (the [registry of record](/appendices/glossary), so the fleet survives the Gateway being down). Deploying an OpenClaw team from the dashboard then creates real OpenClaw agents and wires their routing, so they can delegate to each other over the Gateway.
 
 ## Next steps
 
