@@ -16,6 +16,8 @@
 
 import { apiFetch } from '@clawboo/control-client'
 
+import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
+import { defaultAgentSource } from '@/lib/defaultAgentSource'
 import { updateRoom } from '@/lib/roomsClient'
 import { useRoomStore } from '@/stores/rooms'
 import { useToastStore } from '@/stores/toast'
@@ -50,7 +52,8 @@ export interface SpawnAgentResult {
  *
  * `name` is the ONLY field the server requires (POST /api/agents 400s on a
  * missing or blank name and on nothing else), which is what makes this a
- * canvas-legal action rather than a form.
+ * canvas-legal action rather than a form. The runtime is not asked either: the
+ * agent goes where Create Boo's would (see defaultAgentSource).
  */
 export async function spawnAgent(
   name: string,
@@ -62,10 +65,15 @@ export async function spawnAgent(
 
   let res: Response
   try {
+    const sourceId = await defaultAgentSource()
     res = await apiFetch('/api/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: trimmed, ...(opts.teamId ? { teamId: opts.teamId } : {}) }),
+      body: JSON.stringify({
+        name: trimmed,
+        sourceId,
+        ...(opts.teamId ? { teamId: opts.teamId } : {}),
+      }),
     })
   } catch {
     useToastStore
@@ -91,14 +99,25 @@ export async function spawnAgent(
   if (!agentId) {
     // The write succeeded but we cannot key a position without the id. Refresh
     // so the node still appears; it will be laid out rather than placed.
-    useGraphStore.getState().triggerRefresh()
+    await redrawWithNewAgent()
     return null
   }
 
   // BEFORE the refresh, not after. See the file header.
   placeSpawnedNode(`boo-${agentId}`, at)
-  useGraphStore.getState().triggerRefresh()
+  await redrawWithNewAgent()
   return { agentId, name: trimmed }
+}
+
+/**
+ * Rebuild the canvas with the new agent in it. The canvas draws the fleet
+ * store. With a Gateway, its presence events re-read the registry into that
+ * store; with no Gateway nothing does, so without this read a new Clawboo
+ * Native agent exists and is drawn only after a reload.
+ */
+async function redrawWithNewAgent(): Promise<void> {
+  await refreshFleetFromRegistry().catch(() => undefined)
+  useGraphStore.getState().triggerRefresh()
 }
 
 /**

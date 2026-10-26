@@ -1092,10 +1092,8 @@ export function GhostGraph({
   )
 
   // Single-click on a Boo toggles its orbital children (skills + resources)
-  // visibility — peacock-feather expand / collapse. The previous left-click
-  // behaviour of "select agent in the sidebar" is now available from the
-  // right-click context menu (`Select in sidebar` item) and is also implicit
-  // when the user picks Chat / Edit personality / Edit files there.
+  // visibility: peacock-feather expand / collapse. Opening the agent, which is
+  // also what marks it in the sidebar, is the right-click menu's Open agent.
   const onNodeClick: NodeMouseHandler<Node> = useCallback((_event, node) => {
     if (node.type === 'boo') {
       useGraphStore.getState().toggleBooNodeExpanded(node.id)
@@ -1352,26 +1350,29 @@ export function GhostGraph({
     [getNode],
   )
 
+  // ── The team a new agent joins ── A new agent needs a team to be drawn at
+  // all (Atlas draws teams, a team graph its own), so a team graph's joins that
+  // team and Atlas's joins the one selected in the sidebar, or the first team
+  // when none is. The + button's agent always lands here; a thread's lands here
+  // when the Boo it came from has no team of its own (Boo Zero).
+  const newAgentTeamId =
+    scope === 'team' ? (obsTeamId ?? null) : (obsTeamId ?? allTeams[0]?.id ?? null)
+  const newAgentTeamName = allTeams.find((t) => t.id === newAgentTeamId)?.name ?? null
+
   // ── The thread ── what a thread let go on empty canvas can end in. Shared
-  // with the agent view's mini graph; see useThreadDrop.
+  // with the agent view's mini graph; see useThreadDrop. A room's graph's new
+  // agents join the room as well.
   const thread = useThreadDrop({
     nodes,
     getNode,
     screenToFlowPosition,
     expandBoo,
-    // A team graph's new agents join its team when the source Boo has none,
-    // and a room's graph's new agents join the room as well.
-    fallbackTeamId: scope === 'team' ? (obsTeamId ?? null) : null,
+    fallbackTeamId: newAgentTeamId,
     roomId: scope === 'team' ? (room?.id ?? null) : null,
   })
+  const threadTeamName = allTeams.find((t) => t.id === thread.newAgentTeamId)?.name ?? null
 
-  // ── The + button ── the same picker with no agent behind it. A new agent
-  // needs a team to be drawn at all (Atlas draws teams, a team graph its own),
-  // so a team graph's joins that team and Atlas's joins the one selected in
-  // the sidebar, or the first team when none is.
-  const newAgentTeamId =
-    scope === 'team' ? (obsTeamId ?? null) : (obsTeamId ?? allTeams[0]?.id ?? null)
-  const newAgentTeamName = allTeams.find((t) => t.id === newAgentTeamId)?.name ?? null
+  // ── The + button ── the same picker with no agent behind it.
   const commandBarRef = useRef<HTMLDivElement>(null)
   const add = useAddToGraph({
     canvasKey,
@@ -1951,6 +1952,7 @@ export function GhostGraph({
           at={thread.threadDrop.screen}
           options={thread.threadOptions}
           allowNewAgent={thread.threadDrop.fromNodeType === 'boo'}
+          agentHint={threadTeamName ? `Name one; it joins ${threadTeamName}` : undefined}
           onPick={(option) => void thread.pick(option)}
           onCreateAgent={(name) => void thread.createAgent(name)}
           onClose={thread.close}
@@ -1981,13 +1983,6 @@ export function GhostGraph({
           onChat={() => {
             useFleetStore.getState().selectAgent(contextMenu.agentId)
             useViewStore.getState().openAgent(contextMenu.agentId)
-            setContextMenu(null)
-          }}
-          onSelectInSidebar={() => {
-            // Highlight in fleet sidebar without opening the detail view
-            // (preserved from the previous left-click behaviour, which
-            // now toggles peacock expand instead).
-            useFleetStore.getState().selectAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
           onDelete={() => {

@@ -97,7 +97,7 @@ The sidebar has two parts: the **team rail** on the left and the **agent column*
 
 - **Team rail.** One icon per team, with the Boo Zero mascot at the top and the dashed **+** at the bottom. Click a team's icon to select the team and open its **Home**. Right-click it for the team's actions (see [Archive and delete](#archive-and-delete)).
 - **Home.** A placeholder for now: it says that the team's dashboards, and the artifacts its agents make, will live there. The **Home** row in the agent column's nav opens it too.
-- **Agent column.** With a team selected, it shows the team's name and a search icon that filters the agents, then the team's agents as a grid of mascot tiles (a pulsing mint dot marks the ones working, a red dot any in error, and Boo Zero comes last). Click a tile to open that agent's page (see [Working with agents](/using/agents)). Below the tiles come the team's chats, then **Create Boo** (while an OpenClaw Gateway is connected) and the nav.
+- **Agent column.** With a team selected, it shows the team's name and a search icon that filters the agents, then the team's agents as a grid of mascot tiles (a pulsing mint dot marks the ones working, a red dot any in error, and Boo Zero comes last). Click a tile to open that agent's page (see [Working with agents](/using/agents)). Below the tiles come the team's chats, then **Create Boo** (see [Create a Boo](/using/agents#create-a-boo)) and the nav.
 
 ## A team's chats: General and rooms
 
@@ -162,9 +162,9 @@ Right-click a team's icon in the team rail to open `TeamContextMenu`. It has fou
 | **Archive** / **Unarchive** | Hides the team from the active list (toggles `isArchived`) without touching agents     | `PATCH /api/teams/:id` `{ isArchived }`    |
 | **Refresh Protocol**        | Regenerates each member's `AGENTS.md` with the current roster + collaboration protocol | per-agent file writes (needs a connection) |
 | **Delete team only**        | Deletes the team and **orphans** its agents (sets each member's `team_id` to `null`)   | `DELETE /api/teams/:id`                    |
-| **Delete with agents**      | Deletes the agents from the Gateway first, then deletes the team                       | per-agent delete + `DELETE /api/teams/:id` |
+| **Delete with agents**      | Deletes the team's agents first, each through its runtime, then deletes the team       | per-agent delete + `DELETE /api/teams/:id` |
 
-Both delete actions ask you to confirm first. **Delete team only** keeps your agents; they just become unassigned. **Delete with agents** permanently removes the agents from the runtime before removing the team; if the connection drops mid-loop you may get a partial result and a toast reporting how many of N were removed.
+Both delete actions ask you to confirm first. **Delete team only** keeps your agents; they just become unassigned. **Delete with agents** permanently removes the agents from their runtimes before removing the team, and needs no Gateway. Its confirm mentions the Gateway only when the team has an OpenClaw agent, which is also removed from the Gateway. If an agent fails to delete, the team is still deleted and a toast reports how many of N agents were removed.
 
 <Danger>
 `DELETE /api/teams/:id` also cleans up the team's durable `settings` rows: `team-rules:<teamId>` and `team-onboarding:<teamId>`, and the `boo_zero_team_briefs` row FK-cascades. Deleting a team therefore discards its rules, onboarding state, and Boo Zero brief permanently. There is no migration ladder and no undo; archive instead if you only want to hide it.

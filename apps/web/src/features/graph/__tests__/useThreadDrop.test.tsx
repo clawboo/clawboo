@@ -116,11 +116,8 @@ describe('New agent from a thread', () => {
     )
   })
 
-  /** Pull a thread off `source`, let it go on empty canvas, and name the agent. */
-  async function dropAndCreate(
-    source: GraphNode,
-    opts: { fallbackTeamId: string | null; roomId: string | null },
-  ) {
+  /** Pull a thread off `source` and let it go on empty canvas. */
+  function drop(source: GraphNode, opts: { fallbackTeamId: string | null; roomId: string | null }) {
     const { result } = renderHook(() =>
       useThreadDrop({
         nodes: [source],
@@ -135,6 +132,15 @@ describe('New agent from a thread', () => {
         type: 'boo',
       }),
     )
+    return result
+  }
+
+  /** Pull a thread off `source`, let it go on empty canvas, and name the agent. */
+  async function dropAndCreate(
+    source: GraphNode,
+    opts: { fallbackTeamId: string | null; roomId: string | null },
+  ) {
+    const result = drop(source, opts)
     await act(() => result.current.createAgent('Bea'))
   }
 
@@ -158,15 +164,36 @@ describe('New agent from a thread', () => {
     expect(roomPatch).toBeNull()
   })
 
+  const booZero = {
+    id: 'boo-bz',
+    type: 'boo',
+    position: { x: 0, y: 0 },
+    data: { agentId: 'bz', name: 'Boo Zero', status: 'idle', teamId: null },
+  } as unknown as GraphNode
+
   it('a thread off teamless Boo Zero on a room graph lands the agent in the room', async () => {
-    const booZero = {
-      id: 'boo-bz',
-      type: 'boo',
-      position: { x: 0, y: 0 },
-      data: { agentId: 'bz', name: 'Boo Zero', status: 'idle', teamId: null },
-    } as unknown as GraphNode
     await dropAndCreate(booZero, { fallbackTeamId: 'T', roomId: 'R1' })
     expect(created).toMatchObject({ name: 'Bea', teamId: 'T' })
     expect(roomPatch).toEqual({ addMemberIds: ['a2'] })
+  })
+
+  // The Org chart passes a fallback too, and the source's own team still wins
+  // over it: a thread off a Boo in team S makes an agent in S.
+  it("names the source's own team ahead of the fallback, and creates it there", async () => {
+    const otherTeamBoo = {
+      ...boo,
+      data: { ...(boo.data as object), teamId: 'S' },
+    } as unknown as GraphNode
+    const result = drop(otherTeamBoo, { fallbackTeamId: 'T', roomId: null })
+    expect(result.current.newAgentTeamId).toBe('S')
+    await act(() => result.current.createAgent('Bea'))
+    expect(created).toMatchObject({ name: 'Bea', teamId: 'S' })
+  })
+
+  it('names the fallback team for a thread off teamless Boo Zero, and none once closed', () => {
+    const result = drop(booZero, { fallbackTeamId: 'T', roomId: null })
+    expect(result.current.newAgentTeamId).toBe('T')
+    act(() => result.current.close())
+    expect(result.current.newAgentTeamId).toBeNull()
   })
 })

@@ -570,7 +570,6 @@ export function AgentListColumn() {
   const gatewayMainAgentId = useBooZeroStore((s) => s.gatewayMainAgentId)
 
   const connectionStatus = useConnectionStore((s) => s.status)
-  const client = useConnectionStore((s) => s.client)
 
   const viewMode = useViewStore((s) => s.viewMode)
   const settingsOpen = useSettingsModalStore((s) => s.open)
@@ -676,8 +675,8 @@ export function AgentListColumn() {
   const isViewingAgent = (agentId: string) =>
     (viewMode.type === 'agent' && viewMode.agentId === agentId) ||
     (viewMode.type === 'booZero' && agentId === booZeroAgentId)
+  // No Gateway gate: deletion is a REST route on this server, which needs none.
   const deleteAgent = (agent: AgentState) => {
-    if (!client) return
     void (async () => {
       if (
         !(await confirm({
@@ -932,20 +931,18 @@ export function AgentListColumn() {
         )}
       </div>
 
-      {/* Create Boo */}
-      {client && (
-        <div className="px-2">
-          <button
-            type="button"
-            data-testid="fleet-create-boo"
-            onClick={() => setShowCreateModal(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-2 py-1.5 text-[11px] font-medium text-secondary/60 transition-colors hover:border-accent/40 hover:text-accent/70"
-          >
-            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            Create Boo
-          </button>
-        </div>
-      )}
+      {/* Create Boo: with no Gateway the Boo runs on Clawboo Native. */}
+      <div className="px-2">
+        <button
+          type="button"
+          data-testid="fleet-create-boo"
+          onClick={() => setShowCreateModal(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-2 py-1.5 text-[11px] font-medium text-secondary/60 transition-colors hover:border-accent/40 hover:text-accent/70"
+        >
+          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+          Create Boo
+        </button>
+      </div>
 
       {/* Divider between Create Boo and nav */}
       <div className="mx-3 my-2 border-t border-border" />

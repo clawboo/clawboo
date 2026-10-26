@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Eye, MessageSquare, Trash2, type LucideIcon } from 'lucide-react'
+import { MessageSquare, Trash2, type LucideIcon } from 'lucide-react'
 
 import { useMenuKeyboard } from '@/features/shared/useMenuKeyboard'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
@@ -12,17 +12,13 @@ interface GraphContextMenuProps {
   agentName: string
   onClose: () => void
   onChat: () => void
-  // Highlight the agent in the sidebar without opening the agent detail
-  // view. Replaces the previous left-click behaviour, which now toggles
-  // the boo's orbital children visibility (peacock-feather expand).
-  onSelectInSidebar: () => void
   onDelete: () => void
 }
 
 interface MenuItemConfig {
   label: string
   icon: LucideIcon
-  action: 'chat' | 'selectInSidebar' | 'delete'
+  action: 'chat' | 'delete'
 }
 
 // Emoji glyphs replaced with Lucide icons to
@@ -36,9 +32,12 @@ interface MenuItemConfig {
 //
 // Personality and long-form file editing stay in the detail view on purpose.
 // Five sliders and a markdown body are a panel, not a node chip.
+//
+// No "select in sidebar" row. The sidebar marks only the agent whose page is
+// open, and shows one team's faces at a time, so a select that stays on the
+// canvas has nothing there to light up. Open agent is what marks it.
 const items: MenuItemConfig[] = [
   { label: 'Open agent', icon: MessageSquare, action: 'chat' },
-  { label: 'Select in sidebar', icon: Eye, action: 'selectInSidebar' },
   { label: 'Delete', icon: Trash2, action: 'delete' },
 ]
 
@@ -48,7 +47,6 @@ export function GraphContextMenu({
   agentName,
   onClose,
   onChat,
-  onSelectInSidebar,
   onDelete,
 }: GraphContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -72,7 +70,6 @@ export function GraphContextMenu({
 
   const handlers: Record<MenuItemConfig['action'], () => void> = {
     chat: onChat,
-    selectInSidebar: onSelectInSidebar,
     delete: onDelete,
   }
 

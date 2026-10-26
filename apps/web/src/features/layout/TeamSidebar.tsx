@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { useTeamStore, type Team } from '@/stores/team'
-import { useFleetStore } from '@/stores/fleet'
+import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useViewStore } from '@/stores/view'
 import { useToastStore } from '@/stores/toast'
@@ -158,6 +158,16 @@ function TeamIcon({
 
 // ─── TeamSidebar ─────────────────────────────────────────────────────────────
 
+/** The confirm copy for Delete with agents. Only an OpenClaw agent lives in a
+ *  Gateway, so only a team with one is told about removing it from there
+ *  (`runtime` null is a legacy OpenClaw row). */
+function deleteWithAgentsMessage(agents: readonly AgentState[]): string {
+  const onGateway = agents.some((a) => a.runtime == null || a.runtime === 'openclaw')
+  return onGateway
+    ? 'This deletes the agents and their chats, and removes the OpenClaw agents from the Gateway. It cannot be undone.'
+    : 'This deletes the agents and their chats. It cannot be undone.'
+}
+
 /** The sidebar toggle normally sits in the agent column's top row. The rail shows
  *  its own only when there is no agent column (Boo Zero's view), and in the
  *  collapsed sidebar's hover peek, where it sits right under the pointer that
@@ -260,7 +270,6 @@ export function TeamSidebar({
   const handleDeleteTeamWithAgents = useCallback(async () => {
     if (!contextMenu) return
     const { team } = contextMenu
-    const client = useConnectionStore.getState().client
 
     const teamAgents = useFleetStore.getState().agents.filter((a) => a.teamId === team.id)
 
@@ -270,7 +279,7 @@ export function TeamSidebar({
     if (
       !(await confirm({
         title: `Delete "${team.name}" and ${agentCountText}?`,
-        message: 'This will permanently remove the agents from the Gateway.',
+        message: deleteWithAgentsMessage(teamAgents),
         confirmLabel: 'Delete everything',
         tone: 'danger',
       }))
@@ -278,16 +287,15 @@ export function TeamSidebar({
       return
     }
 
+    // No Gateway gate: deletion is a REST route on this server, which needs none.
     let deletedCount = 0
     try {
-      if (client) {
-        for (const agent of teamAgents) {
-          try {
-            await deleteAgentOperation(agent.id, agent.sessionKey)
-            deletedCount++
-          } catch {
-            // Continue
-          }
+      for (const agent of teamAgents) {
+        try {
+          await deleteAgentOperation(agent.id, agent.sessionKey)
+          deletedCount++
+        } catch {
+          // Continue
         }
       }
 
