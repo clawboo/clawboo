@@ -446,7 +446,7 @@ function OpenClawRow({
           <p className="text-[12px] leading-relaxed" style={{ color: muted(0.55) }}>
             {wasConfigured
               ? 'OpenClaw is set up, but its local Gateway is offline. Reconnect to bring your OpenClaw agents back online — your existing configuration is reused.'
-              : 'The pro path: Clawboo detects, installs, and starts a local OpenClaw Gateway, reusing the provider key you already connected.'}
+              : 'The pro path: Clawboo detects, installs, and starts a local OpenClaw Gateway, reusing the provider key or local Ollama you already connected.'}
           </p>
           {config.onSetup && (
             <div>

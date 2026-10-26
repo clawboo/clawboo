@@ -109,10 +109,12 @@ A global npm install can hit `EACCES`. The stream emits an `error` event with co
 For `ollama`, the default model is one your Ollama has pulled: the requested model (or `llama3.2`) when it is pulled, otherwise the most recently pulled model that can use tools. With no chat model pulled, run `ollama pull llama3.2` first. The handler also writes `OLLAMA_API_KEY=ollama-local` to `.env`, the local marker OpenClaw needs before it will run any `ollama/*` model, and points OpenClaw at `OLLAMA_BASE_URL` when you set one (OpenClaw itself only knows `http://127.0.0.1:11434`).
 
 ```json
-{ "ok": true, "gatewayUrl": "ws://localhost:18789" }
+{ "ok": true, "gatewayUrl": "ws://localhost:18789", "model": "ollama/qwen2.5:7b" }
 ```
 
-The raw token is never returned in the body; it is persisted server-side, and the same-origin proxy injects it on connect.
+`model` is the default it wrote, which for Ollama can differ from the one you asked for. The raw token is never returned in the body; it is persisted server-side, and the same-origin proxy injects it on connect.
+
+**Set up OpenClaw** in Settings → Runtimes, and in the onboarding wizard's **Add more runtimes** step, skips this prompt. It posts [`POST /api/system/auto-configure-openclaw`](/reference/rest-api/system#post-apisystemauto-configure-openclaw), which configures OpenClaw from what you already connected: a provider key, else OpenClaw's own ChatGPT sign-in (below). Without either, a signed-in `codex` CLI gets the offer of that ChatGPT sign-in. Only then does it fall back to the local Ollama you set up for [Clawboo Native](/runtimes/native#2-connect-the-key), with the same `OLLAMA_API_KEY=ollama-local` marker and pulled default model described above, so with Ollama as your only provider OpenClaw runs on it without asking for a cloud key. If Ollama doesn't have that default model (or isn't running), the setup stops before starting the Gateway and shows the `ollama pull` command, with **Check again** and **Continue anyway**. With none of these, it asks for a key. It never replaces a default model you already set, and keeps an `OLLAMA_API_KEY` that already has a value.
 
 ### Or: use your ChatGPT subscription
 

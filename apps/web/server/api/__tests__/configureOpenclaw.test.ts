@@ -62,6 +62,7 @@ describe('POST /api/system/configure-openclaw — token not echoed', () => {
     const body = r.body() as Record<string, unknown>
     expect(body['ok']).toBe(true)
     expect(body['gatewayUrl']).toBe('ws://localhost:18789')
+    expect(body['model']).toBe('anthropic/claude-sonnet-4-5')
     // The leak is closed — no raw token in the response body.
     expect('gatewayToken' in body).toBe(false)
 
@@ -95,6 +96,7 @@ describe('POST /api/system/configure-openclaw: Ollama', () => {
 
   async function configure(body: Record<string, unknown>): Promise<{
     status: number
+    body: Record<string, unknown>
     config: Record<string, unknown>
     env: string
   }> {
@@ -102,6 +104,7 @@ describe('POST /api/system/configure-openclaw: Ollama', () => {
     await configureOpenclawPOST({ body } as unknown as Request, r.res)
     return {
       status: r.statusCode(),
+      body: r.body() as Record<string, unknown>,
       config: JSON.parse(readFileSync(path.join(stateDir, 'openclaw.json'), 'utf8')) as Record<
         string,
         unknown
@@ -146,8 +149,10 @@ describe('POST /api/system/configure-openclaw: Ollama', () => {
 
   it('swaps the picker default for a model Ollama has pulled', async () => {
     serveTags('qwen2.5:7b')
-    const { config } = await configure({ provider: 'ollama', model: 'ollama/llama3.3' })
+    const { config, body } = await configure({ provider: 'ollama', model: 'ollama/llama3.3' })
     expect(primaryOf(config)).toBe('ollama/qwen2.5:7b')
+    // The response says what was written, since it isn't what was asked for.
+    expect(body['model']).toBe('ollama/qwen2.5:7b')
   })
 
   it('keeps a chosen model Ollama has pulled', async () => {

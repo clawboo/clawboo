@@ -187,8 +187,10 @@ When `model` is omitted, the handler picks a per-provider default from its `MODE
 **`200 OK`**: config + `.env` written, token minted, settings saved:
 
 ```ts
-{ ok: true, gatewayUrl: string }   // gatewayUrl is `ws://localhost:<port>`
+{ ok: true, gatewayUrl: string, model: string }   // gatewayUrl is `ws://localhost:<port>`
 ```
+
+`model` is the default written to `openclaw.json`. For `ollama` it can differ from the `model` you sent, when Ollama hasn't pulled that one.
 
 **`500 Internal Server Error`**: a filesystem or token-generation failure:
 
@@ -213,27 +215,40 @@ The no-prompt counterpart to [`configure-openclaw`](#post-apisystemconfigure-ope
 - **Path/query params**: none.
 - **Request body**: none (the handler ignores the request entirely).
 
-It resolves a credential in four rungs, in order, and stops at the first that matches:
+It resolves a credential in five rungs, in order, and stops at the first that matches:
 
-| Rung | Condition                                                           | Outcome                                                                                               |
-| ---- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 1    | A connected provider key (encrypted vault **or** OpenClaw's `.env`) | Key upserted into `.env` + every agent's `auth-profiles.json`, config written → `{ ok: true, ... }`   |
-| 2    | No key, but OpenClaw already holds an `openai-codex` OAuth profile  | Config writes only, **no** key write (the credential is OpenClaw's own profile) → `{ ok: true, ... }` |
-| 3    | No such profile, but the `codex` CLI is logged in                   | `{ ok: false, needsCodexAuth: true, loginCommand }`, so the UI offers a ChatGPT sign-in + a re-check  |
-| 4    | Nothing connected                                                   | `{ ok: false, needsKey: true }`, so the UI falls back to the key prompt                               |
+| Rung | Condition                                                              | Outcome                                                                                               |
+| ---- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1    | A connected provider key (encrypted vault **or** OpenClaw's `.env`)    | Key upserted into `.env` + every agent's `auth-profiles.json`, config written → `{ ok: true, ... }`   |
+| 2    | No key, but OpenClaw already holds an `openai-codex` OAuth profile     | Config writes only, **no** key write (the credential is OpenClaw's own profile) → `{ ok: true, ... }` |
+| 3    | No such profile, but the `codex` CLI is logged in                      | `{ ok: false, needsCodexAuth: true, loginCommand }`, so the UI offers a ChatGPT sign-in + a re-check  |
+| 4    | No codex login either, but a local Ollama is set up for Clawboo Native | Ollama's local marker in `.env`, a pulled default model, config written → `{ ok: true, ... }`         |
+| 5    | Nothing connected                                                      | `{ ok: false, needsKey: true }`, so the UI falls back to the key prompt                               |
 
 Rung 3 exists because a `codex login` in your terminal is a subscription OpenClaw cannot use until it holds a profile of its own; `loginCommand` is `openclaw models auth login --provider openai-codex`. The dashboard runs it for you over
 `POST /api/auth/cli-login/openclaw`, and surfaces the raw command only if that fails.
 
+Rung 4 is the same Ollama setup the [native runtime](/runtimes/native#2-connect-the-key) reads: you picked **Ollama** at onboarding or pressed **Use** on it in the providers manager, or, with neither recorded, `OLLAMA_BASE_URL` is set. **Disconnect Ollama**, or disconnecting Clawboo Native entirely, takes it away again. It is the last resort before the key prompt: a key, the subscription profile and the ChatGPT sign-in offer all come first. It writes what [`configure-openclaw`](#post-apisystemconfigure-openclaw) writes for `ollama`: `OLLAMA_API_KEY=ollama-local` in `.env`, a default model your Ollama has pulled (the most recently pulled model that can use tools when `llama3.2` isn't there, always as `ollama/<model>`), and, when `OLLAMA_BASE_URL` is set, its native root as `models.providers.ollama.baseUrl`.
+
 ### Responses
 
-**`200 OK` (rungs 1 and 2)**: `openclaw.json` was written and the Gateway URL + token saved into Clawboo's settings. `provider` is the id that satisfied the rung (`'openai-codex'` for rung 2):
+**`200 OK` (rungs 1, 2 and 4)**: `openclaw.json` was written and the Gateway URL + token saved into Clawboo's settings. `provider` is the id that satisfied the rung (`'openai-codex'` for rung 2, `'ollama'` for rung 4):
 
 ```ts
-{ ok: true, gatewayUrl: string, provider: string }   // gatewayUrl is `ws://localhost:18789`
+{
+  ok: true
+  gatewayUrl: string // e.g. `ws://localhost:18789`
+  provider: string
+  // rung 4 only, when the default model is an `ollama/` model:
+  model?: string // the default in openclaw.json, kept or just written
+  modelPulled?: boolean // false when Ollama didn't list it, or isn't answering
+  pullCommand?: string // with modelPulled false: e.g. `ollama pull llama3.2`
+}
 ```
 
-**`200 OK` (rungs 3 and 4)**: nothing was written; the body tells the caller which prompt to show:
+An Ollama default that isn't pulled fails every OpenClaw turn, so the inline setup stops on `pullCommand` before it starts the Gateway, with **Check again** (which calls this route again) and **Continue anyway**.
+
+**`200 OK` (rungs 3 and 5)**: nothing was written; the body tells the caller which prompt to show:
 
 ```ts
 { ok: false, needsCodexAuth: true, loginCommand: string }
@@ -248,7 +263,7 @@ Rung 3 exists because a `codex login` in your terminal is a subscription OpenCla
 ```
 
 <Note>
-Both writes are non-destructive read-modify-writes, which is what makes this safe to call on an existing install. The Gateway token is **reused** from `~/.openclaw/.env` when `GATEWAY_AUTH_TOKEN` is already set; a fresh one is minted only when it is absent. In `openclaw.json` only `gateway.mode` is forced (to `'local'`); `gateway.port`, `gateway.auth`, the default model, `tools.agentToAgent` and `tools.sessions` are filled in **only when missing**, so fields you set by hand survive. Unlike `configure-openclaw`, there is no `gatewayPort` input: the port defaults to `18789` and an existing numeric `gateway.port` is left alone.
+Both writes are non-destructive read-modify-writes, which is what makes this safe to call on an existing install. The Gateway token is **reused** from `~/.openclaw/.env` when `GATEWAY_AUTH_TOKEN` is already set; a fresh one is minted only when it is absent. In `openclaw.json` only `gateway.mode` is forced (to `'local'`); `gateway.port`, `gateway.auth`, the default model, `tools.agentToAgent`, `tools.sessions` and (rung 4) `models.providers.ollama` are filled in **only when missing**, so fields you set by hand survive. Rung 4 likewise keeps an `OLLAMA_API_KEY` that already has a value, since any value registers OpenClaw's Ollama provider. Unlike `configure-openclaw`, there is no `gatewayPort` input: the port defaults to `18789` and an existing numeric `gateway.port` is left alone.
 </Note>
 
 ### Example

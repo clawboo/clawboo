@@ -1,9 +1,11 @@
 // OpenClawInlineSetup — the compact IN-PLACE OpenClaw setup. Verifies the two
-// load-bearing behaviors: (1) it reuses an already-connected provider key (via
-// auto-configure) and NEVER shows a key prompt; (2) it falls back to a compact
-// key prompt only when nothing is connected. Also covers the pairing card: a
-// failed reconnect after approval must never strand it on "Reconnecting…". The
-// gateway connect + enterGatewayMode are mocked (no real WebSocket in jsdom).
+// load-bearing behaviors: (1) it reuses an already-connected provider (a key or a
+// local Ollama, via auto-configure) and NEVER shows a key prompt; (2) it falls
+// back to a compact key prompt only when nothing is connected. Also covers the
+// pairing card: a failed reconnect after approval must never strand it on
+// "Reconnecting…". And a local Ollama without OpenClaw's default model stops on
+// the pull command before the Gateway starts. The gateway connect +
+// enterGatewayMode are mocked (no real WebSocket in jsdom).
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -53,27 +55,98 @@ const notPaired = () =>
   })
 
 describe('OpenClawInlineSetup', () => {
-  it('reuses an existing key: auto-configure → start → connect (NO key prompt)', async () => {
+  // A key, and a local Ollama with its default model pulled, answer the same way.
+  it.each([
+    { provider: 'anthropic' },
+    { provider: 'ollama', model: 'ollama/llama3.2', modelPulled: true },
+  ])(
+    'reuses a connected $provider: auto-configure → start → connect (NO key prompt)',
+    async (answer) => {
+      server.use(
+        http.post('/api/system/auto-configure-openclaw', () =>
+          HttpResponse.json({ ok: true, gatewayUrl: 'ws://localhost:18789', ...answer }),
+        ),
+        http.get('/api/system/status', () => HttpResponse.json({ openclaw: { installed: true } })),
+        http.post(
+          '/api/system/gateway',
+          () =>
+            new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+              headers: { 'Content-Type': 'text/event-stream' },
+            }),
+        ),
+      )
+      const onFinish = vi.fn()
+      const onConnected = vi.fn()
+      render(
+        <OpenClawInlineSetup onFinish={onFinish} onCancel={vi.fn()} onConnected={onConnected} />,
+      )
+      // Connects without ever asking for a key.
+      await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1))
+      expect(screen.queryByTestId('openclaw-inline-key')).not.toBeInTheDocument()
+      await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    },
+  )
+
+  // OpenClaw is configured on a local Ollama that lacks the default model.
+  function serveOllamaWithoutModel(pulledAfter: number): {
+    autoCalls: () => number
+    gatewayCalls: () => number
+  } {
+    let auto = 0
+    let gateway = 0
     server.use(
-      http.post('/api/system/auto-configure-openclaw', () =>
-        HttpResponse.json({ ok: true, gatewayUrl: 'ws://localhost:18789', provider: 'anthropic' }),
-      ),
+      http.post('/api/system/auto-configure-openclaw', () => {
+        auto += 1
+        return HttpResponse.json({
+          ok: true,
+          gatewayUrl: 'ws://localhost:18789',
+          provider: 'ollama',
+          model: 'ollama/llama3.2',
+          ...(auto > pulledAfter
+            ? { modelPulled: true }
+            : { modelPulled: false, pullCommand: 'ollama pull llama3.2' }),
+        })
+      }),
       http.get('/api/system/status', () => HttpResponse.json({ openclaw: { installed: true } })),
-      http.post(
-        '/api/system/gateway',
-        () =>
-          new HttpResponse('data: {"type":"complete","success":true}\n\n', {
-            headers: { 'Content-Type': 'text/event-stream' },
-          }),
-      ),
+      http.post('/api/system/gateway', () => {
+        gateway += 1
+        return new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }),
     )
-    const onFinish = vi.fn()
+    return { autoCalls: () => auto, gatewayCalls: () => gateway }
+  }
+
+  it('an Ollama without the default model stops on its pull command, before the Gateway', async () => {
+    const calls = serveOllamaWithoutModel(1)
     const onConnected = vi.fn()
-    render(<OpenClawInlineSetup onFinish={onFinish} onCancel={vi.fn()} onConnected={onConnected} />)
-    // Connects without ever asking for a key.
+    render(<OpenClawInlineSetup onFinish={vi.fn()} onCancel={vi.fn()} onConnected={onConnected} />)
+
+    const panel = await screen.findByTestId('openclaw-inline-needs-model')
+    expect(panel).toHaveTextContent(/couldn.t find ollama\/llama3\.2/i)
+    expect(screen.getByTestId('openclaw-inline-pull-command')).toHaveTextContent(
+      /^ollama pull llama3\.2$/,
+    )
+    // No plain success, and no Gateway started for a model that can't answer.
+    expect(calls.gatewayCalls()).toBe(0)
+    expect(onConnected).not.toHaveBeenCalled()
+
+    // Pulled now: Check again re-runs the setup and connects.
+    await userEvent.click(screen.getByTestId('openclaw-inline-model-recheck'))
     await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1))
-    expect(screen.queryByTestId('openclaw-inline-key')).not.toBeInTheDocument()
-    await waitFor(() => expect(onFinish).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    expect(calls.autoCalls()).toBe(2)
+    expect(calls.gatewayCalls()).toBe(1)
+  })
+
+  it('Continue anyway connects without the model', async () => {
+    const calls = serveOllamaWithoutModel(Infinity)
+    const onConnected = vi.fn()
+    render(<OpenClawInlineSetup onFinish={vi.fn()} onCancel={vi.fn()} onConnected={onConnected} />)
+    await userEvent.click(await screen.findByTestId('openclaw-inline-continue-anyway'))
+    await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1))
+    expect(calls.autoCalls()).toBe(1)
+    expect(calls.gatewayCalls()).toBe(1)
   })
 
   it('falls back to a compact key prompt when no provider is connected', async () => {

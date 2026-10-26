@@ -9,6 +9,8 @@ import {
   OLLAMA_FALLBACK_MODEL,
   listOllamaModels,
   ollamaApiBase,
+  ollamaModelPulled,
+  ollamaPullCommand,
   pickOllamaModel,
 } from './runtimes/native/ollamaModels'
 
@@ -32,6 +34,24 @@ export async function resolveOpenclawOllamaModel(requested?: string): Promise<st
     : trimmed
   const { models } = await listOllamaModels()
   return `${OLLAMA_REF_PREFIX}${pickOllamaModel(bare || OLLAMA_FALLBACK_MODEL, models)}`
+}
+
+/**
+ * Whether OpenClaw's default `ref` can run on this Ollama: null for a ref on
+ * another provider, else whether Ollama answered with the model pulled (an
+ * unreachable Ollama counts as not), plus the command that pulls it when not.
+ * Asks Ollama afresh unless `maxAgeMs` allows reusing a recent answer, such as
+ * the one `resolveOpenclawOllamaModel` just read.
+ */
+export async function openclawOllamaModelStatus(
+  ref: string,
+  opts: { maxAgeMs?: number } = {},
+): Promise<{ modelPulled: boolean; pullCommand?: string } | null> {
+  if (!ref.startsWith(OLLAMA_REF_PREFIX)) return null
+  const model = ref.slice(OLLAMA_REF_PREFIX.length)
+  const { models } = await listOllamaModels(opts)
+  if (ollamaModelPulled(models, model)) return { modelPulled: true }
+  return { modelPulled: false, pullCommand: ollamaPullCommand(model) }
 }
 
 /**
