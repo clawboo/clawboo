@@ -26,6 +26,7 @@ import { getDb } from '../lib/db'
 import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
+import { pendingUpstreamDeletes } from '../lib/agentSource/openClawAgentSource'
 import { runtimeAgentFileKey } from '../lib/agentSource/runtimeAgentFileStore'
 import {
   loadAgentConfig,
@@ -83,6 +84,10 @@ export async function agentsListGET(req: Request, res: Response): Promise<void> 
       agents: lists.flat(),
       stale: health.connection !== 'connected',
       lastSyncedAt: health.lastSyncedAt,
+      // Gateway ids of OpenClaw agents deleted here while the Gateway was down. A
+      // browser that reads the Gateway's own list leaves these out until the
+      // delete lands.
+      pendingDeleteIds: [...pendingUpstreamDeletes(db)],
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -472,10 +477,10 @@ function perAgentSettingKeys(agentId: string): string[] {
 //     remove first to satisfy FK.
 //   - approval_history.agent_id → same.
 //
-// The Gateway-side `agents.delete` RPC is the caller's responsibility (see
-// `deleteAgentOperation` on the client). This endpoint ONLY cleans up local
-// metadata; without it, deleted agents leave permanent ghost rows in SQLite
-// that inflate per-team `agentCount` and pollute namespace checks.
+// The owning source deletes the agent from its runtime first (for OpenClaw,
+// the Gateway's `agents.delete`). Without the local cleanup, deleted agents
+// leave permanent ghost rows in SQLite that inflate per-team `agentCount` and
+// pollute namespace checks.
 
 function deleteLocalAgentRows(agentId: string): void {
   const db = getDb()
@@ -503,13 +508,18 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
     // archiveAgent deletes upstream (Gateway) THEN cleans the SQLite row + FK
     // children. If the server-side Gateway connection is down, fall back to a
     // SQLite-only cleanup so the local row never rots (disconnect tolerance).
+    // The Gateway still holds an OpenClaw agent then, so it is tombstoned: the
+    // next sync deletes it upstream instead of re-creating its row.
+    const source = sourceForAgent(agentId)
     try {
-      await sourceForAgent(agentId).archiveAgent(agentId)
+      await source.archiveAgent(agentId)
       res.json({ ok: true, upstreamDeleted: true })
     } catch (err) {
       if (isDisconnected(err)) {
+        const openClaw = getRegistry().source
+        const pending = source === openClaw && openClaw.deferUpstreamDelete(agentId)
         deleteLocalAgentRows(agentId)
-        res.json({ ok: true, upstreamDeleted: false })
+        res.json({ ok: true, upstreamDeleted: false, upstreamDeletePending: pending })
         return
       }
       throw err

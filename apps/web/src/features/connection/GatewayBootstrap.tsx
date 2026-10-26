@@ -374,35 +374,49 @@ export async function enterNativeMode(teamId: string | null): Promise<{ ok: bool
  * finalizer, which has no banner) share ONE hydration path. Returns the agent
  * count, or -1 on failure (the caller decides how to surface it).
  */
+/** The registry's `pendingDeleteIds` from its last successful read. */
+let lastPendingDeleteIds: readonly string[] = []
+
 async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number> {
   try {
     const result = await liveClient.agents.list()
     const mainKey = result.mainKey?.trim() || 'main'
     // Preserve existing teamId assignments — Gateway doesn't know about teams
     const existingTeamIds = new Map(useFleetStore.getState().agents.map((a) => [a.id, a.teamId]))
-    // Load per-agent model overrides + exec configs in parallel
-    const [agentModels, execConfigs] = await Promise.all([
+    // Load per-agent model overrides + exec configs + the registry in parallel.
+    // The registry read is best-effort: a failure falls back to the Gateway-only
+    // snapshot + defaultId.
+    const [agentModels, execConfigs, reg] = await Promise.all([
       fetchAgentModelMap(),
       fetchExecConfigMap(),
+      listAgents().catch(() => null),
     ])
-    const mapped = result.agents.map((a) => ({
-      id: a.id,
-      name: a.identity?.name ?? a.name ?? a.id,
-      status: 'idle' as const,
-      // The session the user was last on WINS over the agent's main session.
-      // Boot used to hard-code main, which quietly undid every `/reset`: the
-      // messages were stored under the new key and the chat reopened on the old
-      // one, so the reply read as vanished.
-      sessionKey: recallSession(a.id) ?? `agent:${a.id}:${mainKey}`,
-      model: agentModels.get(a.id) ?? null,
-      createdAt: null,
-      streamingText: null,
-      runId: null,
-      lastSeenAt: null,
-      teamId: existingTeamIds.get(a.id) ?? null,
-      runtime: 'openclaw' as const,
-      execConfig: execConfigs.get(a.id) ?? null,
-    }))
+    // Deleted in Clawboo while the Gateway was down: the Gateway still lists them
+    // until the server's next sync deletes them there, so they stay out of the fleet.
+    // A failed registry read keeps the last known set rather than none, or the
+    // Gateway's list would put them straight back.
+    if (reg) lastPendingDeleteIds = reg.pendingDeleteIds ?? []
+    const pendingDelete = new Set(lastPendingDeleteIds)
+    const mapped = result.agents
+      .filter((a) => !pendingDelete.has(a.id))
+      .map((a) => ({
+        id: a.id,
+        name: a.identity?.name ?? a.name ?? a.id,
+        status: 'idle' as const,
+        // The session the user was last on WINS over the agent's main session.
+        // Boot used to hard-code main, which quietly undid every `/reset`: the
+        // messages were stored under the new key and the chat reopened on the old
+        // one, so the reply read as vanished.
+        sessionKey: recallSession(a.id) ?? `agent:${a.id}:${mainKey}`,
+        model: agentModels.get(a.id) ?? null,
+        createdAt: null,
+        streamingText: null,
+        runId: null,
+        lastSeenAt: null,
+        teamId: existingTeamIds.get(a.id) ?? null,
+        runtime: 'openclaw' as const,
+        execConfig: execConfigs.get(a.id) ?? null,
+      }))
 
     // The Gateway client only knows OpenClaw agents. Merge the NON-OpenClaw agents
     // (native, hermes, …) from the multi-source registry so a native / mixed team
@@ -410,20 +424,12 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
     // (composer disabled, empty graph) whenever a Gateway is connected, so Boo Zero
     // "doesn't respond." The registry read also gives us the runtime-NEUTRAL
     // `defaultId` (= `resolveBooZero` — native for a native-first install), so we
-    // identify Boo Zero as the native one, NOT the Gateway's own "main". Best-effort:
-    // a failed read falls back to the Gateway-only snapshot + defaultId.
-    let registryDefaultId: string | undefined
-    let extraAgents: AgentState[] = []
-    try {
-      const reg = await listAgents()
-      registryDefaultId = reg.defaultId || undefined
-      const openClawIds = new Set(mapped.map((m) => m.id))
-      extraAgents = reg.agents
-        .filter((r) => r.runtime !== 'openclaw' && !openClawIds.has(r.id))
-        .map(agentRecordToFleetState)
-    } catch {
-      // Registry read failed — proceed with the Gateway-only fleet.
-    }
+    // identify Boo Zero as the native one, NOT the Gateway's own "main".
+    const registryDefaultId = reg?.defaultId || undefined
+    const openClawIds = new Set(mapped.map((m) => m.id))
+    const extraAgents: AgentState[] = (reg?.agents ?? [])
+      .filter((r) => r.runtime !== 'openclaw' && !openClawIds.has(r.id))
+      .map(agentRecordToFleetState)
     const fullFleet: AgentState[] = [...mapped, ...extraAgents]
 
     // Identify Boo Zero from the runtime-neutral registry defaultId (native for a

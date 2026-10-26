@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useId } from 'react'
-import { apiFetch } from '@clawboo/control-client'
-import { useConnectionStore } from '@/stores/connection'
+import { apiFetch, fetchRegistryHealth } from '@clawboo/control-client'
 import { useTeamStore } from '@/stores/team'
 import { createAgent } from '@/lib/createAgent'
+import { agentSourceFor, type DefaultAgentSource } from '@/lib/defaultAgentSource'
 import {
   DEFAULT_PERSONALITY as SHIPPED_DEFAULT_PERSONALITY,
   mergeSoulWithPersonality,
@@ -16,6 +16,11 @@ const DEFAULT_SOUL = `# SOUL\n\nYou are a helpful AI assistant. You approach tas
 
 // One shared default so the three creation paths cannot drift apart.
 const DEFAULT_PERSONALITY: PersonalityValues = SHIPPED_DEFAULT_PERSONALITY
+
+const RUNTIME_HINT: Record<DefaultAgentSource, string> = {
+  openclaw: 'Runs on OpenClaw, through your Gateway.',
+  'clawboo-native': 'Runs on Clawboo Native: no OpenClaw Gateway is connected.',
+}
 
 export function CreateBooModal({
   isOpen,
@@ -34,6 +39,25 @@ export function CreateBooModal({
   const nameId = useId()
   const roleId = useId()
 
+  // WHICH RUNTIME, SAID BEFORE IT IS CHOSEN. OpenClaw while the server's
+  // Gateway connection is up, otherwise Clawboo Native (see defaultAgentSource).
+  // The server's state is read once per open, and until it answers there is no
+  // hint. What the hint says is what the Boo gets.
+  const [serverGateway, setServerGateway] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!isOpen) return
+    let live = true
+    setServerGateway(null)
+    void fetchRegistryHealth().then((h) => {
+      if (live) setServerGateway(h.connection === 'connected')
+    })
+    return () => {
+      live = false
+    }
+  }, [isOpen])
+  const runtime: DefaultAgentSource | null =
+    serverGateway === null ? null : agentSourceFor(serverGateway)
+
   // Reset the form each time the modal opens. Focusing the name input is NOT
   // done here any more: Modal's focus trap moves focus to the panel's first
   // focusable, which IS this input — and it does so without racing a timeout.
@@ -50,12 +74,6 @@ export function CreateBooModal({
     const trimmedName = name.trim()
     if (!trimmedName || creating) return
 
-    const client = useConnectionStore.getState().client
-    if (!client) {
-      setError('Not connected to Gateway.')
-      return
-    }
-
     setCreating(true)
     setError(null)
 
@@ -63,11 +81,19 @@ export function CreateBooModal({
       const baseSoul = role.trim() || DEFAULT_SOUL
       const soulWithPersonality = mergeSoulWithPersonality(baseSoul, DEFAULT_PERSONALITY)
 
-      const agentId = await createAgent(trimmedName, {
-        soul: soulWithPersonality,
-        identity: `# IDENTITY\n\nYou are ${trimmedName}.`,
-        tools: '# TOOLS\n',
-      })
+      // The runtime the hint names; a submit before the server answered waits
+      // for it, so a Boo can be made on an install with no Gateway at all.
+      const sourceId =
+        runtime ?? agentSourceFor((await fetchRegistryHealth()).connection === 'connected')
+      const agentId = await createAgent(
+        trimmedName,
+        {
+          soul: soulWithPersonality,
+          identity: `# IDENTITY\n\nYou are ${trimmedName}.`,
+          tools: '# TOOLS\n',
+        },
+        sourceId,
+      )
 
       // Persist default personality to SQLite so sliders load correctly
       void apiFetch('/api/personality', {
@@ -97,7 +123,7 @@ export function CreateBooModal({
     } finally {
       setCreating(false)
     }
-  }, [name, role, creating, onCreated, onClose])
+  }, [name, role, creating, runtime, onCreated, onClose])
 
   return (
     <Modal
@@ -158,6 +184,15 @@ export function CreateBooModal({
         placeholder="What should this Boo do?"
         className="mb-4 w-full resize-none rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
       />
+
+      {runtime && (
+        <p
+          data-testid="create-boo-runtime"
+          className="-mt-1 mb-4 text-[12px] text-muted-foreground"
+        >
+          {RUNTIME_HINT[runtime]}
+        </p>
+      )}
 
       {/* Error */}
       {error && (

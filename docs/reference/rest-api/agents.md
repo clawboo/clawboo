@@ -99,8 +99,11 @@ The primary fleet read. Aggregates `listAgents()` across EVERY registered source
   agents: AgentRecord[]
   stale: boolean      // true when the server-side OpenClaw connection !== 'connected'
   lastSyncedAt: number | null
+  pendingDeleteIds: string[] // Gateway ids of OpenClaw agents deleted while the Gateway was down
 }
 ```
+
+An agent in `pendingDeleteIds` is already gone from `agents`, but the Gateway still lists it until the server's next sync deletes it there. A client that reads the Gateway's own `agents.list()` leaves those ids out.
 
 **`500 Internal Server Error`**: any failure listing or probing health:
 
@@ -399,7 +402,7 @@ curl http://localhost:18790/api/agents/<agent-id>
 Archives the agent. The owning source's `archiveAgent` deletes the upstream record THEN cleans the local SQLite row plus its FK-referenced children (`cost_records`, `approval_history`) and per-agent settings keys. If the server-side Gateway connection is down, it falls back to a SQLite-only cleanup so the local row never rots, disconnect tolerance.
 
 <Note>
-The browser is responsible for the Gateway `agents.delete` RPC; this endpoint cleans up clawboo's local metadata. Without it, deleted agents leave permanent ghost rows that inflate per-team `agentCount`.
+An OpenClaw agent deleted while the Gateway is down is recorded as a pending delete. On the next sync the server sends the Gateway's `agents.delete` before it reads the list, and until that lands no sync re-creates the agent's row. If the Gateway refuses the delete outright (it will not delete its only agent, or one that owns shared credentials), the pending delete is dropped and the agent comes back on that same sync. A connection failure is retried on the next sync.
 </Note>
 
 - **Path params**: `agentId`.
@@ -413,10 +416,10 @@ The browser is responsible for the Gateway `agents.delete` RPC; this endpoint cl
 { "ok": true, "upstreamDeleted": true }
 ```
 
-**`200 OK`**: the Gateway was disconnected, so only the local rows were cleaned:
+**`200 OK`**: the Gateway was disconnected, so the local rows were cleaned and, for an OpenClaw agent, the Gateway delete was recorded for the next sync (`upstreamDeletePending: true`). It is `false` when there was no OpenClaw row to delete:
 
 ```json
-{ "ok": true, "upstreamDeleted": false }
+{ "ok": true, "upstreamDeleted": false, "upstreamDeletePending": true }
 ```
 
 **`400 Bad Request`**: missing `agentId` segment:

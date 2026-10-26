@@ -46,7 +46,7 @@ This column follows the selected team. Top to bottom:
 - **The top row**: the selected team's name (or "All Agents" when no team is selected), a **search** icon, and the **collapse toggle**. The search icon opens a quiet field in the same row that filters the agents by name as you type; `Escape` clears and closes it.
 - **The mascot grid**: the team's agents as tiles, each with its Boo and name. A pulsing dot marks an agent that's working and a red dot one in error, and Boo Zero comes last. Clicking a tile opens that [agent's page](#the-agent-page). With no team selected, every agent is listed as a row instead, with a live status badge (Idle / Working / Error / Sleeping, with a fine-grained activity verb when running), a "seen X ago" timestamp, and a trash icon on hover to delete it.
 - **The rooms list**, with no heading: a **New room** button, then **General**, the team's own group chat with everyone on the team (its row reads "General (Main Room)" and is always pinned). The team's other [rooms](#rooms) follow, pinned ones first (most recently pinned on top), then newest first. Each row shows its members' faces; click a row to open that chat, or hover it for its **"..."** menu.
-- **Create Boo**: adds a new agent to the selected team (shown only when connected to a runtime that can create agents).
+- **Create Boo**: adds a new agent to the selected team, on OpenClaw while an OpenClaw Gateway is connected and on Clawboo Native otherwise.
 - **The nav**: the work surfaces you switch between most, then the **Settings** gear.
 - **The theme toggle**, at the very bottom.
 

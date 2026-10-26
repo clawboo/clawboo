@@ -305,7 +305,6 @@ export function FleetSidebar() {
                   selected={agent.id === selectedAgentId}
                   onSelect={() => selectAgent(agent.id)}
                   onDelete={() => {
-                    if (!client) return
                     void (async () => {
                       if (
                         !(await confirm({
@@ -383,19 +382,17 @@ export function FleetSidebar() {
       )}
 
       {/* Create Boo */}
-      {client && (
-        <div className="border-t border-border p-3">
-          <button
-            type="button"
-            data-testid="fleet-create-boo"
-            onClick={() => setShowCreateModal(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[12px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
-          >
-            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            Create Boo
-          </button>
-        </div>
-      )}
+      <div className="border-t border-border p-3">
+        <button
+          type="button"
+          data-testid="fleet-create-boo"
+          onClick={() => setShowCreateModal(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[12px] font-medium text-secondary/60 transition-colors hover:border-accent/30 hover:text-accent/60"
+        >
+          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+          Create Boo
+        </button>
+      </div>
 
       <CreateBooModal
         isOpen={showCreateModal}

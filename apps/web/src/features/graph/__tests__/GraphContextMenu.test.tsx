@@ -25,7 +25,6 @@ function renderMenu(overrides: Partial<Parameters<typeof GraphContextMenu>[0]> =
     onChat: vi.fn(),
     onEditPersonality: vi.fn(),
     onEditFiles: vi.fn(),
-    onSelectInSidebar: vi.fn(),
     onDelete: vi.fn(),
     ...overrides,
   }
@@ -37,10 +36,11 @@ describe('GraphContextMenu', () => {
     renderMenu()
     expect(screen.getByRole('menu', { name: 'Actions for Scout' })).toBeInTheDocument()
     const items = screen.getAllByRole('menuitem')
-    // THREE ROWS, not five. 'Chat', 'Edit personality' and 'Edit files' were
-    // byte-identical calls to the same handler, so the menu promised three
-    // destinations and delivered one.
-    expect(items.map((i) => i.textContent)).toEqual(['Open agent', 'Select in sidebar', 'Delete'])
+    // TWO ROWS. 'Chat', 'Edit personality' and 'Edit files' were byte-identical
+    // calls to the same handler, so the menu promised three destinations and
+    // delivered one. And no 'Select in sidebar': the sidebar marks only the agent
+    // whose page is open, so a select that stays on the canvas showed nothing.
+    expect(items.map((i) => i.textContent)).toEqual(['Open agent', 'Delete'])
   })
 
   it('focuses the first item on open and rovers the tabindex', async () => {
@@ -48,8 +48,8 @@ describe('GraphContextMenu', () => {
     await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     const items = screen.getAllByRole('menuitem')
-    // Exactly one tab stop, so Tab LEAVES the menu instead of walking five buttons.
-    expect(items.map((i) => i.getAttribute('tabindex'))).toEqual(['0', '-1', '-1'])
+    // Exactly one tab stop, so Tab LEAVES the menu instead of walking its buttons.
+    expect(items.map((i) => i.getAttribute('tabindex'))).toEqual(['0', '-1'])
   })
 
   it('moves with the arrow keys and wraps at both ends', async () => {
@@ -58,13 +58,13 @@ describe('GraphContextMenu', () => {
     await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     await user.keyboard('{ArrowDown}')
-    expect(screen.getByRole('menuitem', { name: 'Select in sidebar' })).toHaveFocus()
-
-    await user.keyboard('{ArrowUp}{ArrowUp}')
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
 
     await user.keyboard('{ArrowDown}')
     expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus()
+
+    await user.keyboard('{ArrowUp}')
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
   })
 
   it('jumps to the ends with Home and End', async () => {
@@ -85,7 +85,7 @@ describe('GraphContextMenu', () => {
     await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())
 
     await user.keyboard('{ArrowDown}{Enter}')
-    expect(props.onSelectInSidebar).toHaveBeenCalledTimes(1)
+    expect(props.onDelete).toHaveBeenCalledTimes(1)
     expect(props.onChat).not.toHaveBeenCalled()
   })
 
@@ -125,7 +125,6 @@ describe('GraphContextMenu', () => {
           agentName="Scout"
           onClose={vi.fn()}
           onChat={vi.fn()}
-          onSelectInSidebar={vi.fn()}
           onDelete={vi.fn()}
         />
       </>,

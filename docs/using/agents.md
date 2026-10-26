@@ -184,24 +184,24 @@ Click **Create Boo** in the sidebar's agent column, below the rooms list, to ope
 
 1. Enter a **Name** (required) and an optional **Role** (free text that becomes the base `SOUL.md`).
 2. Click **Create Boo** (or press Enter). The modal:
-   - merges the default personality (the **House Style** preset) into the role text and creates the agent via `POST /api/agents`; the server resolves the workspace and writes `SOUL.md`, `IDENTITY.md`, and `TOOLS.md`;
+   - merges the default personality (the **House Style** preset) into the role text and creates the agent via `POST /api/agents`, on OpenClaw while an OpenClaw Gateway is connected and on Clawboo Native otherwise; the server writes `SOUL.md`, `IDENTITY.md`, and `TOOLS.md`;
    - persists the default personality to SQLite (`POST /api/personality`);
    - assigns the new Boo to the currently selected team (best-effort) via `POST /api/teams/:id/agents`.
 
-<Warning>
-A Boo made here is an OpenClaw agent, so **Create Boo** shows only while an OpenClaw Gateway is connected. If the connection drops while the modal is open, it shows **Not connected to Gateway** and does nothing. A name collision with an existing agent surfaces as a create error.
-</Warning>
+<Note>
+**Create Boo** needs no Gateway. The Boo runs on OpenClaw while the server is connected to an OpenClaw Gateway, and on Clawboo Native when it is not; the dialog says which before you create. A native Boo runs on its `SOUL.md` as its system prompt and needs a connected provider to answer. For an OpenClaw Boo, a name collision with an existing agent surfaces as a create error.
+</Note>
 
 ## Delete a Boo
 
 Two places delete an agent:
 
 - **Any graph**: right-click the Boo, then **Delete**. It deletes at once, with no confirmation, and works without a Gateway.
-- **The all-agents list**: right-click the Boo Zero mascot at the top of the team rail and pick **Show all agents**; the agent column then lists every agent as a row. Hover a row, click its trash icon, and confirm. This one needs a connected OpenClaw Gateway; without one the click does nothing.
+- **The all-agents list**: right-click the Boo Zero mascot at the top of the team rail and pick **Show all agents**; the agent column then lists every agent as a row. Hover a row, click its trash icon, and confirm. Like the graph's **Delete**, it works without a Gateway.
 
 Either way, `deleteAgentOperation`:
 
-1. archives the agent via `DELETE /api/agents/:agentId`; the server deletes it upstream (the Gateway) and removes the SQLite row plus its FK-referenced cost/approval rows. If the connection is down, the server falls back to a SQLite-only cleanup and returns `{ ok: true, upstreamDeleted: false }`;
+1. archives the agent via `DELETE /api/agents/:agentId`; the server archives it through its runtime (an OpenClaw agent is deleted from the Gateway) and removes the SQLite row plus its FK-referenced cost/approval rows. If an OpenClaw agent's Gateway is down, the server removes its own records at once and deletes the agent from the Gateway the next time it connects, answering `{ ok: true, upstreamDeleted: false, upstreamDeletePending: true }`;
 2. removes it from the in-memory fleet store;
 3. re-identifies [Boo Zero](/appendices/glossary) from the remaining agents (in case the deleted Boo was the leader);
 4. clears its transcript and deletes its chat history.
@@ -209,6 +209,10 @@ Either way, `deleteAgentOperation`:
 <Danger>
 Deletion is not reversible. The agent's files and config are removed from both the runtime and SQLite. There is no undo.
 </Danger>
+
+<Note>
+An OpenClaw agent deleted while its Gateway is down leaves clawboo at once and leaves the Gateway the next time the server connects to it; the delete answers `upstreamDeletePending: true`. Until then the Gateway still lists the agent, but clawboo keeps it out of the sidebar and the graphs and never puts it back in a team. `GET /api/agents` lists such agents in `pendingDeleteIds`. If the Gateway refuses the delete (it will not delete its only agent, or one that owns shared credentials), the agent comes back.
+</Note>
 
 ## Verify it worked
 

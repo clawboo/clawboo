@@ -55,7 +55,9 @@ A thread only raises the ports of the Boo it came from: hovering another Boo on 
 
 The picker asks what kind of thing you want first: **Connectors**, **Skills**, or **New agent**. Pick one and it shows that list, ordered so the entries you can finish in a single click come first. The back arrow, Escape, or backspacing to an empty box all return to the choice.
 
-If you already know the name, just type. Searching from the first screen looks across every kind at once and skips the second step, and the last row offers to create an agent named after whatever you typed. A new Boo joins the team of the Boo you pulled from and arrives already routed to it. In a team's or room's graph, a thread off Boo Zero gives it that team, and on a room's graph it joins the room as well.
+If you already know the name, just type. Searching from the first screen looks across every kind at once and skips the second step, and the last row offers to create an agent named after whatever you typed. A new Boo joins the team of the Boo you pulled from and arrives already routed to it. Boo Zero belongs to no team, so a thread off Boo Zero gives the new Boo the graph's team in a team's or room's graph, and in the Org chart the team selected in the sidebar, or your first team when none is selected. The picker's **New agent** row says which team. On a room's graph the new Boo joins the room as well.
+
+A new Boo runs on OpenClaw while an OpenClaw Gateway is connected, and on Clawboo Native when none is, the same as one made with [Create Boo](/using/agents#create-a-boo). A native Boo needs a connected provider to answer.
 
 A connector that needs a key or a folder is listed but greyed, with the reason. Those are set up in [Connectors](/using/connectors), because a credential is a form and not a canvas gesture.
 
@@ -210,13 +212,12 @@ Drawing the same edge twice is a no-op: if the target is already in the source's
 
 Right-click any Boo for its action menu:
 
-| Item                  | What it does                                                                                        |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| **Open agent**        | Opens the agent's page, its 1:1 chat with the graph, files and personality in cards beside it.      |
-| **Select in sidebar** | Selects the agent without leaving the graph or opening its page.                                    |
-| **Delete**            | Deletes the agent at once, with no confirmation (archives it through the runtime + cleans up rows). |
+| Item           | What it does                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------- |
+| **Open agent** | Opens the agent's page, its 1:1 chat with the graph, files and personality in cards beside it.      |
+| **Delete**     | Deletes the agent at once, with no confirmation (archives it through the runtime + cleans up rows). |
 
-**Open agent** lands on the [agent's page](/using/agents). Left-click is reserved for the peacock expand.
+**Open agent** lands on the [agent's page](/using/agents), and the agent column marks the agent while its page is open. Left-click is reserved for the peacock expand.
 
 ### Keyboard
 

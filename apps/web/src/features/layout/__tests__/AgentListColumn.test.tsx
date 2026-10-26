@@ -11,17 +11,20 @@
 // THROWS outside a provider.
 
 import type { ReactElement } from 'react'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
+import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { listAgents } from '@clawboo/control-client'
 import type { GatewayClient } from '@clawboo/gateway-client'
 
+import { server } from '@/__vitest__/mswServer'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useChatStore } from '@/stores/chat'
+import { useConfirmStore } from '@/stores/confirm'
 import { useConnectionStore } from '@/stores/connection'
 import type { AgentState } from '@/stores/fleet'
 import { useFleetStore } from '@/stores/fleet'
@@ -216,6 +219,42 @@ describe('AgentListColumn', () => {
 
     await userEvent.click(screen.getByTestId('nav-settings'))
     expect(useSettingsModalStore.getState().open).toBe(true)
+  })
+
+  // Native mode: the app is connected and there is no Gateway client. Deleting
+  // and creating are REST routes on this server, so neither needs one.
+  describe('with no Gateway (native mode)', () => {
+    beforeEach(() => {
+      useConnectionStore.setState({ status: 'connected', client: null })
+      useConfirmStore.setState({ open: false, options: null, resolver: null })
+    })
+
+    it("deletes an agent from the all-agents list's trash icon, after the confirm", async () => {
+      const deleted: string[] = []
+      server.use(
+        http.delete('/api/agents/:agentId', ({ params }) => {
+          deleted.push(String(params['agentId']))
+          return HttpResponse.json({ ok: true, upstreamDeleted: true })
+        }),
+      )
+      useFleetStore.setState({
+        agents: [agent({ id: 'a1', name: 'Research Boo', runtime: 'clawboo-native' })],
+      })
+      renderColumn(<AgentListColumn />)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete Research Boo' }))
+      await waitFor(() => expect(useConfirmStore.getState().open).toBe(true))
+      expect(useConfirmStore.getState().options?.title).toBe('Delete Research Boo?')
+      act(() => useConfirmStore.getState().settle(true))
+
+      await waitFor(() => expect(deleted).toEqual(['a1']))
+      await waitFor(() => expect(useFleetStore.getState().agents).toEqual([]))
+    })
+
+    it('offers Create Boo', () => {
+      renderColumn(<AgentListColumn />)
+      expect(screen.getByTestId('fleet-create-boo')).toBeInTheDocument()
+    })
   })
 
   it('has no level-A/AA a11y violations', async () => {

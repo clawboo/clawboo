@@ -212,22 +212,27 @@ export function useThreadDrop({
     [threadDrop, getNode, expandBoo, connectorCostOf, refreshConnectorCosts, refreshBrokeredApps],
   )
 
+  // THE TEAM COMES FROM THE THREAD, not from the view. A teamless agent is not
+  // rendered on either canvas -- Atlas draws teams plus Boo Zero, and a team
+  // view draws its own members -- so creating one teamless produced a
+  // successful write and an invisible result, which is the worst outcome this
+  // gesture can have. The thread was pulled off a Boo that belongs somewhere,
+  // and inheriting that is also what the operator means. A Boo that belongs
+  // nowhere (Boo Zero) hands the agent the fallback team instead.
+  const teamForDrop = useCallback(
+    (drop: ThreadDropState): string | null =>
+      (getNode(drop.fromNodeId)?.data as { teamId?: string | null } | undefined)?.teamId ??
+      fallbackTeamId,
+    [getNode, fallbackTeamId],
+  )
+
   /** Create an agent at the drop point, already routed from the source. */
   const handleThreadCreateAgent = useCallback(
     async (name: string) => {
       const drop = threadDrop
       setThreadDrop(null)
       if (!drop) return
-      // THE TEAM COMES FROM THE THREAD, not from the view. A teamless agent is
-      // not rendered on either canvas -- Atlas draws teams plus Boo Zero, and a
-      // team view draws its own members -- so creating one teamless produced a
-      // successful write and an invisible result, which is the worst outcome
-      // this gesture can have. The thread was pulled off a Boo that belongs
-      // somewhere, and inheriting that is also what the operator means.
-      const sourceTeamId = (
-        getNode(drop.fromNodeId)?.data as { teamId?: string | null } | undefined
-      )?.teamId
-      const teamId = sourceTeamId ?? fallbackTeamId
+      const teamId = teamForDrop(drop)
       const created = await spawnAgent(name, drop.flow, { teamId })
       if (!created) return
       // A room's graph draws only the room's members, so an agent made there
@@ -250,7 +255,7 @@ export function useThreadDrop({
         }
       }
     },
-    [threadDrop, fallbackTeamId, roomId, getNode],
+    [threadDrop, teamForDrop, roomId],
   )
 
   /**
@@ -285,6 +290,8 @@ export function useThreadDrop({
   return {
     threadDrop,
     threadOptions,
+    /** The team a New agent made from the pending thread joins, so the picker can name it. */
+    newAgentTeamId: threadDrop ? teamForDrop(threadDrop) : null,
     openFromDrop,
     close,
     pick: handleThreadPick,
