@@ -34,7 +34,7 @@ The `clawboo` binary carries one default action and three subcommands:
 
 ## `clawboo`
 
-The launcher is built on Commander: one default action, the `backup` / `stop` / `restart` subcommands, and the two flags Commander provides automatically (`--version` and `--help`). The runtime is Node 22+ (the package `engines` field requires `node >=22.0.0`).
+The launcher is built on Commander: one default action, the `backup` / `stop` / `restart` subcommands, and the two flags Commander provides automatically (`--version` and `--help`). The runtime is Node 22.12+ (the package `engines` field requires `node >=22.12.0`).
 
 ### Flags
 

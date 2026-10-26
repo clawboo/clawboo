@@ -14,7 +14,7 @@ These docs describe Clawboo **v0.5.0**, the current release.
 ## Prerequisites
 
 <Note>
-- **Node.js 22 or newer**: Clawboo's `engines` field requires `node >=22.0.0`.
+- **Node.js 22.12 or newer**: Clawboo's `engines` field requires `node >=22.12.0`.
 - **A provider API key** for one of: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). Or a running local Ollama with at least one chat model pulled (`ollama pull llama3.2` if you have none), in which case no key and no environment variable are needed. Embedding-only models such as `nomic-embed-text` don't count: they can't run an agent.
 - No OpenClaw or Gateway required.
 </Note>

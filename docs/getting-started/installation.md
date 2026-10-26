@@ -12,7 +12,7 @@ These docs describe Clawboo **v0.5.0**, the current release.
 ## Prerequisites
 
 <Note>
-- **Node.js 22 or newer.** Clawboo's `engines` field requires `node >=22.0.0`. `npx` ships with Node, so if you have a recent Node you already have everything you need.
+- **Node.js 22.12 or newer.** Clawboo's `engines` field requires `node >=22.12.0`. `npx` ships with Node, so if you have a recent Node you already have everything you need.
 - **A terminal and a web browser.** The launcher opens your default browser automatically.
 - **No OpenClaw and no provider key required to launch.** You pick a runtime and (optionally) paste a provider key *inside* the onboarding wizard, not before it. A global install (`npm i -g clawboo`) is recommended for a persistent `clawboo` command and one-click updates, but `npx clawboo` works too.
 </Note>
