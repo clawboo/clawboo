@@ -26,6 +26,7 @@ import {
   type McpServerName,
   type McpTransport,
   type TeamChatBoundIdentity,
+  verifyAttachAccess,
   verifyAttachProvenance,
   verifyAttachScope,
   type SignableScope,
@@ -41,7 +42,7 @@ import {
 } from '../lib/memoryEmbedding'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getMcpAttachSecret } from '../lib/mcpAttachSecret'
-import { createLogger } from '@clawboo/logger'
+import { createLogger, REDACTION_MASK } from '@clawboo/logger'
 
 const log = createLogger('mcp-attach')
 import { emitEvent } from '../lib/obs/emit'
@@ -73,6 +74,48 @@ function verifiedScope(params: URLSearchParams, scope: SignableScope): boolean {
   const ok = verifyAttachScope(getMcpAttachSecret(getDb()), scope, sig)
   if (!ok) log.warn({ scope }, 'mcp attach scope signature INVALID — serving unbound')
   return ok
+}
+
+/** The four Streamable-HTTP transport mounts. `/api/mcp/config` is deliberately
+ *  NOT one of them: it MINTS signed attach URLs, so it is operator-only. */
+const MCP_TRANSPORT_PATHS = new Set<string>(MCP_SERVER_NAMES.map((s) => `/api/mcp/${s}`))
+
+/**
+ * Is this a request from one of this server's own spawned runtimes? The access
+ * gate's `authorizeRuntime` check, consulted for a cookieless `/api/mcp/*` call.
+ *
+ * Proven by the `attachToken` every attach URL clawboo mints carries. Where the
+ * request came from can never vouch for it, because a same-host reverse proxy
+ * makes every remote request look like loopback; the gate lets the address count
+ * only AGAINST a request. Only the transport mounts accept the token,
+ * so a runtime holding a token still cannot reach `/api/mcp/config` and sign
+ * itself an identity it was not given. Fails closed on an unreadable secret.
+ */
+export function carriesAttachToken(req: IncomingMessage): boolean {
+  let url: URL
+  try {
+    url = new URL(req.url ?? '/', 'http://localhost')
+  } catch {
+    return false
+  }
+  if (!MCP_TRANSPORT_PATHS.has(url.pathname)) return false
+  const token = url.searchParams.get('attachToken')
+  if (!token) return false
+  try {
+    return verifyAttachAccess(getMcpAttachSecret(getDb()), token)
+  } catch (err) {
+    log.warn({ err }, 'mcp attach token could not be checked (db unavailable); refusing')
+    return false
+  }
+}
+
+/** Attach-URL params that are credentials: the access token and the scope and
+ *  provenance signatures. Every runtime request carries them, so the request log
+ *  keeps each URL but masks these values. */
+const ATTACH_CREDENTIAL_PARAMS_RE = /([?&](?:attachToken|scopeSig|provSig)=)[^&#]*/g
+
+export function redactAttachCredentials(url: string): string {
+  return url.replace(ATTACH_CREDENTIAL_PARAMS_RE, `$1${REDACTION_MASK}`)
 }
 
 /** Read the run's authoritative scope from the Memory attach URL query params
@@ -249,8 +292,12 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     }),
     teamchat: createStreamableHttpHandlers((req) => {
       const db = getDb()
+      const boundIdentity = parseTeamChatBinding(req)
       return createTeamChatServer(db, {
-        boundIdentity: parseTeamChatBinding(req),
+        boundIdentity,
+        // The same late rule as tasks and memory above: no verified binding over
+        // HTTP means the author and room could only come from the model's args.
+        unverifiedCaller: boundIdentity === undefined,
         onPost: (post: DbTeamChat) =>
           emitEvent(db, {
             kind: 'team_chat_post',
@@ -338,23 +385,25 @@ export function mcpConfigGET(req: Request, res: Response): void {
     const binDir = process.env['CLAWBOO_MCP_BIN_DIR']
     const binPath = binDir ? path.join(binDir, `${server}.js`) : undefined
 
-    // Optional scope: emit a SIGNED bound URL. Scope params are only honoured
-    // when signed now, so the copy-paste snippet must be minted here — the one
-    // place that has the secret — rather than hand-assembled from the docs. The
-    // request reaching this endpoint already implies local access, which is the
-    // same trust that could read the DB directly; the secret itself still never
-    // leaves the server.
+    // Always minted with the secret, so even an unscoped snippet carries the
+    // attach token a gated install demands; an optional scope also gets a signed
+    // binding. Scope params are only honoured when signed, so the copy-paste
+    // snippet must be minted here, the one place that has the secret, rather than
+    // hand-assembled from the docs. The secret itself never leaves the server.
+    //
+    // That makes this route a signing oracle for ANY identity, so who reaches it
+    // matters: with the access gate on it needs the operator cookie (the gate's
+    // runtime exemption covers only the transport mounts, see
+    // `carriesAttachToken`); with the gate off, the bind is the only boundary,
+    // exactly as for every other /api/* route.
     const scopeTeamId = typeof req.query['scopeTeamId'] === 'string' ? req.query['scopeTeamId'] : ''
     const scopeAgentId =
       typeof req.query['scopeAgentId'] === 'string' ? req.query['scopeAgentId'] : ''
-    const scope =
-      scopeTeamId || scopeAgentId
-        ? {
-            ...(scopeTeamId ? { teamId: scopeTeamId } : {}),
-            ...(scopeAgentId ? { agentId: scopeAgentId } : {}),
-            attachSecret: getMcpAttachSecret(getDb()),
-          }
-        : undefined
+    const scope = {
+      ...(scopeTeamId ? { teamId: scopeTeamId } : {}),
+      ...(scopeAgentId ? { agentId: scopeAgentId } : {}),
+      attachSecret: getMcpAttachSecret(getDb()),
+    }
 
     res.json({
       ok: true,
@@ -365,7 +414,7 @@ export function mcpConfigGET(req: Request, res: Response): void {
         httpBaseUrl,
         binPath,
         dbPath: getDbPath(),
-        ...(scope ? { scope } : {}),
+        scope,
       }),
     })
   } catch (err) {

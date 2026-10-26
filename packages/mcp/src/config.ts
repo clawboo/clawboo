@@ -3,7 +3,7 @@
 // own config. This generates the exact snippet per runtime + transport, so a
 // user (or the live smoke) can copy-paste a working attachment. Pure — no SDK.
 
-import { signAttachProvenance, signAttachScope } from './attachAuth'
+import { signAttachAccess, signAttachProvenance, signAttachScope } from './attachAuth'
 
 export type McpRuntime = 'claude-code' | 'codex' | 'openclaw'
 export type McpServerName = 'tasks' | 'memory' | 'tools' | 'teamchat'
@@ -36,10 +36,12 @@ export interface AttachScope {
   delegate?: boolean
   /**
    * Per-install signing secret (see `attachAuth.ts`). When present, the attach
-   * URL carries a `scopeSig` HMAC over the semantic fields — NEVER the secret
-   * itself — and the server refuses the claimed identity when the signature is
-   * absent or wrong. Optional so pure URL construction stays testable without a
-   * secret; production producers always pass it.
+   * URL carries an `attachToken` (the access gate refuses a cookieless
+   * `/api/mcp/*` request without one) and, when it claims a scope, a `scopeSig`
+   * HMAC over the semantic fields, so the server refuses an identity it did not
+   * sign. NEVER the secret itself. Optional so pure URL construction stays
+   * testable without a secret; production producers always pass it, an unscoped
+   * attach included.
    */
   attachSecret?: string | null
   /**
@@ -72,7 +74,8 @@ export interface AttachConfigInput {
  * The HTTP attach URL for a server. The shared Memory server carries the run's
  * scope as query params (`scopeTeamId` / `scopeAgentId` / `scopeTenantId`) so its
  * session binds to the team/agent; Tasks carries `scopeTeamId` so its board READS
- * are team-bound; TeamChat carries the room + author identity; tools stays bare.
+ * are team-bound; TeamChat carries the room + author identity; Tools carries the
+ * agent and team. Every URL built with a secret also carries the `attachToken`.
  * Exported so a driver that builds URLs inline (Codex) stays in lockstep with
  * `buildAttachConfig`.
  */
@@ -84,6 +87,10 @@ export function mcpHttpUrl(
   const base = `${httpBaseUrl.replace(/\/$/, '')}/api/mcp/${server}`
   if (!scope) return base
   const p = new URLSearchParams()
+  // A scope signature covers a CLAIM. An unscoped URL (OpenClaw's process-wide
+  // one, the verification critic's) has none, so it carries the access token
+  // alone rather than a signature over nothing.
+  const claimsScope = Boolean(scope.teamId || scope.agentId || scope.tenantId)
   if (server === 'memory') {
     // Memory: the run's VISIBILITY scope + provenance-only stamps (see
     // AttachScope — prov* never widen visibility).
@@ -101,7 +108,7 @@ export function mcpHttpUrl(
     // `delegate` param, so it signs delegate:false even for an orchestrated run —
     // otherwise the verifier, reconstructing scope from the params, could never
     // match, and a legitimate attach would be silently unbound.
-    if (scope.attachSecret)
+    if (scope.attachSecret && claimsScope)
       p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false }))
   } else if (server === 'tasks') {
     // Tasks: the run's TEAM, so a bare `list_tasks` returns this team's board.
@@ -113,7 +120,7 @@ export function mcpHttpUrl(
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
     // Tasks never grants delegation, so its signature pins delegate:false — a
     // signed tasks URL replayed onto teamchat with delegate=1 must not verify.
-    if (scope.attachSecret)
+    if (scope.attachSecret && claimsScope)
       p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false }))
   } else if (server === 'teamchat') {
     // TeamChat: the run's room + AUTHOR IDENTITY (anti-spoof). The URL is
@@ -123,7 +130,8 @@ export function mcpHttpUrl(
     // Orchestrated runs only — exposes the `team_delegate` signal tool (see
     // AttachScope.delegate for why scope alone must not).
     if (scope.delegate) p.set('delegate', '1')
-    if (scope.attachSecret) p.set('scopeSig', signAttachScope(scope.attachSecret, scope))
+    if (scope.attachSecret && claimsScope)
+      p.set('scopeSig', signAttachScope(scope.attachSecret, scope))
   } else {
     // Tools: the run's AGENT, because a connector tool is governed per agent.
     //
@@ -137,9 +145,12 @@ export function mcpHttpUrl(
     // so a tools URL replayed onto teamchat with `delegate=1` cannot verify.
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
-    if (scope.attachSecret)
+    if (scope.attachSecret && claimsScope)
       p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false }))
   }
+  // On every server's URL, scoped or not: the access gate refuses a cookieless
+  // /api/mcp/* request without it (see `signAttachAccess`).
+  if (scope.attachSecret) p.set('attachToken', signAttachAccess(scope.attachSecret))
   const q = p.toString()
   return q ? `${base}?${q}` : base
 }
@@ -173,7 +184,10 @@ export function buildAttachConfig(input: AttachConfigInput): AttachConfig {
         return {
           id,
           transport: 'http',
-          snippet: `claude mcp add --transport http ${id} ${url}`,
+          // Quoted: the URL always carries a query now, and an unquoted `?` is a
+          // glob in zsh while an unquoted `&` backgrounds the command in any shell.
+          // URLSearchParams percent-encodes `'`, so single quotes are safe.
+          snippet: `claude mcp add --transport http ${id} '${url}'`,
           structured: { [id]: { type: 'http', url } },
         }
       case 'codex':

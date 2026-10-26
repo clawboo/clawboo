@@ -168,7 +168,7 @@ When `STUDIO_ACCESS_TOKEN` is set, the access gate protects every `/api/*` route
 
 - The token charset is restricted to `[A-Za-z0-9._~-]`. A token with any other character **disables** the gate (and logs a warning) rather than silently locking you out, so generate tokens from that set (e.g. `openssl rand -hex 24`).
 - The pathname prefix check is **case-folded**; `/API/settings` cannot bypass `/api/` to reach a route unauthenticated.
-- Loopback `/api/mcp/*` requests are **exempt** (a spawned runtime attaches its MCP client from `127.0.0.1` with no cookie). Non-loopback `/api/mcp/*` still requires the token.
+- The MCP transport routes (`/api/mcp/tasks`, `/memory`, `/tools`, `/teamchat`) also admit a cookieless request carrying the `attachToken` Clawboo writes into its spawned runtimes' attach URLs, but only one that dialed the loopback port directly: never from another host, and never through a proxy (`Forwarded`, `X-Forwarded-*` or `X-Real-IP` present). A loopback address alone admits nothing, because behind a same-host proxy every request arrives from `127.0.0.1`. `/api/mcp/config` always needs the cookie.
 - The gate sets `Secure` on its cookie only when the request arrived over TLS (`X-Forwarded-Proto: https`). If you terminate TLS at the proxy, forward that header so the secure-cookie path engages.
 
 For the front-end proxy itself, forward both HTTP and the WebSocket upgrade for `/api/gateway/ws`:
@@ -184,9 +184,16 @@ location / {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
 }
+
+# The four MCP server routes are never needed from outside: runtimes attach on
+# the loopback port directly. Deny them here as defence in depth. (/api/mcp/config
+# stays: the dashboard's Runtimes panel loads it, behind the cookie.)
+location ~* ^/api/mcp/(tasks|memory|tools|teamchat)(/|$) {
+    return 404;
+}
 ```
 
-Bind Clawboo to loopback and let the proxy be the only network-facing surface, **or** bind it wide and protect it with `STUDIO_ACCESS_TOKEN`, full details in [Security](/operating/security).
+Bind Clawboo to loopback and let the proxy be the only network-facing surface, **or** bind it wide; either way, set `STUDIO_ACCESS_TOKEN` unless the proxy authenticates requests itself. The proxy delivers every request from `127.0.0.1`, so a loopback bind alone protects nothing behind it. Recipes for nginx, Caddy and Cloudflare Tunnel are in [Self-host securely](/guides/self-host-securely); the full model is in [Security](/operating/security).
 
 ### Serving under a path prefix
 

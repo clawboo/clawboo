@@ -51,7 +51,7 @@ The token activates the access gate: every `/api/*` route then requires a valid 
 The refusal names three fixes: set `STUDIO_ACCESS_TOKEN=<random>`, unset `HOST` to bind loopback only, or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. Only that last escape hatch reaches the warn-and-keep-serving path, which leaves the dashboard and every API route reachable by anyone on your network with no authentication.
 </Warning>
 
-The one deliberate carve-out: a loopback request to `/api/mcp/*` is exempt from the gate, because the server's own spawned runtimes attach their MCP clients over `http://127.0.0.1:<port>/api/mcp/*` with no cookie. A non-loopback `/api/mcp/*` request still requires the cookie. The full threat model is in [security](/operating/security); the operator walkthrough is in [self-host securely](/guides/self-host-securely).
+The one deliberate carve-out: the server's own spawned runtimes attach their MCP clients over `http://127.0.0.1:<port>/api/mcp/*` with no cookie, so an MCP transport request carrying the `attachToken` the server wrote into the runtime's attach URL is let through. The source address never counts as a credential, because behind a same-host reverse proxy every request arrives from loopback; it can only refuse one (the token is ignored from another host or through a proxy). If you put Clawboo behind a proxy, set the access token and deny the four MCP server routes (`/api/mcp/tasks`, `/memory`, `/tools`, `/teamchat`) at the proxy. The full threat model is in [security](/operating/security); the operator walkthrough is in [self-host securely](/guides/self-host-securely).
 
 ## Does Clawboo cost money?
 

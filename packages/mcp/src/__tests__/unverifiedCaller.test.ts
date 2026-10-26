@@ -7,7 +7,7 @@
 // board work as any agent.
 //
 // The tools surface has always failed closed on the same absence (no identity ⇒
-// no grants ⇒ 4 tools). These tests hold the other two to it.
+// no grants ⇒ 4 tools). These tests hold memory, tasks and teamchat to it.
 //
 // THE HALF THAT IS NOT SECURITY: `unverifiedCaller` must stay distinct from
 // "no bound scope". The stdio bins (`bin/memory.ts`, `bin/tasks.ts`) are
@@ -15,11 +15,12 @@
 // are the only steering there is. Collapsing the two would break the bins, so
 // the last test in each block pins the bin's behaviour as unchanged.
 
-import { createDb, type ClawbooDb } from '@clawboo/db'
+import { createDb, readRoom, resolveRoomForTeam, type ClawbooDb } from '@clawboo/db'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createMemoryServer } from '../memory/server'
 import { createTasksServer } from '../tasks/server'
+import { createTeamChatServer } from '../teamchat/server'
 import { callText, connectInMemory, listToolNames } from '../testing'
 
 let db: ClawbooDb
@@ -210,5 +211,45 @@ describe('tasks — unverified caller', () => {
     const names = await listToolNames(await connectInMemory(createTasksServer(db)))
     expect(names).toContain('claim_task')
     expect(names).toContain('assign_task')
+  })
+})
+
+describe('teamchat — unverified caller', () => {
+  // Unbound, both tools take the author and the room from their arguments, so an
+  // unidentified HTTP caller could read any team's room and post into it as any
+  // agent. Every TeamChat tool is an identity tool, so none is served.
+  const bound = { agentId: 'agent-1', teamId: 'team-A', roomId: resolveRoomForTeam('team-A') }
+
+  it('is served NO tools, so it cannot post or read as anyone', async () => {
+    const client = await connectInMemory(createTeamChatServer(db, { unverifiedCaller: true }))
+    expect(await listToolNames(client)).toEqual([])
+    const res = await callText(client, 'team_chat_post', {
+      text: 'hello from the boss',
+      authorAgentId: 'victim',
+      teamId: 'team-A',
+    })
+    expect(res.isError).toBe(true)
+    expect(readRoom(db, { roomId: resolveRoomForTeam('team-A'), sinceSeq: 0 })).toEqual([])
+  })
+
+  it('a VERIFIED binding wins over the flag', async () => {
+    const client = await connectInMemory(
+      createTeamChatServer(db, { boundIdentity: bound, unverifiedCaller: true }),
+    )
+    expect(await listToolNames(client)).toEqual(['team_chat_post', 'team_chat_subscribe'])
+    await callText(client, 'team_chat_post', { text: 'status: done' })
+    const rows = readRoom(db, { roomId: bound.roomId, sinceSeq: 0 })
+    expect(rows.map((r) => r.authorAgentId)).toEqual(['agent-1'])
+  })
+
+  it("leaves the stdio bin UNCHANGED: no flag ⇒ the model's identity args still steer", async () => {
+    const client = await connectInMemory(createTeamChatServer(db))
+    await callText(client, 'team_chat_post', {
+      text: 'from the operator',
+      authorAgentId: 'operator-agent',
+      teamId: 'team-A',
+    })
+    const rows = readRoom(db, { roomId: resolveRoomForTeam('team-A'), sinceSeq: 0 })
+    expect(rows.map((r) => r.authorAgentId)).toEqual(['operator-agent'])
   })
 })

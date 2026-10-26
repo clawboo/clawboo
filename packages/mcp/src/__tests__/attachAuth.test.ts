@@ -5,12 +5,14 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  signAttachAccess,
   signAttachProvenance,
   signAttachScope,
+  verifyAttachAccess,
   verifyAttachProvenance,
   verifyAttachScope,
 } from '../attachAuth'
-import { mcpHttpUrl } from '../config'
+import { buildAttachConfig, MCP_SERVER_NAMES, mcpHttpUrl } from '../config'
 
 const SECRET = 'a'.repeat(64)
 
@@ -86,6 +88,95 @@ describe('mcpHttpUrl signing', () => {
   it('an unscoped URL carries no signature at all', () => {
     expect(mcpHttpUrl('http://x', 'tools')).not.toContain('scopeSig')
     expect(mcpHttpUrl('http://x', 'tasks')).not.toContain('scopeSig')
+  })
+})
+
+describe('signAttachAccess / verifyAttachAccess (the control-plane access token)', () => {
+  it('round-trips, and is deterministic so configs stay byte-stable', () => {
+    const token = signAttachAccess(SECRET)
+    expect(verifyAttachAccess(SECRET, token)).toBe(true)
+    expect(signAttachAccess(SECRET)).toBe(token)
+  })
+
+  it('a different secret verifies nothing', () => {
+    expect(verifyAttachAccess('b'.repeat(64), signAttachAccess(SECRET))).toBe(false)
+  })
+
+  it('malformed tokens are false, never a throw', () => {
+    for (const bad of ['', 'zz', 'deadbeef', 'not hex', signAttachAccess(SECRET).slice(2)]) {
+      expect(verifyAttachAccess(SECRET, bad)).toBe(false)
+    }
+  })
+
+  it('is its own domain: never a scope or provenance signature, nor the reverse', () => {
+    // The empty scope is the closest a scope signature gets to "no fields", so it
+    // is the one that would collide if the domains were shared.
+    const emptyScopeSig = signAttachScope(SECRET, {})
+    const emptyProvSig = signAttachProvenance(SECRET, {})
+    expect(verifyAttachAccess(SECRET, emptyScopeSig)).toBe(false)
+    expect(verifyAttachAccess(SECRET, emptyProvSig)).toBe(false)
+    expect(verifyAttachScope(SECRET, {}, signAttachAccess(SECRET))).toBe(false)
+    expect(verifyAttachProvenance(SECRET, {}, signAttachAccess(SECRET))).toBe(false)
+  })
+})
+
+describe('mcpHttpUrl access token', () => {
+  it('rides every server URL minted with a secret, scoped or not', () => {
+    for (const server of MCP_SERVER_NAMES) {
+      for (const scope of [
+        { attachSecret: SECRET },
+        { teamId: 'T', agentId: 'A', attachSecret: SECRET },
+      ]) {
+        const token = new URL(mcpHttpUrl('http://x', server, scope)).searchParams.get('attachToken')
+        expect(token, `${server} ${JSON.stringify(scope)}`).toBe(signAttachAccess(SECRET))
+      }
+    }
+  })
+
+  it('an unscoped URL carries the token alone, with no signature over nothing', () => {
+    // OpenClaw's process-wide URL and the verification critic's are this shape.
+    for (const server of MCP_SERVER_NAMES) {
+      const url = new URL(mcpHttpUrl('http://x', server, { attachSecret: SECRET }))
+      expect([...url.searchParams.keys()]).toEqual(['attachToken'])
+    }
+  })
+
+  it('a scoped URL keeps its scope signature exactly as before', () => {
+    const scope = { teamId: 'T', agentId: 'A', attachSecret: SECRET }
+    const url = new URL(mcpHttpUrl('http://x', 'tasks', scope))
+    expect(url.searchParams.get('scopeSig')).toBe(
+      signAttachScope(SECRET, { ...scope, delegate: false }),
+    )
+  })
+
+  it('no secret, no token: pure URL construction stays secret-free', () => {
+    expect(mcpHttpUrl('http://x', 'tasks', { teamId: 'T' })).not.toContain('attachToken')
+    expect(mcpHttpUrl('http://x', 'tools')).not.toContain('attachToken')
+  })
+
+  it('never leaks the secret itself', () => {
+    const secret = 'f0e1d2c3'.repeat(8)
+    for (const server of MCP_SERVER_NAMES) {
+      expect(mcpHttpUrl('http://x', server, { attachSecret: secret })).not.toContain(secret)
+    }
+  })
+
+  it('the Claude Code snippet quotes the URL, so its query survives a shell', () => {
+    // Unquoted, zsh globs on `?` ("no matches found") and every shell splits a
+    // scoped URL at its first `&`.
+    const { snippet } = buildAttachConfig({
+      runtime: 'claude-code',
+      server: 'memory',
+      transport: 'http',
+      httpBaseUrl: 'http://127.0.0.1:18790',
+      scope: { teamId: 'T', agentId: 'A', attachSecret: SECRET },
+    })
+    const url = mcpHttpUrl('http://127.0.0.1:18790', 'memory', {
+      teamId: 'T',
+      agentId: 'A',
+      attachSecret: SECRET,
+    })
+    expect(snippet).toBe(`claude mcp add --transport http clawboo-memory '${url}'`)
   })
 })
 

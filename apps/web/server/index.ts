@@ -21,6 +21,7 @@ import {
 } from '@clawboo/db'
 
 import { apiRouter } from './api/index'
+import { carriesAttachToken, redactAttachCredentials } from './api/mcp'
 import { attachIdentity } from './lib/auth'
 import { reapOrphanedConnectors } from './lib/connectors/pidFile'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
@@ -52,6 +53,7 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
+import { createProxyExposureWarning } from './lib/proxyExposureWarning'
 import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
 import { restoreScreenshots } from './lib/screenshotBus'
@@ -164,6 +166,11 @@ async function main() {
     // Scopes the operator cookie to the mount and prefixes the post-exchange
     // redirect, so sharing an origin with another app does not share the cookie.
     basePath,
+    // A spawned runtime's MCP client carries no cookie; it presents the attach
+    // token this server minted into its URL. Admitted by that credential, never
+    // by source address alone, because a same-host reverse proxy delivers every
+    // remote request from loopback.
+    authorizeRuntime: carriesAttachToken,
   })
 
   // ── Same-origin guard (CSWSH / DNS-rebinding / cross-site CSRF) ────────────
@@ -248,6 +255,8 @@ async function main() {
   // without this, `/API/settings` resolves to the `/api/settings` handler, and any
   // gate that keyed off a different normalization could be evaded. Every route and
   // client in this repo is lowercase, so this changes nothing for real traffic.
+  // This covers routes on the app itself; `apiRouter` sets the same option on its
+  // own constructor, because a Router does not inherit it.
   app.set('case sensitive routing', true)
 
   // The server-trusted loopback port. Request handlers that hand a callback URL to a
@@ -267,6 +276,19 @@ async function main() {
   // here is what lets them keep their existing checks and cover the prefixed
   // surface too. A pass-through when no prefix is configured.
   app.use(createBasePathMiddleware(basePath))
+
+  // Behind a reverse proxy with no access token, every /api/* route is open to
+  // whoever can reach the proxy, and the loopback bind hides it from the boot
+  // checks above. Say so on the first forwarded request. Observes only; ahead of
+  // the origin guard so a request it 403s still counts.
+  const warnProxyExposure = createProxyExposureWarning({
+    gateEnabled: accessGate.enabled,
+    warn: (message) => log.warn({ port }, message),
+  })
+  app.use((req, _res, next) => {
+    warnProxyExposure(req)
+    next()
+  })
 
   // Same-origin guard — FIRST, before body parsing / CORS / the access gate, so a
   // cross-origin (CSWSH/rebinding/CSRF) /api/* request is 403'd before any work.
@@ -313,7 +335,12 @@ async function main() {
       if (rel.startsWith('/assets/') || rel.startsWith('/fonts/')) return
       const durationMs = Date.now() - start
       const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'
-      reqLog[level]({ method: req.method, url, status: res.statusCode, durationMs })
+      reqLog[level]({
+        method: req.method,
+        url: redactAttachCredentials(url),
+        status: res.statusCode,
+        durationMs,
+      })
     })
     next()
   })

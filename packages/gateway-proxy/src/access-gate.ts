@@ -21,6 +21,15 @@ export interface AccessGateOptions {
    * redirect (which must land back under the mount, not at the origin root).
    */
   basePath?: string
+  /**
+   * Admits a cookieless `/api/mcp/*` request from one of the server's own spawned
+   * runtimes: return true when it carries the credential the server minted into
+   * that runtime's attach URL. Consulted only for `/api/mcp/*`, only when the
+   * cookie is missing or wrong, and only for a request that dialed the loopback
+   * port directly: never one from another host, and never one a proxy forwarded.
+   * Omitted ⇒ `/api/mcp/*` needs the cookie like every other route.
+   */
+  authorizeRuntime?: (req: IncomingMessage) => boolean
 }
 
 export interface AccessGate {
@@ -30,7 +39,8 @@ export interface AccessGate {
    * Call at the top of every HTTP request handler.
    * Returns true when the response has been handled (caller must not write again).
    * - Validates ?access_token=... query param, sets HttpOnly cookie, redirects.
-   * - Blocks /api/* requests that lack a valid cookie.
+   * - Blocks /api/* requests that lack a valid cookie, except an /api/mcp/*
+   *   request that `authorizeRuntime` vouches for.
    */
   handleHttp: (req: IncomingMessage, res: ServerResponse) => boolean
   /**
@@ -83,12 +93,40 @@ function requestIsHttps(req: IncomingMessage): boolean {
   return String(req.headers['x-forwarded-proto'] ?? '').toLowerCase() === 'https'
 }
 
-/** True when the TCP peer is loopback — the only origin a server's own spawned
- *  runtimes connect from. A remote client cannot forge a loopback source on a real
- *  TCP handshake, so this is a safe basis for the /api/mcp/* control-plane exemption. */
-function isLoopbackRequest(req: IncomingMessage): boolean {
+/**
+ * True when the TCP peer is loopback.
+ *
+ * NECESSARY for the runtime exemption, never sufficient. A spawned runtime always
+ * dials the loopback port, so requiring it keeps an attach token that leaked off
+ * the box useless from anywhere else. It cannot admit anything on its own: a
+ * same-host reverse proxy delivers every remote request from loopback too, which
+ * is exactly how the old exemption, keyed on this alone, was bypassed.
+ */
+function isLoopbackPeer(req: IncomingMessage): boolean {
   const addr = req.socket?.remoteAddress ?? ''
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+}
+
+/** Headers a reverse proxy adds on the way in. A spawned runtime dials the
+ *  server's loopback port directly and never sends one. */
+const FORWARDING_HEADERS = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+] as const
+
+/**
+ * True when a reverse proxy carried the request here.
+ *
+ * Never a basis for GRANTING access: a direct caller can send these headers or
+ * leave them out. It only ever takes access away, so that a runtime's attach
+ * token replayed through the operator's proxy is still refused. Exported so the
+ * server's proxy-exposure warning keys off the same header list.
+ */
+export function isForwardedRequest(req: IncomingMessage): boolean {
+  return FORWARDING_HEADERS.some((name) => req.headers[name] !== undefined)
 }
 
 // ─── createAccessGate ───────────────────────────────────────────────────────
@@ -104,6 +142,7 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
   // '' at the origin root, else '/mount'. The cookie needs a non-empty Path.
   const basePath = String(options.basePath ?? '').trim()
   const cookiePath = basePath || '/'
+  const authorizeRuntime = options.authorizeRuntime
   // The gate is the ONLY auth for a non-loopback bind, and the token is written raw
   // into the Set-Cookie value + compared raw against the cookie but percent-decoded in
   // the query path. A token with a cookie-delimiter / non-token char would corrupt the
@@ -165,12 +204,24 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
     // case itself — an uppercased `/API/settings` must never evade the gate and reach
     // a sensitive route unauthenticated.
     if (url.pathname.toLowerCase().startsWith('/api/')) {
-      // Loopback exemption for the spawned-runtime control plane: a runtime attaches
-      // its MCP client to http://127.0.0.1:<port>/api/mcp/* with no cookie (its env is
-      // scrubbed of the token by design). A loopback /api/mcp/* request is the server's
-      // own runtime — let it through. Every other /api/* route, and any NON-loopback
-      // /api/mcp/* request, still requires the cookie.
-      if (url.pathname.toLowerCase().startsWith('/api/mcp/') && isLoopbackRequest(req)) {
+      // The spawned-runtime control plane. A runtime attaches its MCP client to
+      // http://127.0.0.1:<port>/api/mcp/* with no cookie (its env is scrubbed of the
+      // token by design), so it proves itself with the attach token the server
+      // minted into its URL instead, which `authorizeRuntime` checks.
+      //
+      // NOT by its source address. That was the old rule (a loopback peer is our
+      // own runtime), and a same-host reverse proxy breaks it: nginx, Caddy or a
+      // tunnel connector delivers every remote request from 127.0.0.1, which put
+      // the whole control plane on the internet, /api/mcp/config included, and
+      // that route mints signed agent identities. The address and the forwarding
+      // headers now only ever take access away: a runtime dials loopback directly,
+      // so a token arriving any other way is refused.
+      if (
+        url.pathname.toLowerCase().startsWith('/api/mcp/') &&
+        isLoopbackPeer(req) &&
+        !isForwardedRequest(req) &&
+        authorizeRuntime?.(req) === true
+      ) {
         return false
       }
       if (!isAuthorized(req)) {

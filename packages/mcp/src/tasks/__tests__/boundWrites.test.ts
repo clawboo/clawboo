@@ -6,7 +6,7 @@
 // while `get_task` refused it that same id. Reads were isolated; writes were
 // board-wide. Driven over the in-memory MCP transport, like the memory-scope suite.
 
-import { createDb, createTask, getTask, type ClawbooDb } from '@clawboo/db'
+import { createDb, createTask, getTask, listTasks, type ClawbooDb } from '@clawboo/db'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { callText, connectInMemory } from '../../testing'
@@ -63,6 +63,25 @@ describe('Tasks MCP — a bound session cannot write across the boundary', () =>
       parentTaskId: theirs.id,
     })
     expect(res.text).toContain('not found') // same wording as a refused read
+  })
+
+  it('create_subtask refuses a PARENT from another team too (the same escape, other door)', async () => {
+    const theirs = createTask(db, { title: 'theirs', status: 'todo', teamId: 'B' })
+    const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))
+    const res = await callText(client, 'create_subtask', {
+      parentTaskId: theirs.id,
+      title: 'child',
+    })
+    expect(res.text).toContain('not found')
+    expect(listTasks(db, { teamId: 'B' }).map((t) => t.id)).toEqual([theirs.id]) // nothing created
+  })
+
+  it('create_subtask still works under a parent in the bound team', async () => {
+    const mine = createTask(db, { title: 'mine', status: 'todo', teamId: 'A' })
+    const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))
+    const res = await callText(client, 'create_subtask', { parentTaskId: mine.id, title: 'child' })
+    const child = JSON.parse(res.text) as { teamId: string; parentTaskId: string }
+    expect(child).toMatchObject({ teamId: 'A', parentTaskId: mine.id })
   })
 
   it('still permits the same writes INSIDE the bound team', async () => {

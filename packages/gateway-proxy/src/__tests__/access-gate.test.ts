@@ -147,30 +147,140 @@ describe('access gate — Secure cookie only over TLS', () => {
   })
 })
 
-describe('access gate — loopback /api/mcp/* exemption (so spawned runtimes still reach MCP)', () => {
-  const gate = createAccessGate({ token: TOKEN })
+describe('access gate — /api/mcp/* admits a runtime by its attach credential; the address can only refuse', () => {
+  // `authorizeRuntime` stands in for the server's real check (the attach token the
+  // server minted into the runtime's URL). What is under test here is when the
+  // gate asks it, and when it never does.
+  const consulted: string[] = []
+  const gate = createAccessGate({
+    token: TOKEN,
+    authorizeRuntime: (req) => {
+      consulted.push(req.url ?? '')
+      return (req.url ?? '').includes('attachToken=good')
+    },
+  })
 
   for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
-    it(`lets a cookieless /api/mcp/tasks through from loopback ${addr}`, () => {
+    it(`401s a cookieless, credential-less /api/mcp/tasks from loopback ${addr}`, () => {
+      // The old exemption let exactly this through: a loopback peer was taken to
+      // be the server's own runtime.
       const cap = mockRes()
-      // A spawned runtime: loopback peer, no cookie (token scrubbed from its env).
       const handled = gate.handleHttp(mockReq('/api/mcp/tasks', {}, addr), cap.res)
-      expect(handled).toBe(false) // passed through, not 401
+      expect(handled).toBe(true)
+      expect(cap.statusCode).toBe(401)
+    })
+  }
+
+  for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    it(`admits a cookieless /api/mcp/tasks the runtime check vouches for, from loopback ${addr}`, () => {
+      const cap = mockRes()
+      const req = mockReq('/api/mcp/tasks?attachToken=good', {}, addr)
+      expect(gate.handleHttp(req, cap.res)).toBe(false)
       expect(cap.statusCode).toBe(200)
     })
   }
 
-  it('still 401s a NON-loopback /api/mcp/tasks without a cookie', () => {
+  for (const addr of ['192.168.1.50', '203.0.113.7', '::ffff:10.0.0.5', undefined]) {
+    it(`refuses even a vouched-for credential from a non-loopback peer (${String(addr)})`, () => {
+      // A wide bind (HOST=0.0.0.0) takes connections from the network directly.
+      // A runtime always dials loopback, so a token arriving from anywhere else
+      // was lifted from a config, and it must be worth nothing there.
+      consulted.length = 0
+      const cap = mockRes()
+      const req = mockReq('/api/mcp/tasks?attachToken=good', {}, addr)
+      expect(gate.handleHttp(req, cap.res)).toBe(true)
+      expect(cap.statusCode).toBe(401)
+      expect(consulted).toEqual([])
+    })
+  }
+
+  it('401s a credential the runtime check rejects', () => {
     const cap = mockRes()
-    const handled = gate.handleHttp(mockReq('/api/mcp/tasks', {}, '203.0.113.7'), cap.res)
-    expect(handled).toBe(true)
+    const req = mockReq('/api/mcp/tasks?attachToken=forged', {}, '127.0.0.1')
+    expect(gate.handleHttp(req, cap.res)).toBe(true)
     expect(cap.statusCode).toBe(401)
   })
 
-  it('still 401s a loopback NON-mcp /api route (the exemption is /api/mcp/* only)', () => {
+  for (const [name, headers] of [
+    ['X-Forwarded-For', { 'x-forwarded-for': '203.0.113.7' }],
+    ['Forwarded', { forwarded: 'for=203.0.113.7' }],
+    ['X-Forwarded-Proto', { 'x-forwarded-proto': 'https' }],
+  ] as const) {
+    it(`refuses even a vouched-for credential on a proxied request (${name}): a replayed token`, () => {
+      // A runtime dials the loopback port directly, so its requests never carry a
+      // forwarding header. One that does came in through the proxy, with a token
+      // lifted from a runtime's config.
+      const cap = mockRes()
+      const req = mockReq('/api/mcp/tasks?attachToken=good', headers, '127.0.0.1')
+      expect(gate.handleHttp(req, cap.res)).toBe(true)
+      expect(cap.statusCode).toBe(401)
+    })
+  }
+
+  it('never consults the runtime check outside /api/mcp/*', () => {
+    consulted.length = 0
     const cap = mockRes()
-    const handled = gate.handleHttp(mockReq('/api/settings', {}, '127.0.0.1'), cap.res)
+    const handled = gate.handleHttp(
+      mockReq('/api/settings?attachToken=good', {}, '127.0.0.1'),
+      cap.res,
+    )
     expect(handled).toBe(true)
+    expect(cap.statusCode).toBe(401)
+    expect(consulted).toEqual([])
+  })
+
+  it('still accepts the operator cookie on /api/mcp/*, proxied or not', () => {
+    const variants: Record<string, string>[] = [{}, { 'x-forwarded-for': '203.0.113.7' }]
+    for (const headers of variants) {
+      const cap = mockRes()
+      const req = mockReq(
+        '/api/mcp/config',
+        { cookie: `clawboo_access=${TOKEN}`, ...headers },
+        '127.0.0.1',
+      )
+      expect(gate.handleHttp(req, cap.res)).toBe(false)
+    }
+  })
+
+  it('without authorizeRuntime, /api/mcp/* needs the cookie like every other route', () => {
+    const plain = createAccessGate({ token: TOKEN })
+    const cap = mockRes()
+    expect(
+      plain.handleHttp(mockReq('/api/mcp/tasks?attachToken=good', {}, '127.0.0.1'), cap.res),
+    ).toBe(true)
+    expect(cap.statusCode).toBe(401)
+  })
+})
+
+describe('access gate — /api/mcp/* behind a same-host reverse proxy', () => {
+  // nginx, Caddy or a Cloudflare Tunnel connector on the same box forwards every
+  // request to 127.0.0.1, so the socket peer of a request from ANYWHERE on the
+  // internet is loopback. The forwarding header the proxy adds is the only trace
+  // of the real client.
+  const gate = createAccessGate({ token: TOKEN })
+  const PROXIED: readonly [string, Record<string, string>][] = [
+    ['X-Forwarded-For', { 'x-forwarded-for': '203.0.113.7' }],
+    ['Forwarded', { forwarded: 'for=203.0.113.7;proto=https' }],
+    ['X-Real-IP', { 'x-real-ip': '203.0.113.7' }],
+  ]
+
+  for (const [name, headers] of PROXIED) {
+    it(`401s a cookieless /api/mcp/tasks from a remote client (loopback socket + ${name})`, () => {
+      const cap = mockRes()
+      const handled = gate.handleHttp(mockReq('/api/mcp/tasks', headers, '127.0.0.1'), cap.res)
+      expect(handled).toBe(true)
+      expect(cap.statusCode).toBe(401)
+    })
+  }
+
+  it('401s a proxied /api/mcp/config, the route that mints signed attach URLs', () => {
+    const cap = mockRes()
+    const req = mockReq(
+      '/api/mcp/config?server=tools&scopeAgentId=agent-1',
+      { 'x-forwarded-for': '203.0.113.7' },
+      '127.0.0.1',
+    )
+    expect(gate.handleHttp(req, cap.res)).toBe(true)
     expect(cap.statusCode).toBe(401)
   })
 })

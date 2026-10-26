@@ -106,6 +106,42 @@ const AWS_CRED_ENV_KEYS = new Set([
   'AWS_SESSION_TOKEN',
 ])
 
+const PROXY_ENV_KEYS = [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+]
+const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '::1']
+
+/**
+ * When a proxy is configured, keep this server's loopback port off it.
+ *
+ * A runtime's MCP attach URLs point at http://127.0.0.1:<port>, and they carry the
+ * attach token. Sent through a proxy, that token lands in a third party's logs,
+ * and a proxy that adds `X-Forwarded-For` (Squid does by default) gets every MCP
+ * call refused, because the access gate never accepts a runtime token on a
+ * forwarded request. The run would lose its Tasks, Memory and Tools servers with
+ * nothing reporting why. Not every HTTP client skips loopback on its own, so the
+ * exclusion is made explicit.
+ *
+ * ADDS ONLY. Both spellings get the union of whatever either already lists plus the
+ * loopback hosts, because clients disagree about which one wins: writing just one
+ * would let a client that prefers it lose the operator's own exclusions.
+ */
+function keepLoopbackOffProxy(env: NodeJS.ProcessEnv): void {
+  if (!PROXY_ENV_KEYS.some((key) => env[key])) return
+  const listed = [env['NO_PROXY'], env['no_proxy']]
+    .flatMap((value) => (value ?? '').split(','))
+    .map((host) => host.trim())
+    .filter(Boolean)
+  const merged = [...new Set([...listed, ...LOOPBACK_HOSTS])].join(',')
+  env['NO_PROXY'] = merged
+  env['no_proxy'] = merged
+}
+
 function isTruthyFlag(v: string | undefined): boolean {
   if (v === undefined) return false
   const s = v.trim().toLowerCase()
@@ -126,7 +162,8 @@ function isScrubbedSecret(key: string, opts: { keepAwsCreds: boolean }): boolean
  * curated set of the operator's third-party shell secrets, then merge the caller's explicit
  * grant (provider keys / isolated HOME) on top — so a granted key is always restored even if
  * a same-named key was scrubbed. Infra config (PATH/HOME/PYTHONUSERBASE/proxy/AWS_REGION) and
- * the ambient provider-auth the CLIs read (OPENAI_API_KEY / GEMINI_API_KEY / …) are preserved.
+ * the ambient provider-auth the CLIs read (OPENAI_API_KEY / GEMINI_API_KEY / …) are preserved;
+ * a configured proxy additionally gets loopback added to NO_PROXY (see keepLoopbackOffProxy).
  */
 export function buildChildEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   // Keep AWS creds only when the operator explicitly runs Claude Code against Bedrock.
@@ -140,5 +177,6 @@ export function buildChildEnv(extra: Record<string, string | undefined> = {}): N
   for (const [key, value] of Object.entries(extra)) {
     if (value !== undefined) env[key] = value
   }
+  keepLoopbackOffProxy(env)
   return env
 }

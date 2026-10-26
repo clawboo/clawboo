@@ -20,10 +20,12 @@
 // error: the claimed identity is refused (fail closed on identity) while a bare
 // external attach — which never carried scope — keeps working unchanged.
 //
-// This is deliberately not a session or expiry mechanism. The threat is a
-// runtime editing its own config to escalate, not a network attacker: the
-// surface is loopback-only and the signature stops the only party who can reach
-// it from minting an identity it was not given.
+// This is deliberately not a session or expiry mechanism. The threat a scope
+// signature answers is a runtime editing its own config to escalate. Whether a
+// caller may reach the surface AT ALL is a separate question, answered by the
+// access token at the bottom of this file: "loopback-only" turned out not to
+// hold, because a same-host reverse proxy delivers every remote request from
+// 127.0.0.1.
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
@@ -82,6 +84,34 @@ export function verifyAttachProvenance(
   sig: string,
 ): boolean {
   return sameHex(signAttachProvenance(secret, prov), sig)
+}
+
+/** Its own domain tag, with none of the separators `canonical()` and
+ *  `canonicalProvenance()` always contain, so the access token can never verify
+ *  as a scope or provenance signature, or the reverse. */
+const ACCESS_DOMAIN = 'access-v1'
+
+/**
+ * The control-plane ACCESS token: proof that a request comes from a runtime this
+ * server spawned, rather than from anything that can reach the port.
+ *
+ * A scope signature cannot answer that. It falls back to UNBOUND when absent, by
+ * design, so an unsigned attach still gets served. The access gate used to answer
+ * it from the TCP peer address (loopback ⇒ our own runtime), and a same-host
+ * reverse proxy defeats that, since every request it forwards arrives from
+ * 127.0.0.1. This token answers it instead. The server writes it into every attach
+ * URL it mints, scoped or not, and nothing else holds it.
+ *
+ * One value per install, derived from the secret so the secret itself never
+ * leaves the server. Stateless for the same reasons as the scope signature.
+ */
+export function signAttachAccess(secret: string): string {
+  return createHmac('sha256', secret).update(ACCESS_DOMAIN).digest('hex')
+}
+
+/** Constant-time; a malformed or truncated token is simply false, never a throw. */
+export function verifyAttachAccess(secret: string, token: string): boolean {
+  return sameHex(signAttachAccess(secret), token)
 }
 
 function sameHex(expectedHex: string, sig: string): boolean {

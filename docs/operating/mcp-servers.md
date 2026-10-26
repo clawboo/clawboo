@@ -48,15 +48,18 @@ curl 'http://127.0.0.1:18790/api/mcp/config?runtime=claude-code&server=tasks&tra
   "config": {
     "id": "clawboo-tasks",
     "transport": "http",
-    "snippet": "claude mcp add --transport http clawboo-tasks http://127.0.0.1:18790/api/mcp/tasks",
+    "snippet": "claude mcp add --transport http clawboo-tasks 'http://127.0.0.1:18790/api/mcp/tasks?attachToken=<token>'",
     "structured": {
-      "clawboo-tasks": { "type": "http", "url": "http://127.0.0.1:18790/api/mcp/tasks" }
+      "clawboo-tasks": {
+        "type": "http",
+        "url": "http://127.0.0.1:18790/api/mcp/tasks?attachToken=<token>"
+      }
     }
   }
 }
 ```
 
-`snippet` is the human copy-paste line; `structured` is the same attachment as an object (for programmatic config, e.g. Claude Code's inline `mcpServers`). The query params:
+`snippet` is the human copy-paste line; `structured` is the same attachment as an object (for programmatic config, e.g. Claude Code's inline `mcpServers`). Every HTTP URL carries an `attachToken` (64 hex characters, the same value on every call for a given install), which is what admits the attached agent on an install with the access gate on; see [The access gate and the attach token](#the-access-gate-and-the-attach-token). With the gate on, this endpoint itself needs the operator cookie: `curl -b "clawboo_access=$STUDIO_ACCESS_TOKEN" '…/api/mcp/config?…'`. The query params:
 
 | Param       | Default       | Values                                                                                                    |
 | ----------- | ------------- | --------------------------------------------------------------------------------------------------------- |
@@ -72,11 +75,13 @@ For `transport=http`, the base URL in the snippet is the server's **own bound po
 
 ### 2a. Attach over HTTP
 
-Point the agent's MCP client at `<clawboo-base>/api/mcp/<server>`. For Claude Code:
+Point the agent's MCP client at the URL from the snippet, `<clawboo-base>/api/mcp/<server>?attachToken=<token>`. For Claude Code:
 
 ```bash
-claude mcp add --transport http clawboo-tasks http://127.0.0.1:18790/api/mcp/tasks
+claude mcp add --transport http clawboo-tasks 'http://127.0.0.1:18790/api/mcp/tasks?attachToken=<token>'
 ```
+
+Keep the URL quoted: unquoted, zsh treats the `?` as a glob, and a scoped URL's `&` ends the command in any shell. Without the token the URL still works while the access gate is off, but it `401`s the moment you set `STUDIO_ACCESS_TOKEN`.
 
 The agent then runs `initialize` (which mints an `mcp-session-id`), `tools/list`, and `tools/call` against that URL. The session is stateful: subsequent POSTs and the GET event stream reuse the same `mcp-session-id`.
 
@@ -97,8 +102,10 @@ Set `CLAWBOO_DB_PATH` on a stdio attach so the bin opens the **same** database t
 The `memory` server is the shared tier every runtime reads and writes. When attached for a specific run, bind its **visibility scope** so the agent can neither read another team's facts nor mis-tag a save. The scope rides the attach URL as query params:
 
 ```
-http://127.0.0.1:18790/api/mcp/memory?scopeTeamId=<team-id>&scopeAgentId=<agent-id>
+http://127.0.0.1:18790/api/mcp/memory?scopeTeamId=<team-id>&scopeAgentId=<agent-id>&scopeSig=<sig>&attachToken=<token>
 ```
+
+Do not assemble this by hand. Ask `GET /api/mcp/config?server=memory&scopeTeamId=<team-id>&scopeAgentId=<agent-id>` for it: a scope is honoured only with the `scopeSig` the server signs over it (an unsigned one is served unbound), and the `attachToken` is what gets the request past the access gate.
 
 | Param           | Effect                              |
 | --------------- | ----------------------------------- |
@@ -113,36 +120,39 @@ When the scope params are present, the MCP session is bound at `initialize` and 
 The `teamchat` server lets an agent post into a team room. To stop an agent from posting **as a teammate it is not**, the author identity is bound from the attach URL, written by Clawboo, not passed in tool args:
 
 ```
-http://127.0.0.1:18790/api/mcp/teamchat?roomTeamId=<team-id>&postAuthorAgentId=<agent-id>
+http://127.0.0.1:18790/api/mcp/teamchat?roomTeamId=<team-id>&postAuthorAgentId=<agent-id>&scopeSig=<sig>&attachToken=<token>
 ```
+
+As with Memory, mint it with `GET /api/mcp/config?server=teamchat&scopeTeamId=<team-id>&scopeAgentId=<agent-id>` rather than writing it out.
 
 | Param               | Effect                                                           |
 | ------------------- | ---------------------------------------------------------------- |
 | `roomTeamId`        | The team room this attachment posts into (resolved to a room id) |
 | `postAuthorAgentId` | The author every post from this session is attributed to         |
 
-Because the URL is Clawboo-written config and the binding is read server-side at session init, a `team_chat_post` tool call cannot override the author. When **both** params are present the session is bound; otherwise the attachment is unbound (the raw stdio bin / external attach passes identity in tool args). Both params are required for binding; supplying only one leaves it unbound.
+Because the URL is Clawboo-written config and the binding is read server-side at session init, a `team_chat_post` tool call cannot override the author. When **both** params are present and signed, the session is bound. Otherwise an HTTP attachment is served no TeamChat tools at all, because its author and room could only come from tool args; supplying only one param counts as unbound. Only the raw stdio bin, where the operator is the caller, passes identity in tool args.
 
 ## Options / variations
 
-| Choice                    | stdio                                                                   | HTTP                                              |
-| ------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------- |
-| Who owns the process      | The consuming agent (spawns + kills the bin)                            | Clawboo (long-running, in-process)                |
-| Database path             | Bin default `~/.openclaw/clawboo/clawboo.db`; **set `CLAWBOO_DB_PATH`** | Server's `~/.clawboo/clawboo.db` (always correct) |
-| Access gate               | n/a (no HTTP)                                                           | Exempt on loopback for `/api/mcp/*` (see below)   |
-| Memory / TeamChat binding | Pass identity in tool args (unbound)                                    | Bind via URL query params (recommended)           |
-| Best for                  | Same-machine agent owning its lifecycle                                 | Separate process / container                      |
+| Choice                    | stdio                                                                   | HTTP                                               |
+| ------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
+| Who owns the process      | The consuming agent (spawns + kills the bin)                            | Clawboo (long-running, in-process)                 |
+| Database path             | Bin default `~/.openclaw/clawboo/clawboo.db`; **set `CLAWBOO_DB_PATH`** | Server's `~/.clawboo/clawboo.db` (always correct)  |
+| Access gate               | n/a (no HTTP)                                                           | Attach token in the URL, or the cookie (see below) |
+| Memory / TeamChat binding | Pass identity in tool args (unbound)                                    | Signed URL params (TeamChat requires them)         |
+| Best for                  | Same-machine agent owning its lifecycle                                 | Separate process / container                       |
 
-## The access gate and loopback
+## The access gate and the attach token
 
-Clawboo's [access gate](/operating/security) is the only auth on a non-loopback bind. It blocks `/api/*` without a valid cookie when a `STUDIO_ACCESS_TOKEN` is set. The gate has one exemption for the MCP control plane:
+Clawboo's [access gate](/operating/security) is the only auth on a non-loopback bind. It blocks `/api/*` without a valid cookie when a `STUDIO_ACCESS_TOKEN` is set. The MCP control plane has one alternative credential, because a runtime Clawboo spawns has its environment scrubbed of the access token and cannot present the cookie:
 
-- A request to `/api/mcp/*` from a **loopback** peer (`127.0.0.1`, `::1`, or `::ffff:127.0.0.1`) is let through without a cookie. This is what lets a runtime Clawboo spawned on the same machine attach its MCP client; its environment is scrubbed of the token by design.
+- A cookieless request to one of the four transport routes (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`) is let through when its URL carries a valid `attachToken`. Clawboo writes that token into every attach URL it mints, for its own runtimes and in the `GET /api/mcp/config` snippet, as an HMAC derived from a per-install secret that never leaves the server.
+- The token only counts on a request that dialed the loopback port directly. It is refused from another host, and on a request that came through any proxy (one carrying `Forwarded`, `X-Forwarded-*` or `X-Real-IP`). Attached agents dial loopback directly, so this only ever stops a token that has leaked and is being replayed from elsewhere.
+- `/api/mcp/config` mints signed attach URLs, so it always needs the cookie, as does every other `/api/*` route.
 - The prefix test is **case-folded**: the gate lower-cases the pathname before matching, so an uppercased `/API/mcp/` (or `/API/settings`) cannot evade the gate.
-- A **non-loopback** `/api/mcp/*` request still requires the cookie; the exemption is loopback-only, and a remote client cannot forge a loopback source on a real TCP handshake.
 
 <Info>
-The loopback exemption is keyed on the TCP peer address, not on a header. If you expose Clawboo to a network (a non-loopback bind), set `STUDIO_ACCESS_TOKEN` and attach over HTTP **with** the access cookie (or keep the attaching agent on loopback). See [Security](/operating/security) and [self-host securely](/guides/self-host-securely).
+The gate admits by credential; the source address can only refuse. Earlier releases admitted any `/api/mcp/*` request from a loopback TCP peer, and a reverse proxy on the same machine delivers every remote request from loopback, which put the control plane in reach of anyone who could reach the proxy. If you expose Clawboo through a proxy, set `STUDIO_ACCESS_TOKEN` and deny the four MCP server routes at the proxy too. See [Security](/operating/security) and [self-host securely](/guides/self-host-securely).
 </Info>
 
 ## Verify it worked
@@ -158,7 +168,7 @@ The loopback exemption is keyed on the TCP peer address, not on a header. If you
 </Warning>
 
 <Warning>
-**`401` attaching over HTTP.** A `STUDIO_ACCESS_TOKEN` is set and the request is non-loopback (or the cookie is missing). Either attach from loopback (the `/api/mcp/*` exemption applies) or send the access cookie. An uppercased path will not bypass the gate; it is case-folded.
+**`401` attaching over HTTP.** A `STUDIO_ACCESS_TOKEN` is set and the attach URL carries no valid `attachToken` (or the cookie is missing). Re-copy the URL from `GET /api/mcp/config`, which always includes the token, or send the access cookie. A token is also refused from another host or through any proxy, so point the agent at the loopback port directly; if the agent has `HTTP_PROXY` set, add `127.0.0.1` to its `NO_PROXY`. An uppercased path will not bypass the gate; it is case-folded.
 </Warning>
 
 <Danger>
@@ -172,5 +182,5 @@ The loopback exemption is keyed on the TCP peer address, not on a header. If you
 - [Shared memory](/concepts/memory): the shared tier the `memory` server exposes
 - [Peer chat](/concepts/peer-chat): the team rooms the `teamchat` server posts into
 - [The board](/concepts/the-board): what the `tasks` server reads and mutates
-- [Security](/operating/security): the access gate, loopback exemption, and safe exposure
+- [Security](/operating/security): the access gate, the attach token, and safe exposure
 - [Attach Clawboo's MCP to an external agent](/guides/attach-mcp-external-agent): a worked cookbook example

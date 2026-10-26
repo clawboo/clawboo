@@ -38,8 +38,21 @@ import { authRetryAfterMs, isAuthConnectError } from '@clawboo/gateway-client'
 import { createLogger } from '@clawboo/logger'
 import { mcpHttpUrl } from '@clawboo/mcp'
 
+import { getMcpAttachSecret } from '../mcpAttachSecret'
+import { isLoopbackHost } from '../resolveHost'
 import { applyExecApprovalPolicy, isExecAsk, type ExecAsk } from './execApprovalPolicy'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+
+/** Is the configured Gateway on this machine? Judged by its URL's host, with the
+ *  same notion of loopback the bind check uses (`localhost`, `::1`, 127.0.0.0/8). */
+function isLocalGateway(gatewayUrl: string | undefined): boolean {
+  if (!gatewayUrl) return false
+  try {
+    return isLoopbackHost(new URL(gatewayUrl).hostname)
+  } catch {
+    return false
+  }
+}
 
 // ── The subset of GatewayClient this source uses (the real client satisfies it;
 //    tests pass a fake). ──
@@ -359,8 +372,21 @@ export class OpenClawAgentSource implements AgentSource {
       const denyOk =
         desiredDeny.length === currentDeny.length &&
         desiredDeny.every((t) => currentDeny.includes(t))
+      // UNSCOPED but never anonymous: the access gate refuses a cookieless
+      // /api/mcp/* call that lacks the attach token, so the secret goes in even
+      // though this URL signs no identity (see the TOOLS paragraph below). A
+      // config an older build registered has no token; the URL compare below
+      // sees the difference and re-patches it on the next connect.
+      //
+      // Only for a Gateway on THIS machine, though. The URL points at 127.0.0.1,
+      // which a remote Gateway resolves to itself, so the token could do it no
+      // good there and would only be a credential sitting in another host's
+      // config. A remote Gateway keeps the bare URL it always had.
+      const attachScope = isLocalGateway(this.deps.loadSettings().gatewayUrl)
+        ? { attachSecret: getMcpAttachSecret(db) }
+        : undefined
       const entry = (server: 'memory' | 'tasks' | 'tools') => ({
-        url: mcpHttpUrl(baseUrl, server),
+        url: mcpHttpUrl(baseUrl, server, attachScope),
         transport: 'streamable-http' as const,
       })
       // TeamChat is DELIBERATELY NOT registered for OpenClaw. The Gateway config

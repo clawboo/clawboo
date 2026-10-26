@@ -75,7 +75,7 @@ Create a board task. Setting `parentTaskId` makes this a subtask: the per-parent
 
 ### `create_subtask`
 
-Create a subtask under a parent (inherits the parent's team). Same creation caps and tool-errors as a parented `create_task`.
+Create a subtask under a parent (inherits the parent's team). Same creation caps and tool-errors as a parented `create_task`, including its team guard: on a team-bound session, a parent from another team is refused with the same `not found` a read would get.
 
 ```ts
 { parentTaskId: string; title: string; description?: string }
@@ -279,12 +279,12 @@ These builtins re-express real capabilities so the broker has tools to gate, ins
 `createTeamChatServer(db, opts?)` → `clawboo-teamchat`. Two tools that let every runtime, regardless of dialect, post to and listen on the shared team room over the `team_chat` substrate, plus a third, `team_delegate`, pushed onto the tool list only on orchestrator-driven team runs. The board stays canonical; a post is narration, never a board mutation (this server has no board access).
 
 <Info>
-**The `boundIdentity` binding (anti-spoof).** When the server is constructed with `opts.boundIdentity`, the post author and room are authoritative, taken from the binding, never from tool args. A runtime may pass `authorAgentId` / `teamId` / `roomId` in args; they are ignored. The binding rides the clawboo-written attach URL (`roomTeamId` / `postAuthorAgentId`), so a runtime cannot post as a peer it is not. When unbound (the raw stdio bin / external attach), the model must pass `authorAgentId` + `teamId` in args; the default room is `team:<teamId>`.
+**The `boundIdentity` binding (anti-spoof).** When the server is constructed with `opts.boundIdentity`, the post author and room are authoritative, taken from the binding, never from tool args. A runtime may pass `authorAgentId` / `teamId` / `roomId` in args; they are ignored. The binding rides the clawboo-written attach URL (`roomTeamId` / `postAuthorAgentId`), so a runtime cannot post as a peer it is not. When unbound on the raw stdio bin, the model must pass `authorAgentId` + `teamId` in args; the default room is `team:<teamId>`. An **HTTP** session without a verified binding is served neither tool: identity from args would let it read any room and post as any agent.
 </Info>
 
 ### `team_chat_post`
 
-Post a message to your team room as a named peer. Returns `{ posted: { seq, roomId, authorAgentId } }`; a tool-error if the text is empty, or (unbound) if no `authorAgentId` + `teamId` were supplied.
+Post a message to your team room as a named peer. Returns `{ posted: { seq, roomId, authorAgentId } }`; a tool-error if the text is empty, or (unbound stdio bin) if no `authorAgentId` + `teamId` were supplied.
 
 ```ts
 {
@@ -366,7 +366,7 @@ Over HTTP, the authoritative bindings ride query params on the attach URL the se
 - **Tasks**: `scopeTeamId` / `scopeAgentId` bind the run's board reads to its team (`boundScope`); `scopeAgentId` also carries the mid-run inbox piggyback.
 - **Tools**: `scopeTeamId` / `scopeAgentId` (with `scopeSig`) identify the calling agent, because a connector tool reaches an agent only through an agent-scoped grant. An unidentified attach is served the builtin tools only.
 
-When these params are absent, the server is unbound, and what that means splits by transport. For the **stdio bins** the model supplies scope/identity in args, as before, because the operator is the caller. For an **HTTP** attach the caller is unidentified instead, and identity taken from tool args is refused: Memory ignores `scopeTeamId`/`scopeAgentId` and works on the global tier only, Tasks does not serve `claim_task` or `assign_task`, and `add_comment` drops both `authorAgentId` and `authorType`. The anonymous board writes (create, release, status, block, unblock, link) are unaffected, because they name no agent. Every OpenClaw agent currently attaches this way.
+When these params are absent, the server is unbound, and what that means splits by transport. For the **stdio bins** the model supplies scope/identity in args, as before, because the operator is the caller. For an **HTTP** attach the caller is unidentified instead, and identity taken from tool args is refused: Memory ignores `scopeTeamId`/`scopeAgentId` and works on the global tier only, Tasks does not serve `claim_task` or `assign_task`, `add_comment` drops both `authorAgentId` and `authorType`, and TeamChat serves no tools at all, because both of its tools need an author and a room. The anonymous board writes (create, release, status, block, unblock, link) are unaffected, because they name no agent. Every OpenClaw agent currently attaches this way.
 
 ## See also
 
