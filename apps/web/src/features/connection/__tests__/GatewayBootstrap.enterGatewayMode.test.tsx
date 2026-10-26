@@ -91,4 +91,37 @@ describe('enterGatewayMode', () => {
     expect(useFleetStore.getState().agents.map((a) => a.id)).toContain('a1')
     expect(useConnectionStore.getState().status).toBe('connected')
   })
+
+  it('leaves out an agent deleted while the Gateway was down, and never homes it', async () => {
+    const assigned: string[] = []
+    server.use(
+      http.get('/api/agents', () =>
+        HttpResponse.json({
+          defaultId: 'main',
+          mainKey: 'main',
+          agents: [],
+          stale: false,
+          pendingDeleteIds: ['gone'],
+        }),
+      ),
+      http.get('/api/boo-zero/display-name/:id', () => HttpResponse.json({ name: 'Boo Zero' })),
+      http.post('/api/agents/sync', () => HttpResponse.json({ ok: true })),
+      http.post('/api/teams', () =>
+        HttpResponse.json({
+          team: { id: 't1', name: 'Default', icon: '👻', color: '#059669' },
+        }),
+      ),
+      http.post('/api/teams/:id/agents', async ({ request }) => {
+        assigned.push(((await request.json()) as { agentId: string }).agentId)
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    // The Gateway still lists 'gone' until the server's next sync deletes it there.
+    const client = fakeClient([{ id: 'main' }, { id: 'kept' }, { id: 'gone' }])
+
+    await enterGatewayMode(client, 'ws://localhost:18789')
+
+    expect(useFleetStore.getState().agents.map((a) => a.id)).toEqual(['main', 'kept'])
+    expect(assigned).toEqual(['kept'])
+  })
 })

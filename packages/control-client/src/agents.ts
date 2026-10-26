@@ -20,6 +20,9 @@ export interface AgentListResult {
   agents: AgentRecord[]
   stale: boolean
   lastSyncedAt: number | null
+  /** Gateway ids of OpenClaw agents deleted while the Gateway was down; the Gateway
+   *  still lists them until the server's next sync deletes them there. */
+  pendingDeleteIds?: string[]
 }
 
 async function jsonOrThrow<T>(res: Response, what: string): Promise<T> {

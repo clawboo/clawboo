@@ -20,6 +20,7 @@ import {
   agentsCreatePOST,
   agentsDELETE,
   agentsCleanupPOST,
+  agentsSyncPOST,
   agentFileGET,
   agentFilePUT,
   agentSessionsGET,
@@ -146,6 +147,46 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     const after = mockRes()
     await agentGET(req({ params: { agentId: 'a1' } }), after.res)
     expect(after.status()).toBe(404)
+  })
+
+  it('an OpenClaw agent deleted while disconnected stays deleted when the Gateway list returns', async () => {
+    const del = mockRes()
+    await agentsDELETE(req({ params: { agentId: 'a1' } }), del.res)
+    expect(del.status()).toBe(200)
+    expect(del.body()).toEqual({ ok: true, upstreamDeleted: false, upstreamDeletePending: true })
+
+    // A browser reading the Gateway's own list learns to leave a1 out.
+    const list = mockRes()
+    await agentsListGET(req(), list.res)
+    expect((list.body() as { pendingDeleteIds: string[] }).pendingDeleteIds).toEqual(['a1'])
+
+    // The Gateway still holds a1. Its list reaches SQLite on the next connect,
+    // through the browser push (this route) or the server's own sync.
+    const sync = mockRes()
+    await agentsSyncPOST(
+      req({
+        body: {
+          defaultId: 'main',
+          mainKey: 'main',
+          agents: [{ id: 'main' }, { id: 'a1', identity: { name: 'Research Boo' } }],
+        },
+      }),
+      sync.res,
+    )
+    expect(sync.status()).toBe(200)
+
+    const after = mockRes()
+    await agentGET(req({ params: { agentId: 'a1' } }), after.res)
+    expect(after.status()).toBe(404)
+  })
+
+  it('a disconnected DELETE of an id with no row owes the Gateway nothing', async () => {
+    const del = mockRes()
+    await agentsDELETE(req({ params: { agentId: 'ghost' } }), del.res)
+    expect(del.body()).toEqual({ ok: true, upstreamDeleted: false, upstreamDeletePending: false })
+    const list = mockRes()
+    await agentsListGET(req(), list.res)
+    expect((list.body() as { pendingDeleteIds: string[] }).pendingDeleteIds).toEqual([])
   })
 
   it('GET /api/agents/registry/health always 200 (reports disconnected)', async () => {

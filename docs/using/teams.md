@@ -170,6 +170,8 @@ Both delete actions ask you to confirm first. **Delete team only** keeps your ag
 `DELETE /api/teams/:id` also cleans up the team's durable `settings` rows: `team-rules:<teamId>` and `team-onboarding:<teamId>`, and the `boo_zero_team_briefs` row FK-cascades. Deleting a team therefore discards its rules, onboarding state, and Boo Zero brief permanently. There is no migration ladder and no undo; archive instead if you only want to hide it.
 </Danger>
 
+An OpenClaw agent removed by **Delete with agents** while its Gateway is down is gone from clawboo at once and is deleted from the Gateway the next time the server connects to it. It does not come back into a team in the meantime. See [Delete a Boo](/using/agents#delete-a-boo).
+
 ## Verify it worked
 
 - `GET /api/teams` returns the team with an `agentCount` (a subquery over `agents.team_id`). A freshly created empty team reports `agentCount: 0`; a deployed template reports its member count. The response also includes an `assignments` array (`{ agentId, teamId }`) so the client can patch its fleet store.

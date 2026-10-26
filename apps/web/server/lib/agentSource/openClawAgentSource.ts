@@ -34,14 +34,14 @@ import type {
   UpdateAgentInput,
 } from '@clawboo/agent-registry'
 import type { OpenClawGatewayClient } from '@clawboo/adapter-openclaw'
-import { authRetryAfterMs, isAuthConnectError } from '@clawboo/gateway-client'
+import { authRetryAfterMs, GatewayResponseError, isAuthConnectError } from '@clawboo/gateway-client'
 import { createLogger } from '@clawboo/logger'
 import { mcpHttpUrl } from '@clawboo/mcp'
 
 import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { isLoopbackHost } from '../resolveHost'
 import { applyExecApprovalPolicy, isExecAsk, type ExecAsk } from './execApprovalPolicy'
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, like, sql } from 'drizzle-orm'
 
 /** Is the configured Gateway on this machine? Judged by its URL's host, with the
  *  same notion of loopback the bind check uses (`localhost`, `::1`, 127.0.0.0/8). */
@@ -119,6 +119,37 @@ export const SETTING_DEFAULT_ID = 'agent-source:openclaw:defaultId'
 const SETTING_MAIN_KEY = 'agent-source:openclaw:mainKey'
 const SETTING_SCOPE = 'agent-source:openclaw:scope'
 const SETTING_LAST_SYNCED = 'agent-source:openclaw:lastSyncedAt'
+// One row per agent deleted while the Gateway was unreachable, keyed by its Gateway
+// id (what every list entry carries) and holding the Clawboo id. The sync deletes
+// the agent upstream and never re-creates its row while the key exists; a list
+// without the agent, or a Gateway that refuses the delete, clears it.
+const PENDING_DELETE_PREFIX = 'agent-source:openclaw:pendingDelete:'
+
+/** The Gateway ids of agents deleted in Clawboo whose Gateway delete is still owed. */
+export function pendingUpstreamDeletes(db: ClawbooDb): Set<string> {
+  const rows = db
+    .select({ key: settings.key })
+    .from(settings)
+    .where(like(settings.key, `${PENDING_DELETE_PREFIX}%`))
+    .all()
+  return new Set(rows.map((r) => r.key.slice(PENDING_DELETE_PREFIX.length)))
+}
+
+function clearPendingDelete(db: ClawbooDb, gatewayId: string): void {
+  db.delete(settings)
+    .where(eq(settings.key, PENDING_DELETE_PREFIX + gatewayId))
+    .run()
+}
+
+/** An answer the Gateway will give again on every retry (it refuses to delete its
+ *  only agent, or one that owns shared credentials), as opposed to a transport
+ *  failure worth retrying. */
+function isDeleteRefusal(err: unknown): boolean {
+  return (
+    err instanceof GatewayResponseError &&
+    (err.code === 'INVALID_REQUEST' || err.retryable === false)
+  )
+}
 
 const RESYNC_DEBOUNCE_MS = 750
 const BACKOFF_BASE_MS = 2_000
@@ -664,12 +695,16 @@ export class OpenClawAgentSource implements AgentSource {
     if (!this.client || !this.isConnected()) {
       throw new Error('gateway_disconnected')
     }
+    const deleted = await this.flushPendingDeletes(this.client)
     const result = await this.client.agents.list()
-    const upserted = this.upsertFromList(result.agents, {
-      defaultId: result.defaultId ?? '',
-      mainKey: (result.mainKey ?? '').trim() || 'main',
-      scope: result.scope ?? '',
-    })
+    const upserted = this.upsertFromList(
+      result.agents.filter((a) => !deleted.has(a.id)),
+      {
+        defaultId: result.defaultId ?? '',
+        mainKey: (result.mainKey ?? '').trim() || 'main',
+        scope: result.scope ?? '',
+      },
+    )
     const sync: SyncResult = {
       upserted: upserted.upserted,
       archived: upserted.archived,
@@ -678,6 +713,50 @@ export class OpenClawAgentSource implements AgentSource {
     }
     this.emit({ kind: 'sync-complete', at: sync.at, result: sync })
     return sync
+  }
+
+  /** Sends the Gateway deletes owed for agents removed while it was down. A
+   *  transport failure keeps the tombstone for the next sync, and until then
+   *  upsertFromList keeps the agent out of SQLite. A refusal drops it, so the
+   *  agent comes back on this same sync. Returns the Gateway ids it deleted. */
+  private async flushPendingDeletes(client: OpenClawClientLike): Promise<Set<string>> {
+    const db = this.db()
+    const deleted = new Set<string>()
+    for (const gatewayId of pendingUpstreamDeletes(db)) {
+      try {
+        await client.agents.delete(gatewayId)
+        clearPendingDelete(db, gatewayId)
+        deleted.add(gatewayId)
+      } catch (err) {
+        if (isDeleteRefusal(err)) {
+          clearPendingDelete(db, gatewayId)
+          this.log(
+            'warn',
+            { agentId: gatewayId, err: String(err) },
+            'agent-source: the Gateway refused a delete made while it was down; the agent is back',
+          )
+        } else {
+          this.log(
+            'warn',
+            { agentId: gatewayId, err: String(err) },
+            'agent-source: deferred delete failed; retrying on the next sync',
+          )
+        }
+      }
+    }
+    return deleted
+  }
+
+  /** Records that an OpenClaw agent was deleted in Clawboo while the Gateway was
+   *  down, so the next sync deletes it upstream instead of re-creating its row.
+   *  Call it BEFORE the local row is removed: the Gateway id is read from the row.
+   *  Returns false (and records nothing) when there is no OpenClaw row. */
+  deferUpstreamDelete(id: string): boolean {
+    const db = this.db()
+    const row = db.select().from(agents).where(eq(agents.id, id)).get()
+    if (!row || row.sourceId !== 'openclaw') return false
+    setSetting(db, PENDING_DELETE_PREFIX + (row.sourceAgentId ?? row.gatewayId ?? id), id)
+    return true
   }
 
   /** The pure upsert: GATEWAY-OWNED columns only in the `set` clause; SQLite-native
@@ -691,11 +770,17 @@ export class OpenClawAgentSource implements AgentSource {
     const now = Date.now()
     let archived = 0
 
+    const pending = pendingUpstreamDeletes(db)
+
     db.transaction((tx) => {
       const liveIds = new Set<string>()
+      const listedIds = new Set<string>()
       for (const entry of entries) {
         const id = entry.id
         if (!id) continue
+        listedIds.add(id)
+        // Deleted in Clawboo while the Gateway was down; the delete is still owed.
+        if (pending.has(id)) continue
         liveIds.add(id)
         const displayName = entry.identity?.name?.trim() || entry.name?.trim() || id
         const identityJson = JSON.stringify(entry.identity ?? {})
@@ -743,6 +828,19 @@ export class OpenClawAgentSource implements AgentSource {
           .run()
         archived = missing.length
         for (const id of missing) this.emit({ kind: 'agent-archived', at: now, agentId: id })
+      }
+
+      // A tombstoned agent the Gateway no longer lists needs no delete.
+      const settled = [...pending].filter((id) => !listedIds.has(id))
+      if (settled.length > 0) {
+        tx.delete(settings)
+          .where(
+            inArray(
+              settings.key,
+              settled.map((id) => PENDING_DELETE_PREFIX + id),
+            ),
+          )
+          .run()
       }
 
       // List-level metadata (inline upsert — `tx` isn't typed as ClawbooDb so we
@@ -880,6 +978,9 @@ export class OpenClawAgentSource implements AgentSource {
     const created = await client.agents.create({ name: input.name, workspace })
     const agentId = created.agentId.trim()
     if (!agentId) throw new Error('Gateway did not return an agentId for the created agent.')
+    // A Gateway that reuses the id of an agent deleted while it was down must not
+    // have the new agent hidden, or deleted by a resync, because of the old tombstone.
+    clearPendingDelete(this.db(), agentId)
 
     // EVERY OpenClaw agent is told how to open a web page, whoever created it.
     //

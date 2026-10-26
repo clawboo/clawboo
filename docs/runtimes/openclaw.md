@@ -49,7 +49,7 @@ A headless Node connection can't use the browser's `crypto.subtle` device-auth p
 - The server presents an `Origin` of the gateway host (`http(s)://<gateway-host>`). A headless Node WebSocket sends no `Origin` by default, which the Gateway rejects with `CONTROL_UI_ORIGIN_NOT_ALLOWED`; Clawboo injects the `ws` package's WebSocket (which honours a custom `origin`) to satisfy the check.
 
 <Info>
-If the server connection is down, reads still serve SQLite (the agent list renders, flagged `stale: true`), but writes 503. `GET /api/agents` returns `{ defaultId, mainKey, agents, stale, lastSyncedAt }`; agent-file `GET`/`PUT` and session reads return `503 { "error": "gateway_disconnected" }`. See [Agents API](/reference/rest-api/agents).
+If the server connection is down, reads still serve SQLite (the agent list renders, flagged `stale: true`), but writes 503. `GET /api/agents` returns `{ defaultId, mainKey, agents, stale, lastSyncedAt, pendingDeleteIds }`; agent-file `GET`/`PUT` and session reads return `503 { "error": "gateway_disconnected" }`. See [Agents API](/reference/rest-api/agents).
 </Info>
 
 ## Channels

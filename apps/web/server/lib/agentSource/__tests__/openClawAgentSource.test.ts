@@ -18,6 +18,7 @@ import { carriesAttachToken } from '../../../api/mcp'
 import { getDb, resetDb } from '../../db'
 import {
   OpenClawAgentSource,
+  pendingUpstreamDeletes,
   type AgentListEntryLike,
   type OpenClawClientLike,
 } from '../openClawAgentSource'
@@ -264,6 +265,163 @@ describe('OpenClawAgentSource', () => {
     const revived = await src.getAgent('a2')
     expect(revived?.archivedAt).toBeNull()
     await src.stop()
+  })
+
+  describe('an agent deleted while the Gateway was down', () => {
+    // What DELETE /api/agents/:id does when archiveAgent throws gateway_disconnected:
+    // tombstone it, then remove the local row.
+    function deleteOffline(src: OpenClawAgentSource, id: string): void {
+      expect(src.deferUpstreamDelete(id)).toBe(true)
+      getDb().delete(agents).where(eq(agents.id, id)).run()
+    }
+    function syncedGateway(): FakeGateway {
+      const fake = new FakeGateway()
+      fake.list = {
+        defaultId: 'a1',
+        mainKey: 'main',
+        agents: [
+          { id: 'a1', name: 'Boo' },
+          { id: 'a2', name: 'Research Boo' },
+        ],
+      }
+      return fake
+    }
+    function insertOpenClawRow(id: string, gatewayId: string): void {
+      getDb()
+        .insert(agents)
+        .values({
+          id,
+          name: 'Research Boo',
+          gatewayId,
+          sourceId: 'openclaw',
+          sourceAgentId: gatewayId,
+          status: 'idle',
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        .run()
+    }
+
+    it('is deleted upstream on the next sync and not re-created', async () => {
+      const fake = new FakeGateway()
+      fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+      // Like the real Gateway, a deleted agent leaves the list.
+      fake.agents.delete = (agentId: string) => {
+        fake.deleted.push(agentId)
+        fake.list.agents = fake.list.agents.filter((a) => a.id !== agentId)
+        return Promise.resolve()
+      }
+      const src = makeSource(fake)
+      // A Clawboo id that differs from the Gateway's: the tombstone and the delete
+      // must use the Gateway's, which is what the list carries.
+      insertOpenClawRow('a2', 'gw-a2')
+      deleteOffline(src, 'a2')
+      expect([...pendingUpstreamDeletes(getDb())]).toEqual(['gw-a2'])
+      fake.list.agents.push({ id: 'gw-a2', name: 'Research Boo' })
+
+      await src.start()
+      expect(fake.deleted).toEqual(['gw-a2'])
+      expect(await src.getAgent('a2')).toBeNull()
+      expect(await src.getAgent('gw-a2')).toBeNull()
+      expect(pendingUpstreamDeletes(getDb()).size).toBe(0)
+      await src.stop()
+    })
+
+    it('stays out of SQLite while the Gateway delete keeps failing', async () => {
+      const fake = syncedGateway()
+      fake.agents.delete = () => Promise.reject(new Error('socket hang up'))
+      const src = makeSource(fake)
+      await src.start()
+      await src.stop()
+      deleteOffline(src, 'a2')
+
+      await src.start()
+      await src.sync()
+      expect(await src.getAgent('a2')).toBeNull()
+      expect(pendingUpstreamDeletes(getDb()).has('a2')).toBe(true)
+
+      // Removed upstream some other way: the tombstone is settled.
+      fake.list.agents = fake.list.agents.filter((a) => a.id !== 'a2')
+      await src.sync()
+      expect(pendingUpstreamDeletes(getDb()).size).toBe(0)
+      await src.stop()
+    })
+
+    it('comes back on the same sync when the Gateway refuses the delete', async () => {
+      const fake = syncedGateway()
+      let deleteCalls = 0
+      fake.agents.delete = (agentId: string) => {
+        deleteCalls += 1
+        return Promise.reject(
+          new GatewayResponseError({
+            code: 'INVALID_REQUEST',
+            message: `Agent "${agentId}" is the only configured agent and cannot be deleted.`,
+          }),
+        )
+      }
+      const src = makeSource(fake)
+      await src.start()
+      await src.stop()
+      deleteOffline(src, 'a2')
+
+      await src.start()
+      expect(deleteCalls).toBe(1)
+      expect(await src.getAgent('a2')).not.toBeNull()
+      expect(pendingUpstreamDeletes(getDb()).size).toBe(0)
+      // Never re-sent: the refusal is final.
+      await src.sync()
+      expect(deleteCalls).toBe(1)
+      await src.stop()
+    })
+
+    it('records nothing for an id with no OpenClaw row', () => {
+      const src = makeSource(new FakeGateway())
+      expect(src.deferUpstreamDelete('nobody')).toBe(false)
+      expect(pendingUpstreamDeletes(getDb()).size).toBe(0)
+    })
+
+    it('the browser push of the Gateway list honours the tombstone too', async () => {
+      const src = makeSource(new FakeGateway())
+      insertOpenClawRow('a2', 'a2')
+      deleteOffline(src, 'a2')
+
+      src.upsertFromList([{ id: 'a1' }, { id: 'a2', name: 'Research Boo' }], {
+        defaultId: 'a1',
+        mainKey: 'main',
+        scope: '',
+      })
+      expect(await src.getAgent('a1')).not.toBeNull()
+      expect(await src.getAgent('a2')).toBeNull()
+      expect(pendingUpstreamDeletes(getDb()).has('a2')).toBe(true)
+    })
+
+    it('a new agent the Gateway gives the same id is not hidden', async () => {
+      const fake = new FakeGateway()
+      fake.agents.delete = (agentId: string) => {
+        fake.deleted.push(agentId)
+        return Promise.resolve()
+      }
+      // Whether the tombstone is still there when the agent's first file is written
+      // (a resync in that window would delete the new agent upstream).
+      const tombstonedAtFirstWrite: boolean[] = []
+      const setFile = fake.agents.files.set
+      fake.agents.files.set = (agentId: string, name: string, content: string) => {
+        tombstonedAtFirstWrite.push(pendingUpstreamDeletes(getDb()).has(agentId))
+        return setFile(agentId, name, content)
+      }
+      const src = makeSource(fake)
+      await src.start()
+      setSetting(getDb(), 'agent-source:openclaw:pendingDelete:new-Designer', 'old-designer')
+
+      await src.createAgent({ name: 'Designer' })
+      expect(tombstonedAtFirstWrite[0]).toBe(false)
+      expect(pendingUpstreamDeletes(getDb()).size).toBe(0)
+      fake.list.agents = [{ id: 'new-Designer', name: 'Designer' }]
+      await src.sync()
+      expect(fake.deleted).toEqual([])
+      expect(await src.getAgent('new-Designer')).not.toBeNull()
+      await src.stop()
+    })
   })
 
   it('readFile / writeFile delegate to the Gateway; listSessions maps', async () => {

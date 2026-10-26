@@ -210,6 +210,10 @@ Either way, `deleteAgentOperation`:
 Deletion is not reversible. The agent's files and config are removed from both the runtime and SQLite. There is no undo.
 </Danger>
 
+<Note>
+An OpenClaw agent deleted while its Gateway is down leaves clawboo at once and leaves the Gateway the next time the server connects to it; the delete answers `upstreamDeletePending: true`. Until then the Gateway still lists the agent, but clawboo keeps it out of the sidebar and the graphs and never puts it back in a team. `GET /api/agents` lists such agents in `pendingDeleteIds`. If the Gateway refuses the delete (it will not delete its only agent, or one that owns shared credentials), the agent comes back.
+</Note>
+
 ## Verify it worked
 
 - **File save**: re-open the file tab (or reload the page) and confirm the saved content is loaded back from `GET /api/agents/:agentId/files/:name`. The footer reads **Saved**.
