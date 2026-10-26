@@ -429,14 +429,17 @@ function writePositions(): void {
 function initialize(nodes: GraphNode[], edges: GraphEdge[]): void {
   stopLoop()
   // Flipping the OS setting must take effect without a reload: turning reduced
-  // motion ON stops a loop that is mid-simulation (every step is itself a valid
-  // state, so nodes just freeze where they are), and turning it OFF lets the
-  // next wake()/unpinNode() start it again. Registered lazily HERE rather than
-  // at module scope so importing this file stays side-effect-free — the node
-  // test project imports it directly. No-op when matchMedia is unavailable.
+  // motion ON stops a loop that is mid-simulation and lands the nodes on its
+  // end state at once (a held drag still waits for its release), and turning
+  // it OFF lets the next wake()/unpinNode() start it again. Registered lazily
+  // HERE rather than at module scope so importing this file stays
+  // side-effect-free: the node test project imports it directly. No-op when
+  // matchMedia is unavailable.
   if (!reducedMotionUnsub) {
     reducedMotionUnsub = onReducedMotionChange((reduced) => {
-      if (reduced) stopLoop()
+      if (!reduced || !active) return
+      stopLoop()
+      settleNow()
     })
   }
   particles = []

@@ -171,6 +171,51 @@ describe('graphPhysics with reduced motion requested', () => {
     reduced.graphPhysics.dispose()
   })
 
+  // Turning the setting on mid-run lands the nodes where the run was heading,
+  // instead of freezing them part way.
+  it('lands a running settle on its end state when reduced motion turns on', async () => {
+    // Where the animation comes to rest, motion allowed throughout.
+    stubMatchMedia(false)
+    const animated = await freshPhysics()
+    animated.useGraphStore.setState({ nodes: PILED, edges: [] })
+    animated.graphPhysics.initialize(PILED, [])
+    animated.graphPhysics.wake(0.25)
+    runFrames()
+    const rest = positions(animated.useGraphStore)
+    animated.graphPhysics.dispose()
+
+    // The same run, with the setting turned on a few frames in.
+    const listeners = new Set<(event: { matches: boolean }) => void>()
+    let reduce = false
+    window.matchMedia = (() => ({
+      get matches() {
+        return reduce
+      },
+      media: '(prefers-reduced-motion: reduce)',
+      addEventListener: (_type: string, l: (event: { matches: boolean }) => void) =>
+        listeners.add(l),
+      removeEventListener: (_type: string, l: (event: { matches: boolean }) => void) =>
+        listeners.delete(l),
+    })) as unknown as typeof window.matchMedia
+    const flipped = await freshPhysics()
+    flipped.useGraphStore.setState({ nodes: PILED, edges: [] })
+    flipped.graphPhysics.initialize(PILED, [])
+    flipped.graphPhysics.wake(0.25)
+    runFrames(3)
+    expect(flipped.graphPhysics.isActive()).toBe(true)
+
+    reduce = true
+    for (const l of listeners) l({ matches: true })
+
+    expect(flipped.graphPhysics.isActive()).toBe(false)
+    const landed = positions(flipped.useGraphStore)
+    for (const id of Object.keys(rest)) {
+      expect(landed[id]!.x).toBeCloseTo(rest[id]!.x, 1)
+      expect(landed[id]!.y).toBeCloseTo(rest[id]!.y, 1)
+    }
+    flipped.graphPhysics.dispose()
+  })
+
   // A drag moves only the dragged node; its release settles the rest, the way
   // the animated release would.
   it('holds still through a drag and settles on release', async () => {
