@@ -5,6 +5,7 @@
 // the sqlite db lands in a throwaway dir.
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import type { IncomingMessage } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -13,6 +14,7 @@ import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { carriesAttachToken } from '../../../api/mcp'
 import { getDb, resetDb } from '../../db'
 import {
   OpenClawAgentSource,
@@ -339,15 +341,24 @@ describe('OpenClawAgentSource', () => {
   })
 
   // ── register clawboo's shared MCP servers in the Gateway config ─────────────
-  function makeSourceWithMcp(fake: FakeGateway, baseUrl: string | null): OpenClawAgentSource {
+  function makeSourceWithMcp(
+    fake: FakeGateway,
+    baseUrl: string | null,
+    gatewayUrl = 'ws://test:18789',
+  ): OpenClawAgentSource {
     return new OpenClawAgentSource({
       getDb,
-      loadSettings: () => ({ gatewayUrl: 'ws://test:18789', gatewayToken: 'tok' }),
+      loadSettings: () => ({ gatewayUrl, gatewayToken: 'tok' }),
       makeClient: () => fake,
       connectOptions: () => ({}),
       mcpBaseUrl: () => baseUrl,
     })
   }
+
+  /** The servers clawboo registered, as the Gateway now holds them. */
+  const registered = (fake: FakeGateway) =>
+    (fake.configState.mcp?.servers ?? {}) as Record<string, { url: string }>
+  const CLAWBOO_SERVERS = ['clawboo-memory', 'clawboo-tasks', 'clawboo-tools'] as const
 
   /** Wait for the fire-and-forget registration (config.get → patch) to flush. */
   async function flush(): Promise<void> {
@@ -390,6 +401,66 @@ describe('OpenClawAgentSource', () => {
     expect(servers['clawboo-teamchat']).toBeUndefined()
     // Global scope (OpenClaw agents are cross-team): no per-run scope query.
     expect(servers['clawboo-memory']?.url).not.toContain('scopeTeamId')
+    await src.stop()
+  })
+
+  for (const gatewayUrl of ['ws://127.0.0.1:18789', 'ws://localhost:18789', 'ws://[::1]:18789']) {
+    it(`a Gateway on this machine (${gatewayUrl}) gets the attach token in every URL`, async () => {
+      // Unscoped but never anonymous: the access gate demands the token of a
+      // cookieless /api/mcp/* call, and this URL carries nothing else.
+      const fake = new FakeGateway()
+      fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+      const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', gatewayUrl)
+      await src.start()
+      await flush()
+      for (const name of CLAWBOO_SERVERS) {
+        const url = new URL(registered(fake)[name]!.url)
+        expect([...url.searchParams.keys()], name).toEqual(['attachToken'])
+        const req = { url: url.pathname + url.search } as IncomingMessage
+        expect(carriesAttachToken(req), name).toBe(true)
+      }
+      await src.stop()
+    })
+  }
+
+  it('a remote Gateway is never handed the token', async () => {
+    // The URL says 127.0.0.1, which a remote Gateway resolves to itself, so the
+    // token could not help it; it would only be a credential on another host.
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'wss://gateway.example.com')
+    await src.start()
+    await flush()
+    for (const name of CLAWBOO_SERVERS) {
+      expect(registered(fake)[name]?.url, name).toBe(
+        `http://127.0.0.1:18790/api/mcp/${name.replace('clawboo-', '')}`,
+      )
+    }
+    await src.stop()
+  })
+
+  it('re-registers a config an older build wrote without the attach token', async () => {
+    // Those bare URLs 401 on a gated install. The URL compare in the idempotency
+    // check is what notices, so an upgrade needs no migration step.
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    const bare = (server: string) => ({
+      url: `http://127.0.0.1:18790/api/mcp/${server}`,
+      transport: 'streamable-http',
+    })
+    fake.configState.mcp = {
+      servers: {
+        'clawboo-memory': bare('memory'),
+        'clawboo-tasks': bare('tasks'),
+        'clawboo-tools': bare('tools'),
+      },
+    }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'ws://127.0.0.1:18789')
+    await src.start()
+    await flush()
+    for (const name of CLAWBOO_SERVERS) {
+      expect(registered(fake)[name]?.url, name).toContain('attachToken=')
+    }
     await src.stop()
   })
 

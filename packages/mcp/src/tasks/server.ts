@@ -274,6 +274,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       }),
       handler: (args) => {
         const parentTaskId = str(args['parentTaskId'])
+        // The same inheritance escape `create_task` guards against: the subtask
+        // takes its parent's team, so a foreign parent is a cross-team write. This
+        // tool was missed when that guard went in.
+        const denied = outOfTeam(parentTaskId)
+        if (denied) return denied
         const result = createCappedSubtask(db, parentTaskId, {
           title: str(args['title']),
           description: optStr(args['description']),

@@ -293,6 +293,10 @@ The session lifecycle is enforced by the transport, not by Clawboo handlers:
 
 A fresh MCP server instance is created per session (on the `initialize` request) and reused for that session's subsequent requests; closing the transport drops it from the session map.
 
+### Access (the `attachToken`)
+
+With the access gate on (`STUDIO_ACCESS_TOKEN` set), a request to any of the four transport routes needs either the operator cookie or an `attachToken` query param: an HMAC-SHA256 the server derives from its per-install attach-signing secret and writes into every attach URL it mints, for its own spawned runtimes and in the `GET /api/mcp/config` snippet. It is the same value on every URL for a given install, it is checked on **every** request (the `initialize` and the session's later `POST`/`GET`/`DELETE` alike, which is why it rides the URL), and it is refused on a request from a non-loopback TCP peer or one carrying a proxy forwarding header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`). Without either credential the gate answers `401`. The token opens these four routes only; `GET /api/mcp/config` always needs the cookie. With the gate off, neither is required. The request log masks `attachToken`, `scopeSig` and `provSig` values.
+
 ### Per-server session binding (scoping query params)
 
 The `memory` and `teamchat` POST handlers read authoritative binding from the attach URL's query string at session-initialize time. This is how Clawboo binds a run's MCP session to its team/agent; the model can neither widen its visibility nor spoof its identity through tool arguments, because the URL is Clawboo-written config. The other two servers (`tasks`, `tools`) take no scoping params.
@@ -314,7 +318,7 @@ When none are present the memory session is **unbound** (legacy model-arg behavi
 | `roomTeamId`        | The team room (`team:<teamId>` via `resolveRoomForTeam`) |
 | `postAuthorAgentId` | The author identity every post is attributed to          |
 
-**Both** `roomTeamId` and `postAuthorAgentId` are required for a bound TeamChat session; if either is missing the session is unbound and identity falls back to tool args. A bound TeamChat server also emits a `team_chat_post` orchestration event into the observability log on every post.
+**Both** `roomTeamId` and `postAuthorAgentId` are required for a bound TeamChat session, with a `scopeSig` that verifies. Without one, the HTTP session is served **no** TeamChat tools: its author and room could only come from tool args, so it could read any room and post as any agent. (The stdio bin keeps args mode; there the operator is the caller.) A bound TeamChat server also emits a `team_chat_post` orchestration event into the observability log on every post.
 
 ### Event stream
 
@@ -323,6 +327,9 @@ The MCP servers' SSE channel (the `GET` route) carries Model Context Protocol JS
 ### Example (raw initialize handshake)
 
 ```bash
+# With the access gate on, append ?attachToken=<token> (from GET /api/mcp/config)
+# to the URL in BOTH calls.
+
 # 1. Initialize — the response carries the mcp-session-id header.
 curl -i -X POST http://localhost:18790/api/mcp/tasks \
   -H 'Content-Type: application/json' \
@@ -346,13 +353,18 @@ Emits a copy-pasteable attach snippet so the consuming runtime can register one 
 
 - **Query params**:
 
-| Param       | Type   | Default       | Values                                       |
-| ----------- | ------ | ------------- | -------------------------------------------- |
-| `server`    | string | `tasks`       | `tasks` \| `memory` \| `tools` \| `teamchat` |
-| `runtime`   | string | `claude-code` | `claude-code` \| `codex` \| `openclaw`       |
-| `transport` | string | `http`        | `http` \| `stdio`                            |
+| Param          | Type   | Default       | Values                                       |
+| -------------- | ------ | ------------- | -------------------------------------------- |
+| `server`       | string | `tasks`       | `tasks` \| `memory` \| `tools` \| `teamchat` |
+| `runtime`      | string | `claude-code` | `claude-code` \| `codex` \| `openclaw`       |
+| `transport`    | string | `http`        | `http` \| `stdio`                            |
+| `scopeTeamId`  | string | none          | A team id to bind, signed into `scopeSig`    |
+| `scopeAgentId` | string | none          | An agent id to bind, signed into `scopeSig`  |
 
 - **Request body**: none.
+- **Auth**: the operator cookie when the access gate is on. This route signs an attach URL for whatever identity it is asked for, so the `attachToken` does **not** open it.
+
+Every `http` URL it emits carries the `attachToken` (see [Access](#access-the-attachtoken)); one requested with a scope also carries the `scopeSig` that makes the binding count.
 
 ### Responses
 

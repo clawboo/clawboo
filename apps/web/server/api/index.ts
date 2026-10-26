@@ -191,7 +191,13 @@ import {
   schedulesUpdatePATCH,
 } from './schedules'
 
-const router: RouterType = Router()
+// Case-sensitive HERE, not only on the app. `app.set('case sensitive routing')`
+// in ../index.ts reaches routes registered on the app itself; a Router reads the
+// option from its own constructor alone, so every route below used to match
+// `/API/settings` too, while that comment promised the opposite. The access gate
+// folds case before its own /api/ test, so nothing slipped past it, but the
+// router and the gate should not disagree about what a path is.
+const router: RouterType = Router({ caseSensitive: true })
 
 // Rate ceilings first, so every route below inherits the general one. See
 // ../lib/rateLimit for why the numbers are where they are; the strict tier is

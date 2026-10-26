@@ -24,7 +24,7 @@ flowchart TD
     start["Where do you need to reach the dashboard from?"]
     start -->|"Only this machine"| keep["Keep the loopback default.<br/>Do nothing."]
     start -->|"Another machine"| how{"How?"}
-    how -->|"Recommended"| tunnel["SSH tunnel OR reverse proxy<br/>to 127.0.0.1:port.<br/>Bind stays loopback."]
+    how -->|"Recommended"| tunnel["SSH tunnel, OR reverse proxy<br/>to 127.0.0.1:port plus a token<br/>(or auth at the proxy).<br/>Bind stays loopback."]
     how -->|"Direct"| wide["Set HOST + STUDIO_ACCESS_TOKEN.<br/>Terminate TLS in front."]
     tunnel --> done["Reachable, authenticated by your<br/>transport layer"]
     wide --> done
@@ -80,7 +80,44 @@ location / {
 Skip those two variables and the proxy recipe fails in a way that looks like it worked. The same-origin guard runs always, independent of the access gate, and its `Host` allowlist is loopback plus the literal bind host only. `proxy_set_header Host $host;` forwards your public hostname, which is not on that list, so every `/api/*` request answers `403 Cross-origin request blocked.` while the SPA HTML still loads (the guard gates `/api/` only): the dashboard renders and then nothing works. `CLAWBOO_ALLOWED_HOSTS` covers the forwarded `Host`; `CLAWBOO_ALLOWED_ORIGINS` covers the browser `Origin` on state-changing fetches and the `/api/gateway/ws` upgrade. Both only widen the allowlist, never disable it, and a loopback bind logs no boot warning about the omission.
 </Warning>
 
-With either option, Clawboo never accepts a connection off-host directly; your tunnel or proxy is the only network-facing surface, and it brings its own authentication and TLS. You can still add an access token on top, but you do not have to widen the bind to get there.
+With either option, Clawboo never accepts a connection off-host directly; your tunnel or proxy is the only network-facing surface. An SSH tunnel brings its own authentication. A reverse proxy brings TLS, but it authenticates nobody unless you configure it to, so pair it with an access token ([Step 3](#step-3-or-widen-the-bind-and-set-an-access-token) shows how to set one; the bind can stay loopback).
+
+<Warning>
+**A reverse proxy is not authentication.** Every request nginx, Caddy or a Cloudflare Tunnel connector forwards reaches Clawboo from `127.0.0.1`, so from the server's side of the socket the whole internet looks like a local caller. Unless the proxy authenticates requests itself (HTTP basic auth, an SSO proxy such as oauth2-proxy, Cloudflare Access), set `STUDIO_ACCESS_TOKEN` as well. Without it, the dashboard and every `/api/*` route are open to anyone who can reach the proxy. Because the bind is loopback the server does not refuse to start; it logs a one-time `SECURITY:` warning when the first request arrives carrying a proxy's forwarding header (`Forwarded`, `X-Forwarded-*` or `X-Real-IP`). If you see that warning, this is why.
+</Warning>
+
+**Deny the MCP server routes at the proxy.** `/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools` and `/api/mcp/teamchat` are the runtime control plane: the MCP servers Clawboo's own spawned runtimes attach to. Runtimes reach them on the loopback port directly and never through the proxy, so nothing legitimate needs them from outside. With the gate on, Clawboo already refuses them without the operator cookie or a runtime's attach token ([Step 4](#step-4-know-how-the-gate-behaves-once-its-on)). Blocking them at the proxy as well is defence in depth: it still holds if the gate is off or an attach token leaks.
+
+Leave `/api/mcp/config` reachable. The dashboard's Runtimes panel loads its attach snippet from it through the proxy, and with the gate on it needs the operator cookie like any other dashboard route. (If you never use that panel remotely, denying the whole `/api/mcp/` prefix works too.)
+
+```nginx
+# The four MCP server routes. Case-insensitive, and a regex location wins over
+# the `location /` prefix above.
+location ~* ^/api/mcp/(tasks|memory|tools|teamchat)(/|$) {
+    return 404;
+}
+```
+
+```caddyfile
+dash.example.com {
+    @mcp path /api/mcp/tasks* /api/mcp/memory* /api/mcp/tools* /api/mcp/teamchat*
+    respond @mcp 404
+    reverse_proxy 127.0.0.1:18790
+}
+```
+
+```yaml
+# cloudflared config.yml: the deny rule must come before the Clawboo service
+ingress:
+  - hostname: dash.example.com
+    path: ^/api/mcp/(tasks|memory|tools|teamchat)(/|$)
+    service: http_status:404
+  - hostname: dash.example.com
+    service: http://127.0.0.1:18790
+  - service: http_status:404
+```
+
+Under a path prefix (`CLAWBOO_BASE_PATH=/clawboo`, below), deny the same four routes under the prefix (`/clawboo/api/mcp/tasks` and so on) as well.
 
 **Sharing a hostname with other apps.** The recipe above gives Clawboo the whole origin. To put it under a path instead, set `CLAWBOO_BASE_PATH=/clawboo` and forward `location /clawboo/` with a `proxy_pass` that carries no URI part, so the prefix reaches Clawboo intact ([Serving under a path prefix](/operating/deployment#serving-under-a-path-prefix)). Requests are stripped of the prefix before any security check runs, so the same-origin guard and the access gate enforce exactly what they do at the root, and the access cookie is scoped to `Path=/clawboo` so the sibling apps on that origin never receive it.
 
@@ -116,10 +153,17 @@ When `STUDIO_ACCESS_TOKEN` is set, the access gate is the only authentication on
 
 **Case-folded path test.** The gate lowercases the pathname before testing the `/api/` prefix, so an uppercased `/API/settings` can't slip past a case-sensitive prefix check and reach the real handler unauthenticated. The Express app also sets case-sensitive routing so its matcher and the gate agree.
 
-**Loopback `/api/mcp/*` exemption.** A spawned runtime attaches its MCP client to `http://127.0.0.1:<port>/api/mcp/*` with no cookie, by design, because the runtime's environment is scrubbed of the access token. The gate therefore lets a request through _only_ when it is both loopback (`127.0.0.1`, `::1`, or `::ffff:127.0.0.1` at the TCP socket) **and** targets `/api/mcp/*`. A remote client cannot forge a loopback source address on a real TCP handshake. Every other `/api/*` route, and any non-loopback `/api/mcp/*` request, still requires the cookie.
+**The runtime control plane takes an attach token; a loopback address alone admits nothing.** A spawned runtime attaches its MCP client to `http://127.0.0.1:<port>/api/mcp/*` with no cookie, by design, because the runtime's environment is scrubbed of the access token. It proves itself instead with the `attachToken` Clawboo writes into every MCP attach URL it hands a runtime, an HMAC derived from a per-install secret that never leaves the server. The gate lets a cookieless request through only when all of these hold:
+
+- it targets one of the four MCP transport routes (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`);
+- it carries a valid attach token;
+- it reached the server directly from loopback (`127.0.0.1` or `::1`);
+- it did not come through a proxy (no `Forwarded`, `X-Forwarded-*` or `X-Real-IP` header).
+
+The last two can only refuse. A runtime always dials the loopback port directly, so a token that arrives from another host or through a proxy was lifted from a config, and it is worth nothing there. `/api/mcp/config` mints signed attach URLs, so it always needs the cookie, like every other `/api/*` route.
 
 <Info>
-The exemption is loopback-scoped at the socket layer. Putting a reverse proxy in front does **not** widen it: a proxied `/api/mcp/*` request arrives from the proxy's source address (the proxy and the server are both on the box, so it's still loopback, fine), but a request that genuinely originates off-host can never present a loopback peer address. The runtime control plane stays local-only.
+Earlier releases skipped the cookie for any `/api/mcp/*` request whose TCP peer was loopback, on the theory that only the server's own runtimes connect from there. A same-host reverse proxy breaks that theory, because it forwards every request from `127.0.0.1`. Behind the Step 2 recipe, anyone who could reach the proxy could call the MCP servers, and `/api/mcp/config` would sign them an agent identity of their choosing, all without the token. The attach token closes that whatever sits in front of the server; deny the four MCP server routes at the proxy as well ([Step 2](#step-2-reach-it-from-another-machine-without-widening-the-bind-recommended)).
 </Info>
 
 ## Step 5: Terminate TLS so the cookie is `Secure`
@@ -130,15 +174,15 @@ The practical consequence for a self-host: terminate TLS at your reverse proxy a
 
 ## Options / variations
 
-| Goal                               | What to set                                      | Notes                                                                         |
-| ---------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| Loopback-only (default)            | nothing                                          | Safe out of the box; no token.                                                |
-| Remote access, bind stays loopback | SSH tunnel or reverse proxy → `127.0.0.1:<port>` | Recommended. Transport security from your tunnel/proxy.                       |
-| Direct wide bind                   | `HOST=0.0.0.0` + `STUDIO_ACCESS_TOKEN=…`         | Always pair the two. TLS in front for a `Secure` cookie.                      |
-| Reverse proxy or LAN origin        | `CLAWBOO_ALLOWED_ORIGINS=…`                      | Widens the always-on guard; add `CLAWBOO_ALLOWED_HOSTS` for a proxied `Host`. |
-| Stable upstream port               | `CLAWBOO_API_PORT=18790`                         | An explicitly pinned port gets **no** fallback, frees you from the auto-scan. |
-| Custom state dir                   | `CLAWBOO_HOME=/path`                             | Moves the vault, settings, port file, and worktrees with it.                  |
-| Bring your own vault key           | `CLAWBOO_SECRETS_MASTER_KEY=…`                   | 32-byte base64, 64 hex chars, or a raw 32-char string.                        |
+| Goal                               | What to set                                      | Notes                                                                                            |
+| ---------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Loopback-only (default)            | nothing                                          | Safe out of the box; no token.                                                                   |
+| Remote access, bind stays loopback | SSH tunnel or reverse proxy → `127.0.0.1:<port>` | Recommended. A proxy also needs a token (or its own auth) and should deny the MCP server routes. |
+| Direct wide bind                   | `HOST=0.0.0.0` + `STUDIO_ACCESS_TOKEN=…`         | Always pair the two. TLS in front for a `Secure` cookie.                                         |
+| Reverse proxy or LAN origin        | `CLAWBOO_ALLOWED_ORIGINS=…`                      | Widens the always-on guard; add `CLAWBOO_ALLOWED_HOSTS` for a proxied `Host`.                    |
+| Stable upstream port               | `CLAWBOO_API_PORT=18790`                         | An explicitly pinned port gets **no** fallback, frees you from the auto-scan.                    |
+| Custom state dir                   | `CLAWBOO_HOME=/path`                             | Moves the vault, settings, port file, and worktrees with it.                                     |
+| Bring your own vault key           | `CLAWBOO_SECRETS_MASTER_KEY=…`                   | 32-byte base64, 64 hex chars, or a raw 32-char string.                                           |
 
 See [Environment variables](/reference/environment-variables) for every variable, its reader, and its default.
 
@@ -146,9 +190,14 @@ See [Environment variables](/reference/environment-variables) for every variable
 
 - **Confirm the bind.** Boot the server and read the startup log. A non-loopback bind with no token **refuses to start** with a `SECURITY:` error (unless `CLAWBOO_ALLOW_INSECURE=1`, which logs a loud warning instead); a clean boot means you're either loopback or gated.
 - **Check the access gate.** With the gate on, `curl https://your-host/api/settings` without a cookie should return `401`. The same request with `?access_token=<token>` should `302`-redirect and set the `clawboo_access` cookie. A `403 Cross-origin request blocked.` instead means the always-on same-origin guard rejected the public `Host` before the gate ever ran; add that hostname to `CLAWBOO_ALLOWED_HOSTS`.
+- **Check the control plane is closed.** `curl -i https://your-host/api/mcp/tasks` should return `404` (denied at the proxy) or `401` (refused by the gate); a `400` means it reached the MCP server, so neither is in place. `curl -i https://your-host/api/mcp/config` without the cookie should return `401`. A `200` there, with an attach snippet, means anyone who can reach your proxy can mint agent identities; fix it before going further.
 - **Confirm Clawboo-shaped health.** `GET /api/settings` returns `{ gatewayUrl, hasToken }`; `GET /api/health` returns the boot probe (`{ ok, degraded, fatal, checks, … }`). `ok: true` means no fatal checks failed. See [Deployment → Verify it worked](/operating/deployment#verify-it-worked).
 
 ## Troubleshooting
+
+<Warning>
+**The log says a request reached the server through a reverse proxy and `STUDIO_ACCESS_TOKEN` is not set.** Clawboo saw a `Forwarded`, `X-Forwarded-*` or `X-Real-IP` header with the gate off, so everything behind your proxy is reachable without a credential. Set `STUDIO_ACCESS_TOKEN` and restart, or confirm the proxy authenticates every request. The warning is logged once per process and never blocks a request.
+</Warning>
 
 <Warning>
 **The gate seems off even though I set a token.** Check the boot log for a charset warning. A token with any character outside `[A-Za-z0-9._~-]` disables the gate by design (fail-loud rather than a silent lockout). Regenerate with `openssl rand -hex 24` and restart.
@@ -185,5 +234,5 @@ These docs describe Clawboo **v0.5.0**, the current release.
 - [Deploying Clawboo](/operating/deployment), ports, state dir, host binding, reverse-proxy setup
 - [Environment variables](/reference/environment-variables), `HOST`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_HOME`, `CLAWBOO_SECRETS_MASTER_KEY`, and the rest
 - [Connecting runtimes](/runtimes/connecting-runtimes), the encrypted vault and the credential-resolution chain
-- [MCP servers](/operating/mcp-servers), the loopback `/api/mcp/*` control plane the gate exempts
+- [MCP servers](/operating/mcp-servers), the `/api/mcp/*` control plane and the attach token it takes
 - [Glossary](/appendices/glossary), access gate, vault, loopback, runtime

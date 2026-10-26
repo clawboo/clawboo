@@ -12,6 +12,8 @@ import { MockAdapter } from '@clawboo/adapter-mock'
 import { NativeAdapter } from '@clawboo/adapter-native'
 import type { HealthResult, RuntimeAdapter } from '@clawboo/executor'
 
+import { getDb } from '../db'
+import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { resolveRuntimeBin } from '../platform'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { createClaudeCodeDriver } from './claudeCodeDriver'
@@ -71,6 +73,25 @@ function nativeKeyHealth(): Promise<HealthResult> {
   )
 }
 
+/**
+ * Guarantee the attach secret on a run context that will write HTTP attach URLs.
+ *
+ * The access gate refuses a cookieless /api/mcp/* call that lacks the attach
+ * token, and the token comes from this secret. Filled HERE, in the one factory
+ * every real driver is built through, rather than left to each caller: a caller
+ * that builds a context with no scope (the verification critic does) would
+ * otherwise write bare URLs, and on a gated install those 401 and the run loses
+ * its Tasks, Memory and Tools servers without a word. Adds no identity, so an
+ * unscoped run stays unbound. Native attaches in-process and never needs it.
+ */
+export function withAttachSecret(ctx: RuntimeRunContext): RuntimeRunContext {
+  if (!ctx.mcpBaseUrl || ctx.memoryScope?.attachSecret) return ctx
+  return {
+    ...ctx,
+    memoryScope: { ...(ctx.memoryScope ?? {}), attachSecret: getMcpAttachSecret(getDb()) },
+  }
+}
+
 /** Construct an adapter for a runtime, wired to its real driver factory + run context. */
 export type RuntimeAdapterFactory = (ctx: RuntimeRunContext) => RuntimeAdapter
 
@@ -78,11 +99,14 @@ export function adapterFactoryFor(id: NonOpenClawRuntimeId): RuntimeAdapterFacto
   const health = cliHealth(getDescriptor(id).healthBin)
   switch (id) {
     case 'claude-code':
-      return (ctx) => new ClaudeCodeAdapter((opts) => createClaudeCodeDriver(opts, ctx), health)
+      return (ctx) =>
+        new ClaudeCodeAdapter((opts) => createClaudeCodeDriver(opts, withAttachSecret(ctx)), health)
     case 'codex':
-      return (ctx) => new CodexAdapter((opts) => createCodexDriver(opts, ctx), health)
+      return (ctx) =>
+        new CodexAdapter((opts) => createCodexDriver(opts, withAttachSecret(ctx)), health)
     case 'hermes':
-      return (ctx) => new HermesAdapter((opts) => createHermesDriver(opts, ctx), health)
+      return (ctx) =>
+        new HermesAdapter((opts) => createHermesDriver(opts, withAttachSecret(ctx)), health)
     case 'clawboo-native':
       return (ctx) => new NativeAdapter((opts) => createNativeDriver(opts, ctx), nativeKeyHealth)
     case 'clawboo-mock':

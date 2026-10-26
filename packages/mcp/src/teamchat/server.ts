@@ -52,6 +52,19 @@ export interface TeamChatBoundIdentity {
 export interface TeamChatServerOptions {
   /** When set, author + room are authoritative (anti-spoof). Unset = use args. */
   boundIdentity?: TeamChatBoundIdentity
+  /**
+   * The caller reached us over a transport that CAN carry a verified binding and
+   * did NOT. Distinct from `boundIdentity` being unset, which means the operator
+   * ran the stdio bin themselves; see the Memory server's `unverifiedCaller` for
+   * the full reasoning, which applies here identically.
+   *
+   * Effect: NEITHER tool is served. Both resolve an author and a room, and with no
+   * binding the only other source is the tool arguments, so an unverified caller
+   * could read any team's room and post into it as any agent. Tasks hides just its
+   * two identity tools; here every tool is one. Over HTTP this is the verification
+   * critic (no scope at all) and any run without a team (an author but no room).
+   */
+  unverifiedCaller?: boolean
   /** Best-effort obs hook — apps/web passes a `team_chat_post` emitter; tests
    *  and the in-process native bridge omit it. The server stays obs-agnostic. */
   onPost?: (post: DbTeamChat) => void
@@ -65,6 +78,8 @@ interface ResolvedTarget {
 
 export function createTeamChatServer(db: ClawbooDb, opts: TeamChatServerOptions = {}): Server {
   const bound = opts.boundIdentity
+  // A verified binding wins over the flag, mirroring Memory's `unverified && !bound`.
+  if (opts.unverifiedCaller === true && !bound) return buildServer('clawboo-teamchat', [])
 
   /** Resolve who-and-where for a post — bound identity wins over args (anti-spoof). */
   const targetFor = (args: Record<string, unknown>): ResolvedTarget | null => {

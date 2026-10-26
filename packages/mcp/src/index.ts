@@ -12,8 +12,10 @@ export {
   type TeamChatBoundIdentity,
 } from './teamchat/server'
 export {
+  signAttachAccess,
   signAttachProvenance,
   signAttachScope,
+  verifyAttachAccess,
   verifyAttachProvenance,
   verifyAttachScope,
   type SignableProvenance,

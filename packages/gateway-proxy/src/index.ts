@@ -1,5 +1,5 @@
 export type { AccessGate, AccessGateOptions } from './access-gate'
-export { createAccessGate } from './access-gate'
+export { createAccessGate, isForwardedRequest } from './access-gate'
 
 export type { OriginGuard, OriginGuardOptions } from './origin-guard'
 export { createOriginGuard } from './origin-guard'

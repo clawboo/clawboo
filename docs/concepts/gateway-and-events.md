@@ -152,7 +152,7 @@ For a **server-orchestrated team session** (an `agent:<id>:team:<teamId>` key), 
 The proxy upgrade and every `/api/*` route sit behind an optional access gate, active only when `STUDIO_ACCESS_TOKEN` is set. With a token configured, `?access_token=<token>` sets an `HttpOnly` cookie and redirects; thereafter every `/api/*` request and the WS upgrade require that cookie. Token comparison is constant-time (both sides SHA-256-hashed first, so the compare leaks neither length nor a first-differing-byte timing oracle). The gate is the only authentication for a non-loopback bind, so the server refuses to start if it is bound to a public interface with no token set (unless `CLAWBOO_ALLOW_INSECURE=1` explicitly opts in).
 
 <Info>
-The gate has one exemption: a **loopback** request to `/api/mcp/*` is let through without a cookie. That is the spawned-runtime control plane, a runtime attaches its MCP client to `http://127.0.0.1:<port>/api/mcp/*` with its env scrubbed of the token. A remote client cannot forge a loopback source on a real TCP handshake, so this is safe; every non-loopback `/api/mcp/*` request still needs the cookie. See [Security](/operating/security).
+The gate admits one other credential: the `attachToken` on an MCP transport request (`/api/mcp/tasks`, `/memory`, `/tools`, `/teamchat`). That is the spawned-runtime control plane: a runtime attaches its MCP client to `http://127.0.0.1:<port>/api/mcp/*` with its env scrubbed of the access token, so the server writes the attach token into the URL it hands the runtime instead. The token is refused from another host and on a request that came through a proxy, and the source address is never trusted on its own, because a same-host reverse proxy delivers every remote request from loopback. See [Security](/operating/security).
 </Info>
 
 ## Design rationale and trade-offs
@@ -183,5 +183,5 @@ These docs describe Clawboo **v0.5.0**, the current release.
 - [Architecture invariants](/concepts/architecture-invariants), "same-origin WS for the browser" and "all Gateway events go Bridge→Policy→Handler"
 - [Event pipeline internals](/internals/event-pipeline), the patch queue and dispatcher wiring in detail
 - [AgentSource, registry of record](/internals/agent-source), the server-side sync connection
-- [Security](/operating/security), the access gate and the loopback MCP exemption
+- [Security](/operating/security), the access gate and the MCP attach token
 - [Glossary](/appendices/glossary), canonical term definitions

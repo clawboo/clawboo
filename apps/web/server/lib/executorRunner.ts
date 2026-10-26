@@ -651,10 +651,10 @@ async function runTaskInner(
   // → volatile (the auto-injected memory). The handoff is the cross-runtime carrier.
   const resumeCtx = resume ? formatResumeContext(resume) : ''
   // TeamChat is only named when the run is TEAM-SCOPED. The attach URL carries
-  // the author binding from `scope.teamId`; with no team there is no binding, so
-  // the server falls back to identity-from-tool-args — prompting `team_chat_post`
-  // on such a run would be inviting a post whose author is whatever the model
-  // says it is. A teamless task simply has no room to post to.
+  // the author binding from `scope.teamId`; with no team there is no binding, and
+  // the server serves an unbound HTTP session no TeamChat tools at all, so
+  // prompting `team_chat_post` on such a run would name a tool it does not have.
+  // A teamless task simply has no room to post to.
   const mcpNote = input.mcpBaseUrl
     ? [
         'You have clawboo Tasks / Memory / Tools available over MCP — use them to read shared context, claim/update board tasks, and record decisions.',

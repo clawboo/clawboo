@@ -11,9 +11,10 @@ These docs describe Clawboo **v0.5.0**, the current release.
 
 ## Not on this list (already fixed)
 
-Three things you may have read about in older notes are **fixed in current code**; do not treat them as open:
+Four things you may have read about in older notes are **fixed in current code**; do not treat them as open:
 
-- **Access-gate case bypass: fixed.** The gate lower-cases the request path before its `/api/` prefix test, so an uppercased route like `/API/settings` can no longer evade the token check. The loopback `/api/mcp/*` control-plane exemption is also case-folded and is the only unauthenticated `/api/*` path. See [Security](/operating/security).
+- **Access-gate case bypass: fixed.** The gate lower-cases the request path before its `/api/` prefix test, so an uppercased route like `/API/settings` can no longer evade the token check. See [Security](/operating/security).
+- **Access-gate reverse-proxy bypass: fixed.** The gate used to skip the cookie for any `/api/mcp/*` request from a loopback TCP peer. A same-host reverse proxy delivers every remote request from loopback, so behind nginx, Caddy or a Cloudflare Tunnel connector anyone who could reach the proxy could call the MCP servers and have `/api/mcp/config` sign them an agent identity. A cookieless MCP request now needs the `attachToken` the server writes into its runtimes' attach URLs, and is refused from another host or through a proxy even with one; `/api/mcp/config` always needs the cookie. An attach URL copied before the fix carries no token; re-copy it from `/api/mcp/config`. See [Self-host securely](/guides/self-host-securely).
 - **Connected coding-agent reload trap: fixed.** A user who finishes onboarding with a _connected_ non-OpenClaw runtime (a key in the vault) lands back in the dashboard on reload, not the wizard. The fix keys on `onboarded && hasConnectedRuntime`. (The *un*connected SKIP path is a separate, still-open deferral: see [item 5](#5-coding-agent-skip-path-re-onboards-on-reload).)
 - **Budget hard-cap stop: fixed.** A cap-mode budget that crosses 100% aborts the live run, and a paused cap blocks the next dispatch pre-flight (before the claim). Budgets are uncapped by default, so this enforces nothing until you set a limit. See [Governance](/concepts/governance).
 
@@ -133,7 +134,7 @@ See [Clawboo Native](/runtimes/native) and [Review and resolve approvals](/using
 ## See also
 
 - [Glossary](/appendices/glossary), runtime, RuntimeAdapter, the board, tenant seam
-- [Security](/operating/security), access gate, loopback bind, the `/api/mcp/*` exemption
+- [Security](/operating/security), access gate, loopback bind, the `/api/mcp/*` attach token
 - [Governance](/concepts/governance), budgets, the kill-switch, cap-mode auto-pause
 - [Memory](/concepts/memory), shared MCP tier vs per-runtime private tier; OpenClaw global scope
 - [Architecture invariants](/concepts/architecture-invariants), local-first, registry of record

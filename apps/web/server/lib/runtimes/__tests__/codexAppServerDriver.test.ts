@@ -107,7 +107,7 @@ describe('createCodexAppServerDriver', () => {
     else process.env['FAKE_SCENARIO'] = prevScenario
     if (prevLog === undefined) delete process.env['FAKE_LOG']
     else process.env['FAKE_LOG'] = prevLog
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   })
 
   function driverFor(

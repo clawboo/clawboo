@@ -26,6 +26,17 @@ const SAVED = [
   'ANTHROPIC_AUTH_TOKEN',
 ] as const
 
+const PROXY_KEYS = [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'NO_PROXY',
+  'no_proxy',
+] as const
+
 describe('buildChildEnv', () => {
   const prev: Record<string, string | undefined> = {}
   beforeEach(() => {
@@ -114,4 +125,72 @@ describe('buildChildEnv', () => {
     expect(blob).not.toContain('gh-operator-secret')
     expect(blob).toContain('or-key')
   })
+})
+
+describe('buildChildEnv: a configured proxy never carries loopback traffic', () => {
+  // A runtime's MCP attach URLs point at http://127.0.0.1:<port> and carry the attach
+  // token. Through a proxy the token reaches a third party, and a proxy that adds
+  // X-Forwarded-For gets every MCP call refused by the access gate.
+  const prev: Record<string, string | undefined> = {}
+  beforeEach(() => {
+    for (const k of PROXY_KEYS) {
+      prev[k] = process.env[k]
+      delete process.env[k]
+    }
+  })
+  afterEach(() => {
+    for (const k of PROXY_KEYS) {
+      if (prev[k] === undefined) delete process.env[k]
+      else process.env[k] = prev[k]
+    }
+  })
+
+  const listed = (value: string | undefined): string[] => (value ?? '').split(',')
+
+  it('leaves NO_PROXY alone when no proxy is configured', () => {
+    const env = buildChildEnv()
+    expect(env['NO_PROXY']).toBeUndefined()
+    expect(env['no_proxy']).toBeUndefined()
+  })
+
+  for (const key of ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'ALL_PROXY'] as const) {
+    it(`adds loopback to both NO_PROXY spellings when ${key} is set`, () => {
+      process.env[key] = 'http://proxy.corp.example:3128'
+      const env = buildChildEnv()
+      for (const spelling of ['NO_PROXY', 'no_proxy']) {
+        expect(listed(env[spelling])).toEqual(
+          expect.arrayContaining(['127.0.0.1', 'localhost', '::1']),
+        )
+      }
+      expect(env[key]).toBe('http://proxy.corp.example:3128')
+    })
+  }
+
+  it("keeps the operator's own exclusions, without duplicates", () => {
+    process.env['https_proxy'] = 'http://proxy.corp.example:3128'
+    process.env['NO_PROXY'] = 'internal.example,localhost'
+    const env = buildChildEnv()
+    expect(env['NO_PROXY']).toBe(env['no_proxy'])
+    expect(listed(env['NO_PROXY'])).toEqual(['internal.example', 'localhost', '127.0.0.1', '::1'])
+  })
+
+  // Windows env names are case-insensitive: the two spellings are one variable
+  // there, so the second assignment below would replace the first, not sit beside it.
+  it.skipIf(process.platform === 'win32')(
+    'merges the exclusions of both spellings when they differ',
+    () => {
+      process.env['https_proxy'] = 'http://proxy.corp.example:3128'
+      process.env['NO_PROXY'] = 'internal.example,localhost'
+      process.env['no_proxy'] = '.corp.example'
+      const env = buildChildEnv()
+      expect(env['NO_PROXY']).toBe(env['no_proxy'])
+      expect(listed(env['NO_PROXY'])).toEqual([
+        'internal.example',
+        'localhost',
+        '.corp.example',
+        '127.0.0.1',
+        '::1',
+      ])
+    },
+  )
 })
