@@ -13,6 +13,7 @@
 import { envVarForProvider, type AgentConfig } from '@clawboo/adapter-native'
 
 import { resolveRuntimeKeyForRuntime } from '../../secretsVault'
+import { isNativeOllamaRemoved } from './nativeProviderDefaults'
 import { nativeCompatProvider } from './nativeProviders'
 import { createAnthropicProvider } from './providers/anthropic'
 import { createOpenAiProvider, ollamaBaseUrl, OPENROUTER_BASE_URL } from './providers/openai'
@@ -46,6 +47,8 @@ export interface RouteDeps {
   resolveKey?: (envVar: string) => string | null
   /** Provider-client factory override (tests). */
   makeProvider?: (candidate: RouteCandidate) => ProviderClient
+  /** Whether keyless Ollama may serve (tests). Defaults to "not removed by the user". */
+  ollamaAllowed?: boolean
 }
 
 function defaultMakeProvider(c: RouteCandidate): ProviderClient {
@@ -83,11 +86,13 @@ function defaultMakeProvider(c: RouteCandidate): ProviderClient {
 }
 
 /** Build the ordered, key-resolved candidate list. Keyless non-ollama
- *  candidates are dropped (nothing to authenticate with). */
+ *  candidates are dropped (nothing to authenticate with), and so are Ollama ones
+ *  once the user removed Ollama (`ollamaAllowed` false). */
 export function buildCandidates(
   config: AgentConfig,
   apiKeyEnv: Record<string, string> | undefined,
   resolveKey: (envVar: string) => string | null,
+  ollamaAllowed = true,
 ): RouteCandidate[] {
   const raw = [
     { provider: config.primaryProvider, model: config.primaryModel, envVar: config.envVar },
@@ -100,7 +105,7 @@ export function buildCandidates(
   const out: RouteCandidate[] = []
   for (const c of raw) {
     if (c.provider === 'ollama') {
-      out.push({ provider: c.provider, model: c.model, key: null })
+      if (ollamaAllowed) out.push({ provider: c.provider, model: c.model, key: null })
       continue
     }
     const key = c.envVar ? (apiKeyEnv?.[c.envVar] ?? resolveKey(c.envVar)) : null
@@ -119,7 +124,8 @@ export function createRoutedClient(
   const resolveKey =
     deps.resolveKey ?? ((envVar: string) => resolveRuntimeKeyForRuntime('clawboo-native', envVar))
   const makeProvider = deps.makeProvider ?? defaultMakeProvider
-  const candidates = buildCandidates(config, apiKeyEnv, resolveKey)
+  const ollamaAllowed = deps.ollamaAllowed ?? !isNativeOllamaRemoved()
+  const candidates = buildCandidates(config, apiKeyEnv, resolveKey, ollamaAllowed)
   const clients = new Map<number, ProviderClient>()
   /** Index of the proven candidate; -1 = none proven yet. */
   let sticky = -1

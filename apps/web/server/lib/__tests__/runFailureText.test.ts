@@ -80,3 +80,59 @@ describe('runFailureText — a context-overflow label', () => {
     )
   })
 })
+
+// ── A local model that can't run ─────────────────────────────────────────────
+// Ollama refuses a model it never pulled, and one that can't take a tool call,
+// before the first token. Its own words name the problem but not the fix. The
+// current wording below is what Ollama 0.34 sends.
+
+describe('runFailureText: an Ollama model that cannot run', () => {
+  it('names the pull command for a model Ollama does not have', () => {
+    const text = runFailureText("404 model 'llama3.2' not found", 'clawboo-native', 'ollama')
+    expect(text).toContain("Ollama doesn't have llama3.2")
+    expect(text).toContain('"ollama pull llama3.2"')
+  })
+
+  it("reads older Ollama's wording too", () => {
+    expect(
+      runFailureText(
+        '404 model "llama3.2:latest" not found, try pulling it first',
+        'clawboo-native',
+        'ollama',
+      ),
+    ).toContain('"ollama pull llama3.2"')
+  })
+
+  it('drops the implicit :latest and keeps any other tag', () => {
+    expect(runFailureText("model 'llama3.2:latest' not found", null, 'ollama')).toContain(
+      '"ollama pull llama3.2"',
+    )
+    expect(runFailureText("model 'qwen2.5:7b' not found", null, 'ollama')).toContain(
+      '"ollama pull qwen2.5:7b"',
+    )
+  })
+
+  it('says plainly when a model cannot use tools, in either wording', () => {
+    for (const raw of [
+      '400 "gemma2" does not support tools',
+      '400 registry.ollama.ai/library/gemma2:latest does not support tools',
+    ]) {
+      const text = runFailureText(raw, 'clawboo-native', 'ollama')
+      expect(text).toMatch(/^gemma2 can't use tools/)
+      expect(text).toContain('"ollama pull llama3.2"')
+    }
+  })
+
+  it('only for an agent on Ollama: other servers word a missing model the same way', () => {
+    const raw = "404 model 'llama3.2' not found"
+    expect(runFailureText(raw, 'clawboo-native', 'together')).toBe(`The run failed: ${raw}`)
+    expect(runFailureText(raw, 'clawboo-native')).toBe(`The run failed: ${raw}`)
+    const tools = '400 "gemma2" does not support tools'
+    expect(runFailureText(tools, 'clawboo-native', 'openai')).toBe(`The run failed: ${tools}`)
+  })
+
+  it("leaves another provider's unknown-model error verbatim", () => {
+    const raw = '404 The model `gpt-9` does not exist or you do not have access to it.'
+    expect(runFailureText(raw, 'clawboo-native', 'openai')).toBe(`The run failed: ${raw}`)
+  })
+})

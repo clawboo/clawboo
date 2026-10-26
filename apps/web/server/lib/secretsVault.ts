@@ -12,6 +12,8 @@
 // Storage — all under clawboo's OWN dir (`resolveClawbooDir()`), never OpenClaw's:
 //   <clawbooDir>/secrets/master.key         32-byte key, base64, mode 0600
 //   <clawbooDir>/secrets/runtime-keys.json  { [envVar]: { iv, tag, ciphertext } }
+// plus two tiny plaintext flag files with no secret material (see their sections):
+//   disconnected-runtimes.json, keyless-providers.json
 //
 // Key + ciphertext are COLOCATED under secrets/ by design: a local-first, single-
 // user tool has no daemon or keychain, and the only reader able to reach the key
@@ -294,6 +296,50 @@ export function setRuntimeDisconnected(runtimeId: string, disconnected: boolean)
 /** True when the user explicitly disconnected this runtime (and hasn't reconnected). */
 export function isRuntimeDisconnected(runtimeId: string): boolean {
   return readDisconnected()[runtimeId] === true
+}
+
+// ─── Keyless provider choice ─────────────────────────────────────────────────
+// A keyless provider (local Ollama) has nothing to store in the vault, so the
+// vault alone can't say whether the user set it up. This records the choice
+// itself, per provider: `true` when the user picked it, `false` when they removed
+// it, absent when neither (or after a full runtime disconnect, which forgets it).
+// The native runtime reads it through `isNativeOllamaConnected`. Stored as a tiny
+// sibling file in the secrets dir (no secret material, just provider ids).
+
+function keylessChoicesPath(): string {
+  return path.join(secretsDir(), 'keyless-providers.json')
+}
+
+function readKeylessChoices(): Record<string, boolean> {
+  try {
+    const parsed = JSON.parse(readFileSync(keylessChoicesPath(), 'utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, boolean> = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'boolean') out[k] = v
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+/** Record the user's choice for a keyless provider: `true` = chosen, `false` =
+ *  removed (a disconnect, scoped or full), `null` = forget it (no recorded choice). */
+export function setKeylessProviderChoice(provider: string, choice: boolean | null): void {
+  const choices = readKeylessChoices()
+  if (choice === null) delete choices[provider]
+  else choices[provider] = choice
+  ensureSecretsDir()
+  const file = keylessChoicesPath()
+  const tmp = `${file}.tmp`
+  writeFileSync(tmp, JSON.stringify(choices, null, 2), { encoding: 'utf8', mode: 0o600 })
+  renameSync(tmp, file)
+}
+
+/** The user's recorded choice for a keyless provider, or null when none is recorded. */
+export function getKeylessProviderChoice(provider: string): boolean | null {
+  return readKeylessChoices()[provider] ?? null
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   SqliteMemoryStore,
   type ClawbooDb,
 } from '@clawboo/db'
+import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import { eq } from 'drizzle-orm'
 import type {
   Capabilities,
@@ -29,6 +30,7 @@ import type {
 } from '@clawboo/executor'
 
 import { getDb, resetDb } from '../../db'
+import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { subscribeChatDelta } from '../../teamChat/chatDeltaBus'
 import { chatHistoryDELETE } from '../../../api/chatHistory'
 import {
@@ -255,6 +257,49 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     const meta = rows().find((r) => r.kind === 'meta')
     expect(meta?.text).toMatch(/no provider key/i)
     expect(meta?.text).toMatch(/Settings/)
+  })
+
+  it("an Ollama agent's missing-model failure names the pull command", async () => {
+    // The provider comes from the agent's own config: a model Ollama never pulled
+    // is fixed with `ollama pull`, which is not the fix on any other provider.
+    seedAgent('native-ollama', 'clawboo-native')
+    saveAgentConfig(db, {
+      ...DEFAULT_AGENT_CONFIG,
+      id: 'native-ollama',
+      name: 'Local',
+      primaryProvider: 'ollama',
+      primaryModel: 'llama3.2',
+      envVar: 'OLLAMA_BASE_URL',
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const sk = nativeChatSessionKey('native-ollama')
+    const missing = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'error',
+          code: 'bad_request',
+          message: "404 model 'llama3.2' not found",
+          fatal: true,
+        }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'native-ollama',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => missing,
+    })
+    const meta = db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionKey, sk))
+      .all()
+      .map((r) => JSON.parse(r.data as string) as { kind: string; text: string })
+      .find((r) => r.kind === 'meta')
+    expect(meta?.text).toContain('"ollama pull llama3.2"')
   })
 
   it('a turn that DIES mid-reply commits the watched partial text (survives reload); a user Stop clears instead', async () => {

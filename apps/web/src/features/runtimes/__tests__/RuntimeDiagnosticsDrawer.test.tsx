@@ -87,6 +87,27 @@ describe('RuntimeDiagnosticsDrawer', () => {
     expect(await screen.findByTestId('runtime-diagnostics-drawer')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-depth-badge')).toHaveTextContent(/native peer/i)
     expect(screen.getByText('claude-haiku-4-5')).toBeInTheDocument()
+    expect(screen.queryByText('Local Ollama')).toBeNull()
+  })
+
+  it('native on local Ollama alone → says Ollama is set up beside the missing key', async () => {
+    render(
+      <RuntimeDiagnosticsDrawer
+        target={target({
+          id: 'clawboo-native',
+          name: 'Clawboo Native',
+          runtimeClass: 'native',
+          envVar: 'ANTHROPIC_API_KEY',
+          hasCredential: false,
+          ollamaConnected: true,
+        })}
+        onClose={noop}
+        onRecheck={noop}
+      />,
+    )
+    expect(await screen.findByTestId('runtime-diagnostics-drawer')).toBeInTheDocument()
+    expect(screen.getByText('Local Ollama')).toBeInTheDocument()
+    expect(screen.getByText('set up (no key needed)')).toBeInTheDocument()
   })
 
   it('Hermes → wrapped-oneshot badge + skills count + self-improvement', async () => {

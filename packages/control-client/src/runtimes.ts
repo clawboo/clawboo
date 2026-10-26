@@ -24,6 +24,10 @@ export interface RuntimeStatus {
   /** Hermes-only: a ChatGPT-subscription login (`hermes login --provider
    *  openai-codex`) is present — gates the subscription model group. */
   codexAuth?: boolean
+  /** Native-only: local Ollama is set up (chosen in onboarding or the providers
+   *  manager, or configured with OLLAMA_BASE_URL). It readies the runtime without
+   *  a key, so `hasCredential` can be false while `connectionState` is 'ready'. */
+  ollamaConnected?: boolean
   installCommand?: string | null
   builtIn?: boolean
   docsUrl?: string
@@ -126,32 +130,54 @@ export async function connectRuntime(
 export interface HealthcheckResult {
   ok: boolean
   error?: string
+  /** Ollama only: the requested model, when the daemon answers but hasn't pulled it. */
+  missingModel?: string
 }
 
 /** POST /api/runtimes/clawboo-native/healthcheck — verifies a pasted provider
  *  key with a single models-list GET. The key is never persisted; the response
- *  carries only { ok, error? }. */
+ *  carries only { ok, error?, missingModel? }. For Ollama, `model` is also
+ *  checked against the models the local daemon has pulled. */
 export async function healthcheckNativeKey(
   provider: string,
   apiKey: string,
+  model?: string,
 ): Promise<HealthcheckResult> {
   try {
     const res = await apiFetch('/api/runtimes/clawboo-native/healthcheck', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, apiKey }),
+      body: JSON.stringify({ provider, apiKey, ...(model ? { model } : {}) }),
     })
     const body = (await res.json().catch(() => ({}))) as HealthcheckResult
-    return { ok: res.ok && body.ok === true, error: body.error }
+    return {
+      ok: res.ok && body.ok === true,
+      error: body.error,
+      ...(typeof body.missingModel === 'string' ? { missingModel: body.missingModel } : {}),
+    }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
-/** POST /api/runtimes/:id/disconnect — clears the stored credential. */
-export async function disconnectRuntime(id: RuntimeId): Promise<{ ok: boolean; error?: string }> {
+/** POST /api/runtimes/:id/disconnect: clears the stored credential. With
+ *  `provider: 'ollama'` (native only) it removes just the local-Ollama choice and
+ *  leaves every key alone. */
+export async function disconnectRuntime(
+  id: RuntimeId,
+  provider?: 'ollama',
+): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await apiFetch(`/api/runtimes/${id}/disconnect`, { method: 'POST' })
+    const res = await apiFetch(
+      `/api/runtimes/${id}/disconnect`,
+      provider
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider }),
+          }
+        : { method: 'POST' },
+    )
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
     const ok = res.ok && body.ok !== false
     // Surface a real reason on failure so the caller can show it (don't swallow).

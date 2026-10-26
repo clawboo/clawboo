@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 
 import { DEFAULT_AGENT_CONFIG, NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
@@ -23,7 +23,9 @@ import {
   nativeConfigKey,
   nativeFileKey,
 } from '../../runtimes/native/agentConfigStore'
+import { __resetOllamaModelsCacheForTests } from '../../runtimes/native/ollamaModels'
 import { upsertNativeSessionRow } from '../../runtimes/native/sessionStore'
+import { setKeylessProviderChoice } from '../../secretsVault'
 import { ClawbooNativeAgentSource } from '../clawbooNativeAgentSource'
 
 describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', () => {
@@ -129,6 +131,46 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
       const rowExec = created.execConfig as Record<string, unknown> | null
       expect(rowExec && 'modelTier' in rowExec).toBe(false)
     } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
+  it('an auto-resolved Ollama agent gets a model Ollama has pulled, not an unpulled llama3.2', async () => {
+    // The deploy path for a keyless user: no provider in execConfig, Ollama chosen,
+    // and only qwen2.5 pulled. The static llama3.2 would fail every run.
+    const saved = {
+      ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'],
+      OPENAI_API_KEY: process.env['OPENAI_API_KEY'],
+      OPENROUTER_API_KEY: process.env['OPENROUTER_API_KEY'],
+      OLLAMA_BASE_URL: process.env['OLLAMA_BASE_URL'],
+    }
+    for (const k of Object.keys(saved)) delete process.env[k]
+    setKeylessProviderChoice('ollama', true)
+    __resetOllamaModelsCacheForTests()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          models: [
+            { name: 'nomic-embed-text:latest', capabilities: ['embedding'] },
+            { name: 'qwen2.5:7b', capabilities: ['completion', 'tools'] },
+          ],
+        }),
+      ),
+    )
+    try {
+      const created = await source.createAgent({
+        name: 'Local',
+        execConfig: { systemPrompt: 'hi', modelTier: 'specialist' },
+      })
+      const cfg = loadAgentConfig(db, created.id)
+      expect(cfg?.primaryProvider).toBe('ollama')
+      expect(cfg?.primaryModel).toBe('qwen2.5:7b')
+    } finally {
+      vi.unstubAllGlobals()
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k]
         else process.env[k] = v

@@ -69,6 +69,7 @@ import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDisp
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
+import { loadAgentConfig } from '../runtimes/native/agentConfigStore'
 import { createRunCostTally } from '../runtimes/runCostTally'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import type { RuntimeRunContext } from '../runtimes/types'
@@ -581,7 +582,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // through the same wording). Deliberately NOT `persistedTurn`: a system
             // notice is not the agent's turn, and nothing streamed, so the clearing
             // delta below is not in play either.
-            else deps.persistMeta?.(sessionKey, runFailureText(ev.message, obs.runtime))
+            else {
+              const provider = loadAgentConfig(db, agentId)?.primaryProvider
+              deps.persistMeta?.(sessionKey, runFailureText(ev.message, obs.runtime, provider))
+            }
           }
           // Stream-without-commit belt: a turn that streamed live tokens but persisted
           // nothing (pure silent delegation, a write-time drop, an insert error) gets

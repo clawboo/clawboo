@@ -174,6 +174,9 @@ export function RuntimeConnectList({
           <RuntimeProvidersBody
             variant="onboarding"
             nativeReady
+            ollamaConnected={
+              statuses.find((s) => s.id === 'clawboo-native')?.ollamaConnected === true
+            }
             codexReady={codexReady}
             onChanged={onChanged}
           />
@@ -276,7 +279,12 @@ function RuntimeRow({
           // Providers hub.
           extra={
             entry.id === 'clawboo-native' ? (
-              <RuntimeProvidersBody nativeReady codexReady={codexReady} onChanged={onChanged} />
+              <RuntimeProvidersBody
+                nativeReady
+                ollamaConnected={status?.ollamaConnected === true}
+                codexReady={codexReady}
+                onChanged={onChanged}
+              />
             ) : entry.id === 'hermes' ? (
               <RuntimeProvidersBody
                 runtime="hermes"

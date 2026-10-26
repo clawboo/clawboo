@@ -47,7 +47,7 @@ import {
 } from '../runtimes/native/agentConfigStore'
 import {
   nativeAgentProviderReady,
-  resolveConnectedNativeDefaults,
+  resolveDeployNativeDefaults,
 } from '../runtimes/native/nativeProviderDefaults'
 import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
 
@@ -224,7 +224,7 @@ export class ClawbooNativeAgentSource implements AgentSource {
       typeof execConfig['primaryProvider'] === 'string' && execConfig['primaryProvider'].length > 0
     const resolvedProvider = hasExplicitProvider
       ? {}
-      : resolveConnectedNativeDefaults(modelTier === 'leader' ? 'leader' : 'specialist')
+      : await resolveDeployNativeDefaults(modelTier === 'leader' ? 'leader' : 'specialist')
     const files = input.files ?? {}
     const config: AgentConfig = agentConfigSchema.parse({
       ...DEFAULT_AGENT_CONFIG,

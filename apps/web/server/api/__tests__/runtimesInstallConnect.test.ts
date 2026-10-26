@@ -130,6 +130,10 @@ import {
   setRuntimeDisconnected,
   setRuntimeSecret,
 } from '../../lib/secretsVault'
+import {
+  canRunNativeProvider,
+  isNativeOllamaRemoved,
+} from '../../lib/runtimes/native/nativeProviderDefaults'
 
 interface Mock {
   res: Response
@@ -193,6 +197,7 @@ describe('runtimes install/connect REST', () => {
     'OPENROUTER_API_KEY',
     'OPENAI_API_KEY',
     'GROQ_API_KEY',
+    'OLLAMA_BASE_URL',
     'HERMES_HOME',
   ] as const
 
@@ -202,6 +207,7 @@ describe('runtimes install/connect REST', () => {
     delete process.env['OPENROUTER_API_KEY']
     delete process.env['OPENAI_API_KEY']
     delete process.env['GROQ_API_KEY']
+    delete process.env['OLLAMA_BASE_URL']
     home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-rt-rest-'))
     // Isolate the OpenClaw state dir too, so the resolveRuntimeKey `.env`
     // fallback can't read the dev box's real ~/.openclaw/.env provider keys.
@@ -787,7 +793,7 @@ describe('runtimes install/connect REST', () => {
     expect(String((m.body() as { error?: string }).error)).toMatch(/groq/i)
   })
 
-  it('native connect with ollama is a keyless no-op (stores nothing, still ok)', () => {
+  it('native connect with ollama stores no key (vault untouched, still ok)', () => {
     const m = mockRes()
     runtimesConnectPOST(
       req({ params: { id: 'clawboo-native' }, body: { provider: 'ollama' } }),
@@ -796,6 +802,157 @@ describe('runtimes install/connect REST', () => {
     expect((m.body() as { ok?: boolean }).ok).toBe(true)
     expect(hasRuntimeSecret('OLLAMA_BASE_URL')).toBe(false)
     expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(false)
+  })
+
+  // ── keyless local Ollama: the choice is the connection ─────────────────────
+  async function nativeStatus(): Promise<Record<string, unknown>> {
+    const m = mockRes()
+    await runtimesListGET(req(), m.res)
+    return (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'clawboo-native',
+    )!
+  }
+  const connectOllama = (): Mock => {
+    const m = mockRes()
+    runtimesConnectPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'ollama' } }),
+      m.res,
+    )
+    return m
+  }
+  const disconnectNative = (body: Record<string, unknown> = {}): Mock => {
+    const m = mockRes()
+    runtimesDisconnectPOST(req({ params: { id: 'clawboo-native' }, body }), m.res)
+    return m
+  }
+
+  it('picking Ollama readies native with NO key and NO OLLAMA_BASE_URL', async () => {
+    const m = connectOllama()
+    expect((m.body() as { connectionState?: string }).connectionState).toBe('ready')
+    const native = await nativeStatus()
+    // The state the 1:1 composer and the team-deploy picker read.
+    expect(native['connectionState']).toBe('ready')
+    expect(native['ollamaConnected']).toBe(true)
+    // Not a credential: nothing resolves, nothing was stored.
+    expect(native['hasCredential']).toBe(false)
+    expect(native['hasVaultCredential']).toBe(false)
+    expect((native['health'] as { ok?: boolean }).ok).toBe(true)
+  })
+
+  it('OLLAMA_BASE_URL alone also reads ready (health and connection state agree)', async () => {
+    process.env['OLLAMA_BASE_URL'] = 'http://localhost:11434/v1'
+    const native = await nativeStatus()
+    expect((native['health'] as { ok?: boolean }).ok).toBe(true)
+    expect(native['connectionState']).toBe('ready')
+  })
+
+  it('the Ollama choice is native-only: other runtimes never read it', async () => {
+    connectOllama()
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    const m = mockRes()
+    await runtimesListGET(req(), m.res)
+    const hermes = (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'hermes',
+    )!
+    expect(hermes['ollamaConnected']).toBe(false)
+    expect(hermes['connectionState']).toBe('needs-auth')
+  })
+
+  it('disconnect { provider: ollama } removes ONLY the Ollama choice; keys stay', async () => {
+    setRuntimeSecret('OPENROUTER_API_KEY', 'sk-or-kept')
+    connectOllama()
+    const m = disconnectNative({ provider: 'ollama' })
+    expect(m.statusCode()).toBe(200)
+    const native = await nativeStatus()
+    expect(native['ollamaConnected']).toBe(false)
+    expect(native['connectionState']).toBe('ready') // the OpenRouter key still serves
+    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
+    expect(isRuntimeDisconnected('clawboo-native')).toBe(false)
+  })
+
+  it('disconnect { provider: ollama } also mutes an ambient OLLAMA_BASE_URL', async () => {
+    process.env['OLLAMA_BASE_URL'] = 'http://localhost:11434/v1'
+    const m = disconnectNative({ provider: 'ollama' })
+    expect((m.body() as { connectionState?: string }).connectionState).toBe('needs-auth')
+    expect((await nativeStatus())['ollamaConnected']).toBe(false)
+    // Picking it again turns it back on.
+    connectOllama()
+    expect((await nativeStatus())['ollamaConnected']).toBe(true)
+  })
+
+  it('a FULL native disconnect drops a chosen Ollama with the keys', async () => {
+    connectOllama()
+    const m = disconnectNative()
+    expect((m.body() as { connectionState?: string }).connectionState).toBe('needs-auth')
+    const native = await nativeStatus()
+    expect(native['ollamaConnected']).toBe(false)
+    expect((native['health'] as { ok?: boolean }).ok).toBe(false)
+  })
+
+  // Disconnect means the same for every provider: Ollama is REMOVED, not just
+  // forgotten, so its agents stop and nothing but picking it again turns it back on.
+  it('a FULL native disconnect removes Ollama; a later key connect leaves it removed', async () => {
+    connectOllama()
+    disconnectNative()
+    expect(isNativeOllamaRemoved()).toBe(true)
+    expect(canRunNativeProvider('ollama')).toBe(false)
+
+    const keyed = mockRes()
+    runtimesConnectPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { apiKey: 'sk-ant-new', provider: 'anthropic' },
+      }),
+      keyed.res,
+    )
+    expect(isRuntimeDisconnected('clawboo-native')).toBe(false)
+    expect((await nativeStatus())['ollamaConnected']).toBe(false)
+    expect(isNativeOllamaRemoved()).toBe(true)
+
+    // Only picking Ollama again brings it back.
+    connectOllama()
+    expect((await nativeStatus())['ollamaConnected']).toBe(true)
+    expect(isNativeOllamaRemoved()).toBe(false)
+  })
+
+  it('after a FULL disconnect, OLLAMA_BASE_URL alone no longer turns Ollama back on', async () => {
+    // Before, the full disconnect only muted the env var while the runtime stayed
+    // disconnected: the next key connect lifted that, and Ollama silently came back.
+    process.env['OLLAMA_BASE_URL'] = 'http://localhost:11434/v1'
+    expect((await nativeStatus())['ollamaConnected']).toBe(true)
+    disconnectNative()
+    const keyed = mockRes()
+    runtimesConnectPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { apiKey: 'sk-ant-new', provider: 'anthropic' },
+      }),
+      keyed.res,
+    )
+    expect((await nativeStatus())['ollamaConnected']).toBe(false)
+    expect(canRunNativeProvider('ollama')).toBe(false)
+  })
+
+  it('a provider-scoped disconnect accepts only native + ollama', () => {
+    const wrongProvider = disconnectNative({ provider: 'openrouter' })
+    expect(wrongProvider.statusCode()).toBe(400)
+    const wrongRuntime = mockRes()
+    runtimesDisconnectPOST(
+      req({ params: { id: 'hermes' }, body: { provider: 'ollama' } }),
+      wrongRuntime.res,
+    )
+    expect(wrongRuntime.statusCode()).toBe(400)
+  })
+
+  it('an unreadable provider is refused, never read as the full disconnect', () => {
+    // A full disconnect deletes every native key, so `{ provider: 1 }` falling
+    // through to it would wipe keys the caller never meant to touch.
+    setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-keep')
+    for (const provider of [1, null, '', '   ', { id: 'ollama' }]) {
+      const m = disconnectNative({ provider })
+      expect(m.statusCode()).toBe(400)
+    }
+    expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(true)
   })
 
   // ── native healthcheck — one authenticated GET, never persists the key ──
@@ -918,6 +1075,89 @@ describe('runtimes install/connect REST', () => {
     expect(m.statusCode()).toBe(400)
     expect(String((m.body() as { error?: string }).error)).toMatch(/apiKey is required/i)
     expect(fetchMock).not.toHaveBeenCalled() // nothing to probe with — don't call out
+    vi.unstubAllGlobals()
+  })
+
+  // ── Ollama: reachable is not enough, the chosen model must be pulled ──
+  // An Ollama that answers but never pulled the model fails every run with
+  // "model not found", which used to pass this check and onboarding with it.
+  const ollamaTags = (...names: string[]) =>
+    vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            models: names.map((name) => ({
+              name,
+              details: { family: name.startsWith('nomic') ? 'nomic-bert' : 'llama' },
+              capabilities: name.startsWith('nomic') ? ['embedding'] : ['completion', 'tools'],
+            })),
+          }),
+          { status: 200 },
+        ),
+    )
+  const healthcheckOllama = async (body: Record<string, unknown>) => {
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({ params: { id: 'clawboo-native' }, body: { provider: 'ollama', ...body } }),
+      m.res,
+    )
+    return m.body() as { ok?: boolean; error?: string; missingModel?: string }
+  }
+
+  it('ollama healthcheck fails a model the daemon has not pulled, with the pull command', async () => {
+    vi.stubGlobal('fetch', ollamaTags('nomic-embed-text:latest'))
+    const body = await healthcheckOllama({ model: 'llama3.2' })
+    expect(body.ok).toBe(false)
+    expect(body.missingModel).toBe('llama3.2')
+    expect(body.error).toContain('ollama pull llama3.2')
+    vi.unstubAllGlobals()
+  })
+
+  it('ollama healthcheck passes a pulled model (untagged reads as :latest)', async () => {
+    vi.stubGlobal('fetch', ollamaTags('llama3.2:latest'))
+    expect(await healthcheckOllama({ model: 'llama3.2' })).toEqual({ ok: true })
+    vi.unstubAllGlobals()
+  })
+
+  it('ollama healthcheck with no model still only checks that the daemon answers', async () => {
+    vi.stubGlobal('fetch', ollamaTags('nomic-embed-text:latest'))
+    expect(await healthcheckOllama({})).toEqual({ ok: true })
+    vi.unstubAllGlobals()
+  })
+
+  it('ollama healthcheck never reports a model missing from a body that is not a tags list', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<html>ok</html>', { status: 200 })),
+    )
+    expect(await healthcheckOllama({ model: 'llama3.2' })).toEqual({ ok: true })
+    vi.unstubAllGlobals()
+  })
+
+  it('ollama healthcheck probes the native /api/tags behind OLLAMA_BASE_URL', async () => {
+    process.env['OLLAMA_BASE_URL'] = 'http://gpu-box:11434/v1/'
+    const fetchMock = ollamaTags('llama3.2:latest')
+    vi.stubGlobal('fetch', fetchMock)
+    await healthcheckOllama({ model: 'llama3.2' })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://gpu-box:11434/api/tags')
+    vi.unstubAllGlobals()
+  })
+
+  it('a keyed provider ignores `model` (its check is about the key)', async () => {
+    // Even a body shaped like an empty tags list, which would read as "not pulled".
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ models: [] }), { status: 200 })),
+    )
+    const m = mockRes()
+    await runtimesHealthcheckPOST(
+      req({
+        params: { id: 'clawboo-native' },
+        body: { provider: 'anthropic', apiKey: 'sk-probe', model: 'llama3.2' },
+      }),
+      m.res,
+    )
+    expect(m.body()).toEqual({ ok: true })
     vi.unstubAllGlobals()
   })
 

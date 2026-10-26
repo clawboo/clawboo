@@ -2,7 +2,8 @@
 // (onUnhandledRequest:'error'). Connected-ONLY surface: hub-connected rows with
 // one-click keyless "Use" reconnect, per-provider disconnect through the
 // Providers-hub endpoint, the default-model dropdown + Make default, the honest
-// codex-gated ChatGPT row, and the add-more/empty CTAs that jump to Providers.
+// codex-gated ChatGPT row, the add-more/empty CTAs that jump to Providers, and
+// native's local Ollama (offered in settings, an ordinary connected row once set up).
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -194,6 +195,7 @@ describe('RuntimeProvidersBody', () => {
     // in openclaw.json; its subscription row lives in RuntimeManageBody).
     expect(screen.queryByTestId('native-provider-use-openrouter')).toBeNull()
     expect(screen.queryByTestId('native-provider-row-chatgpt')).toBeNull()
+    expect(screen.queryByTestId('native-provider-ollama-offer')).toBeNull()
     await userEvent.click(screen.getByTestId('native-provider-toggle-openrouter'))
     expect(screen.queryByTestId('native-provider-model-openrouter')).toBeNull()
     expect(screen.queryByTestId('native-provider-make-default-openrouter')).toBeNull()
@@ -218,6 +220,7 @@ describe('RuntimeProvidersBody', () => {
     expect(screen.queryByTestId('native-providers-open-hub')).toBeNull()
     expect(screen.queryByTestId('native-provider-add-groq')).toBeNull()
     expect(screen.queryByTestId('native-provider-row-groq')).toBeNull()
+    expect(screen.queryByTestId('native-provider-ollama-offer')).toBeNull()
     expect(document.querySelector('input')).toBeNull()
     // The connected row still manages itself (default model + disconnect).
     await userEvent.click(screen.getByTestId('native-provider-toggle-openrouter'))
@@ -231,6 +234,213 @@ describe('RuntimeProvidersBody', () => {
       expect(container.querySelector('[data-testid="native-providers-body"]')).toBeNull(),
     )
     expect(screen.queryByTestId('native-providers-empty')).toBeNull()
+  })
+
+  // ── local Ollama (native only): picked HERE, since the hub has no key to hold ──
+  it('Ollama not set up: settings offers it; Use checks the local daemon, then records the choice', async () => {
+    hub(['openrouter'])
+    let health: unknown = null
+    const posts: unknown[] = []
+    server.use(
+      http.post(HEALTHCHECK, async ({ request }) => {
+        health = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
+      http.post('/api/runtimes/clawboo-native/connect', async ({ request }) => {
+        posts.push(await request.json())
+        return HttpResponse.json({ ok: true, connectionState: 'ready' })
+      }),
+    )
+    const onChanged = vi.fn()
+    render(<RuntimeProvidersBody nativeReady onChanged={onChanged} />)
+    expect(await screen.findByTestId('native-provider-ollama-offer')).toHaveTextContent(
+      'Local · no key needed',
+    )
+    expect(screen.queryByTestId('native-provider-row-ollama')).toBeNull() // not connected yet
+    await userEvent.click(screen.getByTestId('native-provider-use-ollama'))
+    // Keyless both ways: the probe asks the local daemon, the connect sends only the pick.
+    await waitFor(() => expect(posts).toEqual([{ provider: 'ollama' }]))
+    expect(health).toEqual({ provider: 'ollama', apiKey: '' })
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('a stopped Ollama blocks Use with the fix to run; "Use anyway" records the choice', async () => {
+    hub([])
+    const posts: unknown[] = []
+    server.use(
+      http.post(HEALTHCHECK, () =>
+        HttpResponse.json({ ok: false, error: 'Could not reach ollama.' }),
+      ),
+      http.post('/api/runtimes/clawboo-native/connect', async ({ request }) => {
+        posts.push(await request.json())
+        return HttpResponse.json({ ok: true, connectionState: 'ready' })
+      }),
+    )
+    render(<RuntimeProvidersBody nativeReady={false} />)
+    // Nothing connected yet: the empty card, and Ollama offered beside it.
+    await screen.findByTestId('native-providers-empty')
+    await userEvent.click(await screen.findByTestId('native-provider-use-ollama'))
+    expect(await screen.findByText(/ollama serve/)).toBeInTheDocument()
+    expect(posts).toEqual([])
+    await userEvent.click(screen.getByTestId('native-provider-use-anyway-ollama'))
+    await waitFor(() => expect(posts).toEqual([{ provider: 'ollama' }]))
+  })
+
+  it('Ollama set up: an ordinary connected row; Disconnect removes ONLY the Ollama choice', async () => {
+    hub(['openrouter'])
+    vi.mocked(confirm).mockResolvedValue(true)
+    const scoped: unknown[] = []
+    const hubDisconnects: string[] = []
+    server.use(
+      http.post('/api/runtimes/clawboo-native/disconnect', async ({ request }) => {
+        scoped.push(await request.json())
+        return HttpResponse.json({ ok: true, connectionState: 'ready' })
+      }),
+      http.post('/api/providers/:id/disconnect', ({ params }) => {
+        hubDisconnects.push(String(params['id']))
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    render(<RuntimeProvidersBody nativeReady ollamaConnected />)
+    expect(await screen.findByTestId('native-provider-row-ollama')).toHaveTextContent('Connected')
+    expect(screen.queryByTestId('native-provider-ollama-offer')).toBeNull()
+    await userEvent.click(screen.getByTestId('native-provider-toggle-ollama'))
+    await userEvent.click(screen.getByTestId('native-provider-disconnect-ollama'))
+    // The native runtime's own provider-scoped disconnect, never the hub's key removal.
+    await waitFor(() => expect(scoped).toEqual([{ provider: 'ollama' }]))
+    expect(hubDisconnects).toEqual([])
+  })
+
+  it('Ollama set up: Make default records an ollama leader model', async () => {
+    hub([])
+    const saved: unknown[] = []
+    server.use(
+      http.post('/api/onboarding/native-leader-model', async ({ request }) => {
+        saved.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    render(<RuntimeProvidersBody nativeReady ollamaConnected />)
+    await userEvent.click(await screen.findByTestId('native-provider-toggle-ollama'))
+    await userEvent.click(screen.getByTestId('native-provider-make-default-ollama'))
+    await waitFor(() => expect(saved).toEqual([{ provider: 'ollama', model: 'llama3.2' }]))
+  })
+
+  // ── Ollama's model list is what the local daemon has pulled ───────────────
+  // The default model used to be a static llama3.2; an Ollama that never pulled
+  // it failed every run while this row read Connected.
+
+  function ollamaLeader(model: string) {
+    return http.get('/api/onboarding/native-leader-model', () =>
+      HttpResponse.json({ provider: 'ollama', model }),
+    )
+  }
+  function ollamaModels(body: Record<string, unknown>, onCall?: () => void) {
+    return http.get('/api/providers/ollama/models', () => {
+      onCall?.()
+      return HttpResponse.json(body)
+    })
+  }
+  const PULLED = {
+    models: [
+      { id: 'qwen2.5:7b', label: 'qwen2.5:7b' },
+      { id: 'mistral', label: 'mistral' },
+    ],
+    reachable: true,
+    recommendedModel: 'qwen2.5:7b',
+  }
+
+  it('Ollama default: the dropdown lists the pulled models, and asks only once the row opens', async () => {
+    hub([])
+    let calls = 0
+    server.use(
+      ollamaLeader('qwen2.5:7b'),
+      ollamaModels(PULLED, () => (calls += 1)),
+    )
+    render(<RuntimeProvidersBody nativeReady ollamaConnected />)
+    await screen.findByTestId('native-provider-row-ollama')
+    expect(calls).toBe(0)
+    await userEvent.click(screen.getByTestId('native-provider-toggle-ollama'))
+    await waitFor(() => expect(calls).toBe(1))
+    const select = await screen.findByTestId('native-provider-model-ollama')
+    expect(select).toHaveTextContent('qwen2.5:7b')
+    await userEvent.click(select)
+    expect(screen.getByRole('option', { name: 'mistral' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /llama/i })).toBeNull()
+    // The default is pulled, so there is nothing to fix.
+    expect(screen.queryByTestId('native-provider-ollama-notice')).toBeNull()
+  })
+
+  it('Ollama default not pulled: says so with the pull command and never shows another model as the default', async () => {
+    hub([])
+    let calls = 0
+    server.use(
+      ollamaLeader('llama3.2'),
+      ollamaModels(PULLED, () => (calls += 1)),
+    )
+    render(<RuntimeProvidersBody nativeReady ollamaConnected />)
+    await userEvent.click(await screen.findByTestId('native-provider-toggle-ollama'))
+    const notice = await screen.findByTestId('native-provider-ollama-notice')
+    expect(notice).toHaveTextContent(/doesn't have llama3\.2/)
+    expect(notice).toHaveTextContent('ollama pull llama3.2')
+    // The stored model, marked, rather than the first pulled one passing for it.
+    expect(screen.getByTestId('native-provider-model-ollama')).toHaveTextContent(
+      'llama3.2 (not pulled)',
+    )
+    await userEvent.click(screen.getByTestId('native-provider-ollama-check-again'))
+    await waitFor(() => expect(calls).toBe(2))
+  })
+
+  it('Ollama with no chat model: the notice offers a model to pull', async () => {
+    hub([])
+    server.use(
+      ollamaLeader('llama3.2'),
+      ollamaModels({ models: [], reachable: true, recommendedModel: 'llama3.2' }),
+    )
+    render(<RuntimeProvidersBody nativeReady ollamaConnected />)
+    await userEvent.click(await screen.findByTestId('native-provider-toggle-ollama'))
+    const notice = await screen.findByTestId('native-provider-ollama-notice')
+    expect(notice).toHaveTextContent(/no chat model/i)
+    expect(notice).toHaveTextContent('ollama pull llama3.2')
+  })
+
+  it('a stopped Ollama: the notice says to start it', async () => {
+    hub([])
+    server.use(
+      ollamaLeader('qwen2.5:7b'),
+      ollamaModels({ models: [], reachable: false, recommendedModel: 'llama3.2' }),
+    )
+    render(<RuntimeProvidersBody nativeReady ollamaConnected />)
+    await userEvent.click(await screen.findByTestId('native-provider-toggle-ollama'))
+    const notice = await screen.findByTestId('native-provider-ollama-notice')
+    expect(notice).toHaveTextContent(/isn't answering/)
+    expect(notice).toHaveTextContent('ollama serve')
+    // Unknown is not "missing": the stored model, without the mark.
+    expect(screen.getByTestId('native-provider-model-ollama')).toHaveTextContent('qwen2.5:7b')
+    expect(screen.getByTestId('native-provider-model-ollama')).not.toHaveTextContent('not pulled')
+  })
+
+  it('Ollama Make default records the pulled model a new agent would get', async () => {
+    hub([])
+    const saved: unknown[] = []
+    server.use(
+      ollamaModels(PULLED),
+      http.post('/api/onboarding/native-leader-model', async ({ request }) => {
+        saved.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    render(<RuntimeProvidersBody nativeReady ollamaConnected />)
+    await userEvent.click(await screen.findByTestId('native-provider-toggle-ollama'))
+    await userEvent.click(screen.getByTestId('native-provider-make-default-ollama'))
+    await waitFor(() => expect(saved).toEqual([{ provider: 'ollama', model: 'qwen2.5:7b' }]))
+  })
+
+  it('ONBOARDING variant lists a set-up Ollama as a connected row', async () => {
+    hub([])
+    render(<RuntimeProvidersBody variant="onboarding" nativeReady ollamaConnected />)
+    expect(await screen.findByTestId('native-provider-row-ollama')).toHaveTextContent('Connected')
+    expect(screen.queryByTestId('native-provider-ollama-offer')).toBeNull()
   })
 
   it('the ChatGPT row appears (Connected · Codex) only when the subscription is signed in', async () => {

@@ -55,7 +55,7 @@ interface AgentRecord {
   personalityConfig: unknown | null
   execConfig: unknown | null
   model?: string | null // native: the AgentConfig primaryModel; absent for sources whose model lives elsewhere
-  providerReady?: boolean | null // native: this agent has a runnable candidate (a key in its envVar slot, one of its fallbacks, or keyless Ollama); null/absent = not applicable
+  providerReady?: boolean | null // native: this agent has a runnable candidate (a key in its envVar slot, one of its fallbacks, or keyless Ollama not removed by the user); null/absent = not applicable
   // Classification (dormant seams)
   participantKind: 'agent' | 'human'
   runtime: 'openclaw' | 'claude-code' | 'codex' | 'hermes' | string

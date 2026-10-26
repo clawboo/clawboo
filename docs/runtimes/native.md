@@ -86,7 +86,7 @@ A native run's candidate list is the agent's `primaryProvider` plus its declared
 | `anthropic`  | `ANTHROPIC_API_KEY`  | Anthropic SDK (`messages.create`, streaming)                                          | Empty assistant text blocks are omitted (Anthropic rejects them) |
 | `openai`     | `OPENAI_API_KEY`     | OpenAI SDK (Chat Completions, streaming)                                              | `api.openai.com` gets `max_completion_tokens`                    |
 | `openrouter` | `OPENROUTER_API_KEY` | OpenAI SDK with `baseURL: https://openrouter.ai/api/v1`                               | Compat endpoint gets `max_tokens`                                |
-| `ollama`     | _(keyless)_          | OpenAI SDK with `baseURL: <OLLAMA_BASE_URL>/v1` (default `http://localhost:11434/v1`) | No key needed                                                    |
+| `ollama`     | _(keyless)_          | OpenAI SDK with `baseURL: <OLLAMA_BASE_URL>` (default is `http://localhost:11434/v1`) | No key needed                                                    |
 | `google`     | `GEMINI_API_KEY`     | OpenAI SDK with `baseURL: https://generativelanguage.googleapis.com/v1beta/openai`    | Google                                                           |
 | `xai`        | `XAI_API_KEY`        | OpenAI SDK with `baseURL: https://api.x.ai/v1`                                        | xAI                                                              |
 | `groq`       | `GROQ_API_KEY`       | OpenAI SDK with `baseURL: https://api.groq.com/openai/v1`                             | Groq                                                             |
@@ -105,7 +105,7 @@ HTTP SDK construction can't fail, so fallback fires **per turn, at the first cal
 2. Once a candidate yields, it is surfaced as-is; a mid-stream retry would duplicate the streamed text, so a mid-stream error propagates.
 3. A working candidate becomes **sticky** for the rest of the conversation, and cost is attributed to the provider that actually served the turn.
 
-Keyless non-Ollama candidates (a provider whose env var resolves to nothing) are dropped from the candidate list; there is nothing to authenticate with.
+Keyless non-Ollama candidates (a provider whose env var resolves to nothing) are dropped from the candidate list; there is nothing to authenticate with. Ollama candidates are dropped too once you remove Ollama (**Disconnect Ollama**), until you turn it back on.
 
 <Note>
 Provider error codes are read structurally from the HTTP `.status` (`401`/`403` → `auth`, `429` → `rate_limit`, `5xx`/`529` → `overloaded`), never from SDK error-class names, so a provider SDK major-version bump can't break the routing logic.
@@ -253,13 +253,15 @@ The verification critic deliberately runs *without* a home; builder ≠ judge, s
 
 ## How to connect
 
-The native runtime is built in, so it never reaches the `not-installed` state; connecting is entirely a key (or, for Ollama, nothing). The full connect/disconnect/healthcheck mechanics are shared with the other runtimes; see [Connecting runtimes](/runtimes/connecting-runtimes) for the card UI, the encrypted vault, and the resolution chain. The native specifics:
+The native runtime is built in, so it never reaches the `not-installed` state; connecting is entirely a key (or, for Ollama, choosing it: no key, just the recorded choice). The full connect/disconnect/healthcheck mechanics are shared with the other runtimes; see [Connecting runtimes](/runtimes/connecting-runtimes) for the card UI, the encrypted vault, and the resolution chain. The native specifics:
 
 ### 1. Verify a key before committing
 
 `POST /api/runtimes/clawboo-native/healthcheck` with `{ provider, apiKey? }` makes a single authenticated `GET` to the provider's models/health endpoint (`anthropic` → `https://api.anthropic.com/v1/models`, `openai` → `https://api.openai.com/v1/models`, `openrouter` → `https://openrouter.ai/api/v1/models`, an extra OpenAI-compatible provider → its own `<baseURL>/models`, `ollama` → `<OLLAMA_BASE_URL>/api/tags`, keyless), bounded by an 8-second timeout. It returns `{ ok: true }` on a 2xx or `{ ok: false, error }` on a bad key (`401`/`403` → `"Invalid API key."`), a timeout, or a network failure. **The key is used for that one fetch only, never persisted, never logged, never echoed.** This route is native-only; any other runtime id returns `400`.
 
 `apiKey` is optional. Omit it to check the key already stored for that provider — that's how the Providers manager's one-click **Use** confirms a saved key still works before reconnecting on it. With no `apiKey` and nothing stored, the route returns `400`.
+
+For `ollama` the body can also carry `model`. An Ollama that answers is not enough on its own, because a model it never pulled fails every run, so the route checks `model` against the `/api/tags` list it just fetched and returns `{ ok: false, error, missingModel }` when the model is not there, with the `ollama pull <model>` command in `error`. Ollama reads an untagged name as `:latest`, so `llama3.2` is met by `llama3.2:latest` and not by `llama3.2:1b`. The onboarding connect step sends the model you picked; every other provider ignores the field.
 
 The UI does not treat this as an opt-in extra: every surface that accepts a credential runs it first. The onboarding step verifies on **Continue** (the **Test connection** button is just an earlier chance to run the same check), the Providers hub verifies on **Save**, and the runtime connect card verifies before it writes the vault. A refused credential is not stored on the normal path. The one exception is deliberate and user-driven: each surface offers an explicit override (**Continue anyway** / **Save anyway** / **Connect anyway** / **Use anyway**) which stores the credential unverified, so a machine that simply can't reach the provider is never stranded.
 
@@ -285,9 +287,11 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/healthcheck \
 | `together`                 | `TOGETHER_API_KEY`                   |
 | `cerebras`                 | `CEREBRAS_API_KEY`                   |
 | `moonshot`                 | `MOONSHOT_API_KEY`                   |
-| `ollama`                   | _(keyless, nothing stored, a no-op)_ |
+| `ollama`                   | _(keyless: records the Ollama pick)_ |
 
 The provider is validated against the runtime's known env-var set (`ANTHROPIC_API_KEY` plus its `altEnvVars`); an unrecognized provider falls back to the default `ANTHROPIC_API_KEY`. The response never echoes the key.
+
+**Local Ollama.** With `provider: "ollama"` there is no key to store, so the route records the choice itself (in `secrets/keyless-providers.json` beside the vault, no secret material), and that choice alone readies the runtime: `GET /api/runtimes` reports `connectionState: "ready"` and `ollamaConnected: true` with no key and no `OLLAMA_BASE_URL`. Agents then reach Ollama at `OLLAMA_BASE_URL` when it is set, else `http://localhost:11434/v1`. An agent deployed without a model pick takes the first set-up provider in the order Anthropic, OpenAI, OpenRouter, Ollama, then the extra providers, so on an install with no keys every agent lands on Ollama, on a model it has pulled (see [Ollama models](#ollama-models)), and the universal Boo Zero is created on it. The onboarding connect step makes this call when you pick **Ollama**; later, **Settings → Runtimes → Clawboo Native → Manage** lists Ollama under its providers, with **Use** to turn it on and, once on, its default model and **Disconnect Ollama**. `POST /api/runtimes/clawboo-native/disconnect` with `{ "provider": "ollama" }` removes only that choice (it also stops a configured `OLLAMA_BASE_URL` from counting as set up). Removed, Ollama runs nothing: agents already set to an Ollama model stop running and read `providerReady: false`, and a recorded Ollama leader pick no longer places Boo Zero on it, until you choose **Use** again. A full disconnect removes Ollama too, along with the keys, so disconnect means the same for every provider: a later key connect or `OLLAMA_BASE_URL` does not bring Ollama back, only picking it again does.
 
 ```bash
 # Anthropic (the default slot)
@@ -299,7 +303,27 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
 curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
   -H 'Content-Type: application/json' \
   -d '{"apiKey":"sk-or-...","provider":"openrouter"}'
+
+# Local Ollama (no key)
+curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"ollama"}'
 ```
+
+#### Ollama models
+
+Clawboo lists the models your Ollama has actually pulled rather than a fixed set. `GET /api/providers/ollama/models` reads Ollama's native `/api/tags` at `OLLAMA_BASE_URL` with a trailing `/v1` stripped (else `http://localhost:11434`), with a 3-second timeout, and answers `{ models, reachable, recommendedModel }`:
+
+- **Embedding-only models are left out.** A model such as `nomic-embed-text` turns text into vectors and cannot answer a chat turn. Current Ollama versions report each model's `capabilities` in `/api/tags`, and a model without `completion` is dropped; for an Ollama that doesn't, the embedding families (`bert`, `nomic-bert`, `xlm-roberta`) and names containing `embed`, `minilm`, `rerank` or `bge-` are dropped.
+- **Models that can't use tools are marked.** Agents call tools on nearly every turn, and Ollama refuses a tool call to a model without tool support, so such a model is listed as `<model> (can't use tools)`.
+- **`reachable`** is `false` when nothing that speaks Ollama's API answered, which is how the pickers tell "Ollama is stopped" from "Ollama has no chat model".
+- **`recommendedModel`** is the model a new agent would get (below).
+
+The onboarding model dropdown and the Ollama row's **Default model** in the providers manager both list these models. With Ollama running and no chat model pulled, each says so and shows `ollama pull llama3.2` with a **Check again** button. In the manager, a stored default that Ollama no longer has is shown as `<model> (not pulled)` with its `ollama pull` command, so the list never passes another model off as the default.
+
+**The model an agent is created with.** An agent deployed without a model pick resolves to Ollama with `llama3.2` first; at create time that is checked against `/api/tags`. A pulled model is kept. Otherwise the agent gets the most recently pulled model that can use tools, then the most recent one whose tool support Ollama doesn't report, then the most recent of the rest. The leader and the specialists get the same model on purpose: a laptop holds one or two models in memory, and two different picks would reload a model on nearly every hand-off of a delegation cascade. With nothing pulled, or Ollama unreachable at deploy time, the agent keeps `llama3.2`. One `/api/tags` answer is reused for up to 10 seconds, so a team deploy asks once.
+
+**A run on a model Ollama can't serve.** A run that reaches an unpulled model fails before its first token, and instead of Ollama's raw `model "llama3.2" not found` the chat says Ollama doesn't have the model and gives the `ollama pull` command. A model without tool support gets a plain sentence too, naming the model and suggesting one that can use tools.
 
 ### 3. Deploy a team
 
@@ -307,7 +331,7 @@ A connected native runtime runs any team you deploy. Onboarding creates no team 
 
 ## Verify it worked
 
-- `GET /api/runtimes` should show the `clawboo-native` entry with `installed: true`, `binPath: null`, and `connectionState: "ready"`. Its `health.ok` is `true` when **any** of the routable provider keys in the [provider table](#providers-and-routing) resolves (all eleven count, not just the first three), or `OLLAMA_BASE_URL` is set, no binary probe, no network call. Runtime health is deliberately runtime-wide; each agent's own routing is reported per agent as `providerReady` on `GET /api/agents`, which mirrors the router's candidate rule: true when a key resolves in that agent's `envVar`, or in one of its `fallbacks`, or its provider is keyless Ollama. The agent detail and chat headers badge an agent whose `providerReady` is `false` even while the runtime card is green.
+- `GET /api/runtimes` should show the `clawboo-native` entry with `installed: true`, `binPath: null`, and `connectionState: "ready"`. Its `health.ok` is `true` when **any** of the routable provider keys in the [provider table](#providers-and-routing) resolves (all eleven count, not just the first three), or local Ollama is set up (`ollamaConnected`: you chose it, or `OLLAMA_BASE_URL` is set and you have not removed Ollama or disconnected the runtime), no binary probe, no network call. Runtime health is deliberately runtime-wide; each agent's own routing is reported per agent as `providerReady` on `GET /api/agents`, which mirrors the router's candidate rule: true when a key resolves in that agent's `envVar`, or in one of its `fallbacks`, or its provider is keyless Ollama that you have not removed. The agent detail and chat headers badge an agent whose `providerReady` is `false` even while the runtime card is green.
 - Run a board task on it via `POST /api/runtimes/clawboo-native/run`. Every resolvable provider key is injected from the vault into the run, so a key connected from the UI authenticates automatically.
 
 ## Troubleshooting
@@ -325,7 +349,7 @@ A connected native runtime runs any team you deploy. Onboarding creates no team 
 </Warning>
 
 <Danger>
-**Ollama is keyless and local.** `provider: "ollama"` stores nothing, and the run reaches the model at `<OLLAMA_BASE_URL>/v1` (default `http://localhost:11434/v1`). If Ollama is not running there, the provider call fails like any unreachable endpoint.
+**Ollama is keyless and local.** `provider: "ollama"` stores no key; it records that you chose Ollama, and the run reaches the model at `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`; set the variable to the full OpenAI-compatible base, `/v1` included). The model has to be pulled in that Ollama. The pickers list the pulled models (with none pulled they fall back to `llama3.2` and show the pull command) and an agent created without a pick gets one that is pulled (see [Ollama models](#ollama-models)), but a model picked while nothing was pulled, or removed since, still fails: the chat says Ollama doesn't have it and gives the `ollama pull <model>` command. Pull it, or pick a pulled model on the agent's page. If Ollama is not running there at all, the provider call fails like any unreachable endpoint.
 </Danger>
 
 ## Related

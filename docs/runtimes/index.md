@@ -101,7 +101,7 @@ An empty `models` array does not mean "no models"; it means the list is owned el
 
 Each non-OpenClaw runtime is a pure [RuntimeAdapter](/internals/runtime-adapter) constructed with a per-run driver factory: the adapter wraps a black-box runtime and the factory supplies the real driver (the Claude Agent SDK, `codex app-server`, the `hermes` CLI, or the in-process native harness). The adapters live in dependency-light packages that import only `@clawboo/executor`; the real subprocess/SDK drivers live server-side so the browser bundle never sees them. All five adapters are always available; actual usability depends on install and credential state at run time, not on a flag.
 
-Health for the CLI runtimes is "the binary resolves", checked via `resolveRuntimeBin`, which probes `PATH` **and** the well-known user-install dirs (so a Hermes binary in the Python user-site bin reads healthy even though that dir is usually off the server's PATH). Native health is "any routable provider key (or `OLLAMA_BASE_URL`) resolves", no binary, no network call.
+Health for the CLI runtimes is "the binary resolves", checked via `resolveRuntimeBin`, which probes `PATH` **and** the well-known user-install dirs (so a Hermes binary in the Python user-site bin reads healthy even though that dir is usually off the server's PATH). Native health is "any routable provider key resolves, or local Ollama is set up" (chosen in onboarding or the providers manager, or `OLLAMA_BASE_URL` set), no binary, no network call.
 
 ## Steering a running task
 

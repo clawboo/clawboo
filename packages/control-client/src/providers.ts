@@ -33,6 +33,40 @@ export async function fetchProviderModels(id: string): Promise<ProviderModelOpti
   }
 }
 
+export interface OllamaModelList {
+  /** True when the local Ollama answered, false when it didn't, null when the
+   *  request itself failed (so nothing is known either way). */
+  reachable: boolean | null
+  /** The chat models it has pulled, newest first. */
+  models: ProviderModelOption[]
+  /** The model a new agent would get, or null when unknown. */
+  recommendedModel: string | null
+}
+
+/** GET /api/providers/ollama/models: the chat models the local Ollama has pulled.
+ *  Never throws: a failed request reads as `reachable: null`. */
+export async function fetchOllamaModels(): Promise<OllamaModelList> {
+  try {
+    const res = await apiFetch('/api/providers/ollama/models')
+    if (!res.ok) return { reachable: null, models: [], recommendedModel: null }
+    const body = (await res.json()) as {
+      models?: ProviderModelOption[]
+      reachable?: unknown
+      recommendedModel?: unknown
+    }
+    return {
+      reachable: typeof body.reachable === 'boolean' ? body.reachable : null,
+      models: Array.isArray(body.models) ? body.models : [],
+      recommendedModel:
+        typeof body.recommendedModel === 'string' && body.recommendedModel
+          ? body.recommendedModel
+          : null,
+    }
+  } catch {
+    return { reachable: null, models: [], recommendedModel: null }
+  }
+}
+
 /** POST /api/providers/:id/models — live model list for a PASTED (unsaved) key,
  *  for the onboarding step. The key is used for one fetch only, never persisted. */
 export async function fetchProviderModelsWithKey(

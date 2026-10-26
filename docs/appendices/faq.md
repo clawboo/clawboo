@@ -109,7 +109,7 @@ So "the Ghost Graph" usually means the per-team canvas, and the Org chart is the
 
 ## Can I use a local model?
 
-Yes, via the native runtime and Ollama. Point the native runtime at a local Ollama instance; it rides the OpenAI-compatible client with a base URL (default `http://localhost:11434/v1`, override with `OLLAMA_BASE_URL`). Ollama is keyless, so no API key is needed; the trade-off is that its cost is reported as estimated rather than real USD, since there is no provider invoice. Configure it during native onboarding or in the model picker. See the [native runtime](/runtimes/native) page.
+Yes, via the native runtime and Ollama. Pick **Ollama** on the connect step of native onboarding, or later under **Settings → Runtimes → Clawboo Native → Manage**, where **Use** on the Ollama row turns it on. No API key and no environment variable are needed: the native runtime reaches Ollama through the OpenAI-compatible client at `http://localhost:11434/v1`, and `OLLAMA_BASE_URL` overrides that base URL if your Ollama runs elsewhere. Pull a chat model first (`ollama pull llama3.2` if you have none): Clawboo lists the models you have pulled and runs new agents on one of them. You can also switch a single agent to an Ollama model in its model picker. The trade-off is that Ollama's cost is reported as estimated rather than real USD, since there is no provider invoice. See the [native runtime](/runtimes/native) page.
 
 ## Is Clawboo multi-user or multi-tenant?
 

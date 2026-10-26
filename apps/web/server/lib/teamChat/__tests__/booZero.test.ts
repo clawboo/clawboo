@@ -15,6 +15,7 @@ import { agents, getSetting, setSetting, teams, type ClawbooDb } from '@clawboo/
 
 import { SETTING_DEFAULT_ID } from '../../agentSource/openClawAgentSource'
 import { getDb, resetDb } from '../../db'
+import { setKeylessProviderChoice } from '../../secretsVault'
 import {
   booZeroForTeam,
   ensureNativeBooZero,
@@ -267,6 +268,65 @@ describe('booZero', () => {
       primaryModel: 'llama3.2',
       envVar: 'OLLAMA_BASE_URL',
     })
+  })
+
+  it('ensureNativeBooZero: a REMOVED Ollama drops the recorded Ollama pick', async () => {
+    // "Disconnect Ollama" means Clawboo Native stops using it, so the leader pick
+    // recorded before the disconnect must not put Boo Zero back on it.
+    seedNativeTeam()
+    process.env['ANTHROPIC_API_KEY'] = 'sk-test-key'
+    setKeylessProviderChoice('ollama', false)
+    setSetting(
+      db,
+      SETTING_NATIVE_LEADER_MODEL,
+      JSON.stringify({ provider: 'ollama', model: 'llama3.2' }),
+    )
+    let captured: Record<string, unknown> | undefined
+    const capturingNative = {
+      createAgent: async (input: { name: string; teamId: string | null; execConfig?: unknown }) => {
+        captured = input.execConfig as Record<string, unknown>
+        const id = `native-boo-zero-${++created}`
+        agent(id, input.teamId, 'clawboo-native')
+        return { id }
+      },
+    }
+    expect(await ensureNativeBooZero(db, capturingNative)).not.toBeNull()
+    expect(captured?.['primaryProvider']).toBeUndefined()
+    expect(captured?.['modelTier']).toBe('leader')
+  })
+
+  it('ensureNativeBooZero: a REMOVED Ollama alone creates nothing', async () => {
+    seedNativeTeam()
+    setKeylessProviderChoice('ollama', false)
+    setSetting(
+      db,
+      SETTING_NATIVE_LEADER_MODEL,
+      JSON.stringify({ provider: 'ollama', model: 'llama3.2' }),
+    )
+    expect(await ensureNativeBooZero(db, fakeNative)).toBeNull()
+  })
+
+  it('ensureNativeBooZero: a CHOSEN local Ollama alone (no key, no OLLAMA_BASE_URL) creates it', async () => {
+    // The keyless onboarding path: Ollama picked, nothing in the vault, no env var.
+    // The chosen leader model rides along as the explicit provider + model.
+    seedNativeTeam()
+    setKeylessProviderChoice('ollama', true)
+    setSetting(
+      db,
+      SETTING_NATIVE_LEADER_MODEL,
+      JSON.stringify({ provider: 'ollama', model: 'llama3.2' }),
+    )
+    let captured: Record<string, unknown> | undefined
+    const capturingNative = {
+      createAgent: async (input: { name: string; teamId: string | null; execConfig?: unknown }) => {
+        captured = input.execConfig as Record<string, unknown>
+        const id = `native-boo-zero-${++created}`
+        agent(id, input.teamId, 'clawboo-native')
+        return { id }
+      },
+    }
+    expect(await ensureNativeBooZero(db, capturingNative)).not.toBeNull()
+    expect(captured).toMatchObject({ primaryProvider: 'ollama', primaryModel: 'llama3.2' })
   })
 
   it('ensureNativeBooZero: creates NOTHING when no native provider key is connected', async () => {

@@ -43,8 +43,10 @@ import {
   findNativeModelLabel,
   nativeLeaderModelFor,
   nativeModelGroupsFor,
+  OLLAMA_FALLBACK_MODEL,
 } from '@/lib/nativeModelCatalog'
 import { NATIVE_MORE_PROVIDERS, nativeMoreProvider } from '@/lib/nativeProviders'
+import { useOllamaModels } from '@/lib/useOllamaModels'
 import { useOpenRouterModels } from '@/lib/useOpenRouterModels'
 import { Select } from '@/features/shared/Select'
 
@@ -89,6 +91,8 @@ type TestState = { phase: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }
 /** Continue runs two awaits back to back — verify the credential, then store it.
  *  Naming the phase lets the CTA say which one is in flight. */
 type SubmitPhase = 'idle' | 'verifying' | 'connecting'
+
+const NO_MODELS: { id: string; label: string }[] = []
 
 /** Where to get Ollama when the local daemon isn't answering. */
 const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
@@ -149,6 +153,9 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   // (which is a hard connect failure). Only this one offers "Continue anyway" —
   // a connect failure stored nothing, so there is nothing to continue past.
   const [verifyFail, setVerifyFail] = useState<string | null>(null)
+  // Set with `verifyFail` when Ollama answered but hasn't pulled the chosen model:
+  // the fix is a pull, not a restart.
+  const [missingModel, setMissingModel] = useState<string | null>(null)
   // This step is taller than a laptop viewport, and the failure lands at the very
   // bottom — on a fresh 1280x900 the override sat ~18px under the fold, so the
   // refusal could read as "the button did nothing". Bring it into view.
@@ -233,8 +240,10 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   // OpenRouter's model list is fetched live from its public catalog; every OTHER
   // keyed provider (Anthropic, OpenAI, Google, xAI, Groq, …) is fetched live using
   // the JUST-TYPED key (never stored — the same one-shot-fetch precedent as "Test
-  // connection"), so the picker shows the real, current model list. Ollama is local.
+  // connection"), so the picker shows the real, current model list. Ollama lists
+  // the models the local daemon has actually pulled.
   const openrouter = useOpenRouterModels()
+  const ollama = useOllamaModels(useOllama)
   const [liveModels, setLiveModels] = useState<{ id: string; label: string }[]>([])
 
   useEffect(() => {
@@ -271,12 +280,30 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
     }
   }, [liveModels, model])
 
+  // The same rule for Ollama's pulled models, except the pick is the one the
+  // server would give a new agent (llama3.2 when pulled, else the newest model
+  // that can use tools), never just the first row.
+  const ollamaModels = useOllama ? ollama.models : NO_MODELS
+  const ollamaRecommended = ollama.recommendedModel
+  useEffect(() => {
+    if (ollamaModels.length > 0 && !ollamaModels.some((m) => m.id === model)) {
+      setModel(ollamaRecommended ?? ollamaModels[0]!.id)
+    }
+  }, [ollamaModels, ollamaRecommended, model])
+  // Ollama answered with no chat model at all: nothing in the list could run.
+  // A failed Continue that named the missing model says the same thing more
+  // precisely, so it takes the notice's place rather than repeating it.
+  const ollamaHasNoChatModel =
+    useOllama && ollama.reachable === true && ollamaModels.length === 0 && !missingModel
+
   const modelOptions =
     effectiveProvider === 'openrouter'
       ? openrouter.models
-      : liveModels.length > 0
-        ? liveModels
-        : (nativeModelGroupsFor(effectiveProvider)[0]?.models ?? [])
+      : ollamaModels.length > 0
+        ? ollamaModels
+        : liveModels.length > 0
+          ? liveModels
+          : (nativeModelGroupsFor(effectiveProvider)[0]?.models ?? [])
   const modelSelectOptions = useMemo(() => {
     const base = modelOptions.map((m) => ({ value: m.id, label: m.label }))
     // Guarantee the current selection is present so the trigger shows it (the
@@ -297,6 +324,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
   const resetTest = useCallback(() => {
     setTest({ phase: 'idle' })
     setVerifyFail(null)
+    setMissingModel(null)
   }, [])
 
   const selectProvider = useCallback((id: string) => {
@@ -310,7 +338,21 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
     setTest({ phase: 'idle' })
     setError(null)
     setVerifyFail(null)
+    setMissingModel(null)
   }, [])
+
+  // For Ollama the check covers the model too, so a different pick needs a new
+  // one. A key provider's verdict is about the key alone and stands.
+  const selectModel = useCallback(
+    (id: string) => {
+      setModel(id)
+      if (!useOllama) return
+      setTest({ phase: 'idle' })
+      setVerifyFail(null)
+      setMissingModel(null)
+    },
+    [useOllama],
+  )
 
   const handleTest = useCallback(async () => {
     setTest({ phase: 'testing' })
@@ -334,6 +376,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
       }
       setError(null)
       setVerifyFail(null)
+      setMissingModel(null)
       // 0. Verify the credential BEFORE storing it — one models-list GET, the key
       //    never persisted by that route. Skipped when "Test connection" already
       //    verified THIS key (resetTest/selectProvider clear `ok`, so it can only
@@ -341,12 +384,18 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
       //    failure with "Continue anyway".
       if (!opts?.skipVerify && test.phase !== 'ok') {
         setSubmitPhase('verifying')
-        const h = await healthcheckNativeKey(effectiveProvider, apiKey.trim())
+        // Ollama also checks the chosen model is pulled; a key provider ignores it.
+        const h = await healthcheckNativeKey(
+          effectiveProvider,
+          apiKey.trim(),
+          useOllama ? model : undefined,
+        )
         if (!h.ok) {
           const message = h.error ?? 'Could not verify the key.'
           setSubmitPhase('idle')
           setTest({ phase: 'fail', message })
           setVerifyFail(message)
+          setMissingModel(h.missingModel ?? null)
           return
         }
         // Record the verdict so a retry after a failed connect doesn't re-probe.
@@ -373,6 +422,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
       chatgptActive,
       apiKey,
       effectiveProvider,
+      useOllama,
       model,
       onConnected,
       test.phase,
@@ -793,10 +843,31 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
           </div>
         </div>
       ) : useOllama ? (
-        <p className="mt-5 text-[13px] leading-relaxed" style={{ color: muted(0.55) }}>
-          No key needed. Clawboo will run your agents on a local Ollama model. Make sure Ollama is
-          running before you continue.
-        </p>
+        <div className="mt-5 flex flex-col gap-2">
+          <p className="text-[13px] leading-relaxed" style={{ color: muted(0.55) }}>
+            No key needed. Clawboo will run your agents on a model you have pulled into Ollama. Make
+            sure Ollama is running before you continue.
+          </p>
+          {ollamaHasNoChatModel ? (
+            <div className="flex flex-col gap-2" data-testid="native-ollama-no-models">
+              <FormattedAlert tone="warning">
+                <span className="font-semibold">Ollama is running, but has no chat model yet.</span>{' '}
+                Embedding models can&rsquo;t run agents. Pull one, then check again.
+              </FormattedAlert>
+              <CommandRow command={`ollama pull ${OLLAMA_FALLBACK_MODEL}`} />
+              <div>
+                <OnboardingGhost
+                  testId="native-ollama-check-again"
+                  onClick={() => void ollama.refresh()}
+                  disabled={ollama.checking || submitting}
+                >
+                  {ollama.checking ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Check again
+                </OnboardingGhost>
+              </div>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {/* Model — the leader model for this provider (used for the starter team + Boo
@@ -811,8 +882,9 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             Model
           </span>
           <Select
+            data-testid="native-model-select"
             value={model}
-            onChange={setModel}
+            onChange={selectModel}
             options={modelSelectOptions}
             disabled={submitting}
             searchable={modelSelectOptions.length > 10}
@@ -837,7 +909,12 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
           data-testid="native-verify-failed"
         >
           <FormattedAlert tone="error">
-            {useOllama ? (
+            {useOllama && missingModel ? (
+              <>
+                <span className="font-semibold">Ollama doesn&rsquo;t have {missingModel} yet.</span>{' '}
+                Your agents can only run on a model Ollama has pulled. Pull it, then continue.
+              </>
+            ) : useOllama ? (
               <>
                 <span className="font-semibold">Ollama isn&rsquo;t answering.</span> Start it and
                 try again &mdash; Clawboo runs your agents on your own machine, so Ollama has to be
@@ -852,7 +929,9 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               </>
             )}
           </FormattedAlert>
-          {useOllama ? (
+          {useOllama && missingModel ? (
+            <CommandRow command={`ollama pull ${missingModel}`} />
+          ) : useOllama ? (
             <>
               <CommandRow command="ollama serve" />
               <a
@@ -867,7 +946,21 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               </a>
             </>
           ) : null}
-          <div>
+          <div className="flex flex-wrap items-center gap-2">
+            {useOllama && missingModel ? (
+              // After a pull: re-read what Ollama has, and drop the stale failure.
+              <OnboardingGhost
+                testId="native-ollama-recheck"
+                onClick={() => {
+                  resetTest()
+                  void ollama.refresh()
+                }}
+                disabled={submitting || ollama.checking}
+              >
+                {ollama.checking ? <Loader2 size={14} className="animate-spin" /> : null}
+                Check again
+              </OnboardingGhost>
+            ) : null}
             <OnboardingGhost
               testId="native-continue-anyway"
               onClick={() => void handleSubmit({ skipVerify: true })}

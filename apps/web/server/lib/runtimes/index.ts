@@ -26,6 +26,7 @@ import {
 } from './descriptor'
 import { createHermesDriver } from './hermesDriver'
 import { createNativeDriver } from './native'
+import { isNativeOllamaConnected } from './native/nativeProviderDefaults'
 import type { RuntimeRunContext } from './types'
 
 export type { RuntimeRunContext } from './types'
@@ -56,19 +57,19 @@ function cliHealth(bin: string | null): () => Promise<HealthResult> {
  *  (no binary to probe, no network call). Honors the descriptor's FULL env-var
  *  set (envVar + altEnvVars: Anthropic / OpenAI / OpenRouter) so an OpenRouter-only
  *  setup reads healthy, mirroring the connect-state + run-POST key iteration; a
- *  configured OLLAMA_BASE_URL is the keyless-Ollama signal. */
+ *  set-up keyless Ollama (`isNativeOllamaConnected`) counts too. */
 function nativeKeyHealth(): Promise<HealthResult> {
   const d = getDescriptor('clawboo-native')
   const envVars = [d.envVar, ...(d.altEnvVars ?? [])].filter((v): v is string => Boolean(v))
   const connected =
     envVars.some((v) => Boolean(resolveRuntimeKeyForRuntime('clawboo-native', v))) ||
-    Boolean(process.env['OLLAMA_BASE_URL'])
+    isNativeOllamaConnected()
   return Promise.resolve(
     connected
       ? { ok: true }
       : {
           ok: false,
-          message: `no provider key connected (${envVars.join(' or ')}, or set OLLAMA_BASE_URL)`,
+          message: `no provider key connected (${envVars.join(' or ')}) and no local Ollama set up`,
         },
   )
 }

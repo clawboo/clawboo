@@ -31,6 +31,7 @@ Every file Clawboo owns:
 | `gateway.pid`                      | PID of the managed OpenClaw Gateway process (when Clawboo started it for you)                                                             | `getGatewayPidPath()`          |
 | `secrets/master.key`               | 32-byte AES-256-GCM master key for the credential vault (mode `0600` inside a `0700` dir)                                                 | `getVaultPaths()`              |
 | `secrets/runtime-keys.json`        | The encrypted runtime/provider API-key vault, ciphertext only, keyed by env-var name                                                      | `getVaultPaths()`              |
+| `secrets/keyless-providers.json`   | Your choice for a keyless provider, today local Ollama for Clawboo Native: chosen, or removed by a disconnect (no secret material)        | `setKeylessProviderChoice()`   |
 | `worktrees/<repo-hash>/`           | Per-task git worktrees (the worktree system-of-record), grouped by a hash of the repo path                                                | `worktreeRootForRepo()`        |
 | `reviews/<repo-hash>/`             | Detached read-only review checkouts used by the verification critic                                                                       | `reviewRootForRepo()`          |
 

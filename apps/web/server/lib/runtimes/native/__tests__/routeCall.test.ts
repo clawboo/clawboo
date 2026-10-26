@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { DEFAULT_AGENT_CONFIG, envVarForProvider, type AgentConfig } from '@clawboo/adapter-native'
 
+import { setKeylessProviderChoice } from '../../../secretsVault'
 import { NATIVE_COMPAT_PROVIDERS, nativeCompatProvider } from '../nativeProviders'
 import { ProviderError, type ProviderClient, type ProviderStreamEvent } from '../providers/types'
 import { buildCandidates, createRoutedClient, type RouteCandidate } from '../routeCall'
@@ -185,5 +190,78 @@ describe('createRoutedClient', () => {
     await drain(routed.streamTurn(TURN))
     expect(seen).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6'])
     expect(routed.activeModel()).toBe('claude-sonnet-4-6')
+  })
+})
+
+// ── A removed Ollama is not routed ───────────────────────────────────────────
+// "Disconnect Ollama" must stop agents already set to an Ollama model, not just
+// new ones, so the router drops Ollama candidates once the user removed it.
+
+describe('routing a removed Ollama', () => {
+  const OLLAMA_CONFIG: AgentConfig = {
+    ...DEFAULT_AGENT_CONFIG,
+    id: 'native-route-ollama',
+    primaryProvider: 'ollama',
+    primaryModel: 'llama3.2',
+    envVar: 'OLLAMA_BASE_URL',
+    fallbacks: [],
+  }
+  const ok = (): ProviderStreamEvent[] => [{ type: 'text', delta: 'hi' }]
+
+  it('buildCandidates drops Ollama candidates when Ollama is not allowed', () => {
+    const cfg = { ...CONFIG, fallbacks: [{ provider: 'ollama', model: 'llama3.2' }] }
+    expect(buildCandidates(cfg, undefined, resolveKey, false).map((c) => c.provider)).toEqual([
+      'anthropic',
+    ])
+    expect(buildCandidates(cfg, undefined, resolveKey).map((c) => c.provider)).toEqual([
+      'anthropic',
+      'ollama',
+    ])
+  })
+
+  it('an Ollama-only agent fails with no candidate rather than reaching Ollama', async () => {
+    const fake = fakeClient('ollama', ok)
+    const routed = createRoutedClient(OLLAMA_CONFIG, undefined, {
+      resolveKey,
+      makeProvider: () => fake.client,
+      ollamaAllowed: false,
+    })
+    await expect(drain(routed.streamTurn(TURN))).rejects.toThrow(/no provider key/)
+    expect(fake.calls()).toBe(0)
+  })
+
+  describe('reading the recorded choice', () => {
+    let home: string
+    const saved: Record<string, string | undefined> = {}
+    beforeEach(async () => {
+      home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-route-ollama-'))
+      for (const k of ['HOME', 'CLAWBOO_HOME']) saved[k] = process.env[k]
+      process.env['HOME'] = home
+      process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    })
+    afterEach(async () => {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+
+    it('routes Ollama by default, and stops once the user removed it', async () => {
+      const fake = fakeClient('ollama', ok)
+      const before = createRoutedClient(OLLAMA_CONFIG, undefined, {
+        resolveKey,
+        makeProvider: () => fake.client,
+      })
+      expect(await drain(before.streamTurn(TURN))).toEqual(ok())
+
+      setKeylessProviderChoice('ollama', false)
+      const after = createRoutedClient(OLLAMA_CONFIG, undefined, {
+        resolveKey,
+        makeProvider: () => fake.client,
+      })
+      await expect(drain(after.streamTurn(TURN))).rejects.toThrow(/no provider key/)
+      expect(fake.calls()).toBe(1)
+    })
   })
 })
