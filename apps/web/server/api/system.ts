@@ -766,7 +766,6 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
     }
 
     fs.mkdirSync(stateDir, { recursive: true })
-    const port = DEFAULT_PORT
     const envPath = path.join(stateDir, '.env')
 
     // Reuse an existing gateway token; generate + upsert one if absent.
@@ -827,7 +826,7 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
     if (!config['gateway'] || typeof config['gateway'] !== 'object') config['gateway'] = {}
     const gw = config['gateway'] as Record<string, unknown>
     gw['mode'] = 'local'
-    if (typeof gw['port'] !== 'number') gw['port'] = port
+    if (typeof gw['port'] !== 'number') gw['port'] = DEFAULT_PORT
     if (!gw['auth'] || typeof gw['auth'] !== 'object') {
       gw['auth'] = { mode: 'token', token: '${GATEWAY_AUTH_TOKEN}' }
     }
@@ -871,7 +870,9 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
     if (!tools['sessions']) tools['sessions'] = { visibility: 'all' }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
 
-    const gatewayUrl = `ws://localhost:${port}`
+    // The port the Gateway route will start on or find, so a gateway.port the
+    // user kept is the one Clawboo connects to.
+    const gatewayUrl = `ws://localhost:${resolvePort(stateDir)}`
     saveSettings({ gatewayUrl, gatewayToken })
     res.json({
       ok: true,
