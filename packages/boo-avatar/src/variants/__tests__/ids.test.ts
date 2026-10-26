@@ -83,4 +83,12 @@ describe('scopeSvgIds', () => {
     expect(referenced(scopeSvgIds(svg, ':r5:'))[0]).toMatch(/-r5$/)
     expect(referenced(scopeSvgIds(svg, '«r5»'))[0]).toMatch(/-r5$/)
   })
+
+  it('reads a long run of unclosed references in linear time', () => {
+    // An id class that ran on through `(` took about 8 seconds on this string.
+    const hostile = 'url(#('.repeat(50_000)
+    const started = performance.now()
+    expect(scopeSvgIds(hostile, 'r1')).toBe(hostile)
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
 })

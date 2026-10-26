@@ -18,10 +18,16 @@
  * that by suffixing each mounted copy with its own scope.
  */
 
-/** Ids the document actually points at. A group id nothing references cannot change a drawing. */
+/**
+ * Ids the document actually points at. A group id nothing references cannot change a drawing.
+ *
+ * The id class stops at `(`, whitespace and quotes, none of which an id holds. A class that let a
+ * reference run on through `(` would rescan the rest of the string from every `url(#`, which is
+ * quadratic on a long run of them.
+ */
 function referencedIds(svg: string): Set<string> {
   const refs = new Set<string>()
-  for (const m of svg.matchAll(/url\(#([^)]+)\)/g)) refs.add(m[1])
+  for (const m of svg.matchAll(/url\(#([^()\s"']+)\)/g)) refs.add(m[1])
   for (const m of svg.matchAll(/href="#([^"]+)"/g)) refs.add(m[1])
   return refs
 }
