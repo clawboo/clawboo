@@ -292,7 +292,7 @@ The `clawboo-native` descriptor's `altEnvVars` is the whole `NATIVE_PROVIDER_ENV
 
 ### `OLLAMA_BASE_URL`
 
-- **Read by**: the Native runtime's OpenAI-compatible provider (`ollamaBaseUrl()`) and its Ollama healthcheck probe (`/api/tags`, with a trailing `/v1` stripped); also a set-up signal for the Native runtime (`isNativeOllamaConnected()`).
+- **Read by**: the Native runtime's OpenAI-compatible provider (`ollamaBaseUrl()`) and its Ollama healthcheck probe (`/api/tags`, with a trailing `/v1` stripped); also a set-up signal for the Native runtime (`isNativeOllamaConnected()`). `POST /api/system/configure-openclaw` reads it too: OpenClaw ignores this variable, so configuring OpenClaw on Ollama copies its native root into `models.providers.ollama.baseUrl`.
 - **Purpose**: overrides the base URL for a local Ollama server (keyless). Set it to the full OpenAI-compatible base, `/v1` included. It is not needed to use Ollama: picking Ollama in onboarding or in the Native runtime's providers manager records that choice and uses the default. When set, it also marks local Ollama as set up for the Native runtime even without a provider API key, unless you removed Ollama, either with **Disconnect Ollama** in the providers manager or by disconnecting the runtime. After that the variable no longer turns Ollama on; only picking Ollama again does.
 - **Default**: `http://localhost:11434/v1`.
 

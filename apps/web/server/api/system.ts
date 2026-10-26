@@ -27,6 +27,12 @@ import {
   writeOpenclawProviderKeys,
 } from '../lib/openclawEnv'
 import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import { OLLAMA_FALLBACK_MODEL } from '../lib/runtimes/native/ollamaModels'
+import {
+  OPENCLAW_OLLAMA_KEY_LINE,
+  openclawOllamaProviderConfig,
+  resolveOpenclawOllamaModel,
+} from '../lib/openclawOllama'
 import { providerStatus } from '../lib/providerKeys'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
@@ -56,7 +62,8 @@ const OPENCLAW_MODEL_MAP: Record<string, string> = {
   huggingface: 'huggingface/deepseek-ai/DeepSeek-R1',
   cerebras: 'cerebras/zai-glm-4.7',
   venice: 'venice/llama-3.3-70b',
-  ollama: 'ollama/llama3.2',
+  // Only the preference: configure swaps it for a model this Ollama has pulled.
+  ollama: `ollama/${OLLAMA_FALLBACK_MODEL}`,
   // The ChatGPT subscription (Codex OAuth). `openai-codex/*` is what validates
   // on its own, so it stays the ref clawboo writes. `openclaw doctor --fix`
   // migrates it forward to the canonical `openai/*` AND enables the `openai` +
@@ -69,7 +76,8 @@ const OPENCLAW_MODEL_MAP: Record<string, string> = {
  *  `openai-codex` is OpenClaw's own ChatGPT-subscription OAuth (the user runs
  *  `openclaw models auth login --provider openai-codex` in their terminal —
  *  clawboo never automates the exchange, never stores a key for it). Their
- *  configure path skips every key write. */
+ *  configure path writes no pasted key. Ollama gets OpenClaw's local marker
+ *  instead (`OPENCLAW_OLLAMA_KEY_LINE`), which is not a secret. */
 const KEYLESS_PROVIDERS = new Set(['ollama', 'openai-codex'])
 
 /** The terminal command that creates OpenClaw's ChatGPT-subscription auth
@@ -619,7 +627,7 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
 }
 
 // POST /api/system/configure-openclaw
-export function configureOpenclawPOST(req: Request, res: Response): void {
+export async function configureOpenclawPOST(req: Request, res: Response): Promise<void> {
   try {
     const body = req.body as Record<string, unknown> | undefined
     if (!body || typeof body !== 'object') {
@@ -650,10 +658,13 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
 
     // Resolve model from provider
     const MODEL_MAP = OPENCLAW_MODEL_MAP
-    const resolvedModel =
+    let resolvedModel =
       typeof model === 'string' && model
         ? model
         : (MODEL_MAP[provider] ?? `${provider}/${model ?? 'default'}`)
+    // Ollama runs only a model it has pulled, so the choice is checked against it.
+    const ollamaProvider = provider === 'ollama' ? openclawOllamaProviderConfig() : null
+    if (provider === 'ollama') resolvedModel = await resolveOpenclawOllamaModel(resolvedModel)
 
     // Write openclaw.json
     const openclawConfig = {
@@ -671,6 +682,7 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
         agentToAgent: { enabled: true },
         sessions: { visibility: 'all' },
       },
+      ...(ollamaProvider ? { models: { providers: { ollama: ollamaProvider } } } : {}),
     }
     fs.writeFileSync(
       path.join(stateDir, 'openclaw.json'),
@@ -678,11 +690,14 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
       'utf8',
     )
 
-    // Build .env. A KEYLESS provider (ollama / openai-codex) writes NO key line —
-    // openai-codex auth is OpenClaw's own OAuth profile, never an env var.
+    // Build .env. A KEYLESS provider (ollama / openai-codex) writes NO pasted key:
+    // openai-codex auth is OpenClaw's own OAuth profile, never an env var. Ollama
+    // gets the local marker, without which OpenClaw never registers the provider.
     let envContent = `GATEWAY_AUTH_TOKEN=${gatewayToken}\n`
     const envKeyName = ENV_KEY_MAP[provider]
-    if (envKeyName && typeof apiKey === 'string' && apiKey) {
+    if (provider === 'ollama') {
+      envContent += `${OPENCLAW_OLLAMA_KEY_LINE}\n`
+    } else if (envKeyName && typeof apiKey === 'string' && apiKey) {
       envContent += `${envKeyName}=${apiKey}\n`
     } else if (!KEYLESS_PROVIDERS.has(provider) && typeof apiKey === 'string' && apiKey) {
       envContent += `CUSTOM_API_KEY=${apiKey}\n`

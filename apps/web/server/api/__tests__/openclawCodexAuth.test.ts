@@ -118,9 +118,9 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
   })
 
   // ── configure: the keyless carve-out ────────────────────────────────────────
-  it('configure accepts keyless openai-codex: model default set, NO key line in .env', () => {
+  it('configure accepts keyless openai-codex: model default set, NO key line in .env', async () => {
     const r = mockRes()
-    configureOpenclawPOST(req({ provider: 'openai-codex' }), r.res)
+    await configureOpenclawPOST(req({ provider: 'openai-codex' }), r.res)
     expect(r.statusCode()).toBe(200)
     expect((r.body() as { ok: boolean }).ok).toBe(true)
 
@@ -134,11 +134,13 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     expect(env).toMatch(/GATEWAY_AUTH_TOKEN=[a-f0-9]{64}/)
     expect(env).not.toContain('CUSTOM_API_KEY')
     expect(env).not.toContain('OPENAI')
+    // Ollama's local marker belongs to the Ollama provider alone.
+    expect(env).not.toContain('OLLAMA_API_KEY')
   })
 
-  it('configure still 400s a key-less API-KEY provider (the carve-out is exact)', () => {
+  it('configure still 400s a key-less API-KEY provider (the carve-out is exact)', async () => {
     const r = mockRes()
-    configureOpenclawPOST(req({ provider: 'anthropic' }), r.res)
+    await configureOpenclawPOST(req({ provider: 'anthropic' }), r.res)
     expect(r.statusCode()).toBe(400)
   })
 

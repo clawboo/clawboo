@@ -106,6 +106,8 @@ A global npm install can hit `EACCES`. The stream emits an `error` event with co
 
 `POST /api/system/configure-openclaw` with body `{ provider, apiKey?, model?, gatewayPort? }` writes OpenClaw's `openclaw.json` and `.env`, generates a Gateway token, and saves Clawboo's settings. `provider` is required; `apiKey` is required for every provider except the keyless ones — `ollama` (local) and `openai-codex` (the ChatGPT subscription; see below). The handler writes a local-mode Gateway config (`gateway.mode: 'local'`, token auth via `${GATEWAY_AUTH_TOKEN}`), enables agent-to-agent tooling (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and resolves a default model from the provider.
 
+For `ollama`, the default model is one your Ollama has pulled: the requested model (or `llama3.2`) when it is pulled, otherwise the most recently pulled model that can use tools. With no chat model pulled, run `ollama pull llama3.2` first. The handler also writes `OLLAMA_API_KEY=ollama-local` to `.env`, the local marker OpenClaw needs before it will run any `ollama/*` model, and points OpenClaw at `OLLAMA_BASE_URL` when you set one (OpenClaw itself only knows `http://127.0.0.1:11434`).
+
 ```json
 { "ok": true, "gatewayUrl": "ws://localhost:18789" }
 ```

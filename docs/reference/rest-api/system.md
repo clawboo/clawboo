@@ -158,6 +158,12 @@ Writes a minimal `openclaw.json` and `.env` for a chosen provider, mints a fresh
 
 When `model` is omitted, the handler picks a per-provider default from its `MODEL_MAP` (e.g. `anthropic` → `anthropic/claude-sonnet-4-5`, `openai` → `openai/gpt-5.4`, `ollama` → `ollama/llama3.2`); an unmapped provider falls back to `<provider>/<model ?? 'default'>`. The provider's key is written to `.env` under the canonical env var name (e.g. `anthropic` → `ANTHROPIC_API_KEY`, `google` → `GEMINI_API_KEY`, `huggingface` → `HF_TOKEN`); a non-`ollama` provider with no name mapping falls back to `CUSTOM_API_KEY`.
 
+`ollama` is handled differently, because OpenClaw runs only a model the local Ollama has pulled and registers its Ollama provider only when it has a credential:
+
+- The default model is checked against Ollama's `/api/tags`. The requested model (or `llama3.2` when none is sent) is kept when it is pulled; otherwise the handler writes the most recently pulled model that can use tools, the same pick a new [native](/runtimes/native) agent gets. With no chat model pulled, or Ollama not answering, the request stands. The model is always written as an `ollama/<model>` ref.
+- `.env` gets `OLLAMA_API_KEY=ollama-local`, the marker OpenClaw accepts for a local Ollama. It is not a secret.
+- OpenClaw calls `http://127.0.0.1:11434` and never reads `OLLAMA_BASE_URL`. When that variable is set, the handler writes its native root (without `/v1`) to `models.providers.ollama.baseUrl`, so OpenClaw runs on the same Ollama whose models were checked.
+
 ### Responses
 
 **`400 Bad Request`**: body is missing or not an object:
