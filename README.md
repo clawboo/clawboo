@@ -153,8 +153,8 @@ Full notes in the [CHANGELOG](./apps/cli/CHANGELOG.md).
       <p align="center"><sub><strong>Team space</strong>: one ask, handed out to specialists, tracked on the board, narrated in chat.</sub></p>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/ghost-graph.png" alt="Atlas: an org graph of every team, with labeled team clusters arranged around Boo Zero" />
-      <p align="center"><sub><strong>Atlas</strong>: every team, one live org graph.</sub></p>
+      <img src="docs/screenshots/ghost-graph.png" alt="The Org chart: every team on one org graph, with Boo Zero at the top and each team's Boos in a labeled row beneath it" />
+      <p align="center"><sub><strong>Org chart</strong>: every team, one live org graph.</sub></p>
     </td>
   </tr>
   <tr>
@@ -163,7 +163,7 @@ Full notes in the [CHANGELOG](./apps/cli/CHANGELOG.md).
       <p align="center"><sub><strong>Board</strong>: every delegation is a real task, on the day it happened.</sub></p>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/fleet-health.png" alt="The Fleet overview: agent count, task and verify pass rates, 24-hour spend, and per-runtime health" />
+      <img src="docs/screenshots/fleet-health.png" alt="The Fleet overview in Settings: agent count, task and verify pass rates, 24-hour spend, and per-runtime health" />
       <p align="center"><sub><strong>Fleet</strong>: health, pass rates, and spend across every runtime.</sub></p>
     </td>
   </tr>

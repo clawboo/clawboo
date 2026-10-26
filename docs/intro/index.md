@@ -21,7 +21,7 @@ Clawboo's surface is wide on purpose; it's a mission-control dashboard, not a si
 - **Shared memory and a capability inventory.** Every runtime reads and writes the same tiered [memory](/concepts/memory) store and shows up in one [capabilities](/concepts/capabilities) dashboard, while its private self-model stays its own.
 - **A 436-agent, 85-team marketplace.** Browse and deploy from a [catalog](/using/marketplace) of curated agents and teams, then customize and route them.
 
-![The Org chart: every team as a live org graph around Boo Zero, with labeled team clusters](/images/ghost-graph.png)
+![The Org chart: every team on one live org graph, with Boo Zero at the top and each team's Boos in a labeled row](/images/ghost-graph.png)
 
 ## Version
 

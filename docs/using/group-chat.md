@@ -102,7 +102,7 @@ You can steer a task while it runs. A comment you leave on a task (from the team
 
 When the last delegation completes, the leader synthesizes every deliverable into one final answer:
 
-![Boo Zero synthesizing three specialists' deliverables into one final summary](/images/leader-synthesis.png)
+![Boo Zero's synthesis in the Growth team's General chat: Rin's tier copy, Milo's pricing table and Kit's experiment readout in one answer, with the Team graph and Tasks cards beside it](/images/leader-synthesis.png)
 
 <Note>
 A risky-looking delegation (matching keywords like `delete`, `deploy`, `publish`, `rm -rf`, `secret`, `api_key`) is surfaced on the leader's approval queue via `POST /api/governance/delegation-approval` before it runs. Routine delegations never touch this path. The gate fails closed: an unreachable approval endpoint does **not** auto-approve.

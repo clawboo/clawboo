@@ -7,7 +7,7 @@ Use this page when you want to bring a non-OpenClaw [runtime](/appendices/glossa
 
 The whole lifecycle runs from the **Runtimes** panel (`RuntimeConnectionCard`), backed by `/api/runtimes/*`. Open it from **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **Runtimes** under the Workspace group. This page documents what each step does, where keys are stored, and the per-runtime differences.
 
-![The Runtimes panel: Clawboo Native and Hermes connected, Claude Code one click away, Codex awaiting sign-in, OpenClaw connected](/images/runtimes-panel.png)
+![The Runtimes panel in Settings: Codex, Claude Code, Hermes and Clawboo Native connected, and OpenClaw ready to set up](/images/runtimes-panel.png)
 
 ## Prerequisites
 
