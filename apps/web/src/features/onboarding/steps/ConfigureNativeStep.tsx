@@ -4,8 +4,7 @@
 // button runs — so a typo'd key, a revoked key, an unreachable provider, or a
 // stopped Ollama surfaces HERE, while the key is still on screen, instead of in
 // the user's first chat message. A failure is inline and offers "Continue anyway"
-// so a genuinely offline user is never hard-blocked. Mirrors ConfigureStep's
-// key-input affordance (Eye/EyeOff reveal). The key is written to the encrypted
+// so a genuinely offline user is never hard-blocked. The key is written to the encrypted
 // vault via the runtime connect route — never directly. This step no longer
 // creates a team: real team selection + deployment is the NEXT step (the user
 // picks a template from the marketplace and deploys it).

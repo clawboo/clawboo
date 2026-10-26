@@ -18,8 +18,8 @@ const LOCAL_PROVIDERS = new Set(['ollama', 'sglang', 'opencode', 'opencode-go'])
 
 // The two-column menu (provider list + model list) is wider + taller than the
 // narrow trigger pill. Anchor a FIXED, portaled popover to the trigger and flip
-// it up when it won't fit below — the mechanics ModelDropdown / the shared Select
-// use, load-bearing here because this picker now lives inside the Settings modal
+// it up when it won't fit below (the mechanics the shared Select uses),
+// load-bearing here because this picker now lives inside the Settings modal
 // (a `.surface-overlay-tier` with backdrop-filter + overflow-hidden) nested in the
 // OpenClaw runtime card; an in-flow `position:absolute` menu was clipped to a
 // sliver and unreadable.

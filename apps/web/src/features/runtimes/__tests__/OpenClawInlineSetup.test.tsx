@@ -1,16 +1,19 @@
 // OpenClawInlineSetup — the compact IN-PLACE OpenClaw setup. Verifies the two
 // load-bearing behaviors: (1) it reuses an already-connected provider key (via
 // auto-configure) and NEVER shows a key prompt; (2) it falls back to a compact
-// key prompt only when nothing is connected. The gateway connect + enterGatewayMode
-// are mocked (no real WebSocket in jsdom).
+// key prompt only when nothing is connected. Also covers the pairing card: a
+// failed reconnect after approval must never strand it on "Reconnecting…". The
+// gateway connect + enterGatewayMode are mocked (no real WebSocket in jsdom).
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { GatewayClient } from '@clawboo/gateway-client'
+import { GatewayResponseError, type GatewayClient } from '@clawboo/gateway-client'
 
 import { server } from '@/__vitest__/mswServer'
+import { connectGatewayFromSettings } from '@/lib/gatewayConnect'
 import { OpenClawInlineSetup } from '../OpenClawInlineSetup'
 
 vi.mock('@/lib/gatewayConnect', () => ({
@@ -24,6 +27,30 @@ vi.mock('@/features/connection/GatewayBootstrap', () => ({
 }))
 
 afterEach(() => cleanup())
+
+const sseComplete = () =>
+  new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+
+// A configured, installed OpenClaw whose Gateway starts; the pairing card's
+// approve call succeeds.
+function useReadyGateway() {
+  server.use(
+    http.post('/api/system/auto-configure-openclaw', () =>
+      HttpResponse.json({ ok: true, gatewayUrl: 'ws://localhost:18789', provider: 'anthropic' }),
+    ),
+    http.get('/api/system/status', () => HttpResponse.json({ openclaw: { installed: true } })),
+    http.post('/api/system/gateway', sseComplete),
+    http.post('/api/system/approve-device', () => HttpResponse.json({ ok: true })),
+  )
+}
+
+const notPaired = () =>
+  new GatewayResponseError({
+    code: 'NOT_PAIRED',
+    message: 'pairing required: device is not approved yet',
+  })
 
 describe('OpenClawInlineSetup', () => {
   it('reuses an existing key: auto-configure → start → connect (NO key prompt)', async () => {
@@ -113,8 +140,54 @@ describe('OpenClawInlineSetup', () => {
     expect(screen.getByTestId('openclaw-inline-use-key')).toBeInTheDocument()
 
     // Re-check → auto-configure now succeeds (rung 2) → connects keylessly.
-    const { default: userEvent } = await import('@testing-library/user-event')
     await userEvent.click(screen.getByTestId('openclaw-inline-codex-recheck'))
     await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1))
+  })
+
+  // The card waits 700 ms after a successful approve before it hands back, so
+  // the post-approval assertions get a longer budget.
+  it('a reconnect that fails after approval lands in the error state with Retry', async () => {
+    useReadyGateway()
+    vi.mocked(connectGatewayFromSettings)
+      .mockRejectedValueOnce(notPaired())
+      .mockRejectedValueOnce(new Error('Gateway closed the connection'))
+    const onConnected = vi.fn()
+    render(<OpenClawInlineSetup onFinish={vi.fn()} onCancel={vi.fn()} onConnected={onConnected} />)
+
+    await userEvent.click(await screen.findByTestId('device-pairing-approve-button'))
+
+    expect(await screen.findByRole('alert', {}, { timeout: 3000 })).toHaveTextContent(
+      'Gateway closed the connection',
+    )
+    expect(screen.queryByTestId('device-pairing-approval')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled()
+    expect(onConnected).not.toHaveBeenCalled()
+  })
+
+  it('a second NOT_PAIRED after approval offers Retry, which brings back an approvable card', async () => {
+    useReadyGateway()
+    vi.mocked(connectGatewayFromSettings)
+      .mockRejectedValueOnce(notPaired())
+      .mockRejectedValueOnce(notPaired())
+      .mockRejectedValueOnce(notPaired())
+    const onConnected = vi.fn()
+    render(<OpenClawInlineSetup onFinish={vi.fn()} onCancel={vi.fn()} onConnected={onConnected} />)
+
+    await userEvent.click(await screen.findByTestId('device-pairing-approve-button'))
+    expect(await screen.findByRole('alert', {}, { timeout: 3000 })).toHaveTextContent(
+      /still needs this device approved/,
+    )
+    expect(screen.queryByTestId('device-pairing-approval')).not.toBeInTheDocument()
+
+    // Retry re-runs the setup; the Gateway still says NOT_PAIRED, so a FRESH
+    // card appears with its approve button live again.
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    const approve = await screen.findByTestId('device-pairing-approve-button')
+    expect(approve).toBeEnabled()
+    expect(approve).toHaveTextContent('Approve this device')
+
+    // Approving this time connects (the mock falls back to a live client).
+    await userEvent.click(approve)
+    await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1), { timeout: 3000 })
   })
 })

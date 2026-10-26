@@ -6,12 +6,13 @@
 //      its own tests); this asserts the WIRING: a deploy advances the wizard with
 //      the deployed team id.
 //   2. Skip on addRuntimes still completes (both Continue + Skip land nativeReady).
-//   3. the OpenClaw detour hands a live client back through as 'gateway' mode
-//      (never discarded) — and returns to addRuntimes.
+//   3. a live client from the in-place OpenClaw setup on addRuntimes is handed
+//      through as 'gateway' mode (never discarded), and Escape from selectTeam
+//      back to addRuntimes keeps it connected.
 //   4. the modal announces itself as a dialog, traps + restores focus, and
 //      Escape steps back one step (no-op on welcome) — the a11y contract.
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -19,17 +20,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { server } from '../../../__vitest__/mswServer'
 import { OnboardingWizard } from '../OnboardingWizard'
 
-// Fake GatewayClient (records the disconnect spy) so the OpenClaw connect path
-// can be driven without a real WebSocket. The module's other exports stay real.
+// The OpenClaw setup connects through the saved-settings helper; fake it so the
+// connect path runs without a real WebSocket. The disconnect spy proves the
+// wizard never tears the client down.
 const { fakeDisconnect } = vi.hoisted(() => ({ fakeDisconnect: vi.fn() }))
-vi.mock('@clawboo/gateway-client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@clawboo/gateway-client')>()
-  class FakeGatewayClient {
-    connect = vi.fn().mockResolvedValue(undefined)
-    disconnect = fakeDisconnect
-  }
-  return { ...actual, GatewayClient: FakeGatewayClient }
-})
+vi.mock('@/lib/gatewayConnect', () => ({
+  connectGatewayFromSettings: vi.fn(async () => ({
+    client: { disconnect: fakeDisconnect },
+    gatewayUrl: 'ws://localhost:18789',
+  })),
+}))
 
 // The real team-deploy engine is exercised by CreateTeamModal's own tests; here
 // it's a minimal fake that, while open, exposes a "deploy" button reporting a
@@ -105,34 +105,79 @@ describe('OnboardingWizard — native-first spine', () => {
   })
 })
 
-describe('OnboardingWizard — the OpenClaw detour hands a live client through', () => {
+describe('OnboardingWizard: the OpenClaw setup hands a live client through', () => {
   beforeEach(() => {
-    fakeDisconnect.mockClear()
     server.use(
-      http.get('/api/settings', () => HttpResponse.json({ gatewayUrl: '', hasToken: false })),
-      http.post('/api/settings', () => HttpResponse.json({})),
       http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })),
+      // The inline setup reuses a connected key, finds OpenClaw installed and
+      // starts the Gateway, then connects.
+      http.post('/api/system/auto-configure-openclaw', () =>
+        HttpResponse.json({ ok: true, gatewayUrl: 'ws://localhost:18789', provider: 'anthropic' }),
+      ),
+      http.get('/api/system/status', () => HttpResponse.json({ openclaw: { installed: true } })),
+      http.post(
+        '/api/system/gateway',
+        () =>
+          new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+            headers: { 'Content-Type': 'text/event-stream' },
+          }),
+      ),
       // nativeReady fetches the roster once we land there.
       http.get('/api/agents', () => HttpResponse.json({ agents: [] })),
     )
   })
 
-  it('connect → returns to addRuntimes → Continue → selectTeam → nativeReady completes as gateway', async () => {
-    const onComplete = vi.fn()
-    render(<OnboardingWizard onComplete={onComplete} initialStep="connect" />)
+  // Set up OpenClaw in place on its row; once the wizard holds the live client
+  // the row settles to Connected.
+  async function setUpOpenClaw() {
+    await userEvent.click(await screen.findByTestId('runtime-list-row-openclaw-toggle'))
+    await userEvent.click(screen.getByTestId('addruntimes-setup-openclaw'))
+    await within(screen.getByTestId('runtime-list-row-openclaw')).findByText('Connected')
+  }
 
-    // Establish a GatewayClient via the OpenClaw ConnectStep (detour).
-    await userEvent.click(await screen.findByRole('button', { name: /^Connect/ }))
-    // The detour returns to addRuntimes with a live client, then team selection.
-    await screen.findByTestId('add-runtimes-step')
-    await userEvent.click(screen.getByTestId('addruntimes-continue'))
-    await userEvent.click(await screen.findByTestId('fake-deploy'))
+  async function deployAndLand() {
+    await userEvent.click(await screen.findByTestId('fake-deploy', {}, { timeout: 8_000 }))
     await userEvent.click(await screen.findByTestId('native-open-dashboard'))
+  }
 
-    // The live client is preserved (gateway mode), not discarded.
+  function expectGatewayCompletion(onComplete: ReturnType<typeof vi.fn>) {
     const call = onComplete.mock.calls[0]
     expect(call?.[0]).toBeTruthy()
+    expect(call?.[1]).toBe('ws://localhost:18789')
     expect(call?.[3]).toBe('gateway')
+  }
+
+  it('addRuntimes OpenClaw setup → Continue → selectTeam → nativeReady completes as gateway', async () => {
+    const onComplete = vi.fn()
+    render(<OnboardingWizard onComplete={onComplete} initialStep="addRuntimes" />)
+
+    await setUpOpenClaw()
+    await userEvent.click(screen.getByTestId('addruntimes-continue'))
+    await deployAndLand()
+
+    // The live client is preserved (gateway mode), not discarded.
+    expectGatewayCompletion(onComplete)
+  })
+
+  it('Escape from selectTeam back to addRuntimes keeps the OpenClaw client connected', async () => {
+    fakeDisconnect.mockClear()
+    const onComplete = vi.fn()
+    render(<OnboardingWizard onComplete={onComplete} initialStep="addRuntimes" />)
+
+    await setUpOpenClaw()
+    await userEvent.click(screen.getByTestId('addruntimes-continue'))
+    await screen.findByTestId('fake-deploy', {}, { timeout: 8_000 })
+
+    await userEvent.keyboard('{Escape}')
+    await screen.findByTestId('add-runtimes-step')
+    expect(fakeDisconnect).not.toHaveBeenCalled()
+    expect(
+      within(screen.getByTestId('runtime-list-row-openclaw')).getByText('Connected'),
+    ).toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId('addruntimes-continue'))
+    await deployAndLand()
+    expectGatewayCompletion(onComplete)
   })
 })
 

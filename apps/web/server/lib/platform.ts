@@ -18,8 +18,8 @@
 //   `npx clawboo` on Windows; blocked the entire onboarding flow.
 // - v0.1.3 execFileSync('which', ['openclaw']) threw silently on
 //   Windows (catch returned `installed: false`). Onboarding always
-//   routed Windows users to InstallStep even after a successful
-//   manual `npm install -g openclaw@...`.
+//   sent Windows users to the OpenClaw install screen even after a
+//   successful manual `npm install -g openclaw@...`.
 
 import { execFileSync } from 'node:child_process'
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs'
@@ -60,7 +60,7 @@ export function findExecutable(name: string): string | null {
     // threaded server), and on Windows `where` can be slow under Defender
     // real-time scanning. An unbounded spawn here froze `/api/system/status`
     // past the client timeout on Windows CI runners (and would stall the
-    // onboarding DetectStep for real users). `where`/`which` is normally
+    // OpenClaw setup for real users). `where`/`which` is normally
     // <200 ms, so a 5 s cap never trips in practice but bounds the worst case;
     // on timeout it throws → caught below → treated as "not found".
     // `windowsHide` suppresses the cmd.exe console flash (matches our other

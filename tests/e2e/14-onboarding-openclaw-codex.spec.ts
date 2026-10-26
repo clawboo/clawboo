@@ -10,8 +10,8 @@
 // developer machine's REAL auth state — codex login + OpenClaw profiles — which
 // e2e can't drive headlessly), plus `POST /api/system/gateway` (never spawn a
 // real Gateway in e2e). The REAL rung selection + keyless config write are
-// covered by the server unit tests (openclawCodexAuth.test.ts); the wizard
-// ConfigureStep's ChatGPT method is covered by ConfigureStep.test.tsx.
+// covered by the server unit tests (openclawCodexAuth.test.ts); the inline
+// setup's subscription panel is covered by OpenClawInlineSetup.test.tsx.
 
 import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
 

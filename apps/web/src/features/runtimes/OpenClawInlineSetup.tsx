@@ -100,21 +100,39 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
     [appendLog],
   )
 
-  const connectAndFinish = useCallback(async () => {
+  const fail = useCallback((e: unknown) => {
+    setError(e instanceof Error ? e.message : String(e))
+    setPhase('error')
+  }, [])
+
+  // Connect and hand the client over. Resolves false when the Gateway answers
+  // NOT_PAIRED (this device needs approving); rethrows any other failure.
+  const connectAndFinish = useCallback(async (): Promise<boolean> => {
     try {
       const { client, gatewayUrl } = await connectGatewayFromSettings()
       if (onConnected) onConnected(client, gatewayUrl)
       else await enterGatewayMode(client, gatewayUrl)
-      setPhase('connected')
-      setTimeout(() => onFinish(), 900)
     } catch (e) {
-      if (e instanceof GatewayResponseError && e.code === 'NOT_PAIRED') {
-        setPhase('pairing')
-        return
-      }
+      if (e instanceof GatewayResponseError && e.code === 'NOT_PAIRED') return false
       throw e
     }
+    setPhase('connected')
+    setTimeout(() => onFinish(), 900)
+    return true
   }, [onConnected, onFinish])
+
+  // The pairing card approved this device; reconnect. The card has spent its
+  // approval by now (it stays on "Approved. Reconnecting…"), so any failure,
+  // a second NOT_PAIRED included, goes to the error state. Its Retry re-runs
+  // the setup, which shows a fresh card if the device still needs approving.
+  const handleApproved = useCallback(async () => {
+    try {
+      if (await connectAndFinish()) return
+      fail(new Error('OpenClaw still needs this device approved. Retry to approve it again.'))
+    } catch (e) {
+      fail(e)
+    }
+  }, [connectAndFinish, fail])
 
   const run = useCallback(async () => {
     setError(null)
@@ -161,12 +179,11 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
       }
       setPhase('starting')
       await runSSE('/api/system/gateway', { action: 'start' })
-      await connectAndFinish()
+      if (!(await connectAndFinish())) setPhase('pairing')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setPhase('error')
+      fail(e)
     }
-  }, [runSSE, connectAndFinish])
+  }, [runSSE, connectAndFinish, fail])
 
   // Fire once on mount (StrictMode-safe).
   useEffect(() => {
@@ -333,7 +350,7 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
         </div>
       )}
 
-      {phase === 'pairing' && <DevicePairingApproval onApproved={() => void connectAndFinish()} />}
+      {phase === 'pairing' && <DevicePairingApproval onApproved={() => void handleApproved()} />}
 
       {phase === 'connected' && (
         <span className="flex items-center gap-2 text-[12.5px] font-medium text-mint">

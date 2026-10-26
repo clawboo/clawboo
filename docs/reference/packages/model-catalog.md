@@ -48,7 +48,7 @@ The catalog is the source of truth for **casing**, not for availability. The liv
 ## Used by
 
 - **`apps/web` (server)**; `api/system.ts` builds its canonical-name map from `MODEL_GROUPS` keyed by `providerSlug`, rewrites each live CLI group onto the catalog's casing, supplements missing known providers from the catalog, and serves the full filtered catalog when the CLI is unavailable.
-- **`apps/web` (SPA)**; the model pickers and onboarding read it through the `@/lib/modelCatalog` shim: `features/teams/CreateTeamModal.tsx`, `features/teams/MemberModelSelect.tsx`, `features/onboarding/steps/ConfigureStep.tsx`, `features/agent-detail/AgentModelSelector.tsx`, `features/maintenance/ModelSelector.tsx`, plus the `lib/useModelCatalog.ts` / `lib/useProviderModels.ts` / `lib/useOpenRouterModels.ts` hooks and `lib/modelProvider.ts`.
+- **`apps/web` (SPA)**; the model pickers and onboarding read it through the `@/lib/modelCatalog` shim: `features/teams/CreateTeamModal.tsx`, `features/teams/MemberModelSelect.tsx`, `features/agent-detail/AgentModelSelector.tsx`, `features/maintenance/ModelSelector.tsx`, plus the `lib/useModelCatalog.ts` / `lib/useProviderModels.ts` / `lib/useOpenRouterModels.ts` hooks and `lib/modelProvider.ts`.
 
 ## Source
 

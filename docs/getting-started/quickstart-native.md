@@ -57,7 +57,7 @@ Catching a bad key here is the point: without it, a typo'd or revoked key would 
 
 ### 4. Add more runtimes (optional)
 
-The **"Add more runtimes"** step is optional. Here you can connect Claude Code, Codex, Hermes, or an OpenClaw Gateway as peers, or set up OpenClaw through an inline "Set up OpenClaw" detour that returns you to this step when it's done. You can skip it now and add runtimes anytime later from **Settings**, then the **Runtimes** panel.
+The **"Add more runtimes"** step is optional. Here you can connect Claude Code, Codex, or Hermes as peers, or set up an OpenClaw Gateway with **Set up OpenClaw**, which runs in place inside the OpenClaw row, so you never leave this step. You can skip it now and add runtimes anytime later from **Settings**, then the **Runtimes** panel.
 
 Click **Continue** whenever you're ready, with or without connecting anything.
 

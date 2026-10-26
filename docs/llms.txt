@@ -18,7 +18,7 @@ This file indexes the Clawboo documentation for language models. Paths are relat
 - [Deploy your first team](getting-started/first-team.md): Deploy a team of agents, run the Know-Your-Team gate, send a message in group chat, and watch a delegation land on the board.
 - [Install Clawboo](getting-started/installation.md): Install Clawboo with npm i -g clawboo or npx clawboo, launch the dashboard, and see the launch sequence, port discovery, and where Clawboo keeps its state.
 - [Quickstart: the native runtime (no Gateway)](getting-started/quickstart-native.md): Install Clawboo, connect the built-in native runtime with a provider key, pick and deploy a starter team, and land in it with no OpenClaw Gateway.
-- [Quickstart: the OpenClaw Gateway](getting-started/quickstart-openclaw.md): Install Clawboo, connect the native runtime, then add OpenClaw by detecting, installing, and configuring it, starting the Gateway, and approving the device.
+- [Quickstart: the OpenClaw Gateway](getting-started/quickstart-openclaw.md): Install Clawboo, connect the native runtime, then set up OpenClaw in place on the Add more runtimes step, which installs it, starts the Gateway, and pairs this device.
 
 ## Core Concepts
 

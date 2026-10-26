@@ -1,5 +1,5 @@
-// connectGatewayFromSettings — the shared "connect via saved settings" helper the
-// onboarding wizard AND the dashboard OpenClawSetupFlow both call. Node-project
+// connectGatewayFromSettings: the shared "connect via saved settings" helper
+// OpenClawInlineSetup calls (onboarding and Settings). Node-project
 // test: stub global `fetch` + mock the GatewayClient so no real WS is opened.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,7 +42,7 @@ describe('connectGatewayFromSettings', () => {
 
     expect(gatewayUrl).toBe('ws://localhost:18789')
     expect(client).toBeDefined()
-    // Same-origin proxy + the exact options handleAllGood used. NOTE no authScopeKey.
+    // Same-origin proxy + the setup's connect options. NOTE no authScopeKey.
     //
     // `clientName` is load-bearing and used to be wrong. Announcing
     // `openclaw-control-ui` claims to BE the Gateway's bundled Control UI, and

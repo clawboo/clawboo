@@ -73,7 +73,7 @@ export async function recheckRuntime(id: RuntimeId): Promise<RuntimeStatus | nul
 }
 
 /** Install a runtime CLI via the SSE endpoint. Returns the AbortController so the
- *  caller can cancel; mirrors the onboarding InstallStep usage of consumeApiSSE. */
+ *  caller can cancel. */
 export function installRuntime(id: RuntimeId, handlers: SSEHandlers): AbortController {
   return consumeApiSSE(`/api/runtimes/${id}/install`, { method: 'POST' }, handlers)
 }

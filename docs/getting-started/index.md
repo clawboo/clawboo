@@ -66,7 +66,7 @@ This is the fastest route to a running team. Follow it step by step in the [nati
 
 ### The OpenClaw path (opt-in)
 
-Want to run OpenClaw agents on a local Gateway? Connect OpenClaw from the wizard's **Add more runtimes** step (a "Set up OpenClaw" detour that detects, installs, configures, and starts the Gateway, then returns you to the wizard) or later from **Settings**, then the **Runtimes** panel. The detour checks Node.js, whether the `openclaw` CLI is installed, and whether a Gateway is running, and can install OpenClaw, write its config and provider key, and start the Gateway for you. Once it is connected you can deploy or add OpenClaw agents to a team.
+Want to run OpenClaw agents on a local Gateway? Set up OpenClaw from the wizard's **Add more runtimes** step or later from **Settings**, then the **Runtimes** panel. Either way, **Set up OpenClaw** runs in place inside the OpenClaw row: it reuses the provider key or ChatGPT sign-in you already connected (asking for a key only when there is none), installs OpenClaw if it's missing, writes its config, starts the Gateway, and asks you to approve this device once. Once it is connected you can deploy or add OpenClaw agents to a team.
 
 This path involves more moving parts (a separate CLI and a long-lived Gateway process) but unlocks OpenClaw's own agents and channels. Follow it step by step in the [OpenClaw quickstart](/getting-started/quickstart-openclaw).
 
