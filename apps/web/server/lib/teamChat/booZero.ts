@@ -18,6 +18,7 @@ import { SETTING_DEFAULT_ID } from '../agentSource/openClawAgentSource'
 import {
   canRunNativeProvider,
   hasConnectedNativeProvider,
+  readRecordedNativeDefault,
 } from '../runtimes/native/nativeProviderDefaults'
 
 /** User OVERRIDE: designate ANY agent (any runtime) as Boo Zero. Wins over the
@@ -27,8 +28,9 @@ export const SETTING_BOO_ZERO_OVERRIDE = 'boo-zero:agent-id'
 export const SETTING_NATIVE_BOO_ZERO_ID = 'boo-zero:native-agent-id'
 /** The provider + model the user picked at native onboarding for the leader — read by
  *  `ensureNativeBooZero` so the universal Boo Zero runs on the CHOSEN model instead of
- *  the auto-resolved per-provider default. JSON `{ provider, model }`. Absent → auto-resolve. */
-export const SETTING_NATIVE_LEADER_MODEL = 'boo-zero:native-leader-model'
+ *  the auto-resolved per-provider default. JSON `{ provider, model }`. Absent → auto-resolve.
+ *  Lives beside the resolver, which reads it for every auto-resolved agent too. */
+export { SETTING_NATIVE_LEADER_MODEL } from '../runtimes/native/nativeProviderDefaults'
 
 const NATIVE_RUNTIME = 'clawboo-native'
 
@@ -152,18 +154,11 @@ function hasNativeTeamMember(db: ClawbooDb): boolean {
 function readChosenLeaderModel(
   db: ClawbooDb,
 ): { provider: string; model: string; envVar: string } | null {
-  const raw = getSetting(db, SETTING_NATIVE_LEADER_MODEL)
-  if (!raw) return null
-  try {
-    const p = JSON.parse(raw) as { provider?: unknown; model?: unknown }
-    if (typeof p.provider !== 'string' || typeof p.model !== 'string' || !p.model) return null
-    if (!canRunNativeProvider(p.provider)) return null
-    // Ollama is keyless; AgentConfig.envVar is non-empty by schema (a harmless placeholder).
-    const envVar = envVarForProvider(p.provider) ?? 'OLLAMA_BASE_URL'
-    return { provider: p.provider, model: p.model, envVar }
-  } catch {
-    return null
-  }
+  const p = readRecordedNativeDefault(db)
+  if (!p || !canRunNativeProvider(p.provider)) return null
+  // Ollama is keyless; AgentConfig.envVar is non-empty by schema (a harmless placeholder).
+  const envVar = envVarForProvider(p.provider) ?? 'OLLAMA_BASE_URL'
+  return { provider: p.provider, model: p.model, envVar }
 }
 
 /** Ensure the DEFAULT-NATIVE Boo Zero exists (idempotent via `SETTING_NATIVE_BOO_ZERO_ID`).

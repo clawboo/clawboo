@@ -23,6 +23,7 @@ import {
   fetchRegistryHealth,
   fetchRuntimes,
   setBooZeroOverride,
+  type NativeTierDefaults,
   type RuntimeStatus,
 } from '@clawboo/control-client'
 import {
@@ -127,8 +128,9 @@ function groupsForRuntime(
 /** The model that ACTUALLY runs when the user leaves the picker on its default —
  *  shown transparently in the trigger (never an opaque "Recommended"). OpenClaw's
  *  is the Gateway default (`agents.defaults.model.primary`); native's is the
- *  configured leader model; Hermes is key-derived server-side (unknowable
- *  client-side → the trigger reads plain "Default"). */
+ *  row's tier default as the server resolves it (the leader and the specialists
+ *  can differ); Hermes is key-derived server-side (unknowable client-side → the
+ *  trigger reads plain "Default"). */
 function defaultModelFor(
   sourceId: SelectableSourceId,
   openclawDefault: string | null,
@@ -309,10 +311,11 @@ export function CreateTeamModal({
   // The CONNECTED LLM providers (Providers hub / OpenClaw .env) — the model picker
   // shows ONLY these. Slugs (providerSlug), so display names + ids compare cleanly.
   const [connectedProviderSlugs, setConnectedProviderSlugs] = useState<Set<string>>(new Set())
-  // The native leader's configured default model + provider — shown transparently
-  // in the native picker's trigger + used to pre-select its provider column.
-  const [nativeDefaultModel, setNativeDefaultModel] = useState<string | null>(null)
-  const [nativeDefaultProvider, setNativeDefaultProvider] = useState<string | null>(null)
+  // What a native row left on "Default" really gets, per tier, as the server
+  // resolves it (the recorded default when its provider is set up, else the first
+  // connected key). Shown transparently in the native picker's trigger and used to
+  // pre-select its provider column. Null when no native provider is set up.
+  const [nativeTierDefaults, setNativeTierDefaults] = useState<NativeTierDefaults | null>(null)
   // OpenClaw's Gateway default model (agents.defaults.model.primary) — the exact
   // model an unset OpenClaw row runs, shown in its picker's trigger.
   const openclawDefaultModel = useOpenclawDefaultModel()
@@ -343,17 +346,11 @@ export function CreateTeamModal({
         ),
       )
       .catch(() => setConnectedProviderSlugs(new Set()))
-    // The native default leader model + provider → transparent trigger label +
-    // provider pre-selection for native rows.
+    // The native per-tier defaults → transparent trigger label + provider
+    // pre-selection for native rows.
     void fetchNativeLeaderModel()
-      .then((r) => {
-        setNativeDefaultModel(r.model)
-        setNativeDefaultProvider(r.provider)
-      })
-      .catch(() => {
-        setNativeDefaultModel(null)
-        setNativeDefaultProvider(null)
-      })
+      .then((r) => setNativeTierDefaults(r.resolved))
+      .catch(() => setNativeTierDefaults(null))
   }, [isOpen])
 
   // Deploy state
@@ -756,10 +753,10 @@ export function CreateTeamModal({
             // does NOT read AGENTS.md), so the delegate contract lives HERE — the
             // leader is taught the `delegate` tool by name (no `<delegate>` XML) +
             // gets the coordination surface (board reads + team room, board WRITES
-            // stay engine-owned); provider/model are auto-resolved server-side from
-            // the connected key (via the modelTier hint).
+            // stay engine-owned); provider/model are auto-resolved server-side (via
+            // the modelTier hint) from the recorded default, else the connected key.
             // A picked model overrides the auto-resolved default (provider + model +
-            // env-var); absent → the modelTier hint auto-resolves from the connected key.
+            // env-var); absent → the modelTier hint auto-resolves it.
             // The provider comes from the GROUP the user clicked, falling back to an
             // id lookup only for a model that arrived without one. Deriving it from
             // the id alone used to drop the pick entirely for every live-listed
@@ -1223,6 +1220,10 @@ export function CreateTeamModal({
                             degradedFrom)
                           : null
                         const showModel = runtimeHasModelPicker(value)
+                        // The deploy sends modelTier 'leader' for exactly this row.
+                        const nativeTierDefault = isLeaderRow
+                          ? nativeTierDefaults?.leader
+                          : nativeTierDefaults?.specialist
                         return (
                           <div
                             key={agent.id}
@@ -1291,9 +1292,12 @@ export function CreateTeamModal({
                                   defaultModelId={defaultModelFor(
                                     value,
                                     openclawDefaultModel,
-                                    nativeDefaultModel,
+                                    nativeTierDefault?.model ?? null,
                                   )}
-                                  defaultProvider={defaultProviderFor(value, nativeDefaultProvider)}
+                                  defaultProvider={defaultProviderFor(
+                                    value,
+                                    nativeTierDefault?.provider ?? null,
+                                  )}
                                 />
                               )}
                             </div>

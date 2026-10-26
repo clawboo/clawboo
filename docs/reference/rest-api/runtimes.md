@@ -24,7 +24,7 @@ On the `/api/runtimes/:id/*` routes, `:id` is validated against the runtime set;
 | POST   | `/api/runtimes/:id/run`               | Drive a board task on the runtime end to end                  | No      |
 | GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog (Hermes model picker)             | No      |
 | POST   | `/api/onboarding/native-leader-model` | Record the chosen leader provider + model                     | No      |
-| GET    | `/api/onboarding/native-leader-model` | The recorded leader provider + model (nulls when unset)       | No      |
+| GET    | `/api/onboarding/native-leader-model` | The recorded pick + the per-tier auto-resolved defaults       | No      |
 | GET    | `/api/onboarding/state`               | Aggregated first-run signals in one call                      | No      |
 | GET    | `/api/providers`                      | List every provider with its connection state                 | No      |
 | POST   | `/api/providers/:id/connect`          | Store a provider key                                          | No      |
@@ -523,11 +523,24 @@ The three `/api/onboarding/*` routes. They take no `:id` segment and are grouped
 
 ### `POST /api/onboarding/native-leader-model`
 
-Records the provider + model the user picked when connecting a native key, so the lazily-created universal Boo Zero runs on it instead of the auto-resolved per-provider default. The team-deploy dialog reads it back as the default provider + model for a team's native agents. Body `{ provider, model }`. The pick is also retro-applied to an existing native Boo Zero, best-effort: on a fresh install there is no Boo Zero yet, which is the normal case and not an error. Returns `{ ok: true }`. **400** `{ error: "unknown provider '<provider>'" }` when `provider` is not a known native provider, or `{ error: "model is required" }` when `model` is missing or blank. **500** `{ error }` if the setting cannot be written.
+Records the provider + model the user picked when connecting a native key, so the lazily-created universal Boo Zero runs on it instead of the auto-resolved per-provider default. It is also the default for every native agent created without a model pick, while its provider stays set up (see [how native agents get a model](/runtimes/native#the-agent-config)). Body `{ provider, model }`. The pick is also retro-applied to an existing native Boo Zero, best-effort: on a fresh install there is no Boo Zero yet, which is the normal case and not an error. Returns `{ ok: true }`. **400** `{ error: "unknown provider '<provider>'" }` when `provider` is not a known native provider, or `{ error: "model is required" }` when `model` is missing or blank. **500** `{ error }` if the setting cannot be written.
 
 ### `GET /api/onboarding/native-leader-model`
 
-The recorded pick, read by the Runtimes panel's native provider manager so its "Default" tag and model dropdown reflect reality. Returns `{ provider, model }`, or `{ provider: null, model: null }` when nothing was ever recorded or the stored value does not parse. Never errors.
+The recorded pick, read by the Runtimes panel's native provider manager so its "Default" tag and model dropdown reflect reality, plus what a native agent created without a model pick would get right now, per tier:
+
+```ts
+{
+  provider: string | null // the recorded pick (null when never recorded or unparseable)
+  model: string | null
+  resolved: {
+    leader: { provider: string; model: string }
+    specialist: { provider: string; model: string }
+  } | null // null when no native provider is set up
+}
+```
+
+`resolved` comes from the same path agent creation runs, including the check that an Ollama model is pulled, so the team-deploy dialog labels each native row left on **Default** with exactly the model it will get. A stored value that does not parse reads as no pick, and `resolved` then comes from the fixed provider order. Never errors.
 
 ### `GET /api/onboarding/state`
 

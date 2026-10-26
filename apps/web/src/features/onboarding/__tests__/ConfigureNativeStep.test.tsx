@@ -334,6 +334,27 @@ describe('ConfigureNativeStep', () => {
   const ollamaModels = (body: Record<string, unknown>) =>
     http.get('/api/providers/ollama/models', () => HttpResponse.json(body))
 
+  it('the model hint says an Ollama model runs every agent; a keyed provider keeps the cheaper-specialist note', async () => {
+    server.use(
+      ollamaModels({
+        models: [{ id: 'qwen2.5:7b', label: 'qwen2.5:7b' }],
+        reachable: true,
+        recommendedModel: 'qwen2.5:7b',
+      }),
+    )
+    render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
+    expect(screen.getByTestId('native-model-hint')).toHaveTextContent(
+      /coordinating lead\. The specialists you add default to a faster, cheaper model/,
+    )
+    // Ollama specialists stay on the picked model (agents created without a pick
+    // run it on both tiers), so the cheaper-specialist promise would be false here.
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    const hint = await screen.findByTestId('native-model-hint')
+    expect(hint).toHaveTextContent(/every agent you add, the lead and the specialists alike/)
+    expect(hint).not.toHaveTextContent(/cheaper/)
+  })
+
   it('Ollama lists the pulled models and preselects the one a new agent would get', async () => {
     const onConnected = vi.fn()
     let healthBody: Record<string, unknown> | null = null

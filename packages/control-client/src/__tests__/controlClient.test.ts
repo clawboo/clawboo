@@ -5,6 +5,7 @@ import {
   apiUrl,
   connectRuntime,
   disconnectRuntime,
+  fetchNativeLeaderModel,
   fetchOllamaModels,
   fetchOnboardingState,
   fetchRuntimes,
@@ -233,6 +234,35 @@ describe('agents client', () => {
 })
 
 describe('onboarding client', () => {
+  it('fetchNativeLeaderModel reads the per-tier defaults, dropping a malformed block', async () => {
+    const resolved = {
+      leader: { provider: 'openai', model: 'gpt-4o' },
+      specialist: { provider: 'openai', model: 'gpt-4o-mini' },
+    }
+    stubFetch(async () => jsonResponse({ provider: 'openai', model: 'gpt-4o', resolved }))
+    expect(await fetchNativeLeaderModel()).toEqual({
+      provider: 'openai',
+      model: 'gpt-4o',
+      resolved,
+    })
+
+    // Half a block is no block: a label built from it would name a model for one
+    // tier and silently guess the other.
+    stubFetch(async () =>
+      jsonResponse({
+        provider: 'openai',
+        model: 'gpt-4o',
+        resolved: { leader: resolved.leader, specialist: { provider: 'openai' } },
+      }),
+    )
+    expect((await fetchNativeLeaderModel()).resolved).toBeNull()
+
+    stubFetch(async () => {
+      throw new Error('down')
+    })
+    expect(await fetchNativeLeaderModel()).toEqual({ provider: null, model: null, resolved: null })
+  })
+
   it('setNativeLeaderModel posts provider+model and returns ok; never throws', async () => {
     let body: unknown = null
     stubFetch(async (_url, init) => {

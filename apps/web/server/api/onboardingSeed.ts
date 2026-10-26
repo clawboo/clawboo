@@ -7,10 +7,14 @@
 import type { Request, Response } from 'express'
 
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
-import { getSetting, setSetting } from '@clawboo/db'
+import { getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 
 import { getDb } from '../lib/db'
 import { loadAgentConfig, saveAgentConfig } from '../lib/runtimes/native/agentConfigStore'
+import {
+  readRecordedNativeDefault,
+  resolveNativeTierDefaults,
+} from '../lib/runtimes/native/nativeProviderDefaults'
 import { SETTING_NATIVE_BOO_ZERO_ID, SETTING_NATIVE_LEADER_MODEL } from '../lib/teamChat/booZero'
 
 interface LeaderModelBody {
@@ -64,20 +68,36 @@ export function onboardingNativeLeaderModelPOST(req: Request, res: Response): vo
   }
 }
 
+/** The stored pick as written, or null/null when never set or unparseable. */
+function readStoredLeaderModel(db: ClawbooDb): {
+  provider: string | null
+  model: string | null
+} {
+  try {
+    const raw = getSetting(db, SETTING_NATIVE_LEADER_MODEL)
+    if (!raw) return { provider: null, model: null }
+    const parsed = JSON.parse(raw) as { provider?: string; model?: string }
+    return { provider: parsed.provider ?? null, model: parsed.model ?? null }
+  } catch {
+    return { provider: null, model: null }
+  }
+}
+
 // GET /api/onboarding/native-leader-model — the current default provider + model
 // for the native leader (null/null when never set). Read by the Runtimes panel's
 // native provider manager so its "Default" tag + model dropdown reflect reality.
-export function onboardingNativeLeaderModelGET(_req: Request, res: Response): void {
+// `resolved` is what an agent created without a model pick gets right now, per
+// tier, from the same deploy path `createAgent` runs (pulled-model check
+// included), or null when no native provider is set up. CreateTeamModal labels
+// its "Default" rows with it, so the label can't promise a model the server won't
+// use. A corrupt setting reads as no pick, and `resolved` still comes from the
+// fixed order.
+export async function onboardingNativeLeaderModelGET(_req: Request, res: Response): Promise<void> {
   try {
     const db = getDb()
-    const raw = getSetting(db, SETTING_NATIVE_LEADER_MODEL)
-    if (!raw) {
-      res.json({ provider: null, model: null })
-      return
-    }
-    const parsed = JSON.parse(raw) as { provider?: string; model?: string }
-    res.json({ provider: parsed.provider ?? null, model: parsed.model ?? null })
+    const resolved = await resolveNativeTierDefaults(readRecordedNativeDefault(db))
+    res.json({ ...readStoredLeaderModel(db), resolved })
   } catch {
-    res.json({ provider: null, model: null })
+    res.json({ provider: null, model: null, resolved: null })
   }
 }

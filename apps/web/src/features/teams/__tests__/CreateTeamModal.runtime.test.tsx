@@ -165,7 +165,14 @@ function baseHandlers(
       }),
     ),
     http.get('/api/onboarding/native-leader-model', () =>
-      HttpResponse.json({ provider: 'anthropic', model: 'claude-sonnet-4-5' }),
+      HttpResponse.json({
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+        resolved: {
+          leader: { provider: 'anthropic', model: 'claude-sonnet-4-5' },
+          specialist: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+        },
+      }),
     ),
   ]
 }
@@ -223,6 +230,46 @@ describe('CreateTeamModal per-agent runtime selector', () => {
     await userEvent.click(screen.getAllByTestId('member-runtime-trigger')[1])
     await userEvent.click(screen.getByRole('option', { name: /clawboo native/i }))
     await waitFor(() => expect(screen.getAllByText(/using Clawboo Native/i)).toHaveLength(1))
+  })
+
+  it('native rows name the model each tier really gets (the server’s per-tier defaults)', async () => {
+    // The deploy sends only a modelTier hint for a row left on Default, and the
+    // server resolves leader and specialists differently, so one shared label
+    // would promise the specialists a model they never get.
+    server.use(
+      http.get('/api/onboarding/native-leader-model', () =>
+        HttpResponse.json({
+          provider: 'anthropic',
+          model: 'claude-opus-4-8',
+          resolved: {
+            leader: { provider: 'anthropic', model: 'claude-opus-4-8' },
+            specialist: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+          },
+        }),
+      ),
+      ...baseHandlers(),
+    )
+    renderModal()
+    // Gateway offline (default) → both rows degrade to Native; row 0 is the lead.
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+    const [lead, coder] = screen.getAllByTestId('member-model-trigger')
+    await waitFor(() => expect(lead).toHaveTextContent('Default · Claude Opus 4.8'))
+    expect(coder).toHaveTextContent('Default · Claude Haiku 4.5')
+  })
+
+  it('a native row reads plain "Default" when no native provider is set up', async () => {
+    server.use(
+      http.get('/api/onboarding/native-leader-model', () =>
+        HttpResponse.json({ provider: 'openai', model: 'gpt-4o', resolved: null }),
+      ),
+      ...baseHandlers(),
+    )
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-model-trigger')).toHaveLength(2))
+    // The recorded pick alone is not what would run, so it is never named.
+    for (const trigger of screen.getAllByTestId('member-model-trigger')) {
+      expect(trigger).toHaveTextContent(/^Default$/)
+    }
   })
 
   it('native mode (status=connected, client=null) still degrades OpenClaw to Native — no live Gateway', async () => {

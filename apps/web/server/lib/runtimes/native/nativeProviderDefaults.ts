@@ -7,6 +7,7 @@
 // available"). Explicit-provider callers (the seed) bypass this entirely.
 
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
+import { getSetting, type ClawbooDb } from '@clawboo/db'
 
 import {
   getKeylessProviderChoice,
@@ -16,6 +17,32 @@ import {
 import { listOllamaModels, OLLAMA_FALLBACK_MODEL, pickOllamaModel } from './ollamaModels'
 
 export type ModelTier = 'leader' | 'specialist'
+
+/** The user's default native provider + model, JSON `{ provider, model }`. Written
+ *  by onboarding and by "Make default" in the native providers manager; read by
+ *  `ensureNativeBooZero` and by every agent created without an explicit provider. */
+export const SETTING_NATIVE_LEADER_MODEL = 'boo-zero:native-leader-model'
+
+/** The recorded default (SETTING_NATIVE_LEADER_MODEL), parsed. */
+export interface RecordedNativeDefault {
+  provider: string
+  model: string
+}
+
+/** The recorded default, or null when it is unset or malformed. Says nothing about
+ *  whether the provider can serve a run; the callers decide that. */
+export function readRecordedNativeDefault(db: ClawbooDb): RecordedNativeDefault | null {
+  try {
+    const raw = getSetting(db, SETTING_NATIVE_LEADER_MODEL)
+    if (!raw) return null
+    const p = JSON.parse(raw) as { provider?: unknown; model?: unknown }
+    if (typeof p.provider !== 'string' || !p.provider) return null
+    if (typeof p.model !== 'string' || !p.model) return null
+    return { provider: p.provider, model: p.model }
+  } catch {
+    return null
+  }
+}
 
 /** Per-provider model picks: a capable model for a leader, a cheap one for a
  *  specialist. These are the current defaults for the paths that DON'T pick a model
@@ -62,26 +89,52 @@ export function isNativeOllamaConnected(): boolean {
   return Boolean(process.env['OLLAMA_BASE_URL']?.trim()) && !isRuntimeDisconnected('clawboo-native')
 }
 
+/** The model a usable recorded default puts on a tier. The leader runs the
+ *  recorded model itself. A specialist runs the provider's cheaper tier model, as
+ *  onboarding promises ("the specialists you add default to a faster, cheaper
+ *  model") and as the fixed-order path does. Ollama keeps the recorded model on
+ *  both tiers: it is a model the user picked from what this machine has pulled,
+ *  local runs have no per-token cost to save, and one model for every agent spares
+ *  a reload on each hand-off (see `pickOllamaModel`). */
+function recordedModelForTier(recorded: RecordedNativeDefault, tier: ModelTier): string {
+  if (tier === 'leader' || recorded.provider === 'ollama') return recorded.model
+  return MODEL_DEFAULTS[recorded.provider]?.specialist ?? recorded.model
+}
+
 /**
- * Resolve `{provider, model, envVar}` from the FIRST connected native key, in
- * KNOWN_PROVIDERS priority (anthropic → openai → openrouter → ollama), mirroring
- * `nativeKeyHealth`'s vault-chain check. Keyless Ollama counts once it is set up
- * (`isNativeOllamaConnected`). No key at all → the anthropic default (the run
- * surfaces the missing key; createAgent never throws). `envVar` is non-empty by
- * the AgentConfig schema; ollama carries a harmless placeholder (the native router
- * skips key resolution for ollama candidates).
+ * Resolve `{provider, model, envVar}` for an agent created without an explicit
+ * provider. The user's recorded default wins when its provider is set up
+ * (`isNativeProviderConnected`, the same test the fallback applies), so an
+ * ambient key in the shell or OpenClaw's .env can't pull every agent onto a
+ * provider the user didn't pick. It is the set-up test, not `canRunNativeProvider`:
+ * the default claims agents that don't exist yet, so an Ollama the user never set
+ * up must not claim them. (Boo Zero validates the same pick with
+ * `canRunNativeProvider`, so on such an Ollama the two can differ.) Otherwise the
+ * FIRST set-up provider in KNOWN_PROVIDERS priority (anthropic → openai →
+ * openrouter → ollama → the extra providers), mirroring `nativeKeyHealth`'s
+ * vault-chain check, on its MODEL_DEFAULTS. No key at all → the anthropic default
+ * (the run surfaces the missing key; createAgent never throws). `envVar` is
+ * non-empty by the AgentConfig schema; ollama carries a harmless placeholder (the
+ * native router skips key resolution for ollama candidates).
  */
-export function resolveConnectedNativeDefaults(tier: ModelTier): NativeProviderDefaults {
-  for (const provider of KNOWN_PROVIDERS) {
-    if (provider === 'ollama') {
-      if (!isNativeOllamaConnected()) continue
-      const models = MODEL_DEFAULTS['ollama'] ?? MODEL_DEFAULTS['anthropic']!
-      return { primaryProvider: 'ollama', primaryModel: models[tier], envVar: 'OLLAMA_BASE_URL' }
+export function resolveConnectedNativeDefaults(
+  tier: ModelTier,
+  recorded: RecordedNativeDefault | null,
+): NativeProviderDefaults {
+  if (recorded && isNativeProviderConnected(recorded.provider)) {
+    return {
+      primaryProvider: recorded.provider,
+      primaryModel: recordedModelForTier(recorded, tier),
+      envVar: envVarForProvider(recorded.provider) ?? 'OLLAMA_BASE_URL',
     }
-    const envVar = envVarForProvider(provider)
-    if (envVar && resolveRuntimeKeyForRuntime('clawboo-native', envVar)) {
-      const models = MODEL_DEFAULTS[provider] ?? MODEL_DEFAULTS['anthropic']!
-      return { primaryProvider: provider, primaryModel: models[tier], envVar }
+  }
+  for (const provider of KNOWN_PROVIDERS) {
+    if (!isNativeProviderConnected(provider)) continue
+    const models = MODEL_DEFAULTS[provider] ?? MODEL_DEFAULTS['anthropic']!
+    return {
+      primaryProvider: provider,
+      primaryModel: models[tier],
+      envVar: envVarForProvider(provider) ?? 'OLLAMA_BASE_URL',
     }
   }
   const models = MODEL_DEFAULTS['anthropic']!
@@ -93,17 +146,39 @@ export function resolveConnectedNativeDefaults(tier: ModelTier): NativeProviderD
 const OLLAMA_DEPLOY_PROBE_MAX_AGE_MS = 10_000
 
 /** `resolveConnectedNativeDefaults` for an agent about to be created. A resolved
- *  Ollama model is checked against what the local daemon has pulled, and one that
- *  isn't there is replaced by a model that is (`pickOllamaModel`), since an
- *  unpulled model fails every run. A pulled pick, an unreachable daemon, and every
- *  other provider pass through unchanged. */
+ *  Ollama model, the recorded one included, is checked against what the local
+ *  daemon has pulled, and one that isn't there is replaced by a model that is
+ *  (`pickOllamaModel`), since an unpulled model fails every run. A pulled pick, an
+ *  unreachable daemon, and every other provider pass through unchanged. */
 export async function resolveDeployNativeDefaults(
   tier: ModelTier,
+  recorded: RecordedNativeDefault | null,
 ): Promise<NativeProviderDefaults> {
-  const defaults = resolveConnectedNativeDefaults(tier)
+  const defaults = resolveConnectedNativeDefaults(tier, recorded)
   if (defaults.primaryProvider !== 'ollama') return defaults
   const { models } = await listOllamaModels({ maxAgeMs: OLLAMA_DEPLOY_PROBE_MAX_AGE_MS })
   return { ...defaults, primaryModel: pickOllamaModel(defaults.primaryModel, models) }
+}
+
+/** One tier's auto-resolved provider + model. */
+export interface NativeTierDefault {
+  provider: string
+  model: string
+}
+
+/** What an agent created without a model pick gets on each tier right now, from
+ *  `resolveDeployNativeDefaults` itself, or null when no native provider is set up
+ *  (nothing would run). The deploy picker labels its "Default" rows with these,
+ *  so the label and the created agent can't disagree. */
+export async function resolveNativeTierDefaults(
+  recorded: RecordedNativeDefault | null,
+): Promise<{ leader: NativeTierDefault; specialist: NativeTierDefault } | null> {
+  if (!hasConnectedNativeProvider()) return null
+  const pick = async (tier: ModelTier): Promise<NativeTierDefault> => {
+    const d = await resolveDeployNativeDefaults(tier, recorded)
+    return { provider: d.primaryProvider, model: d.primaryModel }
+  }
+  return { leader: await pick('leader'), specialist: await pick('specialist') }
 }
 
 // Two different questions get asked about a provider, and Ollama is the one place

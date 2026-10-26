@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 
 import { DEFAULT_AGENT_CONFIG, NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
-import { agents, getBudget, getSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, getBudget, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 
 import { getDb, resetDb } from '../../db'
 import { adapterFactoryFor } from '../../runtimes'
@@ -23,6 +23,7 @@ import {
   nativeConfigKey,
   nativeFileKey,
 } from '../../runtimes/native/agentConfigStore'
+import { SETTING_NATIVE_LEADER_MODEL } from '../../runtimes/native/nativeProviderDefaults'
 import { __resetOllamaModelsCacheForTests } from '../../runtimes/native/ollamaModels'
 import { upsertNativeSessionRow } from '../../runtimes/native/sessionStore'
 import { setKeylessProviderChoice } from '../../secretsVault'
@@ -171,6 +172,47 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
       expect(cfg?.primaryModel).toBe('qwen2.5:7b')
     } finally {
       vi.unstubAllGlobals()
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
+  it('auto-resolve prefers the recorded default over an ambient key earlier in the order', async () => {
+    // The user picked OpenAI as the default; an ANTHROPIC_API_KEY in the shell
+    // must not pull a team deployed without a model pick onto Anthropic.
+    const saved = Object.fromEntries(
+      [...NATIVE_PROVIDER_ENV_VARS, 'OLLAMA_BASE_URL'].map((k) => [k, process.env[k]]),
+    )
+    for (const k of Object.keys(saved)) delete process.env[k]
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-ambient'
+    process.env['OPENAI_API_KEY'] = 'sk-openai-test'
+    setSetting(
+      db,
+      SETTING_NATIVE_LEADER_MODEL,
+      JSON.stringify({ provider: 'openai', model: 'gpt-4o' }),
+    )
+    try {
+      const lead = await source.createAgent({
+        name: 'Lead',
+        execConfig: { systemPrompt: 'hi', modelTier: 'leader' },
+      })
+      expect(loadAgentConfig(db, lead.id)).toMatchObject({
+        primaryProvider: 'openai',
+        primaryModel: 'gpt-4o',
+        envVar: 'OPENAI_API_KEY',
+      })
+      const member = await source.createAgent({
+        name: 'Member',
+        execConfig: { systemPrompt: 'hi', modelTier: 'specialist' },
+      })
+      expect(loadAgentConfig(db, member.id)).toMatchObject({
+        primaryProvider: 'openai',
+        primaryModel: 'gpt-4o-mini', // MODEL_DEFAULTS.openai.specialist
+        envVar: 'OPENAI_API_KEY',
+      })
+    } finally {
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k]
         else process.env[k] = v

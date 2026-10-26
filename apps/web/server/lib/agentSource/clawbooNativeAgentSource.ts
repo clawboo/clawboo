@@ -47,6 +47,7 @@ import {
 } from '../runtimes/native/agentConfigStore'
 import {
   nativeAgentProviderReady,
+  readRecordedNativeDefault,
   resolveDeployNativeDefaults,
 } from '../runtimes/native/nativeProviderDefaults'
 import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
@@ -208,10 +209,11 @@ export class ClawbooNativeAgentSource implements AgentSource {
     // free-form config carrier); SOUL.md doubles as the systemPrompt fallback.
     // `modelTier` is a NON-schema hint (the zod parse strips it): when the caller
     // omits an explicit `primaryProvider` (e.g. CreateTeamModal, which doesn't know
-    // which key the user connected), the provider/model/envVar are auto-resolved
-    // from the first connected vault key so the agent runs on whatever the user
-    // connected — an anthropic default with only an OpenAI key would fail at run
-    // time. An explicit provider (the onboarding seed) bypasses this untouched.
+    // which key the user connected), the provider/model/envVar are auto-resolved:
+    // the user's recorded default when its provider is set up, else the first
+    // connected vault key, so the agent runs on something the user connected (an
+    // anthropic default with only an OpenAI key would fail at run time). An
+    // explicit provider (the onboarding seed) bypasses this untouched.
     const rawExec =
       input.execConfig && typeof input.execConfig === 'object'
         ? (input.execConfig as Record<string, unknown>)
@@ -224,7 +226,10 @@ export class ClawbooNativeAgentSource implements AgentSource {
       typeof execConfig['primaryProvider'] === 'string' && execConfig['primaryProvider'].length > 0
     const resolvedProvider = hasExplicitProvider
       ? {}
-      : await resolveDeployNativeDefaults(modelTier === 'leader' ? 'leader' : 'specialist')
+      : await resolveDeployNativeDefaults(
+          modelTier === 'leader' ? 'leader' : 'specialist',
+          readRecordedNativeDefault(db),
+        )
     const files = input.files ?? {}
     const config: AgentConfig = agentConfigSchema.parse({
       ...DEFAULT_AGENT_CONFIG,

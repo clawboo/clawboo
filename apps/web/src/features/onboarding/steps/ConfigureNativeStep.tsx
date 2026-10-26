@@ -890,10 +890,18 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             searchable={modelSelectOptions.length > 10}
             searchPlaceholder="Search models…"
           />
-          <p className="text-[12px] leading-relaxed" style={{ color: muted(0.45) }}>
-            Sets the model for your coordinating lead. The specialists you add default to a faster,
-            cheaper model. You can change any agent&rsquo;s model later, and connect more providers
-            anytime in Settings &rarr; Providers.
+          <p
+            className="text-[12px] leading-relaxed"
+            style={{ color: muted(0.45) }}
+            data-testid="native-model-hint"
+          >
+            {/* Ollama specialists stay on this model rather than a cheaper one:
+                it is one the machine has pulled, and local runs cost nothing. */}
+            {useOllama
+              ? 'Sets the model for every agent you add, the lead and the specialists alike. '
+              : 'Sets the model for your coordinating lead. The specialists you add default to a faster, cheaper model. '}
+            You can change any agent&rsquo;s model later, and connect more providers anytime in
+            Settings &rarr; Providers.
           </p>
         </div>
       ) : null}

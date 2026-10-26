@@ -5,10 +5,40 @@
 
 import { apiFetch } from './config'
 
+/** One tier's auto-resolved native provider + model. */
+export interface NativeTierDefault {
+  provider: string
+  model: string
+}
+
+/** What a native agent created without a model pick gets, per tier. */
+export interface NativeTierDefaults {
+  leader: NativeTierDefault
+  specialist: NativeTierDefault
+}
+
 /** The native leader's current default provider + model (null/null = never set). */
 export interface NativeLeaderModel {
   provider: string | null
   model: string | null
+  /** What an agent deployed without a model pick actually gets right now, per
+   *  tier (the server's own resolver), or null when no native provider is set up. */
+  resolved: NativeTierDefaults | null
+}
+
+function parseTierDefault(v: unknown): NativeTierDefault | null {
+  if (!v || typeof v !== 'object') return null
+  const { provider, model } = v as { provider?: unknown; model?: unknown }
+  if (typeof provider !== 'string' || !provider || typeof model !== 'string' || !model) return null
+  return { provider, model }
+}
+
+function parseTierDefaults(v: unknown): NativeTierDefaults | null {
+  if (!v || typeof v !== 'object') return null
+  const { leader, specialist } = v as { leader?: unknown; specialist?: unknown }
+  const l = parseTierDefault(leader)
+  const s = parseTierDefault(specialist)
+  return l && s ? { leader: l, specialist: s } : null
 }
 
 /** GET /api/onboarding/native-leader-model — the current default. Defensive:
@@ -16,11 +46,19 @@ export interface NativeLeaderModel {
 export async function fetchNativeLeaderModel(): Promise<NativeLeaderModel> {
   try {
     const res = await apiFetch('/api/onboarding/native-leader-model')
-    if (!res.ok) return { provider: null, model: null }
-    const body = (await res.json()) as { provider?: string | null; model?: string | null }
-    return { provider: body.provider ?? null, model: body.model ?? null }
+    if (!res.ok) return { provider: null, model: null, resolved: null }
+    const body = (await res.json()) as {
+      provider?: string | null
+      model?: string | null
+      resolved?: unknown
+    }
+    return {
+      provider: body.provider ?? null,
+      model: body.model ?? null,
+      resolved: parseTierDefaults(body.resolved),
+    }
   } catch {
-    return { provider: null, model: null }
+    return { provider: null, model: null, resolved: null }
   }
 }
 
