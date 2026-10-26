@@ -94,18 +94,34 @@ function teamsClear(teams: readonly RadialTeamPlacement[]): boolean {
 }
 
 /**
+ * A team ring that keeps the spacing whatever shape the fans take. Every member
+ * sits within `reach` of its junction, and neighbouring junctions are
+ * `2R sin(π / n)` apart, so at this radius two members of different teams, or
+ * a member and Boo Zero, are at least the spacing apart.
+ */
+function clearingTeamRadius(teamSizes: readonly number[]): number {
+  const reach = Math.max(0, ...teamSizes.map((size) => radialFan(size).radius))
+  let radius = Math.max(ATLAS_RADIAL_TEAM_RADIUS, ATLAS_RADIAL_BOO_SPACING + reach)
+  if (teamSizes.length >= 2) {
+    const gap = 2 * Math.sin(Math.PI / teamSizes.length)
+    radius = Math.max(radius, (ATLAS_RADIAL_BOO_SPACING + 2 * reach) / gap)
+  }
+  return radius
+}
+
+/**
  * Where each team's junction and members sit around Boo Zero, for teams of
  * `teamSizes` members. Members of one team keep the spacing by their fan; the
  * team ring starts at ATLAS_RADIAL_TEAM_RADIUS and steps out until members of
- * different teams keep it too.
+ * different teams keep it too, which it does by clearingTeamRadius at the
+ * latest.
  */
 export function radialTeamPlacements(teamSizes: readonly number[]): RadialTeamPlacement[] {
+  const ceiling = clearingTeamRadius(teamSizes)
   let radius = ATLAS_RADIAL_TEAM_RADIUS
   let teams = placeTeams(teamSizes, radius)
-  // Bounded so a pathological input cannot hang the layout: 500 steps is a
-  // ring of 10,600, far past any fleet a canvas can show.
-  for (let i = 0; i < 500 && !teamsClear(teams); i++) {
-    radius += TEAM_RADIUS_STEP
+  while (radius < ceiling && !teamsClear(teams)) {
+    radius = Math.min(radius + TEAM_RADIUS_STEP, ceiling)
     teams = placeTeams(teamSizes, radius)
   }
   return teams

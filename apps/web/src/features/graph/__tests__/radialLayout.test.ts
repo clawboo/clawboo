@@ -48,6 +48,7 @@ describe('radialTeamPlacements', () => {
     ['eight full teams', [5, 5, 5, 5, 5, 5, 5, 5]],
     ['a big team among singles', [9, 1, 1, 1]],
     ['twelve pairs', Array.from({ length: 12 }, () => 2)],
+    ['255 single-member teams', Array.from({ length: 255 }, () => 1)],
   ])('keeps every two Boos the spacing apart: %s', (_label, sizes) => {
     const teams = radialTeamPlacements(sizes)
     expect(teams.map((t) => t.members.length)).toEqual(sizes)

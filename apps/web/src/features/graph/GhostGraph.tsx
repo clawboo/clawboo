@@ -364,7 +364,8 @@ export function GhostGraph({
   }, [activityOpen])
   // Shared by the toolbar shift and the canvas pan, so all three moving parts
   // honour the setting together rather than one of them still sliding. The
-  // camera's own fits after a layout or a resize land at once under it too.
+  // camera's own fits (after a layout, after a resize and on Fit to view) land
+  // at once under it too.
   const dockReduceMotion = useReducedMotion()
   const [dockAgentId, setDockAgentId] = useState<string | null>(null)
 
@@ -1793,7 +1794,7 @@ export function GhostGraph({
           onClick={() =>
             void fitView({
               padding: graphFitPadding(0.2, wrapperRef.current?.clientHeight ?? 0),
-              duration: 550,
+              duration: dockReduceMotion ? 0 : 550,
               ease: easePremium,
             })
           }
