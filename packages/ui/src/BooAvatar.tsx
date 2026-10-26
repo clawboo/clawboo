@@ -1,5 +1,5 @@
-import { memo } from 'react'
-import { generateBooAvatar } from '@clawboo/boo-avatar'
+import { memo, useId } from 'react'
+import { generateBooAvatar, scopeSvgIds } from '@clawboo/boo-avatar'
 import type { BooAvatarParams } from '@clawboo/boo-avatar'
 
 // ─── BooAvatar props ──────────────────────────────────────────────────────────
@@ -27,12 +27,15 @@ export const BooAvatar = memo(function BooAvatar({
 }: BooAvatarProps) {
   const w = size
   const h = Math.round(size * ASPECT)
+  // The same agent drawn twice shares a gradient id, and a hidden first copy (a collapsed sidebar)
+  // leaves every later copy unpainted. Scoping the id per instance prevents it.
+  const scope = useId()
 
   // generateBooAvatar outputs fixed width="100" height="92" — replace with
   // the requested dimensions so the SVG scales correctly in any container.
-  const svg = generateBooAvatar(params).replace(
-    'width="100" height="92"',
-    `width="${w}" height="${h}"`,
+  const svg = scopeSvgIds(
+    generateBooAvatar(params).replace('width="100" height="92"', `width="${w}" height="${h}"`),
+    scope,
   )
 
   return (

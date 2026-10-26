@@ -79,11 +79,14 @@ describe('BooAvatar', () => {
   })
 
   it('is deterministic for a seed and differs across seeds', () => {
-    const a = render(<BooAvatar seed="agent-1" />).container.innerHTML
+    // Each mounted copy scopes its gradient id to itself, so compare the drawing without the scope.
+    const drawing = (html: string) =>
+      html.replace(/(boo-body-[0-9a-f]{8}-[0-9a-f]{6})-[A-Za-z0-9_-]+/g, '$1')
+    const a = drawing(render(<BooAvatar seed="agent-1" />).container.innerHTML)
     cleanup()
-    const b = render(<BooAvatar seed="agent-1" />).container.innerHTML
+    const b = drawing(render(<BooAvatar seed="agent-1" />).container.innerHTML)
     cleanup()
-    const c = render(<BooAvatar seed="agent-2" />).container.innerHTML
+    const c = drawing(render(<BooAvatar seed="agent-2" />).container.innerHTML)
     expect(a).toBe(b)
     expect(a).not.toBe(c)
   })
@@ -91,5 +94,25 @@ describe('BooAvatar', () => {
   it('paints the reserved OpenClaw red for Boo Zero', () => {
     const { container } = render(<BooAvatar seed="anything" isBooZero />)
     expect(container.innerHTML).toContain(TINTS[0])
+  })
+
+  it('keeps its body when an earlier copy of the same Boo is hidden', () => {
+    // A collapsed sidebar keeps its tiles mounted but hidden. url(#id) resolves to the first
+    // matching id in the document, and a browser does not paint a gradient defined in a hidden
+    // subtree, so a later copy resolving there drew no body.
+    const { container } = render(
+      <>
+        <div style={{ display: 'none' }}>
+          <BooAvatar seed="milo" size={36} />
+        </div>
+        <div data-testid="shown">
+          <BooAvatar seed="milo" size={16} />
+        </div>
+      </>,
+    )
+    const shown = container.querySelector('[data-testid="shown"] svg') as SVGSVGElement
+    const refs = [...shown.outerHTML.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1])
+    expect(refs.length).toBeGreaterThan(0)
+    for (const id of refs) expect(shown.contains(document.getElementById(id))).toBe(true)
   })
 })

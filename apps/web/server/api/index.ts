@@ -202,7 +202,13 @@ const router: RouterType = Router({ caseSensitive: true })
 // Rate ceilings first, so every route below inherits the general one. See
 // ../lib/rateLimit for why the numbers are where they are; the strict tier is
 // attached per-route to the handful of routes that spawn work.
-router.use(generalLimiter)
+//
+// Scoped to /api: this router is mounted at the app root, so a bare
+// `router.use` would also count every request passing through on its way to
+// the SPA. A cold page load is ~15 API calls but ~90 script chunks plus the
+// shell, logo and fonts, which have their own ceiling in mountSpa. Counting
+// them here as well would let a few dozen page loads lock the API out.
+router.use('/api', generalLimiter)
 
 // Settings
 router.get('/api/settings', settingsGET)

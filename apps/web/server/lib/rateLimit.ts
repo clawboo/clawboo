@@ -23,7 +23,7 @@ import { rateLimit, type RateLimitRequestHandler } from 'express-rate-limit'
 
 const WINDOW_MS = 60_000
 
-/** Ordinary API traffic, including the UI's polling loops. */
+/** Ordinary API traffic under /api, including the UI's polling loops. */
 export const generalLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: WINDOW_MS,
   limit: 3000,
@@ -41,7 +41,7 @@ export const sensitiveLimiter: RateLimitRequestHandler = rateLimit({
   message: { error: 'Too many requests for this operation. Wait a moment and retry.' },
 })
 
-/** The static SPA shell and its deep-link fallback. */
+/** The static SPA shell, its assets, and its deep-link fallback. */
 export const staticLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: WINDOW_MS,
   limit: 3000,

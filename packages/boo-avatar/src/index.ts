@@ -293,9 +293,10 @@ export function booAvatarToDataUrl(params: BooAvatarParams): string {
 
 // ─── Agent Boo variants ──────────────────────────────────────────
 // The generated mascot above draws a different Boo per agent seed. The variants are the opposite:
-// one approved drawing per runtime, shared by every agent on it. Only the registry is re-exported
-// here, and it carries metadata alone; the locked artwork is 188KB and stays behind
-// `loadBooVariant`'s dynamic imports so it never reaches this entry point.
+// one approved drawing per runtime, shared by every agent on it. Only the registry and the id
+// scoper are re-exported here, and neither carries artwork; the locked artwork is 188KB and stays
+// behind `loadBooVariant`'s dynamic imports so it never reaches this entry point.
 
 export { BOO_VARIANTS, variantIdForRuntime, loadBooVariant } from './variants/registry'
+export { scopeSvgIds } from './variants/tint/ids'
 export type { BooSurface, BooVariantId, BooVariantMeta, BooVariantRenderer } from './variants/types'
