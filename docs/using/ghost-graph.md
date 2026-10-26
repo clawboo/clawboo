@@ -242,7 +242,7 @@ Click **Re-layout** (top-right, appears once the first layout has run) to recomp
 On the Org chart, a segmented pill in the toolbar toggles the global topology:
 
 - **Tree** (`top-down`): Boo Zero at the top, teams in a flat row beneath it (the org-chart sketch).
-- **Radial** (default): Boo Zero at the center with teams arranged as petals around it.
+- **Radial** (default): Boo Zero at the center with teams arranged as petals around it. Each team's Boos fan out from its junction far enough apart that no Boo, name or thought bubble lands on a neighbour; a big team's fan opens wider and reaches further out, and the ring of teams grows when their fans would meet.
 
 Your choice persists in `localStorage` under the key `clawboo.atlas.layout`. Each mode keeps its own saved drag positions, under the layout names `atlas-top-down` and `atlas-radial`, so flipping modes never drags one mode's coordinates into the other. (The key and the layout names are identifiers that kept the old name.)
 

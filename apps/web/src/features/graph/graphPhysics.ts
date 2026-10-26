@@ -139,20 +139,23 @@ let reducedMotionUnsub: (() => void) | null = null
 
 function startLoop(): void {
   if (active) return
-  // Reduced motion: never start the relaxation loop. Deliberately the SINGLE
-  // choke point — `wake()`, `pinNode()`, `unpinNode()` and any future caller
-  // are all covered by this one check.
+  // Reduced motion: no loop. The simulation runs to rest in one go and the
+  // nodes land on its end state, the same place the animation would have
+  // brought them (see settleNow). Deliberately the SINGLE choke point:
+  // `wake()`, `pinNode()`, `unpinNode()` and any future caller are all covered
+  // by this one check.
   //
-  // "Never run" rather than "snap to settled" because there is no closed-form
-  // settled state: `initialize` seeds particles FROM the ELK / orbital output
-  // with v = 0, and only iteration discovers the rest. Crucially that output is
-  // already a complete, non-overlapping layout — physics is post-hoc relaxation,
-  // not the thing that positions nodes — so under reduced motion the graph is
-  // still correct; only the settling animation and post-drag re-relaxation go.
+  // Settling rather than skipping matters because the starting positions are
+  // not always final: Boos dropped on each other, a focused team drawn in
+  // close, positions saved from an older layout. Skipped, they would stay
+  // overlapping.
   //
   // Safe in the node test env: prefersReducedMotion() returns false when
   // window/matchMedia are absent, so graphPhysics.test.ts is unaffected.
-  if (prefersReducedMotion()) return
+  if (prefersReducedMotion()) {
+    settleNow()
+    return
+  }
   active = true
   lastFrameTime = 0
   // Pre-fill one step so the first frame reacts immediately (a wake/drag
@@ -183,9 +186,11 @@ function frame(now: number): void {
   let stepped = false
   while (accumulator >= STEP_MS) {
     accumulator -= STEP_MS
-    step()
     stepped = true
-    if (!active) break // step() may decide the sim is asleep
+    if (!step()) {
+      active = false // asleep
+      break
+    }
   }
   if (stepped && active) writePositions()
 
@@ -197,20 +202,42 @@ function frame(now: number): void {
   }
 }
 
+// ─── Settle at once (reduced motion) ─────────────────────────────────────────
+
+// The same fixed steps the loop takes, so everything on screen ends where the
+// animation would leave it, only without the frames in between. 600 steps is
+// ten seconds of simulation; a wake from rest sleeps within about 250.
+const MAX_SETTLE_STEPS = 600
+
+function settleNow(): void {
+  // A held drag keeps the simulation warm (alphaTarget) and never settles;
+  // the release settles instead.
+  if (alphaTarget >= ALPHA_MIN) return
+  // The tiles of a collapsed Boo sit out, which keeps a settle cheap on a big
+  // fleet. They only ever touch their own hidden siblings, so leaving them out
+  // moves nothing on screen, and they settle with their Boo once it opens.
+  const expanded = useGraphStore.getState().expandedBooNodeIds
+  const group = particles.filter((p) => p.kind === 'boo' || isRevealed(p, expanded))
+  stillSteps = 0
+  for (let i = 0; i < MAX_SETTLE_STEPS; i++) {
+    if (!step(group)) break
+  }
+  alpha = 0
+  writePositions()
+}
+
 // ─── Physics step (fixed 60 Hz) ──────────────────────────────────────────────
 
-function step(): void {
-  if (particles.length === 0) {
-    stopLoop()
-    return
-  }
+/** One step over `group` (every particle unless a caller narrows it). False
+ *  once the simulation is asleep, when the caller stops. */
+function step(group: Particle[] = particles): boolean {
+  if (group.length === 0) return false
 
   // 1. Anneal.
   alpha += (alphaTarget - alpha) * ALPHA_DECAY
   if (alpha < ALPHA_MIN && alphaTarget < ALPHA_MIN) {
     alpha = 0
-    stopLoop()
-    return
+    return false
   }
 
   const state = useGraphStore.getState()
@@ -221,7 +248,7 @@ function step(): void {
   syncPinnedFromStore(state.nodes)
 
   // 3. Steering forces (alpha-scaled).
-  for (const p of particles) {
+  for (const p of group) {
     if (p.pinned) continue
 
     if (p.kind === 'boo') {
@@ -247,12 +274,12 @@ function step(): void {
   // 4. Soft collisions (not alpha-scaled — overlaps always resolve; softness
   //    comes from strength < 1 + iteration blending, per d3.forceCollide).
   for (let iter = 0; iter < COLLIDE_ITERATIONS; iter++) {
-    collide(expanded)
+    collide(expanded, group)
   }
 
   // 5. Integrate: friction, speed ceiling, position.
   let maxSpeedSq = 0
-  for (const p of particles) {
+  for (const p of group) {
     if (p.pinned) continue
     const retention = p.kind === 'boo' ? BOO_VELOCITY_RETENTION : CHILD_VELOCITY_RETENTION
     p.vx *= retention
@@ -277,11 +304,12 @@ function step(): void {
   if (alphaTarget < ALPHA_MIN && maxSpeedSq < SLEEP_SPEED_SQ) {
     if (++stillSteps >= SLEEP_STILL_STEPS) {
       alpha = 0
-      stopLoop()
+      return false
     }
   } else {
     stillSteps = 0
   }
+  return true
 }
 
 // Whether a child particle is currently revealed (its parent Boo expanded).
@@ -291,13 +319,13 @@ function isRevealed(p: Particle, expanded: Set<string>): boolean {
   return expanded.has(p.parentBooId)
 }
 
-function collide(expanded: Set<string>): void {
-  const n = particles.length
+function collide(expanded: Set<string>, group: Particle[]): void {
+  const n = group.length
   for (let i = 0; i < n; i++) {
-    const a = particles[i]!
+    const a = group[i]!
     const aRevealed = a.kind !== 'boo' ? isRevealed(a, expanded) : true
     for (let j = i + 1; j < n; j++) {
-      const b = particles[j]!
+      const b = group[j]!
 
       // Pair gating.
       if (a.kind !== 'boo' && b.kind !== 'boo') {

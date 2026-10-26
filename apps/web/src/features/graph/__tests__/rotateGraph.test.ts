@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+import { radialTeamPlacements } from '../radialLayout'
 import {
   FOCUS_CLEARANCE,
+  FOCUS_MIN_GAP,
   FOCUS_PULL,
   FOCUS_PUSH,
   planTeamRotation,
@@ -100,8 +102,9 @@ describe('rotateGraph', () => {
     // The edge from Boo Zero shortens: the junction draws back.
     expect(junction.x).toBeCloseTo(600 - FOCUS_PULL)
     expect(junction.y).toBeCloseTo(0)
-    // The focused agent steps out straight ahead, past the team's old reach.
-    expect(centre(pose.get('a3')!).x).toBeCloseTo(600 + 320 + FOCUS_PUSH)
+    // The focused agent steps out straight ahead, past the team's farthest
+    // member (a1 and a3, each hypot(280, 220) from the junction).
+    expect(centre(pose.get('a3')!).x).toBeCloseTo(600 + Math.hypot(280, 220) + FOCUS_PUSH)
     expect(centre(pose.get('a3')!).y).toBeCloseTo(0)
     // Nobody else sits on its line, and each keeps its distance from the junction.
     for (const id of ['a1', 'a2']) {
@@ -116,6 +119,34 @@ describe('rotateGraph', () => {
     expect(Math.sign(centre(pose.get('a1')!).y)).not.toBe(Math.sign(centre(pose.get('a2')!).y))
     // Other teams are not part of the pose.
     expect(pose.has('team-root-west')).toBe(false)
+  })
+
+  // A big team's fan reaches further from its junction than a small one's, so
+  // the step forward is measured from the team's own reach.
+  it.each([6, 7, 9, 12])('steps a focused agent clear of a %i-member fan as laid out', (size) => {
+    const [team] = radialTeamPlacements([size, 3, 3])
+    const nodes = [
+      boo('bz', 0, 0, { isUniversalLeader: true }),
+      root('big', team!.junction.x, team!.junction.y),
+      ...team!.members.map((m, i) => boo(`m${i}`, m.x, m.y, { teamId: 'big' })),
+    ]
+    const rest = teamRestSnapshot(nodes, 'big')
+    const fromBooZero = (p: { x: number; y: number }) => Math.hypot(p.x + BOO / 2, p.y + BOO / 2)
+    const restReach = Math.max(...team!.members.map((m) => Math.hypot(m.x, m.y)))
+
+    for (let f = 0; f < size; f++) {
+      const pose = focusedTeamPose(nodes, 'big', `m${f}`, rest)!
+      // Past where any member stood.
+      expect(fromBooZero(pose.get(`m${f}`)!)).toBeGreaterThan(restReach)
+      // And no two members of the posed team closer than a Boo apart.
+      const posed = team!.members.map((_, i) => pose.get(`m${i}`)!)
+      for (let i = 0; i < posed.length; i++) {
+        for (let j = i + 1; j < posed.length; j++) {
+          const gap = Math.hypot(posed[i]!.x - posed[j]!.x, posed[i]!.y - posed[j]!.y)
+          expect(gap).toBeGreaterThanOrEqual(FOCUS_MIN_GAP - 0.5)
+        }
+      }
+    }
   })
 
   it('keeps a side that already clears the line where it was, only drawn back', () => {
