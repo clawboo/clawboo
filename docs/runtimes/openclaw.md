@@ -153,7 +153,7 @@ OpenClaw **2026.5.x and later** dropped auto-pair-on-first-connect. A new device
 GatewayResponseError { code: 'NOT_PAIRED', message: 'pairing required: device is not approved yet' }
 ```
 
-The SPA branches on `err.code === 'NOT_PAIRED'` in three places: the connect screen, the onboarding `StartGatewayStep`, and the bootstrap auto-reconnect, and swaps in a **DevicePairingApproval** card. The card's "Approve this device" button hits `POST /api/system/approve-device`, which performs a two-step shell-out against the OpenClaw CLI:
+The SPA branches on `err.code === 'NOT_PAIRED'` in three places: the connect screen, the in-place OpenClaw setup (`OpenClawInlineSetup`, shared by onboarding and Settings, Runtimes), and the bootstrap auto-reconnect, and swaps in a **DevicePairingApproval** card. The card's "Approve this device" button hits `POST /api/system/approve-device`, which performs a two-step shell-out against the OpenClaw CLI:
 
 1. `openclaw devices approve --latest` runs in **preview** mode: it prints `Approve this exact request with: openclaw devices approve <UUID>` and exits non-zero. Clawboo regex-extracts the UUID from the captured stdout/stderr.
 2. `openclaw devices approve <UUID>` performs the actual approval.

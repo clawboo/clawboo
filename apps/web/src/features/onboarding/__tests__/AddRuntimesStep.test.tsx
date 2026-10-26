@@ -1,6 +1,6 @@
 // AddRuntimesStep — the optional "add more runtimes" step. Renders ONE connect
 // LIST (RuntimeConnectList): the connected native foundation, the coding-runtime
-// rows, and an OpenClaw row into the Gateway detour. Each unconnected row shows
+// rows, and an OpenClaw row that sets up in place. Each unconnected row shows
 // an explicit state-aware CTA (Connect / Install / Sign in / Set up) that IS the
 // disclosure toggle — clicking it expands the connect flow in place; there is no
 // chevron and no status pill. The connect body stays MOUNTED when collapsed so a

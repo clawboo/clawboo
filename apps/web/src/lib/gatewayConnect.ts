@@ -1,17 +1,12 @@
 /**
  * apps/web/src/lib/gatewayConnect.ts
  *
- * Shared "connect to the OpenClaw Gateway using saved settings" helper.
+ * Shared "connect to the OpenClaw Gateway using saved settings" helper, used by
+ * OpenClawInlineSetup (onboarding Add-runtimes and Settings, Runtimes).
  *
- * This is the exact connect logic the onboarding wizard's `handleAllGood` used
- * inline (everything-is-green → auto-connect via the same-origin proxy). It is
- * extracted here so the wizard AND the dashboard's OpenClawSetupFlow drive the
- * SAME code path — no copy-paste divergence.
- *
- * Faithful to `handleAllGood`: it does NOT pass `authScopeKey` (the returning-
- * user auto-connect in GatewayBootstrap does, deliberately scoping device auth
- * by URL — that is a separate flow). Do not add it here or wizard reconnect
- * scoping changes silently.
+ * It does NOT pass `authScopeKey` (the returning-user auto-connect in
+ * GatewayBootstrap does, deliberately scoping device auth by URL; that is a
+ * separate flow). Do not add it here or setup reconnect scoping changes silently.
  *
  * Connects via the same-origin proxy (`/api/gateway/ws`) rather than the raw
  * Gateway URL — upholds Architecture Invariant #2; the proxy injects the auth

@@ -5,7 +5,7 @@
  * isn't in the catalog.
  *
  * The popover renders through a portal to `document.body` with FIXED positioning
- * anchored to the trigger — same load-bearing pattern as `ModelDropdown`: this
+ * anchored to the trigger, the same load-bearing pattern as the shared `Select`: this
  * picker lives inside overlay modals (CreateTeamModal / TeamSettingsSheet) that
  * clip overflow, so an in-flow absolute menu would be cut off. We flip the menu
  * ABOVE the trigger when there's no room below and reposition on scroll/resize.

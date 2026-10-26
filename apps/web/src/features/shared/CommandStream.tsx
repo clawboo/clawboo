@@ -1,7 +1,7 @@
 // The shared terminal-style log box — the store-free, line-capped, RAF-scroll
 // variant extracted from RuntimeConnectionCard's install log (the same
-// `var(--terminal-bg, #0d1117)` box InstallStep + OpenClawInlineSetup also
-// hand-roll). Always dark regardless of theme: log output reads as a terminal.
+// `var(--terminal-bg, #0d1117)` box OpenClawInlineSetup also hand-rolls).
+// Always dark regardless of theme: log output reads as a terminal.
 //
 // Pair with the `useCommandLog` hook for the 200-line-capped append pattern.
 

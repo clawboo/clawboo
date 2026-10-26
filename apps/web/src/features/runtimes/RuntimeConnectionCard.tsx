@@ -13,9 +13,9 @@
 //
 // With `hideHeader` (the list host) it carries NO name/status header, no brand
 // tile (the row owns them) — just the status-specific inputs + the one action
-// the current state needs. Reuses the onboarding InstallStep SSE-terminal pattern
-// (no abort on unmount; Retry aborts the prior controller) + the ConfigureStep
-// key-input affordance. `onDisplayState` reports the live state up so the row can
+// the current state needs. Streams the install SSE into a terminal log (no abort
+// on unmount; Retry aborts the prior controller) beside a reveal-toggle key
+// input. `onDisplayState` reports the live state up so the row can
 // drive its CTA / Connected indicator.
 
 import { useEffect, useRef, useState } from 'react'

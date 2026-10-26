@@ -1,7 +1,7 @@
 // Styled select primitive — a custom, fully on-brand dropdown (NOT a native
 // `<select>`, whose popup list is drawn by the OS and can't be themed).
 //
-// Mirrors the app's other pickers (`ModelDropdown` / `AgentModelSelector`): a
+// Mirrors the app's other pickers (`AgentModelSelector`): a
 // pill trigger + a `bg-popover` popover with check-marked rows, arrow-key
 // navigation, and outside-click / Escape close via the shared dismissable-layer
 // stack (so a dropdown inside a dialog dismisses alone, leaving the dialog and
