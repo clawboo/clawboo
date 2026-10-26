@@ -68,7 +68,7 @@ There is no standalone **Approvals** nav item. Approvals surface where they are 
 
 **Fleet** is no longer in the sidebar; it lives in the Settings modal, under **Insights**. It is the read-only overview of the whole fleet: agent count, 24-hour task and verify pass rates, spend, and per-runtime health.
 
-![The Fleet overview: agent count, task and verify pass rates, 24-hour spend, and per-runtime health](/images/fleet-health.png)
+![The Fleet overview in the Settings modal: agent count, task and verify pass rates, 24-hour spend, and per-runtime health](/images/fleet-health.png)
 
 ### The Settings modal
 
@@ -150,7 +150,7 @@ The single most useful thing to internalize: **the same Ghost Graph component re
 
 So: **the Org chart is a nav destination; the per-team Ghost Graph is a card in a team's chat.** They share rendering, hover cascades, the peacock skill-expand interaction, and the **+** button for building on the canvas, while the Tree/Radial toggle and team halos belong to the Org chart. See [Using the Ghost Graph](/using/ghost-graph) for both in depth.
 
-![The Org chart, the all-teams Ghost Graph: labeled team clusters arranged around Boo Zero on one canvas](/images/ghost-graph.png)
+![The Org chart, the all-teams Ghost Graph, in its Tree layout with team halos on: Boo Zero at the top and each team's Boos in a labeled row beneath it](/images/ghost-graph.png)
 
 ## The agent page
 
@@ -164,7 +164,7 @@ Clicking a mascot tile (or an agent row) opens the agent's page: its chat on the
 
 **Graph** and **Details** start open. As in a team chat, each card can be maximized or closed, the splits are resizable, and your browser remembers the sizes and which cards are open. See [Working with agents](/using/agents).
 
-![Agent detail, chat on the left, the agent's compact graph top-right, personality sliders and file tabs bottom-right](/images/agent-detail.png)
+![The agent page: chat on the left, the Graph card top-right with the agent's skills, connectors and model, and the Details card bottom-right with its section pills and the personality presets and sliders](/images/agent-detail.png)
 
 ## Where to go from here
 

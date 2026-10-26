@@ -7,7 +7,7 @@ Use this page when you want to inspect what your agents remember. **Memory** is 
 
 This is the UI half of a dual surface: Memory talks to `/api/memory*`, and the model-facing half is the [Memory MCP server](/concepts/memory). Both read and write the **same** SQLite store, so a fact an agent saves shows up here and vice versa.
 
-![The Memory list view: search, the facts the team has saved, and details about the store](/images/shared-memory.png)
+![Memory in its List view: the search box with its fts, vector and hybrid modes, and the facts the teams have saved, each with its tags and scope](/images/shared-memory.png)
 
 ## Prerequisites
 

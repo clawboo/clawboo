@@ -14,7 +14,7 @@ There are two places to configure Boo Zero, split by scope:
 
 Boo Zero is the runtime-neutral universal leader, identified at connect time, and by default it is a Clawboo-native agent. The client resolves it from the registry's `defaultId` (from `GET /api/agents`, which the server computes as `resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), then falls back to the first teamless agent (`teamId === null`), then the first agent overall. The resolved id lives in `useBooZeroStore.booZeroAgentId`. The same Boo Zero leads every team regardless of the team's runtime mix, and every room inside a team the same way.
 
-![Boo Zero's agent view: delegate tool calls to each specialist streaming in the Activity tab](/images/boo-zero-delegations.png)
+![Boo Zero's agent page: its chat on the left, and its Activity card listing the delegate tool calls that handed work to Ada, Kit, Juno and Iris](/images/boo-zero-delegations.png)
 
 Boo Zero is **teamless in the database** (`teamId === null`) but **participates in every team** via team-scoped sessions. It presides over every room of a team as well: it is never stored as a room member and the room's member picker does not offer it, yet it leads the room's conversation. In any team's or room's [Ghost Graph](/using/ghost-graph), and at the root of the Org chart, Boo Zero is pulled in as the universal leader even though it has no team membership; the `TeamHaloLayer` deliberately omits it from any team's hull because its `teamId` stays `null`.
 
@@ -70,7 +70,7 @@ Per-team configuration lives in the team settings sheet (`TeamSettingsSheet`), o
 2. **Edit the per-team brief.** This is what Boo Zero reads when it operates on this specific team. It is stored in the dedicated `boo_zero_team_briefs` table (one row per team, FK-cascaded on team delete) via `PUT /api/boo-zero/team-briefs/:teamId` with `{ content }`.
 3. **Edit the team rules.** Type one rule per line. **Save rules** `PUT`s `/api/team-rules/:teamId` with `{ content }` (capped at 4000 characters server-side), persisting to the `settings` key `team-rules:<teamId>`. These rules are injected into the preamble of **every team agent's** message and **every Boo Zero turn in this team**.
 
-![The team's Brief & Rules editor: the per-team brief plus durable rules](/images/team-brief-rules.png)
+![The Growth team's settings sheet: the per-team brief Boo Zero reads, and the team rules, one per line](/images/team-brief-rules.png)
 
 ### Per-team surfaces at a glance
 

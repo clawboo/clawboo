@@ -7,7 +7,7 @@ Use this page when you want to see every skill, tool, and connector across all y
 
 The dashboard is the human-facing surface over the unified **capability inventory**, the same merged stream the Ghost Graph reads. It groups every runtime's capabilities by runtime, then by kind, and renders a per-row action set that is a pure function of the row's manageability tier: the UI can never offer an action the owning runtime forbids. The panel is `CapabilitiesPanel`, backed by `GET /api/capabilities` and `POST /api/capabilities/:action`.
 
-![The Capabilities panel grouping skills, tools, and connectors by runtime with availability pills and Enable/Disable actions](/images/capabilities-panel.png)
+![The Capabilities panel in Settings, scrolled to the Claude Code group: its skills and tools with Ready pills, Disable on the two skills, and the built-in rows marked as managed by Claude Code](/images/capabilities-panel.png)
 
 ## Prerequisites
 

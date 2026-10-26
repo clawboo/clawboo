@@ -15,7 +15,7 @@ This is the deliberate opposite of a "brain-only, replace-everything" architectu
 
 Concretely, every agent on a Clawboo team, a [Boo](/appendices/glossary), is a real agent record backed by an [AgentSource](/appendices/glossary), keyed by its `sourceId` (its runtime). SQLite is the [registry of record](/appendices/glossary) for _who exists_; the runtime is the source of truth for _how an agent runs_; the board is the source of truth for _current task state_. No decorative agents, no fake edges, no view-model a writer keeps in sync.
 
-![The Clawboo team space: a Ghost Graph of agents above a shared group chat](/images/team-space.png)
+![A Clawboo team chat: the team's shared General chat on the left, with its Team graph and Tasks cards beside it](/images/team-space.png)
 
 ## The wedge: three things standalone runtimes can't give you
 

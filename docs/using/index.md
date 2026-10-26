@@ -65,7 +65,7 @@ The `fleet` panel (a read-only overview, in the Settings modal under Insights) d
 **Approvals is not a nav slot.** It has a how-to page ([Approvals](/using/approvals)) but no `NavView` id: approvals render in the [board](/using/board)'s **Needs you** column and in an inline tray above the [group-chat](/using/group-chat) composer.
 </Note>
 
-![The team space: Ghost Graph above the group chat for a selected team](/images/team-space.png)
+![A selected team's General chat, with its Team graph and Tasks cards open beside it](/images/team-space.png)
 
 ## See also
 

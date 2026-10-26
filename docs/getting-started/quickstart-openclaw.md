@@ -131,7 +131,7 @@ The dashboard opens connected to the Gateway, with the team you deployed in view
 
 The team space looks like this once you start collaborating:
 
-![Clawboo team space: a team's Ghost Graph on top and group chat below](/images/team-space.png)
+![Clawboo team chat: a team's General chat on the left, with its Team graph and Tasks cards on the right](/images/team-space.png)
 
 ## What just happened
 

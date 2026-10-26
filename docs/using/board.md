@@ -217,7 +217,7 @@ Click any card to open its detail drawer.
 
 Clicking a card slides in a right-hand drawer (`TaskDetailDrawer`) for that task. It loads three reads in parallel: the task itself, its execution ledger, and its workspace detail, and presents them as sections. Press `Escape` or click the scrim to close.
 
-![The task-detail drawer: output, verification, execution ledger, live activity, and comments](/images/task-detail-drawer.png)
+![The task-detail drawer over the board: Rin's report, the overview, a passing verification, the execution ledger, and the start of the Activity log](/images/task-detail-drawer.png)
 
 ```mermaid
 flowchart LR

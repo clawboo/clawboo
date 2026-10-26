@@ -51,7 +51,7 @@ The chat renders its most recent ~150 messages, with **Load earlier messages** a
 
 In the **Graph** card's top-right corner, beside the **+** button, the agent's **runtime icon** is fused with a **model selector** for changing this agent's model. A native (`clawboo-native`) agent picks from the native model catalog and the change is saved to its `AgentConfig` via `PATCH /api/agents/:agentId/model` (no Gateway needed); an OpenClaw agent picks from the OpenClaw catalog and the change is written as a per-agent override in `openclaw.json`; a **Hermes** agent picks from the live OpenRouter catalog (stored in `execConfig`, routed through OpenRouter). **Codex** and **Claude Code** run their account/SDK default, so they show a "runtime-managed model" note instead of a picker. The agent's live activity has a card of its own, so the Graph card carries no Activity button.
 
-![The agent detail view: chat on the left, mini-graph and the tabbed inline editor on the right.](/images/agent-detail.png)
+![An agent's page: the 1:1 chat with Ada on the left, and on the right the Graph card, with her skills, connectors and Claude Sonnet 5 model chip, above the Details card open on Personality.](/images/agent-detail.png)
 
 ## Tasks and routines
 

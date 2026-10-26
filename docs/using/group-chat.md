@@ -7,7 +7,7 @@ Use this page when you want to talk to a whole [team](/appendices/glossary) at o
 
 The chat fills the left of the view, and its tools sit in **cards** stacked beside it: the team's **Browser**, its **Team graph** (the team's [Ghost Graph](/using/ghost-graph)), its **Tasks** and its **Activity** (see [The chat and its cards](#the-chat-and-its-cards)). Orchestration runs **server-side**: the browser posts your message, streams the result back over Server-Sent Events, and renders it. The chat module (`GroupChatPanel`) is backed by `POST` / `GET` / `POST` on `/api/teams/:id/chat`, `/api/teams/:id/chat/stream`, and `/api/teams/:id/chat/stop` (each takes a `roomId` in a room), plus `/api/teams/:id/rooms`, `/api/teams/:id/chat/clear`, `/api/teams/:id/onboarding`, `/api/team-rules/:teamId`, `/api/chat-history`, and `/api/board`.
 
-![Team space: Ghost Graph on top, group chat on the bottom](/images/team-space.png)
+![A team chat: the General chat on the left, with teammates' messages and task cards, and the Team graph and Tasks cards stacked on the right](/images/team-space.png)
 
 ## Prerequisites
 
@@ -102,7 +102,7 @@ You can steer a task while it runs. A comment you leave on a task (from the team
 
 When the last delegation completes, the leader synthesizes every deliverable into one final answer:
 
-![Boo Zero synthesizing three specialists' deliverables into one final summary](/images/leader-synthesis.png)
+![Boo Zero's synthesis in the Growth team's General chat: Rin's tier copy, Milo's pricing table and Kit's experiment readout in one answer, with the Team graph and Tasks cards beside it](/images/leader-synthesis.png)
 
 <Note>
 A risky-looking delegation (matching keywords like `delete`, `deploy`, `publish`, `rm -rf`, `secret`, `api_key`) is surfaced on the leader's approval queue via `POST /api/governance/delegation-approval` before it runs. Routine delegations never touch this path. The gate fails closed: an unreachable approval endpoint does **not** auto-approve.

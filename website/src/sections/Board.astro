@@ -47,28 +47,28 @@ const panels = [
     loop: 'board-scope',
     title: 'One board, every team',
     body: "Work moves from backlog to done in columns laid out by day, scoped to one team or to all of them at once, with what needs you in today's row.",
-    // The board became a calendar in 0.5.0: status columns across the top,
-    // days down the side. The loop ends on a routine's upcoming runs, which
-    // are drawn on the days they fire.
-    alt: "The board in Week view, scoped to the Growth team with seven tasks, then widened to every team at eighteen: two tasks that need a person arrive in today's row, and a routine's upcoming runs open from Thursday.",
+    // The board is a calendar: status columns across the top, days down the
+    // side, beside the sidebar. The loop ends on a routine's upcoming runs,
+    // which are drawn on the days they fire.
+    alt: "The board in Week view, scoped to the Growth team with one task that needs you and five in progress, then widened to every team: three tasks that need a person sit in today's row, and a weekday routine's upcoming runs open from Monday.",
   },
   {
     src: agentDetail,
     dark: agentDetailDark,
     title: 'Agents you can open up',
-    body: 'Model, prompt, tools and history for each teammate, editable in place.',
-    // No budget is on screen in the new capture, so the alt no longer claims
-    // one. See the note on this card's body copy below.
-    alt: 'An agent opened up: a one to one chat with Ada on the left, her model chip and a map of her skills and connectors on the right, and her editable SOUL prompt on the tab strip beneath.',
+    body: 'Talk to any teammate one to one, with its model, tools and personality on cards beside the chat, editable in place.',
+    // Opened from the agent's tile in the sidebar: the 1:1 chat, then the
+    // Graph card (model chip, tools, skills, connectors) over the Details
+    // card on its Personality tab.
+    alt: 'An agent opened up: a one to one chat with Ada in the middle, and beside it her Graph card, with her model chip and the tools and connectors she can reach, over her Details card open on Personality, with its presets and sliders.',
   },
   {
     src: ghostGraph,
     dark: ghostGraphDark,
-    title: 'See the whole team at once',
-    body: 'Who delegated what to whom, live, across every team you are running.',
-    // Was "a leader delegating to specialist agents", which described a single
-    // team. The new capture is Atlas, across all three.
-    alt: 'The Atlas graph across every team: 12 agents under one lead, drawn as three outlined clusters named Growth, Support and Platform, each with its own running and idle count.',
+    title: 'See every team at once',
+    body: 'Every team you run on one org chart under Boo Zero, with who is working right now.',
+    // The Org chart in its Tree layout, across all three teams.
+    alt: "The Org chart in Tree layout: Boo Zero at the top, the Growth, Support and Platform teams beneath it with five, three and three agents running, and each team's Boos in a row under it.",
   },
 ]
 ---
