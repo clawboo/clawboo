@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useState } from 'react'
-import { BOO_VARIANTS, loadBooVariant } from '@clawboo/boo-avatar'
+import { memo, useEffect, useId, useMemo, useState } from 'react'
+import { BOO_VARIANTS, loadBooVariant, scopeSvgIds } from '@clawboo/boo-avatar'
 import type { BooSurface, BooVariantId, BooVariantRenderer } from '@clawboo/boo-avatar'
 
 // ─── BooVariantAvatar props ───────────────────────────────────────────────────
@@ -108,20 +108,29 @@ export const BooVariantAvatar = memo(function BooVariantAvatar({
   // then, so the placeholder reserves the same box the artwork will fill.
   const aspect = renderer?.meta.aspect ?? BOO_VARIANTS[variantId].aspect
   const h = Math.round(size * aspect)
+  /*
+   * Every same-coloured copy of a variant carries the same ids, and `url(#id)` resolves to the
+   * first one in the document. When that first copy is hidden (a collapsed sidebar keeps its tiles
+   * mounted) the browser skips its gradients or empties its clips, and this copy would draw eyes
+   * and paws with no body. Scoping the ids to this instance keeps its paints inside its own svg.
+   */
+  const scope = useId()
 
   const svg = useMemo(() => {
     if (!renderer) return null
+    let drawing: string
     /*
      * The renderer already resolves a colour it cannot draw down to a legible shade, so this
      * should never fire. It is a backstop because the call sits in the render pass: a throw here
      * takes out whichever subtree holds the avatar, and an avatar is not worth a blank panel.
      */
     try {
-      return withSize(renderer.render(tint), w, h)
+      drawing = renderer.render(tint)
     } catch {
-      return withSize(renderer.render(null), w, h)
+      drawing = renderer.render(null)
     }
-  }, [renderer, tint, w, h])
+    return scopeSvgIds(withSize(drawing, w, h), scope)
+  }, [renderer, tint, w, h, scope])
 
   return (
     <span

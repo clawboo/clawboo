@@ -12,6 +12,7 @@ import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { BOO_VARIANTS, BooVariantAvatar } from '../index'
+import type { BooSurface, BooVariantId } from '../index'
 
 afterEach(() => cleanup())
 
@@ -67,4 +68,52 @@ describe('BooVariantAvatar', () => {
 
     expect(darkSvg).not.toBe(lightSvg)
   })
+})
+
+describe('a same-coloured copy hidden earlier in the document', () => {
+  /*
+   * A collapsed sidebar keeps its mascot tiles mounted but hidden. Every url(#id) resolves to the
+   * first matching id in the document, and a browser does not draw a gradient or clip defined in a
+   * hidden subtree, so a visible copy that resolved there (Milo on a board card) drew its eyes and
+   * paws with no body. The locked light Hermes is absent: it is flat ink
+   * with no defs, so it references no id a copy could steal.
+   */
+  const cases: [BooVariantId, BooSurface, string | null][] = [
+    ['codex', 'light', null],
+    ['codex', 'light', '#34D399'],
+    ['claude', 'light', null],
+    ['claude', 'light', '#34D399'],
+    ['hermes', 'light', '#34D399'],
+    ['hermes', 'dark', null],
+    ['hermes', 'dark', '#34D399'],
+  ]
+
+  /** The ids a drawing points at, through its paints and its <use> links. */
+  const referencedIds = (svg: SVGSVGElement): string[] => [
+    ...new Set(
+      [...svg.outerHTML.matchAll(/url\(#([^)]+)\)|href="#([^"]+)"/g)].map((m) => m[1] ?? m[2]),
+    ),
+  ]
+
+  it.each(cases)(
+    '%s/%s in %s resolves every reference inside its own svg',
+    async (id, surface, tint) => {
+      const { container } = render(
+        <>
+          <div style={{ display: 'none' }}>
+            <BooVariantAvatar variantId={id} surface={surface} tint={tint} size={36} />
+          </div>
+          <div data-testid="shown">
+            <BooVariantAvatar variantId={id} surface={surface} tint={tint} size={16} />
+          </div>
+        </>,
+      )
+      await waitFor(() => expect(container.querySelectorAll('svg')).toHaveLength(2))
+      const shown = container.querySelector('[data-testid="shown"] svg') as SVGSVGElement
+
+      const refs = referencedIds(shown)
+      expect(refs.length).toBeGreaterThan(0)
+      for (const ref of refs) expect(shown.contains(document.getElementById(ref))).toBe(true)
+    },
+  )
 })
