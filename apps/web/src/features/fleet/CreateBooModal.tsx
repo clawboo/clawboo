@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useId } from 'react'
 import { apiFetch, fetchRegistryHealth } from '@clawboo/control-client'
-import { useConnectionStore } from '@/stores/connection'
 import { useTeamStore } from '@/stores/team'
 import { createAgent } from '@/lib/createAgent'
 import { agentSourceFor, type DefaultAgentSource } from '@/lib/defaultAgentSource'
@@ -40,11 +39,10 @@ export function CreateBooModal({
   const nameId = useId()
   const roleId = useId()
 
-  // WHICH RUNTIME, SAID BEFORE IT IS CHOSEN. OpenClaw while a Gateway is
-  // reachable, otherwise Clawboo Native (see defaultAgentSource). The browser's
-  // own connection is live state; the server's is read once per open, and
-  // until it answers there is no hint. What the hint says is what the Boo gets.
-  const browserGateway = useConnectionStore((s) => s.status === 'connected' && s.client !== null)
+  // WHICH RUNTIME, SAID BEFORE IT IS CHOSEN. OpenClaw while the server's
+  // Gateway connection is up, otherwise Clawboo Native (see defaultAgentSource).
+  // The server's state is read once per open, and until it answers there is no
+  // hint. What the hint says is what the Boo gets.
   const [serverGateway, setServerGateway] = useState<boolean | null>(null)
   useEffect(() => {
     if (!isOpen) return
@@ -58,9 +56,7 @@ export function CreateBooModal({
     }
   }, [isOpen])
   const runtime: DefaultAgentSource | null =
-    browserGateway || serverGateway !== null
-      ? agentSourceFor({ browser: browserGateway, server: serverGateway === true })
-      : null
+    serverGateway === null ? null : agentSourceFor(serverGateway)
 
   // Reset the form each time the modal opens. Focusing the name input is NOT
   // done here any more: Modal's focus trap moves focus to the panel's first
@@ -88,11 +84,7 @@ export function CreateBooModal({
       // The runtime the hint names; a submit before the server answered waits
       // for it, so a Boo can be made on an install with no Gateway at all.
       const sourceId =
-        runtime ??
-        agentSourceFor({
-          browser: false,
-          server: (await fetchRegistryHealth()).connection === 'connected',
-        })
+        runtime ?? agentSourceFor((await fetchRegistryHealth()).connection === 'connected')
       const agentId = await createAgent(
         trimmedName,
         {

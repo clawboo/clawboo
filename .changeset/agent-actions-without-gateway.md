@@ -4,7 +4,7 @@
 
 Creating and deleting agents now works without an OpenClaw Gateway, and a new agent made on the Org chart always joins a team.
 
-**Create.** Create Boo shows on every install. A new Boo runs on OpenClaw while a Gateway is reachable and on Clawboo Native when none is, and the dialog says which. It still joins the team selected in the sidebar. The graph's New agent, from a thread or the + button, follows the same rule; without a Gateway it used to fail with `gateway_disconnected`, and a new native agent now appears on the canvas at once instead of after a reload.
+**Create.** Create Boo shows on every install. A new Boo runs on OpenClaw while the server is connected to an OpenClaw Gateway and on Clawboo Native otherwise, and the dialog says which. It still joins the team selected in the sidebar. The graph's New agent, from a thread or the + button, follows the same rule; without a Gateway it used to fail with `gateway_disconnected`, and a new native agent now appears on the canvas at once instead of after a reload.
 
 **Delete.** The trash icon in the all-agents list and a team's Delete with agents no longer need a Gateway. Delete with agents removes the team's agents instead of leaving them behind, and its confirm mentions the Gateway only when the team has an OpenClaw agent.
 

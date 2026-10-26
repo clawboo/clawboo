@@ -8,8 +8,8 @@
 //     gone — the focus trap lands on the panel's first focusable, which IS the
 //     name input. If someone re-orders the fields, this test fails.
 //
-// The second block covers the runtime the Boo is made on: OpenClaw while its
-// Gateway is connected, Clawboo Native without one.
+// The second block covers the runtime the Boo is made on: OpenClaw while the
+// server's Gateway connection is up, Clawboo Native otherwise.
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -150,22 +150,29 @@ describe('CreateBooModal runtime', () => {
     expect(screen.queryByText(/Not connected to Gateway/)).toBeNull()
   })
 
-  it('makes an OpenClaw Boo while the Gateway is connected', async () => {
-    useConnectionStore.setState({ status: 'connected', client: {} as never, gatewayUrl: '' })
+  /** Answer the registry-health read: is the server connected to a Gateway? */
+  function serverGateway(connection: 'connected' | 'disconnected') {
+    server.use(
+      http.get('/api/agents/registry/health', () =>
+        HttpResponse.json({ ok: connection === 'connected', connection, lastSyncedAt: null }),
+      ),
+    )
+  }
+
+  it("makes an OpenClaw Boo while the server's Gateway connection is up", async () => {
+    serverGateway('connected')
+    useConnectionStore.setState({ status: 'connected', client: null, gatewayUrl: '' })
     await createScout('Runs on OpenClaw, through your Gateway.')
     expect(createAgentMock).toHaveBeenCalledWith('Scout', expect.any(Object), 'openclaw')
     expect(assigned).toEqual({ teamId: 't1', body: { agentId: 'a-new' } })
   })
 
-  // A thin client has no Gateway connection of its own, only the server's.
-  it("makes an OpenClaw Boo when only the server's Gateway connection is up", async () => {
-    server.use(
-      http.get('/api/agents/registry/health', () =>
-        HttpResponse.json({ ok: true, connection: 'connected', lastSyncedAt: null }),
-      ),
-    )
-    useConnectionStore.setState({ status: 'connected', client: null, gatewayUrl: '' })
-    await createScout('Runs on OpenClaw, through your Gateway.')
-    expect(createAgentMock).toHaveBeenCalledWith('Scout', expect.any(Object), 'openclaw')
+  // The server creates the agent, so only its Gateway connection counts: this
+  // browser's own connection beside a down server one would end in a 503.
+  it("makes a Clawboo Native Boo while only this browser's Gateway is connected", async () => {
+    serverGateway('disconnected')
+    useConnectionStore.setState({ status: 'connected', client: {} as never, gatewayUrl: '' })
+    await createScout('Runs on Clawboo Native: no OpenClaw Gateway is connected.')
+    expect(createAgentMock).toHaveBeenCalledWith('Scout', expect.any(Object), 'clawboo-native')
   })
 })

@@ -374,6 +374,9 @@ export async function enterNativeMode(teamId: string | null): Promise<{ ok: bool
  * finalizer, which has no banner) share ONE hydration path. Returns the agent
  * count, or -1 on failure (the caller decides how to surface it).
  */
+/** The registry's `pendingDeleteIds` from its last successful read. */
+let lastPendingDeleteIds: readonly string[] = []
+
 async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number> {
   try {
     const result = await liveClient.agents.list()
@@ -390,7 +393,10 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
     ])
     // Deleted in Clawboo while the Gateway was down: the Gateway still lists them
     // until the server's next sync deletes them there, so they stay out of the fleet.
-    const pendingDelete = new Set(reg?.pendingDeleteIds ?? [])
+    // A failed registry read keeps the last known set rather than none, or the
+    // Gateway's list would put them straight back.
+    if (reg) lastPendingDeleteIds = reg.pendingDeleteIds ?? []
+    const pendingDelete = new Set(lastPendingDeleteIds)
     const mapped = result.agents
       .filter((a) => !pendingDelete.has(a.id))
       .map((a) => ({

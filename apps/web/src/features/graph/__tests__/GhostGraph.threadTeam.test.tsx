@@ -164,6 +164,22 @@ describe('A thread off Boo Zero on the Org chart', () => {
     )
   })
 
+  // An archived team is off the team rail, so with nothing selected the agent
+  // joins the first team still on it.
+  it('skips an archived first team when the sidebar has none selected', async () => {
+    useTeamStore.setState({
+      teams: [{ ...team('t0', 'Old Crew'), isArchived: true }, team('t1', 'Growth Studio')],
+    })
+    renderOrgChart()
+    dropThreadOffBooZero()
+
+    const picker = screen.getByRole('dialog', { name: 'Connect to' })
+    expect(within(picker).getByText('Name one; it joins Growth Studio')).toBeInTheDocument()
+
+    await createFromPicker('Bea')
+    expect(created).toMatchObject({ name: 'Bea', teamId: 't1' })
+  })
+
   it('makes an agent in the team selected in the sidebar', async () => {
     useTeamStore.setState({ selectedTeamId: 't2' })
     renderOrgChart()

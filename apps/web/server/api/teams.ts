@@ -4,6 +4,7 @@ import { chatMessages, setSetting, teams, agents, settings } from '@clawboo/db'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 import { getRegistry } from '../lib/agentSource/registry'
+import { pendingUpstreamDeletes } from '../lib/agentSource/openClawAgentSource'
 import { ensureNativeBooZero } from '../lib/teamChat/booZero'
 import {
   nativeTeamSessionKeysForTeamLike,
@@ -310,6 +311,14 @@ export async function teamAgentPOST(req: Request, res: Response): Promise<void> 
   try {
     const db = getDb()
     const now = Date.now()
+
+    // An OpenClaw agent deleted while its Gateway was down is still listed by the
+    // Gateway until the next sync deletes it there. The upsert below would bring
+    // its row back, in a team, so assigning it is refused.
+    if (pendingUpstreamDeletes(db).has(body.agentId)) {
+      res.status(409).json({ error: 'agent is being deleted' })
+      return
+    }
 
     // Upsert: create the agent row if it doesn't exist, then set teamId
     db.insert(agents)

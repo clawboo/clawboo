@@ -189,7 +189,7 @@ Click **Create Boo** in the sidebar's agent column, below the rooms list, to ope
    - assigns the new Boo to the currently selected team (best-effort) via `POST /api/teams/:id/agents`.
 
 <Note>
-**Create Boo** needs no Gateway. The Boo runs on OpenClaw when a Gateway is reachable, from your browser or through the server's own connection, and on Clawboo Native when none is. A native Boo runs on its `SOUL.md` as its system prompt and needs a connected provider to answer. For an OpenClaw Boo, a name collision with an existing agent surfaces as a create error.
+**Create Boo** needs no Gateway. The Boo runs on OpenClaw while the server is connected to an OpenClaw Gateway, and on Clawboo Native when it is not; the dialog says which before you create. A native Boo runs on its `SOUL.md` as its system prompt and needs a connected provider to answer. For an OpenClaw Boo, a name collision with an existing agent surfaces as a create error.
 </Note>
 
 ## Delete a Boo

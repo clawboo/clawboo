@@ -1352,11 +1352,14 @@ export function GhostGraph({
 
   // ── The team a new agent joins ── A new agent needs a team to be drawn at
   // all (Atlas draws teams, a team graph its own), so a team graph's joins that
-  // team and Atlas's joins the one selected in the sidebar, or the first team
-  // when none is. The + button's agent always lands here; a thread's lands here
-  // when the Boo it came from has no team of its own (Boo Zero).
+  // team and Atlas's joins the one selected in the sidebar, or the first active
+  // team when none is (an archived one is off the team rail). The + button's
+  // agent always lands here; a thread's lands here when the Boo it came from
+  // has no team of its own (Boo Zero).
   const newAgentTeamId =
-    scope === 'team' ? (obsTeamId ?? null) : (obsTeamId ?? allTeams[0]?.id ?? null)
+    scope === 'team'
+      ? (obsTeamId ?? null)
+      : (obsTeamId ?? allTeams.find((t) => !t.isArchived)?.id ?? null)
   const newAgentTeamName = allTeams.find((t) => t.id === newAgentTeamId)?.name ?? null
 
   // ── The thread ── what a thread let go on empty canvas can end in. Shared
