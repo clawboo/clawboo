@@ -71,20 +71,17 @@ import teamSpaceDark from '../assets/screenshots/team-space-dark.png'
     </div>
 
     <!-- The team space, at full content width and actually readable. The
-         capture is wide enough to carry this size; it used to render at 300px
-         inside a drawn browser window, 900px down the page.
+         capture is wide enough to carry this size.
 
-         The alt text used to describe a board and a group chat in one view.
-         That view is not built yet, so the sentence was selling unshipped
-         software from the top of the homepage. It now names the three things
-         the capture actually contains, in the order they read: the roster, the
-         delegation graph, the chat. Nothing about a board, and no task status
-         either, because tasks are not what this surface shows. -->
+         The alt names what the capture contains, in the order it reads: the
+         sidebar with the team's Boos and its rooms, the General room's chat,
+         then the Team graph and Tasks cards beside it. Nothing it does not
+         show: no board, and no task count beyond the card's own. -->
     <figure class="shot mt-10 sm:mt-12">
       <ThemedShot
         light={teamSpace}
         dark={teamSpaceDark}
-        alt="The Growth team's space in Clawboo: five agents down the left column with their live status, the delegation graph above showing who handed work to whom, and the group chat below where the lead says where the pricing page stands."
+        alt="The Growth team's General room in Clawboo: the team's Boos and rooms in the sidebar, the room's chat down the middle as the team reports on the pricing page, and beside it the Team graph with Ada leading four teammates under Boo Zero and the Tasks card with one task that needs you and five in progress."
         widths={[720, 1080, 1440, 1920, 2400]}
         sizes="(min-width: 1280px) 1200px, 94vw"
         loading="eager"
