@@ -37,6 +37,7 @@ import {
 } from 'lucide-react'
 import { Button, IconButton } from '@/features/shared/Button'
 import { BarBtn, BarDivider } from './toolbar'
+import { graphFitPadding, VIEWPORT_BAR_INSET } from './fitPadding'
 import { RadialLayoutIcon, TreeLayoutIcon } from './layoutIcons'
 import { ActivityDock } from './ActivityDock'
 import {
@@ -362,7 +363,9 @@ export function GhostGraph({
     if (activityOpen) setShowBrowserDock(false)
   }, [activityOpen])
   // Shared by the toolbar shift and the canvas pan, so all three moving parts
-  // honour the setting together rather than one of them still sliding.
+  // honour the setting together rather than one of them still sliding. The
+  // camera's own fits (after a layout, after a resize and on Fit to view) land
+  // at once under it too.
   const dockReduceMotion = useReducedMotion()
   const [dockAgentId, setDockAgentId] = useState<string | null>(null)
 
@@ -490,8 +493,8 @@ export function GhostGraph({
     refitTimerRef.current = setTimeout(() => {
       const state = useGraphStore.getState()
       void fitView({
-        padding: 0.04,
-        duration: 320,
+        padding: graphFitPadding(0.04, wrapperRef.current?.clientHeight ?? 0),
+        duration: dockReduceMotion ? 0 : 320,
         ease: easePremium,
         maxZoom: 1.5,
         nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
@@ -502,7 +505,7 @@ export function GhostGraph({
     return () => {
       if (refitTimerRef.current) clearTimeout(refitTimerRef.current)
     }
-  }, [containerSize.w, containerSize.h, hasRunLayout, fitView])
+  }, [containerSize.w, containerSize.h, hasRunLayout, fitView, dockReduceMotion])
 
   // ── Browser dock: who can be watched, and the canvas pan ────────────────
   //
@@ -1014,14 +1017,15 @@ export function GhostGraph({
       requestAnimationFrame(() => {
         if (!cameraShouldMove) return
         layoutFittedRef.current = true
-        // Tight padding gives Boos visual prominence; maxZoom caps the fit so
-        // tiny graphs (1–2 Boos) don't blow up to fill the canvas.
+        // Tight padding gives Boos visual prominence (the viewport bar's band
+        // stays clear, see fitPadding.ts); maxZoom caps the fit so tiny graphs
+        // (1–2 Boos) don't blow up to fill the canvas.
         // `nodes` filter excludes the invisible-by-default orbital children —
         // see pickFittableNodes() above for why this matters.
         const state = useGraphStore.getState()
         void fitView({
-          padding: 0.04,
-          duration: 650,
+          padding: graphFitPadding(0.04, wrapperRef.current?.clientHeight ?? 0),
+          duration: dockReduceMotion ? 0 : 650,
           ease: easePremium,
           maxZoom: 1.5,
           nodes: pickFittableNodes(state.nodes, state.expandedBooNodeIds),
@@ -1756,14 +1760,15 @@ export function GhostGraph({
           top command bar — replaces the off-brand default React Flow
           <Controls> AND the lone minimap toggle, so all machine chrome speaks
           one language. Horizontal so it hugs the bottom-right corner without
-          eating the short team-scope row. Present in both scopes. */}
+          eating the short team-scope row; every fit keeps its band clear
+          (see fitPadding.ts). Present in both scopes. */}
       <div
         role="toolbar"
         aria-label="Viewport"
         className="surface-floating-tier"
         style={{
           position: 'absolute',
-          bottom: 12,
+          bottom: VIEWPORT_BAR_INSET,
           right: 12,
           zIndex: 20,
           display: 'flex',
@@ -1786,7 +1791,13 @@ export function GhostGraph({
         <BarBtn
           icon={Maximize2}
           label="Fit to view"
-          onClick={() => void fitView({ padding: 0.2, duration: 550, ease: easePremium })}
+          onClick={() =>
+            void fitView({
+              padding: graphFitPadding(0.2, wrapperRef.current?.clientHeight ?? 0),
+              duration: dockReduceMotion ? 0 : 550,
+              ease: easePremium,
+            })
+          }
         />
         <BarDivider />
         <BarBtn

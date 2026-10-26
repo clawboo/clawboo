@@ -432,8 +432,9 @@ function MiniGraphInner({ agentId }: { agentId: string }) {
   // Turning reduced motion ON mid-simulation has to stop the loop that is
   // already running — the guard in `startPhysics` only covers loops that have
   // not started yet, so without this the panel keeps relaxing until it settles.
-  // Mirrors the subscription `graphPhysics.initialize` registers for the shared
-  // singleton. Every step is a valid state, so nodes simply freeze in place.
+  // The shared singleton's subscription (`graphPhysics.initialize`) also lands
+  // its graph on the end state; this panel only stops. Every step is a valid
+  // state, so its nodes simply freeze in place.
   useEffect(() => {
     return onReducedMotionChange((reduced) => {
       if (reduced) stopPhysics()

@@ -3,7 +3,6 @@
 // a team so a chosen agent steps forward while the rest draw back. Pure
 // geometry: the animation and the camera live in GhostGraph.
 
-import { ATLAS_RADIAL_MEMBER_RADIUS } from './radialLayout'
 import type { GraphEdge, GraphNode } from './types'
 
 export interface Point {
@@ -131,7 +130,7 @@ export function teamRestSnapshot(nodes: readonly GraphNode[], teamId: string): M
  *  on its link (a Boo's body plus a margin, in graph units). */
 export const FOCUS_CLEARANCE = 130
 /** The least distance kept between two neighbours on the same side. */
-const MIN_GAP = 180
+export const FOCUS_MIN_GAP = 180
 
 /**
  * A team posed around one of its agents (`focusNodeId`), starting from `rest`
@@ -174,22 +173,29 @@ export function focusedTeamPose(
   const out = new Map<string, Point>()
   out.set(root.id, topLeftAt(root, newRoot))
 
-  // The others, in polar terms around the junction: how far out, and at what
+  // The members, in polar terms around the junction: how far out, and at what
   // angle from the team's direction (negative on one side, positive the other).
-  const others: Array<{ node: GraphNode; d: number; a: number }> = []
+  const members: Array<{ node: GraphNode; d: number; a: number }> = []
   for (const n of nodes) {
     if (!isTeamMember(n, teamId)) continue
-    if (n.id === focusNodeId) {
-      const reach = distance + ATLAS_RADIAL_MEMBER_RADIUS + FOCUS_PUSH
-      out.set(n.id, topLeftAt(n, { x: pivot.x + reach * ux, y: pivot.y + reach * uy }))
-      continue
-    }
     const at = rest.get(n.id) ?? n.position
     const { w, h } = sizeOf(n)
     const vx = at.x + w / 2 - rootCenter.x
     const vy = at.y + h / 2 - rootCenter.y
-    others.push({ node: n, d: Math.hypot(vx, vy), a: shortestTurn(theta, Math.atan2(vy, vx)) })
+    members.push({ node: n, d: Math.hypot(vx, vy), a: shortestTurn(theta, Math.atan2(vy, vx)) })
   }
+
+  // The focused agent steps past the team's farthest member, so a big team's
+  // wider fan never closes back around it.
+  const focused = members.find((m) => m.node.id === focusNodeId)
+  if (focused) {
+    const reach = distance + Math.max(...members.map((m) => m.d)) + FOCUS_PUSH
+    out.set(
+      focused.node.id,
+      topLeftAt(focused.node, { x: pivot.x + reach * ux, y: pivot.y + reach * uy }),
+    )
+  }
+  const others = members.filter((m) => m !== focused)
 
   // The angle at which a member `d` out from the junction clears the line.
   const clearAngle = (d: number) => (d > 0 ? Math.asin(Math.min(1, FOCUS_CLEARANCE / d)) : 0)
@@ -212,7 +218,7 @@ export function focusedTeamPose(
     const shift = Math.max(0, clearAngle(inner.d) - fromLine(inner))
     let previous = -Infinity
     for (const m of sorted) {
-      const apart = m.d > 0 ? 2 * Math.asin(Math.min(1, MIN_GAP / 2 / m.d)) : 0
+      const apart = m.d > 0 ? 2 * Math.asin(Math.min(1, FOCUS_MIN_GAP / 2 / m.d)) : 0
       const a = Math.max(fromLine(m) + shift, previous + apart)
       previous = a
       const angle = theta + sign * a

@@ -3,7 +3,7 @@
 import ELK from 'elkjs/lib/elk.bundled.js'
 import type { ElkNode } from 'elkjs'
 import type { GraphNode, GraphEdge, LayoutData } from './types'
-import { ATLAS_RADIAL_MEMBER_RADIUS, ATLAS_RADIAL_TEAM_RADIUS, radialFanArc } from './radialLayout'
+import { radialTeamPlacements } from './radialLayout'
 
 // ─── Singleton ELK instance ───────────────────────────────────────────────────
 
@@ -377,9 +377,10 @@ export async function computeAtlasLayout(
 //
 //   Boo Zero sits at the centre. Team-roots are distributed equiangularly
 //   on a circle around BZ. Each team's members fan outward from their
-//   team-root in a small arc that opens AWAY from the centre — same
-//   "facing outward" math the orbital skill / resource ring uses for per-
-//   Boo expand.
+//   team-root in an arc that opens AWAY from the centre, the same "facing
+//   outward" math the orbital skill / resource ring uses for per-Boo
+//   expand. The fans and the circle are sized so no two Boos overlap
+//   (radialLayout.ts): the layout is final, not a start for physics to spread.
 //
 //   Same call signature as computeAtlasLayout — the GhostGraph layout
 //   effect dispatches one or the other based on the `atlasLayout` store
@@ -441,46 +442,33 @@ export async function computeAtlasRadialLayout(
     })
   }
 
-  if (numTeams > 0) {
-    // Each team gets an equal angular slice, its fan capped so adjacent teams
-    // don't overlap their member arcs (radialFanArc).
-    for (let i = 0; i < numTeams; i++) {
-      const teamId = orderedTeamIds[i]!
-      // Start at -π/2 (12 o'clock); proceed clockwise.
-      const thetaTeam = -Math.PI / 2 + (2 * Math.PI * i) / numTeams
-      const teamRootCx = ATLAS_RADIAL_TEAM_RADIUS * Math.cos(thetaTeam)
-      const teamRootCy = ATLAS_RADIAL_TEAM_RADIUS * Math.sin(thetaTeam)
+  // Determinism: members sorted by id so reloads produce a stable layout.
+  const sortedTeams = orderedTeamIds.map((teamId) =>
+    [...boosByTeam.get(teamId)!].sort((a, b) => a.id.localeCompare(b.id)),
+  )
+  // Each team gets an equal turn of the circle and a fan spaced so no two Boos
+  // overlap, its names and thought bubbles included (radialTeamPlacements).
+  const placements = radialTeamPlacements(sortedTeams.map((members) => members.length))
 
-      const members = boosByTeam.get(teamId)!
-      const sortedMembers = [...members].sort((a, b) => a.id.localeCompare(b.id))
-      const numMembers = sortedMembers.length
+  for (let i = 0; i < numTeams; i++) {
+    const teamId = orderedTeamIds[i]!
+    const { junction, members } = placements[i]!
+    sortedTeams[i]!.forEach((member, j) => {
+      const center = members[j]!
+      packed.push({
+        ...member,
+        position: { x: center.x - halfEnvW, y: center.y - halfEnvH },
+      })
+    })
 
-      const fanArc = radialFanArc(numMembers, numTeams)
-
-      for (let j = 0; j < numMembers; j++) {
-        const member = sortedMembers[j]!
-        // offset_angle goes from -fanArc/2 (left of outward) to +fanArc/2.
-        const offset = numMembers === 1 ? 0 : -fanArc / 2 + (fanArc * j) / (numMembers - 1)
-        const memberAngle = thetaTeam + offset
-        const memberCx = teamRootCx + ATLAS_RADIAL_MEMBER_RADIUS * Math.cos(memberAngle)
-        const memberCy = teamRootCy + ATLAS_RADIAL_MEMBER_RADIUS * Math.sin(memberAngle)
-        packed.push({
-          ...member,
-          position: { x: memberCx - halfEnvW, y: memberCy - halfEnvH },
-        })
-      }
-
-      // Team-root is a 1px invisible junction — place its top-left exactly at
-      // the math-centre so BZ → team-root → member edges all converge.
-      const teamRootNode = teamRoots.find(
-        (tr) => (tr.data as { teamId?: string }).teamId === teamId,
-      )
-      if (teamRootNode) {
-        packed.push({
-          ...teamRootNode,
-          position: { x: teamRootCx, y: teamRootCy },
-        })
-      }
+    // Team-root is a 1px invisible junction: place its top-left exactly at
+    // the math-centre so BZ → team-root → member edges all converge.
+    const teamRootNode = teamRoots.find((tr) => (tr.data as { teamId?: string }).teamId === teamId)
+    if (teamRootNode) {
+      packed.push({
+        ...teamRootNode,
+        position: { x: junction.x, y: junction.y },
+      })
     }
   }
 
