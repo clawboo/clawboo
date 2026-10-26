@@ -91,7 +91,7 @@ You see this in the chat as a **Board task** card, a labeled row with a status p
 
 The settled team space puts the group chat on the left and the team's cards beside it, with Board task cards interleaved into the conversation as delegations land:
 
-![Clawboo team space: a team's Ghost Graph on top and group chat below](/images/team-space.png)
+![Clawboo team chat: a team's General chat on the left, with its Team graph and Tasks cards on the right](/images/team-space.png)
 
 The **Team graph** card renders the team's Ghost Graph as a hierarchy, the leader at the top, teammates below, and the `@mention` routing from each agent's `AGENTS.md` drawn as edges:
 

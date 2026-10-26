@@ -7,7 +7,7 @@ Clawboo is an open-source, local-first dashboard and orchestrator for teams of A
 
 Clawboo's core capability is orchestration: it runs _heterogeneous_ runtimes as one team. Native agents are built in; paste a provider key and Clawboo runs them in-process, while Claude Code, Codex, Hermes, and the OpenClaw Gateway connect as peer teammates in the same room. They share one board, one memory, and one capability inventory, and their autonomous file-mutating work is independently verified before it counts as done.
 
-![The Clawboo team space: Boo Zero and three specialists in a live team graph, with delegated task cards completing in the group chat below](/images/team-space.png)
+![A team's General chat in Clawboo: teammates' updates and two task cards marked Working on the left, and on the right the Team graph card, with Boo Zero above the team lead and four specialists, and the Tasks card, with one task that needs you and five in progress](/images/team-space.png)
 
 ## What you get
 

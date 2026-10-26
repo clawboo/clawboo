@@ -149,7 +149,7 @@ Full notes in the [CHANGELOG](./apps/cli/CHANGELOG.md).
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/team-space.png" alt="A Clawboo team space: Boo Zero and three specialists in a live team graph, with delegated tasks completing as cards in the group chat below" />
+      <img src="docs/screenshots/team-space.png" alt="A Clawboo team chat: teammates' updates and two task cards marked Working on the left, with the Team graph card (Boo Zero, the team lead and four specialists) and the Tasks card (one task that needs you, five in progress) beside it" />
       <p align="center"><sub><strong>Team space</strong>: one ask, handed out to specialists, tracked on the board, narrated in chat.</sub></p>
     </td>
     <td width="50%">

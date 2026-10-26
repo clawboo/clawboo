@@ -79,7 +79,7 @@ Clawboo is ready!
 
 …and the onboarding welcome screen in your browser.
 
-![The Clawboo dashboard, a team's Ghost Graph on top and group chat below](/images/team-space.png)
+![The Clawboo dashboard: a team's General chat on the left, with its Team graph and Tasks cards on the right](/images/team-space.png)
 
 ## What just happened
 

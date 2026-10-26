@@ -83,7 +83,7 @@ The dashboard opens with your team selected and its group chat, **General**, in 
 
 The team space looks like this:
 
-![Clawboo team space: a team's Ghost Graph on top and group chat below](/images/team-space.png)
+![Clawboo team chat: a team's General chat on the left, with its Team graph and Tasks cards on the right](/images/team-space.png)
 
 ## What just happened
 

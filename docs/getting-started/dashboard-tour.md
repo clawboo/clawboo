@@ -164,7 +164,7 @@ Clicking a mascot tile (or an agent row) opens the agent's page: its chat on the
 
 **Graph** and **Details** start open. As in a team chat, each card can be maximized or closed, the splits are resizable, and your browser remembers the sizes and which cards are open. See [Working with agents](/using/agents).
 
-![Agent detail, chat on the left, the agent's compact graph top-right, personality sliders and file tabs bottom-right](/images/agent-detail.png)
+![The agent page: chat on the left, the Graph card top-right with the agent's skills, connectors and model, and the Details card bottom-right with its section pills and the personality presets and sliders](/images/agent-detail.png)
 
 ## Where to go from here
 
