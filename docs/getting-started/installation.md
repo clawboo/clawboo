@@ -23,7 +23,7 @@ Check your Node version:
 node --version
 ```
 
-If it prints `v22.x` or higher, you're set. If not, install a current Node from [nodejs.org](https://nodejs.org) or via a version manager (`nvm`, `fnm`, etc.) before continuing.
+If it prints `v22.12.0` or higher, you're set (Clawboo's `engines` field requires `node >=22.12.0`, so an earlier 22.x is too old). If not, install a current Node from [nodejs.org](https://nodejs.org) or via a version manager (`nvm`, `fnm`, etc.) before continuing.
 
 ## Steps
 

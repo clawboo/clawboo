@@ -245,10 +245,10 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
 
 ## `POST /api/runtimes/:id/disconnect`
 
-Clears the stored credential for the runtime. The binary stays installed and the runtime stays available; the card returns to `needs-auth` (the vault slot is empty). For a runtime with no `envVar` (Codex), this is a no-op on storage. For `clawboo-native` it also records local Ollama as removed, the same as `{ provider: 'ollama' }` below, so agents on an Ollama model stop. Neither a later key connect nor `OLLAMA_BASE_URL` turns Ollama back on; only picking it again (connect with `provider: 'ollama'`) does.
+Clears the stored credential for the runtime. The binary stays installed and the runtime stays available; the card returns to `needs-auth` (the vault slot is empty). For a runtime with no `envVar` (Codex), this is a no-op on storage. For `clawboo-native` it also records local Ollama as removed, the same as `{ provider: 'ollama' }` below, so agents lose their Ollama candidate (see below). Neither a later key connect nor `OLLAMA_BASE_URL` turns Ollama back on; only picking it again (connect with `provider: 'ollama'`) does.
 
 - **Path params**: `id` (runtime id; 404 on unknown).
-- **Request body**: none, or `{ provider: 'ollama' }` for `clawboo-native` only. That form removes **only** the local-Ollama choice and leaves every key alone, and it also stops a configured `OLLAMA_BASE_URL` from counting as set up until Ollama is picked again. While removed, Ollama serves no run: agents set to an Ollama model fail with no runnable provider and report `providerReady: false`. A keyed provider's own disconnect is `POST /api/providers/:id/disconnect`.
+- **Request body**: none, or `{ provider: 'ollama' }` for `clawboo-native` only. That form removes **only** the local-Ollama choice and leaves every key alone, and it also stops a configured `OLLAMA_BASE_URL` from counting as set up until Ollama is picked again. While removed, Ollama serves no run: the router drops every Ollama candidate, so an agent with no other runnable candidate fails with no runnable provider and reports `providerReady: false`, while one with a keyed fallback runs on that fallback and stays `providerReady: true`. A keyed provider's own disconnect is `POST /api/providers/:id/disconnect`.
 
 ### Responses
 
@@ -581,7 +581,7 @@ Clears the stored key. Returns `{ ok: true, providers }`. **400** for an unknown
 
 The provider's **live** model list, enumerated with the **stored** key. Returns `{ models: [] }` for a non-enumerating provider rather than an error, so the client can fall back to its static catalog.
 
-`ollama` is keyless and answers from the local daemon instead: the chat models its `/api/tags` lists (embedding-only models left out, models without tool support labelled `(can't use tools)`, newest first), whether Ollama answered, and the model an agent created without a pick would get. It is read fresh on every call, so a model pulled a moment ago shows up. See [Ollama models](/runtimes/native#ollama-models).
+`ollama` is keyless and answers from the local daemon instead: the chat models its `/api/tags` lists (embedding-only models left out, models without tool support labelled `(can't use tools)`, newest first), whether Ollama answered, and `recommendedModel`: a fallback recommendation worked out from `llama3.2` (that model when it is pulled, else the newest pulled model that can use tools). It does not read your recorded default model. It is read fresh on every call, so a model pulled a moment ago shows up. See [Ollama models](/runtimes/native#ollama-models).
 
 ```json
 {
