@@ -7,14 +7,16 @@ import os from 'node:os'
 import path from 'node:path'
 
 import type { Request, Response } from 'express'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
+import { DEFAULT_AGENT_CONFIG, NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
 import { getSetting, setSetting } from '@clawboo/db'
 
 import { onboardingNativeLeaderModelGET, onboardingNativeLeaderModelPOST } from '../onboardingSeed'
 import { getDb, resetDb } from '../../lib/db'
 import { loadAgentConfig, saveAgentConfig } from '../../lib/runtimes/native/agentConfigStore'
+import { __resetOllamaModelsCacheForTests } from '../../lib/runtimes/native/ollamaModels'
+import { setKeylessProviderChoice } from '../../lib/secretsVault'
 import { SETTING_NATIVE_BOO_ZERO_ID, SETTING_NATIVE_LEADER_MODEL } from '../../lib/teamChat/booZero'
 
 interface Mock {
@@ -43,10 +45,20 @@ const req = (body: Record<string, unknown> = {}): Request =>
 describe('onboarding native-leader-model REST', () => {
   let home: string
   const prev: Record<string, string | undefined> = {}
-  const SAVED = ['CLAWBOO_HOME', 'OPENCLAW_STATE_DIR'] as const
+  // The provider env vars too: GET reports what auto-resolve would pick, and a
+  // key exported in the developer's shell must not leak into it.
+  const SAVED = [
+    'CLAWBOO_HOME',
+    'OPENCLAW_STATE_DIR',
+    'OLLAMA_BASE_URL',
+    ...NATIVE_PROVIDER_ENV_VARS,
+  ] as const
 
   beforeEach(() => {
-    for (const k of SAVED) prev[k] = process.env[k]
+    for (const k of SAVED) {
+      prev[k] = process.env[k]
+      delete process.env[k]
+    }
     home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-lm-'))
     process.env['CLAWBOO_HOME'] = home
     process.env['OPENCLAW_STATE_DIR'] = mkdtempSync(path.join(os.tmpdir(), 'clawboo-lm-state-'))
@@ -83,18 +95,88 @@ describe('onboarding native-leader-model REST', () => {
     expect(noModel.statusCode()).toBe(400)
   })
 
-  it('GET returns the stored default (and null/null when never set)', () => {
+  it('GET returns the stored default (and null/null when never set)', async () => {
     const empty = mockRes()
-    onboardingNativeLeaderModelGET(req({}), empty.res)
-    expect(empty.body()).toEqual({ provider: null, model: null })
+    await onboardingNativeLeaderModelGET(req({}), empty.res)
+    expect(empty.body()).toEqual({ provider: null, model: null, resolved: null })
 
     onboardingNativeLeaderModelPOST(
       req({ provider: 'openrouter', model: 'minimax/m2.5' }),
       mockRes().res,
     )
     const m = mockRes()
-    onboardingNativeLeaderModelGET(req({}), m.res)
-    expect(m.body()).toEqual({ provider: 'openrouter', model: 'minimax/m2.5' })
+    await onboardingNativeLeaderModelGET(req({}), m.res)
+    // No provider is set up, so nothing would run: `resolved` stays null.
+    expect(m.body()).toEqual({ provider: 'openrouter', model: 'minimax/m2.5', resolved: null })
+  })
+
+  it('GET resolves what an agent without a model pick gets, per tier', async () => {
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-ambient'
+    process.env['OPENAI_API_KEY'] = 'sk-oai'
+    const none = mockRes()
+    await onboardingNativeLeaderModelGET(req({}), none.res)
+    // No recorded default: the fixed order (Anthropic first) on its tier models.
+    expect((none.body() as { resolved: unknown }).resolved).toEqual({
+      leader: { provider: 'anthropic', model: 'claude-sonnet-5' },
+      specialist: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+    })
+
+    onboardingNativeLeaderModelPOST(req({ provider: 'openai', model: 'gpt-4o' }), mockRes().res)
+    const m = mockRes()
+    await onboardingNativeLeaderModelGET(req({}), m.res)
+    expect(m.body()).toEqual({
+      provider: 'openai',
+      model: 'gpt-4o',
+      resolved: {
+        leader: { provider: 'openai', model: 'gpt-4o' },
+        specialist: { provider: 'openai', model: 'gpt-4o-mini' },
+      },
+    })
+  })
+
+  it('GET still resolves from the fixed order when the stored setting is corrupt', async () => {
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant'
+    setSetting(getDb(), SETTING_NATIVE_LEADER_MODEL, '{not json')
+    const m = mockRes()
+    await onboardingNativeLeaderModelGET(req({}), m.res)
+    // A plain "Default" would hide which model each row gets; the fixed order still knows.
+    expect(m.body()).toEqual({
+      provider: null,
+      model: null,
+      resolved: {
+        leader: { provider: 'anthropic', model: 'claude-sonnet-5' },
+        specialist: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+      },
+    })
+  })
+
+  it('GET names the pulled Ollama model the deploy will use, not an unpulled pick', async () => {
+    setKeylessProviderChoice('ollama', true)
+    __resetOllamaModelsCacheForTests()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ models: [{ name: 'qwen2.5:7b', capabilities: ['completion', 'tools'] }] }),
+      ),
+    )
+    try {
+      onboardingNativeLeaderModelPOST(
+        req({ provider: 'ollama', model: 'mistral-nemo' }),
+        mockRes().res,
+      )
+      const m = mockRes()
+      await onboardingNativeLeaderModelGET(req({}), m.res)
+      expect(m.body()).toEqual({
+        provider: 'ollama',
+        model: 'mistral-nemo',
+        resolved: {
+          leader: { provider: 'ollama', model: 'qwen2.5:7b' },
+          specialist: { provider: 'ollama', model: 'qwen2.5:7b' },
+        },
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('POST retro-applies the pick to an EXISTING native Boo Zero AgentConfig', () => {

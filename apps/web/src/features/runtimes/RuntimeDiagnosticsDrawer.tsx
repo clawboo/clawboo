@@ -65,6 +65,8 @@ export interface RuntimeDiagnosticsTarget {
   authKind?: string
   envVar?: string | null
   hasCredential?: boolean
+  /** Native only: local Ollama is set up (readies native with no key). */
+  ollamaConnected?: boolean
   loginCommand?: string
   models?: string[]
   contextWindowTokens?: number
@@ -337,6 +339,7 @@ export function RuntimeDiagnosticsDrawer({
                 {target.runtimeClass === 'native' ? (
                   <>
                     {kv('Provider key', presence(target.hasCredential, target.envVar))}
+                    {target.ollamaConnected ? kv('Local Ollama', 'set up (no key needed)') : null}
                     {target.models && target.models.length > 0
                       ? kv('Models', target.models.slice(0, 3).join(', '))
                       : null}

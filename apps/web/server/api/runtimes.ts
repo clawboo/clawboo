@@ -26,6 +26,13 @@ import { invalidateCodexAuthCache, isCodexLoggedIn } from '../lib/runtimes/codex
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
+import { isNativeOllamaConnected } from '../lib/runtimes/native/nativeProviderDefaults'
+import {
+  ollamaApiBase,
+  ollamaModelPulled,
+  ollamaPullCommand,
+  parseOllamaTags,
+} from '../lib/runtimes/native/ollamaModels'
 import { adapterFactoryFor, enabledRuntimeIds } from '../lib/runtimes'
 import {
   deriveConnectionState,
@@ -40,6 +47,7 @@ import {
   getRuntimeSecret,
   resolveRuntimeKey,
   resolveRuntimeKeyForRuntime,
+  setKeylessProviderChoice,
   setRuntimeDisconnected,
   setRuntimeSecret,
 } from '../lib/secretsVault'
@@ -98,6 +106,10 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
   // reading "Connected" after a disconnect (the disconnect-does-nothing bug).
   const hasCredential =
     envVars.some((v) => Boolean(resolveRuntimeKeyForRuntime(id, v))) || hermesCodexAuth
+  // Native's keyless provider: a set-up local Ollama readies the runtime with no key
+  // at all. It is NOT a credential (`hasCredential` stays "a key resolves"), so it
+  // feeds the connection state directly and rides its own native-only flag.
+  const ollamaConnected = id === 'clawboo-native' && isNativeOllamaConnected()
   // Vault-only signal: a credential DELIBERATELY connected during onboarding (written
   // to the encrypted vault), as opposed to an ambient `process.env` shell var that
   // `resolveRuntimeKey` ALSO honors. The onboarding native-skip decision reads THIS so
@@ -120,9 +132,17 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
     // Additive: hermes-only "signed in with ChatGPT" signal (the picker + card
     // gate the subscription model group on it). Always false for other runtimes.
     codexAuth: hermesCodexAuth,
+    // Additive: native-only "local Ollama is set up" signal (the providers manager
+    // renders its Ollama row from it). Always false for other runtimes.
+    ollamaConnected,
     installCommand: d.installCommand,
     docsUrl: d.docsUrl,
-    connectionState: deriveConnectionState(d, installed, hasCredential, loggedIn),
+    connectionState: deriveConnectionState(
+      d,
+      installed,
+      hasCredential || ollamaConnected,
+      loggedIn,
+    ),
   }
 }
 
@@ -440,10 +460,12 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
 
   // The native runtime is multi-provider: a pasted key must land in the vault
   // slot for the CHOSEN provider (OpenAI/OpenRouter keys would otherwise be
-  // written to ANTHROPIC_API_KEY). `null` = a keyless provider (Ollama) — there
-  // is nothing to store; connectionState is re-derived from what already resolves.
+  // written to ANTHROPIC_API_KEY). `null` = a keyless provider (Ollama): there is
+  // no key to store, so the CHOICE is what gets recorded, and that alone readies
+  // the runtime (served at OLLAMA_BASE_URL, else the local default).
   const targetEnvVar = resolveConnectEnvVar(d, body.provider)
   if (targetEnvVar === null) {
+    setKeylessProviderChoice('ollama', true)
     setRuntimeDisconnected(id, false)
     res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
     return
@@ -499,7 +521,7 @@ function resolveConnectEnvVar(d: RuntimeDescriptor, providerRaw: unknown): strin
 }
 
 // ─── POST /api/runtimes/clawboo-native/healthcheck ───────────────────────────
-// Body: { provider, apiKey? }. A single authenticated GET to the provider's
+// Body: { provider, apiKey?, model? }. A single authenticated GET to the provider's
 // lightweight models/health endpoint, to verify a credential BEFORE anything
 // commits to it. `apiKey` is optional: omit it to probe the key already stored
 // for that provider (what the one-click reuse surfaces do), pass one to probe a
@@ -507,16 +529,16 @@ function resolveConnectEnvVar(d: RuntimeDescriptor, providerRaw: unknown): strin
 // persisted to the vault, NEVER logged, NEVER echoed in the response. Wrapped so
 // a network failure / bad key resolves to { ok: false, error } instead of
 // throwing into the request. The route probes a PROVIDER, not a runtime, so any
-// surface holding a provider key can use it to check that key.
+// surface holding a provider key can use it to check that key. For keyless
+// Ollama, `model` is also checked against the pulled list; a missing one comes
+// back as { ok: false, error, missingModel }.
 interface ProviderProbe {
   url: string
   headers: (key: string) => Record<string, string>
 }
 
 function ollamaTagsUrl(): string {
-  const base = process.env['OLLAMA_BASE_URL']?.trim() || 'http://localhost:11434/v1'
-  // Strip a trailing /v1 (the OpenAI-compat path) → the native /api/tags probe.
-  return `${base.replace(/\/v1\/?$/, '')}/api/tags`
+  return `${ollamaApiBase()}/api/tags`
 }
 
 function providerProbe(provider: string): ProviderProbe | null {
@@ -560,9 +582,12 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
       .json({ ok: false, error: 'healthcheck is only supported for the native runtime' })
     return
   }
-  const body = (req.body ?? {}) as { provider?: unknown; apiKey?: unknown }
+  const body = (req.body ?? {}) as { provider?: unknown; apiKey?: unknown; model?: unknown }
   const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
   const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
+  // Ollama only: the model the user is about to run. A daemon that answers but
+  // never pulled it fails every run, so that is a failed check too.
+  const model = provider === 'ollama' && typeof body.model === 'string' ? body.model.trim() : ''
   const probe = providerProbe(provider)
   if (!probe) {
     res.status(400).json({ ok: false, error: `unknown provider '${provider}'` })
@@ -601,6 +626,17 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
       signal: controller.signal,
     })
     if (resp.ok) {
+      // A body that isn't a tags list proves nothing either way, so only a real
+      // list can report the model missing.
+      const pulled = model ? parseOllamaTags(await resp.json().catch(() => null)) : null
+      if (pulled && !ollamaModelPulled(pulled, model)) {
+        res.json({
+          ok: false,
+          error: `Ollama is running, but it doesn't have ${model} yet. Pull it with "${ollamaPullCommand(model)}".`,
+          missingModel: model,
+        })
+        return
+      }
       res.json({ ok: true })
       return
     }
@@ -634,11 +670,38 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
 //    fallbacks (a shell-exported var, OpenClaw's ~/.openclaw/.env) immediately
 //    re-credential the runtime through `resolveRuntimeKey` and nothing visibly
 //    changes. While set, this runtime resolves keys vault-only; the next
-//    connect clears it.
+//    connect clears it. For native it also records local Ollama as REMOVED, so
+//    disconnect means the same for every provider: Ollama agents stop, and a later
+//    key connect or an ambient OLLAMA_BASE_URL can't turn it back on. Only picking
+//    Ollama again does.
+// Body `{ provider: 'ollama' }` (native only) is the provider-scoped form: it
+// removes ONLY the local-Ollama choice and leaves every key alone (a keyed
+// provider's own disconnect is `POST /api/providers/:id/disconnect`).
 export function runtimesDisconnectPOST(req: Request, res: Response): void {
   const id = requireRuntimeId(req, res)
   if (!id) return
   const d = getDescriptor(id)
+  const body = (req.body ?? {}) as { provider?: unknown }
+  const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
+  // A provider that is sent but unreadable must not fall through to the full
+  // disconnect below, which deletes every key this runtime holds.
+  if (body.provider !== undefined && !provider) {
+    res.status(400).json({ error: 'provider must be a non-empty string' })
+    return
+  }
+  if (provider) {
+    if (id !== 'clawboo-native' || provider !== 'ollama') {
+      res.status(400).json({
+        error: `only the native runtime's keyless 'ollama' disconnects by provider here; remove a provider key via /api/providers/:id/disconnect`,
+      })
+      return
+    }
+    // Recorded as REMOVED (not just forgotten) so an ambient OLLAMA_BASE_URL
+    // can't silently keep Ollama connected after the user removed it.
+    setKeylessProviderChoice('ollama', false)
+    res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
+    return
+  }
   const removed: string[] = []
   for (const envVar of [d.envVar, ...(d.altEnvVars ?? [])]) {
     if (envVar) {
@@ -646,6 +709,7 @@ export function runtimesDisconnectPOST(req: Request, res: Response): void {
       removed.push(envVar)
     }
   }
+  if (id === 'clawboo-native') setKeylessProviderChoice('ollama', false)
   setRuntimeDisconnected(id, true)
   // Stop embedding memory with a key the user just removed.
   onEmbeddingKeysChanged({ removed })

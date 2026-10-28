@@ -15,6 +15,12 @@ import { envVarForOpenclawProvider } from '../lib/openclawEnv'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { fetchNativeModelsForKey, hasLiveModels } from '../lib/providerModels'
 import { onEmbeddingKeysChanged } from '../lib/memoryEmbedding'
+import {
+  listOllamaModels,
+  OLLAMA_FALLBACK_MODEL,
+  ollamaModelOption,
+  pickOllamaModel,
+} from '../lib/runtimes/native/ollamaModels'
 
 // GET /api/providers → { providers: [{ id, connected, poweredRuntimes }] }
 export function providersListGET(_req: Request, res: Response): void {
@@ -54,10 +60,22 @@ export function providerDisconnectPOST(req: Request, res: Response): void {
 }
 
 // GET /api/providers/:id/models → the provider's LIVE model list, enumerated with
-// the stored (vault / OpenClaw .env) key. `[]` for a keyless / unsupported provider
-// (the client falls back to its static list). Only anthropic + openai enumerate here.
+// the stored (vault / OpenClaw .env) key. `[]` for an unsupported provider (the
+// client falls back to its static list). Keyless Ollama answers with the chat
+// models its local daemon has pulled, plus `reachable` and the `recommendedModel`
+// a new agent would get, so a picker can say when there is nothing to pick.
 export async function providerModelsGET(req: Request, res: Response): Promise<void> {
   const id = String(req.params['id'] ?? '')
+  if (id === 'ollama') {
+    // Always a fresh read: this is what the user checks again after an `ollama pull`.
+    const { reachable, models } = await listOllamaModels()
+    res.json({
+      models: models.map(ollamaModelOption),
+      reachable,
+      recommendedModel: pickOllamaModel(OLLAMA_FALLBACK_MODEL, models),
+    })
+    return
+  }
   if (!hasLiveModels(id)) {
     res.json({ models: [] })
     return

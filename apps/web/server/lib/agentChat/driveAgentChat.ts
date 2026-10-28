@@ -30,6 +30,7 @@ import { runFailureText } from '../runFailureText'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
+import { loadAgentConfig } from '../runtimes/native/agentConfigStore'
 import { persistNativeChatEntry } from '../runtimes/native/nativeDriver'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
@@ -244,7 +245,8 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       // badge, then nothing, under a green header. Persist a visible meta with the
       // REASON so the user always learns why (and how to fix a keyless runtime).
       // The wording is shared with the team-chat drain so the two cannot drift.
-      persistNativeChatEntry(db, agentId, runFailureText(errorMessage), {
+      const provider = loadAgentConfig(db, agentId)?.primaryProvider
+      persistNativeChatEntry(db, agentId, runFailureText(errorMessage, null, provider), {
         kind: 'meta',
         role: 'system',
       })

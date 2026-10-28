@@ -91,13 +91,15 @@ The card offers a one-click **Sign in with ChatGPT** (Clawboo's local server run
 
 It makes a single authenticated `GET` to the provider's lightweight models/health endpoint:
 
-| `provider`                                                             | Endpoint probed                        |
-| ---------------------------------------------------------------------- | -------------------------------------- |
-| `anthropic`                                                            | `https://api.anthropic.com/v1/models`  |
-| `openai`                                                               | `https://api.openai.com/v1/models`     |
-| `openrouter`                                                           | `https://openrouter.ai/api/v1/models`  |
-| `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot` | that provider's `<baseURL>/models`     |
-| `ollama`                                                               | `<OLLAMA_BASE_URL>/api/tags` (keyless) |
+| `provider`                                                             | Endpoint probed                       |
+| ---------------------------------------------------------------------- | ------------------------------------- |
+| `anthropic`                                                            | `https://api.anthropic.com/v1/models` |
+| `openai`                                                               | `https://api.openai.com/v1/models`    |
+| `openrouter`                                                           | `https://openrouter.ai/api/v1/models` |
+| `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot` | that provider's `<baseURL>/models`    |
+| `ollama`                                                               | `<Ollama root>/api/tags` (keyless)    |
+
+`<Ollama root>` is `OLLAMA_BASE_URL` with a trailing `/v1` stripped, else `http://localhost:11434`.
 
 It returns `{ ok: true }` on a 2xx, or `{ ok: false, error }` on a bad key (`401`/`403` → "Invalid API key."), an 8-second timeout, or a network failure. **The key is used for exactly that one fetch, never persisted to the vault, never logged, never echoed.** This route is only valid for `clawboo-native`; any other runtime id returns `400`. `apiKey` is optional — omit it to probe the key already stored for that provider; `400` if nothing is stored either. An unknown provider also returns `400`.
 
@@ -130,7 +132,7 @@ Because `resolveRuntimeKey` falls back to `process.env` and OpenClaw's `.env`, a
 ## Verify it worked
 
 - Re-fetch `GET /api/runtimes` (or click **Re-check** in the card). The runtime's `connectionState` should read `ready`, and its `health.ok` should be `true`.
-- For CLI runtimes, `health` reports the binary presence; for `clawboo-native`, `health` reports whether any routable provider key (or `OLLAMA_BASE_URL`) resolves.
+- For CLI runtimes, `health` reports the binary presence; for `clawboo-native`, `health` reports whether any routable provider key resolves or local Ollama is set up (chosen in onboarding or the providers manager, or `OLLAMA_BASE_URL` set).
 - Run a board task on the runtime via `POST /api/runtimes/:id/run`; the connected key is injected from the vault into the spawned process's environment.
 
 ## Troubleshooting

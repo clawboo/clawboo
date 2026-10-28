@@ -319,10 +319,234 @@ describe('ConfigureNativeStep', () => {
     await waitFor(() => expect(onConnected).toHaveBeenCalledWith('ollama', 'llama3.2'))
     // The Ollama card has no Test-connection button, so Continue is the only place
     // "is it actually running?" gets asked — and it is asked, keylessly.
-    expect(healthBody).toEqual({ provider: 'ollama', apiKey: '' })
+    // It also asks whether the model about to run is pulled.
+    expect(healthBody).toEqual({ provider: 'ollama', apiKey: '', model: 'llama3.2' })
     // Keyless: the client omits the empty apiKey entirely (the same wire form the
     // Runtimes panel's one-click provider reuse sends).
     expect(connectBody).toEqual({ provider: 'ollama' })
+  })
+
+  // ── Ollama: the models it has actually pulled ─────────────────────────────
+  // A user with Ollama running but llama3.2 not pulled used to sail through this
+  // step and then fail every run. The dropdown now lists what's pulled, and
+  // Continue checks the chosen model is among them.
+
+  const ollamaModels = (body: Record<string, unknown>) =>
+    http.get('/api/providers/ollama/models', () => HttpResponse.json(body))
+
+  it('the model hint says an Ollama model runs every agent; a keyed provider keeps the cheaper-specialist note', async () => {
+    server.use(
+      ollamaModels({
+        models: [{ id: 'qwen2.5:7b', label: 'qwen2.5:7b' }],
+        reachable: true,
+        recommendedModel: 'qwen2.5:7b',
+      }),
+    )
+    render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
+    expect(screen.getByTestId('native-model-hint')).toHaveTextContent(
+      /coordinating lead\. The specialists you add default to a faster, cheaper model/,
+    )
+    // Ollama specialists stay on the picked model (agents created without a pick
+    // run it on both tiers), so the cheaper-specialist promise would be false here.
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    const hint = await screen.findByTestId('native-model-hint')
+    expect(hint).toHaveTextContent(/every agent you add, the lead and the specialists alike/)
+    expect(hint).not.toHaveTextContent(/cheaper/)
+  })
+
+  it('Ollama lists the pulled models and preselects the one a new agent would get', async () => {
+    const onConnected = vi.fn()
+    let healthBody: Record<string, unknown> | null = null
+    server.use(
+      ollamaModels({
+        models: [
+          { id: 'gemma2', label: "gemma2 (can't use tools)" },
+          { id: 'qwen2.5:7b', label: 'qwen2.5:7b' },
+        ],
+        reachable: true,
+        recommendedModel: 'qwen2.5:7b',
+      }),
+      http.post(HEALTHCHECK, async ({ request }) => {
+        healthBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ok: true })
+      }),
+      http.post('/api/runtimes/clawboo-native/connect', () => HttpResponse.json({ ok: true })),
+    )
+    render(<ConfigureNativeStep onConnected={onConnected} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    // The recommended model, not the first row and not the static llama3.2.
+    await waitFor(() =>
+      expect(screen.getByTestId('native-model-select')).toHaveTextContent('qwen2.5:7b'),
+    )
+    await userEvent.click(screen.getByTestId('native-model-select'))
+    expect(screen.getByRole('option', { name: "gemma2 (can't use tools)" })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /llama3\.2|Llama 3\.2/ })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+
+    await userEvent.click(screen.getByTestId('native-continue'))
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith('ollama', 'qwen2.5:7b'))
+    expect(healthBody).toEqual({ provider: 'ollama', apiKey: '', model: 'qwen2.5:7b' })
+  })
+
+  it('an Ollama with no chat model says so, with the pull command, and checks again', async () => {
+    let calls = 0
+    server.use(
+      http.get('/api/providers/ollama/models', () => {
+        calls += 1
+        return HttpResponse.json(
+          calls === 1
+            ? { models: [], reachable: true, recommendedModel: 'llama3.2' }
+            : {
+                models: [{ id: 'llama3.2', label: 'llama3.2' }],
+                reachable: true,
+                recommendedModel: 'llama3.2',
+              },
+        )
+      }),
+    )
+    render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    const notice = await screen.findByTestId('native-ollama-no-models')
+    expect(notice).toHaveTextContent(/no chat model/i)
+    expect(notice).toHaveTextContent('ollama pull llama3.2')
+    await userEvent.click(screen.getByTestId('native-ollama-check-again'))
+    await waitFor(() => expect(screen.queryByTestId('native-ollama-no-models')).toBeNull())
+    expect(calls).toBe(2)
+  })
+
+  it('a stopped Ollama shows no "no chat model" notice (it is not running at all)', async () => {
+    server.use(ollamaModels({ models: [], reachable: false, recommendedModel: 'llama3.2' }))
+    render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    await waitFor(() => expect(screen.getByTestId('native-model-select')).toBeInTheDocument())
+    expect(screen.queryByTestId('native-ollama-no-models')).toBeNull()
+  })
+
+  it('Continue with a model Ollama has not pulled stops on the pull command, not "start it"', async () => {
+    const onConnected = vi.fn()
+    let connectCalled = false
+    server.use(
+      http.post(HEALTHCHECK, () =>
+        HttpResponse.json({
+          ok: false,
+          error: "Ollama is running, but it doesn't have llama3.2 yet.",
+          missingModel: 'llama3.2',
+        }),
+      ),
+      http.post('/api/runtimes/clawboo-native/connect', () => {
+        connectCalled = true
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    render(<ConfigureNativeStep onConnected={onConnected} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    await userEvent.click(screen.getByTestId('native-continue'))
+
+    const alert = await screen.findByTestId('native-verify-failed')
+    expect(alert).toHaveTextContent(/Ollama doesn’t have llama3\.2 yet/)
+    expect(alert).not.toHaveTextContent(/isn’t answering/)
+    expect(screen.getByText('ollama pull llama3.2')).toBeInTheDocument()
+    expect(screen.queryByText('ollama serve')).toBeNull()
+    expect(screen.queryByTestId('native-get-ollama')).toBeNull()
+    // Never a hard block: the override is still there.
+    expect(screen.getByTestId('native-continue-anyway')).toBeInTheDocument()
+    expect(connectCalled).toBe(false)
+    expect(onConnected).not.toHaveBeenCalled()
+  })
+
+  it('with nothing pulled, a failed Continue replaces the notice; Check again reads the list afresh', async () => {
+    let listCalls = 0
+    server.use(
+      http.get('/api/providers/ollama/models', () => {
+        listCalls += 1
+        return HttpResponse.json(
+          listCalls === 1
+            ? { models: [], reachable: true, recommendedModel: 'llama3.2' }
+            : {
+                models: [{ id: 'qwen2.5:7b', label: 'qwen2.5:7b' }],
+                reachable: true,
+                recommendedModel: 'qwen2.5:7b',
+              },
+        )
+      }),
+      http.post(HEALTHCHECK, () =>
+        HttpResponse.json({ ok: false, error: 'not pulled', missingModel: 'llama3.2' }),
+      ),
+    )
+    render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    await screen.findByTestId('native-ollama-no-models')
+    await userEvent.click(screen.getByTestId('native-continue'))
+    await screen.findByTestId('native-verify-failed')
+    // One message, one pull command.
+    expect(screen.queryByTestId('native-ollama-no-models')).toBeNull()
+    expect(screen.getAllByText('ollama pull llama3.2')).toHaveLength(1)
+
+    // The user pulled a different model meanwhile: Check again finds it.
+    await userEvent.click(screen.getByTestId('native-ollama-recheck'))
+    await waitFor(() => expect(screen.queryByTestId('native-verify-failed')).toBeNull())
+    await waitFor(() =>
+      expect(screen.getByTestId('native-model-select')).toHaveTextContent('qwen2.5:7b'),
+    )
+    expect(listCalls).toBe(2)
+  })
+
+  it('picking another Ollama model after a check asks again about the new one', async () => {
+    const checked: unknown[] = []
+    let connects = 0
+    server.use(
+      ollamaModels({
+        models: [
+          { id: 'llama3.2', label: 'llama3.2' },
+          { id: 'qwen2.5:7b', label: 'qwen2.5:7b' },
+        ],
+        reachable: true,
+        recommendedModel: 'llama3.2',
+      }),
+      http.post(HEALTHCHECK, async ({ request }) => {
+        checked.push(((await request.json()) as { model?: unknown }).model)
+        return HttpResponse.json({ ok: true })
+      }),
+      // The first connect fails, so the verified verdict is still on screen.
+      http.post('/api/runtimes/clawboo-native/connect', () => {
+        connects += 1
+        return connects === 1
+          ? HttpResponse.json({ ok: false, error: 'disk full' }, { status: 500 })
+          : HttpResponse.json({ ok: true })
+      }),
+    )
+    const onConnected = vi.fn()
+    render(<ConfigureNativeStep onConnected={onConnected} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-ollama'))
+    await waitFor(() =>
+      expect(screen.getByTestId('native-model-select')).toHaveTextContent('llama3.2'),
+    )
+    await userEvent.click(screen.getByTestId('native-continue'))
+    await screen.findByText('disk full')
+
+    await userEvent.click(screen.getByTestId('native-model-select'))
+    await userEvent.click(screen.getByRole('option', { name: 'qwen2.5:7b' }))
+    await userEvent.click(screen.getByTestId('native-continue'))
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith('ollama', 'qwen2.5:7b'))
+    expect(checked).toEqual(['llama3.2', 'qwen2.5:7b'])
+  })
+
+  it('a key provider never sends a model to the healthcheck', async () => {
+    let healthBody: Record<string, unknown> | null = null
+    server.use(
+      http.post(HEALTHCHECK, async ({ request }) => {
+        healthBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ok: true })
+      }),
+      http.post('/api/runtimes/clawboo-native/connect', () => HttpResponse.json({ ok: true })),
+    )
+    render(<ConfigureNativeStep onConnected={vi.fn()} onBack={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('native-provider-anthropic'))
+    await userEvent.type(screen.getByTestId('native-api-key'), SECRET)
+    await userEvent.click(screen.getByTestId('native-continue'))
+    await waitFor(() => expect(healthBody).not.toBeNull())
+    expect(healthBody).toEqual({ provider: 'anthropic', apiKey: SECRET })
   })
 
   // Sign in with ChatGPT — the Codex subscription path on the OpenAI card. Codex

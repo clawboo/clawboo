@@ -27,6 +27,14 @@ import {
   writeOpenclawProviderKeys,
 } from '../lib/openclawEnv'
 import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import { isNativeOllamaConnected } from '../lib/runtimes/native/nativeProviderDefaults'
+import { OLLAMA_FALLBACK_MODEL } from '../lib/runtimes/native/ollamaModels'
+import {
+  OPENCLAW_OLLAMA_KEY_LINE,
+  openclawOllamaModelStatus,
+  openclawOllamaProviderConfig,
+  resolveOpenclawOllamaModel,
+} from '../lib/openclawOllama'
 import { providerStatus } from '../lib/providerKeys'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
@@ -56,7 +64,8 @@ const OPENCLAW_MODEL_MAP: Record<string, string> = {
   huggingface: 'huggingface/deepseek-ai/DeepSeek-R1',
   cerebras: 'cerebras/zai-glm-4.7',
   venice: 'venice/llama-3.3-70b',
-  ollama: 'ollama/llama3.2',
+  // Only the preference: configure swaps it for a model this Ollama has pulled.
+  ollama: `ollama/${OLLAMA_FALLBACK_MODEL}`,
   // The ChatGPT subscription (Codex OAuth). `openai-codex/*` is what validates
   // on its own, so it stays the ref clawboo writes. `openclaw doctor --fix`
   // migrates it forward to the canonical `openai/*` AND enables the `openai` +
@@ -69,7 +78,8 @@ const OPENCLAW_MODEL_MAP: Record<string, string> = {
  *  `openai-codex` is OpenClaw's own ChatGPT-subscription OAuth (the user runs
  *  `openclaw models auth login --provider openai-codex` in their terminal —
  *  clawboo never automates the exchange, never stores a key for it). Their
- *  configure path skips every key write. */
+ *  configure path writes no pasted key. Ollama gets OpenClaw's local marker
+ *  instead (`OPENCLAW_OLLAMA_KEY_LINE`), which is not a secret. */
 const KEYLESS_PROVIDERS = new Set(['ollama', 'openai-codex'])
 
 /** The terminal command that creates OpenClaw's ChatGPT-subscription auth
@@ -619,7 +629,7 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
 }
 
 // POST /api/system/configure-openclaw
-export function configureOpenclawPOST(req: Request, res: Response): void {
+export async function configureOpenclawPOST(req: Request, res: Response): Promise<void> {
   try {
     const body = req.body as Record<string, unknown> | undefined
     if (!body || typeof body !== 'object') {
@@ -650,10 +660,13 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
 
     // Resolve model from provider
     const MODEL_MAP = OPENCLAW_MODEL_MAP
-    const resolvedModel =
+    let resolvedModel =
       typeof model === 'string' && model
         ? model
         : (MODEL_MAP[provider] ?? `${provider}/${model ?? 'default'}`)
+    // Ollama runs only a model it has pulled, so the choice is checked against it.
+    const ollamaProvider = provider === 'ollama' ? openclawOllamaProviderConfig() : null
+    if (provider === 'ollama') resolvedModel = await resolveOpenclawOllamaModel(resolvedModel)
 
     // Write openclaw.json
     const openclawConfig = {
@@ -671,6 +684,7 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
         agentToAgent: { enabled: true },
         sessions: { visibility: 'all' },
       },
+      ...(ollamaProvider ? { models: { providers: { ollama: ollamaProvider } } } : {}),
     }
     fs.writeFileSync(
       path.join(stateDir, 'openclaw.json'),
@@ -678,11 +692,14 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
       'utf8',
     )
 
-    // Build .env. A KEYLESS provider (ollama / openai-codex) writes NO key line —
-    // openai-codex auth is OpenClaw's own OAuth profile, never an env var.
+    // Build .env. A KEYLESS provider (ollama / openai-codex) writes NO pasted key:
+    // openai-codex auth is OpenClaw's own OAuth profile, never an env var. Ollama
+    // gets the local marker, without which OpenClaw never registers the provider.
     let envContent = `GATEWAY_AUTH_TOKEN=${gatewayToken}\n`
     const envKeyName = ENV_KEY_MAP[provider]
-    if (envKeyName && typeof apiKey === 'string' && apiKey) {
+    if (provider === 'ollama') {
+      envContent += `${OPENCLAW_OLLAMA_KEY_LINE}\n`
+    } else if (envKeyName && typeof apiKey === 'string' && apiKey) {
       envContent += `${envKeyName}=${apiKey}\n`
     } else if (!KEYLESS_PROVIDERS.has(provider) && typeof apiKey === 'string' && apiKey) {
       envContent += `CUSTOM_API_KEY=${apiKey}\n`
@@ -695,7 +712,8 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
 
     // The raw token is persisted server-side only — never returned in the body. The
     // same-origin proxy injects it on connect, so the browser only needs the URL.
-    res.json({ ok: true, gatewayUrl })
+    // `model` is what was written, which for Ollama may not be the model requested.
+    res.json({ ok: true, gatewayUrl, model: resolvedModel })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -706,11 +724,15 @@ export function configureOpenclawPOST(req: Request, res: Response): void {
 //   1. A connected provider KEY (vault / Providers hub) → today's path, unchanged.
 //   2. An OpenClaw `openai-codex` OAUTH PROFILE (the user already ran the login) →
 //      config writes only (no key exists to write) → { ok:true, provider:'openai-codex' }.
-//   3. A codex-CLI login ONLY (subscription exists, but OpenClaw holds no profile —
+//   3. A codex-CLI login ONLY (subscription exists, but OpenClaw holds no profile:
 //      the bootstrap is not trusted to fire headlessly; see
 //      OPENCLAW_CODEX_BOOTSTRAP_TRUSTED) → { ok:false, needsCodexAuth:true,
 //      loginCommand } so the UI shows the terminal command + Re-check.
-//   4. Nothing → { ok:false, needsKey:true } (the UI falls back to the key prompt).
+//   4. A local Ollama set up for Clawboo Native (`isNativeOllamaConnected`) → OpenClaw's
+//      local Ollama marker plus a pulled default model → { ok:true, provider:'ollama',
+//      model, modelPulled, pullCommand? }. The last resort before asking for a key:
+//      every rung above, the ChatGPT sign-in offer included, comes first.
+//   5. Nothing → { ok:false, needsKey:true } (the UI falls back to the key prompt).
 // Non-destructive: upserts the key + gateway token into .env (never overwrites) and
 // ensures openclaw.json exists with a local gateway + a default model.
 export async function autoConfigureOpenclawPOST(_req: Request, res: Response): Promise<void> {
@@ -723,25 +745,27 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
       ? resolveRuntimeKey(envVarForOpenclawProvider(connected.id))
       : null
     if (connected && connectedKey) {
-      // Rung 1 — a connected key, today's exact path.
+      // Rung 1: a connected key, today's exact path.
       provider = connected.id
       key = connectedKey
     } else if (detectOauthProfileProviders(stateDir).has('openai-codex')) {
-      // Rung 2 — OpenClaw already holds the ChatGPT-subscription OAuth profile.
+      // Rung 2: OpenClaw already holds the ChatGPT-subscription OAuth profile.
       provider = 'openai-codex'
     } else if (await isCodexLoggedIn()) {
-      // Rung 3 — the subscription EXISTS (codex CLI login) but OpenClaw has no
+      // Rung 3: the subscription EXISTS (codex CLI login) but OpenClaw has no
       // profile of its own; the user runs the (non-destructive) login command.
       res.json({ ok: false, needsCodexAuth: true, loginCommand: OPENCLAW_CODEX_LOGIN_COMMAND })
       return
+    } else if (isNativeOllamaConnected()) {
+      // Rung 4: the user's local Ollama, keyless like the profile rung.
+      provider = 'ollama'
     } else {
-      // Rung 4 — nothing connected at all.
+      // Rung 5: nothing connected at all.
       res.json({ ok: false, needsKey: true })
       return
     }
 
     fs.mkdirSync(stateDir, { recursive: true })
-    const port = DEFAULT_PORT
     const envPath = path.join(stateDir, '.env')
 
     // Reuse an existing gateway token; generate + upsert one if absent.
@@ -752,6 +776,7 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
     } catch {
       // fresh
     }
+    while (envLines.length > 0 && envLines[envLines.length - 1] === '') envLines.pop()
     for (const line of envLines) {
       const t = line.trim()
       if (t.startsWith('GATEWAY_AUTH_TOKEN=')) {
@@ -759,18 +784,31 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
         break
       }
     }
+    let envChanged = false
     if (!gatewayToken) {
       gatewayToken = crypto.randomBytes(32).toString('hex')
       const idx = envLines.findIndex((l) => l.trim().startsWith('GATEWAY_AUTH_TOKEN='))
       const newLine = `GATEWAY_AUTH_TOKEN=${gatewayToken}`
       if (idx >= 0) envLines[idx] = newLine
       else envLines.push(newLine)
-      while (envLines.length > 0 && envLines[envLines.length - 1] === '') envLines.pop()
-      fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8')
+      envChanged = true
     }
+    // The Ollama rung's credential is OpenClaw's local marker. An OLLAMA_API_KEY
+    // that already has a value is kept: any value registers the provider.
+    if (provider === 'ollama') {
+      const idx = envLines.findIndex((l) => l.trim().startsWith('OLLAMA_API_KEY='))
+      const current = idx >= 0 ? envLines[idx]!.trim().slice('OLLAMA_API_KEY='.length).trim() : ''
+      if (!current) {
+        if (idx >= 0) envLines[idx] = OPENCLAW_OLLAMA_KEY_LINE
+        else envLines.push(OPENCLAW_OLLAMA_KEY_LINE)
+        envChanged = true
+      }
+    }
+    if (envChanged) fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8')
 
     // Upsert the provider key into .env + auth-profiles (non-destructive). The
-    // oauth rung has NO key — its credential is OpenClaw's own auth profile.
+    // oauth and Ollama rungs have NO pasted key: the oauth credential is OpenClaw's
+    // own auth profile, and Ollama's marker went in with the gateway token above.
     if (key) writeOpenclawProviderKeys(stateDir, [{ provider, key }])
 
     // Ensure openclaw.json — a local gateway + a default model (read-modify-write,
@@ -788,7 +826,7 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
     if (!config['gateway'] || typeof config['gateway'] !== 'object') config['gateway'] = {}
     const gw = config['gateway'] as Record<string, unknown>
     gw['mode'] = 'local'
-    if (typeof gw['port'] !== 'number') gw['port'] = port
+    if (typeof gw['port'] !== 'number') gw['port'] = DEFAULT_PORT
     if (!gw['auth'] || typeof gw['auth'] !== 'object') {
       gw['auth'] = { mode: 'token', token: '${GATEWAY_AUTH_TOKEN}' }
     }
@@ -798,18 +836,50 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
     const defaults = agents['defaults'] as Record<string, unknown>
     if (!defaults['model'] || typeof defaults['model'] !== 'object') defaults['model'] = {}
     const modelObj = defaults['model'] as Record<string, unknown>
+    // Set when this call picks the Ollama default, which reads Ollama's model list.
+    let pickedOllamaModel = false
     if (!modelObj['primary']) {
-      modelObj['primary'] = OPENCLAW_MODEL_MAP[provider] ?? `${provider}/default`
+      pickedOllamaModel = provider === 'ollama'
+      // Ollama runs only a model it has pulled, so its default is checked against it.
+      modelObj['primary'] =
+        provider === 'ollama'
+          ? await resolveOpenclawOllamaModel()
+          : (OPENCLAW_MODEL_MAP[provider] ?? `${provider}/default`)
     }
+    // OpenClaw never reads OLLAMA_BASE_URL, so an override becomes its own Ollama
+    // provider entry. An entry the user already has is left alone.
+    const ollamaProvider = provider === 'ollama' ? openclawOllamaProviderConfig() : null
+    if (ollamaProvider) {
+      if (!config['models'] || typeof config['models'] !== 'object') config['models'] = {}
+      const models = config['models'] as Record<string, unknown>
+      if (!models['providers'] || typeof models['providers'] !== 'object') models['providers'] = {}
+      const providers = models['providers'] as Record<string, unknown>
+      if (!providers['ollama']) providers['ollama'] = ollamaProvider
+    }
+    // An Ollama default that isn't pulled fails every OpenClaw turn, so the setup
+    // is told which model it is and how to pull it. A kept default is checked
+    // afresh: the setup calls again right after the user pulls it.
+    const primary = modelObj['primary']
+    const ollamaModel =
+      provider === 'ollama' && typeof primary === 'string'
+        ? await openclawOllamaModelStatus(primary, { maxAgeMs: pickedOllamaModel ? 10_000 : 0 })
+        : null
     if (!config['tools'] || typeof config['tools'] !== 'object') config['tools'] = {}
     const tools = config['tools'] as Record<string, unknown>
     if (!tools['agentToAgent']) tools['agentToAgent'] = { enabled: true }
     if (!tools['sessions']) tools['sessions'] = { visibility: 'all' }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
 
-    const gatewayUrl = `ws://localhost:${port}`
+    // The port the Gateway route will start on or find, so a gateway.port the
+    // user kept is the one Clawboo connects to.
+    const gatewayUrl = `ws://localhost:${resolvePort(stateDir)}`
     saveSettings({ gatewayUrl, gatewayToken })
-    res.json({ ok: true, gatewayUrl, provider })
+    res.json({
+      ok: true,
+      gatewayUrl,
+      provider,
+      ...(ollamaModel && { model: primary, ...ollamaModel }),
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

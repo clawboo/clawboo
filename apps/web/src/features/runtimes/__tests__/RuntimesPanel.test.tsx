@@ -177,6 +177,34 @@ describe('RuntimesPanel', () => {
     expect(await screen.findByTestId('runtime-clawboo-native-details')).toBeInTheDocument()
   })
 
+  it('native readied by local Ollama alone: Manage lists Ollama and Details says so', async () => {
+    server.use(
+      http.get('/api/runtimes', () =>
+        HttpResponse.json({
+          runtimes: [
+            {
+              id: 'clawboo-native',
+              connectionState: 'ready',
+              envVar: 'ANTHROPIC_API_KEY',
+              hasCredential: false,
+              ollamaConnected: true,
+              capabilities: { runtimeClass: 'native' },
+              health: { ok: true },
+            },
+          ],
+          available: [],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<RuntimesPanel />)
+    expect(await screen.findByTestId('native-provider-row-ollama')).toHaveTextContent('Connected')
+    await user.click(await screen.findByTestId('runtime-clawboo-native-details'))
+    expect(await screen.findByTestId('runtime-diagnostics-drawer')).toHaveTextContent(
+      'set up (no key needed)',
+    )
+  })
+
   it('drops a drawer recheck whose answer is older than an applied refresh', async () => {
     // `recheckRuntime` narrows the SAME GET /api/runtimes the 8s poll reads, so the two
     // overlap and the later-issued answer must win. Here the recheck is issued first but

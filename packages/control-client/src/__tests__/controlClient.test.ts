@@ -4,6 +4,9 @@ import {
   apiFetch,
   apiUrl,
   connectRuntime,
+  disconnectRuntime,
+  fetchNativeLeaderModel,
+  fetchOllamaModels,
   fetchOnboardingState,
   fetchRuntimes,
   getApiBase,
@@ -152,11 +155,74 @@ describe('runtimes client', () => {
     })
   })
 
+  it('healthcheckNativeKey sends a model only when given one, and passes missingModel back', async () => {
+    const fetchFn = stubFetch(async () =>
+      jsonResponse({ ok: false, error: 'not pulled', missingModel: 'llama3.2' }),
+    )
+    expect(await healthcheckNativeKey('ollama', '', 'llama3.2')).toEqual({
+      ok: false,
+      error: 'not pulled',
+      missingModel: 'llama3.2',
+    })
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'llama3.2',
+    })
+  })
+
   it('healthcheckNativeKey never throws on a network error', async () => {
     stubFetch(async () => {
       throw new Error('offline')
     })
     expect(await healthcheckNativeKey('anthropic', 'k')).toEqual({ ok: false, error: 'offline' })
+  })
+
+  it('disconnectRuntime sends no body for a full disconnect, { provider } for the scoped one', async () => {
+    const fetchFn = stubFetch(async () => jsonResponse({ ok: true }))
+    await disconnectRuntime('clawboo-native')
+    const [url, full] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/runtimes/clawboo-native/disconnect')
+    expect(full.method).toBe('POST')
+    expect(full.body).toBeUndefined()
+
+    // The scoped form removes only the local-Ollama choice server-side.
+    expect(await disconnectRuntime('clawboo-native', 'ollama')).toEqual({ ok: true })
+    const [, scoped] = fetchFn.mock.calls[1] as [string, RequestInit]
+    expect(scoped.method).toBe('POST')
+    expect(JSON.parse(String(scoped.body))).toEqual({ provider: 'ollama' })
+  })
+})
+
+describe('providers client', () => {
+  it('fetchOllamaModels reads the pulled list, reachability and the recommended model', async () => {
+    const fetchFn = stubFetch(async () =>
+      jsonResponse({
+        models: [{ id: 'qwen2.5:7b', label: 'qwen2.5:7b' }],
+        reachable: true,
+        recommendedModel: 'qwen2.5:7b',
+      }),
+    )
+    expect(await fetchOllamaModels()).toEqual({
+      reachable: true,
+      models: [{ id: 'qwen2.5:7b', label: 'qwen2.5:7b' }],
+      recommendedModel: 'qwen2.5:7b',
+    })
+    expect(fetchFn.mock.calls[0]?.[0]).toBe('/api/providers/ollama/models')
+  })
+
+  it('fetchOllamaModels says "unknown" (reachable null) when the request itself fails', async () => {
+    const unknown = { reachable: null, models: [], recommendedModel: null }
+    stubFetch(async () => {
+      throw new Error('offline')
+    })
+    expect(await fetchOllamaModels()).toEqual(unknown)
+    stubFetch(async () => jsonResponse({}, { ok: false, status: 500 }))
+    expect(await fetchOllamaModels()).toEqual(unknown)
+    // An older server without the Ollama branch answers `{ models: [] }`.
+    stubFetch(async () => jsonResponse({ models: [] }))
+    expect(await fetchOllamaModels()).toEqual(unknown)
   })
 })
 
@@ -168,6 +234,35 @@ describe('agents client', () => {
 })
 
 describe('onboarding client', () => {
+  it('fetchNativeLeaderModel reads the per-tier defaults, dropping a malformed block', async () => {
+    const resolved = {
+      leader: { provider: 'openai', model: 'gpt-4o' },
+      specialist: { provider: 'openai', model: 'gpt-4o-mini' },
+    }
+    stubFetch(async () => jsonResponse({ provider: 'openai', model: 'gpt-4o', resolved }))
+    expect(await fetchNativeLeaderModel()).toEqual({
+      provider: 'openai',
+      model: 'gpt-4o',
+      resolved,
+    })
+
+    // Half a block is no block: a label built from it would name a model for one
+    // tier and silently guess the other.
+    stubFetch(async () =>
+      jsonResponse({
+        provider: 'openai',
+        model: 'gpt-4o',
+        resolved: { leader: resolved.leader, specialist: { provider: 'openai' } },
+      }),
+    )
+    expect((await fetchNativeLeaderModel()).resolved).toBeNull()
+
+    stubFetch(async () => {
+      throw new Error('down')
+    })
+    expect(await fetchNativeLeaderModel()).toEqual({ provider: null, model: null, resolved: null })
+  })
+
   it('setNativeLeaderModel posts provider+model and returns ok; never throws', async () => {
     let body: unknown = null
     stubFetch(async (_url, init) => {

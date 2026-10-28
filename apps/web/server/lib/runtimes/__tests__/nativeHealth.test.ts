@@ -9,6 +9,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { setKeylessProviderChoice, setRuntimeDisconnected } from '../../secretsVault'
 import { adapterFactoryFor } from '../index'
 import type { RuntimeRunContext } from '../types'
 
@@ -67,6 +68,17 @@ describe('nativeKeyHealth — full env-var set + keyless Ollama', () => {
   })
 
   it('is unhealthy with no provider key and no Ollama', async () => {
+    expect(await nativeHealth()).toMatchObject({ ok: false })
+  })
+
+  it('is healthy with a CHOSEN local Ollama and no env var at all', async () => {
+    setKeylessProviderChoice('ollama', true)
+    expect(await nativeHealth()).toMatchObject({ ok: true })
+  })
+
+  it('an explicit disconnect mutes OLLAMA_BASE_URL', async () => {
+    process.env['OLLAMA_BASE_URL'] = 'http://localhost:11434'
+    setRuntimeDisconnected('clawboo-native', true)
     expect(await nativeHealth()).toMatchObject({ ok: false })
   })
 })

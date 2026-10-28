@@ -10,6 +10,7 @@
 // drain (`teamChat/serverDeliver.ts`) so the two surfaces cannot drift.
 
 import { getDescriptor, isRuntimeId } from './runtimes/descriptor'
+import { OLLAMA_FALLBACK_MODEL, ollamaPullCommand } from './runtimes/native/ollamaModels'
 import { isContextOverflowMessage } from './runtimes/native/providers/types'
 
 /**
@@ -27,10 +28,15 @@ export const RUN_ENDED_WITHOUT_RESULT =
  * the user actually has to fix. Team delivery drives four runtimes through this,
  * and only the native one raises the missing-key error today, but a hardcoded
  * destination would quietly start misdirecting the moment another one did.
+ *
+ * `provider` is a native agent's provider. Ollama's model errors are only read as
+ * Ollama's when the agent runs on it: other OpenAI-compatible servers word a
+ * missing model the same way, and the fix there is not `ollama pull`.
  */
 export function runFailureText(
   errorMessage: string | null | undefined,
   runtime?: string | null,
+  provider?: string | null,
 ): string {
   // `routeCall` throws "no provider key available (checked ANTHROPIC_API_KEY and
   // fallbacks)" when the agent's configured slot is empty, which is a setup
@@ -71,5 +77,41 @@ export function runFailureText(
     )
   }
 
+  const ollama = provider === 'ollama' ? ollamaModelFailureText(errorMessage ?? '') : null
+  if (ollama) return ollama
+
   return `The run failed: ${errorMessage ?? 'unknown error'}`
+}
+
+// Ollama's own words for the two ways a local model refuses a run before its
+// first token. Current versions say `model 'llama3.2' not found` and
+// `"gemma2" does not support tools`; older ones said `model "llama3.2" not found,
+// try pulling it first` and `registry.ollama.ai/library/gemma2:latest does not
+// support tools`.
+const OLLAMA_NOT_PULLED_RE = /model ['"]?([^'"\s]+)['"]? not found(?:, try pulling it first)?/i
+const OLLAMA_NO_TOOLS_RE = /['"]?([^'"\s]+)['"]? does not support tools/i
+
+function ollamaModelName(raw: string): string {
+  return (raw.split('/').pop() ?? raw).replace(/:latest$/, '')
+}
+
+/** The fix for a local model that can't run, or null when it isn't one. */
+function ollamaModelFailureText(message: string): string | null {
+  const missing = OLLAMA_NOT_PULLED_RE.exec(message)
+  if (missing?.[1]) {
+    const model = ollamaModelName(missing[1])
+    return (
+      `Ollama doesn't have ${model} yet, so this run couldn't start. ` +
+      `Pull it with "${ollamaPullCommand(model)}", or pick a model you have pulled in this agent's settings.`
+    )
+  }
+  const noTools = OLLAMA_NO_TOOLS_RE.exec(message)
+  if (noTools?.[1]) {
+    const model = ollamaModelName(noTools[1])
+    return (
+      `${model} can't use tools, and this agent needs them. Pick a model that can in this ` +
+      `agent's settings, or pull one with "${ollamaPullCommand(OLLAMA_FALLBACK_MODEL)}".`
+    )
+  }
+  return null
 }

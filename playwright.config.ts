@@ -144,6 +144,24 @@ export default defineConfig({
       // structure (and the legend-filter assertions) can't vary with whatever
       // Ollama/OpenAI happens to be reachable on the test host.
       CLAWBOO_DISABLE_EMBEDDINGS: '1',
+      // Blank every native provider key and the Ollama base URL, so a key exported
+      // in the developer's shell can't decide which provider the onboarding specs
+      // land on (the sandbox already keeps OpenClaw's .env out of reach).
+      ...Object.fromEntries(
+        [
+          'ANTHROPIC_API_KEY',
+          'OPENAI_API_KEY',
+          'OPENROUTER_API_KEY',
+          'GEMINI_API_KEY',
+          'XAI_API_KEY',
+          'GROQ_API_KEY',
+          'MISTRAL_API_KEY',
+          'TOGETHER_API_KEY',
+          'CEREBRAS_API_KEY',
+          'MOONSHOT_API_KEY',
+          'OLLAMA_BASE_URL',
+        ].map((k) => [k, '']),
+      ),
     },
   },
 })

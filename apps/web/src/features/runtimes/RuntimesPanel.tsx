@@ -283,6 +283,7 @@ export function RuntimesPanel() {
       authKind: status?.authKind ?? entry.authKind,
       envVar: status?.envVar ?? entry.envVar ?? null,
       hasCredential: status?.hasCredential,
+      ollamaConnected: status?.ollamaConnected,
       loginCommand: entry.loginCommand,
       models: caps?.models,
       contextWindowTokens: caps?.contextWindowTokens,

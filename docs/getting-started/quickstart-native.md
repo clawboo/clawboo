@@ -14,8 +14,8 @@ These docs describe Clawboo **v0.5.0**, the current release.
 ## Prerequisites
 
 <Note>
-- **Node.js 22 or newer**: Clawboo's `engines` field requires `node >=22.0.0`.
-- **A provider API key** for one of: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). Or a running local Ollama, in which case no key is needed.
+- **Node.js 22.12 or newer**: Clawboo's `engines` field requires `node >=22.12.0`.
+- **A provider API key** for one of: Anthropic (`sk-ant-…`), OpenAI (`sk-…`), or OpenRouter (`sk-or-…`). Or a running local Ollama with at least one chat model pulled (`ollama pull llama3.2` if you have none), in which case no key and no environment variable are needed. Embedding-only models such as `nomic-embed-text` don't count: they can't run an agent.
 - No OpenClaw or Gateway required.
 </Note>
 
@@ -42,7 +42,7 @@ The first screen is the welcome splash: the Clawboo wordmark, the line "Your AI 
 
 ### 3. Connect Clawboo Native
 
-The next screen is titled **"Connect your AI provider"**; the key you paste here powers the built-in Clawboo Native runtime. Choose your provider from the grid, **OpenAI** (GPT models, the default), **Anthropic** (Claude models), **OpenRouter** (any model, one key), or **Ollama** (local, no key needed), then paste your API key into the **API Key** field. The step opens on OpenAI with its **Sign in with ChatGPT** (Recommended) auth method already selected, so neither the API Key field nor the model dropdown is on screen yet: click the **API key** card beside it to reveal them, or pick **Anthropic** or **OpenRouter**, which show the key field straight away. Sign in with ChatGPT is the path for a ChatGPT subscription without an API key: it connects the [Codex runtime](/runtimes/codex), and your team deploys on Codex, no key anywhere. The eye icon toggles key visibility. Picking **Ollama** hides the key field. A **model** dropdown lets you pick the team leader's default model, and you can fine-tune any agent's model later from its [agent page](/using/agents).
+The next screen is titled **"Connect your AI provider"**; the key you paste here powers the built-in Clawboo Native runtime. Choose your provider from the grid, **OpenAI** (GPT models, the default), **Anthropic** (Claude models), **OpenRouter** (any model, one key), or **Ollama** (local, no key needed), then paste your API key into the **API Key** field. The step opens on OpenAI with its **Sign in with ChatGPT** (Recommended) auth method already selected, so neither the API Key field nor the model dropdown is on screen yet: click the **API key** card beside it to reveal them, or pick **Anthropic** or **OpenRouter**, which show the key field straight away. Sign in with ChatGPT is the path for a ChatGPT subscription without an API key: it connects the [Codex runtime](/runtimes/codex), and your team deploys on Codex, no key anywhere. The eye icon toggles key visibility. Picking **Ollama** hides the key field. A **model** dropdown lets you pick the team leader's default model, and you can fine-tune any agent's model later from its [agent page](/using/agents). For Ollama the dropdown lists the chat models your Ollama has pulled, with `llama3.2` preselected when it's one of them; a model marked "(can't use tools)" is listed too, but agents offer tools on nearly every turn, so it will fail most of them. If Ollama is running with no chat model at all, the step says so, shows `ollama pull llama3.2`, and offers **Check again** for after the pull.
 
 ![The provider connect step with OpenRouter selected: provider cards, the API key field, and the leader model picker](/images/onboarding-connect-provider.png)
 
@@ -50,8 +50,8 @@ You can click **Test connection** below the field to check the key right away, b
 
 **Expected result:** the **Continue** button is enabled once a key is present (or Ollama is selected). Clicking it shows **Verifying…**, then:
 
-- **The key works** → it is stored in Clawboo's encrypted, at-rest vault (under the env-var slot for the chosen provider, never a plaintext file, never returned in any response; Ollama is keyless, so nothing is stored) and you advance to the optional runtimes step. No team is created yet. If you already ran **Test connection** on this key and it passed, Continue reuses that result instead of checking twice.
-- **The key doesn't verify** → nothing is stored and you stay on this step, with the reason inline ("Invalid API key.", "Could not reach anthropic.", …) next to the field you can fix. Picking **Ollama** while it isn't running shows a start hint (`ollama serve`) instead. **Continue anyway** appears after any failed check and stores the credential unverified — reach for it when the check is failing because _this machine_ can't reach the provider, not when the key itself is wrong. A genuinely invalid key is better fixed here than discovered in your first chat message.
+- **The key works** → it is stored in Clawboo's encrypted, at-rest vault (under the env-var slot for the chosen provider, never a plaintext file, never returned in any response; Ollama is keyless, so Clawboo records only that you chose it, and reaches it at `http://localhost:11434/v1` unless `OLLAMA_BASE_URL` points elsewhere) and you advance to the optional runtimes step. No team is created yet. If you already ran **Test connection** on this key and it passed, Continue reuses that result instead of checking twice.
+- **The key doesn't verify** → nothing is stored and you stay on this step, with the reason inline ("Invalid API key.", "Could not reach anthropic.", …) next to the field you can fix. Picking **Ollama** while it isn't running shows a start hint (`ollama serve`) instead, and if it is running but doesn't have the model you picked, the hint is the pull command (`ollama pull <model>`). **Continue anyway** appears after any failed check and stores the credential (for Ollama, the choice) unverified; reach for it when the check is failing because _this machine_ can't reach the provider, not when the key itself is wrong. A genuinely invalid key is better fixed here than discovered in your first chat message.
 
 Catching a bad key here is the point: without it, a typo'd or revoked key would sail through the wizard and only fail on your first chat message, long after this screen is gone.
 
@@ -65,7 +65,7 @@ Click **Continue** whenever you're ready, with or without connecting anything.
 
 ### 5. Pick and deploy a team
 
-The **Team** step opens Clawboo's team marketplace, the same one you'll use later from the dashboard. Browse the starter teams, pick one, then customize it: rename it, choose a color collection, and set each agent's runtime and model. During onboarding every agent defaults to the runtime you just connected: **Clawboo Native** for a provider key, or **Codex** if you signed in with ChatGPT. Either way the whole team deploys Gateway-free. You can still switch any agent to another connected runtime from its picker. Click **Deploy**.
+The **Team** step opens Clawboo's team marketplace, the same one you'll use later from the dashboard. Browse the starter teams, pick one, then customize it: rename it, choose a color collection, and set each agent's runtime and model. During onboarding every agent defaults to the runtime you just connected: **Clawboo Native** for a provider key or Ollama, or **Codex** if you signed in with ChatGPT. On Ollama, an agent you don't pick a model for runs on one your Ollama has pulled. Either way the whole team deploys Gateway-free. You can still switch any agent to another connected runtime from its picker. Click **Deploy**.
 
 **Expected result:** Clawboo creates the team and its agents (`clawboo-native`, or `codex` on the ChatGPT path, all sharing Clawboo's memory), then advances to the "Your team is ready" screen.
 
@@ -87,7 +87,7 @@ The team space looks like this:
 
 ## What just happened
 
-Connecting the native runtime linked your provider key to `clawboo-native`, Clawboo's in-process harness; deploying a team then wrote its agents into SQLite, the [registry of record](/appendices/glossary) for which agents and teams exist. There was no OpenClaw Gateway involved at any point. The leader is wired to coordinate work by delegating tasks onto [the board](/appendices/glossary) (the durable, race-free kanban that is the source of truth for team coordination) rather than doing everything itself, and the team chat runs [server-side](/concepts/delegation-and-orchestration), so a cascade keeps going even if you close the tab.
+Connecting the native runtime linked your provider key (or your Ollama choice) to `clawboo-native`, Clawboo's in-process harness; deploying a team then wrote its agents into SQLite, the [registry of record](/appendices/glossary) for which agents and teams exist. There was no OpenClaw Gateway involved at any point. The leader is wired to coordinate work by delegating tasks onto [the board](/appendices/glossary) (the durable, race-free kanban that is the source of truth for team coordination) rather than doing everything itself, and the team chat runs [server-side](/concepts/delegation-and-orchestration), so a cascade keeps going even if you close the tab.
 
 ## Next steps
 

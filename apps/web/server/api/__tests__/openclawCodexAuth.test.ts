@@ -1,9 +1,10 @@
 // OpenClaw on the ChatGPT subscription — the keyless `openai-codex` provider
 // path. Covers the oauth-profile scanner (shape-tolerant, fail-closed, values
 // never surfaced), the keyless configure carve-out, the auto-configure rungs
-// (key → oauth profile → codex-CLI-only → nothing), the openclaw-config codexAuth
-// probe, and the systemModels slug fix (oauth providers configured + the latent
-// 'Hugging Face' display-name/id mismatch).
+// (key → oauth profile → codex-CLI-only → nothing; the Ollama rung between the
+// codex-CLI login and nothing has its own file), the openclaw-config codexAuth
+// probe, and the systemModels slug fix (oauth providers configured +
+// the latent 'Hugging Face' display-name/id mismatch).
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
@@ -12,7 +13,7 @@ import path from 'node:path'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The codex-CLI login probe (rung 3) is machine state — mock it. The oauth
+// The codex-CLI login probe (rung 3) is machine state, so mock it. The oauth
 // PROFILE detection stays REAL (fixture files in the sandboxed state dir).
 const codexAuthState = vi.hoisted(() => ({ loggedIn: false }))
 vi.mock('../../lib/runtimes/codexAuth', () => ({
@@ -118,9 +119,9 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
   })
 
   // ── configure: the keyless carve-out ────────────────────────────────────────
-  it('configure accepts keyless openai-codex: model default set, NO key line in .env', () => {
+  it('configure accepts keyless openai-codex: model default set, NO key line in .env', async () => {
     const r = mockRes()
-    configureOpenclawPOST(req({ provider: 'openai-codex' }), r.res)
+    await configureOpenclawPOST(req({ provider: 'openai-codex' }), r.res)
     expect(r.statusCode()).toBe(200)
     expect((r.body() as { ok: boolean }).ok).toBe(true)
 
@@ -134,11 +135,13 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     expect(env).toMatch(/GATEWAY_AUTH_TOKEN=[a-f0-9]{64}/)
     expect(env).not.toContain('CUSTOM_API_KEY')
     expect(env).not.toContain('OPENAI')
+    // Ollama's local marker belongs to the Ollama provider alone.
+    expect(env).not.toContain('OLLAMA_API_KEY')
   })
 
-  it('configure still 400s a key-less API-KEY provider (the carve-out is exact)', () => {
+  it('configure still 400s a key-less API-KEY provider (the carve-out is exact)', async () => {
     const r = mockRes()
-    configureOpenclawPOST(req({ provider: 'anthropic' }), r.res)
+    await configureOpenclawPOST(req({ provider: 'anthropic' }), r.res)
     expect(r.statusCode()).toBe(400)
   })
 
@@ -186,7 +189,7 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     })
   })
 
-  it('rung 4: nothing connected → needsKey (unchanged)', async () => {
+  it('rung 5: nothing connected → needsKey (unchanged)', async () => {
     const r = mockRes()
     await autoConfigureOpenclawPOST(req(), r.res)
     expect(r.body()).toEqual({ ok: false, needsKey: true })

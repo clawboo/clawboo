@@ -59,6 +59,45 @@ describe('RuntimeConnectList — OpenClaw offline vs fresh', () => {
   })
 })
 
+describe('RuntimeConnectList: native on local Ollama', () => {
+  // Readied by Ollama alone: ready, with no key behind it.
+  const NATIVE_OLLAMA: RuntimeStatus = {
+    id: 'clawboo-native',
+    connectionState: 'ready',
+    hasCredential: false,
+    ollamaConnected: true,
+  }
+
+  it('the panel row lists Ollama as a connected provider in Manage', async () => {
+    render(
+      <RuntimeConnectList
+        runtimeIds={['clawboo-native']}
+        statuses={[NATIVE_OLLAMA]}
+        loaded
+        variant="panel"
+        onChanged={vi.fn()}
+        onDiagnostics={vi.fn()}
+        openclaw={OPENCLAW_OFF}
+      />,
+    )
+    expect(await screen.findByTestId('native-provider-row-ollama')).toHaveTextContent('Connected')
+  })
+
+  it('the onboarding foundation row lists the Ollama picked on the connect step', async () => {
+    render(
+      <RuntimeConnectList
+        runtimeIds={[]}
+        statuses={[NATIVE_OLLAMA]}
+        loaded
+        variant="onboarding"
+        onChanged={vi.fn()}
+        openclaw={OPENCLAW_OFF}
+      />,
+    )
+    expect(await screen.findByTestId('native-provider-row-ollama')).toHaveTextContent('Connected')
+  })
+})
+
 describe('RuntimeConnectList — connected card + Manage', () => {
   it('a connected runtime shows the top-right "Connected" status + a Manage footer (no ⓘ button)', async () => {
     renderList([{ id: 'hermes', connectionState: 'ready', codexAuth: false }])

@@ -13,6 +13,10 @@
 import type { ModelGroup } from './modelCatalog'
 import { NATIVE_MORE_PROVIDERS } from './nativeProviders'
 
+/** The Ollama model the docs tell a new user to pull, mirroring the server's
+ *  `OLLAMA_FALLBACK_MODEL`. */
+export const OLLAMA_FALLBACK_MODEL = 'llama3.2'
+
 /** Group display names — shared so the dynamic-model hooks can find + replace
  *  exactly these groups with a live list from the provider. */
 export const OPENROUTER_GROUP_NAME = 'OpenRouter'
@@ -50,9 +54,11 @@ const NATIVE_MODELS: Record<string, { label: string; models: { id: string; label
       { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini' },
     ],
   },
+  // Ollama's STATIC FALLBACK, for when the local daemon can't be asked. Once it
+  // answers, the pickers list the models it has actually pulled (useOllamaModels).
   ollama: {
     label: 'Ollama',
-    models: [{ id: 'llama3.2', label: 'Llama 3.2' }],
+    models: [{ id: OLLAMA_FALLBACK_MODEL, label: 'Llama 3.2' }],
   },
   // The extra OpenAI-compatible providers — one recommended model each as the
   // static fallback; the live /models list provides the rest once a key exists.

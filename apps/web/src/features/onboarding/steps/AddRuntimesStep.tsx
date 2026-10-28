@@ -5,7 +5,7 @@
 // (the connected native foundation, Claude Code / Codex / Hermes, and OpenClaw)
 // is a visible row so it's discoverable at a glance, and each expands in place
 // to its connect flow. OpenClaw setup runs IN-PLACE in its row (OpenClawInlineSetup),
-// reusing the provider key already entered so it never re-asks. Continue advances
+// reusing the provider key or local Ollama already set up so it never re-asks. Continue advances
 // to the ready landing whether or not anything was connected — nothing here can
 // strand the user (the native team exists), so there is a single forward action.
 

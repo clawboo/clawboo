@@ -38,12 +38,14 @@ import type {
   StartOpts,
   TaskHandle,
 } from '@clawboo/executor'
+import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import { createNudgeQueue, type NudgeQueue, type RunStamp } from '@clawboo/team-orchestration'
 
 import { getDb, resetDb } from '../../db'
 import { homeDispatchMutex } from '../../executorRunner'
 import { estimateRunCostUsd, estimateRunCostUsdFromUsage } from '../../runtimes/estimateCost'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
+import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { HUMAN_TURN, SYSTEM_TURN } from '@clawboo/team-orchestration'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 
@@ -448,6 +450,42 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
     for (let i = 0; i < 4; i++) await tick()
     expect(w.metas[0]?.text).toBe('The run failed: upstream 503')
+  })
+
+  it("an Ollama agent's missing-model failure names the pull command", async () => {
+    // The provider comes from the agent's own config, so the same words from a
+    // non-Ollama agent (below) stay verbatim.
+    saveAgentConfig(db, {
+      ...DEFAULT_AGENT_CONFIG,
+      id: 'a1',
+      name: 'A1',
+      primaryProvider: 'ollama',
+      primaryModel: 'llama3.2',
+      envVar: 'OLLAMA_BASE_URL',
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const failing = () =>
+      new FakeAdapter((run) =>
+        (async function* () {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'error',
+            code: 'bad_request',
+            message: "404 model 'llama3.2' not found",
+            fatal: true,
+          }
+        })(),
+      )
+    const w = wire(failing())
+    await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(w.metas[0]?.text).toContain('"ollama pull llama3.2"')
+
+    const other = wire(failing())
+    await other.deliver(SK, 'a2', 'hi', HUMAN_TURN)
+    for (let i = 0; i < 4; i++) await tick()
+    expect(other.metas[0]?.text).toBe("The run failed: 404 model 'llama3.2' not found")
   })
 
   it('a stream that ends with NO terminal also says so instead of going quiet', async () => {

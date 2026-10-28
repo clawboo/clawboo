@@ -24,12 +24,12 @@ On the `/api/runtimes/:id/*` routes, `:id` is validated against the runtime set;
 | POST   | `/api/runtimes/:id/run`               | Drive a board task on the runtime end to end                  | No      |
 | GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog (Hermes model picker)             | No      |
 | POST   | `/api/onboarding/native-leader-model` | Record the chosen leader provider + model                     | No      |
-| GET    | `/api/onboarding/native-leader-model` | The recorded leader provider + model (nulls when unset)       | No      |
+| GET    | `/api/onboarding/native-leader-model` | The recorded pick + the per-tier auto-resolved defaults       | No      |
 | GET    | `/api/onboarding/state`               | Aggregated first-run signals in one call                      | No      |
 | GET    | `/api/providers`                      | List every provider with its connection state                 | No      |
 | POST   | `/api/providers/:id/connect`          | Store a provider key                                          | No      |
 | POST   | `/api/providers/:id/disconnect`       | Clear a stored provider key                                   | No      |
-| GET    | `/api/providers/:id/models`           | Live model list using the **stored** key                      | No      |
+| GET    | `/api/providers/:id/models`           | Live model list (**stored** key; Ollama: pulled models)       | No      |
 | POST   | `/api/providers/:id/models`           | Live model list using a **pasted** (unsaved) key              | No      |
 | POST   | `/api/auth/cli-login/:tool`           | Drive a CLI's own OAuth sign-in and relay its output          | SSE     |
 
@@ -83,6 +83,7 @@ Lists every runtime with its capabilities, live health, and install/auth status.
     hasVaultCredential: boolean
     loggedIn: boolean // oauth runtimes only: an existing `codex login` was detected
     codexAuth: boolean // hermes only: a ChatGPT-subscription login is present
+    ollamaConnected: boolean // clawboo-native only: local Ollama is set up (readies it with no key)
     installCommand: string | null
     docsUrl: string
     connectionState: 'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown'
@@ -102,7 +103,7 @@ Lists every runtime with its capabilities, live health, and install/auth status.
 }
 ```
 
-`installed` is `true` for the built-in `clawboo-native` (it ships inside the server) and otherwise reflects whether `healthBin` resolves on `PATH` or a known user-install dir. `hasCredential` is presence-only; the secret value is never read into the response. `hasVaultCredential` is the same presence check but **vault-only** (via `getRuntimeSecret`): it ignores a key that resolves only from a bare `process.env` var, so it reflects a deliberate connect. The onboarding-landing decision (`GatewayBootstrap.hasConnectedRuntime`) reads `hasVaultCredential`, not `hasCredential`, so an env-var-only environment is not mistaken for a connected runtime. `connectionState` is derived as: `not-installed` if not installed; otherwise `ready` for `authKind: 'none'`, `ready`/`needs-login` for `oauth` (Codex) depending on whether an existing `codex login` is detected, and `ready`/`needs-auth` for `api-key` depending on `hasCredential`. `loggedIn` is true only for an installed `oauth` runtime whose terminal login was detected, and it is what flips that runtime's `connectionState` to `ready`. `codexAuth` is the Hermes-only ChatGPT-subscription signal (a usable `openai-codex` credential in `~/.hermes/auth.json`, which has no env var and no vault slot); it folds into `hasCredential`. Both are `false` for every other runtime.
+`installed` is `true` for the built-in `clawboo-native` (it ships inside the server) and otherwise reflects whether `healthBin` resolves on `PATH` or a known user-install dir. `hasCredential` is presence-only; the secret value is never read into the response. `hasVaultCredential` is the same presence check but **vault-only** (via `getRuntimeSecret`): it ignores a key that resolves only from a bare `process.env` var, so it reflects a deliberate connect. The onboarding-landing decision (`GatewayBootstrap.hasConnectedRuntime`) reads `hasVaultCredential`, not `hasCredential`, so an env-var-only environment is not mistaken for a connected runtime. `connectionState` is derived as: `not-installed` if not installed; otherwise `ready` for `authKind: 'none'`, `ready`/`needs-login` for `oauth` (Codex) depending on whether an existing `codex login` is detected, and `ready`/`needs-auth` for `api-key` depending on `hasCredential` (for `clawboo-native`, `hasCredential` or `ollamaConnected`). `loggedIn` is true only for an installed `oauth` runtime whose terminal login was detected, and it is what flips that runtime's `connectionState` to `ready`. `codexAuth` is the Hermes-only ChatGPT-subscription signal (a usable `openai-codex` credential in `~/.hermes/auth.json`, which has no env var and no vault slot); it folds into `hasCredential`. Both are `false` for every other runtime. `ollamaConnected` is the native-only local-Ollama signal: `true` once the user chose Ollama (a connect with `provider: 'ollama'`), or when `OLLAMA_BASE_URL` is set and the user has neither removed Ollama nor disconnected the runtime. No key exists, so it readies `connectionState` without folding into `hasCredential`; it is `false` for every other runtime.
 
 **`500 Internal Server Error`**: any failure constructing an adapter or probing health:
 
@@ -204,7 +205,7 @@ Stores a provider key in the encrypted vault and marks the runtime connected. Be
 
 `ready` when clawboo detects and reuses an existing `codex login`; `not-installed` when the CLI is absent; `needs-login` otherwise.
 
-**`200 OK`**: `authKind: 'none'`, or no `envVar`, or a keyless native provider (`provider: 'ollama'`): nothing stored, state re-derived:
+**`200 OK`**: `authKind: 'none'`, or no `envVar`, or a keyless native provider (`provider: 'ollama'`): no key stored, state re-derived. For `provider: 'ollama'` the route records the Ollama choice instead (`secrets/keyless-providers.json`, no secret material), and that choice alone makes the native runtime `ready`:
 
 ```ts
 { ok: true, connectionState: 'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown' }
@@ -244,10 +245,10 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
 
 ## `POST /api/runtimes/:id/disconnect`
 
-Clears the stored credential for the runtime. The binary stays installed and the runtime stays available; the card returns to `needs-auth` (the vault slot is empty). For a runtime with no `envVar` (Codex), this is a no-op on storage.
+Clears the stored credential for the runtime. The binary stays installed and the runtime stays available; the card returns to `needs-auth` (the vault slot is empty). For a runtime with no `envVar` (Codex), this is a no-op on storage. For `clawboo-native` it also records local Ollama as removed, the same as `{ provider: 'ollama' }` below, so agents lose their Ollama candidate (see below). Neither a later key connect nor `OLLAMA_BASE_URL` turns Ollama back on; only picking it again (connect with `provider: 'ollama'`) does.
 
 - **Path params**: `id` (runtime id; 404 on unknown).
-- **Request body**: none.
+- **Request body**: none, or `{ provider: 'ollama' }` for `clawboo-native` only. That form removes **only** the local-Ollama choice and leaves every key alone, and it also stops a configured `OLLAMA_BASE_URL` from counting as set up until Ollama is picked again. While removed, Ollama serves no run: the router drops every Ollama candidate, so an agent with no other runnable candidate fails with no runnable provider and reports `providerReady: false`, while one with a keyed fallback runs on that fallback and stays `providerReady: true`. A keyed provider's own disconnect is `POST /api/providers/:id/disconnect`.
 
 ### Responses
 
@@ -257,10 +258,29 @@ Clears the stored credential for the runtime. The binary stays installed and the
 { ok: true, connectionState: 'needs-auth' | 'needs-login' | 'ready' | 'not-installed' | 'unknown' }
 ```
 
+**`400 Bad Request`**: a `provider` that is sent but is not a non-empty string (it is never read as the full disconnect):
+
+```json
+{ "error": "provider must be a non-empty string" }
+```
+
+**`400 Bad Request`**: a `provider` other than `ollama`, or `{ provider: 'ollama' }` on a runtime other than `clawboo-native`:
+
+```json
+{
+  "error": "only the native runtime's keyless 'ollama' disconnects by provider here; remove a provider key via /api/providers/:id/disconnect"
+}
+```
+
 ### Example
 
 ```bash
 curl -X POST http://localhost:18790/api/runtimes/hermes/disconnect
+
+# Native: stop using local Ollama, keep every key
+curl -X POST http://localhost:18790/api/runtimes/clawboo-native/disconnect \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"ollama"}'
 ```
 
 ---
@@ -326,10 +346,12 @@ This route is native-only. Any other `:id` (still a valid runtime) returns **400
   apiKey?: string     // optional: omit to probe the key already stored for
                       // `provider`. Required only when nothing is stored
                       // (and never needed for keyless ollama).
+  model?: string      // ollama only: also check that this model is pulled.
+                      // Ignored for every other provider.
 }
 ```
 
-Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; the extra OpenAI-compatible providers (`google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`) → that provider's own `<baseURL>/models`; `ollama` → `<OLLAMA_BASE_URL>/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
+Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; the extra OpenAI-compatible providers (`google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`) → that provider's own `<baseURL>/models`; `ollama` → the native Ollama base URL (`OLLAMA_BASE_URL` with a trailing `/v1` stripped, else `http://localhost:11434`) followed by `/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
 
 ### Responses
 
@@ -364,7 +386,11 @@ Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/model
 { ok: false, error: 'Provider returned <status>.' } // other non-2xx
 { ok: false, error: 'Could not reach <provider> (timed out).' } // 8s abort
 { ok: false, error: 'Could not reach <provider>.' }            // network error
+// ollama with `model`: the daemon answered, but its /api/tags lacks the model
+{ ok: false, error: 'Ollama is running, but it doesn\'t have llama3.2 yet. Pull it with "ollama pull llama3.2".', missingModel: 'llama3.2' }
 ```
+
+For `ollama`, `model` is matched the way Ollama resolves names: an untagged `llama3.2` is met by `llama3.2:latest`, a tagged `qwen2.5:7b` only by itself. A 2xx whose body isn't a tags list proves nothing either way, so it passes.
 
 ### Example
 
@@ -497,11 +523,24 @@ The three `/api/onboarding/*` routes. They take no `:id` segment and are grouped
 
 ### `POST /api/onboarding/native-leader-model`
 
-Records the provider + model the user picked when connecting a native key, so the lazily-created universal Boo Zero runs on it instead of the auto-resolved per-provider default. The team-deploy dialog reads it back as the default provider + model for a team's native agents. Body `{ provider, model }`. The pick is also retro-applied to an existing native Boo Zero, best-effort: on a fresh install there is no Boo Zero yet, which is the normal case and not an error. Returns `{ ok: true }`. **400** `{ error: "unknown provider '<provider>'" }` when `provider` is not a known native provider, or `{ error: "model is required" }` when `model` is missing or blank. **500** `{ error }` if the setting cannot be written.
+Records the provider + model the user picked when connecting a native key, so the lazily-created universal Boo Zero runs on it instead of the auto-resolved per-provider default. It is also the default for every native agent created without a model pick, while its provider stays set up (see [how native agents get a model](/runtimes/native#the-agent-config)). Body `{ provider, model }`. The pick is also retro-applied to an existing native Boo Zero, best-effort: on a fresh install there is no Boo Zero yet, which is the normal case and not an error. Returns `{ ok: true }`. **400** `{ error: "unknown provider '<provider>'" }` when `provider` is not a known native provider, or `{ error: "model is required" }` when `model` is missing or blank. **500** `{ error }` if the setting cannot be written.
 
 ### `GET /api/onboarding/native-leader-model`
 
-The recorded pick, read by the Runtimes panel's native provider manager so its "Default" tag and model dropdown reflect reality. Returns `{ provider, model }`, or `{ provider: null, model: null }` when nothing was ever recorded or the stored value does not parse. Never errors.
+The recorded pick, read by the Runtimes panel's native provider manager so its "Default" tag and model dropdown reflect reality, plus what a native agent created without a model pick would get right now, per tier:
+
+```ts
+{
+  provider: string | null // the recorded pick (null when never recorded or unparseable)
+  model: string | null
+  resolved: {
+    leader: { provider: string; model: string }
+    specialist: { provider: string; model: string }
+  } | null // null when no native provider is set up
+}
+```
+
+`resolved` comes from the same path agent creation runs, including the check that an Ollama model is pulled, so the team-deploy dialog labels each native row left on **Default** with exactly the model it will get. A stored value that does not parse reads as no pick, and `resolved` then comes from the fixed provider order. Never errors.
 
 ### `GET /api/onboarding/state`
 
@@ -540,7 +579,20 @@ Clears the stored key. Returns `{ ok: true, providers }`. **400** for an unknown
 
 ### `GET /api/providers/:id/models`
 
-The provider's **live** model list, enumerated with the **stored** key. Returns `{ models: [] }` for a keyless or non-enumerating provider rather than an error, so the client can fall back to its static catalog.
+The provider's **live** model list, enumerated with the **stored** key. Returns `{ models: [] }` for a non-enumerating provider rather than an error, so the client can fall back to its static catalog.
+
+`ollama` is keyless and answers from the local daemon instead: the chat models its `/api/tags` lists (embedding-only models left out, models without tool support labelled `(can't use tools)`, newest first), whether Ollama answered, and `recommendedModel`: a fallback recommendation worked out from `llama3.2`. That is `llama3.2` when it is pulled; otherwise the newest pulled model that can use tools, then the newest whose tool support Ollama doesn't report, then the newest that can't use tools; and `llama3.2` itself when Ollama reports no chat model or doesn't answer. It does not read your recorded default model. It is read fresh on every call, so a model pulled a moment ago shows up. See [Ollama models](/runtimes/native#ollama-models).
+
+```json
+{
+  "models": [
+    { "id": "qwen2.5:7b", "label": "qwen2.5:7b" },
+    { "id": "gemma2", "label": "gemma2 (can't use tools)" }
+  ],
+  "reachable": true,
+  "recommendedModel": "qwen2.5:7b"
+}
+```
 
 ### `POST /api/providers/:id/models`
 

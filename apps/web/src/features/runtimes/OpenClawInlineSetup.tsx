@@ -1,9 +1,12 @@
 // Compact, IN-PLACE OpenClaw setup — runs inside the OpenClaw tab pane (Settings
 // Runtimes + onboarding Add-runtimes) instead of navigating to a separate full-
-// screen flow. It REUSES the provider key already connected (native onboarding /
-// Providers hub) via POST /api/system/auto-configure-openclaw, so it NEVER re-asks
-// for an LLM key: detect → (install if needed) → start Gateway → connect. Only if
-// nothing is connected does it fall back to a compact key prompt.
+// screen flow. It REUSES the provider already connected (a key from native
+// onboarding / the Providers hub, the ChatGPT subscription, or a local Ollama) via
+// POST /api/system/auto-configure-openclaw, so it NEVER re-asks for an LLM key:
+// detect → (install if needed) → start Gateway → connect. Only if nothing is
+// connected does it fall back to a compact key prompt. On a local Ollama that
+// hasn't pulled OpenClaw's default model it stops first and shows the pull
+// command, since every OpenClaw turn would fail without it.
 //
 // Drives the existing SSE endpoints (install, gateway start) + the shared connect
 // helper; NOT_PAIRED is handled inline via DevicePairingApproval. Onboarding passes
@@ -33,6 +36,7 @@ type Phase =
   | 'preparing'
   | 'needs-key'
   | 'needs-codex-auth'
+  | 'needs-model'
   | 'installing'
   | 'starting'
   | 'pairing'
@@ -69,6 +73,10 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
   )
   // Set only when THIS run installed the OpenClaw binary → the "installed" ack.
   const [justInstalled, setJustInstalled] = useState(false)
+  // OpenClaw's Ollama default that Ollama couldn't be found to have.
+  const [missingModel, setMissingModel] = useState<{ model: string; pullCommand: string } | null>(
+    null,
+  )
   const firedRef = useRef(false)
 
   const appendLog = useCallback((line?: string) => {
@@ -134,12 +142,28 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
     }
   }, [connectAndFinish, fail])
 
+  // Install OpenClaw if needed, start the Gateway, connect (or show the pairing
+  // card when this device needs approving).
+  const startAndConnect = useCallback(async () => {
+    const status = (await apiFetch('/api/system/status')
+      .then((r) => r.json())
+      .catch(() => null)) as { openclaw?: { installed?: boolean } } | null
+    if (!status?.openclaw?.installed) {
+      setPhase('installing')
+      await runSSE('/api/system/install-openclaw', {})
+    }
+    setPhase('starting')
+    await runSSE('/api/system/gateway', { action: 'start' })
+    if (!(await connectAndFinish())) setPhase('pairing')
+  }, [runSSE, connectAndFinish])
+
   const run = useCallback(async () => {
     setError(null)
     try {
       setPhase('preparing')
-      // Reuse an already-connected credential — a provider key, or an existing
-      // OpenClaw ChatGPT-subscription (openai-codex) auth profile.
+      // Reuse an already-connected credential: a provider key, an existing
+      // OpenClaw ChatGPT-subscription (openai-codex) auth profile, or the local
+      // Ollama set up for Clawboo Native (keyless, so nothing to ask for).
       const auto = (await apiFetch('/api/system/auto-configure-openclaw', { method: 'POST' })
         .then((r) => r.json())
         .catch(() => ({ ok: false, needsKey: true }))) as {
@@ -147,6 +171,9 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
         needsKey?: boolean
         needsCodexAuth?: boolean
         loginCommand?: string
+        model?: string
+        modelPulled?: boolean
+        pullCommand?: string
       }
       if (!auto.ok) {
         if (auto.needsCodexAuth) {
@@ -170,20 +197,16 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
         setPhase('needs-key')
         return
       }
-      const status = (await apiFetch('/api/system/status')
-        .then((r) => r.json())
-        .catch(() => null)) as { openclaw?: { installed?: boolean } } | null
-      if (!status?.openclaw?.installed) {
-        setPhase('installing')
-        await runSSE('/api/system/install-openclaw', {})
+      if (auto.modelPulled === false && auto.model && auto.pullCommand) {
+        setMissingModel({ model: auto.model, pullCommand: auto.pullCommand })
+        setPhase('needs-model')
+        return
       }
-      setPhase('starting')
-      await runSSE('/api/system/gateway', { action: 'start' })
-      if (!(await connectAndFinish())) setPhase('pairing')
+      await startAndConnect()
     } catch (e) {
       fail(e)
     }
-  }, [runSSE, connectAndFinish, fail])
+  }, [runSSE, startAndConnect, fail])
 
   // Fire once on mount (StrictMode-safe).
   useEffect(() => {
@@ -345,6 +368,43 @@ export function OpenClawInlineSetup({ onConnected, onFinish, onCancel }: OpenCla
               data-testid="openclaw-inline-codex-recheck"
             >
               Re-check
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'needs-model' && missingModel && (
+        <div className="flex flex-col gap-2.5" data-testid="openclaw-inline-needs-model">
+          <FormattedAlert tone="warning">
+            <span className="font-semibold">
+              Clawboo couldn&rsquo;t find {missingModel.model} in your Ollama.
+            </span>{' '}
+            OpenClaw runs on it, so its agents can&rsquo;t answer without it. Make sure Ollama is
+            running and pull the model, then check again.
+          </FormattedAlert>
+          <code
+            data-testid="openclaw-inline-pull-command"
+            className="rounded-lg border border-border px-3 py-2 font-mono text-[12.5px]"
+            style={{ background: 'var(--code-block-bg)', color: 'var(--foreground)' }}
+          >
+            {missingModel.pullCommand}
+          </code>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void run()}
+              data-testid="openclaw-inline-model-recheck"
+            >
+              Check again
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void startAndConnect().catch(fail)}
+              data-testid="openclaw-inline-continue-anyway"
+            >
+              Continue anyway
             </Button>
           </div>
         </div>
