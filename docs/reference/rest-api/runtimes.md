@@ -351,7 +351,7 @@ This route is native-only. Any other `:id` (still a valid runtime) returns **400
 }
 ```
 
-Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; the extra OpenAI-compatible providers (`google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`) → that provider's own `<baseURL>/models`; `ollama` → `<OLLAMA_BASE_URL>/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
+Provider → probe endpoint: `anthropic` → `https://api.anthropic.com/v1/models`; `openai` → `https://api.openai.com/v1/models`; `openrouter` → `https://openrouter.ai/api/v1/models`; the extra OpenAI-compatible providers (`google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`) → that provider's own `<baseURL>/models`; `ollama` → the native Ollama base URL (`OLLAMA_BASE_URL` with a trailing `/v1` stripped, else `http://localhost:11434`) followed by `/api/tags` (keyless). The fetch is bounded by an 8-second timeout.
 
 ### Responses
 
@@ -581,7 +581,7 @@ Clears the stored key. Returns `{ ok: true, providers }`. **400** for an unknown
 
 The provider's **live** model list, enumerated with the **stored** key. Returns `{ models: [] }` for a non-enumerating provider rather than an error, so the client can fall back to its static catalog.
 
-`ollama` is keyless and answers from the local daemon instead: the chat models its `/api/tags` lists (embedding-only models left out, models without tool support labelled `(can't use tools)`, newest first), whether Ollama answered, and `recommendedModel`: a fallback recommendation worked out from `llama3.2` (that model when it is pulled, else the newest pulled model that can use tools). It does not read your recorded default model. It is read fresh on every call, so a model pulled a moment ago shows up. See [Ollama models](/runtimes/native#ollama-models).
+`ollama` is keyless and answers from the local daemon instead: the chat models its `/api/tags` lists (embedding-only models left out, models without tool support labelled `(can't use tools)`, newest first), whether Ollama answered, and `recommendedModel`: a fallback recommendation worked out from `llama3.2`. That is `llama3.2` when it is pulled; otherwise the newest pulled model that can use tools, then the newest whose tool support Ollama doesn't report, then the newest that can't use tools; and `llama3.2` itself when Ollama reports no chat model or doesn't answer. It does not read your recorded default model. It is read fresh on every call, so a model pulled a moment ago shows up. See [Ollama models](/runtimes/native#ollama-models).
 
 ```json
 {
