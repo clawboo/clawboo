@@ -132,7 +132,7 @@ Because `resolveRuntimeKey` falls back to `process.env` and OpenClaw's `.env`, a
 ## Verify it worked
 
 - Re-fetch `GET /api/runtimes` (or click **Re-check** in the card). The runtime's `connectionState` should read `ready`, and its `health.ok` should be `true`.
-- For CLI runtimes, `health` reports the binary presence; for `clawboo-native`, `health` reports whether any routable provider key resolves or local Ollama is set up (chosen in onboarding or the providers manager, or `OLLAMA_BASE_URL` set).
+- For CLI runtimes, `health` reports the binary presence; for `clawboo-native`, `health` reports whether any routable provider key resolves or local Ollama is set up (chosen in onboarding or the providers manager, or `OLLAMA_BASE_URL` set). `OLLAMA_BASE_URL` stops counting after **Disconnect Ollama** or a full native disconnect, until Ollama is picked again.
 - Run a board task on the runtime via `POST /api/runtimes/:id/run`; the connected key is injected from the vault into the spawned process's environment.
 
 ## Troubleshooting
