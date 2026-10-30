@@ -28,8 +28,10 @@ import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const dispatched: Array<{ teamId: string; taskId: string }> = []
+const dispatchFails = { on: false }
 vi.mock('../../lib/teamChat/boardDispatch', () => ({
   requestTaskDispatch: (teamId: string, taskId: string) => {
+    if (dispatchFails.on) throw new Error('orchestrator unavailable')
     dispatched.push({ teamId, taskId })
   },
 }))
@@ -105,6 +107,7 @@ describe('board: a person commenting on a task', () => {
     resetRunSteers()
     resetReplyWakes()
     dispatched.length = 0
+    dispatchFails.on = false
     const db = getDb()
     const now = Date.now()
     db.insert(teams)
@@ -323,5 +326,21 @@ describe('board: a person commenting on a task', () => {
       agentId: null,
       reason: 'unassigned',
     })
+  })
+
+  it('keeps a saved reply and says it was not delivered when starting the agent fails', async () => {
+    const db = getDb()
+    const taskId = boundTask()
+    expect(claimTask(db, taskId, 'coder').ok).toBe(true)
+    expect(updateStatus(db, taskId, 'blocked').ok).toBe(true)
+    dispatchFails.on = true
+    const r = await comment(taskId, 'Use the staging database.')
+    expect(r.statusCode()).toBe(200)
+    expect(deliveryOf(r)).toEqual({ status: 'not-delivered', agentId: 'coder', reason: 'failed' })
+    expect(
+      (getComments(db, taskId) as { body: string }[]).some(
+        (c) => c.body === 'Use the staging database.',
+      ),
+    ).toBe(true)
   })
 })

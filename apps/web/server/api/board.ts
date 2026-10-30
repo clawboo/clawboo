@@ -49,6 +49,7 @@ import {
   type TaskRunCost,
   type TaskStatus,
 } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
 import { agentHandoffSchema } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
@@ -75,6 +76,8 @@ import {
   type WorkspaceMissReason,
 } from '../lib/workspaceFs'
 import { openPreviewStream, resolvePreviewFile } from '../lib/workspacePreview'
+
+const log = createLogger('board-api')
 
 // ─── GET /api/board ──────────────────────────────────────────────────────────
 // Query: teamId?, status?, ready?=true (deps satisfied), includeDropped?=true
@@ -522,9 +525,20 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
       // it went (see personReply).
       if (parsed.data.authorType === 'user') {
         const mcpBaseUrl = loopbackMcpBaseUrl(req)
-        delivery = await deliverPersonReply(db, task, parsed.data.body, {
-          dispatch: (teamId, id) => requestTaskDispatch(teamId, id, mcpBaseUrl),
-        })
+        try {
+          delivery = await deliverPersonReply(db, task, parsed.data.body, {
+            dispatch: (teamId, id) => requestTaskDispatch(teamId, id, mcpBaseUrl),
+          })
+        } catch (err) {
+          // The comment is saved: say it was not delivered rather than fail the
+          // request, which would have the person send it a second time.
+          log.error({ err, taskId }, 'delivering a person reply failed')
+          delivery = {
+            status: 'not-delivered',
+            agentId: task.assigneeAgentId ?? delegationTargetOf(task.sourceDelegationId),
+            reason: 'failed',
+          }
+        }
       }
     }
     res.json({
