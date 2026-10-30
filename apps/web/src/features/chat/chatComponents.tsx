@@ -349,6 +349,27 @@ export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['componen
   p({ children }) {
     return <p className="my-1 leading-relaxed">{children}</p>
   },
+  // An image is never loaded. What this renders is mostly text an agent wrote,
+  // and an image loads from wherever its address points the moment it is shown,
+  // so an agent steered by something it read could send data out in that
+  // address. A web or same-site image shows as a link the person can choose to
+  // open; any other address is only named.
+  img({ src, alt }) {
+    const label = alt?.trim() ? `Image: ${alt.trim()}` : 'Image'
+    const linkable = typeof src === 'string' && (/^https?:\/\//i.test(src) || src.startsWith('/'))
+    if (!linkable) return <span className="text-muted-foreground">{label}</span>
+    return (
+      <a
+        href={src}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        data-md-image=""
+        className="text-mint underline underline-offset-2 hover:text-mint/80"
+      >
+        {label}
+      </a>
+    )
+  },
 }
 
 // ─── TypingIndicator ──────────────────────────────────────────────────────────

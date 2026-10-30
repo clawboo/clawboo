@@ -16,6 +16,7 @@ import { useFleetStore, type AgentState } from '@/stores/fleet'
 
 import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
+import { TaskComments } from '../TaskComments'
 import { TaskDetailDrawer } from '../TaskDetailDrawer'
 
 // The agent's Boo under the title reads the theme.
@@ -973,5 +974,43 @@ describe('TaskDetailDrawer: reading and stepping', () => {
     expect(screen.queryByText('Ship it')).toBeNull()
     release()
     expect(await screen.findByRole('heading', { name: 'Second task' })).toBeInTheDocument()
+  })
+})
+
+// An agent's text is untrusted: an image in it would load from wherever its
+// address points the moment the text is shown, and the address can carry data
+// out. It shows as a link to open instead.
+describe('agent markdown loads no images', () => {
+  const BODY =
+    'Done.\n\n![the chart](https://images.example/p.png?d=secret)\n\n![](data:image/png;base64,AAAA)'
+
+  it('draws an image in the report as a link, and fetches nothing', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done' },
+          comments: [{ body: BODY, authorType: 'agent', authorAgentId: 'agent-7' }],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const report = await screen.findByTestId('task-report')
+    expect(report.querySelector('img')).toBeNull()
+    const link = within(report).getByRole('link', { name: 'Image: the chart' })
+    expect(link).toHaveAttribute('href', 'https://images.example/p.png?d=secret')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'))
+    // A data address is named, not linked.
+    expect(within(report).getByText('Image')).toBeInTheDocument()
+  })
+
+  it('draws an image in an agent comment as a link', () => {
+    render(<TaskComments comments={[{ body: BODY, authorType: 'agent' }]} />)
+    const log = screen.getByTestId('task-comments')
+    expect(log.querySelector('img')).toBeNull()
+    expect(within(log).getByRole('link', { name: 'Image: the chart' })).toBeInTheDocument()
   })
 })
