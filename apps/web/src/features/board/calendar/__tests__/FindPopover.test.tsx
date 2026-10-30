@@ -93,7 +93,6 @@ function renderFind(props: Partial<FindPopoverProps> = {}) {
         search={fakeSearch}
         scope="week"
         findsRoutines
-        hueOf={() => 'var(--category-web)'}
         columnName={(column) => (column === 'cancelled' ? 'Cancelled' : 'To do')}
         dayLabel={(at) => (at == null ? 'No date' : 'Today')}
         ownerOf={(task) => (task.assigneeAgentId as string | null) ?? null}

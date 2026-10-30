@@ -23,6 +23,7 @@ import { useToastStore } from '@/stores/toast'
 import { server } from '../../../../__vitest__/mswServer'
 import { BoardPanel } from '../../BoardPanel'
 import { addDays, buildRange, dayKey, localeWeekStart, startOfDay } from '../calendarModel'
+import { pickView } from '../../__tests__/boardControls'
 import { resetBoardStorage } from '../../__tests__/resetBoardStorage'
 
 const HOUR = 3_600_000
@@ -388,7 +389,7 @@ describe('picking a task', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'Today' }))
+    await pickView(user, 'Today')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'day')
     // Finished work from another day is not on the Today view.
     expect(
@@ -401,7 +402,7 @@ describe('picking a task', () => {
     await waitFor(() =>
       expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'week'),
     )
-    expect(screen.getByRole('radio', { name: 'Week' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Week')
     await waitFor(() => expect(cardFor('Filed the expense report')).toHaveFocus())
     expect(screen.getByTestId(`calendar-cell-done-${dayKey(yesterday)}`)).toContainElement(
       cardFor('Filed the expense report'),

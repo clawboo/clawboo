@@ -111,6 +111,14 @@ test.describe('Board drag with a real mouse', () => {
 
     await page.locator('[data-testid="nav-board"]').click()
     await expect(page.locator('[data-testid="board-calendar"]')).toBeVisible({ timeout: 20_000 })
+    // The board opens on Kanban, which has no rows by day; the Week view's
+    // today row is what says a move finishes a card today.
+    await page.locator('[data-testid="board-view"]').click()
+    await page.getByRole('menuitemradio', { name: 'Week' }).click()
+    await expect(page.locator('[data-testid="board-calendar"]')).toHaveAttribute(
+      'data-mode',
+      'week',
+    )
     await expect(column(page, 'todo').getByText('E2E stays put')).toBeVisible({ timeout: 10_000 })
 
     // 1. A To do card held over In progress: the column refuses it and steps back.

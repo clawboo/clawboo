@@ -1,7 +1,8 @@
-// TaskCard and DraggableCard on their own. The calendar chip's face (who has the
-// task, the runtime it runs on, its one status mark or its cost, the subtask, the
-// stamp), the attributes and classes the chip's CSS keys on, the undated card,
-// and how DraggableCard routes a mouse, a pen, a touch, a key and a click.
+// TaskCard and DraggableCard on their own. The card's face (who has the task,
+// its one status mark or its cost, the subtask, the stamp), the runtime the
+// drawer names for it, the attributes and classes the card's CSS keys on, the
+// undated card, and how DraggableCard routes a mouse, a pen, a touch, a key and
+// a click.
 //
 // DraggableCard runs inside a real DndContext with the board's sensors, so a
 // drag here is dnd-kit's own: a pointer press that travels 5px, or Space on the
@@ -26,17 +27,11 @@ import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import type { BoardTask } from '@/lib/boardClient'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 
-import { DraggableCard, TaskCard, type CardStamp } from '../TaskCard'
+import { DraggableCard, TaskCard, runtimeNameOf, taskRuntimeOf, type CardStamp } from '../TaskCard'
 
-const ACCENT = 'var(--category-web)'
-const ADDED: CardStamp = { label: '9:41 AM', title: 'Added Oct 14, 9:41 AM', finished: false }
-const FINISHED: CardStamp = { label: '3:05 PM', title: 'Finished Oct 14, 3:05 PM', finished: true }
-const DATED: CardStamp = {
-  label: 'Oct 12',
-  title: 'Added Oct 12, 9:41 AM',
-  finished: false,
-  dated: true,
-}
+const ADDED: CardStamp = { label: '9:41 AM', title: 'Added Oct 14, 9:41 AM' }
+const FINISHED: CardStamp = { label: '3:05 PM', title: 'Finished Oct 14, 3:05 PM' }
+const DATED: CardStamp = { label: 'Oct 12', title: 'Added Oct 12, 9:41 AM' }
 
 const STATE_CLASSES = [
   'calendar-chip--arrived',
@@ -55,17 +50,17 @@ function seedFleet(agents: Array<Partial<AgentState> & { id: string }>): void {
 
 type CardProps = Partial<ComponentProps<typeof TaskCard>>
 
-/** A calendar chip: a card with a stamp and its column's colour. */
+/** A calendar chip: a card with a stamp. */
 function renderChip(task: BoardTask, props: CardProps = {}): HTMLElement {
   render(
     <ThemeProvider>
-      <TaskCard task={task} onClick={() => {}} stamp={ADDED} accent={ACCENT} {...props} />
+      <TaskCard task={task} onClick={() => {}} stamp={ADDED} {...props} />
     </ThemeProvider>,
   )
   return screen.getByTestId('board-card')
 }
 
-/** The undated All board's card: no stamp, no colour. */
+/** A card with no stamp (a task with no date). */
 function renderUndated(task: BoardTask, props: CardProps = {}): HTMLElement {
   render(
     <ThemeProvider>
@@ -81,87 +76,59 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('a calendar chip: the runtime', () => {
+describe('the runtime a task runs on (the drawer shows it, the card does not)', () => {
   it("reads an open task's runtime from its agent, not the engine's stored placeholder", () => {
     // The team engine stores 'openclaw' on a task until its run ends, whatever the
     // agent runs on.
-    seedFleet([{ id: 'agent-7', name: 'Coder', runtime: 'codex' }])
-    const card = renderChip(
-      makeTask({ status: 'in_progress', assigneeAgentId: 'agent-7', assigneeRuntime: 'openclaw' }),
-    )
-    expect(within(card).getByText('Runtime: Codex')).toHaveClass('sr-only')
-    const mark = within(card).getByTitle('Codex')
-    // The glyph paints in the chip's muted ink, never the brand colour.
-    expect(mark).toHaveClass('text-muted-foreground')
-    expect(mark.querySelector('svg')).not.toBeNull()
-    expect(card).not.toHaveTextContent(/OpenClaw/)
-    expect(within(card).queryByTitle('OpenClaw')).toBeNull()
+    const task = makeTask({
+      status: 'in_progress',
+      assigneeAgentId: 'agent-7',
+      assigneeRuntime: 'openclaw',
+    })
+    expect(taskRuntimeOf(task, 'codex')).toBe('codex')
   })
 
   it.each([
-    ['done', 'claude-code', 'codex', 'Claude Code'],
-    ['cancelled', 'hermes', 'codex', 'Hermes'],
+    ['done', 'claude-code', 'codex'],
+    ['cancelled', 'hermes', 'codex'],
   ])(
     'reads a %s task by the runtime its run recorded (%s), not its agent (%s)',
-    (status, recorded, agentRuntime, label) => {
-      seedFleet([{ id: 'agent-7', name: 'Coder', runtime: agentRuntime }])
-      const card = renderChip(
-        makeTask({ status, assigneeAgentId: 'agent-7', assigneeRuntime: recorded }),
-        { stamp: FINISHED },
-      )
-      expect(within(card).getByText(`Runtime: ${label}`)).toHaveClass('sr-only')
-      expect(within(card).getByTitle(label)).toBeInTheDocument()
-      expect(within(card).getAllByText(/^Runtime:/)).toHaveLength(1)
+    (status, recorded, agentRuntime) => {
+      const task = makeTask({ status, assigneeAgentId: 'agent-7', assigneeRuntime: recorded })
+      expect(taskRuntimeOf(task, agentRuntime)).toBe(recorded)
     },
   )
 
   it("falls back to the agent's runtime when a finished task recorded none", () => {
-    seedFleet([{ id: 'agent-7', name: 'Coder', runtime: 'hermes' }])
-    const card = renderChip(makeTask({ status: 'done', assigneeAgentId: 'agent-7' }), {
-      stamp: FINISHED,
-    })
-    expect(within(card).getByText('Runtime: Hermes')).toHaveClass('sr-only')
-  })
-
-  it('names a runtime the board has no brand for by its id, with no glyph', () => {
-    seedFleet([{ id: 'agent-7', name: 'Coder', runtime: 'acme' }])
-    const card = renderChip(
-      makeTask({ status: 'in_progress', assigneeAgentId: 'agent-7', assigneeRuntime: 'openclaw' }),
+    expect(taskRuntimeOf(makeTask({ status: 'done', assigneeAgentId: 'agent-7' }), 'hermes')).toBe(
+      'hermes',
     )
-    const name = within(card).getByText('acme')
-    expect(name).toHaveTextContent('Runtime: acme')
-    expect(within(name).getByText('Runtime:')).toHaveClass('sr-only')
-    expect(name.querySelector('svg')).toBeNull()
-    expect(card).not.toHaveTextContent(/OpenClaw/)
-  })
-
-  it('reads the runtime of the agent a waiting task is bound to', () => {
-    // A person handed the task to an agent; it waits in To do with no assignee yet.
-    seedFleet([{ id: 'agent-9', name: 'Writer', runtime: 'hermes' }])
-    const card = renderChip(
-      makeTask({ status: 'todo', sourceDelegationId: 'assign:n1:agent:agent-9:origin:human' }),
-    )
-    expect(within(card).getByText('Runtime: Hermes')).toHaveClass('sr-only')
   })
 
   it.each([
-    ['nobody has an open task', { status: 'todo', assigneeRuntime: 'openclaw' }, []],
-    ['nobody has a finished task that recorded none', { status: 'done' }, []],
+    ['nobody has an open task', { status: 'todo', assigneeRuntime: 'openclaw' }],
+    ['nobody has a finished task that recorded none', { status: 'done' }],
     [
-      "the open task's agent is not in the fleet",
+      "the open task's agent is unknown or has no runtime",
       { status: 'in_progress', assigneeAgentId: 'ghost', assigneeRuntime: 'openclaw' },
-      [],
     ],
-    [
-      "the open task's agent has no runtime",
-      { status: 'in_progress', assigneeAgentId: 'agent-7', assigneeRuntime: 'openclaw' },
-      [{ id: 'agent-7', name: 'Coder', runtime: null }],
-    ],
-  ])('claims no runtime when %s', (_case, fields, agents) => {
-    seedFleet(agents)
-    const card = renderChip(makeTask(fields))
+  ])('claims no runtime when %s', (_case, fields) => {
+    expect(taskRuntimeOf(makeTask(fields), null)).toBeNull()
+  })
+
+  it('names a runtime by its brand, and one the board has no brand for by its id', () => {
+    expect(runtimeNameOf('codex')).toBe('Codex')
+    expect(runtimeNameOf('acme')).toBe('acme')
+  })
+
+  it('leaves the runtime off the card', () => {
+    seedFleet([{ id: 'agent-7', name: 'Coder', runtime: 'codex' }])
+    const card = renderChip(
+      makeTask({ status: 'in_progress', assigneeAgentId: 'agent-7', assigneeRuntime: 'openclaw' }),
+    )
     expect(within(card).queryByText(/^Runtime:/)).toBeNull()
-    expect(card).not.toHaveTextContent(/OpenClaw|openclaw/)
+    expect(within(card).queryByTitle('Codex')).toBeNull()
+    expect(card).not.toHaveTextContent(/Codex|OpenClaw|openclaw/)
   })
 })
 
@@ -191,6 +158,15 @@ describe('a calendar chip: who has it', () => {
     expect(within(card).queryByText('Unassigned')).toBeNull()
   })
 
+  it.each(['backlog', 'done', 'cancelled'])(
+    'draws no empty circle on an unassigned %s card: only To do says it',
+    (status) => {
+      const card = renderChip(makeTask({ status }), { stamp: FINISHED })
+      expect(within(card).queryByTitle('Unassigned')).toBeNull()
+      expect(within(card).queryByText('Unassigned')).toBeNull()
+    },
+  )
+
   it('names an agent the fleet does not know generically', () => {
     const card = renderChip(makeTask({ status: 'in_progress', assigneeAgentId: 'gone' }))
     expect(within(card).getByText('Assigned to an agent')).toHaveClass('sr-only')
@@ -209,7 +185,10 @@ describe('a calendar chip: one status mark, else the cost', () => {
     )
     const verifying = within(card).getByText('Verifying')
     expect(verifying).not.toHaveClass('sr-only')
-    expect(card.querySelector('.board-pulse-dot')).not.toBeNull()
+    // A still glyph; the motion is a shimmer on the word, never a pulse.
+    expect(card.querySelector('[data-glyph="verifying"]')).not.toBeNull()
+    expect(verifying).toHaveClass('board-shimmer')
+    expect(card.querySelector('.board-pulse-dot')).toBeNull()
     expect(within(card).queryByTitle(/Verification failed/)).toBeNull()
     expect(within(card).queryByTestId('board-card-cost')).toBeNull()
     // The cost the mark displaced moves into the card's tooltip.
@@ -243,7 +222,7 @@ describe('a calendar chip: one status mark, else the cost', () => {
     },
   )
 
-  it("shows no Verified on a Done chip, whose stamp's check already says so", () => {
+  it('shows no Verified on a Done chip, whose column already says so', () => {
     const card = renderChip(
       makeTask({
         status: 'done',
@@ -257,8 +236,8 @@ describe('a calendar chip: one status mark, else the cost', () => {
     // With no mark the cost stays on the face, so the card needs no tooltip.
     expect(within(card).getByTestId('board-card-cost')).toBeInTheDocument()
     expect(card).not.toHaveAttribute('title')
-    const stamp = within(card).getByTestId('board-card-stamp')
-    expect(stamp.querySelector('svg.text-mint')).not.toBeNull()
+    // Nor a check on the stamp: the column says it.
+    expect(within(card).getByTestId('board-card-stamp').querySelector('svg')).toBeNull()
   })
 
   it('shows the cost when nothing else is marked, and gives the card no tooltip', () => {
@@ -266,7 +245,9 @@ describe('a calendar chip: one status mark, else the cost', () => {
       makeTask({ status: 'in_progress', runCost: { usd: 0.02, estimated: true } }),
     )
     const cost = within(card).getByTestId('board-card-cost')
-    expect(cost).toHaveClass('font-data')
+    // Plain tabular figures in Inter, not mono.
+    expect(cost).toHaveClass('tabular-nums')
+    expect(cost).not.toHaveClass('font-data')
     expect(cost.querySelector('[aria-hidden]')).toHaveTextContent('~$0.02')
     expect(within(cost).getByText('Cost $0.02, estimated')).toHaveClass('sr-only')
     expect(cost).toHaveAttribute('title', '$0.02, estimated, not a charge the runtime reported')
@@ -338,18 +319,17 @@ describe('a calendar chip: the compact cost', () => {
     expect(cost.querySelector('[aria-hidden]')?.textContent).toBe(shown)
     expect(cost.querySelector('.sr-only')?.textContent).toBe(spoken)
     expect(cost).toHaveAttribute('title', title)
-    // A chip has no room for the undated card's "est." suffix.
+    // A card has no room for an "est." suffix: the tilde and the title say it.
     expect(cost).not.toHaveTextContent(/est\./)
   })
 
-  it('keeps the exact figure and the "est." suffix on the undated card', () => {
+  it('shows the same compact figure on the undated card', () => {
     const card = renderUndated(
       makeTask({ status: 'done', runCost: { usd: 0.004, estimated: true } }),
     )
     const cost = within(card).getByTestId('board-card-cost')
-    expect(cost).toHaveTextContent('~$0.0040 est.')
-    expect(cost).toHaveAttribute('title', 'Estimated, not a charge the runtime reported')
-    expect(card).not.toHaveTextContent('<$0.01')
+    expect(cost.querySelector('[aria-hidden]')?.textContent).toBe('<$0.01')
+    expect(cost).toHaveAttribute('title', '$0.0040, estimated, not a charge the runtime reported')
   })
 })
 
@@ -392,17 +372,19 @@ describe('a calendar chip: a subtask', () => {
     expect(within(card).queryByTitle('Subtask')).toBeNull()
   })
 
-  it('keeps the visible "sub" on the undated card', () => {
+  it('marks a subtask the same way on the undated card', () => {
     const card = renderUndated(makeTask({ status: 'todo', parentTaskId: 'p1' }))
-    expect(within(card).getByText('sub')).not.toHaveClass('sr-only')
+    expect(within(card).getByTitle('Subtask')).toBeInTheDocument()
+    expect(card).not.toHaveTextContent(/\bsub\b/)
   })
 })
 
 describe('a calendar chip: the stamp', () => {
-  it('sets a time in mono and a date in Inter, at the end of the row', () => {
+  it('sets a time or a date in Inter with tabular figures, at the end of the row', () => {
     const card = renderChip(makeTask())
     const time = within(card).getByTestId('board-card-stamp')
-    expect(time).toHaveClass('font-data', 'ml-auto')
+    expect(time).toHaveClass('ml-auto', 'tabular-nums')
+    expect(time).not.toHaveClass('font-data')
     expect(time).toHaveAttribute('title', 'Added Oct 14, 9:41 AM')
     expect(time).toHaveTextContent('9:41 AM')
     expect(within(time).getByText(', Added Oct 14, 9:41 AM')).toHaveClass('sr-only')
@@ -414,7 +396,7 @@ describe('a calendar chip: the stamp', () => {
     expect(dated).toHaveTextContent('Oct 12')
   })
 
-  it('carries a mint check when the task finished, and none while it is open', () => {
+  it('carries no check when the task finished: Done already says it', () => {
     const open = within(renderChip(makeTask())).getByTestId('board-card-stamp')
     expect(open.querySelector('svg')).toBeNull()
     cleanup()
@@ -422,15 +404,17 @@ describe('a calendar chip: the stamp', () => {
     const finished = within(
       renderChip(makeTask({ status: 'done' }), { stamp: FINISHED }),
     ).getByTestId('board-card-stamp')
-    expect(finished.querySelector('svg.text-mint')).not.toBeNull()
+    expect(finished.querySelector('svg')).toBeNull()
+    expect(finished).toHaveTextContent('3:05 PM')
   })
 })
 
 describe('a calendar chip: its state', () => {
-  it('is a chip in its column colour, with the tooltip ids the board relies on', () => {
+  it('is a neutral card, with the ids the board relies on', () => {
     const card = renderChip(makeTask())
     expect(card).toHaveClass('calendar-chip')
-    expect(card.style.getPropertyValue('--chip')).toBe(ACCENT)
+    // No column colour reaches the card: colour lives in the column's glyph.
+    expect(card.style.getPropertyValue('--chip')).toBe('')
     expect(card).toHaveAttribute('data-focus-restore-id', 't1')
     // The chip's CSS owns its transitions.
     expect(card.className).not.toMatch(/transition|duration-/)
@@ -454,25 +438,21 @@ describe('a calendar chip: its state', () => {
     ['settle', 'calendar-chip--settle', true],
     ['lifted', 'calendar-chip--lifted', false],
     ['dragging', 'calendar-chip--source', false],
-  ])('takes %s as %s', (prop, cls, lifts) => {
+  ])('takes %s as %s', (prop, cls) => {
     const card = renderChip(makeTask(), { [prop]: true })
     expect(card).toHaveClass(cls)
     for (const other of STATE_CLASSES.filter((c) => c !== cls)) expect(card).not.toHaveClass(other)
-    // A card in the hand, or the copy it left behind, stays put under the pointer.
-    if (lifts) expect(card).toHaveClass('hover:-translate-y-px')
-    else expect(card).not.toHaveClass('hover:-translate-y-px')
   })
 
-  it('lifts on hover at rest', () => {
-    expect(renderChip(makeTask())).toHaveClass('hover:-translate-y-px')
+  it('does not move under the pointer: hover only firms its edge', () => {
+    expect(renderChip(makeTask()).className).not.toMatch(/translate/)
   })
 
-  it('stops the title short of the drag grip on a chip only', () => {
-    const chip = renderChip(makeTask())
-    expect(within(chip).getByText('Draft the launch note').style.paddingRight).toBe('18px')
-    cleanup()
-    const card = renderUndated(makeTask())
-    expect(within(card).getByText('Draft the launch note').style.paddingRight).toBe('')
+  it('keeps the title clear of the drag grip on touch screens only', () => {
+    // Elsewhere the grip shows only on keyboard focus, over the end of the line.
+    const title = within(renderChip(makeTask())).getByText('Draft the launch note')
+    expect(title).toHaveClass('[@media(hover:none)]:pr-5')
+    expect(title.style.paddingRight).toBe('')
   })
 
   it('strikes through a cancelled chip, and names an untitled one', () => {
@@ -482,17 +462,12 @@ describe('a calendar chip: its state', () => {
     expect(within(card).getByText('(untitled)')).toHaveClass('line-through')
   })
 
-  it.each([
-    ['the undated card', undefined, undefined],
-    ['a stamped card with no column colour', ADDED, undefined],
-  ])('keeps chip state off %s, whatever it is passed', (_case, stamp, accent) => {
+  it('keeps the state off the undated card, whatever it is passed', () => {
     render(
       <ThemeProvider>
         <TaskCard
           task={makeTask({ status: 'done' })}
           onClick={() => {}}
-          stamp={stamp}
-          accent={accent}
           open
           past
           arrived
@@ -505,31 +480,28 @@ describe('a calendar chip: its state', () => {
     const card = screen.getByTestId('board-card')
     expect(card).not.toHaveAttribute('data-open')
     expect(card).not.toHaveAttribute('data-past')
-    expect(card).not.toHaveClass('calendar-chip')
+    // One card dialect: the same neutral card, just without the states.
+    expect(card).toHaveClass('calendar-chip')
     for (const cls of STATE_CLASSES) expect(card).not.toHaveClass(cls)
-    expect(card).toHaveClass('border-border', 'hover:-translate-y-px')
   })
 })
 
 describe('the undated card', () => {
-  it('shows a runtime pill only when the task has a runtime', () => {
-    const unassigned = renderUndated(makeTask({ status: 'todo', assigneeRuntime: 'openclaw' }))
-    expect(unassigned).not.toHaveTextContent(/openclaw/i)
-    expect(unassigned.querySelector('.uppercase')).toBeNull()
-    cleanup()
-
+  it('has the same face as any card, with no stamp and no runtime', () => {
     seedFleet([{ id: 'agent-7', name: 'Coder', runtime: 'codex' }])
-    const open = renderUndated(
+    const card = renderUndated(
       makeTask({ status: 'in_progress', assigneeAgentId: 'agent-7', assigneeRuntime: 'openclaw' }),
     )
-    expect(within(open).getByText('codex')).toHaveClass('uppercase')
-    expect(open).not.toHaveTextContent(/openclaw/i)
+    expect(within(card).getByText('Assigned to Coder')).toHaveClass('sr-only')
+    expect(within(card).queryByTestId('board-card-stamp')).toBeNull()
+    expect(card).not.toHaveTextContent(/codex|openclaw/i)
+    expect(card.querySelector('.uppercase, .font-mono')).toBeNull()
   })
 
-  it('keeps its Verifying and verdict pills', () => {
+  it('marks Verifying and a verdict as any card does, not with pills', () => {
     const card = renderUndated(makeTask({ status: 'in_review', verification: { status: 'fail' } }))
-    expect(within(card).getByText('Verifying')).toHaveClass('uppercase')
-    expect(within(card).getByText('fail')).toHaveClass('uppercase')
+    expect(within(card).getByText('Verifying')).toHaveClass('board-shimmer')
+    expect(card.querySelector('.uppercase')).toBeNull()
   })
 })
 
@@ -570,7 +542,6 @@ function renderDraggable(props: DraggableProps = {}) {
           disabled={false}
           onOpen={onOpen}
           stamp={ADDED}
-          accent={ACCENT}
           {...props}
         />
       </DndHarness>
@@ -621,9 +592,8 @@ describe('DraggableCard: pointer drags', () => {
       title: 'Draft the launch note',
       sitsToday: true,
     })
-    // The copy left in its cell is marked, and stops lifting on hover.
+    // The copy left in its cell is marked.
     expect(card).toHaveClass('calendar-chip--source')
-    expect(card).not.toHaveClass('hover:-translate-y-px')
     expect(card.parentElement!.style.opacity).toBe('1')
     letGo()
     expect(onDragEnd).toHaveBeenCalledTimes(1)
@@ -632,7 +602,7 @@ describe('DraggableCard: pointer drags', () => {
   })
 
   it('fades the undated card while it is dragged, instead of marking it', () => {
-    const { card, onDragStart } = renderDraggable({ stamp: undefined, accent: undefined })
+    const { card, onDragStart } = renderDraggable({ stamp: undefined })
     press(card, 'mouse')
     expect(onDragStart).toHaveBeenCalledTimes(1)
     expect(card.parentElement!.style.opacity).toBe('0.4')

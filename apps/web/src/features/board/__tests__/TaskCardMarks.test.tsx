@@ -24,10 +24,9 @@ import { calendarStamp } from '../calendar/CalendarGrid'
 import { elapsedLabel, shortDate, timeLabel, timeOnDay } from '../calendar/calendarFormat'
 import { resetBoardStorage } from './resetBoardStorage'
 
-const ACCENT = 'var(--category-web)'
 const TITLE = 'Draft the launch note and send it round the team'
-const ADDED: CardStamp = { label: '9:41 AM', title: 'Added Oct 14, 9:41 AM', finished: false }
-const FINISHED: CardStamp = { label: '3:05 PM', title: 'Finished Oct 14, 3:05 PM', finished: true }
+const ADDED: CardStamp = { label: '9:41 AM', title: 'Added Oct 14, 9:41 AM' }
+const FINISHED: CardStamp = { label: '3:05 PM', title: 'Finished Oct 14, 3:05 PM' }
 
 /** How long the pointer or focus has to rest on a card to count as a look. */
 const LOOK_MS = 600
@@ -46,11 +45,9 @@ function themed(children: ReactNode) {
   return <ThemeProvider>{children}</ThemeProvider>
 }
 
-/** A calendar chip: a card with a stamp and its column's colour. */
+/** A calendar chip: a card with a stamp. */
 function chipElement(task: BoardTask, props: CardProps = {}) {
-  return themed(
-    <TaskCard task={task} onClick={() => {}} stamp={ADDED} accent={ACCENT} {...props} />,
-  )
+  return themed(<TaskCard task={task} onClick={() => {}} stamp={ADDED} {...props} />)
 }
 
 function renderChip(task: BoardTask, props: CardProps = {}) {
@@ -96,7 +93,6 @@ describe('a clamped chip', () => {
       { stamp: FINISHED, clamp: true },
     )
     expect(within(card).getByText('Assigned to Coder')).toHaveClass('sr-only')
-    expect(within(card).getByText('Runtime: Codex')).toHaveClass('sr-only')
     expect(within(card).getByTestId('board-card-stamp')).toHaveTextContent('3:05 PM')
   })
 
@@ -170,18 +166,11 @@ describe('an unclamped chip', () => {
 })
 
 describe('clamp off a chip', () => {
-  it('leaves a stamped card with no column colour at two lines and no tooltip', () => {
-    render(themed(<TaskCard task={makeTask()} onClick={() => {}} stamp={ADDED} clamp />))
+  it('leaves the undated card at two lines and no tooltip, whatever it is passed', () => {
+    render(themed(<TaskCard task={makeTask()} onClick={() => {}} clamp />))
     const card = screen.getByTestId('board-card')
     expect(titleLine(card)).toHaveClass('line-clamp-2')
     expect(titleLine(card)).not.toHaveClass('line-clamp-1')
-    expect(card).not.toHaveAttribute('title')
-  })
-
-  it('leaves the undated card unclamped', () => {
-    render(themed(<TaskCard task={makeTask()} onClick={() => {}} clamp />))
-    const card = screen.getByTestId('board-card')
-    expect(titleLine(card).className).not.toMatch(/line-clamp/)
     expect(card).not.toHaveAttribute('title')
   })
 })
@@ -214,15 +203,8 @@ describe('an unseen chip: the dot', () => {
     expect(card).toHaveAttribute('title', TITLE)
   })
 
-  it.each([
-    ['the undated card', undefined, undefined],
-    ['a stamped card with no column colour', ADDED, undefined],
-  ])('draws no dot on %s', (_case, stamp, accent) => {
-    render(
-      themed(
-        <TaskCard task={makeTask()} onClick={() => {}} stamp={stamp} accent={accent} unseen />,
-      ),
-    )
+  it('draws no dot on the undated card', () => {
+    render(themed(<TaskCard task={makeTask()} onClick={() => {}} unseen />))
     expect(screen.queryByTestId('board-card-unseen')).toBeNull()
   })
 
@@ -347,45 +329,38 @@ describe('a chip stamp: running and finished', () => {
   const ADDED_AT = NOW - 3 * 60 * 60_000
   const SINCE = NOW - 25 * 60_000
 
-  it('shows how long a running task has gone, with a timer and no check', () => {
+  it('shows how long a running task has gone, behind a live dot', () => {
     const task = makeTask({ status: 'in_progress', createdAt: ADDED_AT, runningSince: SINCE })
     const stamp = calendarStamp(task, 'day', NOW)!
     expect(stamp.running).toBe(true)
     const { card } = renderChip(task, { stamp })
     const shown = within(card).getByTestId('board-card-stamp')
-    expect(shown.querySelector('svg.lucide-timer')).not.toBeNull()
-    expect(shown.querySelector('svg.lucide-circle-check')).toBeNull()
-    expect(shown.querySelector('svg.text-mint')).toBeNull()
+    expect(shown.querySelector('span.bg-mint')).not.toBeNull()
+    expect(shown.querySelector('svg')).toBeNull()
     expect(shown).toHaveTextContent(elapsedLabel(NOW - SINCE))
-    // A length of time, like a clock time, is set in mono.
-    expect(shown).toHaveClass('font-data')
+    // Times are Inter with tabular figures, never mono.
+    expect(shown).toHaveClass('tabular-nums')
+    expect(shown).not.toHaveClass('font-data')
     const title = `Running since ${timeOnDay(SINCE, NOW)}. Added ${shortDate(ADDED_AT)} at ${timeLabel(ADDED_AT)}`
     expect(shown).toHaveAttribute('title', title)
     expect(within(shown).getByText(`, ${title}`)).toHaveClass('sr-only')
   })
 
-  it('draws the timer for a hand-built running stamp too', () => {
-    const stamp: CardStamp = {
-      label: '2h 5m',
-      title: 'Running since 9:00 AM',
-      finished: false,
-      running: true,
-    }
+  it('draws the live dot for a hand-built running stamp too', () => {
+    const stamp: CardStamp = { label: '2h 5m', title: 'Running since 9:00 AM', running: true }
     const shown = within(
       renderChip(makeTask({ status: 'in_progress' }), { stamp }).card,
     ).getByTestId('board-card-stamp')
-    expect(shown.querySelectorAll('svg')).toHaveLength(1)
-    expect(shown.querySelector('svg.lucide-timer')).not.toBeNull()
+    expect(shown.querySelectorAll('span.bg-mint')).toHaveLength(1)
     expect(shown).toHaveTextContent('2h 5m')
   })
 
-  it('carries a mint check on a finished stamp, and no timer', () => {
+  it('carries no mark on a finished stamp: Done already says it', () => {
     const shown = within(
       renderChip(makeTask({ status: 'done' }), { stamp: FINISHED }).card,
     ).getByTestId('board-card-stamp')
-    expect(shown.querySelectorAll('svg')).toHaveLength(1)
-    expect(shown.querySelector('svg.lucide-circle-check')).toHaveClass('text-mint')
-    expect(shown.querySelector('svg.lucide-timer')).toBeNull()
+    expect(shown.querySelector('svg')).toBeNull()
+    expect(shown.querySelector('span.bg-mint')).toBeNull()
   })
 
   it('stamps a finished task as finished even when it still carries a run start', () => {
@@ -393,8 +368,7 @@ describe('a chip stamp: running and finished', () => {
     const stamp = calendarStamp(task, 'day', NOW)!
     expect(stamp.running).toBeUndefined()
     const shown = within(renderChip(task, { stamp }).card).getByTestId('board-card-stamp')
-    expect(shown.querySelector('svg.lucide-circle-check')).toHaveClass('text-mint')
-    expect(shown.querySelector('svg.lucide-timer')).toBeNull()
+    expect(shown.querySelector('span.bg-mint')).toBeNull()
     expect(shown).toHaveTextContent(timeLabel(NOW - 60_000))
   })
 
@@ -421,7 +395,6 @@ function renderDraggable(props: DraggableProps = {}) {
           disabled={false}
           onOpen={() => {}}
           stamp={FINISHED}
-          accent={ACCENT}
           {...props}
         />
       </DndContext>,

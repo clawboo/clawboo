@@ -6,14 +6,13 @@
 // days folds into a seam, one line that opens where it is clicked; Earlier, the
 // row of open work from before the range, folds when all of it is parked.
 //
-// It is a kanban first. Each column is a lane in its own faint colour that runs
-// unbroken from top to bottom; a day is a hairline step inside the lanes, so the
-// eye follows work down a column rather than across a row. A card is an event
-// chip held at its corner in the column's colour, and an upcoming routine run is
-// a hatched, dashed outline of one. The day gutter carries the calendar: today's
-// date in the one red circle on the board, weekends and the Earlier row shaded.
-// Today's row is lifted on a sheet of its own; any other row lights up only
-// when someone picks its date.
+// It is a kanban first. Each column is a neutral lane that runs unbroken from
+// top to bottom, with space rather than rules between lanes; a day is a hairline
+// step inside them, so the eye follows work down a column rather than across a
+// row. The only colour in a column is the small status glyph in its title. A
+// card is a plain card, and an upcoming routine run is a dashed outline of one.
+// The day gutter carries the calendar: today's date is the one red circle on the
+// board, and a row lights up only when someone picks its date.
 //
 // Needs you is the first column, and it only has today: what is waiting on a
 // person is waiting now, so it sits in today's row (in the All view, in its one
@@ -30,21 +29,16 @@ import {
   type Ref,
 } from 'react'
 import { useDroppable } from '@dnd-kit/core'
-import {
-  ChevronDown,
-  ChevronRight,
-  EyeOff,
-  FoldVertical,
-  ShieldAlert,
-  UnfoldVertical,
-} from 'lucide-react'
+import { ChevronDown, ChevronRight, EyeOff, FoldVertical, Plus, UnfoldVertical } from 'lucide-react'
 
 import type { BoardTask } from '@/lib/boardClient'
 import type { RoutineOccurrences } from '@/lib/schedulesClient'
 
 import { NEEDS_YOU_COLUMN } from '../boardStatus'
+import { StatusGlyph, glyphKindOf } from '../StatusGlyph'
 import { DraggableCard, type CardStamp } from '../TaskCard'
 import {
+  agoLabel,
   countLabel,
   dayMonth,
   elapsedLabel,
@@ -70,28 +64,30 @@ import {
   type DayRuns,
   type TaskBuckets,
 } from './calendarModel'
-import { RollingCount } from './RollingCount'
 import { RoutineRunStrip } from './RoutineRun'
 
-// The widths add up to 1120px with Cancelled folded, which fits the board's
-// share of a 1440px screen beside the app's sidebars: every column on screen,
-// no sideways scroll. The gutter is a date and a weekday, like a calendar's.
-export const GUTTER_W = 80
+// The widths and the space between lanes add up to 1136px with Cancelled
+// folded, which fits the board's share of a 1440px screen beside the app's
+// sidebars: every column on screen, no sideways scroll. The gutter is a date and
+// a weekday, like a calendar's.
+export const GUTTER_W = 64
 export const NEEDS_YOU_W = 248
 export const HEADER_H = 44
 /** The space the board leaves under the grid (its scroll container's bottom padding). */
 export const BOTTOM_PAD = 32
 /** The narrowest a status column gets; wider screens share out the rest. */
-const COLUMN_MIN: Record<string, number> = { todo: 200 }
-const DEFAULT_COLUMN_MIN = 184
+export const COLUMN_MIN = 184
+/** Space between lanes: spacing separates them, not rules. */
+export const LANE_GAP = 8
+export const LANE_RADIUS = 12
+/** The Kanban board's side gutter, the same as the bars above it. */
+export const KANBAN_PAD = 16
 /** Cards a cell of the Earlier row shows before "+N more", in every view. */
 const EARLIER_CAP = 3
-const RAIL_W = 40
+export const RAIL_W = 40
 const RUN_CAP = 2
 /** A seam's height: folded quiet days are a line, not a row. */
 const SEAM_H = 12
-/** The seam's fill in the date column, opaque like the rest of the gutter. */
-const SEAM_FILL = 'color-mix(in srgb, var(--foreground) 3%, var(--surface))'
 /** Earlier's summary reads from the furthest along: running, then to do, then
  *  parked in Backlog. */
 const EARLIER_ORDER = ['in_progress', 'todo', 'backlog']
@@ -103,23 +99,22 @@ const EARLIER_WORD: Record<string, string> = {
 /** Needs you items today's cell shows before "+N more". */
 export const NEEDS_YOU_CAP = 3
 
-// Each column's colour. Red is today's alone, so no column is red; amber is
-// Needs you's alone, so no status column is amber either.
-const COLUMN_HUE: Record<string, string> = {
-  backlog: 'var(--category-other)',
-  todo: 'var(--category-data)',
-  in_progress: 'var(--category-web)',
-  done: 'var(--mint)',
-  cancelled: 'var(--category-other)',
+/** What an empty lane on the Kanban board says, in its column's words. */
+const EMPTY_LANE: Record<string, string> = {
+  backlog: 'Nothing parked',
+  todo: 'Nothing waiting to start',
+  in_progress: 'Nothing running',
+  done: 'Nothing finished yet',
+  cancelled: 'Nothing cancelled',
 }
-const NEEDS_YOU_HUE = 'var(--amber)'
 
 /** How far a column that cannot take the dragged card steps back. */
 const DIM_WHILE_DRAGGING = 0.45
 
-export function columnHue(id: string): string {
-  return COLUMN_HUE[id] ?? 'var(--category-other)'
-}
+// Every lane is the same faint neutral. A lane under a dragged card that can
+// land there fills a step more. Cells paint `--lane`, so the column sets it once.
+export const LANE = 'rgb(var(--foreground-rgb) / 0.025)'
+const LANE_OVER = 'rgb(var(--foreground-rgb) / 0.06)'
 
 export interface CalendarColumn {
   id: string
@@ -229,6 +224,8 @@ export interface CalendarGridProps {
   unseenIds: ReadonlySet<string>
   /** The person has looked at a card that changed while they were away. */
   onSeen: (id: string) => void
+  /** Opens New task, from the "+" in To do's title. */
+  onNewTask?: () => void
 }
 
 /** The states a cell's cards draw from: which one is open, which just moved. */
@@ -254,8 +251,8 @@ function runningSinceOf(task: BoardTask): number | null {
 /**
  * A calendar card's stamp. A task that is running shows how long its run has
  * gone; any other shows when it was added or finished. A card on a day row
- * shows the time, one from before the range its date, and one in the All view
- * the time when it is from today and the date otherwise.
+ * shows the time, one from before the range its date, and one on the Kanban
+ * board how long ago ("4m ago", "Yesterday").
  */
 export function calendarStamp(
   task: BoardTask,
@@ -271,19 +268,14 @@ export function calendarStamp(
     return {
       label: elapsedLabel(now - since),
       title: [`Running since ${timeOnDay(since, now)}`, when].filter(Boolean).join('. '),
-      finished: false,
       running: true,
     }
   }
   if (at == null || when == null) return undefined
-  const dated = place === 'earlier' || (place === 'all' && !isSameDay(at, now))
-  return {
-    // The weekday and the time are in the title.
-    label: dated ? dayMonth(at) : timeLabel(at),
-    title: when,
-    finished: task.status === 'done',
-    dated,
-  }
+  // On the Kanban board no row gives the day, so the card says how long ago.
+  if (place === 'all') return { label: agoLabel(at, now), title: when }
+  // The weekday and the time are in the title.
+  return { label: place === 'earlier' ? dayMonth(at) : timeLabel(at), title: when }
 }
 
 function placeOf(row: Row): StampPlace {
@@ -319,70 +311,58 @@ function rowTone(
   }
 }
 
-/** A picked day's fill across the lanes. Neutral, because red is today's. */
-const SELECTED_WASH = 'rgb(var(--foreground-rgb) / 0.045)'
+/** A picked day's fill in the lanes: the lane, a step darker. */
+const SELECTED_LANE = 'rgb(var(--foreground-rgb) / 0.07)'
 
-/** Whether the rule under a row runs right across the board: a week break in a
- *  month, and the line under Earlier. */
+/** Whether the rule under a row is the firm one: a week break in a month, and
+ *  the line under Earlier. */
 function fullRule(row: Row): boolean {
   return row.kind === 'earlier' || (row.kind !== 'all' && row.breakAfter)
 }
 
-/** Today's sheet, the opaque fill that lifts its row off the lanes. */
-const TODAY_SHEET = 'var(--board-today-sheet)'
-
-/** The gutter's fill: opaque, so cards scrolling under it never show through. */
-function gutterFill(tone: Tone, row: Row): string {
-  if (tone.today)
-    return tone.selected ? `color-mix(in srgb, var(--foreground) 5%, ${TODAY_SHEET})` : TODAY_SHEET
-  if (tone.selected) return 'color-mix(in srgb, var(--foreground) 5%, var(--surface))'
-  if (tone.weekend || row.kind === 'earlier')
-    return 'color-mix(in srgb, var(--foreground) 2.8%, var(--surface))'
-  return 'var(--surface)'
-}
-
-function gutterStyle(tone: Tone, row: Row): CSSProperties {
+/** The gutter sits on the board's canvas, opaque so cards scrolling under it
+ *  never show through. Only a picked date fills its row. */
+function gutterStyle(tone: Tone): CSSProperties {
   return {
-    backgroundColor: gutterFill(tone, row),
-    borderBottom: fullRule(row) ? '1px solid var(--border-strong)' : '1px solid var(--border)',
+    backgroundColor: tone.selected
+      ? 'color-mix(in srgb, var(--foreground) 4.5%, var(--surface))'
+      : 'var(--surface)',
   }
 }
 
-// A plain day's rule stops short of the column edges, so the lanes run unbroken
-// and the days read as steps inside them. It is drawn in the cell's transparent
-// bottom border, where the gutter draws its own, so the two meet on one line.
-const LANE_RULE = 'linear-gradient(var(--border), var(--border))'
+// A day's rule stops short of the lane's edges, so the lanes run unbroken and
+// the days read as steps inside them. It is drawn in the cell's transparent
+// bottom border.
 const LANE_RULE_INSET = 8
 
-/** A cell's fill and rule. Cells sit on their lane, so the fill is translucent. */
-function cellStyle(tone: Tone, row: Row): CSSProperties {
-  const backgroundColor = tone.today
-    ? tone.selected
-      ? `color-mix(in srgb, var(--foreground) 4.5%, ${TODAY_SHEET})`
-      : TODAY_SHEET
-    : tone.selected
-      ? SELECTED_WASH
-      : undefined
-  if (fullRule(row)) return { backgroundColor, borderBottom: '1px solid var(--border-strong)' }
+/** A cell's fill and rule. The fill is the column's `--lane`; the first row
+ *  rounds the lane's top. */
+function cellStyle(tone: Tone, row: Row, first = false): CSSProperties {
+  const rule = fullRule(row) ? 'var(--border-strong)' : 'var(--border)'
   return {
-    backgroundColor,
+    backgroundColor: tone.selected ? SELECTED_LANE : 'var(--lane)',
     borderBottom: '1px solid transparent',
-    backgroundImage: LANE_RULE,
+    backgroundImage: `linear-gradient(${rule}, ${rule})`,
     backgroundOrigin: 'border-box',
     backgroundRepeat: 'no-repeat',
     backgroundPosition: 'center bottom',
     backgroundSize: `calc(100% - ${LANE_RULE_INSET * 2}px) 1px`,
+    ...(first ? { borderTopLeftRadius: LANE_RADIUS, borderTopRightRadius: LANE_RADIUS } : null),
   }
 }
 
-/** A column's lane: the faintest wash of its colour, top to bottom. */
-function laneFill(hue: string): string {
-  return `color-mix(in srgb, ${hue} 3.5%, transparent)`
-}
-
-/** A column title's fill: opaque, a touch more of the colour than its lane. */
-function titleFill(hue: string): string {
-  return `color-mix(in srgb, ${hue} 6%, var(--surface))`
+/** The lane under the last row, down to the bottom of the board. */
+function LaneEnd() {
+  return (
+    <div
+      aria-hidden
+      style={{
+        backgroundColor: 'var(--lane)',
+        borderBottomLeftRadius: LANE_RADIUS,
+        borderBottomRightRadius: LANE_RADIUS,
+      }}
+    />
+  )
 }
 
 // ─── Day gutter ─────────────────────────────────────────────────────────────
@@ -426,14 +406,14 @@ function DayHeader({
   /** Today's circle pings each time this bumps; 0 means it never has. */
   todayPing: number
 }) {
-  const base = gutterStyle(tone, row)
+  const base = gutterStyle(tone)
 
   if (row.kind === 'all') {
     return (
       <div data-testid="calendar-row-all" className="px-1.5 py-2.5" style={base}>
         <div
           aria-hidden
-          className="flex flex-col items-center whitespace-nowrap text-[11px] leading-[14px] tabular-nums text-muted-foreground"
+          className="flex flex-col items-center whitespace-nowrap text-micro tabular-nums text-muted-foreground"
         >
           {/* The corner already says All. */}
           <span className="text-foreground">{countLabel(tasks, 'task')}</span>
@@ -454,11 +434,11 @@ function DayHeader({
           aria-label={`Earlier: open work added before ${longDate(rangeStart)}, ${
             earlierParts.length > 0 ? earlierParts.join(', ') : countLabel(tasks, 'task')
           }`}
-          className="flex w-full cursor-pointer items-center justify-center gap-0.5 rounded-md py-0.5 text-[11px] font-semibold leading-[14px] text-foreground transition-colors duration-150 hover:bg-foreground/[0.04] focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="flex w-full cursor-pointer items-center justify-center gap-0.5 rounded-md py-0.5 text-micro font-semibold text-foreground transition-colors duration-150 hover:bg-foreground/[0.04] focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           <Chevron
             size={12}
-            strokeWidth={2.4}
+            strokeWidth={2}
             className="shrink-0 text-muted-foreground"
             aria-hidden
           />
@@ -466,7 +446,7 @@ function DayHeader({
         </button>
         <div
           aria-hidden
-          className="mt-1 flex flex-col items-center whitespace-nowrap text-[11px] leading-[14px] tabular-nums text-muted-foreground"
+          className="mt-1 flex flex-col items-center whitespace-nowrap text-micro tabular-nums text-muted-foreground"
         >
           <span>Before</span>
           <span>{dayMonth(rangeStart)}</span>
@@ -496,14 +476,7 @@ function DayHeader({
       <div
         data-testid="calendar-row-gap"
         className="board-seam-gutter relative"
-        style={{
-          ...base,
-          height: SEAM_H,
-          backgroundColor: SEAM_FILL,
-          borderBottomColor: 'var(--border-strong)',
-          // The line above the seam, drawn over the rule of the row before it.
-          boxShadow: '0 -1px 0 var(--border-strong)',
-        }}
+        style={{ ...base, height: SEAM_H }}
       >
         {/* The visible handle is small; the button around it is the gutter's
             width and 24px tall, reaching a few pixels into the rows either side,
@@ -521,9 +494,9 @@ function DayHeader({
         >
           <span
             aria-hidden
-            className="board-seam-handle flex h-4 items-center gap-1 rounded-full px-1.5 text-[10px] leading-none font-medium tabular-nums whitespace-nowrap text-muted-foreground group-focus-visible:outline-2 group-focus-visible:outline-offset-1 group-focus-visible:outline-foreground"
+            className="board-seam-handle flex h-4 items-center gap-1 rounded-full px-1.5 text-micro leading-none font-medium tabular-nums whitespace-nowrap text-muted-foreground group-focus-visible:outline-2 group-focus-visible:outline-offset-1 group-focus-visible:outline-foreground"
           >
-            <UnfoldVertical size={10} strokeWidth={2.4} className="shrink-0" />
+            <UnfoldVertical size={10} strokeWidth={2} className="shrink-0" />
             {span}
           </span>
         </button>
@@ -535,8 +508,10 @@ function DayHeader({
   // already names it.
   const monthStart = !first && new Date(row.day).getDate() === 1
   const dim = tone.past && !tone.today && !tone.selected
+  // A day gone by, or a weekend, reads its weekday in the muted ink.
+  const quietWeekday = dim || (tone.weekend && !tone.today && !tone.selected)
   const weekday = (
-    <span className={`board-micro ${dim ? 'text-muted-foreground' : 'text-foreground'}`}>
+    <span className={`board-micro ${quietWeekday ? 'text-muted-foreground' : 'text-foreground'}`}>
       {weekdayShort(row.day)}
     </span>
   )
@@ -603,7 +578,7 @@ function DayHeader({
             onClick={() => onToggleFold(row.unfolded!)}
             className="absolute left-0.5 top-1/2 z-[1] flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-0!"
           >
-            <FoldVertical size={12} strokeWidth={2.2} aria-hidden />
+            <FoldVertical size={12} strokeWidth={2} aria-hidden />
           </button>
         ) : null}
         <button
@@ -616,16 +591,14 @@ function DayHeader({
             {monthStart ? (
               <span className="flex flex-col items-end">
                 {weekday}
-                <span className="text-[10px] leading-3 text-muted-foreground">
-                  {monthShort(row.day)}
-                </span>
+                <span className="text-micro text-muted-foreground">{monthShort(row.day)}</span>
               </span>
             ) : (
               weekday
             )}
             <span
               className={[
-                'font-display font-display-cut flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[14px] leading-none',
+                'font-display font-display-cut flex size-6 shrink-0 items-center justify-center rounded-full text-sm leading-none',
                 circle,
               ].join(' ')}
               style={{ boxShadow: ring }}
@@ -644,8 +617,8 @@ function DayHeader({
       data-day-key={row.key}
       data-today={tone.today || undefined}
       data-selected={tone.selected || undefined}
-      className={tone.today ? 'board-today-gutter flex' : 'flex'}
-      style={{ ...base, minHeight: tone.today ? 76 : undefined }}
+      className="flex"
+      style={base}
     >
       <button
         {...button}
@@ -655,7 +628,7 @@ function DayHeader({
           {weekday}
           <span
             className={[
-              'font-display font-display-cut relative mt-1 flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full text-[20px] leading-none',
+              'font-display font-display-cut relative mt-1 flex size-7 shrink-0 items-center justify-center rounded-full text-xl leading-none',
               circle,
             ].join(' ')}
             style={{ boxShadow: ring }}
@@ -667,9 +640,7 @@ function DayHeader({
             ) : null}
           </span>
           {monthStart ? (
-            <span className="mt-0.5 text-[10px] leading-3 text-muted-foreground">
-              {monthShort(row.day)}
-            </span>
+            <span className="mt-0.5 text-micro text-muted-foreground">{monthShort(row.day)}</span>
           ) : null}
         </span>
       </button>
@@ -691,19 +662,19 @@ function whereLabel(row: Row, tone: Tone): string {
 
 /** A cell with nothing a person can reach: a folded column, or Needs you on a
  *  day that is not today. It keeps the row's shading and rule. */
-function Spacer({ row, tone }: { row: Row; tone: Tone }) {
-  return <div aria-hidden style={cellStyle(tone, row)} />
+function Spacer({ row, tone, first }: { row: Row; tone: Tone; first: boolean }) {
+  return <div aria-hidden style={cellStyle(tone, row, first)} />
 }
 
 /** The dashed outline that shows where a dragged card will land. */
-function LandingOutline({ caption, accent }: { caption: string; accent: string }) {
+function LandingOutline({ caption }: { caption: string }) {
   return (
     <div
       data-testid="calendar-landing"
-      className="flex h-10 shrink-0 items-center justify-center rounded-lg border border-dashed text-[11.5px] font-medium text-foreground"
+      className="flex h-10 shrink-0 items-center justify-center rounded-lg border border-dashed text-xs font-medium text-foreground"
       style={{
-        borderColor: `color-mix(in srgb, ${accent} 70%, transparent)`,
-        background: `color-mix(in srgb, ${accent} 8%, transparent)`,
+        borderColor: 'color-mix(in srgb, var(--foreground) 35%, transparent)',
+        background: 'var(--surface)',
       }}
     >
       {caption}
@@ -715,6 +686,7 @@ function Cell({
   column,
   row,
   tone,
+  first,
   tasks,
   runs,
   cap,
@@ -733,6 +705,8 @@ function Cell({
   column: CalendarColumn
   row: Row
   tone: Tone
+  /** The lane's first row, which rounds its top. */
+  first: boolean
   tasks: BoardTask[]
   runs: DayRuns<RoutineOccurrences>[]
   cap: number
@@ -753,7 +727,6 @@ function Cell({
   const shownTasks = folded ? [] : expanded ? tasks : pickShown(tasks, cap, pinnedIds)
   const hidden = folded ? 0 : runs.length - shownRuns.length + (tasks.length - shownTasks.length)
   const empty = runs.length === 0 && tasks.length === 0
-  const accent = columnHue(column.id)
   // Finished work from a day before today steps back, in a past day's row or in
   // the All view's one row; on today, and in Earlier (which only holds open
   // work), it does not.
@@ -792,26 +765,23 @@ function Cell({
       }`}
       data-testid={`calendar-cell-${column.id}-${row.key}`}
       data-selected={tone.selected || undefined}
-      className={`flex min-w-0 flex-col gap-1.5 transition-colors duration-150 ${
+      className={`flex min-w-0 flex-col gap-2 transition-colors duration-150 ${
         row.kind === 'day' && row.compact ? 'px-2 py-1.5' : 'p-2'
       }`}
-      style={cellStyle(tone, row)}
+      style={cellStyle(tone, row, first)}
     >
       {/* The day's work first, then what is still to come: a routine's runs are
           a promise, not work, so they sit under the cards. A dragged card's
           outline sits where the card will land among them. */}
       {shownTasks.map((t, i) => (
         <Fragment key={t.id}>
-          {landing && i === landingIndex ? (
-            <LandingOutline caption={landing.caption} accent={accent} />
-          ) : null}
+          {landing && i === landingIndex ? <LandingOutline caption={landing.caption} /> : null}
           <DraggableCard
             key={t.id}
             task={t}
             disabled={cardDisabled(t)}
             onOpen={() => onCardOpen(t.id)}
             stamp={calendarStamp(t, placeOf(row), states.now)}
-            accent={accent}
             open={t.id === states.openTaskId}
             past={finishedBefore(t)}
             // Finished work from a day gone by keeps its title to one line, unless
@@ -825,7 +795,7 @@ function Cell({
         </Fragment>
       ))}
       {landing && landingIndex === shownTasks.length ? (
-        <LandingOutline caption={landing.caption} accent={accent} />
+        <LandingOutline caption={landing.caption} />
       ) : null}
       {shownRuns.map((r) => {
         const focusId = `routine-run:${r.routine.schedule.id}:${row.key}`
@@ -836,7 +806,6 @@ function Cell({
             key={r.routine.schedule.id}
             day={r}
             nextAt={nextAt}
-            accent={accent}
             focusId={focusId}
             open={states.openRunKey === focusId}
             onOpen={(anchor) => onRunOpen(r.routine, anchor)}
@@ -846,12 +815,17 @@ function Cell({
           />
         )
       })}
+      {row.kind === 'all' && empty && !landing ? (
+        <span data-testid="board-lane-empty" className="px-1 py-0.5 text-xs text-muted-foreground">
+          {EMPTY_LANE[column.id] ?? 'No tasks'}
+        </span>
+      ) : null}
       {hidden > 0 || (expanded && (runs.length > runCap || tasks.length > cap)) ? (
         <button
           type="button"
           onClick={onToggleExpanded}
           aria-expanded={expanded}
-          className="self-start cursor-pointer rounded-md px-1.5 py-0.5 text-[12px] font-medium text-foreground transition-colors hover:bg-foreground/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="self-start cursor-pointer rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           {expanded ? 'Show less' : `+${hidden} more`}
         </button>
@@ -862,29 +836,26 @@ function Cell({
 
 // ─── Columns ────────────────────────────────────────────────────────────────
 
-/** A column's sticky title: a colour dot, the name, and the count as a bare
- *  numeral beside it. An empty column shows no count at all. */
+/** A column's sticky title: its status glyph, the name, and the count as a
+ *  plain number beside it. An empty column shows no count at all. */
 function ColumnTitle({
-  hue,
+  glyph,
   label,
   count,
   children,
 }: {
-  hue: string
+  glyph: ReactNode
   label: string
   count: number
   children?: ReactNode
 }) {
   return (
     <>
-      <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: hue }} />
+      {glyph}
       <span className="flex min-w-0 items-baseline gap-1.5">
-        <span className="truncate text-[13px] font-semibold text-foreground">{label}</span>
+        <span className="truncate text-xs font-semibold text-foreground">{label}</span>
         {count > 0 ? (
-          <RollingCount
-            value={count}
-            className="font-data shrink-0 text-[12px] tabular-nums text-muted-foreground"
-          />
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
         ) : null}
       </span>
       {children}
@@ -892,16 +863,20 @@ function ColumnTitle({
   )
 }
 
-/** Every sticky header cell. `board-col-head` lifts it off the rows with a
- *  shadow once the board has scrolled down. */
-const HEADER_BASE = 'board-col-head sticky top-0 z-[2] flex items-center border-b border-border'
-const HEADER_CLASS = `${HEADER_BASE} gap-2 px-3`
+/** Every sticky header cell. It sits on the canvas above its lane, and
+ *  `board-col-head` lifts it off the rows with a shadow once the board has
+ *  scrolled down. */
+const HEADER_BASE = 'board-col-head sticky top-0 z-[2] flex items-center'
+const HEADER_CLASS = `${HEADER_BASE} gap-2 pl-3 pr-1`
 /** A folded column's header holds only its count, centred in the narrow rail. */
 const RAIL_HEADER_CLASS = `${HEADER_BASE} justify-center px-1`
 const HEADER_STYLE = {
   height: HEADER_H,
   background: 'var(--surface)',
 }
+/** The round ghost buttons in a column's title. */
+const HEAD_BUTTON =
+  'ml-auto flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2'
 
 /** A rail: a folded column's full-height button, its name running down the side
  *  in sentence case. It fills the column, so its focus ring is drawn inside it
@@ -930,14 +905,14 @@ function Rail({
       data-testid={testId}
       onClick={onClick}
       aria-label={label}
-      className="absolute inset-0 z-[3] flex cursor-pointer flex-col items-center transition-colors hover:bg-foreground/[0.03] focus-visible:outline-2 focus-visible:-outline-offset-2!"
+      className="absolute inset-0 z-[3] flex cursor-pointer flex-col items-center rounded-xl transition-colors hover:bg-foreground/[0.03] focus-visible:outline-2 focus-visible:-outline-offset-2!"
       style={{ paddingTop: HEADER_H + 12 }}
     >
       <span
         aria-hidden
         data-testid={caption ? `${testId}-caption` : undefined}
         className={[
-          'sticky text-[11.5px] font-semibold tracking-[0.01em]',
+          'sticky text-xs font-semibold',
           caption ? 'text-foreground' : 'text-muted-foreground',
         ].join(' ')}
         style={{ top: HEADER_H + 12, writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
@@ -946,6 +921,18 @@ function Rail({
       </span>
     </button>
   )
+}
+
+/** A column element: one grid item spanning every row, laying its cells on the
+ *  parent's rows. `--lane` is the fill its cells paint. */
+function columnStyle(gridColumn: number, lane: string): CSSProperties {
+  return {
+    gridColumn,
+    gridRow: '1 / -1',
+    display: 'grid',
+    gridTemplateRows: 'subgrid',
+    ['--lane' as string]: lane,
+  }
 }
 
 function NeedsYouColumn({
@@ -979,51 +966,38 @@ function NeedsYouColumn({
       data-testid="board-column-needs-you"
       role="group"
       aria-label={`Needs you, ${items}`}
-      className="relative border-l border-border transition-opacity duration-150"
+      className="relative transition-opacity duration-150"
       style={{
-        gridColumn,
-        gridRow: '1 / -1',
-        display: 'grid',
-        gridTemplateRows: 'subgrid',
-        background: laneFill(NEEDS_YOU_HUE),
+        ...columnStyle(gridColumn, landsHere ? LANE_OVER : LANE),
         opacity: dragging && !landsHere ? DIM_WHILE_DRAGGING : 1,
       }}
     >
-      <div
-        className={rail ? RAIL_HEADER_CLASS : HEADER_CLASS}
-        style={{ ...HEADER_STYLE, background: titleFill(NEEDS_YOU_HUE) }}
-      >
+      <div className={rail ? RAIL_HEADER_CLASS : HEADER_CLASS} style={HEADER_STYLE}>
         {rail ? (
-          <RollingCount
-            value={total}
+          <span
             className={[
-              'font-data text-[12px] font-semibold tabular-nums',
+              'text-xs font-semibold tabular-nums',
               total > 0 ? 'text-foreground' : 'text-muted-foreground',
             ].join(' ')}
-          />
+          >
+            {total}
+          </span>
         ) : (
-          <>
-            <ShieldAlert
-              size={14}
-              strokeWidth={2.2}
-              aria-hidden
-              className={total > 0 ? 'shrink-0 text-amber' : 'shrink-0 text-muted-foreground'}
-            />
-            <span className="truncate text-[13px] font-semibold text-foreground">Needs you</span>
-            {total > 0 ? (
-              <span className="font-data shrink-0 rounded-full bg-amber/20 px-1.5 py-px text-[11px] font-semibold tabular-nums text-foreground">
-                <RollingCount value={total} />
-              </span>
-            ) : null}
+          <ColumnTitle
+            glyph={<StatusGlyph kind="needs_you" muted={total === 0} />}
+            label="Needs you"
+            count={total}
+          >
             {onToday ? (
-              <span className="ml-auto text-[11px] text-muted-foreground">Today</span>
+              <span className="ml-auto pr-2 text-xs text-muted-foreground">Today</span>
             ) : null}
-          </>
+          </ColumnTitle>
         )}
       </div>
-      {rows.map((row) => {
+      {rows.map((row, i) => {
         const tone = tones.get(row.key)!
-        if (row.key !== hostKey) return <Spacer key={row.key} row={row} tone={tone} />
+        if (row.key !== hostKey)
+          return <Spacer key={row.key} row={row} tone={tone} first={i === 0} />
         return (
           <div
             key={row.key}
@@ -1031,23 +1005,17 @@ function NeedsYouColumn({
             tabIndex={-1}
             aria-label={`Needs you${onToday ? ' today' : ''}: ${total === 0 ? 'nothing' : items}`}
             data-testid="calendar-needs-you-today"
-            className="flex min-w-0 flex-col gap-2.5 p-2 focus-visible:-outline-offset-2!"
-            style={{
-              ...cellStyle(tone, row),
-              // Today's sheet (or the lane, in the All view), with a little more
-              // amber when something is waiting.
-              backgroundColor: `color-mix(in srgb, ${
-                tone.selected ? 'var(--foreground)' : NEEDS_YOU_HUE
-              } ${tone.selected ? 4.5 : total > 0 ? 6 : 0}%, ${onToday ? TODAY_SHEET : 'transparent'})`,
-            }}
+            className="flex min-w-0 flex-col gap-2 p-2 focus-visible:-outline-offset-2!"
+            style={cellStyle(tone, row, i === 0)}
           >
             {landsHere && landing?.rowKey === row.key ? (
-              <LandingOutline caption={landing.caption} accent={NEEDS_YOU_HUE} />
+              <LandingOutline caption={landing.caption} />
             ) : null}
             {needsYou.content}
           </div>
         )
       })}
+      <LaneEnd />
       {rail ? (
         <Rail
           testId="board-needs-you-rail"
@@ -1085,6 +1053,7 @@ function StatusColumn({
   cardDisabled,
   onCardOpen,
   onRunOpen,
+  onNewTask,
   states,
 }: {
   column: CalendarColumn
@@ -1113,12 +1082,13 @@ function StatusColumn({
   cardDisabled: (task: BoardTask) => boolean
   onCardOpen: (id: string) => void
   onRunOpen: (run: RoutineOccurrences, anchor: HTMLElement) => void
+  /** Opens New task; To do, where a new task lands, carries a "+" for it. */
+  onNewTask?: () => void
   states: CardStates
 }) {
   const { setNodeRef, isOver: dndOver } = useDroppable({ id: column.id, disabled: dropDisabled })
   const over = (isOver || dndOver) && !dropDisabled && !own
   const rail = column.id === 'cancelled' && !cancelledOpen
-  const hue = columnHue(column.id)
 
   // Folding swaps the button that was pressed for its counterpart, in another
   // place in the tree; focus follows, or a keyboard user would land on the page.
@@ -1141,31 +1111,22 @@ function StatusColumn({
       data-testid={`board-column-${column.id}`}
       role="group"
       aria-label={`${column.label}, ${countLabel(count, 'task')}`}
-      className="relative border-l border-border transition-[opacity,background-color] duration-150"
+      className="relative transition-opacity duration-150"
       style={{
-        gridColumn,
-        gridRow: '1 / -1',
-        display: 'grid',
-        gridTemplateRows: 'subgrid',
-        background: over ? `color-mix(in srgb, ${hue} 8%, transparent)` : laneFill(hue),
-        boxShadow: over
-          ? `inset 0 0 0 1.5px color-mix(in srgb, ${hue} 55%, transparent)`
-          : undefined,
+        ...columnStyle(gridColumn, over ? LANE_OVER : LANE),
         // A column that cannot take the card steps back while it is dragged.
         opacity: dragging && dropDisabled ? DIM_WHILE_DRAGGING : 1,
       }}
     >
-      <div
-        className={rail ? RAIL_HEADER_CLASS : HEADER_CLASS}
-        style={{ ...HEADER_STYLE, background: titleFill(hue) }}
-      >
+      <div className={rail ? RAIL_HEADER_CLASS : HEADER_CLASS} style={HEADER_STYLE}>
         {rail ? (
-          <RollingCount
-            value={count}
-            className="font-data text-[12px] font-semibold tabular-nums text-muted-foreground"
-          />
+          <span className="text-xs font-semibold tabular-nums text-muted-foreground">{count}</span>
         ) : (
-          <ColumnTitle hue={hue} label={column.label} count={count}>
+          <ColumnTitle
+            glyph={<StatusGlyph kind={glyphKindOf(column.id)} />}
+            label={column.label}
+            count={count}
+          >
             {column.id === 'cancelled' ? (
               <button
                 ref={foldRef}
@@ -1173,17 +1134,28 @@ function StatusColumn({
                 onClick={() => toggle(false)}
                 aria-label="Fold the Cancelled column"
                 title="Fold"
-                className="ml-auto flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
+                className={HEAD_BUTTON}
               >
-                <EyeOff size={13} strokeWidth={2} />
+                <EyeOff size={14} strokeWidth={2} />
+              </button>
+            ) : column.id === 'todo' && onNewTask ? (
+              <button
+                type="button"
+                onClick={onNewTask}
+                aria-label="Add a task to To do"
+                title="New task (C)"
+                className={HEAD_BUTTON}
+              >
+                <Plus size={14} strokeWidth={2} />
               </button>
             ) : null}
           </ColumnTitle>
         )}
       </div>
-      {rows.map((row) => {
+      {rows.map((row, i) => {
         const tone = tones.get(row.key)!
-        if (rail || row.kind === 'gap') return <Spacer key={row.key} row={row} tone={tone} />
+        if (rail || row.kind === 'gap')
+          return <Spacer key={row.key} row={row} tone={tone} first={i === 0} />
         // The All view's one row is a cell like any day's, keyed 'all'.
         const tasks =
           row.kind === 'earlier'
@@ -1198,6 +1170,7 @@ function StatusColumn({
             column={column}
             row={row}
             tone={tone}
+            first={i === 0}
             tasks={tasks}
             runs={runs}
             // The Today view uncaps its own day, but not the Earlier row above
@@ -1221,6 +1194,7 @@ function StatusColumn({
           />
         )
       })}
+      <LaneEnd />
       {rail ? (
         <Rail
           railRef={railRef}
@@ -1345,6 +1319,7 @@ export function CalendarGrid(props: CalendarGridProps) {
     todayPing,
     unseenIds,
     onSeen,
+    onNewTask,
   } = props
   const states = useMemo<CardStates>(
     () => ({ openTaskId, arrivedIds, settleId, openRunKey, unseenIds, onSeen, now }),
@@ -1450,7 +1425,6 @@ export function CalendarGrid(props: CalendarGridProps) {
     for (const row of rows) if (row.kind === 'day' && tones.get(row.key)?.today) return row.key
     return null
   }, [rows, tones])
-  const todayIndex = todayKey == null ? -1 : rows.findIndex((r) => r.key === todayKey)
   // Needs you sits in today's row, or in the All view's one row.
   const needsYouKey = todayKey ?? (range == null ? 'all' : null)
 
@@ -1496,16 +1470,26 @@ export function CalendarGrid(props: CalendarGridProps) {
       return next
     })
 
+  // The Kanban board (no range) is one row of every task: it has no days, so no
+  // date gutter, and its lanes keep the bars' side gutter instead.
+  const kanban = range == null
   // Fixed tracks for the gutter, Needs you and the rails; the status columns
   // share whatever a wide screen has left over, never going under their minimum.
   const needsYouW = needsYouKey === null ? RAIL_W : NEEDS_YOU_W
   const tracks = columns.map((c) => {
     if (c.id === 'cancelled' && !cancelledOpen) return { css: `${RAIL_W}px`, min: RAIL_W }
-    const min = COLUMN_MIN[c.id] ?? DEFAULT_COLUMN_MIN
-    return { css: `minmax(${min}px, 1fr)`, min }
+    return { css: `minmax(${COLUMN_MIN}px, 1fr)`, min: COLUMN_MIN }
   })
-  const template = [`${GUTTER_W}px`, `${needsYouW}px`, ...tracks.map((t) => t.css)].join(' ')
-  const minWidth = GUTTER_W + needsYouW + tracks.reduce((n, t) => n + t.min, 0)
+  const template = [
+    ...(kanban ? [] : [`${GUTTER_W}px`]),
+    `${needsYouW}px`,
+    ...tracks.map((t) => t.css),
+  ].join(' ')
+  const minWidth =
+    (kanban ? KANBAN_PAD * 2 : GUTTER_W + LANE_GAP) +
+    needsYouW +
+    tracks.reduce((n, t) => n + t.min, 0) +
+    tracks.length * LANE_GAP
 
   return (
     <div
@@ -1519,84 +1503,78 @@ export function CalendarGrid(props: CalendarGridProps) {
         // week still fills the board and the columns run to the bottom as drop
         // targets, while the day rows keep the height their content gives them.
         gridTemplateRows: `${HEADER_H}px repeat(${rows.length}, auto) 1fr`,
+        columnGap: LANE_GAP,
+        paddingInline: kanban ? KANBAN_PAD : undefined,
         minHeight: `calc(var(--board-vh, 100vh) - ${BOTTOM_PAD}px)`,
         minWidth,
         background: 'var(--surface)',
       }}
     >
-      {/* Day gutter: sticks to the left edge, its corner to the top as well. Each
+      {kanban ? null : (
+        <>
+          {/* Day gutter: sticks to the left edge, its corner to the top as well. Each
           casts a shadow only once the board has scrolled under it. It sits above
           every layer in the columns, the rails included, so a board scrolled
           sideways passes under the dates. */}
-      <div
-        className="board-gutter sticky left-0 z-[4] border-r border-border"
-        style={{
-          gridColumn: 1,
-          gridRow: '1 / -1',
-          display: 'grid',
-          gridTemplateRows: 'subgrid',
-          background: 'var(--surface)',
-        }}
-      >
-        {/* The corner is the board's legend: hover it to learn where a card sits. */}
-        <div
-          aria-hidden
-          title="Open work sits on the day it was added, finished work on the day it finished."
-          className="board-col-head sticky top-0 z-[3] flex items-center justify-center border-b border-border px-1"
-          style={HEADER_STYLE}
-        >
-          <span className="board-micro whitespace-nowrap text-muted-foreground">
-            {range == null
-              ? 'All'
-              : range.mode === 'month'
-                ? monthShort(range.start)
-                : `Week ${isoWeek(range.days[3] ?? range.start)}`}
-          </span>
-        </div>
-        {rows.map((row, i) => {
-          const totals = row.kind === 'day' ? dayTotals.get(row.key) : undefined
-          return (
-            <DayHeader
-              key={row.key}
-              row={row}
-              first={i === (withEarlier ? 1 : 0)}
-              tone={tones.get(row.key)!}
-              now={now}
-              tasks={
-                row.kind === 'earlier'
-                  ? earlierCount
-                  : row.kind === 'all'
-                    ? allCount
-                    : (totals?.tasks ?? 0)
-              }
-              runs={{ count: totals?.runs ?? 0, more: totals?.more ?? false }}
-              earlierParts={earlierParts}
-              earlierOpen={earlierOpen}
-              onToggleEarlier={() => onEarlierOpenChange(!earlierOpen)}
-              onToggleFold={toggleFold}
-              onSeamHover={lightSeam}
-              onSelect={onSelectDay}
-              rangeStart={range?.start ?? now}
-              todayPing={todayPing}
-            />
-          )
-        })}
-      </div>
-
-      {/* Today's row sits a little above the board: its cells are an opaque sheet
-          over the lanes, and this layer, under the columns, casts the sheet's soft
-          shadow above and below it. */}
-      {todayIndex >= 0 ? (
-        <div
-          aria-hidden
-          data-testid="calendar-today-lift"
-          className="board-today-lift"
-          style={{ gridColumn: '2 / -1', gridRow: todayIndex + 2 }}
-        />
-      ) : null}
+          <div
+            className="board-gutter sticky left-0 z-[4]"
+            style={{
+              gridColumn: 1,
+              gridRow: '1 / -1',
+              display: 'grid',
+              gridTemplateRows: 'subgrid',
+              background: 'var(--surface)',
+            }}
+          >
+            {/* The corner is the board's legend: hover it to learn where a card sits. */}
+            <div
+              aria-hidden
+              title="Open work sits on the day it was added, finished work on the day it finished."
+              className="board-col-head sticky top-0 z-[3] flex items-center justify-center px-1"
+              style={HEADER_STYLE}
+            >
+              <span className="board-micro whitespace-nowrap text-muted-foreground">
+                {range == null
+                  ? 'All'
+                  : range.mode === 'month'
+                    ? monthShort(range.start)
+                    : `Week ${isoWeek(range.days[3] ?? range.start)}`}
+              </span>
+            </div>
+            {rows.map((row, i) => {
+              const totals = row.kind === 'day' ? dayTotals.get(row.key) : undefined
+              return (
+                <DayHeader
+                  key={row.key}
+                  row={row}
+                  first={i === (withEarlier ? 1 : 0)}
+                  tone={tones.get(row.key)!}
+                  now={now}
+                  tasks={
+                    row.kind === 'earlier'
+                      ? earlierCount
+                      : row.kind === 'all'
+                        ? allCount
+                        : (totals?.tasks ?? 0)
+                  }
+                  runs={{ count: totals?.runs ?? 0, more: totals?.more ?? false }}
+                  earlierParts={earlierParts}
+                  earlierOpen={earlierOpen}
+                  onToggleEarlier={() => onEarlierOpenChange(!earlierOpen)}
+                  onToggleFold={toggleFold}
+                  onSeamHover={lightSeam}
+                  onSelect={onSelectDay}
+                  rangeStart={range?.start ?? now}
+                  todayPing={todayPing}
+                />
+              )
+            })}
+          </div>
+        </>
+      )}
 
       <NeedsYouColumn
-        gridColumn={2}
+        gridColumn={kanban ? 1 : 2}
         rows={rows}
         tones={tones}
         hostKey={needsYouKey}
@@ -1609,7 +1587,7 @@ export function CalendarGrid(props: CalendarGridProps) {
         <StatusColumn
           key={column.id}
           column={column}
-          gridColumn={3 + i}
+          gridColumn={(kanban ? 2 : 3) + i}
           rows={rows}
           tones={tones}
           buckets={buckets}
@@ -1632,6 +1610,7 @@ export function CalendarGrid(props: CalendarGridProps) {
           cardDisabled={cardDisabled}
           onCardOpen={onCardOpen}
           onRunOpen={onRunOpen}
+          onNewTask={onNewTask}
           states={states}
         />
       ))}

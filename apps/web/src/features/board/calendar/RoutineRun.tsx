@@ -76,8 +76,8 @@ function runCount(day: DayRuns<RoutineOccurrences>): string {
 /** The outlined Routine tag. Neutral on purpose: red marks today and nothing else. */
 export function RoutineTag() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-[5px] border border-border-strong px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground">
-      <Repeat size={10} strokeWidth={2.4} aria-hidden />
+    <span className="inline-flex items-center gap-1 rounded-md border border-border-strong px-1.5 py-px text-micro font-medium text-muted-foreground">
+      <Repeat size={10} strokeWidth={2} aria-hidden />
       Routine
     </span>
   )
@@ -92,7 +92,6 @@ export function RoutineTag() {
 export function RoutineRunStrip({
   day,
   nextAt,
-  accent,
   focusId,
   open,
   onOpen,
@@ -101,8 +100,6 @@ export function RoutineRunStrip({
   day: DayRuns<RoutineOccurrences>
   /** The soonest run on screen, when this day holds it; null otherwise. */
   nextAt: number | null
-  /** The column's colour, as a CSS colour. */
-  accent: string
   /** Lets the popover hand focus back to this strip if a re-render replaced it. */
   focusId: string
   /** Its popover is open. */
@@ -151,26 +148,12 @@ export function RoutineRunStrip({
       className={`calendar-run block w-full cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-offset-2 ${
         line ? 'px-2 py-[3px]' : 'px-2.5 py-1.5'
       }`}
-      style={{ '--chip': accent } as CSSProperties}
     >
       {line ? (
-        <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-4 text-foreground">
-          <Repeat
-            size={11}
-            strokeWidth={2.4}
-            aria-hidden
-            className="shrink-0"
-            style={{ color: accent }}
-          />
-          {isNext ? (
-            <span
-              aria-hidden
-              className="size-[5px] shrink-0 rounded-full"
-              style={{ background: accent }}
-            />
-          ) : null}
-          <span className="font-data shrink-0 tabular-nums">{time}</span>
-          <span className="min-w-0 truncate font-semibold">{name}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <Repeat size={12} strokeWidth={2} aria-hidden className="shrink-0" />
+          <span className="shrink-0 tabular-nums">{time}</span>
+          <span className="min-w-0 truncate font-medium">{name}</span>
           {many ? (
             <span className="ml-auto shrink-0 tabular-nums">{`×${day.more ? `${day.count}+` : day.count}`}</span>
           ) : null}
@@ -178,29 +161,12 @@ export function RoutineRunStrip({
       ) : (
         <>
           {/* The name has the whole width; when it runs, and how often that day, sit
-          under it the way a card's details sit under its title. Size and weight
-          set the two lines apart, and both stay the foreground colour: the hatch
-          crosses every glyph of the second line, and muted text over its lines
-          falls under 4.5:1. */}
-          <span className="block truncate text-[12.5px] font-semibold leading-[18px] text-foreground">
-            {name}
-          </span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[11px] leading-[14px] text-foreground">
-            <Repeat
-              size={11}
-              strokeWidth={2.4}
-              aria-hidden
-              className="shrink-0"
-              style={{ color: accent }}
-            />
-            {isNext ? (
-              <span
-                aria-hidden
-                className="size-[5px] shrink-0 rounded-full"
-                style={{ background: accent }}
-              />
-            ) : null}
-            <span className="font-data shrink-0 tabular-nums">{time}</span>
+          under it the way a card's details sit under its title. It is all in the
+          muted ink: a run is planned, not work that exists. */}
+          <span className="block truncate text-xs font-medium text-muted-foreground">{name}</span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-micro text-muted-foreground">
+            <Repeat size={12} strokeWidth={2} aria-hidden className="shrink-0" />
+            <span className="shrink-0 tabular-nums">{time}</span>
             {many ? (
               <>
                 <span aria-hidden>·</span>
@@ -287,7 +253,7 @@ export function RoutineRunPopover({
       aria-labelledby={headingId}
       data-testid="calendar-routine-popover"
       tabIndex={-1}
-      className="surface-floating-tier board-pop-in board-ink-focus fixed z-[75] flex flex-col overflow-y-auto rounded-2xl p-4 outline-none"
+      className="surface-floating-tier board-pop-in board-ink-focus fixed z-[75] flex flex-col overflow-y-auto rounded-xl p-4 outline-none"
       style={
         {
           left: pos.left,
@@ -313,12 +279,12 @@ export function RoutineRunPopover({
         <div className="min-w-0 flex-1">
           <h2
             id={headingId}
-            className="truncate text-[15px] font-semibold text-foreground"
+            className="truncate text-base font-semibold text-foreground"
             style={{ letterSpacing: '-0.01em' }}
           >
             {routineName(run)}
           </h2>
-          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+          <p className="mt-0.5 text-compact text-muted-foreground">
             {describeCadence(rec.cronSpec)}
             {zone ? `, ${zone} time` : ''}
           </p>
@@ -326,7 +292,7 @@ export function RoutineRunPopover({
         <RoutineTag />
       </div>
 
-      <div className="mt-3.5 flex items-center gap-2 text-[12.5px] text-foreground">
+      <div className="mt-3.5 flex items-center gap-2 text-compact text-foreground">
         {team ? (
           <Users size={15} strokeWidth={2} className="shrink-0 text-muted-foreground" aria-hidden />
         ) : rec.agentId ? (
@@ -337,29 +303,29 @@ export function RoutineRunPopover({
 
       {upcoming.length > 0 ? (
         <div className="mt-3.5">
-          <div id={upcomingId} className="text-[11px] font-semibold text-muted-foreground">
+          <div id={upcomingId} className="text-xs font-medium text-muted-foreground">
             Upcoming runs
           </div>
           {inFlight ? (
             <p
               data-testid="calendar-routine-in-flight"
-              className="mt-1 text-[11.5px] leading-snug text-muted-foreground"
+              className="mt-1 text-xs text-muted-foreground"
             >
               {`A run ${inFlight === 'starting' ? 'is starting' : 'is running'} now. The first time below happens only if that run has finished by then; if not, it is skipped.`}
             </p>
           ) : null}
           <ul aria-labelledby={upcomingId} className="mt-1.5 flex flex-col gap-1">
             {upcoming.map((t) => (
-              <li key={t} className="flex justify-between gap-3 text-[12px] text-foreground">
+              <li key={t} className="flex justify-between gap-3 text-xs text-foreground">
                 <span className="tabular-nums">{shortDate(t)}</span>
-                <span className="font-data tabular-nums text-muted-foreground">{timeLabel(t)}</span>
+                <span className="tabular-nums text-muted-foreground">{timeLabel(t)}</span>
               </li>
             ))}
           </ul>
         </div>
       ) : null}
 
-      <p className="mt-3.5 text-[12px] leading-relaxed text-muted-foreground">{fireSummary(rec)}</p>
+      <p className="mt-3.5 text-xs leading-relaxed text-muted-foreground">{fireSummary(rec)}</p>
 
       <div className="mt-4 flex items-center justify-end gap-2">
         <Button
@@ -380,7 +346,7 @@ export function RoutineRunPopover({
         </Button>
       </div>
       {blocked ? (
-        <p id={blockedId} className="mt-2 text-right text-[11.5px] text-muted-foreground">
+        <p id={blockedId} className="mt-2 text-right text-xs text-muted-foreground">
           {`Can’t run it now: ${blocked}.`}
         </p>
       ) : null}

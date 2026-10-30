@@ -12,7 +12,7 @@ import {
   type DragStartEvent,
   type DropAnimation,
 } from '@dnd-kit/core'
-import { KanbanSquare, Plus, RefreshCw } from 'lucide-react'
+import { Calendar, CalendarDays, CalendarRange, Columns3, Plus, Search } from 'lucide-react'
 import { BooAvatar, TINTS } from '@clawboo/ui'
 import { delegationTargetOf } from '@clawboo/board-core'
 
@@ -33,7 +33,6 @@ import { prefersReducedMotion } from '@/lib/prefersReducedMotion'
 import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
-import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
@@ -44,10 +43,24 @@ import { hasOpenLayer } from '@/features/shared/useDismissableLayer'
 import { RoutineDialog, type RoutineDirectory } from '@/features/routines/RoutineDialog'
 import { EMPTY_DIRECTORY, loadRoutineDirectory } from '@/features/routines/routineDirectory'
 
-import { TaskDetailDrawer } from './TaskDetailDrawer'
+import { TaskDetailDrawer, type DrawerPosition } from './TaskDetailDrawer'
 import { NeedsYouItems, NeedsYouLane, useNeedsYou } from './NeedsYouColumn'
 import { NewTaskDialog } from './NewTaskDialog'
-import { TaskCard, taskOwnerOf } from './TaskCard'
+import { CardPropertiesContext, TaskCard, taskOwnerOf } from './TaskCard'
+import { StatusGlyph, glyphKindOf } from './StatusGlyph'
+import {
+  AgentsWorkingChip,
+  DisplayButton,
+  FilterMenuButton,
+  NO_FILTER,
+  ViewMenuButton,
+  filterCount,
+  toolbarButton,
+  useDelayedFlag,
+  type BoardFilter,
+  type CardProperties,
+  type ViewOption,
+} from './BoardToolbar'
 import {
   BOARD_STATUS_COLUMNS,
   NEEDS_YOU_COLUMN,
@@ -64,12 +77,16 @@ import { resolveDrop } from './resolveDrop'
 import { boardCollision } from './boardCollision'
 import {
   BOTTOM_PAD,
+  COLUMN_MIN,
   CalendarGrid,
   GUTTER_W,
   HEADER_H,
+  LANE,
+  LANE_GAP,
+  LANE_RADIUS,
   NEEDS_YOU_CAP,
+  RAIL_W,
   calendarStamp,
-  columnHue,
   type Landing,
 } from './calendar/CalendarGrid'
 import { CalendarToolbar } from './calendar/CalendarToolbar'
@@ -110,6 +127,15 @@ import { useCalendarClock } from './calendar/useCalendarClock'
 import { useRoutineRuns } from './calendar/useRoutineRuns'
 
 /** The since line's actions: quiet links in the header's subtitle. */
+/** The views, as the view switch lists them, with their keys: the Kanban board
+ *  (every task by status, no dates) first, then the calendars. */
+const VIEW_OPTIONS: ViewOption<CalendarMode>[] = [
+  { id: 'all', label: 'Kanban', keycap: 'K', icon: <Columns3 size={14} strokeWidth={2} /> },
+  { id: 'day', label: 'Today', keycap: 'D', icon: <CalendarDays size={14} strokeWidth={2} /> },
+  { id: 'week', label: 'Week', keycap: 'W', icon: <CalendarRange size={14} strokeWidth={2} /> },
+  { id: 'month', label: 'Month', keycap: 'M', icon: <Calendar size={14} strokeWidth={2} /> },
+]
+
 const SINCE_ACTION =
   'shrink-0 cursor-pointer rounded font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2'
 
@@ -200,11 +226,25 @@ function unboundTodo(task: BoardTask, to: string): boolean {
 const PREFS_KEY = 'clawboo.board.calendar'
 const MODES: readonly CalendarMode[] = ['day', 'week', 'month', 'all']
 interface BoardViewPrefs {
+  /** 'all' is the Kanban board, the default. */
   mode: CalendarMode
+  /** The person chose the view. Week was the default before Kanban, and the
+   *  prefs were saved whole on any change, so a stored Week without this was
+   *  never picked and gives way to the new default. */
+  modePicked?: boolean
   showRoutines: boolean
   cancelledOpen: boolean
+  /** What every card shows besides its title and agent (the Display popover). */
+  cardCost: boolean
+  cardTime: boolean
 }
-const DEFAULT_PREFS: BoardViewPrefs = { mode: 'week', showRoutines: true, cancelledOpen: false }
+const DEFAULT_PREFS: BoardViewPrefs = {
+  mode: 'all',
+  showRoutines: true,
+  cancelledOpen: false,
+  cardCost: true,
+  cardTime: true,
+}
 
 function readPrefs(): BoardViewPrefs {
   try {
@@ -212,9 +252,15 @@ function readPrefs(): BoardViewPrefs {
     if (!raw) return DEFAULT_PREFS
     const p = JSON.parse(raw) as Partial<BoardViewPrefs>
     return {
-      mode: p.mode && MODES.includes(p.mode) ? p.mode : 'week',
+      mode:
+        p.mode && MODES.includes(p.mode) && (p.mode !== 'week' || p.modePicked)
+          ? p.mode
+          : DEFAULT_PREFS.mode,
+      ...(p.modePicked ? { modePicked: true } : {}),
       showRoutines: typeof p.showRoutines === 'boolean' ? p.showRoutines : true,
       cancelledOpen: typeof p.cancelledOpen === 'boolean' ? p.cancelledOpen : false,
+      cardCost: typeof p.cardCost === 'boolean' ? p.cardCost : true,
+      cardTime: typeof p.cardTime === 'boolean' ? p.cardTime : true,
     }
   } catch {
     return DEFAULT_PREFS
@@ -250,6 +296,10 @@ function writePrefs(prefs: BoardViewPrefs): void {
   }
 }
 
+/** Find's second key as the platform writes it. */
+const FIND_KEY =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl+K'
+
 /** True when a keystroke is meant for whatever has focus, not for the board. */
 function keyBelongsElsewhere(e: KeyboardEvent): boolean {
   if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return true
@@ -258,9 +308,22 @@ function keyBelongsElsewhere(e: KeyboardEvent): boolean {
   if (t.isContentEditable) return true
   if (t.closest('input, textarea, select, [role="listbox"], [role="menu"], [role="dialog"]'))
     return true
-  // The segmented control and the Routines toggle are buttons, and arrow keys on
-  // a focused radio group conventionally move within it.
+  // Arrow keys on a focused radio group conventionally move within it.
   return t.closest('[role="radiogroup"]') != null && e.key.startsWith('Arrow')
+}
+
+/** A run is going on it right now. */
+function isRunning(task: BoardTask): boolean {
+  const since = task['runningSince']
+  return task.status === 'in_progress' && typeof since === 'number' && since > 0
+}
+
+/** Whether the board's filter lets a task through. */
+function matchesFilter(task: BoardTask, filter: BoardFilter): boolean {
+  if (filter.running && !isRunning(task)) return false
+  if (filter.agents.size === 0 && !filter.unowned) return true
+  const owner = taskOwnerOf(task)
+  return owner ? filter.agents.has(owner) : filter.unowned
 }
 
 /** An in-flight drag move: the target status, and when it was made (a move
@@ -304,7 +367,22 @@ export function BoardPanel() {
   const [tasks, setTasks] = useState<BoardTask[]>([])
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [composerOpen, setComposerOpen] = useState(false)
+  // What the board is narrowed to (Filter, and the agents-working chip). It lasts
+  // for this visit and starts over with each team.
+  const [boardFilter, setBoardFilter] = useState<BoardFilter>(NO_FILTER)
   const [refreshing, setRefreshing] = useState(false)
+  // The board polls every 5s; a spinner shows only when a read runs long.
+  const slowRefresh = useDelayedFlag(refreshing, 300)
+  const fleetAgents = useFleetStore((s) => s.agents)
+  // The agents Filter offers: the team's, or every team's agents under All teams.
+  const filterAgents = useMemo(
+    () =>
+      fleetAgents
+        .filter((a) => (teamFilter === 'all' ? !!a.teamId : a.teamId === teamFilter))
+        .map((a) => ({ id: a.id, name: a.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [fleetAgents, teamFilter],
+  )
   const [loaded, setLoaded] = useState(false) // false until the first fetch resolves → skeleton
   const [fetchOk, setFetchOk] = useState(true) // false when the last fetch failed → error/retry
   // When the board last read the server. A routine run before then has fired, and
@@ -337,6 +415,10 @@ export function BoardPanel() {
 
   // ── Calendar state ──
   const [prefs, setPrefs] = useState<BoardViewPrefs>(readPrefs)
+  const cardProps = useMemo<CardProperties>(
+    () => ({ cost: prefs.cardCost, time: prefs.cardTime }),
+    [prefs.cardCost, prefs.cardTime],
+  )
   const updatePrefs = useCallback((patch: Partial<BoardViewPrefs>) => {
     setPrefs((p) => {
       const next = { ...p, ...patch }
@@ -795,6 +877,27 @@ export function BoardPanel() {
     [tasks, overrides],
   )
 
+  // The filter, applied once: the columns, Needs you and the calendar all draw
+  // from what it lets through. Find still searches every task.
+  const shownTasks = useMemo(
+    () =>
+      filterCount(boardFilter) === 0
+        ? effectiveTasks
+        : effectiveTasks.filter((t) => matchesFilter(t, boardFilter)),
+    [effectiveTasks, boardFilter],
+  )
+  // A team has its own agents, so the filter starts over with each team.
+  useEffect(() => setBoardFilter(NO_FILTER), [teamFilter])
+  // The agents with a run going, for the "agents working" chip.
+  const workingAgents = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of effectiveTasks) {
+      const owner = isRunning(t) ? taskOwnerOf(t) : null
+      if (owner) ids.add(owner)
+    }
+    return [...ids]
+  }, [effectiveTasks])
+
   const activeTask = useMemo(
     () =>
       activeId == null
@@ -808,9 +911,9 @@ export function BoardPanel() {
   const byColumn = useMemo(() => {
     const map: Record<string, BoardTask[]> = { [NEEDS_YOU_COLUMN]: [] }
     for (const col of COLUMNS) map[col.id] = []
-    for (const t of effectiveTasks) (map[drawnColumnOf(t)] ??= []).push(t)
+    for (const t of shownTasks) (map[drawnColumnOf(t)] ??= []).push(t)
     return map
-  }, [effectiveTasks])
+  }, [shownTasks])
 
   // Approvals and stuck tasks, gathered once for whichever layout is showing.
   const needsYou = useNeedsYou(teamFilter, byColumn[NEEDS_YOU_COLUMN] ?? [])
@@ -823,8 +926,8 @@ export function BoardPanel() {
 
   // ── Calendar projections ──
   const datedTasks = useMemo(
-    () => effectiveTasks.filter((t) => drawnColumnOf(t) !== NEEDS_YOU_COLUMN),
-    [effectiveTasks],
+    () => shownTasks.filter((t) => drawnColumnOf(t) !== NEEDS_YOU_COLUMN),
+    [shownTasks],
   )
   // The All view is the calendar with a single row, every task newest first.
   const buckets = useMemo(
@@ -834,6 +937,24 @@ export function BoardPanel() {
         : bucketAll(datedTasks, now, drawnColumnOf),
     [range, datedTasks, now],
   )
+  // Where the open task sits in its column, top to bottom as the board draws it,
+  // so J and K in the drawer step through the column. A task the board does not
+  // show (another range, or filtered out) has no place to step from.
+  const drawerPosition = useMemo<DrawerPosition | null>(() => {
+    const open = openTaskId ? shownTasks.find((t) => t.id === openTaskId) : undefined
+    if (!open) return null
+    const col = drawnColumnOf(open)
+    const ids =
+      col === NEEDS_YOU_COLUMN
+        ? needsYou.stuck.map((s) => s.task.id)
+        : [
+            ...(buckets.earlier.get(col) ?? []),
+            ...[...(buckets.cells.get(col)?.values() ?? [])].flat(),
+          ].map((t) => t.id)
+    const index = ids.indexOf(open.id)
+    if (index < 0) return null
+    return { index, total: ids.length, prev: ids[index - 1] ?? null, next: ids[index + 1] ?? null }
+  }, [openTaskId, shownTasks, needsYou.stuck, buckets])
   // A run whose time has passed has fired: it leaves the calendar, and the board
   // shows what it made. Runs are bucketed whether or not the Routines switch draws
   // them, because the switch shows their count while it hides them.
@@ -941,6 +1062,9 @@ export function BoardPanel() {
   // Nothing to show: no tasks at all, and no routine runs drawn in the range.
   const emptyBoard = tasks.length === 0 && drawnRuns === 0 && (range == null || runsKnown)
   const showCalendar = loaded && fetchOk && !emptyBoard && !waitingForRuns
+  // Work is on the board, but the filters hide all of it.
+  const filteredEmpty =
+    showCalendar && filterCount(boardFilter) > 0 && tasks.length > 0 && shownTasks.length === 0
   if (showCalendar) calendarSeenRef.current = true
 
   const onDragStart = useCallback(
@@ -1249,7 +1373,10 @@ export function BoardPanel() {
     const mode = prefs.mode
     if (mode === 'week' || mode === 'month') setFocusDay((f) => shiftFocus(mode, f, 1))
   }, [prefs.mode])
-  const setMode = useCallback((mode: CalendarMode) => updatePrefs({ mode }), [updatePrefs])
+  const setMode = useCallback(
+    (mode: CalendarMode) => updatePrefs({ mode, modePicked: true }),
+    [updatePrefs],
+  )
 
   // A range change is announced once, politely, with how many tasks the new range
   // shows (the Earlier row's included, as in the grid); polls that change counts
@@ -1305,8 +1432,8 @@ export function BoardPanel() {
     if (el) setFindAnchor(el)
   }, [])
 
-  // Keyboard: T today, the arrows for the previous and next range, D W M A for
-  // the views, / to find, while focus is on the board. Inert while typing, while any overlay is
+  // Keyboard: T today, the arrows for the previous and next range, K D W M for
+  // the views (A still means Kanban), / to find, C for a new task, while focus is on the board. Inert while typing, while any overlay is
   // open, and mid-drag. The arrows are left alone while focus is in the grid
   // itself, where they scroll it.
   const refocusViewRef = useRef(false)
@@ -1332,6 +1459,11 @@ export function BoardPanel() {
         openFind()
         return
       }
+      if (k === 'c' || k === 'C') {
+        e.preventDefault()
+        setComposerOpen(true)
+        return
+      }
       let handled = true
       // All has no today row to go to.
       if ((k === 't' || k === 'T') && rangeRef.current) goToday()
@@ -1340,7 +1472,8 @@ export function BoardPanel() {
       else if (k === 'd' || k === 'D') setMode('day')
       else if (k === 'w' || k === 'W') setMode('week')
       else if (k === 'm' || k === 'M') setMode('month')
-      else if (k === 'a' || k === 'A') setMode('all')
+      // K for Kanban; A, its old name All, still works.
+      else if (k === 'k' || k === 'K' || k === 'a' || k === 'A') setMode('all')
       else handled = false
       if (handled) {
         e.preventDefault()
@@ -1362,18 +1495,28 @@ export function BoardPanel() {
     setMode,
     openFind,
   ])
+  // Cmd+K (Ctrl+K off a Mac) finds from anywhere on the board page, a field
+  // included: it is the key people reach for to search. Not over an overlay.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.altKey || e.shiftKey || e.isComposing) return
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return
+      if (activeTask || hasOpenLayer() || composerOpen || openTaskId || routineDialogId) return
+      if (useSettingsModalStore.getState().open || useEditorStore.getState().isOpen) return
+      e.preventDefault()
+      openFind()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [activeTask, composerOpen, openTaskId, routineDialogId, openFind])
   // A shortcut can redraw the grid out from under the focused element; when it
-  // does, focus goes to the view switch rather than being lost to the page.
+  // does, focus goes to the view button rather than being lost to the page.
   useEffect(() => {
     if (!refocusViewRef.current) return
     refocusViewRef.current = false
     const a = document.activeElement
     if (a && a !== document.body && a.isConnected) return
-    document
-      .querySelector<HTMLElement>(
-        '[data-testid="board-calendar-toolbar"] [role="radio"][aria-checked="true"]',
-      )
-      ?.focus()
+    document.querySelector<HTMLElement>('[data-testid="board-view"]')?.focus()
   }, [prefs.mode, rangeKey])
 
   // The calendar's min-height follows the board's visible area.
@@ -1695,22 +1838,116 @@ export function BoardPanel() {
   // The run strip whose popover is open, by the id the strip carries for focus.
   const openRunKey = runPopover?.anchor.getAttribute('data-focus-restore-id') ?? null
 
+  // The board's controls, on the right of the second bar: a spinner only while a
+  // background read runs long, Needs you when its cards are out of view, the
+  // agents at work, then Find, Filter, Display and the view.
+  const runNote =
+    runStats.count > 0
+      ? `${runStats.count}${runStats.more ? '+' : ''} upcoming`
+      : 'None coming up here'
+  const toolbarActions = (
+    <>
+      <span
+        aria-hidden
+        data-testid="board-refreshing"
+        title="Refreshing"
+        className="flex size-4 items-center justify-center text-muted-foreground"
+      >
+        {/* The first read has the skeleton to say so. */}
+        {slowRefresh && loaded ? <Spinner size={14} /> : null}
+      </span>
+      {/* Kept in the layout while hidden, so the bar never reflows (and the
+          board never jumps) as it comes and goes. */}
+      {needsYou.total > 0 ? (
+        <button
+          type="button"
+          data-testid="board-needs-you-chip"
+          onClick={revealNeedsYou}
+          aria-hidden={visibility.needsYou ? true : undefined}
+          tabIndex={visibility.needsYou ? -1 : undefined}
+          className={[
+            toolbarButton(false),
+            'text-foreground',
+            visibility.needsYou ? 'pointer-events-none invisible opacity-0' : '',
+          ].join(' ')}
+        >
+          <StatusGlyph kind="needs_you" />
+          Needs you
+          <span className="board-reason tabular-nums">{needsYou.total}</span>
+        </button>
+      ) : null}
+      <AgentsWorkingChip
+        agentIds={workingAgents}
+        on={boardFilter.running}
+        onToggle={() => setBoardFilter((f) => ({ ...f, running: !f.running }))}
+      />
+      <button
+        type="button"
+        data-testid="board-find"
+        aria-label={
+          range ? 'Find a task, an agent or a routine (/)' : 'Find a task or an agent (/)'
+        }
+        title={`${range ? 'Find a task, an agent or a routine' : 'Find a task or an agent'} (/ or ${FIND_KEY})`}
+        aria-haspopup="dialog"
+        aria-expanded={findAnchor != null}
+        aria-keyshortcuts="/ Meta+K Control+K"
+        onClick={(e) => (findAnchor ? closeFind() : openFind(e.currentTarget))}
+        className={`${toolbarButton(findAnchor != null)} px-2`}
+      >
+        <Search size={14} strokeWidth={2} aria-hidden />
+      </button>
+      <FilterMenuButton agents={filterAgents} filter={boardFilter} onChange={setBoardFilter} />
+      <DisplayButton
+        routines={
+          range
+            ? {
+                show: prefs.showRoutines,
+                onChange: (showRoutines) => updatePrefs({ showRoutines }),
+                note: runNote,
+              }
+            : null
+        }
+        cancelledOpen={prefs.cancelledOpen}
+        onCancelledOpenChange={(cancelledOpen) => updatePrefs({ cancelledOpen })}
+        card={cardProps}
+        onCardChange={(c) => updatePrefs({ cardCost: c.cost, cardTime: c.time })}
+      />
+      <ViewMenuButton value={prefs.mode} options={VIEW_OPTIONS} onChange={setMode} />
+    </>
+  )
+
   return (
-    <div ref={rootRef} className="board-ink-focus flex h-full flex-col">
-      <PanelHeader
-        title="Board"
-        // The board is a live projection of agent work, so without a word a person
-        // may wait to be asked before touching it. This says who moves the cards and
-        // that they may hand one out too (the New task button beside it).
-        subtitle={
-          // Back from being away, the line says what changed meanwhile, and steps
-          // through it. Otherwise it says who moves the cards.
-          seenSum ? (
-            <span data-testid="board-since" className="inline-flex max-w-full items-baseline gap-2">
+    <CardPropertiesContext.Provider value={cardProps}>
+      <div ref={rootRef} className="board-ink-focus flex h-full flex-col">
+        {/* The board's own header, a thin bar: the title and its team, what changed
+          while the person was away (only when something did), and New task. */}
+        <div
+          data-testid="board-header"
+          className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-1"
+        >
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">Board</h1>
+          <Select
+            size="sm"
+            aria-label="Filter by team"
+            value={teamFilter}
+            onChange={(value) => setTeamFilter(value)}
+          >
+            <option value="all">All teams</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.icon} {t.name}
+              </option>
+            ))}
+          </Select>
+          {seenSum ? (
+            // Back from being away: what changed meanwhile, and a way through it.
+            <span
+              data-testid="board-since"
+              className="inline-flex h-7 max-w-full items-center gap-2 rounded-full border border-border px-2.5 text-xs text-muted-foreground"
+            >
               <span className="truncate">
                 {`Since ${sinceLabel(seenSum.since, now)}: ${summaryParts(seenSum.counts).join(', ')}`}
               </span>
-              <span aria-hidden>·</span>
               <button
                 type="button"
                 onClick={showNextChange}
@@ -1719,397 +1956,421 @@ export function BoardPanel() {
               >
                 Show
               </button>
-              <span aria-hidden>·</span>
               <button type="button" onClick={markEverythingSeen} className={SINCE_ACTION}>
                 Mark seen
               </button>
             </span>
-          ) : (
-            <span data-testid="board-agent-hint">
-              Agents create and move work here. You can hand one a task too.
-            </span>
-          )
-        }
-        icon={KanbanSquare}
-        size="md"
-        border
-        actions={
-          <>
-            <Select
-              size="sm"
-              aria-label="Filter by team"
-              value={teamFilter}
-              onChange={(value) => setTeamFilter(value)}
-            >
-              <option value="all">All teams</option>
-              {teams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.icon} {t.name}
-                </option>
-              ))}
-            </Select>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                void refresh()
-                void refreshRuns()
-              }}
-              aria-label="Refresh"
-            >
-              {refreshing ? <Spinner size={13} /> : <RefreshCw size={13} strokeWidth={2} />}
-              Refresh
-            </Button>
-            <Button variant="primary" size="sm" onClick={() => setComposerOpen(true)}>
-              <Plus size={14} strokeWidth={2.4} />
-              New task
-            </Button>
+          ) : null}
+          <div className="ml-auto flex items-center gap-2">
             <GitHubStarButton />
-          </>
-        }
-      />
-
-      <CalendarToolbar
-        mode={prefs.mode}
-        onModeChange={setMode}
-        range={range}
-        now={now}
-        weekStartsOn={weekStartsOn}
-        activeDays={activeDays}
-        onPrev={goPrev}
-        onNext={goNext}
-        onToday={goToday}
-        onPickDate={(day) => {
-          // Today shows only today, so a picked date opens its week.
-          if (prefs.mode === 'day') updatePrefs({ mode: 'week' })
-          setFocusDay(startOfDay(day))
-          setSelectedDay(startOfDay(day))
-          requestView({ day, align: 'top' })
-        }}
-        summary={{ tasks: tasksInRange, runs: runStats.count, runsMore: runStats.more }}
-        showRoutines={prefs.showRoutines}
-        onShowRoutinesChange={(showRoutines) => updatePrefs({ showRoutines })}
-        needsYou={{
-          count: needsYou.total,
-          offscreen: !visibility.needsYou,
-          onReveal: revealNeedsYou,
-        }}
-        announcement={announcement}
-        todayDirection={todayDirection}
-        onFind={(anchor) => (findAnchor ? closeFind() : openFind(anchor))}
-        findOpen={findAnchor != null}
-      />
-
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <div
-          ref={scrollRef}
-          // The calendar runs edge to edge: its date gutter sticks to the left edge,
-          // and side padding would leave a strip beside it where scrolled cells show.
-          // The scroll padding keeps a card brought into view clear of the sticky
-          // header and gutter.
-          className={[
-            'relative min-h-0 flex-1 overflow-auto',
-            showCalendar ? '' : 'px-6 py-5',
-          ].join(' ')}
-          style={
-            showCalendar
-              ? {
-                  paddingBottom: BOTTOM_PAD,
-                  scrollPaddingTop: HEADER_H + 8,
-                  scrollPaddingLeft: GUTTER_W + 8,
-                }
-              : undefined
-          }
-        >
-          <DndContext
-            sensors={sensors}
-            collisionDetection={boardCollision}
-            // Replaces dnd-kit's defaults, which announce raw task uuids and raw
-            // status ids. Module constants → stable identity → the internal
-            // useDndMonitor never re-registers.
-            accessibility={range ? CALENDAR_ACCESSIBILITY : BOARD_ACCESSIBILITY}
-            onDragStart={onDragStart}
-            onDragOver={onDragOver}
-            onDragEnd={onDragEnd}
-            onDragCancel={() => {
-              // A cancel never moves the card, so it always flies back. dnd-kit
-              // clears the drag without a last drag-over first, and the render that
-              // ends the drag (the one the overlay reads) keeps what is set here.
-              dropAnimationRef.current = prefersReducedMotion() ? null : DROP_RETURN
-              setActiveId(null)
-              setDragOver(null)
-            }}
-          >
-            {showCalendar ? (
-              <motion.div
-                key={gridKey}
-                initial={{ opacity: 0, x: slideDir * 16 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: RANGE_SLIDE_MS / 1000, ease: [0.32, 0.72, 0, 1] }}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setComposerOpen(true)}
+              title="New task (C)"
+              aria-keyshortcuts="c"
+            >
+              <Plus size={14} strokeWidth={2} aria-hidden />
+              New task
+              <kbd
+                aria-hidden
+                className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-white/20 px-1 text-micro font-medium"
+                style={{ fontFamily: 'inherit' }}
               >
-                <CalendarGrid
-                  range={range}
-                  now={now}
-                  weekStartsOn={weekStartsOn}
-                  weekend={weekend}
-                  selectedDay={selectedDay}
-                  onSelectDay={setSelectedDay}
-                  columns={columns}
-                  buckets={buckets}
-                  runsByDay={runsByDay}
-                  nextRunAt={
-                    prefs.showRoutines && range && rangeContains(range, now) ? runStats.next : null
+                C
+              </kbd>
+            </Button>
+          </div>
+        </div>
+
+        <CalendarToolbar
+          mode={prefs.mode}
+          range={range}
+          now={now}
+          weekStartsOn={weekStartsOn}
+          activeDays={activeDays}
+          onPrev={goPrev}
+          onNext={goNext}
+          onToday={goToday}
+          onPickDate={(day) => {
+            // Today shows only today, so a picked date opens its week.
+            if (prefs.mode === 'day') updatePrefs({ mode: 'week' })
+            setFocusDay(startOfDay(day))
+            setSelectedDay(startOfDay(day))
+            requestView({ day, align: 'top' })
+          }}
+          announcement={announcement}
+          todayDirection={todayDirection}
+          actions={toolbarActions}
+        />
+
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {filteredEmpty ? (
+            // The filters hide every task: say so over the empty lanes, with the
+            // way back, rather than leaving a board that looks like it lost its work.
+            <div className="pointer-events-none absolute inset-x-0 top-24 z-[5] flex justify-center px-4">
+              <div
+                role="status"
+                data-testid="board-filtered-empty"
+                className="pointer-events-auto flex items-center gap-3 rounded-xl border border-border bg-surface py-2 pr-2 pl-4 text-compact text-foreground shadow-[var(--shadow-raised)]"
+              >
+                No tasks match these filters
+                <Button variant="ghost" size="sm" onClick={() => setBoardFilter(NO_FILTER)}>
+                  Clear filters
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <div
+            ref={scrollRef}
+            // The calendar runs edge to edge: its date gutter sticks to the left edge,
+            // and side padding would leave a strip beside it where scrolled cells show.
+            // The scroll padding keeps a card brought into view clear of the sticky
+            // header and gutter.
+            className={[
+              'relative min-h-0 flex-1 overflow-auto',
+              // The fallback lanes keep the Kanban board's side gutter.
+              showCalendar ? '' : 'px-4 pb-8',
+            ].join(' ')}
+            style={
+              showCalendar
+                ? {
+                    paddingBottom: BOTTOM_PAD,
+                    scrollPaddingTop: HEADER_H + 8,
+                    // Kanban has no date gutter to keep clear of.
+                    scrollPaddingLeft: range ? GUTTER_W + 8 : 16,
                   }
-                  showEarlier={showEarlier}
-                  earlierOpen={earlierOpen}
-                  onEarlierOpenChange={setEarlierOpen}
-                  needsYou={{
-                    total: needsYou.total,
-                    content: (
-                      <NeedsYouItems
-                        model={needsYou}
-                        teamFilter={teamFilter}
-                        onOpenTask={openTask}
-                        onTasksChanged={onTasksChanged}
-                        layout="cell"
-                        // Today and All show every card in a cell, Needs you too.
-                        cap={range && range.mode !== 'day' ? NEEDS_YOU_CAP : undefined}
-                        show={needsYouShow}
-                      />
-                    ),
-                    onGoToday: revealNeedsYou,
-                  }}
-                  cancelledOpen={prefs.cancelledOpen}
-                  onCancelledOpenChange={(cancelledOpen) => updatePrefs({ cancelledOpen })}
-                  pinnedIds={pinnedIds}
-                  drag={
-                    activeTask
-                      ? {
-                          task: activeTask,
-                          ownColumn: boardColumnOf(activeTask),
-                          overColumn: dragOver,
-                        }
-                      : null
-                  }
-                  landing={landing}
-                  columnDropDisabled={columnDropDisabled}
-                  cardDisabled={cardDisabled}
-                  onCardOpen={openTask}
-                  onRunOpen={(run, anchor) => setRunPopover({ run, anchor })}
-                  openTaskId={openTaskId}
-                  openRunKey={openRunKey}
-                  arrivedIds={arrivedIds}
-                  settleId={settleId}
-                  todayPing={todayPing}
-                  unseenIds={dotted}
-                  onSeen={seeCard}
-                />
-              </motion.div>
-            ) : (
-              <div className="flex min-h-full items-start gap-4">
-                {/* Needs you ALWAYS renders as the first column, outside the task-load
+                : undefined
+            }
+          >
+            <DndContext
+              sensors={sensors}
+              collisionDetection={boardCollision}
+              // Replaces dnd-kit's defaults, which announce raw task uuids and raw
+              // status ids. Module constants → stable identity → the internal
+              // useDndMonitor never re-registers.
+              accessibility={range ? CALENDAR_ACCESSIBILITY : BOARD_ACCESSIBILITY}
+              onDragStart={onDragStart}
+              onDragOver={onDragOver}
+              onDragEnd={onDragEnd}
+              onDragCancel={() => {
+                // A cancel never moves the card, so it always flies back. dnd-kit
+                // clears the drag without a last drag-over first, and the render that
+                // ends the drag (the one the overlay reads) keeps what is set here.
+                dropAnimationRef.current = prefersReducedMotion() ? null : DROP_RETURN
+                setActiveId(null)
+                setDragOver(null)
+              }}
+            >
+              {showCalendar ? (
+                <motion.div
+                  key={gridKey}
+                  initial={{ opacity: 0, x: slideDir * 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: RANGE_SLIDE_MS / 1000, ease: [0.32, 0.72, 0, 1] }}
+                >
+                  <CalendarGrid
+                    range={range}
+                    now={now}
+                    weekStartsOn={weekStartsOn}
+                    weekend={weekend}
+                    selectedDay={selectedDay}
+                    onSelectDay={setSelectedDay}
+                    columns={columns}
+                    buckets={buckets}
+                    runsByDay={runsByDay}
+                    nextRunAt={
+                      prefs.showRoutines && range && rangeContains(range, now)
+                        ? runStats.next
+                        : null
+                    }
+                    showEarlier={showEarlier}
+                    earlierOpen={earlierOpen}
+                    onEarlierOpenChange={setEarlierOpen}
+                    needsYou={{
+                      total: needsYou.total,
+                      content: (
+                        <NeedsYouItems
+                          model={needsYou}
+                          teamFilter={teamFilter}
+                          onOpenTask={openTask}
+                          onTasksChanged={onTasksChanged}
+                          layout="cell"
+                          // Today and All show every card in a cell, Needs you too.
+                          cap={range && range.mode !== 'day' ? NEEDS_YOU_CAP : undefined}
+                          show={needsYouShow}
+                        />
+                      ),
+                      onGoToday: revealNeedsYou,
+                    }}
+                    cancelledOpen={prefs.cancelledOpen}
+                    onCancelledOpenChange={(cancelledOpen) => updatePrefs({ cancelledOpen })}
+                    pinnedIds={pinnedIds}
+                    drag={
+                      activeTask
+                        ? {
+                            task: activeTask,
+                            ownColumn: boardColumnOf(activeTask),
+                            overColumn: dragOver,
+                          }
+                        : null
+                    }
+                    landing={landing}
+                    columnDropDisabled={columnDropDisabled}
+                    cardDisabled={cardDisabled}
+                    onCardOpen={openTask}
+                    onRunOpen={(run, anchor) => setRunPopover({ run, anchor })}
+                    openTaskId={openTaskId}
+                    openRunKey={openRunKey}
+                    arrivedIds={arrivedIds}
+                    settleId={settleId}
+                    todayPing={todayPing}
+                    unseenIds={dotted}
+                    onSeen={seeCard}
+                    onNewTask={() => setComposerOpen(true)}
+                  />
+                </motion.div>
+              ) : (
+                <div className="flex min-h-full items-start" style={{ gap: LANE_GAP }}>
+                  {/* Needs you ALWAYS renders as the first column, outside the task-load
                 branch: its approvals are decoupled from the board-task fetch (an exec
                 store + a /api/tools/approvals poll), so a /api/board outage never hides
                 a pending, time-sensitive gate. Its tasks are the ones nothing will move
                 on its own (failed, timed out, stopped, blocked, unassigned). Scoped to
                 the team filter and always expanded, like every other column. */}
-                <NeedsYouLane
-                  model={needsYou}
-                  teamFilter={teamFilter}
-                  onOpenTask={openTask}
-                  onTasksChanged={onTasksChanged}
-                />
-                {!loaded || waitingForRuns ? (
-                  // Skeleton columns until the first fetch resolves (mirrors the
-                  // RuntimesPanel `!loaded` pattern: empty columns shouldn't flash first),
-                  // as wide as the calendar's so the board does not jump when it lands.
-                  <div
-                    data-testid="board-skeleton"
-                    style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}
-                  >
-                    {COLUMNS.map((col) => (
-                      <div
-                        key={col.id}
-                        style={{
-                          flex: '0 0 184px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 10,
-                        }}
-                      >
-                        <Skeleton width="50%" height={11} />
-                        <Skeleton height={72} radius={16} />
-                        <Skeleton height={72} radius={16} />
-                      </div>
-                    ))}
-                  </div>
-                ) : !fetchOk ? (
-                  // The fetch FAILED, said as such: an empty board has its own empty
-                  // state, and showing that here would hide the error.
-                  <div data-testid="board-fetch-error" className="max-w-[460px]">
-                    <FormattedAlert tone="error">
-                      <span className="flex items-center gap-2">
-                        Couldn’t load the board.
-                        <Button variant="ghost" size="sm" onClick={() => void refresh()}>
-                          Retry
-                        </Button>
-                      </span>
-                    </FormattedAlert>
-                  </div>
-                ) : emptyBoard ? (
-                  // A genuinely empty board (fetch OK, zero tasks, no routine runs ahead)
-                  // → one board-level empty state with a manual CTA, rather than a grid of
-                  // empty cells. Reinforces the agent-driven model and offers the manual
-                  // escape hatch in the same place a first-time user looks.
-                  <div
-                    data-testid="board-empty"
-                    className="flex flex-1 items-center justify-center py-16"
-                  >
-                    <EmptyState
-                      // A calm Boo in To do's blue, where a first task lands. Amber
-                      // is Needs you's and red is today's, so neither is left to
-                      // the seed.
-                      art={
-                        <BooAvatar
-                          seed="clawboo-board-empty"
-                          size={56}
-                          tint={TINTS[3]}
-                          eyeShape={0}
-                          accessory="none"
-                        />
-                      }
-                      title="No tasks yet"
-                      helper="Agents populate this board automatically as work is delegated in chat. You can also add the first task yourself."
-                      action={
-                        <Button variant="primary" size="sm" onClick={() => setComposerOpen(true)}>
-                          <Plus size={14} strokeWidth={2.4} /> New task
-                        </Button>
-                      }
-                    />
-                  </div>
-                ) : null}
-              </div>
-            )}
-            {/* Rendered in an overlay so the moving card isn't clipped by column
-              overflow, and follows the pointer/keyboard cursor across columns. */}
-            <DragOverlay dropAnimation={dropAnimation}>
-              {activeTask ? (
-                <div className="cursor-grabbing" style={{ width: overlayWidth }}>
-                  <TaskCard
-                    task={activeTask}
-                    onClick={() => {}}
-                    // The lifted card keeps the stamp it had in its cell: a date when
-                    // it came from the Earlier row.
-                    stamp={calendarStamp(
-                      activeTask,
-                      !range
-                        ? 'all'
-                        : showEarlier &&
-                            !isFinishedStatus(activeTask.status) &&
-                            taskAnchor(activeTask, now) < range.start
-                          ? 'earlier'
-                          : 'day',
-                      now,
-                    )}
-                    accent={columnHue(boardColumnOf(activeTask))}
-                    lifted
+                  <NeedsYouLane
+                    model={needsYou}
+                    teamFilter={teamFilter}
+                    onOpenTask={openTask}
+                    onTasksChanged={onTasksChanged}
+                    loading={!loaded}
                   />
-                  {dragHint ? (
+                  {!loaded || waitingForRuns ? (
+                    // Skeleton columns until the first fetch resolves (mirrors the
+                    // RuntimesPanel `!loaded` pattern: empty columns shouldn't flash first),
+                    // as wide as the calendar's so the board does not jump when it lands.
                     <div
-                      data-testid="board-drag-hint"
-                      className="mt-1.5 inline-flex rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-foreground shadow-[var(--shadow-raised)]"
+                      data-testid="board-skeleton"
+                      aria-busy="true"
+                      aria-label="Loading the board"
+                      className="flex min-w-0 flex-1 items-start"
+                      style={{ gap: LANE_GAP }}
                     >
-                      {dragHint}
+                      {COLUMNS.map((col, i) => {
+                        const folded = col.id === 'cancelled' && !prefs.cancelledOpen
+                        return (
+                          <div
+                            key={col.id}
+                            className="flex flex-col"
+                            style={
+                              folded
+                                ? { flex: `0 0 ${RAIL_W}px` }
+                                : { flex: `1 1 ${COLUMN_MIN}px`, minWidth: COLUMN_MIN }
+                            }
+                          >
+                            <div
+                              className="flex items-center gap-2 pl-3 pr-1"
+                              style={{ height: HEADER_H }}
+                            >
+                              {folded ? null : (
+                                <>
+                                  <StatusGlyph kind={glyphKindOf(col.id)} muted />
+                                  <span className="truncate text-xs font-semibold text-muted-foreground">
+                                    {col.label}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            <div
+                              className="flex flex-col gap-2 p-2"
+                              style={{
+                                background: LANE,
+                                borderRadius: LANE_RADIUS,
+                                minHeight: 240,
+                              }}
+                            >
+                              {/* Fewer cards further right, so the shapes read as a
+                                  board settling, not a grid of equal blocks. */}
+                              {folded
+                                ? null
+                                : Array.from({ length: Math.max(1, 3 - (i % 3)) }, (_, k) => (
+                                    <Skeleton key={k} height={k === 0 ? 76 : 58} radius={8} />
+                                  ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : !fetchOk ? (
+                    // The fetch FAILED, said as such: an empty board has its own empty
+                    // state, and showing that here would hide the error.
+                    <div data-testid="board-fetch-error" className="max-w-[460px]">
+                      <FormattedAlert tone="error">
+                        <span className="flex items-center gap-2">
+                          Couldn’t load the board.
+                          <Button variant="ghost" size="sm" onClick={() => void refresh()}>
+                            Retry
+                          </Button>
+                        </span>
+                      </FormattedAlert>
+                    </div>
+                  ) : emptyBoard ? (
+                    // A genuinely empty board (fetch OK, zero tasks, no routine runs ahead)
+                    // → one board-level empty state with a manual CTA, rather than a grid of
+                    // empty cells. Reinforces the agent-driven model and offers the manual
+                    // escape hatch in the same place a first-time user looks.
+                    <div
+                      data-testid="board-empty"
+                      className="flex flex-1 items-center justify-center py-16"
+                    >
+                      <EmptyState
+                        // A calm Boo in To do's blue, where a first task lands. Amber
+                        // is Needs you's and red is today's, so neither is left to
+                        // the seed.
+                        art={
+                          <BooAvatar
+                            seed="clawboo-board-empty"
+                            size={56}
+                            tint={TINTS[3]}
+                            eyeShape={0}
+                            accessory="none"
+                          />
+                        }
+                        title="No tasks yet"
+                        helper="Agents populate this board automatically as work is delegated in chat. You can also add the first task yourself."
+                        action={
+                          <Button variant="primary" size="sm" onClick={() => setComposerOpen(true)}>
+                            <Plus size={14} strokeWidth={2} /> New task
+                          </Button>
+                        }
+                      />
                     </div>
                   ) : null}
                 </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
+              )}
+              {/* Rendered in an overlay so the moving card isn't clipped by column
+              overflow, and follows the pointer/keyboard cursor across columns. */}
+              <DragOverlay dropAnimation={dropAnimation}>
+                {activeTask ? (
+                  <div className="cursor-grabbing" style={{ width: overlayWidth }}>
+                    <TaskCard
+                      task={activeTask}
+                      onClick={() => {}}
+                      // The lifted card keeps the stamp it had in its cell: a date when
+                      // it came from the Earlier row.
+                      stamp={calendarStamp(
+                        activeTask,
+                        !range
+                          ? 'all'
+                          : showEarlier &&
+                              !isFinishedStatus(activeTask.status) &&
+                              taskAnchor(activeTask, now) < range.start
+                            ? 'earlier'
+                            : 'day',
+                        now,
+                      )}
+                      lifted
+                    />
+                    {dragHint ? (
+                      <div
+                        data-testid="board-drag-hint"
+                        className="mt-1.5 inline-flex rounded-full border border-border bg-surface px-2.5 py-1 text-micro font-medium text-foreground shadow-[var(--shadow-raised)]"
+                      >
+                        {dragHint}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
+          </div>
+          {showCalendar && moreRight ? (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 right-0 w-12"
+              style={{
+                background: 'linear-gradient(to right, transparent, var(--surface))',
+              }}
+            />
+          ) : null}
         </div>
-        {showCalendar && moreRight ? (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 w-12"
-            style={{
-              background: 'linear-gradient(to right, transparent, var(--surface))',
+
+        <AnimatePresence
+          // Closing the drawer hands focus back to the card that opened it. When the
+          // card's new home is off screen (today's row, from another week), focus
+          // goes to Today rather than being lost to the page.
+          onExitComplete={() => {
+            const a = document.activeElement
+            if (a && a !== document.body && a.isConnected) return
+            document
+              .querySelector<HTMLElement>('[data-testid="board-calendar-toolbar"] button')
+              ?.focus()
+          }}
+        >
+          {openTaskId && (
+            <TaskDetailDrawer
+              taskId={openTaskId}
+              onClose={() => setOpenTaskId(null)}
+              onStatusCommitted={commitStatus}
+              onChanged={onTasksChanged}
+              position={drawerPosition}
+              onOpenTask={setOpenTaskId}
+            />
+          )}
+        </AnimatePresence>
+
+        {runPopover ? (
+          <RoutineRunPopover
+            run={runPopover.run}
+            anchor={runPopover.anchor}
+            now={now}
+            timeZone={timeZone}
+            onClose={() => setRunPopover(null)}
+            onRunNow={() => runNow(runPopover.run)}
+            onOpenRoutine={() => openRoutine(runPopover.run)}
+          />
+        ) : null}
+
+        {findAnchor ? (
+          <FindPopover
+            anchor={findAnchor}
+            search={searchBoard}
+            scope={range ? range.mode : 'all'}
+            findsRoutines={range != null}
+            columnName={(column) =>
+              column === NEEDS_YOU_COLUMN ? 'Needs you' : statusLabel(column)
+            }
+            dayLabel={findDayLabel}
+            ownerOf={taskOwnerOf}
+            agentName={agentName}
+            onPick={pickFound}
+            onClose={closeFind}
+          />
+        ) : null}
+
+        {routineDialogId ? (
+          <RoutineDialog
+            key={routineDialogId}
+            target={{ mode: 'view', id: routineDialogId }}
+            record={routineRecords.find((r) => r.id === routineDialogId) ?? null}
+            directory={directory}
+            preferredTeamId={teamFilter !== 'all' ? teamFilter : null}
+            onClose={() => setRoutineDialogId(null)}
+            onChanged={routineChanged}
+            onOpenTask={(taskId) => {
+              setRoutineDialogId(null)
+              openTask(taskId)
             }}
           />
         ) : null}
+
+        <NewTaskDialog
+          open={composerOpen}
+          onClose={() => setComposerOpen(false)}
+          defaultTeamId={teamFilter !== 'all' ? teamFilter : undefined}
+          onCreated={handleCreated}
+        />
       </div>
-
-      <AnimatePresence
-        // Closing the drawer hands focus back to the card that opened it. When the
-        // card's new home is off screen (today's row, from another week), focus
-        // goes to Today rather than being lost to the page.
-        onExitComplete={() => {
-          const a = document.activeElement
-          if (a && a !== document.body && a.isConnected) return
-          document
-            .querySelector<HTMLElement>('[data-testid="board-calendar-toolbar"] button')
-            ?.focus()
-        }}
-      >
-        {openTaskId && (
-          <TaskDetailDrawer
-            taskId={openTaskId}
-            onClose={() => setOpenTaskId(null)}
-            onStatusCommitted={commitStatus}
-            onChanged={onTasksChanged}
-          />
-        )}
-      </AnimatePresence>
-
-      {runPopover ? (
-        <RoutineRunPopover
-          run={runPopover.run}
-          anchor={runPopover.anchor}
-          now={now}
-          timeZone={timeZone}
-          onClose={() => setRunPopover(null)}
-          onRunNow={() => runNow(runPopover.run)}
-          onOpenRoutine={() => openRoutine(runPopover.run)}
-        />
-      ) : null}
-
-      {findAnchor ? (
-        <FindPopover
-          anchor={findAnchor}
-          search={searchBoard}
-          scope={range ? range.mode : 'all'}
-          findsRoutines={range != null}
-          hueOf={(column) => (column === NEEDS_YOU_COLUMN ? 'var(--amber)' : columnHue(column))}
-          columnName={(column) => (column === NEEDS_YOU_COLUMN ? 'Needs you' : statusLabel(column))}
-          dayLabel={findDayLabel}
-          ownerOf={taskOwnerOf}
-          agentName={agentName}
-          onPick={pickFound}
-          onClose={closeFind}
-        />
-      ) : null}
-
-      {routineDialogId ? (
-        <RoutineDialog
-          key={routineDialogId}
-          target={{ mode: 'view', id: routineDialogId }}
-          record={routineRecords.find((r) => r.id === routineDialogId) ?? null}
-          directory={directory}
-          preferredTeamId={teamFilter !== 'all' ? teamFilter : null}
-          onClose={() => setRoutineDialogId(null)}
-          onChanged={routineChanged}
-          onOpenTask={(taskId) => {
-            setRoutineDialogId(null)
-            openTask(taskId)
-          }}
-        />
-      ) : null}
-
-      <NewTaskDialog
-        open={composerOpen}
-        onClose={() => setComposerOpen(false)}
-        defaultTeamId={teamFilter !== 'all' ? teamFilter : undefined}
-        onCreated={handleCreated}
-      />
-    </div>
+    </CardPropertiesContext.Provider>
   )
 }

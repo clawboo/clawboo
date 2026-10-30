@@ -32,6 +32,7 @@ import {
   rangeContains,
   startOfDay,
 } from '../calendarModel'
+import { pickView } from '../../__tests__/boardControls'
 import { resetBoardStorage } from '../../__tests__/resetBoardStorage'
 
 // dnd-kit's real drag can't run in jsdom, so the board's handlers are captured
@@ -283,7 +284,7 @@ describe('finishing a card by hand', () => {
     renderBoard()
     await screen.findByTestId('board-calendar')
     // The All view shows the card whatever day of the week it is.
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     expect(inCell('in_progress', 'all').getByText('Week-old chore')).toBeInTheDocument()
 
     await drop('w', 'done')
@@ -528,7 +529,7 @@ describe('cancelling a card by hand', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     expect(screen.getByTestId('board-cancelled-rail')).toBeInTheDocument()
 
     await drop('c', 'cancelled')
@@ -606,7 +607,10 @@ describe('the columns during a drag', () => {
     // To do → In progress is a legal status change, but a person moving it there
     // starts no run, so the column takes nothing.
     expect(inProgress).toHaveStyle({ opacity: DIMMED })
-    expect(inProgress.style.boxShadow).toBe('')
+    // Its lane keeps the rest fill every lane has.
+    expect(inProgress.style.getPropertyValue('--lane')).toBe(
+      screen.getByTestId('board-column-backlog').style.getPropertyValue('--lane'),
+    )
     expect(screen.queryByTestId('calendar-landing')).toBeNull()
     // A column it can go to stays at full strength.
     expect(screen.getByTestId('board-column-backlog')).toHaveStyle({ opacity: '1' })
@@ -619,16 +623,20 @@ describe('the columns during a drag', () => {
     const own = screen.getByTestId('board-column-in_progress')
     const done = screen.getByTestId('board-column-done')
 
+    // Every lane rests on the same fill.
+    const rest = done.style.getPropertyValue('--lane')
+    expect(rest).not.toBe('')
+
     await lift('a')
     await hover('in_progress')
-    expect(own.style.boxShadow).toBe('')
+    expect(own.style.getPropertyValue('--lane')).toBe(rest)
     expect(own).toHaveStyle({ opacity: '1' })
     expect(screen.queryByTestId('calendar-landing')).toBeNull()
 
-    // A column it can go to does light up.
+    // A column it can go to does light up: its lane fills a step more.
     await hover('done')
-    expect(done.style.boxShadow).toMatch(/^inset /)
-    expect(own.style.boxShadow).toBe('')
+    expect(done.style.getPropertyValue('--lane')).not.toBe(rest)
+    expect(own.style.getPropertyValue('--lane')).toBe(rest)
   })
 
   it('steps Needs you back during any drag that does not land there', async () => {
@@ -772,7 +780,7 @@ describe('where the landing outline sits', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     const cell = screen.getByTestId('calendar-cell-todo-all')
     const titles = ['Newest card', 'Recent card', 'Oldest card']
     expect(cellOrder(cell, titles)).toEqual(titles)

@@ -1,10 +1,11 @@
 // The Board's "Needs you" column: everything waiting on a person. It stays
 // expanded when empty (like every other column), shows pending approvals and stuck
 // tasks (with group headings only when both are there), and gives each stuck task
-// the reason it waits plus the action that gets it moving. The calendar draws the
-// same items as amber chips in today's row, gathers tasks that broke the same way
-// onto one card with batch actions, lets a card that is done animate out, and
-// keeps a keyboard user's place when a focused card leaves.
+// the reason it waits plus the one action that gets it moving, with the rest
+// (Dismiss, handing it to someone else) in the card's menu. The calendar draws the
+// same cards in today's row, gathers tasks that broke the same way onto one card
+// with batch actions, lets a card that is done animate out, and keeps a keyboard
+// user's place when a focused card leaves.
 // RTL + msw (onUnhandledRequest:'error').
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
@@ -101,6 +102,13 @@ beforeEach(() => {
   server.use(http.get('/api/tools/approvals', () => HttpResponse.json({ approvals: [] })))
 })
 afterEach(() => cleanup())
+
+/** Opens a card's menu and picks an item: Dismiss and the agents a task can go
+ *  to live there, beside the one action the card leads with. */
+async function pickFromMenu(scope: HTMLElement, item: string | RegExp) {
+  await userEvent.click(within(scope).getByRole('button', { name: /^More for/ }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: item }, T))
+}
 
 describe('NeedsYouColumn', () => {
   it('stays expanded when nothing needs you, and says so', async () => {
@@ -206,8 +214,8 @@ describe('NeedsYouColumn', () => {
     const card = await screen.findByTestId('needs-you-task', {}, T)
     expect(within(card).getByText('Unassigned')).toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: /Retry/ })).toBeNull()
-    await userEvent.click(within(card).getByLabelText('Assign to an agent'))
-    await userEvent.click(await screen.findByRole('option', { name: 'Writer' }, T))
+    await userEvent.click(within(card).getByRole('button', { name: 'Assign' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Writer' }, T))
     await waitFor(() => expect(assigned).toEqual({ id: 't1', agentId: 'a2' }), T)
   })
 
@@ -220,7 +228,7 @@ describe('NeedsYouColumn', () => {
       }),
     )
     renderColumn([failedTask()])
-    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }, T))
+    await pickFromMenu(await screen.findByTestId('needs-you-task', {}, T), 'Dismiss')
     const dialog = await screen.findByTestId('confirm-dialog', {}, T)
     expect(patched).toBeNull() // nothing is cancelled before the person confirms
     await userEvent.click(within(dialog).getByTestId('confirm-ok'))
@@ -241,7 +249,7 @@ describe('NeedsYouColumn', () => {
       ),
     )
     renderColumn([failedTask()])
-    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }, T))
+    await pickFromMenu(await screen.findByTestId('needs-you-task', {}, T), 'Dismiss')
     await userEvent.click(
       within(await screen.findByTestId('confirm-dialog', {}, T)).getByTestId('confirm-ok'),
     )
@@ -359,7 +367,7 @@ describe('Needs you in the calendar’s today row', () => {
     expect(open).toHaveAccessibleDescription(/Failed 2×.*provider out of credits.*Waiting since/)
   })
 
-  it('offers Retry and Dismiss as quiet words that still do their jobs', async () => {
+  it('leads with Retry as a quiet word, with Dismiss in the card menu', async () => {
     let retried = ''
     server.use(
       http.post('/api/board/:id/retry', ({ params }) => {
@@ -369,7 +377,8 @@ describe('Needs you in the calendar’s today row', () => {
     )
     const { onTasksChanged } = renderCell([failedTask()])
     const card = await screen.findByTestId('needs-you-task', {}, T)
-    expect(within(card).getByRole('button', { name: 'Dismiss' })).toBeVisible()
+    expect(within(card).queryByRole('button', { name: 'Dismiss' })).toBeNull()
+    expect(within(card).getByRole('button', { name: /^More for/ })).toBeVisible()
     await userEvent.click(within(card).getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(retried).toBe('t1'), T)
     await waitFor(() => expect(onTasksChanged).toHaveBeenCalled(), T)
@@ -384,7 +393,7 @@ describe('Needs you in the calendar’s today row', () => {
     ).not.toBeNull()
     expect(within(group).queryByText('Exec Approval')).toBeNull()
     expect(group.querySelector('.uppercase')).toBeNull()
-    expect(within(group).getByText('rm -rf build')).toHaveClass('font-data')
+    expect(within(group).getByText('rm -rf build')).toHaveClass('font-mono')
 
     const allow = within(group).getByRole('button', { name: 'Allow Once' })
     const always = within(group).getByRole('button', { name: 'Always' })
@@ -495,7 +504,7 @@ describe('Needs you groups tasks that broke the same way', () => {
       }),
     )
     renderCell(sameCause(3))
-    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss all 3 tasks' }, T))
+    await pickFromMenu(await screen.findByTestId('needs-you-group', {}, T), 'Dismiss all')
     const dialog = await screen.findByTestId('confirm-dialog', {}, T)
     expect(within(dialog).getByText('Dismiss 3 tasks?')).toBeInTheDocument()
     expect(patched).toEqual([]) // nothing is cancelled before the person confirms
@@ -510,7 +519,8 @@ describe('Needs you groups tasks that broke the same way', () => {
     renderCell([a, { ...b, assigneeAgentId: null, sourceDelegationId: null }])
     const group = await screen.findByTestId('needs-you-group', {}, T)
     expect(within(group).queryByRole('button', { name: /Retry all/ })).toBeNull()
-    expect(within(group).getByRole('button', { name: /Dismiss all/ })).toBeVisible()
+    // Dismiss all is still there, in the group's menu.
+    expect(within(group).getByRole('button', { name: 'More for 2 tasks' })).toBeVisible()
   })
 
   it('opens a task from its row', async () => {
@@ -659,7 +669,7 @@ describe('Needs you keeps a keyboard user’s place when a card leaves', () => {
     await waitFor(() => expect(document.activeElement).toBe(openButton('Other work')), T)
   })
 
-  it('moves focus on after a confirmed Dismiss, and back to Dismiss when the person backs out', async () => {
+  it('moves focus on after a confirmed Dismiss, and back to the menu when the person backs out', async () => {
     server.use(http.patch('/api/board/:id', () => HttpResponse.json({ ok: true })))
     const a = single('t1', 'Card A', 'quota')
     const b = single('t2', 'Card B', 'disk full')
@@ -668,16 +678,16 @@ describe('Needs you keeps a keyboard user’s place when a card leaves', () => {
     onTasksChanged.mockImplementation(() => rerender([b]))
     await screen.findByRole('button', { name: 'Open “Card A”' }, T)
     const cardA = openButton('Card A').closest('[data-testid="needs-you-task"]') as HTMLElement
-    const dismiss = within(cardA).getByRole('button', { name: 'Dismiss' })
+    const more = within(cardA).getByRole('button', { name: /^More for/ })
 
-    await userEvent.click(dismiss)
+    await pickFromMenu(cardA, 'Dismiss')
     const asked = await screen.findByTestId('confirm-dialog', {}, T)
     await userEvent.click(within(asked).getByTestId('confirm-cancel'))
-    await waitFor(() => expect(document.activeElement).toBe(dismiss), T)
+    await waitFor(() => expect(document.activeElement).toBe(more), T)
     await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).toBeNull(), T)
     expect(onTasksChanged).not.toHaveBeenCalled()
 
-    await userEvent.click(dismiss)
+    await pickFromMenu(cardA, 'Dismiss')
     const again = await screen.findByTestId('confirm-dialog', {}, T)
     await userEvent.click(within(again).getByTestId('confirm-ok'))
     await waitFor(() => expect(document.activeElement).toBe(openButton('Card B')), T)
