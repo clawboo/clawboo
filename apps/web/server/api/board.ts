@@ -58,7 +58,7 @@ import { emitEvent } from '../lib/obs'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
-import { forwardPersonComment } from '../lib/teamChat/taskSteer'
+import { deliverPersonReply, type ReplyDelivery } from '../lib/teamChat/personReply'
 import {
   actOnTaskWorkspace,
   getTaskWorkspace,
@@ -484,7 +484,7 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
 }
 
 // ─── POST /api/board/:taskId/comments ────────────────────────────────────────
-export function boardCommentPOST(req: Request, res: Response): void {
+export async function boardCommentPOST(req: Request, res: Response): Promise<void> {
   try {
     const parsed = commentBody.safeParse(req.body)
     if (!parsed.success) {
@@ -509,7 +509,7 @@ export function boardCommentPOST(req: Request, res: Response): void {
     // Narrate the comment into the team room so every peer sees it, not just the
     // leader (best-effort, AFTER the canonical write; never a write path back).
     const task = getTask(db, taskId)
-    let forwarded = false
+    let delivery: ReplyDelivery | null = null
     if (task) {
       const author = parsed.data.authorAgentId ?? parsed.data.authorType
       reflectToRoom(
@@ -517,13 +517,22 @@ export function boardCommentPOST(req: Request, res: Response): void {
         task.teamId,
         `${author} on "${task.title}": ${parsed.data.body.slice(0, 160)}`,
       )
-      // A person's comment is meant for the agent doing the work: pass it on
-      // (mailbox, plus a steer into the run working on the task).
+      // A person's comment is a reply to the agent the task belongs to: deliver
+      // it, starting the task again when it waits on the person, and say where
+      // it went (see personReply).
       if (parsed.data.authorType === 'user') {
-        forwarded = forwardPersonComment(db, task, parsed.data.body)
+        const mcpBaseUrl = loopbackMcpBaseUrl(req)
+        delivery = await deliverPersonReply(db, task, parsed.data.body, {
+          dispatch: (teamId, id) => requestTaskDispatch(teamId, id, mcpBaseUrl),
+        })
       }
     }
-    res.json({ ok: true, comment, forwarded })
+    res.json({
+      ok: true,
+      comment,
+      forwarded: delivery != null && delivery.status !== 'not-delivered',
+      ...(delivery ? { delivery } : {}),
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

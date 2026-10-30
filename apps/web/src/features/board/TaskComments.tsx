@@ -10,6 +10,7 @@
 // and Clawboo's own stay plain text: a path like `__init__.py` in a failure
 // reason must read as written.
 
+import type { ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -47,11 +48,14 @@ export function TaskComments({
   comments,
   compact = false,
   emptyLabel = 'No comments yet.',
+  after,
 }: {
   comments: TaskComment[]
   /** Tighter type for the chat card, where the log sits inside a narrow card. */
   compact?: boolean
   emptyLabel?: string
+  /** Drawn under an entry, such as where a reply the person just sent went. */
+  after?: (comment: TaskComment) => ReactNode
 }) {
   const authorOf = useAuthorLabel()
   const visible = comments.filter((c) => typeof c.body === 'string' && c.body.trim().length > 0)
@@ -107,6 +111,7 @@ export function TaskComments({
               {c.body}
             </p>
           )}
+          {after?.(c)}
         </li>
       ))}
     </ol>

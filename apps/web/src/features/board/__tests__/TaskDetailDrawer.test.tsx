@@ -90,7 +90,10 @@ describe('TaskDetailDrawer', () => {
     expect(
       within(screen.getByTestId('task-report')).getByText('Shipped and verified.').tagName,
     ).toBe('P')
-    expect(screen.queryByRole('button', { name: /^Comments/ })).toBeNull()
+    // Comments holds only the reply box: the report is not listed a second time.
+    expect(
+      within(screen.getByTestId('task-comments-section')).queryByTestId('task-comments'),
+    ).toBeNull()
   })
 
   it('falls back to a plain heading when the boo is not in the fleet', async () => {
@@ -873,8 +876,11 @@ describe('TaskDetailDrawer: reading and stepping', () => {
     await screen.findByRole('heading', { name: 'Ship it' })
     expect(screen.getByRole('button', { name: 'Properties' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Activity' })).toBeInTheDocument()
-    for (const empty of [/^Verification/, /^Workspace/, /^Run history/, /^Comments/, /^Brief/])
+    for (const empty of [/^Verification/, /^Workspace/, /^Run history/, /^Brief/])
       expect(screen.queryByRole('button', { name: empty })).toBeNull()
+    // Comments is always there: it holds the reply box.
+    expect(screen.getByRole('button', { name: 'Comments' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Reply' })).toBeInTheDocument()
   })
 
   it('folds a section from its heading', async () => {
@@ -1099,5 +1105,84 @@ describe('TaskDetailDrawer: review fixes', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(screen.getByRole('heading', { name: 'Second task' })).toBeInTheDocument()
     expect(screen.queryByTestId('task-detail-loading')).toBeNull()
+  })
+})
+
+describe('TaskDetailDrawer: replying', () => {
+  it('sends a reply, says what sending does first and where the reply went after', async () => {
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder', teamId: 'team-1' } as AgentState],
+      selectedAgentId: null,
+    })
+    const comments: Record<string, unknown>[] = []
+    let status = 'blocked'
+    let posted: Record<string, unknown> | null = null
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Draft the launch post',
+            status,
+            teamId: 'team-1',
+            sourceDelegationId: 'assign:n1:agent:agent-7:origin:human',
+            attention:
+              status === 'blocked' ? { reason: 'failed', failedRuns: 1, detail: 'no key' } : null,
+          },
+          comments,
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.post('/api/board/t1/comments', async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>
+        comments.push({ id: 'c9', body: posted['body'], authorType: 'user', createdAt: Date.now() })
+        status = 'todo'
+        return HttpResponse.json({
+          ok: true,
+          comment: { id: 'c9' },
+          forwarded: true,
+          delivery: { status: 'woke-agent', agentId: 'agent-7' },
+        })
+      }),
+    )
+    const onChanged = vi.fn()
+    const user = userEvent.setup()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} onChanged={onChanged} />)
+
+    const box = await screen.findByRole('textbox', { name: 'Reply' })
+    expect(box).toHaveAttribute('placeholder', 'Reply to Coder…')
+    expect(screen.getByText('Sending starts Coder on this again.')).toBeInTheDocument()
+
+    await user.type(box, 'Use the staging key.{Enter}')
+    expect(posted).toEqual({ body: 'Use the staging key.', authorType: 'user' })
+    const receipt = await screen.findByTestId('reply-receipt')
+    expect(receipt).toHaveTextContent('Coder is starting on this')
+    // The note sits under the reply it belongs to.
+    expect(receipt.closest('li')).toHaveTextContent('Use the staging key.')
+    expect(box).toHaveValue('')
+    expect(onChanged).toHaveBeenCalled()
+  })
+
+  it('says a finished task can take the reply as a follow-up', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done', assigneeAgentId: 'agent-7' },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findByRole('textbox', { name: 'Reply' })
+    expect(
+      screen.getByText('This task is finished. You can send your reply as a follow-up task.'),
+    ).toBeInTheDocument()
   })
 })
