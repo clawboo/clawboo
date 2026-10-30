@@ -70,7 +70,7 @@ describe('InlineApprovalCard', () => {
     expect(screen.queryByText('Exec Approval')).toBeNull()
     expect(document.querySelector('.uppercase')).toBeNull()
     expect(screen.getByText('Coder')).toBeInTheDocument()
-    expect(screen.getByText('rm -rf build')).toHaveClass('font-data')
+    expect(screen.getByText('rm -rf build')).toHaveClass('font-mono')
 
     // One filled emphasis, in ink; the other two outlined; no red anywhere.
     expect(button('Allow Once').className).toContain('bg-foreground')

@@ -21,8 +21,9 @@ import { useToastStore } from '@/stores/toast'
 
 import { server } from '../../../../__vitest__/mswServer'
 import { BoardPanel } from '../../BoardPanel'
-import { dayMonth, longDate, shortDate, timeLabel } from '../calendarFormat'
+import { agoLabel, dayMonth, longDate, shortDate, timeLabel } from '../calendarFormat'
 import { addDays, dayKey, startOfDay } from '../calendarModel'
+import { openDisplay, pickView } from '../../__tests__/boardControls'
 import { resetBoardStorage } from '../../__tests__/resetBoardStorage'
 
 const HOUR = 3_600_000
@@ -136,9 +137,12 @@ function titlesIn(cell: HTMLElement, titles: readonly string[]): string[] {
     .map((card) => titles.find((t) => card.textContent?.includes(t)) ?? '?')
 }
 
-/** The view switch's segments, in order. */
-function viewSegments(): HTMLElement[] {
-  return within(screen.getByRole('radiogroup', { name: 'Board view' })).getAllByRole('radio')
+/** The views in the view menu, in order (it opens the menu). */
+async function viewItems(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement[]> {
+  await user.click(screen.getByTestId('board-view'))
+  return within(await screen.findByRole('menu', { name: 'Board view' })).getAllByRole(
+    'menuitemradio',
+  )
 }
 
 /** The range title's two parts: the dates, and the year beside them. */
@@ -150,8 +154,14 @@ function titleParts(): string[] {
 
 /** The panel header above the time bar: the title, its subtitle and the actions. */
 function panelHeader(): HTMLElement {
-  return screen.getByRole('heading', { name: 'Board', level: 1 }).parentElement!.parentElement!
-    .parentElement!
+  return screen.getByTestId('board-header')
+}
+
+/** What an element shows on screen: its text without the screen-reader-only parts. */
+function shownText(el: HTMLElement): string {
+  const copy = el.cloneNode(true) as HTMLElement
+  copy.querySelectorAll('.sr-only, [role="status"]').forEach((n) => n.remove())
+  return copy.textContent ?? ''
 }
 
 /** The view the board stored for this browser. */
@@ -176,22 +186,62 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-describe('the Today view', () => {
-  it('comes first in the view switch, with Week chosen by default', async () => {
+describe('the views', () => {
+  it('opens on the Kanban board for a first visit, with the calendars after it', async () => {
+    resetBoardStorage({ view: null })
     serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }])
     renderBoard()
     await screen.findByTestId('board-calendar')
+    expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'all')
 
-    expect(viewSegments().map((r) => r.textContent)).toEqual(['Today', 'Week', 'Month', 'All'])
-    expect(viewSegments().map((r) => r.getAttribute('aria-checked'))).toEqual([
-      'false',
+    // One button names the view; it opens the views, each with its key.
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Kanban')
+    const items = await viewItems(userEvent.setup())
+    expect(items.map((r) => r.getAttribute('data-testid'))).toEqual([
+      'board-view-all',
+      'board-view-day',
+      'board-view-week',
+      'board-view-month',
+    ])
+    expect(items.map((r) => r.getAttribute('aria-keyshortcuts'))).toEqual(['K', 'D', 'W', 'M'])
+    expect(items.map((r) => r.getAttribute('aria-checked'))).toEqual([
       'true',
       'false',
       'false',
+      'false',
     ])
-    expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'week')
   })
 
+  it.each([
+    ['a Week the person picked', { mode: 'week', modePicked: true }, 'week'],
+    ['a Month', { mode: 'month' }, 'month'],
+    ['Today', { mode: 'day' }, 'day'],
+    // Week was the old default, saved with any other setting: never a choice.
+    ['a Week nobody picked', { mode: 'week', showRoutines: false }, 'all'],
+  ])('opens on %s as stored', async (_case, stored, mode) => {
+    resetBoardStorage({ view: null })
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify(stored))
+    serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }])
+    renderBoard()
+    await screen.findByTestId('board-calendar')
+    expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', mode)
+  })
+
+  it('remembers a view the person picks as their choice', async () => {
+    resetBoardStorage({ view: null })
+    serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }])
+    const user = userEvent.setup()
+    renderBoard()
+    await screen.findByTestId('board-calendar')
+    await pickView(user, 'Week')
+    expect(JSON.parse(window.localStorage.getItem(PREFS_KEY)!)).toMatchObject({
+      mode: 'week',
+      modePicked: true,
+    })
+  })
+})
+
+describe('the Today view', () => {
   it('shows only today, with the open work from before it in Earlier', async () => {
     const today = Date.now()
     const yesterday = addDays(today, -1) + 10 * HOUR
@@ -212,9 +262,9 @@ describe('the Today view', () => {
     renderBoard()
     await screen.findByTestId('board-calendar')
 
-    await user.click(screen.getByRole('radio', { name: 'Today' }))
+    await pickView(user, 'Today')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'day')
-    expect(screen.getByRole('radio', { name: 'Today' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Today')
     // One day row, today's; nothing folds and nothing else is drawn.
     expect(dayRowKeys()).toEqual([dayKey(today)])
     expect(screen.queryByTestId('calendar-row-gap')).toBeNull()
@@ -244,7 +294,7 @@ describe('the Today view', () => {
     expect(screen.getByRole('button', { name: /^Next week/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Go to today' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('radio', { name: 'Today' }))
+    await pickView(user, 'Today')
     expect(screen.queryByRole('button', { name: /^Previous/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Next/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Go to today' })).toBeNull()
@@ -274,7 +324,7 @@ describe('the Today view', () => {
     expect(within(cell()).getAllByTestId('board-card')).toHaveLength(3)
     expect(within(cell()).getByRole('button', { name: '+2 more' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('radio', { name: 'Today' }))
+    await pickView(user, 'Today')
     expect(within(cell()).getAllByTestId('board-card')).toHaveLength(5)
     expect(within(cell()).queryByRole('button', { name: /more$/ })).toBeNull()
     expect(within(cell()).queryByRole('button', { name: 'Show less' })).toBeNull()
@@ -289,12 +339,12 @@ describe('the Today view', () => {
 
     await user.keyboard('d')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'day')
-    expect(screen.getByRole('radio', { name: 'Today' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Today')
     expect(dayRowKeys()).toEqual([dayKey(Date.now())])
 
     await user.keyboard('w')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'week')
-    expect(screen.getByRole('radio', { name: 'Week' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Week')
     expect(dayRowKeys()).toContain(dayKey(Date.now()))
   })
 
@@ -303,7 +353,7 @@ describe('the Today view', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'Today' }))
+    await pickView(user, 'Today')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'day')
 
     await user.click(screen.getByTestId('board-range-title'))
@@ -318,7 +368,7 @@ describe('the Today view', () => {
     )
     expect(screen.queryByTestId('calendar-mini-month')).toBeNull()
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'week')
-    expect(screen.getByRole('radio', { name: 'Week' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Week')
     expect(storedMode()).toBe('week')
     // The week shown is the picked date's, two weeks on, so today is not in it.
     expect(screen.getByTestId(`calendar-day-${dayKey(target)}`)).toHaveAttribute(
@@ -335,20 +385,20 @@ describe('the Today view', () => {
     await screen.findByTestId('board-calendar')
     expect(storedMode()).not.toBe('day')
 
-    await user.click(screen.getByRole('radio', { name: 'Today' }))
+    await pickView(user, 'Today')
     expect(storedMode()).toBe('day')
 
     cleanup()
     renderBoard()
     await screen.findByTestId('board-calendar')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'day')
-    expect(screen.getByRole('radio', { name: 'Today' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Today')
     expect(dayRowKeys()).toEqual([dayKey(Date.now())])
   })
 })
 
 describe('the All view', () => {
-  it('draws every task in one row, whose gutter counts them, newest first', async () => {
+  it('draws every task in one row with no dates, newest first', async () => {
     const now = Date.now()
     serve([
       { id: 'a', title: 'Fresh idea', status: 'todo', createdAt: earlierToday() },
@@ -367,18 +417,19 @@ describe('the All view', () => {
     renderBoard()
     await screen.findByTestId('board-calendar')
 
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'all')
-    expect(screen.getByRole('radio', { name: 'All' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('board-view')).toHaveAttribute('aria-label', 'View: Kanban')
     expect(storedMode()).toBe('all')
     // One row and no days: no Earlier, no seams, nothing dated.
     expect(dayRowKeys()).toEqual([])
     expect(screen.queryByTestId('calendar-row-earlier')).toBeNull()
     expect(screen.queryByTestId('calendar-row-gap')).toBeNull()
-    const row = screen.getByTestId('calendar-row-all')
-    expect(row).toHaveTextContent('5 tasks')
-    expect(row).toHaveTextContent('newest first')
-    expect(screen.getByTestId('board-calendar-toolbar')).toHaveTextContent('All tasks')
+    // No date gutter: the lanes start at the board's edge.
+    expect(screen.queryByTestId('calendar-row-all')).toBeNull()
+    expect(screen.getByTestId('board-calendar-toolbar')).toHaveTextContent(
+      'Every task by status, newest first',
+    )
     // Every card is in the one row, history included.
     for (const [col, title] of [
       ['todo', 'Fresh idea'],
@@ -410,7 +461,7 @@ describe('the All view', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
 
     const cell = screen.getByTestId('calendar-cell-todo-all')
     expect(titlesIn(cell, titles)).toEqual(['Newest', 'Middle', 'Oldest'])
@@ -421,7 +472,7 @@ describe('the All view', () => {
     expect(within(cell).queryByRole('button', { name: /more$/ })).toBeNull()
   })
 
-  it('stamps a card from today with its time and an older one with its date', async () => {
+  it('stamps each card with how long ago it came, and an old one with its date', async () => {
     const today = earlierToday()
     const older = addDays(Date.now(), -12) + 9 * HOUR + 30 * 60_000
     serve([
@@ -431,11 +482,11 @@ describe('the All view', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
 
     const stampOf = (title: string) => within(cardFor(title)).getByTestId('board-card-stamp')
     expect(stampOf('Added today').textContent).toMatch(
-      new RegExp(`^${escapeRe(timeLabel(today))},`),
+      new RegExp(`^${escapeRe(agoLabel(today, Date.now()))},`),
     )
     expect(stampOf('Added before').textContent).toMatch(
       new RegExp(`^${escapeRe(dayMonth(older))},`),
@@ -465,7 +516,7 @@ describe('the All view', () => {
     expect(screen.getByTestId('board-needs-you-rail')).toBeInTheDocument()
     expect(screen.queryByTestId('calendar-needs-you-today')).toBeNull()
 
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     expect(screen.queryByTestId('board-needs-you-rail')).toBeNull()
     const home = screen.getByTestId('calendar-needs-you-today')
     expect(home).toHaveAccessibleName('Needs you: 1 item')
@@ -474,22 +525,25 @@ describe('the All view', () => {
     expect(columnHead('needs-you')).not.toHaveTextContent('Today')
     expect(columnHead('needs-you')).toHaveTextContent(/^Needs you1$/)
     // What waits on a person is not a card in a status column.
-    expect(screen.getByTestId('calendar-row-all')).toHaveTextContent('1 task')
+    expect(screen.getByTestId('board-column-todo')).toHaveAccessibleName('To do, 1 task')
     for (const id of ['backlog', 'todo', 'in_progress', 'done']) {
       expect(within(screen.getByTestId(`board-column-${id}`)).queryByText('Broken run')).toBeNull()
     }
   })
 
-  it('draws no routine runs, and has no Routines switch', async () => {
+  it('draws no routine runs, and Display has no routine runs switch', async () => {
     serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }], 2)
     const user = userEvent.setup()
     renderBoard()
     // A week draws today's runs in To do.
     expect(await screen.findByTestId('calendar-routine-run')).toBeInTheDocument()
+    await openDisplay(user)
     expect(screen.getByTestId('board-routines-toggle')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
 
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     expect(screen.queryByTestId('calendar-routine-run')).toBeNull()
+    await openDisplay(user)
     expect(screen.queryByTestId('board-routines-toggle')).toBeNull()
     expect(
       within(screen.getByTestId('calendar-cell-todo-all')).getByText('Any task'),
@@ -503,13 +557,15 @@ describe('the All view', () => {
       2,
     )
     renderBoard()
-    await screen.findByTestId('calendar-row-all')
+    await waitFor(() =>
+      expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'all'),
+    )
     expect(await screen.findByText('Any task')).toBeInTheDocument()
     expect(screen.queryByTestId('calendar-routine-run')).toBeNull()
     expect(board.runReads()).toBe(0)
   })
 
-  it('shows no task count in the header, leaving it to the column heads and the gutter', async () => {
+  it('shows no task count in the header, leaving it to the column heads', async () => {
     serve([
       { id: 't1', title: 'One task', status: 'todo', createdAt: earlierToday() },
       { id: 't2', title: 'Two task', status: 'todo', createdAt: earlierToday() - 1000 },
@@ -518,13 +574,12 @@ describe('the All view', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
 
-    expect(panelHeader().textContent).not.toMatch(/\d+ tasks?/)
-    expect(screen.getByTestId('board-calendar-toolbar').textContent).not.toMatch(/\d+ tasks?/)
+    expect(shownText(panelHeader())).not.toMatch(/\d+ tasks?/)
+    expect(shownText(screen.getByTestId('board-calendar-toolbar'))).not.toMatch(/\d+ tasks?/)
     expect(screen.getByTestId('board-column-todo')).toHaveAccessibleName('To do, 2 tasks')
     expect(screen.getByTestId('board-column-backlog')).toHaveAccessibleName('Backlog, 1 task')
-    expect(screen.getByTestId('calendar-row-all')).toHaveTextContent('3 tasks')
   })
 
   it('folds Cancelled into a rail that opens into the row and folds again', async () => {
@@ -544,13 +599,11 @@ describe('the All view', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
 
     const rail = screen.getByTestId('board-cancelled-rail')
     expect(rail).toHaveAccessibleName('Cancelled, 2 tasks. Show the column.')
     expect(screen.queryByText('Dropped idea')).toBeNull()
-    // Folded, its cards are not on screen, so the gutter does not count them.
-    expect(screen.getByTestId('calendar-row-all')).toHaveTextContent('1 task')
 
     await user.click(rail)
     const cell = await screen.findByTestId('calendar-cell-cancelled-all')
@@ -559,7 +612,7 @@ describe('the All view', () => {
       'Dropped long ago',
     ])
     expect(screen.queryByTestId('board-cancelled-rail')).toBeNull()
-    expect(screen.getByTestId('calendar-row-all')).toHaveTextContent('3 tasks')
+    expect(screen.getByTestId('board-column-cancelled')).toHaveAccessibleName('Cancelled, 2 tasks')
     expect(JSON.parse(window.localStorage.getItem(PREFS_KEY)!)).toMatchObject({
       mode: 'all',
       cancelledOpen: true,

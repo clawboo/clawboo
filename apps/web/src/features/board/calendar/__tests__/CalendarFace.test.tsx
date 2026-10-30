@@ -32,6 +32,7 @@ import {
   startOfMonth,
   startOfWeek,
 } from '../calendarModel'
+import { openDisplay, pickView } from '../../__tests__/boardControls'
 import { resetBoardStorage } from '../../__tests__/resetBoardStorage'
 
 const HOUR = 3_600_000
@@ -213,7 +214,7 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('the column heads', () => {
-  it('count each column as a bare numeral, and an empty column not at all', async () => {
+  it('count each column as a plain number, and an empty column not at all', async () => {
     serve(
       [{ id: 't1', title: 'Draft the launch note', status: 'todo', createdAt: earlierToday() }],
       [{ routine: ROUTINE, count: 24 }],
@@ -223,11 +224,15 @@ describe('the column heads', () => {
 
     const todo = columnHead('todo')
     expect(todo).toHaveTextContent(/^To do1$/)
-    const count = todo.querySelector('.board-roll')
-    expect(count).toHaveTextContent(/^1$/)
-    expect(count?.previousElementSibling).toHaveTextContent(/^To do$/)
+    const count = within(todo).getByText('1')
+    expect(count).toHaveClass('tabular-nums', 'text-muted-foreground')
+    expect(count.previousElementSibling).toHaveTextContent(/^To do$/)
+    // A count that changes just changes: it does not roll.
+    expect(todo.querySelector('.board-roll')).toBeNull()
+    // The column's colour is its glyph, before the name.
+    expect(todo.querySelector('[data-glyph="todo"]')).not.toBeNull()
     // The run total lives on the Routines switch, not here: no repeat mark, no 24.
-    expect(todo.querySelector('svg')).toBeNull()
+    expect(todo.querySelector('svg.lucide-repeat')).toBeNull()
     expect(todo.textContent).not.toContain('24')
     expect(screen.getByRole('group', { name: 'To do, 1 task' })).toBe(
       screen.getByTestId('board-column-todo'),
@@ -247,12 +252,13 @@ describe('the column heads', () => {
 
     const head = columnHead('needs-you')
     expect(head).toHaveTextContent(/^Needs youToday$/)
-    expect(head.querySelector('.board-roll')).toBeNull()
-    expect(head.querySelector('svg')).toHaveClass('text-muted-foreground')
-    expect(head.querySelector('svg')).not.toHaveClass('text-amber')
+    // Nothing waits, so the glyph steps back to the muted ink.
+    const glyph = head.querySelector('[data-glyph="needs_you"]')
+    expect(glyph?.getAttribute('style')).toContain('--muted-foreground')
+    expect(glyph?.getAttribute('style')).not.toContain('--amber')
   })
 
-  it('count what waits on Needs you in an amber pill, apart from the status columns', async () => {
+  it('count what waits on Needs you as a plain number beside its amber glyph', async () => {
     const old = startOfDay(Date.now()) - 20 * 24 * HOUR
     serve([{ id: 'f1', title: 'Broken run', status: 'blocked', createdAt: old, updatedAt: old }])
     renderBoard()
@@ -260,10 +266,13 @@ describe('the column heads', () => {
 
     const head = columnHead('needs-you')
     expect(head).toHaveTextContent(/^Needs you1Today$/)
-    const count = head.querySelector('.board-roll')
-    expect(count).toHaveTextContent(/^1$/)
-    expect(count?.parentElement).toHaveClass('bg-amber/20')
-    expect(head.querySelector('svg')).toHaveClass('text-amber')
+    const count = within(head).getByText('1')
+    expect(count).toHaveClass('tabular-nums')
+    // A number, not a pill: the amber is the glyph's alone.
+    expect(count.closest('.rounded-full')).toBeNull()
+    expect(head.querySelector('[data-glyph="needs_you"]')?.getAttribute('style')).toContain(
+      '--amber',
+    )
     // A stuck task is counted where it waits, not in a status column.
     expect(columnHead('backlog').textContent).not.toMatch(/\d/)
   })
@@ -396,7 +405,7 @@ describe('the day gutter', () => {
     expect(corner()).toHaveAttribute('aria-hidden', 'true')
     expect(corner()).toHaveTextContent(new RegExp(`^Week ${isoWeek(thisWeek().days[3]!)}$`))
 
-    await user.click(screen.getByRole('radio', { name: 'Month' }))
+    await pickView(user, 'Month')
     expect(corner()).toHaveTextContent(new RegExp(`^${monthShort(startOfMonth(Date.now()))}$`))
   })
 
@@ -432,7 +441,7 @@ describe('the day gutter', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    await user.click(screen.getByRole('radio', { name: 'Month' }))
+    await pickView(user, 'Month')
 
     const handles = screen
       .getAllByTestId('calendar-row-gap')
@@ -467,12 +476,12 @@ describe('the day gutter', () => {
     await screen.findByTestId('board-calendar')
 
     // In a month the 1st opens the range, whose title already names the month.
-    await user.click(screen.getByRole('radio', { name: 'Month' }))
+    await pickView(user, 'Month')
     const opening = screen.getByTestId(`calendar-day-${dayKey(onFirst)}`)
     expect(opening).not.toHaveTextContent(monthShort(onFirst))
 
     // The next 1st that does not open its week (two months in a row cannot both).
-    await user.click(screen.getByRole('radio', { name: 'Week' }))
+    await pickView(user, 'Week')
     const weekStart = localeWeekStart()
     let first = startOfMonth(addDays(startOfMonth(Date.now()), 40))
     if (startOfWeek(first, weekStart) === first) first = startOfMonth(addDays(first, 40))
@@ -656,18 +665,15 @@ describe('quiet days and today', () => {
     }
   })
 
-  it('lifts today’s row, and only on a range that holds today', async () => {
+  it('marks today once, in its red date, and lifts no row', async () => {
     serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }])
-    const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
 
-    expect(screen.getByTestId(`calendar-day-${dayKey(Date.now())}`)).toHaveClass(
-      'board-today-gutter',
-    )
-    expect(screen.getByTestId('calendar-today-lift')).toHaveAttribute('aria-hidden', 'true')
-
-    await user.click(screen.getByRole('button', { name: /^Previous week/ }))
+    const today = screen.getByTestId(`calendar-day-${dayKey(Date.now())}`)
+    expect(today.querySelector('.bg-primary-solid')).toHaveTextContent(String(new Date().getDate()))
+    // No sheet, no shadow, no lift: the date says it.
+    expect(today).not.toHaveClass('board-today-gutter')
     expect(screen.queryByTestId('calendar-today-lift')).toBeNull()
   })
 })
@@ -700,16 +706,16 @@ describe('the routine run strips', () => {
     expect(name).toHaveTextContent(/^Morning digest$/)
     // One run that day: the time alone, no count.
     expect(detail.textContent).toBe(timeLabel(firstRunAt))
-    const time = detail.querySelector('.font-data') as HTMLElement
+    // The time is Inter with tabular figures, after the repeat mark. The next run
+    // is told apart by its firm edge (data-next above), not by a coloured dot.
+    const time = detail.querySelector('.tabular-nums') as HTMLElement
     expect(time).toHaveTextContent(timeLabel(firstRunAt))
-    // A dot in the column's colour leads the next run's time, and only its.
-    const dot = time.previousElementSibling as HTMLElement
-    expect(dot.tagName).toBe('SPAN')
-    expect(dot).toHaveAttribute('aria-hidden', 'true')
-    expect(dot).toHaveClass('rounded-full')
-    expect(dot.style.background).toBe('var(--category-data)')
-    const laterTime = later.children[1]!.querySelector('.font-data') as HTMLElement
+    expect(time).not.toHaveClass('font-data')
+    expect(time.previousElementSibling?.tagName.toLowerCase()).toBe('svg')
+    const laterTime = later.children[1]!.querySelector('.tabular-nums') as HTMLElement
     expect(laterTime.previousElementSibling?.tagName.toLowerCase()).toBe('svg')
+    // Nothing in a strip carries a colour.
+    expect(next.querySelector('[style]')).toBeNull()
   })
 
   it('shows a strip as open while its popover is, and closed again after Escape', async () => {
@@ -741,8 +747,8 @@ describe('the routine run strips', () => {
   })
 })
 
-describe('the Routines switch', () => {
-  it('carries the run total as a numeral and in its title, and keeps its name', async () => {
+describe('the routine runs switch, in Display', () => {
+  it('says how many runs are coming, and hides and shows them', async () => {
     serve(
       [{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }],
       [{ routine: ROUTINE, count: 24 }],
@@ -751,64 +757,51 @@ describe('the Routines switch', () => {
     renderBoard()
     await screen.findByTestId('calendar-routine-run')
 
-    const toggle = screen.getByRole('button', { name: 'Routines' })
+    const display = await openDisplay(user)
+    const toggle = within(display).getByRole('switch', { name: 'Routine runs' })
     expect(toggle).toBe(screen.getByTestId('board-routines-toggle'))
-    const count = screen.getByTestId('board-routines-count')
-    expect(toggle).toContainElement(count)
-    expect(count).toHaveTextContent(/^24$/)
-    expect(count).toHaveAttribute('aria-hidden', 'true')
-    expect(count).toHaveClass('text-foreground')
-    expect(toggle).toHaveAttribute('title', 'Hide 24 upcoming routine runs')
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(display).toHaveTextContent('24 upcoming')
 
-    // Off: the runs leave the grid, but the switch still says how many there are.
+    // Off: the runs leave the grid, and Display still says how many there are.
     await user.click(toggle)
-    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
     expect(screen.queryByTestId('calendar-routine-run')).toBeNull()
-    expect(screen.getByTestId('board-routines-count')).toHaveTextContent(/^24$/)
-    expect(screen.getByTestId('board-routines-count')).toHaveClass('text-muted-foreground')
-    expect(toggle).toHaveAttribute('title', 'Show 24 upcoming routine runs')
-    expect(toggle).toHaveAccessibleName('Routines')
+    expect(display).toHaveTextContent('24 upcoming')
 
     await user.click(toggle)
-    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
     expect(await screen.findByTestId('calendar-routine-run')).toBeInTheDocument()
-    expect(toggle).toHaveAttribute('title', 'Hide 24 upcoming routine runs')
   })
 
-  it('names a single run in the singular', async () => {
+  it('counts a single run as one', async () => {
     serve(
       [{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }],
       [{ routine: ROUTINE, count: 1 }],
     )
+    const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('calendar-routine-run')
-    expect(screen.getByTestId('board-routines-count')).toHaveTextContent(/^1$/)
-    expect(screen.getByTestId('board-routines-toggle')).toHaveAttribute(
-      'title',
-      'Hide 1 upcoming routine run',
-    )
+    expect(await openDisplay(user)).toHaveTextContent('1 upcoming')
   })
 
-  it('marks a total the server capped with a plus, on the switch and in the day’s tooltip', async () => {
+  it('marks a total the server capped with a plus, in Display and in the day’s tooltip', async () => {
     serve(
       [{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }],
       [{ routine: ROUTINE, count: 24, more: true }],
     )
+    const user = userEvent.setup()
     renderBoard()
     const strip = await screen.findByTestId('calendar-routine-run')
-    expect(screen.getByTestId('board-routines-count')).toHaveTextContent(/^24\+$/)
-    expect(screen.getByTestId('board-routines-toggle')).toHaveAttribute(
-      'title',
-      'Hide 24+ upcoming routine runs',
-    )
     expect(within(strip).getByText('24+ runs')).toBeInTheDocument()
     expect(dateButton(Date.now())).toHaveAttribute(
       'title',
       `${longDate(Date.now())}, today. 1 task, 24+ runs. Click to highlight the day.`,
     )
+    expect(await openDisplay(user)).toHaveTextContent('24+ upcoming')
   })
 
-  it('shows no numeral while no run is coming', async () => {
+  it('says none are coming while no run is', async () => {
     let answered = false
     serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }])
     server.use(
@@ -817,15 +810,16 @@ describe('the Routines switch', () => {
         return HttpResponse.json({ now: Date.now(), routines: [] })
       }),
     )
+    const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
     await waitFor(() => expect(answered).toBe(true))
-    expect(screen.queryByTestId('board-routines-count')).toBeNull()
-    expect(screen.getByTestId('board-routines-toggle')).toHaveAttribute(
-      'title',
-      'Hide upcoming routine runs',
+    const display = await openDisplay(user)
+    expect(display).toHaveTextContent('None coming up here')
+    expect(within(display).getByRole('switch', { name: 'Routine runs' })).toHaveAttribute(
+      'aria-checked',
+      'true',
     )
-    expect(screen.getByTestId('board-routines-toggle')).toHaveAccessibleName('Routines')
   })
 })
 
@@ -862,7 +856,7 @@ describe('the range title', () => {
     }
 
     // "October" then "2026".
-    await user.click(screen.getByRole('radio', { name: 'Month' }))
+    await pickView(user, 'Month')
     expect(parts().map((p) => p.textContent)).toEqual([
       new Date().toLocaleDateString(undefined, { month: 'long' }),
       String(new Date().getFullYear()),
@@ -1033,7 +1027,7 @@ describe('the date picker', () => {
 })
 
 describe('the header', () => {
-  it('counts the tasks in the column heads in every view, the All view included', async () => {
+  it('counts the tasks in the column heads in every view, Kanban included', async () => {
     serve([
       { id: 't1', title: 'One task', status: 'todo', createdAt: earlierToday() },
       { id: 't2', title: 'Two task', status: 'backlog', createdAt: earlierToday() },
@@ -1041,14 +1035,15 @@ describe('the header', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    const actions = screen.getByRole('button', { name: 'Refresh' }).parentElement as HTMLElement
-    for (const view of ['Week', 'Month', 'All', 'Today']) {
-      await user.click(screen.getByRole('radio', { name: view }))
-      expect(actions.textContent).not.toMatch(/\d+ tasks?/)
+    for (const view of ['Week', 'Month', 'Kanban', 'Today']) {
+      await pickView(user, view)
+      // What the bars show: the polite announcer beside them is for screen readers.
+      for (const bar of ['board-header', 'board-calendar-toolbar']) {
+        const copy = screen.getByTestId(bar).cloneNode(true) as HTMLElement
+        copy.querySelectorAll('.sr-only, [role="status"]').forEach((n) => n.remove())
+        expect(copy.textContent).not.toMatch(/\d+ tasks?/)
+      }
       expect(screen.getByTestId('board-column-todo')).toHaveAccessibleName('To do, 1 task')
     }
-    // The All view's gutter says how many it holds.
-    await user.click(screen.getByRole('radio', { name: 'All' }))
-    expect(screen.getByTestId('calendar-row-all')).toHaveTextContent('2 tasks')
   })
 })

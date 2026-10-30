@@ -23,11 +23,11 @@ import { useFocusTrap } from '@/features/shared/useFocusTrap'
 
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
-const FIELD_LABEL = 'mb-1.5 block text-[12px] font-medium text-foreground/60'
-const FIELD_HINT = 'mt-1.5 text-[11.5px] leading-relaxed text-foreground/45'
+const FIELD_LABEL = 'mb-1.5 block text-xs font-medium text-muted-foreground'
+const FIELD_HINT = 'mt-1.5 text-xs leading-relaxed text-muted-foreground'
 const INPUT_CLASS =
-  'w-full rounded-lg border border-border bg-surface px-3 text-[13.5px] text-foreground ' +
-  'outline-none transition placeholder:text-foreground/35 ' +
+  'w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground ' +
+  'outline-none transition placeholder:text-muted-foreground ' +
   'focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50'
 
 export interface NewTaskDialogProps {
@@ -170,12 +170,12 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
       >
         <h2
           id={headingId}
-          className="text-[15px] font-semibold text-foreground"
+          className="text-base font-semibold text-foreground"
           style={{ letterSpacing: '-0.01em' }}
         >
           New task
         </h2>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-foreground/55">
+        <p className="mt-1 text-sm text-muted-foreground">
           Give one agent a task. It starts right away, and only that agent works on it.
         </p>
 
@@ -249,7 +249,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
 
           <div>
             <label htmlFor={descId} className={FIELD_LABEL}>
-              Details <span className="text-foreground/35">(optional)</span>
+              Details <span className="font-normal">(optional)</span>
             </label>
             <textarea
               id={descId}
@@ -280,7 +280,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
             loading={submitting}
             disabled={!canSubmit}
           >
-            {!submitting && <Plus size={14} strokeWidth={2.2} />}
+            {!submitting && <Plus size={14} strokeWidth={2} />}
             {agentName ? `Send to ${agentName}` : 'Create task'}
           </Button>
         </div>

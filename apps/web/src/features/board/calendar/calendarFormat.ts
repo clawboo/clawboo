@@ -152,3 +152,19 @@ export function sinceLabel(since: number, now: number): string {
   if (since > addDays(startOfDay(now), -6)) return `${weekdayShort(since)} ${timeLabel(since)}`
   return dayMonth(since)
 }
+
+/**
+ * How long ago something happened, as a card on the Kanban board says it: "Just
+ * now", "4m ago", "3h ago" today, "Yesterday", "3d ago" within the week, else the
+ * date. A moment in the future (another machine's clock) reads "Just now".
+ */
+export function agoLabel(at: number, now: number): string {
+  const minutes = Math.floor((now - at) / 60_000)
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes}m ago`
+  if (isSameDay(at, now)) return `${Math.floor(minutes / 60)}h ago`
+  if (isSameDay(at, addDays(now, -1))) return 'Yesterday'
+  const days = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000)
+  if (days < 7) return `${days}d ago`
+  return dayMonth(at)
+}

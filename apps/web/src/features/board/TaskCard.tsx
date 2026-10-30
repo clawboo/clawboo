@@ -1,31 +1,30 @@
 // A task's card on the board, and its drag-and-drop wrapper. The board draws
-// every card as a calendar chip, stamped with when it was added, started or
-// finished; without a stamp and an accent the card takes a plain form.
+// every card as a chip: a neutral card with the title, then one row saying who
+// has it, at most one status mark (else its cost), and when it was added,
+// started or finished. A card never repeats what its column already says.
+// Without a stamp the card takes a plain form.
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { delegationTargetOf, type TaskRunCost } from '@clawboo/board-core'
-import {
-  Check,
-  CheckCircle2,
-  CircleDashed,
-  CornerDownRight,
-  GripVertical,
-  Timer,
-  X,
-} from 'lucide-react'
+import { Check, CircleDashed, CornerDownRight, GripVertical, X } from 'lucide-react'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
-import { MarkGlyph, resolveRuntimeMark, runtimeLabel } from '@/features/runtimes/RuntimeBrand'
-import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
+import { runtimeLabel } from '@/features/runtimes/RuntimeBrand'
 import type { BoardTask } from '@/lib/boardClient'
 import { useFleetStore } from '@/stores/fleet'
+
+import type { CardProperties } from './BoardToolbar'
 
 import { boardColumnOf } from './boardStatus'
 import { isFinishedStatus } from './calendar/calendarModel'
 import { sitsOnOtherDay } from './finishMove'
+import { StatusGlyph } from './StatusGlyph'
 import { formatCostUsd, formatRunCost, runCostOf } from './taskCost'
+
+/** What every card shows besides its title and agent, from the Display popover. */
+export const CardPropertiesContext = createContext<CardProperties>({ cost: true, time: true })
 
 /** The runtimes the board has a name and a mark for. */
 const KNOWN_RUNTIMES = new Set(['openclaw', 'clawboo-native', 'claude-code', 'codex', 'hermes'])
@@ -85,25 +84,12 @@ function verdictStatus(task: BoardTask): 'pass' | 'fail' | 'completed_with_debt'
   }
 }
 
-const VERDICT_META: Record<
-  'pass' | 'fail' | 'completed_with_debt',
-  { tone: StatusTone; label: string }
-> = {
-  pass: { tone: 'success', label: 'pass' },
-  fail: { tone: 'error', label: 'fail' },
-  completed_with_debt: { tone: 'warning', label: 'debt' },
-}
-
 /** When a calendar card's task was added or finished, as the card shows it. */
 export interface CardStamp {
   /** The visible text: a time, or a date for a card from before the range. */
   label: string
   /** The full sentence a tooltip and a screen reader get. */
   title: string
-  /** The task finished, so the stamp carries a check. */
-  finished: boolean
-  /** The label is a date, not a time: it is set in Inter, since mono is for times. */
-  dated?: boolean
   /** The label is how long the task's run has been going, not when it was added. */
   running?: boolean
 }
@@ -133,9 +119,9 @@ function IconMark({
 
 /**
  * The one status mark a calendar chip shows, or null. Verifying comes first, then
- * a verdict that did not pass, then a pass (only before Done, whose stamp already
- * carries the check). A subtask's mark names the subtask in its tooltip and for
- * screen readers, so the row has no separate subtask mark to fit.
+ * a verdict that did not pass, then a pass (only before Done, whose column already
+ * says it). A subtask's mark names the subtask in its tooltip and for screen
+ * readers, so the row has no separate subtask mark to fit.
  */
 function chipStatusMark(
   status: string,
@@ -146,10 +132,10 @@ function chipStatusMark(
     return (
       <span
         title={subtask ? withSubtask('Verifying', true) : undefined}
-        className="inline-flex shrink-0 items-center gap-1 text-[11px] leading-4 text-muted-foreground"
+        className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
       >
-        <span aria-hidden className="board-pulse-dot size-[5px] shrink-0 rounded-full bg-mint" />
-        <span>Verifying</span>
+        <StatusGlyph kind="verifying" />
+        <span className="board-shimmer">Verifying</span>
         {subtask ? <span className="sr-only">. Subtask</span> : null}
       </span>
     )
@@ -157,110 +143,96 @@ function chipStatusMark(
   if (verdict === 'completed_with_debt') {
     return (
       <IconMark label={withSubtask('Passed with debt', subtask)} className="text-amber">
-        <CircleDashed size={12} strokeWidth={2.2} aria-hidden />
+        <CircleDashed size={12} strokeWidth={2} aria-hidden />
       </IconMark>
     )
   }
   if (verdict === 'fail') {
     return (
       <IconMark label={withSubtask('Verification failed', subtask)} className="text-amber">
-        <X size={12} strokeWidth={2.4} aria-hidden />
+        <X size={12} strokeWidth={2} aria-hidden />
       </IconMark>
     )
   }
   if (verdict === 'pass' && status !== 'done') {
     return (
       <IconMark label={withSubtask('Verified', subtask)} className="text-mint">
-        <Check size={12} strokeWidth={2.4} aria-hidden />
+        <Check size={12} strokeWidth={2} aria-hidden />
       </IconMark>
     )
   }
   return null
 }
 
-/** A recorded cost in the card's data face. */
+/**
+ * A recorded cost, in plain tabular figures. A card has room for cents at most:
+ * a sub-cent cost reads "<$0.01", which already says it is not exact, and a
+ * larger estimate carries a tilde. The exact figure and whether it is an
+ * estimate are in the title and for screen readers.
+ */
 function CostLabel({
   usd,
   estimated,
-  compact = false,
   subtask = false,
 }: {
   usd: number
   estimated: boolean
-  /**
-   * A chip has room for cents at most. A sub-cent cost reads "<$0.01", which
-   * already says it is not exact; a larger estimate carries a tilde. The exact
-   * figure and whether it is an estimate are in the title and for screen readers.
-   */
-  compact?: boolean
-  /** The chip is a subtask: its cost names that too, so the row needs no arrow. */
+  /** The card is a subtask: its cost names that too, so the row needs no arrow. */
   subtask?: boolean
 }) {
-  if (compact) {
-    const exact = formatCostUsd(usd)
-    const shown = usd > 0 && usd < 0.01 ? '<$0.01' : `${estimated ? '~' : ''}${exact}`
-    const detail = estimated
-      ? 'estimated, not a charge the runtime reported'
-      : 'the cost the runtime reported'
-    return (
-      <span
-        data-testid="board-card-cost"
-        className="font-data shrink-0 text-[11px] tabular-nums text-muted-foreground"
-        title={withSubtask(`${exact}, ${detail}`, subtask)}
-      >
-        <span aria-hidden>{shown}</span>
-        <span className="sr-only">
-          {withSubtask(`Cost ${exact}${estimated ? ', estimated' : ''}`, subtask)}
-        </span>
-      </span>
-    )
-  }
-  const title = estimated
-    ? 'Estimated, not a charge the runtime reported'
-    : 'Cost the runtime reported'
+  const exact = formatCostUsd(usd)
+  const shown = usd > 0 && usd < 0.01 ? '<$0.01' : `${estimated ? '~' : ''}${exact}`
+  const detail = estimated
+    ? 'estimated, not a charge the runtime reported'
+    : 'the cost the runtime reported'
   return (
     <span
       data-testid="board-card-cost"
-      className="font-data text-[11px] tabular-nums text-muted-foreground"
-      title={title}
+      className="shrink-0 text-xs tabular-nums text-muted-foreground"
+      title={withSubtask(`${exact}, ${detail}`, subtask)}
     >
-      {formatRunCost(usd, estimated)}
+      <span aria-hidden>{shown}</span>
+      <span className="sr-only">
+        {withSubtask(`Cost ${exact}${estimated ? ', estimated' : ''}`, subtask)}
+      </span>
     </span>
   )
 }
 
 /**
- * A calendar chip's meta row, one line: who has it, the runtime it runs on, at
- * most one status mark (else its cost), a subtask arrow when neither of those has
- * taken the subtask into its own label, and the stamp at the end. Every mark paints in the chip's ink or a
- * status colour, never a brand colour.
+ * A calendar chip's meta row, one line: who has it, at most one status mark
+ * (else its cost), a subtask arrow when neither of those has taken the subtask
+ * into its own label, and the stamp at the end. The runtime is not here: the
+ * drawer and the graph carry it. Every mark is muted ink or a status colour.
  */
 function ChipMeta({
   task,
   stamp,
   ownerId,
   ownerName,
-  runtime,
   mark,
   cost,
 }: {
   task: BoardTask
-  stamp: CardStamp
+  stamp?: CardStamp
   ownerId: string | null
   ownerName: string | null
-  runtime: string | null
   mark: ReactNode
   cost: TaskRunCost
 }) {
   const subtask = !!task['parentTaskId']
+  const shows = useContext(CardPropertiesContext)
+  const costShown = shows.cost && cost.usd !== null
   return (
-    <div className="flex min-h-4 flex-wrap items-center gap-x-1 gap-y-1">
+    <div className="flex min-h-4 flex-wrap items-center gap-x-1.5 gap-y-1">
       {ownerId ? (
         <span title={ownerName ?? undefined} className="inline-flex shrink-0 items-center">
           <AgentBooAvatar agentId={ownerId} size={16} />
           <span className="sr-only">{`Assigned to ${ownerName ?? 'an agent'}`}</span>
         </span>
-      ) : (
+      ) : task.status === 'todo' ? (
+        // Nobody has it, and in To do that is worth a mark; elsewhere the row
+        // just starts with what it has.
         <span
           title="Unassigned"
           className="size-4 shrink-0 rounded-full"
@@ -268,50 +240,32 @@ function ChipMeta({
         >
           <span className="sr-only">Unassigned</span>
         </span>
-      )}
-      {runtime ? (
-        KNOWN_RUNTIMES.has(runtime) ? (
-          <span
-            title={runtimeLabel(runtime)}
-            className="inline-flex shrink-0 text-muted-foreground"
-          >
-            <MarkGlyph glyph={resolveRuntimeMark(runtime).glyph} size={11} />
-            <span className="sr-only">{`Runtime: ${runtimeLabel(runtime)}`}</span>
-          </span>
-        ) : (
-          <span className="shrink-0 text-[11px] leading-4 text-muted-foreground">
-            <span className="sr-only">Runtime: </span>
-            {runtime}
-          </span>
-        )
       ) : null}
       {mark ??
-        (cost.usd !== null ? (
-          <CostLabel usd={cost.usd} estimated={cost.estimated} subtask={subtask} compact />
+        (costShown && cost.usd !== null ? (
+          <CostLabel usd={cost.usd} estimated={cost.estimated} subtask={subtask} />
         ) : null)}
-      {subtask && mark == null && cost.usd === null ? (
+      {subtask && mark == null && !costShown ? (
         <IconMark label="Subtask" className="text-muted-foreground">
-          <CornerDownRight size={11} strokeWidth={2} aria-hidden />
+          <CornerDownRight size={12} strokeWidth={2} aria-hidden />
         </IconMark>
       ) : null}
-      <StampLabel stamp={stamp} />
+      {stamp && shows.time ? <StampLabel stamp={stamp} /> : null}
     </div>
   )
 }
 
 /** When the task was added or finished, at the end of a calendar card's meta row.
- *  A time is set in mono; a date is words, so it is set in Inter. */
+ *  A run that is going shows its clock behind a small live dot. */
 function StampLabel({ stamp }: { stamp: CardStamp }) {
   return (
     <span
       data-testid="board-card-stamp"
       title={stamp.title}
-      className={`${stamp.dated ? '' : 'font-data '}ml-auto inline-flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground`}
+      className="ml-auto inline-flex items-center gap-1 text-xs tabular-nums text-muted-foreground"
     >
-      {stamp.finished ? (
-        <CheckCircle2 size={12} strokeWidth={2.2} className="text-mint" aria-hidden />
-      ) : stamp.running ? (
-        <Timer size={11} strokeWidth={2.2} aria-hidden />
+      {stamp.running ? (
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-mint" />
       ) : null}
       {stamp.label}
       <span className="sr-only">{`, ${stamp.title}`}</span>
@@ -320,8 +274,9 @@ function StampLabel({ stamp }: { stamp: CardStamp }) {
 }
 
 /**
- * A calendar chip's classes for its state. The chip's CSS owns every transition
- * and animation; the class or data attribute only names the state.
+ * A card's classes for its state. The card's CSS owns every transition and
+ * animation; the class or data attribute only names the state. Nothing moves
+ * under the pointer: hover only firms the edge.
  */
 function chipStateClasses({
   arrived,
@@ -335,8 +290,6 @@ function chipStateClasses({
   dragging?: boolean
 }): string {
   return [
-    // A card in the hand, or the copy it left behind, stays put under the pointer.
-    lifted || dragging ? '' : 'hover:-translate-y-px',
     arrived ? 'calendar-chip--arrived' : '',
     settle ? 'calendar-chip--settle' : '',
     lifted ? 'calendar-chip--lifted' : '',
@@ -371,7 +324,6 @@ export function TaskCard({
   task,
   onClick,
   stamp,
-  accent,
   open,
   past,
   arrived,
@@ -387,9 +339,7 @@ export function TaskCard({
   onClick: () => void
   /** Calendar cards carry a stamp: when it was added, started or finished. */
   stamp?: CardStamp
-  /** A calendar card is an event chip in its column's colour (a CSS colour). */
-  accent?: string
-  // The rest apply to calendar chips only (stamp and accent both set).
+  // The rest apply to stamped cards only.
   /** Its drawer is open. */
   open?: boolean
   /** It finished on a day before today. */
@@ -416,17 +366,16 @@ export function TaskCard({
   const ownerName = useFleetStore((s) =>
     ownerId ? (s.agents.find((a) => a.id === ownerId)?.name ?? null) : null,
   )
-  const runtime = taskRuntimeOf(task, useAgentRuntime(ownerId))
   const cost = runCostOf(task)
   const verdict = verdictStatus(task)
-  const chip = stamp != null && accent != null
-  const mark = chip ? chipStatusMark(task.status, verdict, Boolean(task['parentTaskId'])) : null
-  // A chip shows one mark; when that mark takes the cost's place, the cost moves
+  const stamped = stamp != null
+  const mark = chipStatusMark(task.status, verdict, Boolean(task['parentTaskId']))
+  // A card shows one mark; when that mark takes the cost's place, the cost moves
   // into the card's tooltip.
   const costTip =
     mark != null && cost.usd !== null ? `Cost: ${formatRunCost(cost.usd, cost.estimated)}` : null
   const title = task.title ?? '(untitled)'
-  const clamped = chip && !!clamp
+  const clamped = stamped && !!clamp
   // A title cut to one line is whole in the tooltip.
   const tip = [clamped ? title : null, costTip].filter(Boolean).join('\n') || undefined
   const look = useLook(unseen ? onSeen : undefined)
@@ -438,40 +387,30 @@ export function TaskCard({
       // drawer it opened cannot return focus to the captured node. This tags the card
       // with its task id so `useFocusTrap` can re-find it on close (#98).
       data-focus-restore-id={task.id}
-      data-open={(chip && open) || undefined}
-      data-past={(chip && past) || undefined}
+      data-open={(stamped && open) || undefined}
+      data-past={(stamped && past) || undefined}
       onClick={onClick}
       onPointerDown={onDragPointerDown}
       {...look}
       title={tip}
       className={[
-        'group block w-full cursor-pointer text-left',
-        chip
-          ? `calendar-chip rounded-lg px-2.5 py-2 ${chipStateClasses({ arrived, settle, lifted, dragging })}`
-          : 'border border-border bg-surface transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong',
-        chip ? '' : stamp ? 'rounded-xl px-3 py-2.5' : 'rounded-2xl p-4',
+        'calendar-chip group block w-full cursor-pointer rounded-lg px-3 py-2.5 text-left',
+        stamped ? chipStateClasses({ arrived, settle, lifted, dragging }) : '',
       ].join(' ')}
-      style={chip ? ({ '--chip': accent } as CSSProperties) : { boxShadow: 'var(--shadow-raised)' }}
     >
       <div
         className={[
-          stamp
-            ? `${clamped ? 'line-clamp-1' : 'line-clamp-2'} text-[12.5px] font-semibold`
-            : 'text-[13px] font-semibold',
-          task.status === 'cancelled' && stamp
+          // The drag grip shows at the card's top right on keyboard focus, over the
+          // end of the first line. On a touch screen it always shows, so there the
+          // words stop short of it.
+          'mb-2 text-sm font-medium [@media(hover:none)]:pr-5',
+          clamped ? 'line-clamp-1' : 'line-clamp-2',
+          task.status === 'cancelled'
             ? 'text-muted-foreground line-through decoration-foreground/30'
             : 'text-foreground',
         ].join(' ')}
-        style={{
-          lineHeight: stamp ? '17px' : 1.35,
-          letterSpacing: '-0.01em',
-          marginBottom: stamp ? 6 : 9,
-          // The drag grip appears at the chip's top right on keyboard focus; the
-          // words stop short of it.
-          paddingRight: chip ? 18 : undefined,
-        }}
       >
-        {chip && unseen ? (
+        {stamped && unseen ? (
           <span
             data-testid="board-card-unseen"
             className="mr-1.5 inline-block size-1.5 rounded-full bg-foreground align-[2px]"
@@ -481,33 +420,14 @@ export function TaskCard({
         ) : null}
         {title}
       </div>
-      {chip ? (
-        <ChipMeta
-          task={task}
-          stamp={stamp}
-          ownerId={ownerId}
-          ownerName={ownerName}
-          runtime={runtime}
-          mark={mark}
-          cost={cost}
-        />
-      ) : (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-          {stamp && ownerId ? <AgentBooAvatar agentId={ownerId} size={16} /> : null}
-          {task.status === 'in_review' && <StatusPill tone="working" label="Verifying" />}
-          {runtime ? <StatusPill tone="idle" label={runtime} /> : null}
-          {verdict && (
-            <StatusPill tone={VERDICT_META[verdict].tone} label={VERDICT_META[verdict].label} />
-          )}
-          {cost.usd !== null && <CostLabel usd={cost.usd} estimated={cost.estimated} />}
-          {task['parentTaskId'] ? (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-              <CornerDownRight size={11} strokeWidth={2} /> sub
-            </span>
-          ) : null}
-          {stamp ? <StampLabel stamp={stamp} /> : null}
-        </div>
-      )}
+      <ChipMeta
+        task={task}
+        stamp={stamp}
+        ownerId={ownerId}
+        ownerName={ownerName}
+        mark={mark}
+        cost={cost}
+      />
     </button>
   )
 }
@@ -528,7 +448,6 @@ export function DraggableCard({
   disabled,
   onOpen,
   stamp,
-  accent,
   open,
   past,
   arrived,
@@ -541,7 +460,6 @@ export function DraggableCard({
   disabled: boolean
   onOpen: () => void
   stamp?: CardStamp
-  accent?: string
   open?: boolean
   past?: boolean
   arrived?: boolean
@@ -563,7 +481,7 @@ export function DraggableCard({
     },
     disabled,
   })
-  const chip = stamp != null && accent != null
+  const stamped = stamp != null
 
   // When this card's last drag ended. A layout effect, so the time is set before
   // the click that can follow a drop reaches the card.
@@ -590,12 +508,15 @@ export function DraggableCard({
   }
 
   return (
-    <div ref={setNodeRef} className="relative" style={{ opacity: isDragging && !chip ? 0.4 : 1 }}>
+    <div
+      ref={setNodeRef}
+      className="relative"
+      style={{ opacity: isDragging && !stamped ? 0.4 : 1 }}
+    >
       <TaskCard
         task={task}
         onClick={handleOpen}
         stamp={stamp}
-        accent={accent}
         open={open}
         past={past}
         arrived={arrived}
@@ -603,7 +524,7 @@ export function DraggableCard({
         clamp={clamp}
         unseen={unseen}
         onSeen={onSeen}
-        dragging={chip && isDragging}
+        dragging={stamped && isDragging}
         onDragPointerDown={disabled ? undefined : onDragPointerDown}
       />
       {!disabled && (
@@ -616,7 +537,7 @@ export function DraggableCard({
           onClick={(e) => {
             if (e.detail > 0) handleOpen()
           }}
-          className="absolute right-1.5 top-1.5 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-foreground/[0.08] hover:text-foreground focus-visible:cursor-grab focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 [@media(hover:none)]:opacity-100"
+          className="board-card-grip absolute right-1.5 top-1.5 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:text-foreground focus-visible:cursor-grab focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 [@media(hover:none)]:opacity-100"
           style={{ touchAction: 'none' }}
           {...listeners}
           {...attributes}

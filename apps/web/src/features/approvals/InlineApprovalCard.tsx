@@ -23,7 +23,7 @@ interface InlineApprovalCardProps {
 
 // The board's buttons fit three across a narrow cell: shorter, tighter, and
 // Allow Once takes the room the other two leave.
-const BOARD_BUTTON = 'h-7! px-2! text-[12px]!'
+const BOARD_BUTTON = 'h-7! px-2! text-xs!'
 
 export function InlineApprovalCard({
   approval,
@@ -49,23 +49,27 @@ export function InlineApprovalCard({
       style={{ overflow: 'hidden' }}
     >
       <div
-        className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-3"
-        style={{ boxShadow: 'var(--shadow-raised)' }}
+        className={
+          board
+            ? 'calendar-chip flex flex-col gap-2 rounded-lg px-3 py-2.5'
+            : 'flex flex-col gap-2 rounded-xl border border-border bg-surface p-3'
+        }
+        style={board ? undefined : { boxShadow: 'var(--shadow-raised)' }}
       >
         {/* Row 1: Header */}
         {board ? (
           <>
             <div className="flex items-center justify-between gap-2">
-              <span className="board-reason inline-flex min-w-0 items-center gap-1.5 text-[11px] font-semibold leading-4">
+              <span className="board-reason inline-flex min-w-0 items-center gap-1.5 text-xs font-medium">
                 <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber" />
                 <span className="truncate">Wants to run a command</span>
               </span>
-              <span className="font-data shrink-0 text-[10px] tabular-nums text-muted-foreground">
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 expires {expiresIn}s
               </span>
             </div>
             {showAgentName && (
-              <span className="-mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="-mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                 {approval.agentId && <AgentBooAvatar agentId={approval.agentId} size={16} />}
                 <span className="truncate">{agent?.name ?? 'Unknown agent'}</span>
               </span>
@@ -87,7 +91,9 @@ export function InlineApprovalCard({
 
         {/* Row 2: Command preview */}
         <div
-          className="font-data rounded-lg px-2 py-1.5 text-[11px] leading-relaxed text-foreground"
+          className={`rounded-lg px-2 py-1.5 leading-relaxed text-foreground ${
+            board ? 'font-mono text-xs' : 'font-data text-[11px]'
+          }`}
           style={{
             background: 'var(--code-block-bg)',
             wordBreak: 'break-all',
@@ -101,7 +107,7 @@ export function InlineApprovalCard({
         {/* Error */}
         {approval.error && (
           <div
-            className="rounded-md px-1.5 py-1 text-[10px]"
+            className={`rounded-md px-1.5 py-1 ${board ? 'text-xs' : 'text-[10px]'}`}
             style={{
               color: 'var(--destructive)',
               background: 'color-mix(in srgb, var(--destructive) 8%, transparent)',

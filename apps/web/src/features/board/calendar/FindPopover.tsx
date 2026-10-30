@@ -29,6 +29,7 @@ import {
   type FindScope,
   type FindTaskResult,
 } from './findModel'
+import { StatusGlyph, glyphKindOf } from '../StatusGlyph'
 import { useAnchoredPosition } from './useAnchoredPosition'
 
 const WIDTH = 360
@@ -42,8 +43,6 @@ export interface FindPopoverProps {
   scope: FindScope
   /** Whether routines can be found: the All view draws no runs to find them by. */
   findsRoutines: boolean
-  /** A CSS colour for the column a task is drawn in. */
-  hueOf: (column: string) => string
   /** The name of the column a task is drawn in. */
   columnName: (column: string) => string
   /** The day a task sits on, as the row shows it: "Today", "Oct 12". */
@@ -83,7 +82,6 @@ export function FindPopover({
   search,
   scope,
   findsRoutines,
-  hueOf,
   columnName,
   dayLabel,
   ownerOf,
@@ -220,7 +218,7 @@ export function FindPopover({
           onChange={(e) => changeQuery(e.target.value)}
           onKeyDown={onKeyDown}
           // The board's ink focus ring is the field's ring too.
-          className="h-8 w-full rounded-lg border border-border bg-surface pl-8 pr-8 text-[13px] text-foreground transition-colors placeholder:text-muted-foreground focus:border-foreground/40"
+          className="h-8 w-full rounded-lg border border-border bg-surface pl-8 pr-8 text-compact text-foreground transition-colors placeholder:text-muted-foreground focus:border-foreground/40"
         />
         {query ? (
           <button
@@ -241,11 +239,11 @@ export function FindPopover({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5">
         {!trimmed ? (
-          <p className="px-2 py-3 text-[12.5px] text-muted-foreground">
+          <p className="px-2 py-3 text-compact text-muted-foreground">
             {`Type to ${label.toLowerCase()}.`}
           </p>
         ) : ordered.length === 0 ? (
-          <p className="px-2 py-3 text-[12.5px] text-muted-foreground">
+          <p className="px-2 py-3 text-compact text-muted-foreground">
             {`No matches for “${trimmed}”.`}
           </p>
         ) : (
@@ -254,7 +252,7 @@ export function FindPopover({
               <div key={group.id} role="group" aria-label={group.label} className="mt-1 first:mt-0">
                 <div
                   role="presentation"
-                  className="px-2 pb-0.5 pt-1.5 text-[11px] font-semibold text-muted-foreground"
+                  className="px-2 pb-0.5 pt-1.5 text-xs font-medium text-muted-foreground"
                 >
                   {group.label}
                 </div>
@@ -283,7 +281,6 @@ export function FindPopover({
                       {r.kind === 'task' ? (
                         <TaskRow
                           result={r}
-                          hue={hueOf(r.column)}
                           columnName={columnName(r.column)}
                           day={dayLabel(r.at)}
                           owner={ownerOf(r.task)}
@@ -293,14 +290,14 @@ export function FindPopover({
                         <>
                           <Repeat
                             size={12}
-                            strokeWidth={2.4}
+                            strokeWidth={2}
                             aria-hidden
                             className="mt-[3px] shrink-0 text-muted-foreground"
                           />
-                          <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] text-foreground">
+                          <span className="min-w-0 flex-1 truncate text-compact text-foreground">
                             {r.name}
                           </span>
-                          <span className="shrink-0 text-[11px] leading-[18px] text-muted-foreground">
+                          <span className="shrink-0 text-xs leading-4.5 text-muted-foreground">
                             Routine
                           </span>
                         </>
@@ -314,7 +311,7 @@ export function FindPopover({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-border px-3.5 py-2 text-[11px] text-muted-foreground">
+      <div className="shrink-0 border-t border-border px-3.5 py-2 text-xs text-muted-foreground">
         {more > 0 ? <p className="mb-0.5">{`+${more} more. Keep typing to narrow it.`}</p> : null}
         <p id={hintId}>Enter shows it · Shift+Enter opens it</p>
       </div>
@@ -330,18 +327,16 @@ export function FindPopover({
   )
 }
 
-/** A task result: its column's dot, the title, why it matched, its day and its Boo. */
+/** A task result: its column's glyph, the title, why it matched, its day and its Boo. */
 function TaskRow({
   result,
-  hue,
   columnName,
   day,
   owner,
   agentName,
 }: {
   result: FindTaskResult
-  hue: string
-  /** Said with the title, since the dot alone is colour. */
+  /** Said with the title, since the glyph alone is a picture. */
   columnName: string
   day: string
   owner: string | null
@@ -350,16 +345,14 @@ function TaskRow({
   const note = matchNote(result, owner, agentName)
   return (
     <>
-      <span
-        aria-hidden
-        className="mt-[5.5px] size-[7px] shrink-0 rounded-full"
-        style={{ background: hue }}
-      />
+      <span aria-hidden className="flex h-[18px] shrink-0 items-center">
+        <StatusGlyph kind={glyphKindOf(result.column)} />
+      </span>
       <span className="min-w-0 flex-1">
         <span
           className={[
-            'block truncate text-[13px] leading-[18px]',
-            // Cancelled shares Backlog's neutral dot, so it is struck through too.
+            'block truncate text-compact',
+            // Cancelled is struck through, as on its card.
             result.column === 'cancelled'
               ? 'text-muted-foreground line-through'
               : 'text-foreground',
@@ -368,15 +361,9 @@ function TaskRow({
           {result.task.title || 'Untitled task'}
           <span className="sr-only">{`, ${columnName}`}</span>
         </span>
-        {note ? (
-          <span className="block truncate text-[11.5px] leading-4 text-muted-foreground">
-            {note}
-          </span>
-        ) : null}
+        {note ? <span className="block truncate text-xs text-muted-foreground">{note}</span> : null}
       </span>
-      <span className="shrink-0 text-[11px] leading-[18px] tabular-nums text-muted-foreground">
-        {day}
-      </span>
+      <span className="shrink-0 text-xs leading-4.5 tabular-nums text-muted-foreground">{day}</span>
       {owner ? (
         <span aria-hidden className="flex h-[18px] shrink-0 items-center">
           <AgentBooAvatar agentId={owner} size={16} />

@@ -698,10 +698,12 @@ samp {
 }
 
 /* ─── The Board ─────────────────────────────────────────────────────────────
-   What the calendar board draws in CSS: event chips held by a corner clip,
-   routine runs, its type, its scroll shadows and focus rings, and its motion.
-   Every animation here rests on its final frame, so the global reduced-motion
-   guard (which ends animations at once) leaves each thing in its settled state. */
+   What the board draws in CSS: its cards and routine runs, its type, its scroll
+   shadows and focus rings, and its motion. The board is neutral: colour lives
+   in the small status glyphs (StatusGlyph.tsx), amber in Needs you, red in
+   today's date. It moves only when something happens, and every animation here
+   rests on its final frame, so the global reduced-motion guard (which ends
+   animations at once) leaves each thing in its settled state. */
 
 :root {
   --chip-rest-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
@@ -716,76 +718,58 @@ samp {
   --board-edge-shadow: rgb(0 0 0 / 0.6);
 }
 
-/* An event chip: a card tinted with its column's colour (`--chip`), held at its
-   top-left corner by two short arms of that colour. The arms sit on the border
-   and bend with the card's radius, so the corner reads as a clip; `--clip` is
-   their length. Hover, the open card and a held card reach further. */
+/* A card: a neutral surface with a hairline edge. Pointing at it firms the edge
+   and nothing moves; the card whose drawer is open carries an ink ring. In dark
+   mode the card sits a step above its lane. */
 .calendar-chip {
-  --clip: 22px;
   position: relative;
-  background: color-mix(in srgb, var(--chip) 5%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--chip) 20%, var(--border));
+  background: var(--surface);
+  border: 1px solid var(--border);
   box-shadow: var(--chip-rest-shadow);
   transition:
     box-shadow var(--motion-base),
-    border-color var(--motion-base),
-    background-color var(--motion-base),
+    border-color var(--motion-fast),
     opacity var(--motion-fast),
-    filter var(--motion-fast),
-    translate var(--motion-fast);
+    filter var(--motion-fast);
 }
-.calendar-chip::before {
-  content: '';
-  position: absolute;
-  top: -1px;
-  left: -1px;
-  width: var(--clip);
-  height: var(--clip);
-  border-top: 3px solid var(--chip);
-  border-left: 3px solid var(--chip);
-  border-top-left-radius: inherit;
-  pointer-events: none;
-  transition:
-    width var(--motion-base),
-    height var(--motion-base),
-    opacity var(--motion-fast),
-    border-color var(--motion-base);
+.dark .calendar-chip {
+  background: color-mix(in srgb, var(--foreground) 4%, var(--surface));
 }
 .calendar-chip:hover {
-  --clip: 30px;
-  box-shadow: var(--chip-lift-shadow);
+  border-color: var(--border-strong);
 }
-/* The card whose drawer is open. */
 .calendar-chip[data-open] {
-  --clip: 30px;
-  border-color: color-mix(in srgb, var(--chip) 45%, transparent);
+  border-color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 45%, transparent);
 }
-/* Finished work on a day already gone: paper, a fainter clip, no lift. Its
-   words keep full contrast. */
-.calendar-chip[data-past] {
+/* The drag grip shows (on keyboard focus) over the end of the title's first
+   line, so it carries the card's own fill. */
+.board-card-grip {
   background: var(--surface);
-  box-shadow: none;
 }
-.calendar-chip[data-past]::before {
-  border-color: color-mix(in srgb, var(--chip) 50%, transparent);
+.dark .board-card-grip {
+  background: color-mix(in srgb, var(--foreground) 4%, var(--surface));
+}
+.board-card-grip:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, var(--surface));
+}
+.dark .board-card-grip:hover {
+  background: color-mix(in srgb, var(--foreground) 12%, var(--surface));
+}
+/* Finished work on a day already gone lies flat. Its words keep full contrast. */
+.calendar-chip[data-past] {
+  box-shadow: none;
 }
 /* The card left in its cell while it is being dragged. */
 .calendar-chip--source {
   opacity: 0.35;
   filter: saturate(0.2);
 }
-.calendar-chip--source::before {
-  opacity: 0;
-}
-/* The card in the person's hand: a deeper shadow, the clip at full reach. */
+/* The card in the person's hand: a deeper shadow. */
 .calendar-chip--lifted {
-  --clip: 30px;
   box-shadow: var(--chip-held-shadow);
   cursor: grabbing;
   animation: board-chip-lift 160ms cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-.dark .calendar-chip--lifted {
-  border-color: color-mix(in srgb, var(--chip) 55%, transparent);
 }
 @keyframes board-chip-lift {
   from {
@@ -801,87 +785,51 @@ samp {
     box-shadow: var(--chip-lift-shadow);
   }
 }
-/* A card an agent just put here: its clip snaps on (the top arm, then the left)
-   and a faint ring of its colour fades away. */
+/* A card an agent just put here fades in. */
 .calendar-chip--arrived {
-  animation: board-chip-halo 1400ms ease-out both;
+  animation: board-chip-arrive 320ms ease-out both;
 }
-.calendar-chip--arrived::before {
-  animation: board-clip-on 420ms cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-@keyframes board-chip-halo {
+@keyframes board-chip-arrive {
   from {
-    box-shadow:
-      0 0 0 3px color-mix(in srgb, var(--chip) 24%, transparent),
-      var(--chip-lift-shadow);
-  }
-}
-@keyframes board-clip-on {
-  0% {
-    width: 3px;
-    height: 3px;
     opacity: 0;
-  }
-  15% {
-    opacity: 1;
-  }
-  55% {
-    width: var(--clip);
-    height: 3px;
-  }
-  100% {
-    width: var(--clip);
-    height: var(--clip);
   }
 }
 
-/* An upcoming routine run: a fine pencil hatch and a dashed edge in the
-   column's colour, so it never reads as a task that exists. The next run on
-   screen, and the run whose details are open, firm up to a solid edge. Its
-   words stay the foreground colour: muted text over the hatch lines falls
-   under 4.5:1. */
+/* An upcoming routine run: a dashed outline of a card, so it never reads as a
+   task that exists. The next run on screen, and the run whose details are open,
+   firm up to a solid edge. */
 .calendar-run {
-  background: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--chip) 16%, transparent) 0 1px,
-    transparent 1px 7px
-  );
-  border: 1px dashed color-mix(in srgb, var(--chip) 42%, transparent);
-  border-radius: 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
   transition:
     background-color var(--motion-fast),
     border-color var(--motion-fast);
 }
-.dark .calendar-run {
-  background-image: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--chip) 22%, transparent) 0 1px,
-    transparent 1px 7px
-  );
-}
 .calendar-run:hover,
 .calendar-run[data-open] {
-  background-color: color-mix(in srgb, var(--chip) 5%, transparent);
-  border-color: color-mix(in srgb, var(--chip) 70%, transparent);
+  background-color: rgb(var(--foreground-rgb) / 0.03);
+  border-color: color-mix(in srgb, var(--foreground) 30%, transparent);
 }
 .calendar-run[data-next],
 .calendar-run[data-open] {
   border-style: solid;
 }
 
-/* Folded quiet days: a seam across the board, the way a spreadsheet shows
-   hidden rows. It reaches one pixel up over the rule of the row before it, so
-   the seam is two lines with a light fill between them. Pointing at the seam,
-   or at its handle in the date column, lights both. */
+/* Folded quiet days: a seam across the lanes, the way a spreadsheet shows hidden
+   rows, drawn as one dashed line. Pointing at the seam, or at its handle in the
+   date column, darkens both. */
 .board-seam {
-  margin-top: -1px;
-  border-top: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
-  background-color: rgb(var(--foreground-rgb) / 0.03);
-  transition: background-color var(--motion-fast);
+  background-image: linear-gradient(to right, var(--border-strong) 50%, transparent 50%);
+  background-size: 6px 1px;
+  background-repeat: repeat-x;
+  background-position: left center;
 }
 .board-seam[data-hot] {
-  background-color: rgb(var(--foreground-rgb) / 0.065);
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--foreground) 40%, transparent) 50%,
+    transparent 50%
+  );
 }
 .board-seam-handle {
   background-color: var(--surface);
@@ -901,7 +849,8 @@ samp {
 /* Type. One micro label for the board's few uppercase words (a weekday, the
    week corner), and the display cut of Inter for its date numerals and titles. */
 .board-micro {
-  font-size: 10.5px;
+  /* The text-micro step (11 / 14). */
+  font-size: 11px;
   line-height: 14px;
   font-weight: 600;
   text-transform: uppercase;
@@ -931,33 +880,6 @@ samp {
 }
 [data-scrolled-x] .board-gutter {
   box-shadow: 8px 0 16px -10px var(--board-edge-shadow);
-}
-
-/* Today's row sits a little above the board: an opaque sheet over the lanes (its
-   cells and its date carry `--board-today-sheet`), with a soft shadow above and
-   below it, cast by a layer under the columns (`.board-today-lift`) and by its
-   date in the gutter (`.board-today-gutter`, which sits above its neighbours so
-   the shadow is not covered by them). */
-:root {
-  --board-today-sheet: var(--surface);
-  --board-lift-shadow: rgb(15 23 42 / 0.2);
-}
-.dark {
-  --board-today-sheet: color-mix(in srgb, var(--foreground) 5%, var(--surface));
-  --board-lift-shadow: rgb(0 0 0 / 0.6);
-}
-.board-today-lift,
-.board-today-gutter {
-  box-shadow:
-    0 -6px 14px -10px var(--board-lift-shadow),
-    0 12px 26px -12px var(--board-lift-shadow);
-}
-.board-today-lift {
-  pointer-events: none;
-}
-.board-today-gutter {
-  position: relative;
-  z-index: 1;
 }
 
 /* Today's date pings once when Today brings it into view. */
@@ -1015,71 +937,32 @@ samp {
   }
 }
 
-/* A count that changes rolls: the old number leaves and the new one arrives,
-   upward for more, downward for less (see RollingCount). */
-.board-roll {
-  position: relative;
-  display: inline-flex;
-  overflow: hidden;
+/* Work in progress moves on its word, never on a dot or a ring: a soft highlight
+   passes across "Verifying". At rest (and under reduced motion) the word is the
+   plain muted colour, and the highlight only ever lightens toward the foreground,
+   so the text never drops below the muted contrast. */
+.board-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%
+  );
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: board-shimmer 2.4s linear infinite;
 }
-.board-roll-in-up {
-  animation: board-roll-in-up 180ms cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-.board-roll-in-down {
-  animation: board-roll-in-down 180ms cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-.board-roll-out-up,
-.board-roll-out-down {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-}
-.board-roll-out-up {
-  animation: board-roll-out-up 180ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-.board-roll-out-down {
-  animation: board-roll-out-down 180ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-@keyframes board-roll-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(70%);
-  }
-}
-@keyframes board-roll-in-down {
-  from {
-    opacity: 0;
-    transform: translateY(-70%);
-  }
-}
-@keyframes board-roll-out-up {
-  from {
-    opacity: 1;
-    transform: none;
-  }
+@keyframes board-shimmer {
   to {
-    opacity: 0;
-    transform: translateY(-70%);
+    background-position: 0% 0;
   }
 }
-@keyframes board-roll-out-down {
-  from {
-    opacity: 1;
-    transform: none;
-  }
-  to {
-    opacity: 0;
-    transform: translateY(70%);
-  }
-}
-
-/* A small dot that breathes, for work in progress (Verifying). */
-.board-pulse-dot {
-  animation: board-pulse-dot 1.6s ease-in-out infinite;
-}
-@keyframes board-pulse-dot {
-  50% {
-    opacity: 0.35;
+@media (prefers-reduced-motion: reduce) {
+  .board-shimmer {
+    animation: none;
   }
 }
 

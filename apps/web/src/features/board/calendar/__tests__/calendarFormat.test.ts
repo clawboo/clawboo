@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  agoLabel,
   countLabel,
   elapsedLabel,
   isoWeek,
@@ -161,5 +162,26 @@ describe('timeOnDay and sinceLabel', () => {
     expect(sinceLabel(yesterday, now)).toBe(`yesterday ${timeLabel(yesterday)}`)
     expect(sinceLabel(thisWeek, now)).toBe(`${weekdayShort(thisWeek)} ${timeLabel(thisWeek)}`)
     expect(sinceLabel(longAgo, now)).toBe(md(longAgo))
+  })
+})
+
+describe('agoLabel', () => {
+  // Noon, so an hour or two back is still today.
+  const now = new Date(2026, 9, 14, 12, 0).getTime()
+  const MIN = 60_000
+
+  it('says how long ago something happened today', () => {
+    expect(agoLabel(now - 20_000, now)).toBe('Just now')
+    expect(agoLabel(now + 5 * MIN, now)).toBe('Just now')
+    expect(agoLabel(now - 4 * MIN, now)).toBe('4m ago')
+    expect(agoLabel(now - 59 * MIN, now)).toBe('59m ago')
+    expect(agoLabel(now - 3 * 60 * MIN, now)).toBe('3h ago')
+  })
+
+  it('names yesterday, counts days within the week, and dates anything older', () => {
+    expect(agoLabel(new Date(2026, 9, 13, 23, 30).getTime(), now)).toBe('Yesterday')
+    expect(agoLabel(new Date(2026, 9, 11, 9, 0).getTime(), now)).toBe('3d ago')
+    const older = new Date(2026, 9, 2, 9, 0).getTime()
+    expect(agoLabel(older, now)).toBe(md(older))
   })
 })

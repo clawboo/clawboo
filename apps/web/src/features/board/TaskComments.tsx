@@ -5,7 +5,15 @@
 // Each entry is attributed the way a person would say it: the agent by name, "You"
 // for the person using Clawboo, and "Clawboo" for the notes the orchestrator
 // writes itself (a run failing, a result arriving late, a cap being hit).
+//
+// An agent writes in markdown, so its entries render as markdown. A person's note
+// and Clawboo's own stay plain text: a path like `__init__.py` in a failure
+// reason must read as written.
 
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+
+import { MD_COMPONENTS } from '@/features/chat/chatComponents'
 import { useFleetStore } from '@/stores/fleet'
 
 export interface TaskComment {
@@ -48,7 +56,7 @@ export function TaskComments({
   const authorOf = useAuthorLabel()
   const visible = comments.filter((c) => typeof c.body === 'string' && c.body.trim().length > 0)
   if (visible.length === 0) {
-    return <div className="text-[11.5px] text-muted-foreground">{emptyLabel}</div>
+    return <div className="text-xs text-muted-foreground">{emptyLabel}</div>
   }
   return (
     <ol className="flex flex-col" data-testid="task-comments">
@@ -63,27 +71,42 @@ export function TaskComments({
           <div className="flex items-baseline gap-2">
             <span
               className={[
-                'font-mono font-semibold uppercase tracking-wider',
-                compact ? 'text-[9.5px]' : 'text-[10px]',
-                c.authorType === 'system' ? 'text-muted-foreground' : 'text-foreground/75',
+                'font-medium',
+                compact ? 'text-micro' : 'text-xs',
+                c.authorType === 'system' ? 'text-muted-foreground' : 'text-foreground',
               ].join(' ')}
             >
               {authorOf(c)}
             </span>
             {typeof c.createdAt === 'number' && (
-              <time className="font-data text-[10px] text-foreground/35">
+              <time
+                className={`${compact ? 'text-micro' : 'text-xs'} tabular-nums text-muted-foreground`}
+              >
                 {timeFormat.format(new Date(c.createdAt))}
               </time>
             )}
           </div>
-          <p
-            className={[
-              'whitespace-pre-wrap break-words leading-relaxed text-foreground/75',
-              compact ? 'text-[11.5px]' : 'text-[12px]',
-            ].join(' ')}
-          >
-            {c.body}
-          </p>
+          {c.authorType === 'agent' ? (
+            <div
+              className={[
+                'min-w-0 break-words text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
+                compact ? 'text-xs' : 'text-sm',
+              ].join(' ')}
+            >
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                {c.body}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <p
+              className={[
+                'whitespace-pre-wrap break-words text-foreground',
+                compact ? 'text-xs' : 'text-sm',
+              ].join(' ')}
+            >
+              {c.body}
+            </p>
+          )}
         </li>
       ))}
     </ol>

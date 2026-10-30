@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from 'react'
@@ -17,7 +16,7 @@ import {
   useReducedMotion,
   type Transition,
 } from 'framer-motion'
-import { AlertTriangle, CheckCircle2, ChevronRight, RotateCcw, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, ChevronRight, RotateCcw, UserPlus } from 'lucide-react'
 import { delegationTargetOf } from '@clawboo/board-core'
 import { BooAvatar } from '@clawboo/ui'
 
@@ -25,14 +24,13 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalCard } from '@/features/approvals/InlineApprovalCard'
 import { ToolApprovalCard } from '@/features/approvals/ToolApprovalCard'
 import { usePendingApprovals, type ToolApproval } from '@/features/approvals/usePendingApprovals'
-import { Button } from '@/features/shared/Button'
-import { StatusPill } from '@/features/shared/StatusPill'
 import type { BoardTask } from '@/lib/boardClient'
 import type { ApprovalRequest } from '@/stores/approvals'
+import { Skeleton } from '@/features/shared/Skeleton'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 
-import { AssignAgentSelect } from './AssignAgentSelect'
+import { BoardMenu, MoreMenuButton, type BoardMenuItem } from './BoardMenu'
 import {
   ATTENTION_META,
   attentionLabel,
@@ -40,8 +38,9 @@ import {
   type AttentionReason,
   type TaskAttention,
 } from './boardStatus'
-import { countLabel, dayMonth, longDate, timeLabel } from './calendar/calendarFormat'
-import { isSameDay } from './calendar/calendarModel'
+import { countLabel, longDate, timeLabel } from './calendar/calendarFormat'
+import { StatusGlyph } from './StatusGlyph'
+import { HEADER_H, LANE, LANE_RADIUS, NEEDS_YOU_W } from './calendar/CalendarGrid'
 import { useTaskActions } from './useTaskActions'
 
 // ─── NeedsYouColumn ────────────────────────────────────────────────────────
@@ -61,23 +60,15 @@ import { useTaskActions } from './useTaskActions'
 // shows before it can draw the calendar: while tasks load, when the read fails,
 // and on an empty board. The calendar draws the same items in today's row.
 
-const SECTION_LABEL =
-  'font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 // Names the approvals and the tasks apart, so it shows only when both are there.
-const GROUP_LABEL = 'flex items-center gap-1.5 px-1 text-[11px] font-semibold text-muted-foreground'
+const GROUP_LABEL = 'flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground'
 
-// The calendar chip's actions: quiet words, not buttons in boxes. They stay
-// visible, since a card waiting on a person should say what the person can do.
-// While an action is out they are aria-disabled rather than disabled, so the
-// button keeps focus instead of dropping it to the page.
-const QUIET_ACTION =
-  'inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-[4px] px-1.5 text-[11.5px] font-semibold transition-colors hover:bg-amber/12 focus-visible:outline-2 focus-visible:outline-offset-1 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent'
-// The same for the lane's buttons.
-const BUSY_BUTTON = 'aria-disabled:cursor-default aria-disabled:opacity-45'
-// The chip's last line, under an amber hairline (a neutral one in dark mode).
-const CHIP_FOOTER =
-  'mt-2 flex items-center gap-1.5 border-t border-[color-mix(in_srgb,var(--amber)_14%,transparent)] pt-1.5 text-[11px] text-muted-foreground dark:border-[rgb(255_255_255/0.06)]'
-const AMBER_CHIP = { '--chip': 'var(--amber)' } as CSSProperties
+// A card's one action: a quiet word with its icon, not a button in a box. It
+// stays visible, since a card waiting on a person should say what the person
+// can do. While an action is out it is aria-disabled rather than disabled, so
+// the button keeps focus instead of dropping it to the page.
+const CARD_ACTION =
+  'inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-lg px-2 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.06] focus-visible:outline-2 focus-visible:outline-offset-1 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent'
 
 // How a card or a group row leaves once it no longer needs the person: it fades
 // and its height closes, so what is below slides up instead of jumping.
@@ -91,9 +82,9 @@ function leaveTransition(reduced: boolean): Transition {
 function ReasonLabel({ reason, label }: { reason: AttentionReason; label: string }) {
   const broke = reason === 'failed' || reason === 'timed_out'
   return (
-    <span className="board-reason inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] font-semibold leading-4">
+    <span className="board-reason inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium">
       {broke ? (
-        <AlertTriangle size={11} strokeWidth={2.4} aria-hidden className="shrink-0" />
+        <AlertTriangle size={12} strokeWidth={2} aria-hidden className="shrink-0" />
       ) : (
         <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber" />
       )}
@@ -331,23 +322,99 @@ function returnFocus(trigger: HTMLElement | null) {
   if (lost) trigger.focus({ preventScroll: true })
 }
 
+/** The one action a card leads with, by why it waits. Retry when the task can go
+ *  back to its agent; Assign when nobody has it; Review and Open take the person
+ *  to the drawer, where a check's findings or the story of a block are. */
+type PrimaryAction = 'retry' | 'assign' | 'review' | 'open'
+
+function primaryActionOf(
+  reason: AttentionReason,
+  canRetry: boolean,
+  canAssign: boolean,
+): PrimaryAction {
+  switch (reason) {
+    case 'failed':
+    case 'timed_out':
+    case 'stopped':
+      return canRetry ? 'retry' : canAssign ? 'assign' : 'open'
+    case 'unassigned':
+    case 'unstarted':
+      return canAssign ? 'assign' : canRetry ? 'retry' : 'open'
+    case 'needs_review':
+      return 'review'
+    case 'blocked':
+      return 'open'
+  }
+}
+
+/** The agents on a team, for the menus that hand a task to one of them. */
+function useTeamMembers(teamId: string | null) {
+  const agents = useFleetStore((s) => s.agents)
+  // Filtered in a memo: a selector that builds a new array would never settle.
+  return useMemo(() => (teamId ? agents.filter((a) => a.teamId === teamId) : []), [agents, teamId])
+}
+
+/** The Assign action: a button that opens the team's agents. */
+function AssignButton({
+  members,
+  busy,
+  onPick,
+}: {
+  members: { id: string; name: string }[]
+  busy: boolean
+  onPick: (agent: { id: string; name: string }, opener: HTMLElement) => void
+}) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  return (
+    <>
+      <button
+        type="button"
+        className={CARD_ACTION}
+        aria-haspopup="menu"
+        aria-expanded={anchor != null}
+        aria-disabled={busy || undefined}
+        onClick={(e) => {
+          if (busy) return
+          const el = e.currentTarget
+          setAnchor((a) => (a ? null : el))
+        }}
+      >
+        <UserPlus size={12} strokeWidth={2} aria-hidden />
+        Assign
+      </button>
+      {anchor ? (
+        <BoardMenu
+          anchor={anchor}
+          label="Assign to an agent"
+          testId="assign-agent-menu"
+          onClose={() => setAnchor(null)}
+          items={members.map((a, i) => ({
+            key: a.id,
+            label: a.name,
+            group: i === 0 ? 'Assign to' : undefined,
+            icon: <AgentBooAvatar agentId={a.id} size={16} />,
+            onSelect: () => onPick(a, anchor),
+          }))}
+        />
+      ) : null}
+    </>
+  )
+}
+
 function NeedsYouTaskCard({
   task,
   attention,
   showTeam,
   onOpen,
   onChanged,
-  compact = false,
 }: {
   task: BoardTask
   attention: TaskAttention
   showTeam: boolean
   onOpen: () => void
   onChanged: () => void
-  /** The calendar's chip: amber, tighter, one line of detail. */
-  compact?: boolean
 }) {
-  const { retry, dismiss } = useTaskActions()
+  const { retry, dismiss, assign } = useTaskActions()
   // One action at a time: a second press while the first is still out would
   // only be refused.
   const [busy, setBusy] = useState(false)
@@ -365,18 +432,20 @@ function NeedsYouTaskCard({
   const bound = delegationTargetOf(
     typeof task['sourceDelegationId'] === 'string' ? task['sourceDelegationId'] : null,
   )
+  const members = useTeamMembers(teamId)
   const unassigned = attention.reason === 'unassigned'
-  const since = waitingSince(task)
+  const sinceTitle = waitingTitle(waitingSince(task))
   const canRetry = canRetryTask(task, attention)
-  const canAssign = !!teamId && !bound
+  const canAssign = !bound && members.length > 0
+  const primary = primaryActionOf(attention.reason, canRetry, canAssign)
   const detail = attention.detail ?? meta.hint
-  const sinceTitle = waitingTitle(since)
 
   // Focus stays on the pressed button until the board's next read takes the
-  // card away, and the card hands it on as it leaves.
-  const act = (action: (taskId: string) => Promise<boolean>) => {
+  // card away, and the card hands it on as it leaves. An action picked from a
+  // menu hands focus back to the button that opened the menu.
+  const act = (action: (taskId: string) => Promise<boolean>, opener?: HTMLElement) => {
     if (busy) return
-    const trigger = focusedIn(rootRef.current)
+    const trigger = opener ?? focusedIn(rootRef.current)
     setBusy(true)
     void action(task.id)
       .then((ok) => {
@@ -385,105 +454,63 @@ function NeedsYouTaskCard({
       })
       .finally(() => setBusy(false))
   }
+  const giveTo = (agent: { id: string; name: string }, opener: HTMLElement) =>
+    act((id) => assign(id, agent.id, agent.name), opener)
 
-  const agentLine = (
+  const moreItems = (opener: HTMLElement): BoardMenuItem[] => {
+    const items: BoardMenuItem[] = []
+    if (canRetry && primary !== 'retry') {
+      items.push({
+        key: 'retry',
+        label: 'Retry',
+        icon: <RotateCcw size={14} strokeWidth={2} />,
+        onSelect: () => act(retry, opener),
+      })
+    }
+    if (primary !== 'assign') {
+      members
+        .filter((a) => a.id !== bound)
+        .forEach((a, i) =>
+          items.push({
+            key: `assign:${a.id}`,
+            label: a.name,
+            group: i === 0 ? (bound ? 'Give to someone else' : 'Assign to') : undefined,
+            icon: <AgentBooAvatar agentId={a.id} size={16} />,
+            onSelect: () => giveTo(a, opener),
+          }),
+        )
+    }
+    items.push({
+      key: 'dismiss',
+      label: 'Dismiss',
+      separator: items.length > 0,
+      onSelect: () => act(dismiss, opener),
+    })
+    return items
+  }
+
+  const who = agentId ? (
     <>
-      {agentId && <AgentBooAvatar agentId={agentId} size={16} />}
+      <AgentBooAvatar agentId={agentId} size={16} />
       <span className="truncate">
-        {agentName ?? (unassigned ? 'No agent' : 'Unknown agent')}
+        {agentName ?? 'Unknown agent'}
         {teamName ? ` · ${teamName}` : ''}
       </span>
     </>
-  )
-  const assignSelect =
-    canAssign && teamId ? (
-      <AssignAgentSelect taskId={task.id} teamId={teamId} onAssigned={onChanged} />
-    ) : null
-  const titleText = (
-    <span
-      className={[
-        'font-semibold text-foreground',
-        compact ? 'line-clamp-2 text-[12.5px]' : 'text-[13px]',
-      ].join(' ')}
-      style={{ lineHeight: compact ? '17px' : 1.35, letterSpacing: '-0.01em' }}
-    >
-      {task.title ?? '(untitled)'}
-    </span>
+  ) : (
+    <span className="truncate">{teamName ?? (unassigned ? 'No agent' : '')}</span>
   )
 
-  // The calendar's chip: amber like its column, the title across the full width,
-  // then one line that leads with why it waits. Who it belongs to and what the
-  // person can do share the last line, under a hairline. When it started
-  // waiting is the line's tooltip, and part of the button's description.
-  if (compact) {
-    const who = agentId ? agentLine : teamName ? <span className="truncate">{teamName}</span> : null
-    return (
-      <div
-        ref={rootRef}
-        data-testid="needs-you-task"
-        data-attention={attention.reason}
-        className="calendar-chip rounded-lg py-2 pl-3 pr-2"
-        style={AMBER_CHIP}
-      >
-        <button
-          type="button"
-          onClick={onOpen}
-          data-focus-restore-id={task.id}
-          className="block w-full cursor-pointer text-left"
-          aria-label={`Open “${task.title ?? 'task'}”`}
-          aria-describedby={detailId}
-        >
-          {titleText}
-          <span
-            id={detailId}
-            data-testid={sinceTitle ? 'needs-you-since' : undefined}
-            title={sinceTitle ?? undefined}
-            className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-muted-foreground"
-          >
-            <ReasonLabel reason={attention.reason} label={attentionLabel(attention)} />
-            <span className="sr-only">. </span>
-            <span className="min-w-0 truncate" title={detail}>
-              {detail}
-            </span>
-            {sinceTitle ? <span className="sr-only">. {sinceTitle}.</span> : null}
-          </span>
-        </button>
-        <div className={CHIP_FOOTER}>
-          {who ? <span className="flex min-w-0 flex-1 items-center gap-1.5">{who}</span> : null}
-          <span className="ml-auto flex shrink-0 items-center gap-0.5">
-            {canRetry && (
-              <button
-                type="button"
-                className={`${QUIET_ACTION} text-foreground`}
-                aria-disabled={busy || undefined}
-                onClick={() => act(retry)}
-              >
-                <RotateCcw size={12} strokeWidth={2.2} aria-hidden />
-                Retry
-              </button>
-            )}
-            {assignSelect}
-            <button
-              type="button"
-              className={`${QUIET_ACTION} text-muted-foreground hover:text-foreground`}
-              aria-disabled={busy || undefined}
-              onClick={() => act(dismiss)}
-            >
-              Dismiss
-            </button>
-          </span>
-        </div>
-      </div>
-    )
-  }
-
+  // Like any card: the title, then why it waits, in Needs you's amber, with the
+  // reported detail beside it. When it started waiting is the line's tooltip and
+  // part of the card's description. The last row says whose it is and holds the
+  // one action the reason calls for, with the rest in the menu.
   return (
     <div
       ref={rootRef}
       data-testid="needs-you-task"
       data-attention={attention.reason}
-      className="rounded-2xl border border-border bg-surface p-3.5"
-      style={{ boxShadow: 'var(--shadow-raised)' }}
+      className="calendar-chip rounded-lg px-3 py-2.5"
     >
       <button
         type="button"
@@ -491,54 +518,51 @@ function NeedsYouTaskCard({
         data-focus-restore-id={task.id}
         className="block w-full cursor-pointer text-left"
         aria-label={`Open “${task.title ?? 'task'}”`}
+        aria-describedby={detailId}
       >
-        <div className="flex items-start justify-between gap-2">
-          {titleText}
-          <StatusPill
-            tone={meta.tone}
-            label={attentionLabel(attention)}
-            className="shrink-0 whitespace-nowrap"
-          />
-        </div>
-        <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-          {agentLine}
-          {since && sinceTitle ? (
-            <span
-              data-testid="needs-you-since"
-              title={sinceTitle}
-              className="font-data ml-auto shrink-0 tabular-nums"
-            >
-              {isSameDay(since, Date.now()) ? timeLabel(since) : dayMonth(since)}
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-2 line-clamp-3 text-[11.5px] leading-relaxed text-foreground/65">
-          {detail}
-        </p>
+        <span className="line-clamp-2 text-sm font-medium text-foreground">
+          {task.title ?? '(untitled)'}
+        </span>
+        <span
+          id={detailId}
+          data-testid={sinceTitle ? 'needs-you-since' : undefined}
+          title={sinceTitle ?? undefined}
+          className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <ReasonLabel reason={attention.reason} label={attentionLabel(attention)} />
+          <span className="sr-only">. </span>
+          <span className="min-w-0 truncate" title={detail}>
+            {detail}
+          </span>
+          {sinceTitle ? <span className="sr-only">. {sinceTitle}.</span> : null}
+        </span>
       </button>
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {canRetry && (
-          <Button
-            size="sm"
-            variant="secondary"
-            className={BUSY_BUTTON}
+      <div className="mt-2 flex min-h-7 items-center gap-1">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+          {who}
+        </span>
+        {primary === 'retry' ? (
+          <button
+            type="button"
+            className={CARD_ACTION}
             aria-disabled={busy || undefined}
             onClick={() => act(retry)}
           >
-            <RotateCcw size={13} strokeWidth={2.2} aria-hidden />
+            <RotateCcw size={12} strokeWidth={2} aria-hidden />
             Retry
-          </Button>
+          </button>
+        ) : primary === 'assign' ? (
+          <AssignButton members={members} busy={busy} onPick={giveTo} />
+        ) : (
+          <button type="button" className={CARD_ACTION} onClick={onOpen}>
+            {primary === 'review' ? 'Review' : 'Open'}
+          </button>
         )}
-        {assignSelect}
-        <Button
-          size="sm"
-          variant="ghost"
-          className={BUSY_BUTTON}
-          aria-disabled={busy || undefined}
-          onClick={() => act(dismiss)}
-        >
-          Dismiss
-        </Button>
+        <MoreMenuButton
+          label={`More for “${task.title ?? 'task'}”`}
+          disabled={busy}
+          items={moreItems}
+        />
       </div>
     </div>
   )
@@ -552,7 +576,7 @@ function AgentStack({ agentIds }: { agentIds: string[] }) {
   )
   if (shown.length === 0) return null
   return (
-    <span className="ml-auto flex shrink-0 items-center pl-1" title={names}>
+    <span className="flex shrink-0 items-center" title={names}>
       {shown.map((id, i) => (
         <span
           key={id}
@@ -583,12 +607,12 @@ function GroupRow({ task, attention, onOpen }: StuckItem & { onOpen: () => void 
       aria-label={`Open “${task.title ?? 'task'}”`}
       aria-describedby={sinceTitle ? sinceId : undefined}
       title={sinceTitle ? `${title}\n${sinceTitle}` : title}
-      className="group/row flex h-6 w-full min-w-0 cursor-pointer items-center gap-1 rounded-[4px] px-1.5 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-amber/10 focus-visible:outline-2 focus-visible:outline-offset-1"
+      className="group/row flex h-6 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-left text-xs text-foreground transition-colors hover:bg-foreground/[0.05] focus-visible:outline-2 focus-visible:outline-offset-1"
     >
       <span className="min-w-0 flex-1 truncate">{title}</span>
       <ChevronRight
         size={12}
-        strokeWidth={2.2}
+        strokeWidth={2}
         aria-hidden
         className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100"
       />
@@ -601,8 +625,9 @@ function GroupRow({ task, attention, onOpen }: StuckItem & { onOpen: () => void 
   )
 }
 
-/** Several tasks stuck on the same cause, on one card: the cause, why they wait
- *  and how many, a row per task, and one Retry all / Dismiss all. */
+/** Several tasks stuck on the same cause, on one card: the cause as its title,
+ *  why they wait and how many, a row per task, and Retry all, with Dismiss all
+ *  in the menu. */
 function NeedsYouGroupCard({
   entry,
   onOpenTask,
@@ -625,11 +650,11 @@ function NeedsYouGroupCard({
   const canRetryAll = items.every((i) => canRetryTask(i.task, i.attention))
   const label = `${ATTENTION_META[reason].label} · ${countLabel(n, 'task')}`
 
-  // As on a single card: focus stays on the pressed button, and the group hands
-  // it on as it leaves (to a task that stays, or the next card).
-  const act = (action: (taskIds: readonly string[]) => Promise<number>) => {
+  // As on a single card: focus stays on the pressed button (or goes back to the
+  // menu's button), and the group hands it on as it leaves.
+  const act = (action: (taskIds: readonly string[]) => Promise<number>, opener?: HTMLElement) => {
     if (busy) return
-    const trigger = focusedIn(rootRef.current)
+    const trigger = opener ?? focusedIn(rootRef.current)
     setBusy(true)
     void action(ids)
       .then((done) => {
@@ -646,20 +671,13 @@ function NeedsYouGroupCard({
       aria-labelledby={headlineId}
       data-testid="needs-you-group"
       data-attention={reason}
-      className="calendar-chip rounded-lg py-2 pl-3 pr-2"
-      style={AMBER_CHIP}
+      className="calendar-chip rounded-lg px-3 py-2.5"
     >
-      <p
-        id={headlineId}
-        title={cause}
-        className="line-clamp-2 text-[12px] font-semibold text-foreground"
-        style={{ lineHeight: '16px', letterSpacing: '-0.01em' }}
-      >
+      <p id={headlineId} title={cause} className="line-clamp-2 text-sm font-medium text-foreground">
         {cause}
       </p>
-      <div className="mt-1 flex min-w-0 items-center gap-1.5">
+      <div className="mt-1 flex min-w-0 items-center">
         <ReasonLabel reason={reason} label={label} />
-        <AgentStack agentIds={agentIds} />
       </div>
       <ul className="-mx-1.5 mt-1.5 flex flex-col" aria-label={countLabel(n, 'task')}>
         <AnimatePresence>
@@ -670,30 +688,33 @@ function NeedsYouGroupCard({
           ))}
         </AnimatePresence>
       </ul>
-      <div className={CHIP_FOOTER}>
-        <span className="ml-auto flex shrink-0 items-center gap-0.5">
-          {canRetryAll && (
-            <button
-              type="button"
-              aria-label={`Retry all ${countLabel(n, 'task')}`}
-              className={`${QUIET_ACTION} text-foreground`}
-              aria-disabled={busy || undefined}
-              onClick={() => act(retryMany)}
-            >
-              <RotateCcw size={12} strokeWidth={2.2} aria-hidden />
-              Retry all
-            </button>
-          )}
+      <div className="mt-2 flex min-h-7 items-center gap-1">
+        <span className="flex min-w-0 flex-1 items-center">
+          <AgentStack agentIds={agentIds} />
+        </span>
+        {canRetryAll && (
           <button
             type="button"
-            aria-label={`Dismiss all ${countLabel(n, 'task')}`}
-            className={`${QUIET_ACTION} text-muted-foreground hover:text-foreground`}
+            aria-label={`Retry all ${countLabel(n, 'task')}`}
+            className={CARD_ACTION}
             aria-disabled={busy || undefined}
-            onClick={() => act(dismissMany)}
+            onClick={() => act(retryMany)}
           >
-            Dismiss all
+            <RotateCcw size={12} strokeWidth={2} aria-hidden />
+            Retry all
           </button>
-        </span>
+        )}
+        <MoreMenuButton
+          label={`More for ${countLabel(n, 'task')}`}
+          disabled={busy}
+          items={(opener) => [
+            {
+              key: 'dismiss',
+              label: 'Dismiss all',
+              onSelect: () => act(dismissMany, opener),
+            },
+          ]}
+        />
       </div>
     </div>
   )
@@ -856,7 +877,7 @@ export function NeedsYouItems({
     setExpanded(true)
   }
   // Each card's gap is padding under it, so the gap closes with a card that leaves.
-  const gap = cell ? 6 : 10
+  const gap = 8
   // A lone group needs no heading: the column's title already says what it is.
   const labelled = approvals.length > 0 && stuck.length > 0
 
@@ -874,7 +895,7 @@ export function NeedsYouItems({
     return cell ? (
       <div
         data-testid="needs-you-empty"
-        className="flex items-center gap-2 px-1 py-1 text-[12px] text-muted-foreground"
+        className="flex items-center gap-2 px-1 py-1 text-xs text-muted-foreground"
       >
         <span aria-hidden className="inline-flex shrink-0">
           <BooAvatar seed="clawboo-all-clear" size={22} eyeShape={3} tint="#34D399" />
@@ -884,13 +905,10 @@ export function NeedsYouItems({
     ) : (
       <div
         data-testid="needs-you-empty"
-        className="flex flex-col items-center gap-1.5 px-2 py-5 text-center"
+        className="flex flex-col items-center gap-1 px-2 py-5 text-center"
       >
-        <CheckCircle2 size={18} strokeWidth={2} className="text-mint" />
-        <span className="text-[12px] font-medium text-foreground/70">
-          Nothing needs you right now
-        </span>
-        <span className="text-[11px] leading-relaxed text-muted-foreground">
+        <span className="text-xs font-medium text-foreground">Nothing needs you right now</span>
+        <span className="text-xs text-muted-foreground">
           Approvals, failed runs and stuck tasks show up here.
         </span>
       </div>
@@ -900,10 +918,7 @@ export function NeedsYouItems({
   return (
     <HiddenTasksContext.Provider value={hiddenIds}>
       {shownApprovals.length > 0 && (
-        <div
-          className={['flex flex-col', cell ? 'gap-1.5' : 'gap-2.5'].join(' ')}
-          data-testid="needs-you-approvals"
-        >
+        <div className="flex flex-col gap-2" data-testid="needs-you-approvals">
           {labelled && (
             <span className={GROUP_LABEL}>
               Approval pending
@@ -929,10 +944,7 @@ export function NeedsYouItems({
       )}
 
       {(hasEntries || draining) && (
-        <div
-          className={['flex flex-col', cell ? 'gap-1.5' : 'gap-2.5'].join(' ')}
-          data-testid="needs-you-tasks"
-        >
+        <div className="flex flex-col gap-2" data-testid="needs-you-tasks">
           {labelled && (
             <span className={GROUP_LABEL}>
               Tasks
@@ -957,7 +969,6 @@ export function NeedsYouItems({
                       showTeam={teamFilter === 'all'}
                       onOpen={() => onOpenTask(entry.task.id)}
                       onChanged={onTasksChanged}
-                      compact={cell}
                     />
                   )}
                 </Leaving>
@@ -973,7 +984,7 @@ export function NeedsYouItems({
           onClick={() => setExpanded((e) => !e)}
           aria-expanded={expanded}
           data-needs-you-more=""
-          className="self-start cursor-pointer rounded-md px-1.5 py-0.5 text-[12px] font-medium text-foreground transition-colors hover:bg-foreground/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="self-start cursor-pointer rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           {expanded ? 'Show less' : `+${hidden} more`}
         </button>
@@ -982,17 +993,22 @@ export function NeedsYouItems({
   )
 }
 
-/** The Needs you column the board shows while it cannot draw the calendar. */
+/** The Needs you column the board shows while it cannot draw the calendar: the
+ *  same title on the canvas and the same lane under it as the board's own. */
 export function NeedsYouLane({
   model,
   teamFilter,
   onOpenTask,
   onTasksChanged,
+  loading = false,
 }: {
   model: NeedsYouModel
   teamFilter: string
   onOpenTask: (taskId: string) => void
   onTasksChanged: () => void
+  /** The board's tasks have not arrived: an empty lane cannot yet say that
+   *  nothing needs you. Approvals, read on their own, still show. */
+  loading?: boolean
 }) {
   const { total } = model
   const titleId = useId()
@@ -1005,39 +1021,36 @@ export function NeedsYouLane({
       tabIndex={-1}
       data-needs-you-home=""
       data-testid="board-column-needs-you"
-      className={[
-        'flex max-h-full w-[288px] shrink-0 flex-col gap-2.5 rounded-2xl border p-3 transition-colors',
-        total > 0 ? 'border-amber/40 bg-amber/[0.04]' : 'border-border bg-foreground/[0.02]',
-      ].join(' ')}
+      className="flex max-h-full shrink-0 flex-col"
+      style={{ width: NEEDS_YOU_W }}
     >
-      <div className="flex items-center justify-between px-1">
-        <span className="flex items-center gap-1.5">
-          <ShieldAlert
-            size={14}
-            strokeWidth={2}
-            className={total > 0 ? 'text-amber' : 'text-foreground/35'}
-          />
-          <span id={titleId} className={SECTION_LABEL}>
-            Needs you
-          </span>
+      <div className="flex shrink-0 items-center gap-2 pl-3 pr-1" style={{ height: HEADER_H }}>
+        <StatusGlyph kind="needs_you" muted={total === 0} />
+        <span id={titleId} className="text-xs font-semibold text-foreground">
+          Needs you
         </span>
-        <span
-          className={[
-            'font-data rounded-full px-2 py-0.5 text-[10px] font-semibold',
-            total > 0 ? 'bg-amber/20 text-amber' : 'bg-foreground/[0.06] text-foreground/50',
-          ].join(' ')}
-        >
-          {total}
-        </span>
+        {total > 0 ? (
+          <span className="text-xs tabular-nums text-muted-foreground">{total}</span>
+        ) : null}
       </div>
 
-      <div className="flex min-h-0 flex-col gap-2.5 overflow-y-auto">
-        <NeedsYouItems
-          model={model}
-          teamFilter={teamFilter}
-          onOpenTask={onOpenTask}
-          onTasksChanged={onTasksChanged}
-        />
+      <div
+        className="flex min-h-0 flex-col gap-2 overflow-y-auto p-2"
+        style={{ background: LANE, borderRadius: LANE_RADIUS }}
+      >
+        {loading && total === 0 ? (
+          <>
+            <Skeleton height={76} radius={8} />
+            <Skeleton height={58} radius={8} />
+          </>
+        ) : (
+          <NeedsYouItems
+            model={model}
+            teamFilter={teamFilter}
+            onOpenTask={onOpenTask}
+            onTasksChanged={onTasksChanged}
+          />
+        )}
       </div>
     </div>
   )

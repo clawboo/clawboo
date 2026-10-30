@@ -219,23 +219,20 @@ function FinishPanel({
     >
       <h2
         id={headingId}
-        className="line-clamp-2 text-[15px] font-semibold text-foreground"
+        className="line-clamp-2 text-base font-semibold text-foreground"
         style={{ letterSpacing: '-0.01em' }}
       >
         {heading}
       </h2>
       {notes.map((n) => (
-        <p key={n} className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+        <p key={n} className="mt-1.5 text-sm text-muted-foreground">
           {n}
         </p>
       ))}
 
       {sits != null ? (
         <div className="mt-4">
-          <p
-            id={groupLabelId}
-            className="board-micro mb-1.5 text-[11px] font-semibold text-muted-foreground"
-          >
+          <p id={groupLabelId} className="mb-1.5 text-xs font-medium text-muted-foreground">
             {cancelling ? 'Put it on' : 'Finished on'}
           </p>
           <div
@@ -275,7 +272,7 @@ function FinishPanel({
                   >
                     {checked ? <Check size={10} strokeWidth={3} /> : null}
                   </span>
-                  <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-foreground">
+                  <span className="flex min-w-0 items-center gap-1.5 text-compact font-medium text-foreground">
                     {o.id === 'other' ? (
                       <CalendarDays
                         size={13}
@@ -286,9 +283,7 @@ function FinishPanel({
                     ) : null}
                     {o.label}
                   </span>
-                  <span className="ml-auto truncate text-[12px] text-muted-foreground">
-                    {o.aside}
-                  </span>
+                  <span className="ml-auto truncate text-xs text-muted-foreground">{o.aside}</span>
                 </button>
               )
             })}
@@ -405,7 +400,7 @@ function DayPicker({
   return (
     <div data-testid="finish-day-picker" className="mt-2 rounded-xl border border-border p-2.5">
       <div className="mb-1.5 flex items-center justify-between pl-1">
-        <span id={headingId} className="text-[13px] font-semibold text-foreground">
+        <span id={headingId} className="text-sm font-semibold text-foreground">
           {monthLabel}
         </span>
         <span className="flex items-center gap-0.5">
@@ -442,7 +437,7 @@ function DayPicker({
                 key={i}
                 scope="col"
                 abbr={h.long}
-                className="pb-1 text-center text-[10.5px] font-semibold text-muted-foreground"
+                className="pb-1 text-center text-micro font-medium text-muted-foreground"
               >
                 {h.short}
               </th>
@@ -470,7 +465,7 @@ function DayPicker({
                         onChange(d)
                       }}
                       className={[
-                        'mx-auto flex h-7 w-7 items-center justify-center rounded-full text-[12px] tabular-nums transition-colors focus-visible:outline-2 focus-visible:outline-offset-1',
+                        'mx-auto flex h-7 w-7 items-center justify-center rounded-full text-xs tabular-nums transition-colors focus-visible:outline-2 focus-visible:outline-offset-1',
                         allowed ? 'cursor-pointer hover:bg-foreground/[0.08]' : 'cursor-default',
                         picked
                           ? 'bg-foreground font-semibold text-background hover:bg-foreground'
