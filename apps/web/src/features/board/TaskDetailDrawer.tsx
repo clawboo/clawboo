@@ -26,6 +26,7 @@ import {
   getTaskExecutions,
   getWorkspaceDetail,
   type BoardExecution,
+  type ReplyDelivery,
   type TaskDetail,
   type WorkspaceDetail,
 } from '@/lib/boardClient'
@@ -44,7 +45,9 @@ import { AssignAgentSelect } from './AssignAgentSelect'
 import { StatusSelect } from './StatusSelect'
 import type { StatusCommit } from './useStatusMutation'
 import { runtimeNameOf, taskRuntimeOf, useAgentRuntime } from './TaskCard'
+import { ReplyReceipt } from './ReplyReceipt'
 import { TaskComments } from './TaskComments'
+import { TaskReplyBox } from './TaskReplyBox'
 import {
   ATTENTION_META,
   attentionLabel,
@@ -314,6 +317,10 @@ export function TaskDetailDrawer({
   // arrives (on open, or after J or K) the drawer shows its skeleton, never the
   // last task's content under the new one's id.
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  // Where each reply the person sent from here went, by comment id.
+  const [receipts, setReceipts] = useState<Map<string, { delivery: ReplyDelivery; body: string }>>(
+    () => new Map(),
+  )
   const contentRef = useRef<HTMLDivElement>(null)
   // The task open now. A reply or a status write for a task the drawer has
   // stepped away from (J or K mid-flight) must not land on the one it shows.
@@ -850,11 +857,39 @@ export function TaskDetailDrawer({
                 </Section>
               )}
 
-              {otherComments.length > 0 && (
-                <Section title="Comments" count={otherComments.length}>
-                  <TaskComments comments={otherComments} emptyLabel="No comments." />
-                </Section>
-              )}
+              <Section
+                title="Comments"
+                count={otherComments.length > 0 ? otherComments.length : undefined}
+                testId="task-comments-section"
+              >
+                {otherComments.length > 0 ? (
+                  <TaskComments
+                    comments={otherComments}
+                    after={(c) => {
+                      const r = c.id ? receipts.get(c.id) : undefined
+                      return r ? (
+                        <ReplyReceipt
+                          delivery={r.delivery}
+                          task={task}
+                          body={r.body}
+                          onFollowUp={() => onChanged?.()}
+                        />
+                      ) : null
+                    }}
+                  />
+                ) : null}
+                <TaskReplyBox
+                  taskId={task.id}
+                  status={task.status}
+                  agentName={ownerId ? (ownerName ?? ownerId) : null}
+                  onSent={({ commentId, delivery, body }) => {
+                    if (commentId && delivery) {
+                      setReceipts((m) => new Map(m).set(commentId, { delivery, body }))
+                    }
+                    refreshAfterAction()
+                  }}
+                />
+              </Section>
 
               <div className="mt-8 border-t border-border" />
               <Section title="Activity" testId="task-activity">

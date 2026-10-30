@@ -139,7 +139,7 @@ The team graph and **Tasks** start open. Each toggle in the header shows or hide
 
 Click a task to open it in the card. The card's title becomes **Tasks › _task title_**; click **Tasks**, or press **Escape**, to go back to the list. The task shows its description, status, agent, runtime and cost, its **Output** once it is done (or its **Latest report**, when it has one), its **Progress** as a live activity feed, and its **Comments**.
 
-At the bottom is a comment box (_"Comment or steer this task…"_). **Send** saves your comment on the task and passes it to the agent working on it, as described in [step 5](#5-watch-delegations-land-on-the-board); the line under the box says what sending does for this task, for example that the agent gets it before its next step, or that the task is finished and the comment is only saved. A task waiting on you also offers **Send and retry**, which posts the comment and runs the task again.
+At the bottom is a comment box (_"Comment or steer this task…"_). **Send** saves your comment on the task and passes it to the agent working on it, as described in [step 5](#5-watch-delegations-land-on-the-board); the line under the box says what sending does for this task, for example that the agent gets it before its next step, or that sending starts the agent on it again. Once sent, a note under your comment says where it went. A task that is waiting on you starts again for your comment; a finished task cannot, and the note offers to send your comment as a follow-up task for the same agent.
 
 **Open on Board**, the kanban icon in the card's header while a task is open, switches to the [Board](/using/board#the-task-detail-drawer) with that task's detail drawer open.
 
