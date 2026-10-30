@@ -1,7 +1,9 @@
 import {
+  createContext,
   forwardRef,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -242,6 +244,39 @@ export function groupEntriesToBlocks(entries: TranscriptEntry[]): RenderBlock[] 
 // it renders as flat prose. Sizes are em-based so the same map works at any
 // container font size (13px chat turns, 12.5px board task cards).
 
+/** True inside a markdown link, so an image there does not nest a second link. */
+const InsideMarkdownLink = createContext(false)
+
+/**
+ * An image is never loaded. What markdown renders here is mostly text an agent
+ * wrote, and an image loads from wherever its address points the moment it is
+ * shown, so an agent steered by something it read could send data out in that
+ * address. A web or same-site image (a relative address included) shows as a
+ * link the person can choose to open; any other address is only named, and so
+ * is an image inside a link, which takes the outer link's place.
+ */
+function MarkdownImage({ src, alt }: { src?: unknown; alt?: string }) {
+  const insideLink = useContext(InsideMarkdownLink)
+  const label = alt?.trim() ? `Image: ${alt.trim()}` : 'Image'
+  const linkable =
+    typeof src === 'string' &&
+    src.length > 0 &&
+    (/^https?:/i.test(src) || !/^[a-z][a-z\d+.-]*:/i.test(src))
+  if (insideLink) return <span>{label}</span>
+  if (!linkable) return <span className="text-muted-foreground">{label}</span>
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer nofollow"
+      data-md-image=""
+      className="text-mint underline underline-offset-2 hover:text-mint/80"
+    >
+      {label}
+    </a>
+  )
+}
+
 export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['components'] = {
   h1({ children }) {
     return (
@@ -342,34 +377,14 @@ export const MD_COMPONENTS: React.ComponentProps<typeof ReactMarkdown>['componen
         rel="noreferrer"
         className="text-mint underline underline-offset-2 hover:text-mint/80"
       >
-        {children}
+        <InsideMarkdownLink.Provider value>{children}</InsideMarkdownLink.Provider>
       </a>
     )
   },
   p({ children }) {
     return <p className="my-1 leading-relaxed">{children}</p>
   },
-  // An image is never loaded. What this renders is mostly text an agent wrote,
-  // and an image loads from wherever its address points the moment it is shown,
-  // so an agent steered by something it read could send data out in that
-  // address. A web or same-site image shows as a link the person can choose to
-  // open; any other address is only named.
-  img({ src, alt }) {
-    const label = alt?.trim() ? `Image: ${alt.trim()}` : 'Image'
-    const linkable = typeof src === 'string' && (/^https?:\/\//i.test(src) || src.startsWith('/'))
-    if (!linkable) return <span className="text-muted-foreground">{label}</span>
-    return (
-      <a
-        href={src}
-        target="_blank"
-        rel="noopener noreferrer nofollow"
-        data-md-image=""
-        className="text-mint underline underline-offset-2 hover:text-mint/80"
-      >
-        {label}
-      </a>
-    )
-  },
+  img: MarkdownImage,
 }
 
 // ─── TypingIndicator ──────────────────────────────────────────────────────────

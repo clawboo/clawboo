@@ -44,6 +44,27 @@ describe('markdown images', () => {
     expect(link).toHaveAttribute('href', '/api/artifacts/a1.png')
   })
 
+  it('links a relative address, which resolves on this site', () => {
+    renderMarkdown('![chart](charts/p.png)')
+    const md = screen.getByTestId('md')
+    expect(md.querySelector('img')).toBeNull()
+    expect(within(md).getByRole('link', { name: 'Image: chart' })).toHaveAttribute(
+      'href',
+      'charts/p.png',
+    )
+  })
+
+  it('names an image inside a link instead of nesting a second link', () => {
+    renderMarkdown('[![chart](/image.png)](https://example.com/report.html)')
+    const md = screen.getByTestId('md')
+    expect(md.querySelector('img')).toBeNull()
+    expect(md.querySelector('a a')).toBeNull()
+    const links = within(md).getAllByRole('link')
+    expect(links).toHaveLength(1)
+    expect(links[0]).toHaveAttribute('href', 'https://example.com/report.html')
+    expect(links[0]).toHaveTextContent('Image: chart')
+  })
+
   it('only names an image whose address is not a web or same-site one', () => {
     renderMarkdown('![pixel](data:image/png;base64,AAAA)')
     const md = screen.getByTestId('md')
