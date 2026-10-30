@@ -937,24 +937,6 @@ export function BoardPanel() {
         : bucketAll(datedTasks, now, drawnColumnOf),
     [range, datedTasks, now],
   )
-  // Where the open task sits in its column, top to bottom as the board draws it,
-  // so J and K in the drawer step through the column. A task the board does not
-  // show (another range, or filtered out) has no place to step from.
-  const drawerPosition = useMemo<DrawerPosition | null>(() => {
-    const open = openTaskId ? shownTasks.find((t) => t.id === openTaskId) : undefined
-    if (!open) return null
-    const col = drawnColumnOf(open)
-    const ids =
-      col === NEEDS_YOU_COLUMN
-        ? needsYou.stuck.map((s) => s.task.id)
-        : [
-            ...(buckets.earlier.get(col) ?? []),
-            ...[...(buckets.cells.get(col)?.values() ?? [])].flat(),
-          ].map((t) => t.id)
-    const index = ids.indexOf(open.id)
-    if (index < 0) return null
-    return { index, total: ids.length, prev: ids[index - 1] ?? null, next: ids[index + 1] ?? null }
-  }, [openTaskId, shownTasks, needsYou.stuck, buckets])
   // A run whose time has passed has fired: it leaves the calendar, and the board
   // shows what it made. Runs are bucketed whether or not the Routines switch draws
   // them, because the switch shows their count while it hides them.
@@ -1022,6 +1004,25 @@ export function BoardPanel() {
   const earlierOpen = earlierChoice ?? (earlierHasLiveWork || earlierHeld)
   const earlierOpenRef = useRef(earlierOpen)
   earlierOpenRef.current = earlierOpen
+  // Where the open task sits in its column, top to bottom as the board draws it,
+  // so J and K in the drawer step through the column. A task the board does not
+  // show (another range, or filtered out) has no place to step from.
+  const drawerPosition = useMemo<DrawerPosition | null>(() => {
+    const open = openTaskId ? shownTasks.find((t) => t.id === openTaskId) : undefined
+    if (!open) return null
+    const col = drawnColumnOf(open)
+    const ids =
+      col === NEEDS_YOU_COLUMN
+        ? needsYou.stuck.map((s) => s.task.id)
+        : [
+            // Earlier's cards count only while its row is drawn and open.
+            ...(showEarlier && earlierOpen ? (buckets.earlier.get(col) ?? []) : []),
+            ...[...(buckets.cells.get(col)?.values() ?? [])].flat(),
+          ].map((t) => t.id)
+    const index = ids.indexOf(open.id)
+    if (index < 0) return null
+    return { index, total: ids.length, prev: ids[index - 1] ?? null, next: ids[index + 1] ?? null }
+  }, [openTaskId, shownTasks, needsYou.stuck, buckets, showEarlier, earlierOpen])
   const holdEarlier = useCallback(() => {
     if (earlierOpenRef.current && rangeRef.current) {
       setEarlierHeldFor(rangeKeyOf(rangeRef.current))
@@ -2302,8 +2303,12 @@ export function BoardPanel() {
           onExitComplete={() => {
             const a = document.activeElement
             if (a && a !== document.body && a.isConnected) return
+            // A named control: the toolbar's first button can be the Needs you
+            // chip, which is hidden while its column is on screen.
             document
-              .querySelector<HTMLElement>('[data-testid="board-calendar-toolbar"] button')
+              .querySelector<HTMLElement>(
+                '[data-testid="board-range-title"], [data-testid="board-find"]',
+              )
               ?.focus()
           }}
         >

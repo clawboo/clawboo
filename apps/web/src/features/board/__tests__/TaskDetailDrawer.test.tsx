@@ -1014,3 +1014,90 @@ describe('agent markdown loads no images', () => {
     expect(within(log).getByRole('link', { name: 'Image: the chart' })).toBeInTheDocument()
   })
 })
+
+describe('TaskDetailDrawer: review fixes', () => {
+  function stubTask(id: string, task: Record<string, unknown>, getTask?: () => Promise<Response>) {
+    return [
+      http.get(`/api/board/${id}`, () =>
+        getTask
+          ? getTask()
+          : HttpResponse.json({ task: { id, ...task }, comments: [], ancestors: [] }),
+      ),
+      http.get(`/api/board/${id}/executions`, () => HttpResponse.json({ executions: [] })),
+      http.get(`/api/board/${id}/workspace/detail`, () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    ]
+  }
+
+  it('lists the findings of the latest attempt, the one the verdict and reviewer line describe', async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'in_review',
+        verification: JSON.stringify({
+          status: 'pass',
+          attempts: [
+            {
+              critic: {
+                ran: true,
+                findings: [{ severity: 'major', title: 'First try: missing test' }],
+              },
+            },
+            {
+              critic: {
+                ran: true,
+                findings: [{ severity: 'minor', title: 'Latest: rename a variable' }],
+              },
+            },
+          ],
+          debtNotes: [],
+        }),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).getByText(/Latest: rename a variable/)).toBeInTheDocument()
+    expect(within(verification).queryByText(/First try: missing test/)).toBeNull()
+  })
+
+  it('keeps a late reply for the task it stepped away from off the one it shows', async () => {
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder', teamId: 'team-1' } as AgentState],
+      selectedAgentId: null,
+    })
+    const failed = {
+      title: 'Draft the launch post',
+      status: 'blocked',
+      teamId: 'team-1',
+      assigneeAgentId: 'agent-7',
+      sourceDelegationId: 'assign:n1:agent:agent-7:origin:human',
+      attention: { reason: 'failed', failedRuns: 1, detail: 'provider out of credits' },
+    }
+    // The first read of t1 answers at once; the re-read after Retry waits.
+    let reads = 0
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      ...stubTask('t1', failed, async () => {
+        reads++
+        if (reads > 1) await gate
+        return HttpResponse.json({ task: { id: 't1', ...failed }, comments: [], ancestors: [] })
+      }),
+      http.post('/api/board/:id/retry', () => HttpResponse.json({ ok: true }, { status: 202 })),
+      ...stubTask('t2', { title: 'Second task', status: 'todo' }),
+    )
+    const user = userEvent.setup()
+    const { rerender } = render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const banner = await screen.findByTestId('task-needs-you')
+    await user.click(within(banner).getByRole('button', { name: /Retry/ }))
+    await waitFor(() => expect(reads).toBe(2))
+
+    // J, before the re-read of t1 comes back.
+    rerender(<TaskDetailDrawer taskId="t2" onClose={() => {}} />)
+    expect(await screen.findByRole('heading', { name: 'Second task' })).toBeInTheDocument()
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByRole('heading', { name: 'Second task' })).toBeInTheDocument()
+    expect(screen.queryByTestId('task-detail-loading')).toBeNull()
+  })
+})

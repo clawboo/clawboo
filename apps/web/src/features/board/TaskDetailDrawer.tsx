@@ -315,6 +315,10 @@ export function TaskDetailDrawer({
   // last task's content under the new one's id.
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  // The task open now. A reply or a status write for a task the drawer has
+  // stepped away from (J or K mid-flight) must not land on the one it shows.
+  const openTaskRef = useRef(taskId)
+  openTaskRef.current = taskId
 
   const load = useCallback(
     async (live: () => boolean = () => true) => {
@@ -324,7 +328,7 @@ export function TaskDetailDrawer({
         getWorkspaceDetail(taskId),
       ])
       // A quick J or K can land an older task's reply after a newer one's.
-      if (!live()) return
+      if (!live() || openTaskRef.current !== taskId) return
       setDetail(d)
       setExecutions(ex)
       setWorkspace(ws)
@@ -591,6 +595,7 @@ export function TaskDetailDrawer({
                 <div className="flex flex-col">
                   <PropRow label="Status">
                     <StatusSelect
+                      key={task.id}
                       taskId={task.id}
                       status={task.status}
                       assigneeAgentId={task.assigneeAgentId}
@@ -600,7 +605,7 @@ export function TaskDetailDrawer({
                       quiet={onStatusCommitted != null}
                       onChange={(next, commit) => {
                         setDetail((d) =>
-                          d
+                          d && d.task.id === taskId
                             ? {
                                 ...d,
                                 // Mirror the server: a →todo release clears the assignee,
@@ -722,7 +727,7 @@ export function TaskDetailDrawer({
                             ))}
                           </ul>
                         )}
-                        {(verdict.attempts?.[0]?.critic?.findings ?? []).map((fnd, i) => (
+                        {(last?.critic?.findings ?? []).map((fnd, i) => (
                           <div key={i} className="text-xs text-foreground">
                             <span className="font-medium">{fnd.severity}</span>: {fnd.title}
                           </div>

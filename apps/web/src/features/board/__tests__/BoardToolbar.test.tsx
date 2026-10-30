@@ -142,6 +142,27 @@ describe('Filter', () => {
     expect(shownTitles()).toEqual(['Coder work', 'Writer work'])
   })
 
+  it('keeps the agents-working chip while its filter is on, after the last run ends', async () => {
+    serve()
+    const user = userEvent.setup()
+    renderBoard()
+    await screen.findByText('Writer work')
+    await user.click(screen.getByTestId('board-agents-working'))
+
+    // The run finishes: nobody is working, but the filter is still on.
+    serve(TASKS().map((t) => ({ ...t, runningSince: undefined })))
+    await pollBoard()
+    await waitFor(() =>
+      expect(screen.getByTestId('board-agents-working')).toHaveTextContent('No agents working'),
+    )
+    const chip = screen.getByTestId('board-agents-working')
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(chip)
+    expect(screen.queryByTestId('board-agents-working')).toBeNull()
+    expect(shownTitles()).toEqual(['Coder work', 'Loose idea', 'Writer work'])
+  })
+
   it('shows no agents-working chip while nobody is working', async () => {
     serve(TASKS().map((t) => ({ ...t, runningSince: undefined })))
     renderBoard()

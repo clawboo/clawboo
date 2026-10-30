@@ -1103,6 +1103,47 @@ describe('BoardPanel', () => {
     expect(within(drawer).getByTestId('task-position')).toHaveTextContent('1 of 3')
   })
 
+  it('steps only through the cards the board draws, not a folded Earlier row', async () => {
+    // Week view. Backlog work from before the week sits in Earlier, folded
+    // because it is only parked work; J and K pass over it.
+    const HOUR = 60 * 60 * 1000
+    const tasks = [
+      {
+        id: 'old',
+        title: 'Parked long ago',
+        status: 'backlog',
+        createdAt: Date.now() - 10 * 24 * HOUR,
+      },
+      {
+        id: 'a',
+        title: 'Parked this morning',
+        status: 'backlog',
+        createdAt: Date.now() - 2 * HOUR,
+      },
+      { id: 'b', title: 'Parked an hour ago', status: 'backlog', createdAt: Date.now() - HOUR },
+    ]
+    server.use(
+      http.get('/api/board', () => HttpResponse.json({ tasks })),
+      http.get('/api/board/:id', ({ params }) =>
+        HttpResponse.json({
+          task: tasks.find((t) => t.id === params['id']),
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/:id/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/:id/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await user.click((await screen.findByText('Parked this morning')).closest('button')!)
+    const drawer = await screen.findByTestId('task-detail-drawer')
+    await within(drawer).findByRole('heading', { name: 'Parked this morning' })
+    expect(within(drawer).getByTestId('task-position')).toHaveTextContent('1 of 2')
+    expect(within(drawer).getByRole('button', { name: 'Previous task' })).toBeDisabled()
+  })
+
   it('opens the task a chat card asked for ("Open on board")', async () => {
     server.use(
       http.get('/api/board', () =>

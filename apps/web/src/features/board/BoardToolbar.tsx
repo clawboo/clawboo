@@ -446,7 +446,9 @@ export function AgentsWorkingChip({
   on: boolean
   onToggle: () => void
 }) {
-  if (agentIds.length === 0) return null
+  // While its filter is on the chip stays, even once the last run ends, so the
+  // control that narrowed the board is still there to widen it.
+  if (agentIds.length === 0 && !on) return null
   const n = agentIds.length
   return (
     <button
@@ -457,7 +459,7 @@ export function AgentsWorkingChip({
       title={on ? 'Show all the work again' : 'Show only the work running now'}
       className={toolbarButton(on)}
     >
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-mint" />
+      {n > 0 ? <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-mint" /> : null}
       <span aria-hidden className="flex items-center">
         {agentIds.slice(0, 3).map((id, i) => (
           <span
@@ -469,7 +471,7 @@ export function AgentsWorkingChip({
           </span>
         ))}
       </span>
-      {n === 1 ? '1 agent working' : `${n} agents working`}
+      {n === 0 ? 'No agents working' : n === 1 ? '1 agent working' : `${n} agents working`}
     </button>
   )
 }
