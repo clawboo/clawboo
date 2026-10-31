@@ -37,7 +37,7 @@ export const faqs: FaqItem[] = [
   },
   {
     q: 'How do agents avoid stepping on each other?',
-    a: 'Each task is claimed by a single conditional write, so two agents can never take the same one, and each works in its own copy of the repo.',
+    a: 'Each task is claimed by a single conditional write, so two agents can never take the same one.',
   },
   {
     q: 'What do I need to run it?',

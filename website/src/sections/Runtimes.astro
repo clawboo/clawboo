@@ -11,7 +11,6 @@
  *    (nativeProviders.ts:20-53 is seven OpenAI-compatible plus four built-in).
  *  - Agents coordinate through the board and structured messages, never by
  *    reading each other's terminal output (codexDriver.ts:1-4).
- *  - Each works in its own copy of the code, so two cannot overwrite each other.
  *  - The runtimes guide link.
  *
  * ONE CAVEAT, deliberately accepted: "everyone knows these logos" holds for
@@ -58,8 +57,7 @@ import runtimesPanelDark from '../assets/screenshots/runtimes-panel-dark.png'
           </p>
           <p class="mt-3 text-[15px] leading-relaxed text-secondary">
             However they join, they coordinate through the board and structured messages, never by
-            reading each other&rsquo;s screen output, and each works in its own copy of the code so
-            two agents can&rsquo;t overwrite each other.
+            reading each other&rsquo;s screen output.
           </p>
           <a
             class="mt-4 inline-flex items-center gap-1.5 text-[15px] font-medium text-brand hover:underline"
