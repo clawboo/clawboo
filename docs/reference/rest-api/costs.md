@@ -20,12 +20,12 @@ Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_T
 
 ## Cost records
 
-A cost record is one run's token counts plus an estimated price. The server records each OpenClaw Gateway turn itself, and those rows carry a `sessionKey`. Rows posted through `POST /api/cost-records` (by your own script, or by the dashboard for a Gateway turn of an agent it does not list as OpenClaw) have `sessionKey: null`. Clawboo Native, Claude Code, Codex and Hermes runs write no cost records, which is why **Tokens Used** counts OpenClaw agents only.
+A cost record is one run's token counts plus a price. The server records each OpenClaw Gateway turn itself, and those rows carry a `sessionKey`. Rows posted through `POST /api/cost-records` (by your own script, or by the dashboard for a Gateway turn of an agent it does not list as OpenClaw) have `sessionKey: null`. The server also writes one record for each Clawboo Native, Claude Code, Codex or Hermes run when it settles the run's cost, on the task runner (agent routines and API runs) and in team chat. Those rows carry a `sessionKey` too, and `runId` is the run's execution id when it has one. When the run reported no token counts, they are guessed from the text at about 4 characters per token. One-to-one chats with these agents write no records, and runs from before these records were added are not backfilled.
 
 A cost record is a report only. Writing one does not charge a budget; budget spend is tracked separately (see the [Governance API](/reference/rest-api/governance)). Deleting an agent deletes its cost records.
 
 <Note>
-`costUsd` is always an estimate from a built-in price list, never a figure a provider reported. The list covers Anthropic Claude models plus `gpt-4o` and `gpt-4o-mini`. Any other model, including a local Ollama model that costs nothing, is priced at `$3` per million input tokens and `$15` per million output tokens. For which runtimes report real provider cost, see [Budgets and spend](/using/budgets-and-spend).
+On rows the server records for OpenClaw turns, and on rows posted through `POST /api/cost-records`, `costUsd` is an estimate from a built-in price list, never a figure a provider reported. The list covers Anthropic Claude models plus `gpt-4o` and `gpt-4o-mini`. A model your own Ollama serves is priced at `$0`: an `ollama/` model id, or an OpenClaw turn the Gateway says Ollama served, unless its tag marks one of Ollama's cloud models (`-cloud` or `:cloud`). Any other model is priced at `$3` per million input tokens and `$15` per million output tokens. A row for another runtime's run carries the cost that run recorded: Claude Code's reported figure, or Clawboo's estimate. For which runtimes report real provider cost, see [Budgets and spend](/using/budgets-and-spend).
 </Note>
 
 The record shape, returned by both cost-record routes:
@@ -37,9 +37,9 @@ interface CostRecord {
   model: string
   inputTokens: number
   outputTokens: number
-  costUsd: number // estimate, see the note above
+  costUsd: number // see the note above
   runId: string | null
-  sessionKey: string | null // set only on rows the server records for OpenClaw turns
+  sessionKey: string | null // set on rows the server records itself; null on rows from POST
   createdAt: number // epoch ms
 }
 ```
@@ -133,7 +133,7 @@ Totals for the **Tokens Used** panel, built from the records of the last 30 days
 
 ```ts
 {
-  totalToday: number // estimated USD
+  totalToday: number // USD, see the note above
   totalWeek: number
   totalMonth: number
   tokensToday: number // input + output tokens

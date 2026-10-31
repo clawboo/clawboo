@@ -105,7 +105,7 @@ Cards are neutral: color appears only in the status marks, and amber marks what 
 
 - **Agent**: the face of the agent that has the task. In **To do**, a dashed circle means no agent is bound to it.
 - **Status mark**: **Verifying** while the work is checked. After a check, an amber cross means it failed, an amber dashed circle means it passed with debt (open issues noted), and a green check means it passed (until the card reaches Done). A card with no mark shows its cost here.
-- **Cost**: what all of the task's runs cost, once a run has recorded a cost. A figure that starts with `~` is an estimate: the runtime reported no charge, so Clawboo priced the run itself. A cost under a cent reads `<$0.01`. When a status mark takes the cost's place, point at the card to see the cost. Which runtimes report real cost is in [Budgets and spend](/using/budgets-and-spend).
+- **Cost**: what all of the task's runs cost, once a run has recorded a cost. A figure that starts with `~` is an estimate: the runtime reported no charge, so Clawboo priced the run itself. A cost under a cent reads `<$0.01`, and a task whose runs all ran on a model your own Ollama serves reads `free`. When a status mark takes the cost's place, point at the card to see the cost. Which runtimes report real cost is in [Budgets and spend](/using/budgets-and-spend).
 - **Subtask**: a small arrow when another task handed this one out and the card has no mark or cost to show. Otherwise the mark's or the cost's tooltip says it is a subtask.
 - **Time**: on Kanban, how long ago the task was added or finished, such as "4m ago", "Yesterday" or "3d ago". A calendar view shows the clock time, and the Earlier row the date. A running task shows how long its current run has gone, after a small live dot. Point at the time for the full date.
 
@@ -263,7 +263,7 @@ Each section folds from its heading, and a section with nothing in it is not sho
 | **Comments**       | Your replies and actions (**You**) and the notes Clawboo writes (**Clawboo**), then a box to reply to the agent. See [Steer a running task](#steer-a-running-task) |
 | **Activity**       | The task's live tool calls, results and errors                                                                                                                     |
 
-Click the **Parent** to open that task in the drawer. A run that is still going can show OpenClaw as its runtime in **Run history** until it ends. The drawer's cost is the same total as the card's, to four decimal places.
+Click the **Parent** to open that task in the drawer. A run that is still going can show OpenClaw as its runtime in **Run history** until it ends. The drawer's cost is the same total as the card's, to four decimal places, or `free` for a task that ran only on a local model.
 
 An image in the agent's report or its comments shows as a link named after its alt text, such as **Image: sales chart**. It opens in a new tab only when you click it. Clawboo never loads it by itself, so an agent cannot send data out in an image's address without your click. An address that is not a web or same-site one is only named, not linked.
 

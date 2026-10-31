@@ -549,7 +549,7 @@ A refused or finished run answers with the runner's result. A refusal (`ok: fals
   doneReason: 'success' | 'max_turns' | 'aborted' | 'error'
   status: string           // the task's status after the run
   summary: string
-  costUsd: number | null   // reported or estimated; null when the runtime reports nothing
+  costUsd: number | null   // reported, or estimated when the runtime reports none; 0 on a local Ollama model
   usedWorktree: boolean
   degradations: string[]
   needsVerifyFix?: true    // verification failed and the task is still in_progress, waiting for a fix

@@ -252,7 +252,14 @@ A tool returned. `isError` feeds the tool error rate in the trace metrics.
 Spend and tokens reported during a run. Several can arrive for one run; see [Cost totals](#cost-totals).
 
 ```ts
-{ costUsd?: number | null; inputTokens?: number; outputTokens?: number; model?: string | null }
+{
+  costUsd?: number | null
+  inputTokens?: number
+  outputTokens?: number
+  model?: string | null
+  estimated?: boolean // task-runner runs: Clawboo priced the figure itself
+  local?: true // task-runner runs: a model the user's own Ollama served, recorded at $0
+}
 ```
 
 Team chat runs write no `cost` events; their spend is charged to budgets directly. See [Budgets and spend](/using/budgets-and-spend) for which runtimes report real cost and which are estimated.

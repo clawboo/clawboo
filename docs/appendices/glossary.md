@@ -61,7 +61,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Connector**: a link to an outside app or tool, such as GitHub, Gmail, a folder or a web browser, that agents use through Clawboo. Connecting one gives no agent access until you share it with that agent on the graph. The two browser connectors are the exception: every new agent gets them. See [Connectors](/using/connectors).
 
-**Cost estimate**: a cost Clawboo works out itself when a runtime reports none, marked **est.** on task cards. Models Clawboo has no price for, including local Ollama models, are estimated at a default rate. See [Budgets and spend](/using/budgets-and-spend).
+**Cost estimate**: a cost Clawboo works out itself when a runtime reports none, marked **est.** on task cards. Models Clawboo has no price for are estimated at a default rate. A model your own Ollama serves is not estimated: it costs nothing, so its runs read **free**. See [Budgets and spend](/using/budgets-and-spend).
 
 ### D
 
@@ -169,7 +169,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Team rules**: short rules that every member of a team follows on every turn in that team's chats. Edit them with the team's brief, or add one with `/rule` in a chat. See [Teams](/using/teams).
 
-**Tokens Used**: **Settings** > **Insights** > **Tokens Used**: recorded token use and cost by team and agent. It counts OpenClaw agents only. See [Budgets and spend](/using/budgets-and-spend).
+**Tokens Used**: **Settings** > **Insights** > **Tokens Used**: recorded token use and cost by team and agent, for every runtime. See [Budgets and spend](/using/budgets-and-spend).
 
 **Trace**: the record of one task-runner run, with its steps, tool calls and errors, shown in the **Observability** panel. See [Observability](/concepts/observability).
 
@@ -196,7 +196,7 @@ The dashboard's labels are the names these docs use. The right-hand column lists
 | **Meet your team**                                                                | The one-time introduction before a team's chat opens      | Know Your Team gate                                                   |
 | **Routines**                                                                      | Work that runs on a schedule, for a team or for one agent | Scheduler (before 0.4.0)                                              |
 | **Needs you**                                                                     | The Board's first column                                  | Needs approval (before 0.4.0)                                         |
-| **Tokens Used**                                                                   | Recorded token use and cost, for OpenClaw agents          | Cost dashboard; the welcome screen's **Cost** button opens it         |
+| **Tokens Used**                                                                   | Recorded token use and cost, for every runtime            | Cost dashboard; the welcome screen's **Cost** button opens it         |
 | **warn only**, **hard cap**                                                       | The two budget modes                                      | kill-switch (for hard cap)                                            |
 | **Clawboo Native**                                                                | The built-in runtime                                      | native runtime, native harness, `clawboo-native` (its id)             |
 | **OpenClaw Gateway**, **Gateway**                                                 | OpenClaw's own server on your computer                    | gateway                                                               |

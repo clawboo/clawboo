@@ -121,6 +121,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     runCost: {
       usd: number | null // null when no run recorded a cost
       estimated: boolean // true when any part of usd is an estimate
+      local?: true // present when every counted run ran on a local model, so the task cost nothing
     }
     // When the current run started (epoch ms); null when no run is going. Not
     // returned by the `ready=true` variant.
@@ -131,7 +132,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
 
 `attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger and its check result. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: it was moved there by hand, which starts nothing. The board renders every task with an `attention` in its **Needs you** column.
 
-`runCost` sums the `costUsd` of the task's run ledger rows. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource: 'reported'`; a row with a null source counts as an estimate. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
+`runCost` sums the `costUsd` of the task's run ledger rows. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource` `'reported'` or `'local'`; a row with a null source counts as an estimate. `local: true` appears only when every counted row is `'local'`, a run on a model the user's own Ollama served, and the board then shows the cost as `free`. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
 **`500 Internal Server Error`**: a database failure:
 
@@ -624,7 +625,7 @@ Opens a row in the task's run ledger, after a successful claim. The server reads
     costUsd: number | null
     // How costUsd was obtained; null when no cost is recorded or the row predates
     // the column (the board then treats a recorded cost as an estimate).
-    costSource: 'reported' | 'token-estimate' | 'char-estimate' | null
+    costSource: 'reported' | 'local' | 'token-estimate' | 'char-estimate' | null
     summary: string | null
     runReason: string | null
     error: string | null
@@ -669,7 +670,7 @@ Closes a run in the ledger with its outcome, and optionally its tokens and cost.
   cacheRead?: number            // integer
   cacheWrite?: number           // integer
   costUsd?: number
-  costSource?: 'reported' | 'token-estimate' | 'char-estimate'
+  costSource?: 'reported' | 'local' | 'token-estimate' | 'char-estimate'
 }
 ```
 

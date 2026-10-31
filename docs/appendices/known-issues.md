@@ -108,33 +108,13 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 ## Costs and budgets
 
-### Tokens Used shows OpenClaw spend only
-
-**What you see:** **Settings** > **Insights** > **Tokens Used** stays empty, or lists only OpenClaw agents, while your other agents work.
-
-**What it affects:** Tokens Used counts OpenClaw turns only. Spend by Clawboo Native, Claude Code, Codex and Hermes agents never appears there. It still counts toward your budgets, and each task's card and drawer show what its runs cost. The exception is a Hermes agent's routine and API runs, which record no cost at all (see [Hermes reports no usage](#hermes-reports-no-usage)).
-
-**What to do:** read task costs on the [Board](/using/board), and budgets in **Settings** > **Insights** > **Governance**. See [Budgets and spend](/using/budgets-and-spend).
-
-**Status:** open.
-
 ### Models without a known price are estimated at $3 and $15 per million tokens
 
-**What you see:** a run on a local Ollama model, which costs you nothing, shows a cost such as `~$0.02 est.` on its task card.
+**What you see:** a run on a model Clawboo has no price for, such as gpt-5.4 or one of Ollama's cloud models, shows a cost such as `~$0.02 est.` on its task card.
 
-**What it affects:** Clawboo's price table lists Claude models and two GPT-4o models. Any other model, including every local Ollama model, is priced at a default rate of $3 per million input tokens and $15 per million output tokens. The run is marked **est.**, and the estimate counts toward your budgets, so a free local model can push a budget into a warning or a hard cap.
+**What it affects:** Clawboo's price table lists Claude models and two GPT-4o models. Any other model is priced at a default rate of $3 per million input tokens and $15 per million output tokens. The run is marked **est.**, and the estimate counts toward your budgets. A model your own Ollama serves is not affected: it is recorded at $0 and reads **free**.
 
-**What to do:** treat **est.** figures as rough. For local or flat-rate models, set budgets with the placeholder rate in mind; your provider's bill is the real number.
-
-**Status:** open.
-
-### Hermes reports no usage
-
-**What you see:** a Hermes agent's routine run, or a run started through the API, records no cost.
-
-**What it affects:** Hermes tells Clawboo nothing about the tokens it used. In team chat, Clawboo estimates a Hermes turn from the length of its prompt and reply. On the task runner (agent routines and API runs) it records nothing, so budgets under-count Hermes work.
-
-**What to do:** check Hermes spend in your provider's own dashboard (OpenRouter, Anthropic or OpenAI).
+**What to do:** treat **est.** figures as rough. For flat-rate plans, set budgets with the placeholder rate in mind; your provider's bill is the real number.
 
 **Status:** open.
 

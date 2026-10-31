@@ -106,7 +106,7 @@ For work you do not trust, run Clawboo under a separate user account or in a vir
 
 Claude Code reports the dollar cost of each run, and Clawboo records that figure as reported, not as an estimate. It counts toward your budgets, and Anthropic bills the same usage to your API key. If a run in team chat or in the agent's own chat ends without reporting a cost (it failed early, say), Clawboo records an estimate from the length of the prompt and reply instead.
 
-The cost arrives when a run finishes, so a hard cap cannot stop a Claude Code run partway through. See [Budgets and spend](/using/budgets-and-spend) for how each runtime's cost reaches your budgets.
+The cost arrives when a run finishes, so a hard cap cannot stop a Claude Code run partway through. When that last report takes a hard cap past its limit, the finished result is kept and posted, and the next run is refused. A routine or API run that ends without reporting a cost is estimated the same way as in team chat. See [Budgets and spend](/using/budgets-and-spend) for how each runtime's cost reaches your budgets.
 
 ## Disconnect Claude Code
 
@@ -117,7 +117,7 @@ In **Settings** > **Runtimes**, click **Manage** on the **Claude Code** row, the
 - Team setup has no model picker for Claude Code members.
 - It needs an Anthropic API key to read **Connected**; a Claude subscription sign-in alone doesn't count.
 - A one-off `npx` run of Clawboo cannot load the Agent SDK.
-- A hard cap counts Claude Code's cost only when each run ends.
+- A hard cap counts Claude Code's cost only when each run ends, so it refuses the next run rather than stopping the current one.
 
 ## Troubleshooting
 

@@ -70,7 +70,7 @@ Clawboo is free and open source under the MIT license, and there is no Clawboo a
 
 ### Why does a local model show a cost?
 
-Clawboo has no price list for local models. It estimates an Ollama run at a default rate, $3 per million input tokens and $15 per million output tokens, and marks the figure **est.** Your real cost is zero. Estimates also appear when another runtime reports no cost of its own. [Budgets and spend](/using/budgets-and-spend) lists what each runtime reports.
+A model your own Ollama serves costs nothing, so Clawboo records its runs at $0, shows the task as **free** and charges no budget. If one shows a cost, Clawboo did not count it as local. Ollama's cloud models (a `-cloud` tag) run on ollama.com, so they are estimated at a default rate, $3 per million input tokens and $15 per million output tokens, and marked **est.** An OpenClaw agent counts as local only when its model in `openclaw.json` is an `ollama/` one. [Budgets and spend](/using/budgets-and-spend) lists what each runtime reports.
 
 ### What should I ask my team first?
 

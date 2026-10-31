@@ -12,7 +12,7 @@ Hermes is an open-source agent, published as the `hermes-agent` Python package. 
 | Best for        | An agent that builds up its own memory and skills over time; many models through one OpenRouter key                |
 | You need        | Python 3.11, 3.12 or 3.13, and one credential: an OpenRouter key, an Anthropic or OpenAI key, or a ChatGPT sign-in |
 | Who bills you   | The provider it runs on (OpenRouter, Anthropic, OpenAI), or your ChatGPT plan                                      |
-| Cost in Clawboo | Hermes reports none; team chat and the agent's own chat record an estimate                                         |
+| Cost in Clawboo | Hermes reports none; Clawboo records an estimate                                                                   |
 | Steering        | A comment stops the run and resumes it with your comment                                                           |
 
 To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
@@ -140,7 +140,7 @@ For work you do not trust, run Clawboo under a separate user account or in a vir
 
 ## Costs
 
-Hermes reports neither tokens nor dollars to Clawboo. In team chat and in the agent's own chat, Clawboo estimates each run's cost from the length of the prompt and the reply, at about four characters per token. It prices those tokens at the model's rate when Clawboo knows it, and otherwise at $3 per million input and $15 per million output tokens. That estimate counts toward your budgets. A run started over the REST API, or by an agent Routine, records no cost at all.
+Hermes reports neither tokens nor dollars to Clawboo. Clawboo estimates each run's cost from the length of the prompt and the reply, at about four characters per token, in team chat, in the agent's own chat, and on runs started over the REST API or by an agent Routine. It prices those tokens at the model's rate when Clawboo knows it, and otherwise at $3 per million input and $15 per million output tokens. That estimate counts toward your budgets.
 
 Your provider bills the real usage: OpenRouter, Anthropic or OpenAI per token, or your ChatGPT plan. See [Budgets and spend](/using/budgets-and-spend) for how each runtime's cost reaches your budgets.
 
@@ -153,7 +153,7 @@ To remove a single key instead, open **Manage**, click that provider's row, and 
 ## Limits
 
 - No live text: a Hermes reply appears when its run finishes.
-- Hermes reports no cost, so Clawboo's figures for it are estimates, or nothing outside team chat and the agent's own chat.
+- Hermes reports no cost, so Clawboo's figures for it are estimates.
 - A comment stops the run; the tool call in progress at that moment is lost, and finished work is kept.
 - The agent's `config.yaml` is a one-time copy of yours.
 - Python 3.11 to 3.13 only.

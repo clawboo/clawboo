@@ -29,8 +29,8 @@ Use this page to read the spend figures, set a budget, and resume one that pause
 
 | Where                                                 | What it shows                                                                    | What it covers                            |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------- |
-| **Settings** > **Insights** > **Tokens Used**         | Token counts for today, the last 7 days and the last 30 days, by team and agent  | OpenClaw agents only                      |
-| A task's card and drawer on the [Board](/using/board) | What the task's runs cost. A figure such as `~$0.02 est.` is an estimate         | Board tasks whose runs recorded a cost    |
+| **Settings** > **Insights** > **Tokens Used**         | Token counts for today, the last 7 days and the last 30 days, by team and agent  | Every runtime                             |
+| A task's card and drawer on the [Board](/using/board) | What the task's runs cost. `~$0.02 est.` is an estimate; `free` is a local model | Board tasks whose runs recorded a cost    |
 | **Settings** > **Insights** > **Governance**          | Each budget's spend against its limit                                            | Work charged to a scope that has a budget |
 | **Settings** > **Insights** > **Fleet**               | **Spend · 24h**: the total cost of board tasks that changed in the last 24 hours | Board tasks                               |
 
@@ -40,21 +40,21 @@ None of these is your bill. Your provider's own billing page shows what you were
 
 Some runtimes report what a run cost. For the others, Clawboo estimates it. Estimates count toward budgets the same way as reported figures, and the Board marks them **est.**
 
-| Runtime                            | What it reports to Clawboo       | What Clawboo records                                                                                               | Marked est. |
-| ---------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------- |
-| Claude Code                        | The dollar cost of each run      | That figure                                                                                                        | No          |
-| Clawboo Native, on a priced model  | Token counts for each model turn | The cost at Clawboo's list price for that model                                                                    | No          |
-| Clawboo Native, on any other model | Token counts for each model turn | The tokens priced from Clawboo's rate table, or at the default rate when the model is not in it                    | Yes         |
-| Codex                              | Token counts, no dollar figure   | The tokens priced at the default rate, because Clawboo has no prices for Codex models                              | Yes         |
-| Hermes                             | Nothing                          | In team chat and one-to-one chat, an estimate from the prompt and reply length. On routine and API runs, nothing   | Yes         |
-| OpenClaw                           | No cost with its runs            | An estimate from the length of the prompt and the reply, for every team-chat run and for routine runs that succeed | Yes         |
+| Runtime                            | What it reports to Clawboo       | What Clawboo records                                                                                                | Marked est. |
+| ---------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Claude Code                        | The dollar cost of each run      | That figure                                                                                                         | No          |
+| Clawboo Native, on a priced model  | Token counts for each model turn | The cost at Clawboo's list price for that model                                                                     | No          |
+| Clawboo Native, on any other model | Token counts for each model turn | The tokens priced from Clawboo's rate table, or at the default rate when the model is not in it                     | Yes         |
+| Codex                              | Token counts, no dollar figure   | The tokens priced at the default rate, because Clawboo has no prices for Codex models                               | Yes         |
+| Hermes                             | Nothing                          | An estimate from the length of the prompt and the reply, in team chat, one-to-one chat, routines and API runs alike | Yes         |
+| OpenClaw                           | No cost with its runs            | An estimate from the length of the prompt and the reply, for every team-chat run and every routine run              | Yes         |
 
 - **The priced models** are claude-haiku-4-5, claude-sonnet-4-6, gpt-4o and gpt-4o-mini, plus the OpenRouter ids anthropic/claude-haiku-4.5 and openai/gpt-4o-mini. The default leader models, claude-sonnet-5 and gpt-5.4, are not among them.
 - **The rate table** lists Anthropic's Claude models plus gpt-4o and gpt-4o-mini. **The default rate** is $3 per million input tokens and $15 per million output tokens.
 - **Length estimates** count about four characters as one token, then apply the model's rate.
-- **Runs that end without a report.** In team chat, a run that reports neither a cost nor token counts gets a length estimate, marked **est.** That includes a Claude Code run that fails or is stopped before it reports its cost. One-to-one chat charges the same estimate to the agent's budget. On agent routines and API runs, such a run records no cost.
-- **Local Ollama models** are in neither list, so an Ollama run that costs you nothing still shows a cost at the default rate, marked **est.** Treat it as a placeholder.
-- **Tokens Used** counts OpenClaw differently: it shows the token counts the OpenClaw Gateway records for each turn. Those counts and the budget's estimate for the same turn can differ.
+- **Runs that end without a report.** A run that reports neither a cost nor token counts gets a length estimate, marked **est.**, in team chat, one-to-one chat, routines and API runs alike. That includes a Claude Code run that fails or is stopped before it reports its cost, and an OpenClaw routine run that fails, times out or is stopped.
+- **Local Ollama models cost nothing.** A run on a model your own Ollama serves is recorded at $0, charges no budget, and reads **free** on the Board. That covers a Clawboo Native agent on the Ollama provider and an OpenClaw agent whose model in `openclaw.json` is an `ollama/` one. Ollama's cloud models (a `-cloud` tag) run on ollama.com, so they keep the default rate.
+- **Tokens Used** counts OpenClaw differently: it shows the token counts the OpenClaw Gateway records for each turn. Those counts and the budget's estimate for the same turn can differ. The other runtimes are listed with the figures their runs record.
 
 The runtime pages repeat these rules with their setup: [Clawboo Native](/runtimes/native), [OpenClaw](/runtimes/openclaw), [Claude Code](/runtimes/claude-code), [Codex](/runtimes/codex) and [Hermes](/runtimes/hermes).
 
@@ -66,7 +66,7 @@ Open **Settings** (the **Settings** row in the sidebar, or `Cmd/Ctrl + ,`), then
 - **Tokens by Team** lists every agent, grouped by team, with agents outside a team under **Unassigned**. Each row shows a bar for the agent's share and its input and output tokens; hover them for exact counts.
 - The chart below shows daily totals for the last 30 days, with empty days at zero.
 
-Tokens Used counts OpenClaw agents only: their one-to-one chat, their team-chat turns and their routines. Clawboo Native, Claude Code, Codex and Hermes agents are listed with zero tokens, however much they worked, so read their spend on the Board and in budgets. An OpenClaw agent that runs on your Gateway but is not in Clawboo is not counted.
+Tokens Used counts every runtime. An OpenClaw agent is counted turn by turn from the Gateway's own token counts: its one-to-one chat, its team-chat turns and its routines. Clawboo Native, Claude Code, Codex and Hermes agents are counted run by run: Board and API runs, routines and team-chat runs, but not their one-to-one chat. A run that reported no token counts is counted from the length of its prompt and reply. Work from before this was added is not backfilled, and an OpenClaw agent that runs on your Gateway but is not in Clawboo is not counted.
 
 The panel loads its figures once, when you open it. Close it and open it again to see new usage.
 
@@ -75,8 +75,8 @@ The panel loads its figures once, when you open it. Close it and open it again t
 A budget counts spend only from the moment you create it, and only for its own scope:
 
 - **Team chat**, meaning General, rooms, team routines, tasks you give an agent on the Board, and the tasks a leader hands off from there: charged to the agent and the team, and to the mission when the run works on a task.
-- **Agent routines and runs started through the API** on Clawboo Native, Claude Code, Codex or Hermes: charged to the agent, the mission and the team. Hermes records no cost on these runs.
-- **OpenClaw agent routines**: charged to the agent, the mission and the team, from an estimate when a run succeeds. A run that fails or times out is not charged.
+- **Agent routines and runs started through the API** on Clawboo Native, Claude Code, Codex or Hermes: charged to the agent, the mission and the team. A run that reports no cost is charged an estimate when it ends.
+- **OpenClaw agent routines**: charged to the agent, the mission and the team, from an estimate when the run ends, whether it succeeded, failed, timed out or was stopped.
 - **One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent**: charged to that agent only.
 - **One-to-one chat with an OpenClaw agent**: shows on **Tokens Used**, but no budget is charged.
 
@@ -150,16 +150,17 @@ When an agent routine, a run started through the API, or an OpenClaw routine tak
 
 A paused hard cap does not stop every kind of work at once. It depends on where the work runs:
 
-| Where the work runs                                                         | Before a run starts                   | While a run is going                                                                                                                                                                                                                                            |
-| --------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Team chat: General, rooms, team routines, Board tasks and hand-offs         | Not checked, so new turns still start | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                 |
-| Agent routines and API runs on Clawboo Native, Claude Code, Codex or Hermes | The run is refused                    | Clawboo Native stops after its next model turn. Claude Code and Codex report their cost only as the run ends, so their work is already done; the run is still recorded as stopped by the cap, and the next run is refused. Hermes records no cost on these runs |
-| OpenClaw agent routines                                                     | The run is refused                    | The run finishes. If it succeeds, its estimate is charged at the end and the next run is refused                                                                                                                                                                |
-| One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent   | Not checked                           | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                 |
+| Where the work runs                                                         | Before a run starts                   | While a run is going                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Team chat: General, rooms, team routines, Board tasks and hand-offs         | Not checked, so new turns still start | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                          |
+| Agent routines and API runs on Clawboo Native, Claude Code, Codex or Hermes | The run is refused                    | A run that keeps working past the cap is stopped. Claude Code and Codex report their cost only as the run ends, so their work is already done: the result is kept and posted, and the next run is refused. A run with no cost report is charged an estimate when it ends |
+| OpenClaw agent routines                                                     | The run is refused                    | The run finishes. Its estimate is charged when it ends, whether it succeeded or not, and the next run is refused                                                                                                                                                         |
+| One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent   | Not checked                           | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                          |
 
 What you see when a hard cap stops work:
 
 - **A run started through the API** that a cap stops is cancelled, and its task goes back to **To do** with the comment `Auto-paused: <scope> budget reached. Raise the cap (or resume) to continue.` A run refused before it starts answers `422` with the reason `budget_paused` and leaves the task as it was.
+- **A run whose last cost report crossed the cap** (the usual case for Claude Code and Codex) had already ended, so it is not stopped: its result is posted, its task moves on as usual, and the comment reads `Budget cap reached (<scope>) by this run's final cost report. The run had already ended, so what it produced is kept; the next run is refused until you raise the cap or resume.`
 - **An agent routine** counts the refused or stopped run as a failure. The routine stops until you resume it, and its task waits in **Needs you**; see [When a routine stops](/using/routines#when-a-routine-stops).
 - **An OpenClaw routine** whose estimate crosses the cap leaves the comment `Budget cap reached (<scope>). This run is recorded; the next scheduled fire is blocked until you raise the cap or resume.`
 - **Team chat and one-to-one chat**: a stopped run that had not replied yet leaves the message `The run failed: the run was stopped by a budget cap`. In team chat, a handed-off task it was working on waits in **Needs you**.
@@ -221,12 +222,12 @@ The **Audit log** at the bottom of **Governance** keeps a record of what Clawboo
 
 The event types that matter for spend:
 
-| Event type      | What it records                                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `budget`        | A budget passing 80% or 100% on an agent routine, an API run or an OpenClaw routine, and each run a hard cap auto-paused |
-| `cap_hit`       | A team-chat turn that tried to start more hand-offs than the fan-out cap allows                                          |
-| `circuit_break` | A circuit breaker stopping an agent routine or API run that was going nowhere                                            |
-| `approval`      | Decisions on risky hand-offs, and unanswered approvals that Clawboo's cleanup expired                                    |
+| Event type      | What it records                                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `budget`        | A budget passing 80% or 100% on an agent routine, an API run or an OpenClaw routine, and each run a hard cap auto-paused or finished past |
+| `cap_hit`       | A team-chat turn that tried to start more hand-offs than the fan-out cap allows                                                           |
+| `circuit_break` | A circuit breaker stopping an agent routine or API run that was going nowhere                                                             |
+| `approval`      | Decisions on risky hand-offs, and unanswered approvals that Clawboo's cleanup expired                                                     |
 
 Resuming a budget writes no entry, and neither does spend in team chat or one-to-one chat.
 
@@ -271,7 +272,7 @@ With an empty **scope id**, or a limit that is not a number, the button does not
 
 <Accordion title="The budget's bar never moves">
 
-Check the id: Clawboo accepts any id, so a budget for a mistyped one is never charged. A **tenant** budget is never charged either. A budget also counts only spend after it was created, and some work charges no budget at all: Hermes routine and API runs, OpenClaw routine runs that fail, and one-to-one chat with an OpenClaw agent.
+Check the id: Clawboo accepts any id, so a budget for a mistyped one is never charged. A **tenant** budget is never charged either. A budget also counts only spend after it was created, and some work charges no budget at all: one-to-one chat with an OpenClaw agent, and anything on a local Ollama model, which costs nothing.
 
 </Accordion>
 
@@ -281,15 +282,15 @@ The panel could not read the budget list from Clawboo's server. Press **Retry** 
 
 </Accordion>
 
-<Accordion title="Tokens Used shows zero for my agents">
+<Accordion title="Tokens Used shows zero for an agent">
 
-**Tokens Used** counts OpenClaw agents only. For Clawboo Native, Claude Code, Codex and Hermes agents, read the cost on each task's card on the Board, or set a budget.
+Tokens Used lists Clawboo Native, Claude Code, Codex and Hermes runs only from the release that added them, so earlier work reads zero. An OpenClaw agent's turns count only when Clawboo's server sees them and can match them to an agent in Clawboo.
 
 </Accordion>
 
-<Accordion title="A local Ollama run shows a cost">
+<Accordion title="An Ollama run shows a cost">
 
-Clawboo has no price for local models, so it estimates Ollama runs at the default rate of $3 per million input tokens and $15 per million output tokens, and marks them **est.** Your real cost is zero; treat the figure as a placeholder.
+A model your own Ollama serves is free, so its runs read **free** and charge no budget. A cost means the run was not recognized as local: one of Ollama's cloud models (a `-cloud` tag), which runs on ollama.com, or an OpenClaw agent whose model in `openclaw.json` is not an `ollama/` one.
 
 </Accordion>
 
@@ -307,8 +308,8 @@ Spend from team chat and one-to-one chat updates the budget's bar and status wit
 - **Budgets over REST.** `GET /api/governance/budgets` lists them. `POST /api/governance/budgets` takes `{ "scope", "scopeId", "limitUsdCents", "mode" }`, where `limitUsdCents` is a positive whole number and a missing `mode` means `warn`; saving an existing scope updates its limit and mode. `POST /api/governance/budgets/:scope/:scopeId/resume` resumes a budget and answers `willRepause`; when spend is at or over the limit, an optional `graceUsdCents` raises the limit to the current spend plus the grace and keeps the mode. There is no delete route.
 - **The audit log over REST.** `GET /api/governance/audit` takes `agentId`, `eventType`, `since` and `limit` (at most 1,000).
 - **Another way to get a hard cap.** Creating a Clawboo Native agent through the API with `budgetUsd` also creates a hard-cap budget for that agent.
-- **Run costs.** Each run records its cost with a source of `reported`, `token-estimate` or `char-estimate`. A task's total reads as an estimate when any of its runs is not `reported`.
-- **Tokens Used** reads `GET /api/cost-records/summary`. Clawboo's server writes one cost record for each OpenClaw turn it can match to an agent in Clawboo.
+- **Run costs.** Each run records its cost with a source of `reported`, `local`, `token-estimate` or `char-estimate`. A task's total reads as an estimate when any of its runs is neither `reported` nor `local`, and as free when all of them are `local`.
+- **Tokens Used** reads `GET /api/cost-records/summary`. Clawboo's server writes one cost record for each OpenClaw turn it can match to an agent in Clawboo, and one for each run of the other runtimes.
 - Shapes and codes: [Governance API](/reference/rest-api/governance) and [Costs and fleet API](/reference/rest-api/costs).
 
 </Accordion>

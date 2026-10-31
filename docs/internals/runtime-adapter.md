@@ -203,13 +203,13 @@ interface RuntimeEventBase {
 | `tool-call`   | `toolCallId`, `name`, `input`, `partial`                                                    | `partial: true` while the input JSON is still streaming.  |
 | `tool-result` | `toolCallId`, `name`, `output`, `isError`                                                   | The outcome of a tool call.                               |
 | `status`      | `phase: 'init' \| 'thinking' \| 'running' \| 'turn-complete'`, `model?`, `detail?`          | A lifecycle signal with no text.                          |
-| `cost`        | `costUsd: number \| null`, `usage`, `model`, `estimated?`                                   | Token usage, plus USD when the runtime reports it.        |
+| `cost`        | `costUsd: number \| null`, `usage`, `model`, `estimated?`, `local?`                         | Token usage, plus USD when the runtime reports it.        |
 | `done`        | `reason: 'success' \| 'max_turns' \| 'aborted' \| 'error'`, `summary`, `usage?`, `costUsd?` | Terminal summary for one run or turn.                     |
 | `error`       | `code: string \| null`, `message`, `fatal`                                                  | A recoverable or fatal failure.                           |
 
 The union encodes two real differences between runtimes in its types:
 
-1. **Not every runtime reports USD.** `cost.costUsd` is `number | null`, and `estimated?` marks a derived value. A runtime that cannot supply USD emits `null` rather than an invented number; the runner then estimates spend from the token usage (see [the executor runner](/internals/executor-runner)).
+1. **Not every runtime reports USD.** `cost.costUsd` is `number | null`, and `estimated?` marks a derived value. A runtime that cannot supply USD emits `null` rather than an invented number; the runner then estimates spend from the token usage (see [the executor runner](/internals/executor-runner)). `local?` marks a model the user's own Ollama served, whose `costUsd` of 0 is exact rather than unknown.
 2. **Not every runtime streams text.** A runtime without deltas emits one `text-delta` carrying the whole message.
 
 `assertExhaustive(x: never): never` guards `switch` statements over the union, so a new variant is a compile error at every switch that forgets it.

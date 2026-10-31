@@ -104,11 +104,11 @@ In team chat, Claude Code, Codex and Hermes run with their own approval prompts 
 
 | Runtime        | Good for                                      | Tools of its own                                                     | A comment on a running task          | Spend shown                                 |
 | -------------- | --------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------- |
-| Clawboo Native | Writing, planning, coordinating               | None in team chat beyond memory, the board, hand-offs and connectors | Reaches it before its next step      | Exact for a few models, otherwise estimated |
+| Clawboo Native | Writing, planning, coordinating               | None in team chat beyond memory, the board, hand-offs and connectors | Reaches it before its next step      | Exact or estimated; free on your own Ollama |
 | OpenClaw       | Agents that use your OpenClaw setup           | Whatever your Gateway gives its agents                               | Reaches it before its next step      | Estimated from text length                  |
 | Claude Code    | Code changes                                  | Commands, file edits and more, with prompts off                      | Reaches it before its next step      | Reported by Claude Code                     |
 | Codex          | Code changes on a ChatGPT plan                | Commands and file edits, with its sandbox off                        | Reaches it before its next step      | Estimated from tokens                       |
-| Hermes         | A helper that grows its own memory and skills | Its own tools, every call approved automatically                     | It pauses, reads it, then carries on | Estimated in team chat                      |
+| Hermes         | A helper that grows its own memory and skills | Its own tools, every call approved automatically                     | It pauses, reads it, then carries on | Estimated from text length                  |
 
 The [runtime overview](/runtimes/index) compares them in full, and [Budgets and spend](/using/budgets-and-spend) explains estimated costs.
 

@@ -177,9 +177,11 @@ You should get a `200` response with `"ok": true` and a `doneReason`.
   your terminal event, then ends the stream itself.
 - **Rotation needs a window.** With `contextWindowTokens` set, the task runner starts a successor session before
   the window fills. A `done` with reason `max_turns` triggers rotation too.
-- **Missing cost is estimated or skipped.** A `cost` event with `costUsd: null` and usage is priced from the
-  tokens and marked as an estimate. A runtime that reports no usage records no spend on task-runner runs; team
-  chat estimates it from characters. See [Budgets and spend](/using/budgets-and-spend) for what users see.
+- **Missing cost is estimated.** A `cost` event with `costUsd: null` and usage is priced from the tokens and
+  marked as an estimate. A run that reports no usage at all is estimated from the characters it was sent and
+  produced, on task-runner runs and in team chat alike. A `cost` event with `local: true` marks a model the user's
+  own Ollama served, and the host records it at $0. See [Budgets and spend](/using/budgets-and-spend) for what
+  users see.
 - **Some claims change the path.** A runtime that declares `runtimeClass: 'connected-substrate'` is refused by the
   task runner, and one that declares `worktrees: false` gets no task worktree.
 - **Prompt order.** The task runner builds every prompt with `assembleTiers`, frozen content first. No Clawboo

@@ -146,7 +146,7 @@ Clawboo runs Codex with its own sandbox and approval prompts turned off. A Codex
 
 - **Every agent needs tool use.** A model without it fails with "… can't use tools, and this agent needs them." Pick one Ollama reports as tool-capable.
 - **Quality depends on your computer.** A model small enough for a laptop makes more mistakes than a hosted one, most often when it hands work to teammates. If tasks go wrong, try the largest tool-capable model your computer runs comfortably.
-- **Costs still show as estimates.** Clawboo has no price for local models, so it estimates one at a default rate and shows it as "est." on task cards, although Ollama charges nothing. Estimates count toward budgets, so they can set off budget warnings and caps. See [Budgets and spend](/using/budgets-and-spend).
+- **Costs read free.** A run on a model your own Ollama serves is recorded at $0, shows as "free" on task cards and charges no budget. Ollama's cloud models (a `-cloud` tag) run on ollama.com instead, so Clawboo estimates them at a default rate, marks them "est." and counts them toward budgets. See [Budgets and spend](/using/budgets-and-spend).
 
 ### ChatGPT plan
 
@@ -176,7 +176,7 @@ You should see the **OpenClaw** row read **Connected**.
 
 </Steps>
 
-**Set up OpenClaw** reuses the first credential it finds, in this order: a provider API key you connected, OpenClaw's own ChatGPT sign-in, an offer to sign OpenClaw in with ChatGPT (when Codex is signed in), and then your local Ollama. So OpenClaw runs on Ollama only when no API key and no ChatGPT sign-in are connected. For Ollama, Clawboo adds the line `OLLAMA_API_KEY=ollama-local` to `~/.openclaw/.env`. It is a marker OpenClaw needs, not a secret. If OpenClaw's default model is not pulled, the setup stops with the `ollama pull` command and a **Check again** button.
+**Set up OpenClaw** reuses the first credential it finds, in this order: a provider API key you connected, OpenClaw's own ChatGPT sign-in, an offer to sign OpenClaw in with ChatGPT (when Codex is signed in), and then your local Ollama. So OpenClaw runs on Ollama only when no API key and no ChatGPT sign-in are connected. For Ollama, Clawboo adds the line `OLLAMA_API_KEY=ollama-local` to `~/.openclaw/.env`. It is a marker OpenClaw needs, not a secret. If OpenClaw's default model is not pulled, the setup stops with the `ollama pull` command and a **Check again** button. An OpenClaw agent whose model is an `ollama/` one is recorded at $0, like Clawboo Native on Ollama.
 
 More on OpenClaw: [OpenClaw](/runtimes/openclaw).
 
