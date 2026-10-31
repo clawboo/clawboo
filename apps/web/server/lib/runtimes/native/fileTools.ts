@@ -1,11 +1,11 @@
 // Built-in file tools for the native runtime — the runtime's PRIVATE plane
 // (every coding runtime ships its own file primitives; the shared MCP spine
-// carries coordination, not workspace edits). Strictly jailed to the run's
-// worktree cwd: every path resolves under it or the call is rejected, so a
-// model cannot read or write outside its isolated world. No cwd ⇒ no file
-// tools (research/review runs get none).
+// carries coordination, not workspace edits). Strictly jailed to the run's cwd
+// (a task worktree, or the team's folder): every path resolves under it, on disk
+// as well as by name, or the call is rejected, so a model cannot read or write
+// outside it. No cwd ⇒ no file tools.
 
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface NativeToolOutcome {
@@ -54,6 +54,39 @@ export function resolveJailed(cwd: string, rel: string): string | null {
   return resolved
 }
 
+/**
+ * `resolveJailed`, then the same answer on disk: the target may not be a symlink,
+ * and following every symlink above it must still land inside the cwd. The cwd
+ * can be shared (a team folder that Claude Code or Codex also write to), so a
+ * link planted there would otherwise carry these tools anywhere the user can
+ * reach. Checked, not locked: a link swapped in between this check and the read
+ * or write is not caught.
+ */
+export async function resolveJailedOnDisk(cwd: string, rel: string): Promise<string | null> {
+  const lexical = resolveJailed(cwd, rel)
+  if (!lexical) return null
+  let realRoot: string
+  try {
+    realRoot = await realpath(cwd)
+  } catch {
+    return null
+  }
+  const prefix = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep
+  try {
+    if ((await lstat(lexical)).isSymbolicLink()) return null
+  } catch {
+    // Missing: a file about to be written. Its nearest existing parent decides.
+  }
+  for (let probe = lexical; ; probe = path.dirname(probe)) {
+    try {
+      const real = await realpath(probe)
+      return real === realRoot || real.startsWith(prefix) ? lexical : null
+    } catch {
+      if (path.dirname(probe) === probe) return null
+    }
+  }
+}
+
 const err = (message: string): NativeToolOutcome => ({ output: message, isError: true })
 
 export function buildFileTools(cwd: string | null): NativeLocalTool[] {
@@ -70,7 +103,7 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
         required: ['path'],
       },
       async run(args) {
-        const target = resolveJailed(cwd, String(args['path'] ?? ''))
+        const target = await resolveJailedOnDisk(cwd, String(args['path'] ?? ''))
         if (!target) return err('path must be a relative path inside the workspace')
         try {
           const info = await stat(target)
@@ -100,7 +133,7 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
         required: ['path', 'content'],
       },
       async run(args) {
-        const target = resolveJailed(cwd, String(args['path'] ?? ''))
+        const target = await resolveJailedOnDisk(cwd, String(args['path'] ?? ''))
         if (!target) return err('path must be a relative path inside the workspace')
         try {
           await mkdir(path.dirname(target), { recursive: true })
@@ -124,7 +157,7 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
       async run(args) {
         const rel =
           typeof args['path'] === 'string' && args['path'] ? (args['path'] as string) : '.'
-        const target = rel === '.' ? path.resolve(cwd) : resolveJailed(cwd, rel)
+        const target = await resolveJailedOnDisk(cwd, rel)
         if (!target) return err('path must be a relative path inside the workspace')
         try {
           const entries = await readdir(target, { withFileTypes: true })

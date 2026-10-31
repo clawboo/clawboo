@@ -9,7 +9,7 @@
 //        connected-substrate participant with no operator client (skipped);
 //  (005) normalizeSingleLeader collapses a two-leader team to one + warns.
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -617,6 +617,38 @@ describe('runTeamExchange (the production trigger)', () => {
     await Promise.all([p1, p2])
     // A fully completed before B started → one session at a time on the agent.
     expect(order).toEqual(['start:A', 'done:A', 'start:B', 'done:B'])
+  })
+
+  it("starts Claude Code / Codex / Hermes / Native turns in the team's shared folder", async () => {
+    seedTeam(
+      'tmwd',
+      [
+        { id: 'cc', runtime: 'claude-code' },
+        { id: 'cx', runtime: 'codex' },
+        { id: 'hm', runtime: 'hermes' },
+        { id: 'nv', runtime: 'clawboo-native' },
+      ],
+      'cc',
+    )
+    const cwds = new Map<string, string | null>()
+    const res = await runTeamExchange({
+      db,
+      teamId: 'tmwd',
+      firstSpeakers: ['cc', 'cx', 'hm', 'nv'],
+      makeAdapterFor: (p) => (ctx) => {
+        // The empty-ctx call is the capability probe, not a turn.
+        if (ctx.memoryScope) cwds.set(p.agentId, ctx.cwd ?? null)
+        return fixedAdapter(p.runtime, 'wrapped-oneshot', `${p.agentId}: ok`)(ctx)
+      },
+    })
+
+    expect(res.ok).toBe(true)
+    const folder = path.join(homeDir, 'workspaces', 'tmwd')
+    expect(cwds.get('cc')).toBe(folder)
+    expect(cwds.get('cx')).toBe(folder)
+    expect(cwds.get('hm')).toBe(folder)
+    expect(cwds.get('nv')).toBe(folder)
+    expect(statSync(folder).isDirectory()).toBe(true)
   })
 })
 

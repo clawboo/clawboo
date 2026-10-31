@@ -367,8 +367,9 @@ export function createClaudeCodeDriver(
       const mod = await (deps.loadSdk ?? loadAgentSdk)()
       const options: Record<string, unknown> = {
         abortController: abort,
-        // Headless worker: clawboo gates risky tools externally (board/approvals)
-        // and the run is confined to an isolated per-task worktree. The SDK
+        // Headless worker: clawboo gates risky tools externally (board/approvals).
+        // ctx.cwd only sets where the run starts (a per-task worktree, or the
+        // team's working folder in team chat); it confines nothing. The SDK
         // requires the explicit opt-in alongside bypassPermissions.
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,

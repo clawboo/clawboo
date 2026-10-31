@@ -1,8 +1,10 @@
 import crypto from 'node:crypto'
+import { rm } from 'node:fs/promises'
 import type { Request, Response } from 'express'
 import { chatMessages, setSetting, teams, agents, settings } from '@clawboo/db'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 import { getDb } from '../lib/db'
+import { teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
 import { getRegistry } from '../lib/agentSource/registry'
 import { pendingUpstreamDeletes } from '../lib/agentSource/openClawAgentSource'
 import { ensureNativeBooZero } from '../lib/teamChat/booZero'
@@ -244,8 +246,11 @@ export function teamsPATCH(req: Request, res: Response): void {
 //     same pointers for the team's chat rooms (`...:<teamId>:room:<roomId>`)
 // The `boo_zero_team_briefs` and `rooms` tables FK-cascade on team delete (see
 // schema; room memberships cascade with their rooms), so those clean themselves.
+// The team's working folder (`<clawboo home>/workspaces/<teamId>`, where its
+// agents' runs start) is removed with it, files included.
+// Archiving a team keeps it.
 
-export function teamsDELETE(req: Request, res: Response): void {
+export async function teamsDELETE(req: Request, res: Response): Promise<void> {
   const teamId = req.params['id'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })
@@ -283,9 +288,23 @@ export function teamsDELETE(req: Request, res: Response): void {
       .run()
 
     // Delete the team (boo_zero_team_briefs and rooms FK-cascade).
-    db.delete(teams).where(eq(teams.id, teamId)).run()
+    const existed = db.delete(teams).where(eq(teams.id, teamId)).run().changes > 0
 
-    res.json({ ok: true })
+    // After the row, so a failed delete never loses the files, and only for a
+    // team that existed: a made-up id must not remove another folder under
+    // workspaces/ (the shared `_no-team` one, say). The path is pinned under
+    // workspaces/, and `rm` removes a symlink, never its target.
+    let folderRemoved = false
+    if (existed) {
+      try {
+        await rm(teamWorkdirPath(teamId), { recursive: true, force: true })
+        folderRemoved = true
+      } catch {
+        folderRemoved = false
+      }
+    }
+
+    res.json({ ok: true, folderRemoved })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

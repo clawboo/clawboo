@@ -1,8 +1,10 @@
 // Read-only filesystem view over a task's worktree: directory listing, bounded
 // file reads, git status, and a per-file diff against the task's baseline.
-// This powers the agent-detail Workspace tab. Every path is resolved from the
-// stored `workspaces` row, never from the request, and every relative path is
-// confined to the worktree root before any filesystem call.
+// This powers the agent-detail Workspace tab, which also lists the agent's team
+// folder (where its runs start when there is no worktree; see teamWorkdir.ts).
+// Every root is resolved server-side, from the stored `workspaces` row or the
+// agent's own row, never from the request, and every relative path is confined
+// to that root before any filesystem call.
 //
 // Confinement is three layers, in order (the third is the one people miss):
 //   1. Absolute paths and `..` segments are refused outright, with an error
@@ -16,15 +18,17 @@
 //      passes the lexical check and then points anywhere on disk; this layer
 //      is what stops it.
 
-import { constants as fsConstants } from 'node:fs'
+import { constants as fsConstants, existsSync } from 'node:fs'
 import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
-import { getWorkspaceForTask, type DbWorkspace } from '@clawboo/db'
+import { agents, getWorkspaceForTask, type DbWorkspace } from '@clawboo/db'
 import { execGit, GitError, loadWorktree } from '@clawboo/worktrees'
+import { eq } from 'drizzle-orm'
 
 import { getDb } from './db'
+import { taskRunWorkdirFor } from './runtimes/teamWorkdir'
 
 /** A refused path. The message is safe to surface to the caller verbatim. */
 export class WorkspacePathError extends Error {
@@ -438,4 +442,64 @@ export async function workspaceFileDiff(
     diff: truncated ? decodeUtf8(bytes.subarray(0, MAX_DIFF_BYTES)) : diff,
     truncated,
   }
+}
+
+// ─── Agent-level wrappers: the team folder ───────────────────────────────────
+
+/** The folder an agent's runs start in when they have no worktree: its team's
+ *  folder, or the shared `_no-team` one for an agent with no team. */
+export interface AgentTeamFolder {
+  teamId: string | null
+  path: string
+  /** False until the first run creates it. */
+  onDisk: boolean
+}
+
+/** null for an unknown agent or a runtime that gets no folder (OpenClaw). The
+ *  path comes from the agent's row, never the request. */
+export function agentTeamFolder(agentId: string): AgentTeamFolder | null {
+  const row = getDb()
+    .select({ runtime: agents.runtime, teamId: agents.teamId })
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .get()
+  if (!row) return null
+  const dir = taskRunWorkdirFor(row.runtime, row.teamId)
+  if (!dir) return null
+  return { teamId: row.teamId ?? null, path: dir, onDisk: existsSync(dir) }
+}
+
+async function resolveTeamFolderRoot(
+  agentId: string,
+): Promise<{ ok: true; root: string } | { ok: false; reason: WorkspaceMissReason }> {
+  const folder = agentTeamFolder(agentId)
+  if (!folder) return { ok: false, reason: 'not_found' }
+  try {
+    await realpath(folder.path)
+  } catch {
+    return { ok: false, reason: 'gone' }
+  }
+  return { ok: true, root: folder.path }
+}
+
+export async function listTeamFolderDir(
+  agentId: string,
+  relDir: string,
+): Promise<{ ok: false; reason: WorkspaceMissReason } | (WorkspaceDirListing & { ok: true })> {
+  const rootRes = await resolveTeamFolderRoot(agentId)
+  if (!rootRes.ok) return rootRes
+  const listing = await listDirAt(rootRes.root, relDir)
+  return { ok: true, ...listing }
+}
+
+export async function readTeamFolderFile(
+  agentId: string,
+  relPath: string,
+): Promise<
+  { ok: false; reason: WorkspaceMissReason } | ({ ok: true; path: string } & WorkspaceFileRead)
+> {
+  const rootRes = await resolveTeamFolderRoot(agentId)
+  if (!rootRes.ok) return rootRes
+  const read = await readFileAt(rootRes.root, relPath)
+  return { ok: true, path: relPath, ...read }
 }

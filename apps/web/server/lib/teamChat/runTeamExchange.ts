@@ -41,6 +41,7 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
+import { teamWorkdirFor } from '../runtimes/teamWorkdir'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { dispatchChatTurn } from './dispatchChatTurn'
@@ -259,6 +260,8 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
       r.homeKind === 'persistent'
         ? runtimeIdentityHomePath(participant.runtime, participant.agentId)
         : null
+    // Claude Code / Codex / Hermes / Native start in the team's shared folder.
+    const cwd = teamWorkdirFor(participant.runtime, teamId)
     const turn = () =>
       dispatchChatTurn(
         {
@@ -270,6 +273,7 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
           stimulus: turnIndex === 1 ? (deps.stimulus ?? null) : null,
           mcpBaseUrl: deps.mcpBaseUrl ?? null,
           ...(homeDir ? { homeDir } : {}),
+          ...(cwd ? { cwd } : {}),
           ...(deps.signal ? { signal: deps.signal } : {}),
           ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
         },

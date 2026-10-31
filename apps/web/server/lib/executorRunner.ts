@@ -100,6 +100,7 @@ import { markToolCallLogged } from './agentSource/loggedToolCalls'
 import type { RuntimeRunContext } from './runtimes'
 import { estimateRunCostUsdFromUsage } from './runtimes/estimateCost'
 import { runtimeIdentityHomePath } from './runtimes/identityHome'
+import { ensureTeamWorkdir, taskRunWorkdirFor } from './runtimes/teamWorkdir'
 import { buildPersonaBlock } from './runtimes/personaBlock'
 import {
   actOnTaskWorkspace,
@@ -259,6 +260,29 @@ function formatResumeContext(r: ResumeState): string {
  */
 type WorkspaceOutcome =
   { ok: true; cwd: string | null; resume: ResumeState | null } | { ok: false; reason: string }
+
+/**
+ * Where a run with no worktree starts. `cwd` stays the WORKTREE (null here), since
+ * the handoff and native-resume bookkeeping key on it; `runDir` is only the folder
+ * the driver is started in: the team's folder (see teamWorkdir.ts), null for a
+ * runtime that does not get one.
+ */
+async function folderForRun(
+  runtimeId: string,
+  teamId: string | null,
+): Promise<{ ok: true; runDir: string | null } | { ok: false; reason: string }> {
+  const runDir = taskRunWorkdirFor(runtimeId, teamId)
+  if (!runDir) return { ok: true, runDir: null }
+  try {
+    await ensureTeamWorkdir(runDir)
+    return { ok: true, runDir }
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `Could not create the working folder ${runDir} for this run: ${e instanceof Error ? e.message : String(e)}`,
+    }
+  }
+}
 
 /** Acquire a worktree for the run — reuse an existing one (cross-runtime resume) or provision fresh. */
 async function acquireWorkspace(
@@ -598,7 +622,14 @@ async function runTaskInner(
   })
 
   const kind = input.kind ?? 'code'
-  const workspace = await acquireWorkspace(taskId, caps, input.repoPath, kind)
+  const acquired = await acquireWorkspace(taskId, caps, input.repoPath, kind)
+  // No worktree (read-only work): the run still starts in a folder of its own,
+  // never the server's working directory.
+  const runFolder =
+    acquired.ok && acquired.cwd === null
+      ? await folderForRun(runtimeId, task.teamId ?? null)
+      : ({ ok: true, runDir: null } as const)
+  const workspace: WorkspaceOutcome = runFolder.ok ? acquired : runFolder
 
   // Isolation was required but unavailable. Running now would execute the agent
   // in the SERVER's own working directory with permission gates bypassed, so the
@@ -627,6 +658,7 @@ async function runTaskInner(
     return { ok: false, reason: 'workspace_unavailable' }
   }
   const { cwd, resume } = workspace
+  const runDir = runFolder.ok ? runFolder.runDir : null
 
   // Memory auto-injection: seed the most-relevant facts for the task into the
   // VOLATILE tier (cache-safe — never the cached prefix, per the KV-cache
@@ -765,7 +797,7 @@ async function runTaskInner(
   if (homeDir) await mkdir(homeDir, { recursive: true, mode: 0o700 }).catch(() => {})
   const baseSessionKey = `runtime:${runtimeId}:task:${taskId}`
   const ctx: RuntimeRunContext = {
-    cwd,
+    cwd: cwd ?? runDir,
     model: input.model ?? null,
     // Same-runtime continuation resumes the prior NATIVE session (the id rides
     // the worktree handoff); a cross-runtime pickup gets the prose ResumeState
