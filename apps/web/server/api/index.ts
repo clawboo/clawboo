@@ -69,6 +69,7 @@ import {
 import { agentChatIngestPOST, agentChatStopPOST, agentChatStreamGET } from './agentChat'
 import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
 import { teamActivitySummaryGET } from './teamActivity'
+import { teamMemberRolesGET } from './teamMemberRoles'
 import { teamRulesGET, teamRulesPUT } from './teamRules'
 import {
   teamBriefGET,
@@ -290,6 +291,8 @@ router.post('/api/system/self-update', sensitiveLimiter, selfUpdatePOST)
 
 // Teams
 router.get('/api/teams', teamsGET)
+// Each team member's one-line role, for the board's New task suggestion.
+router.get('/api/teams/member-roles', teamMemberRolesGET)
 router.post('/api/teams', teamsPOST)
 router.patch('/api/teams/:id', teamsPATCH)
 router.delete('/api/teams/:id', teamsDELETE)

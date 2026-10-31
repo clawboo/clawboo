@@ -302,6 +302,20 @@ export async function createTaskForAgent(
   }
 }
 
+/** Each team member's one-line role, keyed by agent id, for the New task
+ *  suggestion. An agent with no stated role is absent. Resolves {} on any failure,
+ *  so the dialog falls back to matching names. */
+export async function fetchMemberRoles(): Promise<Record<string, string>> {
+  try {
+    const r = await apiFetch('/api/teams/member-roles')
+    if (!r.ok) return {}
+    const body = (await r.json()) as { roles?: Record<string, string> }
+    return body.roles ?? {}
+  } catch {
+    return {}
+  }
+}
+
 /** The outcome of a hand-off: ok, or the server's reason for refusing it. */
 export type HandOffResult = { ok: true } | { ok: false; reason: string }
 

@@ -229,6 +229,19 @@ describe('the header', () => {
     expect(await screen.findByTestId('new-task-dialog')).toBeInTheDocument()
   })
 
+  it('opens New task, on its one field, from the To do column’s plus', async () => {
+    serve()
+    const user = userEvent.setup()
+    renderBoard()
+    await screen.findByText('Writer work')
+
+    await user.click(screen.getByRole('button', { name: 'Add a task to To do' }))
+    const dialog = await screen.findByTestId('new-task-dialog')
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('What should get done?')).toHaveFocus(),
+    )
+  })
+
   it('opens Find with Cmd+K or Ctrl+K, even from a field', async () => {
     serve()
     const user = userEvent.setup()
