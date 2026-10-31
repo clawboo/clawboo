@@ -90,6 +90,7 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
     createdAt: number
     updatedAt: number
     completedAt: number | null
+    personMovedAt: number | null // when a person last moved the card (see PATCH below)
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {
@@ -347,6 +348,7 @@ This is the route a **person** uses (the board and the task drawer), and a perso
 - A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`.
 - A run working on the task is stopped, whether the team engine, the executor runner or an OpenClaw routine fire started it, and its execution is closed as cancelled. A task moved back to `todo` while it was running is started again for its bound agent.
 - Whoever delegated the task (the `:reflectTo:` agent in its `sourceDelegationId`) is told a person marked it done or cancelled it: through a `[Task Update]` when the team's engine is running, else as a mailbox notice read at its next turn. A task a person assigned reports to nobody.
+- The move is stamped on the task as `personMovedAt`. Until a run starts after it, the agent's own status writes through the [tasks MCP tools](/reference/mcp-tools) (`update_task_status`, `block_task`, `unblock_task`) are refused with a tool error that names the column the person chose and tells the agent not to retry, so the run the person overruled cannot put the card back. A run that starts after the move writes as usual.
 
 <Note>
 A task with **no** stored verification verdict is *unverified*, not *failing*; it lands `done` normally. The gate blocks known-failing verdicts, not un-run verification; manually completing unverified work is an intentional human judgment call (the autonomous path always writes a verdict via the verification gate before this transition). Moving a task to `todo` releases it (clears the assignee + verdict) so the atomic claim can re-acquire it.
@@ -429,12 +431,21 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 
 Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The handler emits a `comment_added` event and narrates a truncated form of the comment into the team chat room (best-effort, after the write). The handler does not 404 a missing task before inserting; the comment row is created against the supplied `taskId`.
 
-A `user` comment is also passed on to the task's assignee, unless the task is unassigned, `done` or `cancelled`:
+A `user` comment is a person's reply to the agent the task belongs to: its assignee, or, while the task has none (waiting in `todo`, or waiting on a person), the agent its `sourceDelegationId` binds it to. The handler delivers it before it answers and says where it went in `delivery`:
 
-1. **The mailbox**, always first. The comment lands in the assignee's inbox, which every run reads when it starts. A queued or retried task finds it there, and so does the next turn of a running task when the steer below did not deliver it first.
-2. **A steer into the running run**, when the task is `in_progress` and a run is working on it. How the message gets in depends on the runtime (see [steering a running task](/runtimes/index#steering-a-running-task)). When the steer lands, the mailbox row is marked delivered so the agent does not read the comment a second time at its next run. When it does not land (the run already finished, or the runtime has no way in), the mailbox row stays and carries it.
+1. **The mailbox**, first. The reply lands in the agent's inbox, which every run reads when it starts. A queued or restarted task finds it there, and so does the next turn of a running task when the steer below did not deliver it first.
+2. **Then, by the task's status:**
 
-The steer runs in the background: the response does not wait for it.
+| Status                                                        | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `delivery`                               |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `in_progress`, with a run working on it                       | The reply is steered into that run; how it gets in depends on the runtime (see [steering a running task](/runtimes/index#steering-a-running-task)). The handler waits up to about 2.5 seconds for the steer. When it lands, the mailbox row is marked delivered so the agent does not read the reply a second time at its next run. When it does not land in that time, the mailbox row stays and carries it                                                                                                                                          | `steered`, or `queued` with `next-run`   |
+| `blocked`, `todo`, or `in_progress` with no run working on it | The task is started again, as [`/retry`](#post-apiboardtaskidretry) starts it: moved back to `todo` (a `status_changed` event with reason `reply`), noted on its trail as `Started again for a person's reply.` (a `system` comment), and handed to its agent through the same person dispatch, so the automatic re-run limit does not hold it back. Replies to a `todo` task within 15 seconds of a restart start no second run; the run on its way reads them too. A plan step whose dependency is not done is not started; the reply waits with it | `woke-agent`, or `queued` with `waiting` |
+| `in_review`                                                   | The reply waits in the mailbox; the agent reads it after the check                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `queued` with `in-review`                |
+| `backlog`                                                     | The reply waits in the mailbox for the task's next run; a parked task is not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `queued` with `next-run`                 |
+| `done`, `cancelled`, or dropped                               | Nothing is delivered: the task will not run again. The dashboard offers to send the reply as a follow-up task instead (a `POST /api/board` for the same agent with this task as `parentTaskId`)                                                                                                                                                                                                                                                                                                                                                       | `not-delivered` with `finished`          |
+| No agent bound                                                | The reply is saved on the task only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `not-delivered` with `unassigned`        |
+
+A task with no team, or one whose move back to `todo` is refused, gets `queued` with `next-run` instead of a restart. When the mailbox write fails, or delivery throws after the comment is saved, the comment stays saved and `delivery` is `not-delivered` with `failed`, rather than a **500** that would have the person send it again. Comments by an agent or the system are saved and narrated only, with no `delivery`.
 
 - **Path params**: `taskId`.
 - **Request body** (validated by `commentBody`):
@@ -469,9 +480,22 @@ The steer runs in the background: the response does not wait for it.
     tenantId: string | null
     createdAt: number
   }
-  forwarded: boolean // true when a `user` comment was put in the assignee's mailbox
+  forwarded: boolean // true when a `user` comment was delivered: steered, started again, or queued
+  delivery?: ReplyDelivery // `user` comments on an existing task only
 }
+
+type ReplyDelivery =
+  | { status: 'steered'; agentId: string } // in front of the run working on the task
+  | { status: 'woke-agent'; agentId: string } // the task was started again for the reply
+  | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' }
+  | {
+      status: 'not-delivered'
+      agentId: string | null
+      reason: 'finished' | 'unassigned' | 'failed'
+    }
 ```
+
+For an `in_progress` task the response can take up to about 2.5 seconds, while the handler waits for the steer.
 
 **`500 Internal Server Error`**:
 
@@ -482,9 +506,15 @@ The steer runs in the background: the response does not wait for it.
 ### Example
 
 ```bash
+# An agent's note
 curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Blocked on the upstream schema.","authorType":"agent","authorAgentId":"native-leader-abc"}'
+
+# A person's reply, delivered to the task's agent
+curl -X POST http://localhost:18790/api/board/<task-id>/comments \
+  -H 'Content-Type: application/json' \
+  -d '{"body":"Use the v2 schema; it landed this morning.","authorType":"user"}'
 ```
 
 ---
