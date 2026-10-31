@@ -1,96 +1,204 @@
 ---
 title: '@clawboo/mcp'
-description: Protocol adapters exposing Clawboo's Tasks / Memory / Tools / TeamChat MCP servers over stdio and in-process Streamable HTTP.
+sidebarTitle: 'mcp'
+description: 'Clawboo MCP servers and their transports, the client for third-party connectors with its OAuth flow, attach-URL signing, and the stdio bins.'
+keywords:
+  [
+    '@clawboo/mcp',
+    'mcp',
+    'MCP servers',
+    'Tasks MCP',
+    'Memory MCP',
+    'Tools MCP',
+    'TeamChat MCP',
+    'memory_feedback',
+    'team_delegate',
+    'attachToken',
+    'scopeSig',
+    'unverifiedCaller',
+    'connector client',
+    'OAuth',
+    'clawboo-mcp-tasks',
+    'CLAWBOO_DB_PATH',
+  ]
 ---
 
-**Version** `0.1.0` · **Purity** server-only · **Purpose** thin MCP protocol adapters over the `@clawboo/db` service cores, served over stdio bins + in-process Streamable HTTP.
+`@clawboo/mcp` has two halves. The server half gives agents Clawboo's board, memory, tools and peer channel as four
+MCP servers. The client half is how Clawboo itself connects to the third-party MCP servers you add as connectors.
+Between them sits attach signing, which stops an agent from claiming an identity Clawboo did not give it.
 
-- **Workspace deps**: `@clawboo/db`
-- **External deps**: `@modelcontextprotocol/sdk` (pinned `1.30.0`), `zod`
+Use this page when you add or change an MCP tool, change how runtimes attach, or work on connectors. Each tool's
+inputs are listed on [MCP tools](/reference/mcp-tools), and attaching an outside agent is covered in
+[MCP servers](/operating/mcp-servers). This is the only package that depends on `@modelcontextprotocol/sdk`, which
+is why the connector client lives here too.
 
-The package is the protocol layer of the MCP quartet (Tasks · Memory · Tools · TeamChat). Each server is a low-level SDK `Server` built from `@clawboo/db` data-access cores. The same SQLite file is the cross-process bus, so a stdio bin spawned by an external runtime and the in-process Express server read/write the same board / memory / tools / team_chat store.
+## The four servers
 
-<Info>
-Servers use the SDK's low-level `Server` + `setRequestHandler` API, **not** `McpServer.registerTool`; the high-level API's per-tool zod-generic inference OOMs `tsc` and the `tsup dts` build once a server has ~12 tools. Every SDK touchpoint lives in `shared.ts` (`buildServer` + a self-contained zod→JSON-Schema converter).
-</Info>
+| Server                        | Built by                              | Tools                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tasks (`clawboo-tasks`)       | `createTasksServer(db, opts)`         | `list_tasks`, `get_task`, `create_task`, `create_subtask`, `claim_task`, `assign_task`, `release_task`, `update_task_status`, `block_task`, `unblock_task`, `add_comment`, `link_task` |
+| Memory (`clawboo-memory`)     | `createMemoryServer(db, embed, opts)` | `memory_save`, `memory_search`, `memory_browse`, `memory_feedback`                                                                                                                     |
+| Tools (`clawboo-tools`)       | `createToolsServer(db, opts)`         | the built-ins (`echo`, `note`, `web_search`, `delete_path`), plus the tools of each connected connector and the app toolkits an agent has been granted                                 |
+| TeamChat (`clawboo-teamchat`) | `createTeamChatServer(db, opts)`      | `team_chat_post`, `team_chat_subscribe`, and `team_delegate` when the binding grants delegation                                                                                        |
 
-The bins ship as four CLI executables: `clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`, `clawboo-mcp-teamchat`.
+Each server is a thin layer over `@clawboo/db`: the handlers call its repository functions. A few behaviors matter
+to anyone changing them:
 
-## Public API
+- **Tasks.** `readOnly` serves only `list_tasks` and `get_task`; Clawboo Native uses it for an agent whose Tasks
+  access is set to read. A bound team scope forces `list_tasks` to that team and makes `get_task` refuse another
+  team's task. A lost claim, a dependency cycle in `link_task` and a refused subtask (too many children, too deep)
+  come back as tool errors the model should not retry.
+- **Tools.** Every call runs through the `@clawboo/db` broker, so a connector tool is checked against the agent's
+  grants. A connector tool is listed only to an agent whose grant would allow it.
+- **TeamChat.** `team_delegate` only signals: the team engine sees the tool call and creates the board task.
+- **Mailbox delivery.** For a bound agent, its undelivered mailbox rows ride along on the next Tasks or TeamChat
+  tool response as a second content block.
 
-Everything below is re-exported from the `.` barrel (`src/index.ts`).
+## Transports
 
-### Functions
+- **HTTP.** `createStreamableHttpHandlers` serves each server inside the dashboard server at `/api/mcp/<server>`.
+  Clawboo's own Claude Code, Codex and Hermes runs and the OpenClaw Gateway connect here.
+- **In-process.** `connectInMemoryClient` connects Clawboo Native's MCP bridge to the servers without a network
+  hop. `probeServer` checks that a server answers, for the boot probe and the MCP supervisor.
+- **stdio.** `runStdioServer` backs the four bins `clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`
+  and `clawboo-mcp-teamchat`, for runtimes you attach yourself.
 
-| Export                         | Signature                                                                       | Contract                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createTasksServer`            | `(db: ClawbooDb, opts?: TasksServerOptions) => Server`                          | Build the Tasks MCP server (12 tools) over the durable board repository. `opts.readOnly` serves only `list_tasks` / `get_task`; `opts.boundScope` makes the run's team authoritative for reads and its agent id the recipient of the inbox piggyback. A claim conflict, a dependency cycle, and the per-parent child / depth creation caps all surface as tool-errors the model must not retry.                     |
-| `createMemoryServer`           | `(db, embed?: EmbeddingProvider \| null, opts?: MemoryServerOptions) => Server` | Build the Memory MCP server (`memory_save` / `memory_search` / `memory_browse`) over `SqliteMemoryStore`. `opts.boundScope` makes the run's scope authoritative (anti-mis-tag).                                                                                                                                                                                                                                     |
-| `createToolsServer`            | `(db, opts?: ToolsServerOptions) => Server`                                     | Build the Tools MCP broker server. Lists only **available** tools (a hidden tool is absent from `tools/list`); every call routes through the broker (inspector chain → approval → execute → compaction → audit).                                                                                                                                                                                                    |
-| `createTeamChatServer`         | `(db, opts?: TeamChatServerOptions) => Server`                                  | Build the TeamChat MCP server (`team_chat_post` / `team_chat_subscribe`) over the `team_chat` substrate. `opts.boundIdentity` makes author + room authoritative (anti-spoof).                                                                                                                                                                                                                                       |
-| `formatPeerPost`               | `(post: PeerPostLike) => string`                                                | Wrap a room post as non-user inter-session evidence (`[Inter-session message · … · isUser=false]`). Defangs an embedded forged header and quote-prefixes the body. The single source of truth for peer-as-evidence tagging.                                                                                                                                                                                         |
-| `runStdioServer`               | `(server: Server) => Promise<void>`                                             | Serve a built server over stdio (`StdioServerTransport`). The consuming runtime owns the process lifecycle.                                                                                                                                                                                                                                                                                                         |
-| `createStreamableHttpHandlers` | `(createServer: (req?: IncomingMessage) => Server) => McpHttpHandlers`          | Build POST/GET/DELETE handlers for one server factory. A fresh server + transport is created per MCP session (on `initialize`); the initialize request is handed to the factory so a server can bind per-session state from the URL.                                                                                                                                                                                |
-| `probeServer`                  | `(server: Server) => Promise<number>`                                           | Liveness probe: connect an in-memory `Client`, `tools/list`, resolve to the tool count, close both ends in `finally`. Throws on failure.                                                                                                                                                                                                                                                                            |
-| `connectInMemoryClient`        | `(server: Server, name?: string) => Promise<InMemoryMcpClient>`                 | Connect a long-lived in-memory `Client` to a server (the in-process consumption path for the native runtime). `close()` is idempotent and never throws.                                                                                                                                                                                                                                                             |
-| `buildAttachConfig`            | `(input: AttachConfigInput) => AttachConfig`                                    | Produce the per-runtime + per-transport attach snippet (copy-pasteable command/config block + structured form). Pure, no SDK.                                                                                                                                                                                                                                                                                       |
-| `mcpHttpUrl`                   | `(httpBaseUrl: string, server: McpServerName, scope?: AttachScope) => string`   | The HTTP attach URL for one server. Appends scope query params for `memory` (`scopeTeamId`/`scopeAgentId`/`scopeTenantId`), `tasks` (`scopeTeamId`/`scopeAgentId`), `teamchat` (`roomTeamId`/`postAuthorAgentId`, plus `delegate=1` on an orchestrated run), and `tools` (`scopeTeamId`/`scopeAgentId`). The `memory` URL also carries `provRuntime`/`provTaskId`/`provSessionKey`, signed separately by `provSig`. |
+The bins are built from `packages/mcp/src/bin/*.ts` by `apps/web/tsup.mcp-bins.config.ts`, with every `@clawboo/*`
+package inlined, and `scripts/assemble-cli.sh` copies them into the published `clawboo` package. Each bin opens
+`createDb(defaultDbPath())`: the file named by `CLAWBOO_DB_PATH`, else `~/.openclaw/clawboo/clawboo.db`. That is a
+different file from the server's `~/.clawboo/clawboo.db`, on purpose, so set `CLAWBOO_DB_PATH` to the server's
+file or use the snippet from `GET /api/mcp/config`, which embeds it. The Memory bin re-resolves its embedding
+provider once a minute and falls back to keyword search when there is none.
 
-### Types & interfaces
+## Attach URLs and signing
 
-| Export                  | Kind      | Contract                                                                                                                                                                      |
-| ----------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ToolsServerOptions`    | interface | `{ availability?, agentId?, broker? }`, broker context for `createToolsServer` (which tools register, audit identity, provenance/approval/compaction knobs).                  |
-| `TeamChatServerOptions` | interface | `{ boundIdentity?: TeamChatBoundIdentity, onPost?: (post: DbTeamChat) => void }`, anti-spoof binding + a best-effort obs emit hook.                                           |
-| `TeamChatBoundIdentity` | interface | `{ agentId, teamId, roomId }`, the runtime's identity bound by clawboo at attach time (URL / closure).                                                                        |
-| `PeerPostLike`          | interface | `{ authorAgentId, body, kind: string, seq: number }`, the input shape `formatPeerPost` wraps.                                                                                 |
-| `McpHttpHandlers`       | interface | `{ handlePost(req, res, body), handleSessionRequest(req, res) }`, typed against `node:http` (Express req/res are assignable).                                                 |
-| `InMemoryMcpClient`     | interface | `{ listTools(): Promise<McpToolInfo[]>, callTool(name, args): Promise<McpCallOutcome>, close(): Promise<void> }`, minimal structural client surface for in-process consumers. |
-| `McpCallOutcome`        | interface | `{ output: string, isError: boolean, denied?: string }`, `denied` is read from the result's `_meta.denied` (a broker policy-denial reason).                                   |
-| `McpToolInfo`           | interface | `{ name: string, description?: string, inputSchema?: Record<string, unknown> }`, one tool as served by `tools/list`.                                                          |
-| `AttachConfig`          | interface | `{ id: string, transport: McpTransport, snippet: string, structured: Record<string, unknown> }`, the result of `buildAttachConfig`.                                           |
-| `AttachConfigInput`     | interface | `{ runtime, server, transport, binPath?, dbPath?, httpBaseUrl?, scope? }`, input for `buildAttachConfig`.                                                                     |
-| `AttachScope`           | interface | `{ teamId?, agentId?, tenantId? }`, the run's visibility (Memory) + room/author binding (TeamChat).                                                                           |
-| `McpRuntime`            | type      | `'claude-code' \| 'codex' \| 'openclaw'`, runtimes that attach via their own config (HTTP/stdio snippets).                                                                    |
-| `McpServerName`         | type      | `'tasks' \| 'memory' \| 'tools' \| 'teamchat'`.                                                                                                                               |
-| `McpTransport`          | type      | `'stdio' \| 'http'`.                                                                                                                                                          |
+`mcpHttpUrl(baseUrl, server, scope)` writes the URL a runtime attaches with, and `buildAttachConfig` wraps it in a
+runtime's own config shape (a `claude mcp add` line, a Codex `config.toml` entry, an `openclaw.json` entry). A URL
+Clawboo mints with the install's attach secret carries up to three signatures. An unscoped URL, such as the one
+registered with a local OpenClaw Gateway, carries the token alone.
 
-### Constants
+- **`attachToken`**, on every such URL: proof that the request comes from a runtime this server started. The
+  access gate admits a request without the dashboard cookie only when it carries a valid token, targets one of the
+  four server mounts, arrives on the loopback port directly and was not forwarded by a proxy.
+  `GET /api/mcp/config` mints signed URLs, so it always needs the cookie when the gate is on.
+- **`scopeSig`**, when the URL claims a team, agent or tenant: an HMAC over those and the delegation privilege.
+- **`provSig`**, on Memory URLs that carry provenance stamps (runtime, task, session): it signs the stamps recorded
+  with saves and feedback.
 
-| Export               | Value                                               | Contract                                                        |
-| -------------------- | --------------------------------------------------- | --------------------------------------------------------------- |
-| `MCP_SERVER_NAMES`   | `readonly ['tasks', 'memory', 'tools', 'teamchat']` | The canonical server-name list; drives per-runtime auto-attach. |
-| `MCP_SERVER_VERSION` | `'0.1.0'`                                           | The `version` every built `Server` advertises.                  |
+`signAttachAccess`, `signAttachScope` and `signAttachProvenance` mint these from the per-install secret, and their
+`verify` partners check them in constant time. The secret never leaves the server.
 
-<Note>
-The `Server` type (`@modelcontextprotocol/sdk/server/index.js`) is re-exported from `shared.ts` for internal use but is **not** part of the `.` barrel.
-</Note>
+## Unverified callers
 
-### The four servers' tools
+A scope whose signature is missing or wrong counts as no scope at all. Over HTTP that makes the caller unverified,
+and each server narrows what it serves:
 
-`createTasksServer` (name `clawboo-tasks`): `list_tasks`, `get_task`, `create_task`, `create_subtask`, `claim_task`, `assign_task`, `release_task`, `update_task_status`, `block_task`, `unblock_task`, `add_comment`, `link_task`. With `readOnly: true` only the first two are served, which is what a team run attaches: claims and status there are engine-owned, so a model-issued `create_task` or `claim_task` would race the engine's writes or orphan a task no dispatcher runs.
+| Server   | What an unverified HTTP caller gets                                                                 |
+| -------- | --------------------------------------------------------------------------------------------------- |
+| Tasks    | no `claim_task` or `assign_task`, and `add_comment` drops its author fields; other edits still work |
+| Memory   | global memory only for reads and saves, and no provenance recorded                                  |
+| TeamChat | no tools at all                                                                                     |
+| Tools    | no agent or team identity, so no grant matches and connector tools stay hidden                      |
 
-`createMemoryServer` (name `clawboo-memory`): `memory_save`, `memory_search` (mode `fts | vector | hybrid`), `memory_browse`.
+A stdio caller with no scope is the operator running a bin and is served without these limits. OpenClaw agents are
+always unverified: the Gateway registers Memory, Tasks and Tools once for all its agents, with no per-run
+identity, and gets no TeamChat server. The server-side flags are `unverifiedCaller` on the Tasks, Memory and
+TeamChat options.
 
-`createToolsServer` (name `clawboo-tools`): the broker's built-in registry, filtered to available descriptors (`echo`/`note`/`web_search`/`delete_path`, availability-gated).
+## The connector client
 
-`createTeamChatServer` (name `clawboo-teamchat`): `team_chat_post`, `team_chat_subscribe`.
+When you connect a connector, Clawboo is the MCP client. The server's connector supervisor and OAuth flow
+(`apps/web/server/lib/connectors/`) call into this half; the connector definitions themselves come from
+[@clawboo/connector-catalog](/reference/packages/connector-catalog).
 
-<Info>
-`claim_task` / `assign_task` return a tool-error on conflict (`claim failed: <reason>`). A conflict means another agent won the atomic claim; the model must **not** retry. Two more refusals sit on the same never-retry footing: `link_task` rejects an edge that would close a dependency cycle, and `create_task` (with `parentTaskId`) / `create_subtask` go through `createCappedSubtask`, so a parented create is refused with `subtask rejected: <reason>` once the parent has 24 live children or the task would nest past depth 2 (`parent not found: <id>` when the parent does not exist).
-</Info>
+- **Sessions.** `connectStdioConnector(spec)` spawns a local server and `connectHttpConnector(spec)` dials a remote
+  one. Both return a `ConnectorSession` that lists tools and calls them, and both throw
+  `ConnectorHandshakeError` when the server never completes the MCP handshake.
+- **Time budgets.** The handshake, each tool-list page and each tool call have separate timeouts
+  (`DEFAULT_HANDSHAKE_TIMEOUT_MS`, `DEFAULT_LIST_TIMEOUT_MS`, `DEFAULT_CALL_TIMEOUT_MS`). The handshake budget is the
+  generous one, because a cold `npx` install happens inside it. Discovery stops at `MAX_CONNECTOR_TOOLS` tools.
+- **Results.** `flattenContent` turns an MCP result into text for the model, and images ride along separately.
+- **Environment.** `connectorChildEnv` builds a stdio connector's environment from an empty set, the few variables
+  a process needs to start (`CONNECTOR_ENV_ALLOWLIST`) and the credentials you gave that connector, so it never
+  inherits your provider keys.
+  This closes the environment only. It is not a sandbox: the connector still runs as your user and can read your
+  files.
 
-## Used by
+Remote connectors sign in with OAuth 2.1, discovered from the server rather than configured per provider:
 
-Only `apps/web` depends on `@clawboo/mcp` (no other package does; a `@clawboo/db` comment merely references it). Server-side consumers include the MCP REST/transport route (`server/api/mcp.ts`), the OpenClaw agent-source MCP registration, the boot probe and liveness supervisor (`bootProbe.ts`, `mcpSupervisor.ts`), the runtime drivers (`claudeCodeDriver`, `codexDriver`, `hermesDriver`), the native in-process bridge (`runtimes/native/mcpBridge.ts`), the capability sources (`capabilitySource/{claudeCode,codex}.ts`), the team-chat dispatcher (`teamChat/dispatchChatTurn.ts`), and the bin bundler (`tsup.mcp-bins.config.ts`).
+<Steps>
 
-## Source
+<Step title="Discover">
 
-`packages/mcp/src/index.ts` (barrel). Servers in `src/{tasks,memory,tools,teamchat}/server.ts`; transports in `src/{stdio,http}.ts`; clients in `src/{probe,inMemoryClient}.ts`; attach config in `src/config.ts`; SDK helpers in `src/shared.ts`; bins in `src/bin/`.
+An unauthenticated request returns `401` with a `WWW-Authenticate` header. `resourceMetadataUrl` reads it,
+`discoverResourceMetadata` fetches the protected-resource metadata (RFC 9728), and `discoverAuthServer` fetches the
+authorization server's metadata (RFC 8414).
 
-## See also
+</Step>
 
-- [@clawboo/db](/reference/packages/db), the service cores the servers adapt (board, memory store, tools broker, team_chat).
-- [MCP tools reference](/reference/mcp-tools), the full tool list + zod input shapes.
-- [Tools & MCP REST](/reference/rest-api/tools-and-mcp), `/api/mcp/*` transport + attach-config routes.
-- [MCP servers as teammates](/operating/mcp-servers), attaching the servers from an external runtime.
+<Step title="Register">
+
+`registerClient` registers this install as a client through dynamic client registration (RFC 7591), with the
+loopback redirect it is about to listen on. Clawboo ships no client secret, so an authorization server without a
+registration endpoint cannot be used; the catalog marks such providers with `needsPreregisteredApp`.
+
+</Step>
+
+<Step title="Authorize and exchange">
+
+`createPkce` makes an S256 challenge, `buildAuthorizeUrl` builds the sign-in URL, and `exchangeCode` and
+`refreshToken` talk to the token endpoint.
+
+</Step>
+
+</Steps>
+
+Every endpoint must be `https` unless it is on this machine, and a host that resolves to a private or link-local
+address is refused, so a connector cannot point Clawboo at your local network. `isLoopbackUrl` lets the flow tell
+an authorization server you run yourself from one a remote server named.
+
+## Add or change a tool
+
+<Steps>
+
+<Step title="Add the tool definition">
+
+Each server builds its tools as plain definitions (`name`, `description`, a zod `inputSchema`, a `handler`) and
+passes them to `buildServer` in `src/shared.ts`. `buildServer` validates arguments with zod and converts the schema
+to JSON Schema itself. The servers use the SDK's low-level `Server` API, because the high-level per-tool type
+inference exhausts the TypeScript compiler's memory once a server has about a dozen tools.
+
+</Step>
+
+<Step title="Keep data access in the database package">
+
+Put the query or write in a `@clawboo/db` repository function and call it from the handler, so the REST routes
+and the other servers can reuse it.
+
+</Step>
+
+<Step title="Decide who may call it">
+
+If an argument names an agent, a team or a room, take it from the bound scope instead of trusting the model, and
+decide what an unverified caller gets. Tasks lists its identity tools in `IDENTITY_TOOL_NAMES` for this reason.
+Return a refusal the model must not retry as an error result (`textResult(message, true)`).
+
+</Step>
+
+<Step title="Test and document it">
+
+Run `pnpm --filter @clawboo/mcp test`; the suite includes the shared server contract and the unverified-caller
+cases. Then add the tool to [MCP tools](/reference/mcp-tools). You should see it in a client's `tools/list`, for
+example from the stdio bin with `CLAWBOO_DB_PATH` set.
+
+</Step>
+
+</Steps>
+
+## Related
+
+- [MCP tools](/reference/mcp-tools): every tool's inputs, outputs and limits.
+- [MCP servers](/operating/mcp-servers): attach an outside agent, and the attach token in practice.
+- [@clawboo/db](/reference/packages/db): the repositories behind every handler.
+- [Add a connector](/reference/packages/connector-catalog): the definitions the connector client launches.
+- [@clawboo/gateway-client](/reference/packages/gateway-client): the access gate that checks the attach token.

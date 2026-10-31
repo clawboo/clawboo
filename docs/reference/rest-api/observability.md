@@ -1,34 +1,38 @@
 ---
-title: Observability API
-description: 'REST reference for the orchestration event log: feed, traces, errors, fleet health, graph projection, SSE live-tail, client mirror, and eval smoke run.'
+title: 'Observability API'
+sidebarTitle: 'Observability'
+description: 'REST reference for the event log: the feed, traces, errors, agent health, the task graph, a live stream, event ingest, and the eval smoke run.'
+keywords: ['observability', 'events', 'traces', 'event log', 'sse', 'fleet health', 'evals']
 ---
 
-REST surface over the durable orchestration event log: query the raw event feed, reconstruct a single trace with metrics, pull the harness-bug error feed, read the fleet-health triage, fold the event-sourced delegation graph, live-tail the log over Server-Sent Events, and mirror client-observed runtime events back into the log. This group also covers `POST /api/eval/smoke`, the on-demand deterministic eval run.
+These routes read the server's event log, the durable record of what happened on the board and in runs: tasks created and claimed, status changes, runs, tool calls, costs, approvals and errors. They return the raw feed, one trace with its totals, the error feed, each agent's health, the task-delegation graph, and a live stream; one route accepts events from outside processes. `POST /api/eval/smoke` runs the built-in eval suite. The fleet summary (`GET /api/fleet/summary`) is on the [Costs API](/reference/rest-api/costs) page.
 
-Observability is always on; there is no feature gate, and these handlers serve unconditionally. The event log is the single read source: a trace is all events sharing a `traceId`, the graph is a projection of the ordered stream, and metrics/error-taxonomy/fleet-health all fold from the same rows. All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
+Observability is always on: there is no switch, and every route here answers. A trace is all events that share a `traceId`; the graph, metrics, error list and agent health are all worked out from the same rows. Every route is on the general rate tier (see [rate limits](/reference/rest-api/index#rate-limits)).
 
 <Info>
-Every payload-bearing response redacts the event's JSON `data` field before it is sent; credential-shaped keys/values are masked with `••••`. This is display-layer defense in depth on top of the storage-layer secret scrub; numeric telemetry (token counts, cost) survives the mask. `GET /api/obs/stream` is **Server-Sent Events**, not request/response; it is documented below with an event-stream catalog, not a JSON response body.
+
+Every response that carries event payloads masks credential-shaped keys and values in the event's `data` with `••••` before sending it, on top of the secret scrub applied when the event was written. Numbers such as token counts and cost are kept. `GET /api/obs/stream` is a Server-Sent Events stream, documented below with its frames rather than a JSON body.
+
 </Info>
 
 ## Routes
 
-| Method | Path                       | Summary                                               | Stream? |
-| ------ | -------------------------- | ----------------------------------------------------- | ------- |
-| GET    | `/api/obs/events`          | Query the orchestration event feed                    | No      |
-| GET    | `/api/obs/traces/:traceId` | One reconstructed trace + aggregate metrics           | No      |
-| GET    | `/api/obs/errors`          | The error-taxonomy feed (harness-bug filter)          | No      |
-| GET    | `/api/obs/health`          | Fleet-health triage (working/idle/stalled/zombie)     | No      |
-| GET    | `/api/obs/graph`           | Event-sourced delegation/status/cost graph projection | No      |
-| GET    | `/api/obs/stream`          | SSE live-tail of the log, scoped by team/task/agent   | SSE     |
-| POST   | `/api/obs/ingest`          | Mirror client-observed runtime events into the log    | No      |
-| POST   | `/api/eval/smoke`          | Run the deterministic eval smoke suite                | No      |
+| Method | Path                       | Summary                                              | Stream? |
+| ------ | -------------------------- | ---------------------------------------------------- | ------- |
+| GET    | `/api/obs/events`          | Query the orchestration event feed                   | No      |
+| GET    | `/api/obs/traces/:traceId` | One reconstructed trace + aggregate metrics          | No      |
+| GET    | `/api/obs/errors`          | The error feed (filter to likely Clawboo bugs)       | No      |
+| GET    | `/api/obs/health`          | Each agent's state: working, idle, stalled or zombie | No      |
+| GET    | `/api/obs/graph`           | The task and delegation graph, built from the log    | No      |
+| GET    | `/api/obs/stream`          | SSE live-tail of the log, scoped by team/task/agent  | SSE     |
+| POST   | `/api/obs/ingest`          | Add events an outside process observed to the log    | No      |
+| POST   | `/api/eval/smoke`          | Run the built-in eval smoke suite (no model calls)   | No      |
 
 ---
 
 ## `GET /api/obs/events`
 
-Returns rows from the event log filtered by the query params, ordered by the monotonic `seq` cursor. The default order is `asc` (causal order, so a feed reads chronologically); pass `order=desc` for a recent-first feed.
+Returns events from the log that match the query, ordered by `seq`, a number that only ever grows. The default order is `asc` (oldest first, the order things happened); pass `order=desc` for newest first.
 
 - **Path params**: none.
 - **Query params**:
@@ -40,8 +44,8 @@ Returns rows from the event log filtered by the query params, ordered by the mon
 | `agentId`  | string          | Match events for one agent (the per-agent activity scope).       |
 | `traceId`  | string          | Match events sharing a trace.                                    |
 | `kinds`    | string          | Comma-separated list of event kinds; empty/blank values dropped. |
-| `since`    | number          | `ts >=` (wall-clock ms), a recent-window read.                   |
-| `afterSeq` | number          | `seq >` cursor (strictly monotonic, collision-free).             |
+| `since`    | number          | Only events with `ts` at or after this time (epoch ms).          |
+| `afterSeq` | number          | Only events with a larger `seq` (a resume cursor).               |
 | `limit`    | number          | Row cap, clamped to 1-5000 (defaults to 500 when omitted).       |
 | `order`    | `asc` \| `desc` | `desc` only when literally `"desc"`; anything else is `asc`.     |
 
@@ -73,7 +77,7 @@ Returns rows from the event log filtered by the query params, ordered by the mon
 }
 ```
 
-`OrchestrationEventKind` is one of: `task_created`, `task_claimed`, `status_changed`, `comment_added`, `dep_linked`, `execution_started`, `execution_completed`, `tool_call`, `tool_result`, `cost`, `approval_requested`, `approval_resolved`, `error`, `span_start`, `span_end`, `session_rotated`, `routine_fired`, `routine_dispatched`, `routine_completed`, `routine_error`, `team_chat_post`, `speaker_selected`, `turn_bound_hit`. See [Events & errors reference](/reference/events-and-errors) for the per-kind `data` shapes.
+`OrchestrationEventKind` is one of 25 kinds: `task_created`, `task_claimed`, `status_changed`, `comment_added`, `dep_linked`, `execution_started`, `execution_completed`, `tool_call`, `tool_result`, `cost`, `approval_requested`, `approval_resolved`, `error`, `span_start`, `span_end`, `session_rotated`, `routine_fired`, `routine_dispatched`, `routine_completed`, `routine_error`, `team_chat_post`, `speaker_selected`, `turn_bound_hit`, `grant_decision`, `connector_health`. See [Events and errors](/reference/events-and-errors) for each kind's `data`.
 
 **`500 Internal Server Error`**: any read failure:
 
@@ -92,7 +96,7 @@ curl "http://localhost:18790/api/obs/events?teamId=<team-uuid>&kinds=cost,error&
 
 ## `GET /api/obs/traces/:traceId`
 
-Reconstructs one trace, every event sharing the `traceId`, ordered `seq` ASC (causal). The full multi-agent task renders from this (leader → specialists → tool spans). Aggregate metrics are computed from the un-redacted events first, then each event's `data` is masked for display, so numeric cost/token telemetry in `metrics` is accurate.
+Returns one trace: every event that shares the `traceId`, oldest first. A whole multi-agent task (the lead, the agents it delegated to, their tool calls) reads from this. The totals in `metrics` are worked out before each event's `data` is masked, so cost and token figures are exact.
 
 - **Path params**: `traceId` (string).
 - **Request body**: none.
@@ -137,23 +141,23 @@ curl http://localhost:18790/api/obs/traces/<trace-id>
 
 ## `GET /api/obs/errors`
 
-The error-taxonomy feed: every `error` event, recent-first, projected to a compact shape. An error whose class is `Unknown` is a harness bug; pass `harnessBug=true` to filter to those.
+The error feed: `error` events, newest first, in a compact shape. Each error carries the class Clawboo sorted it into; an error it could not sort (class `Unknown`) is flagged `harnessBug: true`, a likely bug in Clawboo itself. Pass `harnessBug=true` to see only those.
 
 - **Path params**: none.
 - **Query params**:
 
-| Param        | Type   | Notes                                                                     |
-| ------------ | ------ | ------------------------------------------------------------------------- |
-| `harnessBug` | string | `"true"` filters to harness-bug errors only; any other value returns all. |
-| `since`      | number | `ts >=` (wall-clock ms).                                                  |
+| Param        | Type   | Notes                                                                           |
+| ------------ | ------ | ------------------------------------------------------------------------------- |
+| `harnessBug` | string | `"true"` returns only errors flagged `harnessBug`; any other value returns all. |
+| `since`      | number | Only errors with `ts` at or after this time (epoch ms).                         |
 
 - **Request body**: none.
 
-The read is fixed to `kinds: ['error']`, `limit: 500`, newest-first **by `ts`**. Wall-clock order is what a display feed wants, and it is the order the only index over `kind` can serve, so the cost stays proportional to the 500 rows returned rather than to every error ever recorded. The `harnessBug` filter is applied after projection.
+The route always reads the 500 newest `error` events by `ts`, then applies the `harnessBug` filter. Older errors are not reachable here; use `GET /api/obs/events?kinds=error` with `afterSeq` to page through them.
 
 ### Responses
 
-**`200 OK`**: the error rows plus the unfiltered harness-bug count. The whole payload is run through `redactObject`:
+**`200 OK`**: the errors and the count of flagged ones. The whole response is masked before it is sent:
 
 ```ts
 {
@@ -167,11 +171,11 @@ The read is fixed to `kinds: ['error']`, `limit: 500`, newest-first **by `ts`**.
     harnessBug: boolean // from event data
     message: string // from event data; defaults to ''
   }>
-  harnessBugCount: number // count across ALL errors in the window, before the filter
+  harnessBugCount: number // flagged errors among the 500 read, before the filter
 }
 ```
 
-`harnessBugCount` always reflects the full window (harness bugs found regardless of the `harnessBug` filter), so a UI can badge the alert count even while showing the unfiltered feed.
+`harnessBugCount` ignores the `harnessBug` filter, so a client can show the count while listing every error.
 
 **`500 Internal Server Error`**:
 
@@ -182,7 +186,7 @@ The read is fixed to `kinds: ['error']`, `limit: 500`, newest-first **by `ts`**.
 ### Example
 
 ```bash
-# Harness-bug alerts in the last hour
+# Errors flagged as likely Clawboo bugs in the last hour
 curl "http://localhost:18790/api/obs/errors?harnessBug=true&since=$(($(date +%s%3N) - 3600000))"
 ```
 
@@ -190,13 +194,13 @@ curl "http://localhost:18790/api/obs/errors?harnessBug=true&since=$(($(date +%s%
 
 ## `GET /api/obs/health`
 
-Fleet-health triage, a per-agent state folded from the event log, time-sensitive (computed against `Date.now()`). An agent with an open execution is `working` if a recent event landed, `stalled` if quiet past 5 minutes, and `zombie` if quiet past 30 minutes (the process is almost certainly dead, what orphan reconciliation reaps); an agent with no open execution is `idle`.
+Each agent's current state, worked out from the event log against the current time. An agent with an open run is `working` while events keep arriving, `stalled` after 5 quiet minutes and `zombie` after 30 (its process has almost certainly died; the server's stale-run cleanup closes such runs). An agent with no open run is `idle`.
 
 - **Path params**: none.
 - **Query params**: `teamId` (string), scope to one team.
 - **Request body**: none.
 
-The read is capped at the **most recent 5000 events** for the requested scope. `orchestration_events` is append-only and is never pruned, so the triage folds a trailing window rather than the whole history: rows are selected newest-first, then folded in causal order. An agent whose activity has scrolled out of that window stops appearing.
+Only the **most recent 5000 events** in scope are read. The event log only grows (nothing prunes it), so this works from a recent window, not the whole history: an agent whose activity has scrolled out of the window stops appearing.
 
 ### Responses
 
@@ -231,17 +235,17 @@ curl "http://localhost:18790/api/obs/health?teamId=<team-uuid>"
 
 ## `GET /api/obs/graph`
 
-Folds the ordered event stream into a delegation/status/cost graph projection. The team graph is a pure projection of the log (replaying the same log always reproduces the same graph), so the surface cannot drift from reality. Two views fold from one ordered list: the task-delegation graph and the derived agent-to-agent delegation graph.
+Builds the task graph from the event log: tasks with their status and cost, the delegation and dependency edges between them, and the agent-to-agent delegations they imply. The same events always give the same graph.
 
 - **Path params**: none.
 - **Query params**: `teamId` (string), scope to one team.
 - **Request body**: none.
 
-The read is capped at the **most recent 5000 events** for the requested scope. `orchestration_events` is append-only and is never pruned, so the projection folds a trailing window rather than the whole history: rows are selected newest-first, then folded in causal order. A task whose events have all scrolled out of that window stops appearing, and one only partly inside it projects from the events that remain.
+Only the **most recent 5000 events** in scope are read, as for health. A task whose events have all left that window stops appearing, and a task partly inside it is drawn from the events that remain.
 
 ### Responses
 
-**`200 OK`**: the projected graph (this response is the projection output verbatim, not wrapped or redacted; it carries no raw event `data`):
+**`200 OK`**: the graph. It carries no raw event `data`, so nothing in it is masked:
 
 ```ts
 {
@@ -270,7 +274,7 @@ The read is capped at the **most recent 5000 events** for the requested scope. `
     id: string
     source: string
     target: string
-    kind: 'delegation' | 'dependency' // agent→agent edges are always 'delegation'
+    kind: 'delegation' | 'dependency' // edges between agents are always 'delegation'
   }>
 }
 ```
@@ -291,22 +295,26 @@ curl "http://localhost:18790/api/obs/graph?teamId=<team-uuid>"
 
 ## `GET /api/obs/stream`
 
-Server-Sent Events live-tail of the event log, scoped by team/task/agent. The handler opens an `text/event-stream` response and polls the log every 750 ms on the monotonic `seq` cursor, pushing any new rows. It is cross-process correct (it catches writes from the standalone MCP stdio bins, not just the in-process server) and indexed. Resume from a known position via the standard `EventSource` `Last-Event-ID` header or the `?since=<seq>` query param.
+A Server-Sent Events tail of the event log, optionally scoped to a team, task or agent. The route polls the log every 750 ms past a `seq` cursor and sends any new events. It reads the database, so it also sees events that another process writes to the same database file. Resume with the `EventSource` `Last-Event-ID` header or `?since=<seq>`.
+
+**Where it starts.** With no `Last-Event-ID` and no `since`, the cursor is `0`: the stream first replays the whole log for its scope, 500 events per poll, and only then follows new events. This is the opposite of the chat streams, which start at the newest message. To watch only new events, pass the newest `seq` as `since` (read it with `GET /api/obs/events?order=desc&limit=1`).
 
 - **Path params**: none.
 - **Query params**:
 
-| Param     | Type   | Notes                                                                                                       |
-| --------- | ------ | ----------------------------------------------------------------------------------------------------------- |
-| `teamId`  | string | Scope the tail to one team.                                                                                 |
-| `taskId`  | string | Scope the tail to one board task.                                                                           |
-| `agentId` | string | Scope the tail to one agent.                                                                                |
-| `since`   | number | Resume cursor (`seq`). Negative/non-finite → `0`. The `Last-Event-ID` header takes precedence when present. |
+| Param     | Type   | Notes                                                                                            |
+| --------- | ------ | ------------------------------------------------------------------------------------------------ |
+| `teamId`  | string | Scope the tail to one team.                                                                      |
+| `taskId`  | string | Scope the tail to one board task.                                                                |
+| `agentId` | string | Scope the tail to one agent.                                                                     |
+| `since`   | number | Resume after this `seq`. An invalid or negative value means `0`. `Last-Event-ID` takes priority. |
 
 - **Request body**: none.
 
 <Note>
-This is an SSE route, not request/response. There is no JSON response body; the catalog below describes the wire frames. Each polled batch reads up to 500 rows past the cursor (`order: 'asc'`). The cursor only advances forward, so resuming with a stale `since`/`Last-Event-ID` replays from there. The stream is cleaned up on `req`/`res` close.
+
+This is an SSE route: there is no JSON response body, and the catalog below describes the frames. Each poll reads up to 500 events past the cursor, oldest first. The cursor only moves forward, so resuming from an old `since` or `Last-Event-ID` replays everything after it.
+
 </Note>
 
 ### Connection
@@ -356,7 +364,16 @@ curl -N "http://localhost:18790/api/obs/stream?taskId=<task-uuid>&since=4187"
 
 ## `POST /api/obs/ingest`
 
-Mirrors client-observed runtime events into the durable log. The OpenClaw runtime is observed in the browser (the server never sees those frames), so the SPA forwards them here to keep the activity terminal uniform across runtimes. Ingestion is **whitelisted** to the three per-tool kinds the browser legitimately observes: `tool_call`, `tool_result`, `error`. Board lifecycle events (`task_created`, `status_changed`, `execution_*`, …) are emitted server-side by the board REST handlers and are never accepted here. Each event is best-effort: a malformed row is skipped, never failing the batch.
+Adds events that a process outside the server observed to the log. Nothing in the dashboard calls it: the server records its own runs' tool calls, results and errors itself. Because any process that can reach the API may call it, only five kinds are accepted: `tool_call`, `tool_result`, `error`, `grant_decision` and `connector_health`. Board events (`task_created`, `status_changed`, `execution_started` and the rest) come only from the server and are never accepted here. A malformed event is skipped without failing the batch.
+
+The first three kinds store `data` as sent (it is masked when read). For `connector_health` and `grant_decision` the server rebuilds `data` from a fixed shape and drops every other field:
+
+| Kind               | Kept fields                                                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connector_health` | `connectorId`, `health` (`unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`; anything else becomes `unknown`), `detail`, `failures` |
+| `grant_decision`   | `decision` (`allow`, `require_approval` or `deny`; anything else becomes `deny`), `reason`, `grantId`, `connectorId`, `toolName`, `ruleId`     |
+
+In those two kinds, `detail` is masked for secrets and cut to 200 characters, and the other text fields are masked and cut to 120.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -364,30 +381,30 @@ Mirrors client-observed runtime events into the durable log. The OpenClaw runtim
 ```ts
 {
   events?: Array<{
-    kind: 'tool_call' | 'tool_result' | 'error'  // any other kind is dropped
+    kind: 'tool_call' | 'tool_result' | 'error' | 'grant_decision' | 'connector_health' // others are skipped
     ts?: number              // must be within [now - 24h, now + 60s], else server time is used
     teamId?: string | null
     taskId?: string | null
     agentId?: string | null
     runtime?: string | null   // defaults to 'openclaw' when omitted
-    data?: Record<string, unknown>  // non-object → {}
+    data?: Record<string, unknown>  // anything but an object is stored as {}
   }>
 }
 ```
 
-A non-array `events` is treated as empty. At most 200 events are accepted per call (the rest are sliced off). Any event whose `kind` is missing or not in the whitelist is skipped.
+A missing or non-array `events` counts as empty. At most 200 events are taken per call; the rest are ignored. An event whose `kind` is missing or not one of the five is skipped.
 
-A supplied `ts` is clamped to a band around server time (60 s ahead for clock skew, 24 h behind) and replaced with server time when it falls outside. `ts` is not just metadata: fleet health derives staleness from it, so a future timestamp would pin an agent at `working` and mask a genuine `zombie`. A mirror reports what a browser just observed, so a timestamp far from now is wrong regardless of intent.
+A `ts` more than 60 seconds ahead of the server clock, or more than 24 hours behind it, is replaced with the server's time. Agent health is worked out from `ts`, so a future timestamp would keep an agent `working` and hide a real `zombie`.
 
 ### Responses
 
-**`200 OK`**: the count of events actually appended (after whitelist + slice):
+**`200 OK`**: how many events were added:
 
 ```json
 { "ok": true, "count": 3 }
 ```
 
-**`400 Bad Request`**: an unexpected throw while ingesting (the error string is redacted):
+**`400 Bad Request`**: an unexpected failure while adding events (the message is masked):
 
 ```json
 { "error": "<message>" }
@@ -405,19 +422,19 @@ curl -X POST http://localhost:18790/api/obs/ingest \
 
 ## `POST /api/eval/smoke`
 
-Runs the deterministic eval smoke suite (`SMOKE_TASKS`), the exact subset CI runs, and returns the real `SuiteReport`. It uses no live model, no provider keys, no executor/RuntimeAdapter, and no network; each trial gets its own temp-dir SQLite board (disjoint from the real `clawboo.db`), and the contexts are cleaned up after the run. The ablation self-test (variants over the harness's own subsystem flags) runs only from the manual `evals.yml` workflow; it is explained in the UI but never driven from this route, and no live-model judge is wired into it yet.
+Runs the smoke subset of Clawboo's built-in eval suite (`SMOKE_TASKS`) and returns its report. It calls no model, needs no provider key, starts no runtime and uses no network. Each trial runs on its own throwaway board in a temporary SQLite file, never your `clawboo.db`, and the temporary files are removed afterwards. The ablation self-test runs only in the repository's manual `evals.yml` workflow, never from this route.
 
 - **Path/query params**: none.
 - **Request body**:
 
 ```ts
 {
-  trials?: number  // clamped to [1, 3]; non-finite/missing → 1
-  k?: number       // clamped to [1, 3]; non-finite/missing → trials
+  trials?: number  // 1 to 3; missing or not a number means 1
+  k?: number       // 1 to 3; missing or not a number means the trials value
 }
 ```
 
-Both inputs are floored and clamped so the route can never be turned into a load generator.
+Both values are rounded down and kept between 1 and 3, so the run stays small.
 
 ### Responses
 
@@ -445,7 +462,7 @@ Both inputs are floored and clamped so the route can never be turned into a load
 }
 ```
 
-**`500 Internal Server Error`**: the run threw (contexts are still cleaned up in `finally`):
+**`500 Internal Server Error`**: the run failed (the temporary files are still removed):
 
 ```json
 { "error": "<message>" }
@@ -463,12 +480,12 @@ curl -X POST http://localhost:18790/api/eval/smoke \
 
 ## Error envelope
 
-Every error response on these routes is the standard envelope `{ error: string }`. On the obs routes the error string is run through the display redactor before it is sent. The two success-shaped exceptions are `/api/obs/ingest` (`{ ok: true, count }`) and `/api/eval/smoke` (the bare `SuiteReport`).
+Most error bodies are `{ "error": "<message>" }`; on the `/api/obs/*` routes the message is masked before it is sent. Two success shapes differ from the rest: `POST /api/obs/ingest` answers `{ "ok": true, "count": n }`, and `POST /api/eval/smoke` answers the bare suite report.
 
-## See also
+## Related
 
-- [Observability concepts](/concepts/observability), the event log, traces, the Ghost-Graph projection, and fleet-health triage
-- [Events & errors reference](/reference/events-and-errors), the orchestration event kinds and the error taxonomy
-- [Observability dashboard](/using/observability-dashboard), the UI over these endpoints (traces, errors, fleet health, the eval scorecard)
-- [Board API](/reference/rest-api/board), the board lifecycle events this log records
-- [REST API overview](/reference/rest-api/index)
+- [Observability](/concepts/observability): the event log, traces and agent health.
+- [Observability panel](/using/observability): the dashboard views over these routes.
+- [Events and errors](/reference/events-and-errors): each event kind's `data` and the error classes.
+- [Costs API](/reference/rest-api/costs): cost records and the fleet summary.
+- [Board API](/reference/rest-api/board): the board routes that write task events.

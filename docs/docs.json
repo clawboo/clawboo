@@ -92,9 +92,7 @@
               "concepts/governance",
               "concepts/observability",
               "concepts/worktrees-and-handoff",
-              "concepts/scheduling",
-              "concepts/gateway-and-events",
-              "concepts/architecture-invariants"
+              "concepts/scheduling"
             ]
           },
           {
@@ -169,10 +167,12 @@
               "reference/cli",
               "reference/configuration",
               "reference/environment-variables",
-              "reference/database-schema",
+              "reference/limits-and-defaults",
+              "reference/keyboard-shortcuts",
               "reference/mcp-tools",
-              "reference/marketplace-catalog",
-              "reference/events-and-errors"
+              "reference/events-and-errors",
+              "reference/database-schema",
+              "reference/marketplace-catalog"
             ]
           },
           {
@@ -180,76 +180,74 @@
             "pages": [
               "reference/rest-api/index",
               "reference/rest-api/agents",
+              "reference/rest-api/teams",
               "reference/rest-api/board",
-              "reference/rest-api/capabilities",
-              "reference/rest-api/governance",
               "reference/rest-api/memory",
-              "reference/rest-api/misc",
-              "reference/rest-api/observability",
+              "reference/rest-api/capabilities",
+              "reference/rest-api/connectors",
+              "reference/rest-api/boo-zero",
               "reference/rest-api/runtimes",
               "reference/rest-api/schedules",
+              "reference/rest-api/governance",
+              "reference/rest-api/costs",
+              "reference/rest-api/observability",
+              "reference/rest-api/tools-and-mcp",
+              "reference/rest-api/agent-settings",
+              "reference/rest-api/chat-history",
               "reference/rest-api/settings",
               "reference/rest-api/system",
-              "reference/rest-api/teams",
-              "reference/rest-api/tools-and-mcp"
+              "reference/rest-api/catalog"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Contribute",
+        "groups": [
+          {
+            "group": "Start here",
+            "pages": [
+              "internals/index",
+              "appendices/contributing",
+              "internals/monorepo-and-build",
+              "internals/testing",
+              "internals/release-process",
+              "internals/design-system"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "internals/architecture-invariants",
+              "internals/gateway-and-events",
+              "internals/runtime-adapter",
+              "internals/agent-source",
+              "internals/seams",
+              "internals/executor-runner",
+              "internals/board-internals",
+              "internals/event-pipeline"
             ]
           },
           {
             "group": "Packages",
             "pages": [
               "reference/packages/index",
-              "reference/packages/adapter-claude-code",
-              "reference/packages/adapter-codex",
-              "reference/packages/adapter-hermes",
-              "reference/packages/adapter-native",
-              "reference/packages/adapter-openclaw",
-              "reference/packages/agent-registry",
-              "reference/packages/board-core",
-              "reference/packages/boo-avatar",
-              "reference/packages/capability-registry",
-              "reference/packages/compaction",
-              "reference/packages/config",
-              "reference/packages/control-client",
-              "reference/packages/db",
-              "reference/packages/evals",
-              "reference/packages/events",
               "reference/packages/executor",
-              "reference/packages/gateway-client",
-              "reference/packages/gateway-proxy",
-              "reference/packages/governance",
-              "reference/packages/logger",
+              "reference/packages/adapters",
+              "reference/packages/db",
               "reference/packages/mcp",
-              "reference/packages/model-catalog",
-              "reference/packages/obs",
-              "reference/packages/process-lookup",
-              "reference/packages/protocol",
-              "reference/packages/scheduler",
+              "reference/packages/gateway-client",
+              "reference/packages/governance",
+              "reference/packages/connector-catalog",
+              "reference/packages/board-core",
               "reference/packages/team-orchestration",
-              "reference/packages/tsconfig",
-              "reference/packages/ui",
+              "reference/packages/scheduler",
               "reference/packages/worktrees"
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Internals",
-        "groups": [
+          },
           {
-            "group": "Internals & Contributing",
-            "pages": [
-              "internals/index",
-              "internals/monorepo-and-build",
-              "internals/runtime-adapter",
-              "internals/agent-source",
-              "internals/seams",
-              "internals/executor-runner",
-              "internals/board-internals",
-              "internals/event-pipeline",
-              "internals/testing",
-              "internals/release-process",
-              "internals/design-system"
-            ]
+            "group": "Legal",
+            "pages": ["appendices/license-and-notices"]
           }
         ]
       },
@@ -262,9 +260,7 @@
               "appendices/glossary",
               "appendices/known-issues",
               "appendices/faq",
-              "appendices/changelog",
-              "appendices/contributing",
-              "appendices/license-and-notices"
+              "appendices/changelog"
             ]
           }
         ]
@@ -293,25 +289,52 @@
       {
         "header": "Product",
         "items": [
-          { "label": "Install", "href": "https://www.npmjs.com/package/clawboo" },
-          { "label": "Website", "href": "https://www.claw.boo" },
-          { "label": "Changelog", "href": "/appendices/changelog" }
+          {
+            "label": "Install",
+            "href": "https://www.npmjs.com/package/clawboo"
+          },
+          {
+            "label": "Website",
+            "href": "https://www.claw.boo"
+          },
+          {
+            "label": "Changelog",
+            "href": "/appendices/changelog"
+          }
         ]
       },
       {
         "header": "Docs",
         "items": [
-          { "label": "Quickstart", "href": "/getting-started/index" },
-          { "label": "Core Concepts", "href": "/concepts/index" },
-          { "label": "REST API", "href": "/reference/rest-api/index" }
+          {
+            "label": "Quickstart",
+            "href": "/getting-started/index"
+          },
+          {
+            "label": "Core Concepts",
+            "href": "/concepts/index"
+          },
+          {
+            "label": "REST API",
+            "href": "/reference/rest-api/index"
+          }
         ]
       },
       {
         "header": "Community",
         "items": [
-          { "label": "GitHub", "href": "https://github.com/clawboo/clawboo" },
-          { "label": "Contributing", "href": "/appendices/contributing" },
-          { "label": "License", "href": "/appendices/license-and-notices" }
+          {
+            "label": "GitHub",
+            "href": "https://github.com/clawboo/clawboo"
+          },
+          {
+            "label": "Contributing",
+            "href": "/appendices/contributing"
+          },
+          {
+            "label": "License",
+            "href": "/appendices/license-and-notices"
+          }
         ]
       }
     ]
@@ -319,5 +342,110 @@
   "metadata": {
     "timestamp": true
   },
-  "redirects": [{ "source": "/using/scheduler", "destination": "/using/routines" }]
+  "redirects": [
+    {
+      "source": "/concepts/architecture-invariants",
+      "destination": "/internals/architecture-invariants"
+    },
+    {
+      "source": "/concepts/gateway-and-events",
+      "destination": "/internals/gateway-and-events"
+    },
+    {
+      "source": "/internals/codegen-and-ingestion",
+      "destination": "/reference/marketplace-catalog"
+    },
+    {
+      "source": "/reference/packages/adapter-claude-code",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-codex",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-hermes",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-native",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-openclaw",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/agent-registry",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/boo-avatar",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/capability-registry",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/compaction",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/config",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/control-client",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/evals",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/events",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/gateway-proxy",
+      "destination": "/reference/packages/gateway-client"
+    },
+    {
+      "source": "/reference/packages/logger",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/model-catalog",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/obs",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/process-lookup",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/protocol",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/tsconfig",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/ui",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/rest-api/misc",
+      "destination": "/reference/rest-api/index"
+    },
+    {
+      "source": "/using/scheduler",
+      "destination": "/using/routines"
+    }
+  ]
 }

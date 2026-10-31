@@ -1,156 +1,143 @@
 ---
-title: '@clawboo/gateway-client'
-description: 'WebSocket client for the OpenClaw Gateway: typed RPC, event subscription, reconnect, and Ed25519 device auth.'
+title: 'Gateway client and proxy'
+sidebarTitle: 'gateway-client'
+description: 'The OpenClaw Gateway client, the server-side proxy and device identity, the optional access gate, and the always-on Origin and Host guard.'
+keywords:
+  [
+    '@clawboo/gateway-client',
+    '@clawboo/gateway-proxy',
+    'gateway-client',
+    'gateway-proxy',
+    'GatewayClient',
+    'device identity',
+    'access gate',
+    'STUDIO_ACCESS_TOKEN',
+    'origin guard',
+    'CLAWBOO_ALLOWED_ORIGINS',
+    'CLAWBOO_ALLOWED_HOSTS',
+    'exec approvals',
+  ]
 ---
 
-|                    |                                                                                                                                                                                               |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Version**        | `0.1.1`                                                                                                                                                                                       |
-| **Purity**         | browser-safe (the `ws` dep is for Node injection only; see `webSocketImpl`)                                                                                                                   |
-| **Purpose**        | A WebSocket client for the OpenClaw Gateway: UUID-keyed request/response correlation, event subscription, reconnect lifecycle, and a typed RPC surface for agents / sessions / config / chat. |
-| **Workspace deps** | `@clawboo/logger`                                                                                                                                                                             |
-| **External deps**  | `@noble/ed25519`, `ws`                                                                                                                                                                        |
+Two packages carry Clawboo's connection to an OpenClaw Gateway and guard the dashboard's own front door.
+`@clawboo/gateway-client` is the WebSocket client the SPA and the server use to talk to a Gateway.
+`@clawboo/gateway-proxy` is its server half: the same-origin WebSocket proxy the browser connects through, the
+device identity that signs the Gateway handshake, the optional access gate and the always-on Origin and Host
+guard.
 
-The client owns reconnection after a connection that opened then dropped (`800 ms → 15 s` backoff). It negotiates the OpenClaw connect protocol (`minProtocol: 3, maxProtocol: 4`) and signs the connect frame with Ed25519 device auth in the browser (via `crypto.subtle`), or through an injected `signConnect` hook for Node callers. The `device-auth` module is internal and not re-exported.
-
-## Public API
-
-### Classes
-
-| Export          | Signature             | Contract                                                                                                                                                                                                                                                                                                                                     |
-| --------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GatewayClient` | `new GatewayClient()` | The WS client. Lifecycle: `connect(url, opts?)` / `disconnect()`. RPC: `call<T>(method, params?, timeoutMs = 60_000)`. Subscriptions: `onStatus(handler)`, `onEvent(handler)`, `on(event, handler)` (each returns an unsubscribe fn). Getter `status`; `getLastHello()`. Typed namespaces `agents` / `sessions` / `config` / `chat` (below). |
-
-`GatewayClient` typed RPC namespaces (instance fields, not separate exports):
-
-| Member              | Signature                                                                      | Contract                                                                                                                                                                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agents.list`       | `() => Promise<AgentsListResult>`                                              | RPC `agents.list`.                                                                                                                                                                                                                                                              |
-| `agents.create`     | `(config: AgentCreateConfig) => Promise<AgentCreateResult>`                    | RPC `agents.create` with a 2-minute timeout (the Gateway resolves the default model, which can be slow on Windows).                                                                                                                                                             |
-| `agents.delete`     | `(id: string) => Promise<void>`                                                | RPC `agents.delete` with param `{ agentId: id }`.                                                                                                                                                                                                                               |
-| `agents.files.read` | `(agentId, name) => Promise<string>`                                           | Calls RPC `agents.files.get`; returns `res.file.content` or `''` when missing.                                                                                                                                                                                                  |
-| `agents.files.set`  | `(agentId, name, content) => Promise<void>`                                    | RPC `agents.files.set`, 2-minute timeout.                                                                                                                                                                                                                                       |
-| `sessions.list`     | `(agentId: string) => Promise<Session[]>`                                      | RPC `sessions.list`.                                                                                                                                                                                                                                                            |
-| `sessions.send`     | `(agentId, message) => Promise<void>`                                          | RPC `sessions.send`, delivers a message to the agent's main session.                                                                                                                                                                                                            |
-| `sessions.patch`    | `(key, updates) => Promise<SessionPatchResult>`                                | RPC `sessions.patch` (model / thinkingLevel / execHost). `execSecurity` and `execAsk` are RETIRED: they remain in the v4 schema but any request carrying either, `null` included, is refused with guidance to set `permissionMode` instead.                                     |
-| `sessions.abort`    | `(key, runId?) => Promise<{ ok; abortedRunId?; status? }>`                     | Heavy session-level abort; `runId` optional (Gateway resolves the active run from `key`). `status: 'no-active-run'` is a benign no-op.                                                                                                                                          |
-| `config.get`        | `() => Promise<GatewayConfig>`                                                 | RPC `config.get`.                                                                                                                                                                                                                                                               |
-| `config.patch`      | `(updates: Partial<GatewayConfig>, baseHash?, replacePaths?) => Promise<void>` | RPC `config.patch`, wire-encoded via `encodeConfigPatchParams` (`{ raw, baseHash, replacePaths }`). `replacePaths` is DERIVED from `updates` when omitted, so callers need not declare it; pass it only to override that. Without it a patch that shortens an array is refused. |
-| `chat.abort`        | `(sessionKey, runId) => Promise<{ ok; abortedRunId?; status? }>`               | Surgical per-run cancel, the Stop-button primitive.                                                                                                                                                                                                                             |
-
-### Functions
-
-| Export                           | Signature                                                                                                                    | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `parseGatewayFrame`              | `(raw: string) => Frame \| null`                                                                                             | `JSON.parse` a wire frame; returns `null` on parse failure.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `buildAgentMainSessionKey`       | `(agentId: string, mainKey: string) => string`                                                                               | Builds `agent:<agentId>:<mainKey>` (defaults `mainKey` to `'main'` when blank).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `parseAgentIdFromSessionKey`     | `(sessionKey: string) => string \| null`                                                                                     | Extracts the agent id from an `agent:<id>:` key; `null` on no match.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `isSameSessionKey`               | `(a: string, b: string) => boolean`                                                                                          | True when both trim to the same non-empty string.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `isGatewayDisconnectLikeError`   | `(err: unknown) => boolean`                                                                                                  | True for "gateway not connected"/"client stopped" messages or a `Gateway closed (1012)` reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `isAuthError`                    | `(msg: string \| null) => boolean`                                                                                           | Heuristic: true when the message reads as auth / unauthorized / forbidden / invalid-token / token-missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `resolveProxyGatewayUrl`         | `() => string`                                                                                                               | Same-origin `ws(s)://<host>/api/gateway/ws`; falls back to `ws://localhost:18790/api/gateway/ws` when `window` is undefined (SSR/Node).                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `isLocalGatewayUrl`              | `(url: string) => boolean`                                                                                                   | True when the URL host is `localhost` / `127.0.0.1` / `::1` / `0.0.0.0`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `encodeConfigPatchParams`        | `(updates: Partial<GatewayConfig>, baseHash?: string, replacePaths?: string[]) => { raw: string; baseHash?; replacePaths? }` | Encodes a partial config into the `config.patch` envelope: `raw` = `JSON.stringify(updates)`, optional optimistic-concurrency `baseHash` from a prior `config.get`, and `replacePaths` naming every array being replaced. From OpenClaw 2026.9 a patch that would SHORTEN an array is refused unless its path is declared, so `replacePaths` is derived from the payload by `collectArrayPaths` rather than hand-listed at each call site. Object maps such as `mcp.servers` are skipped: they merge RFC 7386 style, where a key is removed by sending it as null. |
-| `formatGatewayError`             | `(error: unknown) => string`                                                                                                 | Renders an error for display; `GatewayResponseError` → `Gateway error (<code>): <message>` (adds a `doctor --fix` hint on invalid-config).                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `resolveGatewayAutoRetryDelayMs` | `(params: AutoRetryDelayParams) => number \| null`                                                                           | Auto-reconnect backoff (`2s × 1.5^attempt`, capped 30s, max 20 attempts); `null` to stop on manual disconnect / non-retryable code / auth error.                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `syncGatewaySessionSettings`     | `(params: SyncSessionSettingsParams) => Promise<SessionPatchResult>`                                                         | Builds a `sessions.patch` payload from the provided settings (at least one required) and calls it through the injected `GatewayClientLike`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
-
-### Types & interfaces
-
-| Export                      | Kind      | Contract                                                                                                                                                                                                                                     |
-| --------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ReqFrame`                  | type      | Request frame: `{ type: 'req'; id; method; params }`.                                                                                                                                                                                        |
-| `ResFrame`                  | type      | Response frame: `{ type: 'res'; id; ok; payload?; error? }`.                                                                                                                                                                                 |
-| `EventFrame`                | type      | Event frame: `{ type: 'event'; event; payload?; seq?; stateVersion? }`.                                                                                                                                                                      |
-| `Frame`                     | type      | `ReqFrame \| ResFrame \| EventFrame`.                                                                                                                                                                                                        |
-| `GatewayStateVersion`       | type      | `{ presence: number; health: number }`.                                                                                                                                                                                                      |
-| `GatewayHelloOk`            | type      | The `hello-ok` connect response: protocol, features, snapshot, auth (deviceToken/role/scopes), policy.                                                                                                                                       |
-| `AgentStatus`               | type      | `'idle' \| 'running' \| 'error' \| 'sleeping'`.                                                                                                                                                                                              |
-| `Agent`                     | interface | `{ id; name; status?; sessionKey?; model?; createdAt? }`.                                                                                                                                                                                    |
-| `AgentListEntry`            | interface | `{ id; name?; identity? }` (identity carries theme/emoji/avatar).                                                                                                                                                                            |
-| `AgentsListResult`          | interface | `{ defaultId; mainKey; scope?; agents: AgentListEntry[] }`.                                                                                                                                                                                  |
-| `AgentCreateConfig`         | interface | `{ name; workspace }`, the only fields `agents.create` accepts.                                                                                                                                                                              |
-| `AgentCreateResult`         | interface | `{ agentId; name; workspace? }`.                                                                                                                                                                                                             |
-| `Session`                   | interface | `{ key; agentId; createdAt?; updatedAt? }`.                                                                                                                                                                                                  |
-| `GatewayConfig`             | interface | `{ path?; gateway?: { url?; token? }; [key: string]: unknown }`, loose; mirrors the on-disk config.                                                                                                                                          |
-| `ConnectionStatus`          | type      | `'disconnected' \| 'connecting' \| 'connected' \| 'reconnecting'`.                                                                                                                                                                           |
-| `GatewayDeviceField`        | interface | Signed device fields on a connect frame: `{ id; publicKey; signature; signedAt; nonce? }`.                                                                                                                                                   |
-| `ConnectOptions`            | interface | Connect args: `clientName?`, `clientVersion?`, `token?`, `password?`, `authScopeKey?`, `disableDeviceAuth?`, `platform?`, `mode?`, `instanceId?`, `signConnect?` (Node device-auth hook), `origin?` (Node-only WS Origin), `webSocketImpl?`. |
-| `WebSocketLikeCtor`         | type      | `new (url: string, options?: { origin?: string }) => WebSocket`, a constructor compatible with both the DOM global and the `ws` package.                                                                                                     |
-| `SessionPatchResult`        | type      | `{ ok: true; key; entry?; resolved? }`.                                                                                                                                                                                                      |
-| `GatewayClientLike`         | type      | `{ call<T>(method, params?): Promise<T> }`, the minimal forward-reference used by helper params.                                                                                                                                             |
-| `SyncSessionSettingsParams` | type      | Input for `syncGatewaySessionSettings`: `{ client; sessionKey; model?; thinkingLevel?; execHost?; execSecurity?; execAsk? }`.                                                                                                                |
-| `AutoRetryDelayParams`      | type      | Input for `resolveGatewayAutoRetryDelayMs`: `{ status; didAutoConnect; wasManualDisconnect; gatewayUrl; errorMessage; connectErrorCode; attempt }`.                                                                                          |
-| `GatewayErrorPayload`       | type      | `{ code; message; details?; retryable?; retryAfterMs? }`.                                                                                                                                                                                    |
-
-### Errors
-
-| Export                 | Kind  | Contract                                                                                                                                                                                                      |
-| ---------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GatewayResponseError` | class | `extends Error`; constructed from a `GatewayErrorPayload`. Exposes read-only `code`, `details?`, `retryable?`, `retryAfterMs?`. SPA code branches on `err.code === 'NOT_PAIRED'` for the device-pairing flow. |
-
-### Constants
-
-| Export                                | Kind  | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GATEWAY_BROWSER_CLIENT_ID`           | const | `'webchat-ui'`, the client id a browser connection sends at connect. The server-side connection sends `cli` instead, because the browser-UI ids also require a browser `Origin` header a Node connection cannot send (`CONTROL_UI_ORIGIN_NOT_ALLOWED`).                                                                                                                                                                                                                                                                           |
-| `GATEWAY_BROWSER_CAPS`                | const | `readonly ['exec-approvals']`, the capabilities a browser connection declares. Declaring `exec-approvals` is what makes that socket an approval surface: the Gateway registers an approval route per run only for connections that declared it, and a run with no such route is denied outright (`exec denied: Headless runs cannot wait for interactive exec approval`) rather than queued. The server-side connection passes its own `caps` (`['tool-events', 'exec-approvals']`) explicitly and is unaffected by this default. |
-| `EXEC_ALLOWLIST_CWD_BOUND_PREFIX`     | const | `'sha256:cwd-argv:v1:'`, the only `argPattern` form an `allow-always` row is read as live in. A hand-typed pattern on such a row classifies as `inert-allow-always`.                                                                                                                                                                                                                                                                                                                                                              |
-| `EXEC_ALLOWLIST_NODE_MARKER_PREFIX`   | const | `'=node-command:'`, the companion row an operator's "Always" mints alongside the grant. It authorizes nothing on its own, and the grant is read as depending on it, so both rows are removed together.                                                                                                                                                                                                                                                                                                                            |
-| `EXEC_ALLOWLIST_EXACT_COMMAND_PREFIX` | const | `'=command:'`, the other marker form. A row carrying it is read as granting one exact command by itself.                                                                                                                                                                                                                                                                                                                                                                                                                          |
-
-### Exec approvals policy
-
-The Gateway keeps each agent's exec approval posture, and the standing grants under it, in a store of its own, which it exposes over the wire only through `exec.approvals.get` and `exec.approvals.set`. Three modules cover it: `execApprovals.ts` writes the posture, `execAllowlist.ts` reads what a stored row means, and `execRevoke.ts` removes grants. All three are on the barrel because the server and the browser SPA are separate build targets and both need them.
-
-<Warning>
-clawboo treats `exec.approvals.get` as a WRITE rather than a read. On clawboo's reading of OpenClaw, that call re-serialises the document and saves it back, so issuing it against a stored document that cannot be parsed would replace every agent's policy with a fail-closed default. Anything that only needs to READ the grants should read OpenClaw's stored row directly instead; see [Data and state](/operating/data-and-state).
-</Warning>
-
-| Export                         | Kind      | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `resolveExecPatchParams`       | function  | `() => { execHost: 'gateway' }`. The session-level exec fields `sessions.patch` still accepts. `execSecurity` and `execAsk` are RETIRED: they survive in the v4 schema, but a request carrying either, `null` included, is refused, so only `execHost` is sent. `permissionMode` is not offered as a replacement here because it also sets the session's filesystem boundary.                                                                                                                |
-| `ExecAllowlistEntry`           | type      | `{ id?; pattern; argPattern?; source?; lastUsedAt?; [key: string]: unknown }`, one standing grant as the Gateway writes it. The index signature is deliberate: the Gateway owns this document, and a closed shape invites a caller to map over the rows and write back entries stripped of `argPattern`, which stop matching the command they were minted for.                                                                                                                               |
-| `AgentApprovalPolicy`          | type      | `{ security?; ask?; allowlist? }`, one agent bucket inside the document.                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `GatewayApprovalsDoc`          | type      | `{ version: 1; socket?; defaults?; agents? }`, the whole fleet permissions document. `socket` and `defaults` are carried across a rewrite rather than rebuilt.                                                                                                                                                                                                                                                                                                                               |
-| `ApprovalsGetResult`           | type      | `{ path; exists; hash; file? }`, the `exec.approvals.get` / `exec.approvals.set` payload. `hash` is the base hash a compare-and-swap write quotes back.                                                                                                                                                                                                                                                                                                                                      |
-| `ExecApprovalsMutationOutcome` | interface | `{ wrote; attempts; result? }`. `result` is the Gateway's own account of the document AFTER the write, which is what lets a caller prove a change landed without calling `exec.approvals.get` again (that call is itself a write).                                                                                                                                                                                                                                                           |
-| `mutateExecApprovalsDoc`       | function  | `(client, mutate, opts?: { attempts? }) => Promise<ExecApprovalsMutationOutcome>`. Reads the document, runs `mutate` on it, and writes it back under the base-hash compare-and-swap (default 3 attempts). On a conflict `mutate` is re-run against the FRESH read rather than the computed payload being re-sent, so a concurrent write is not erased. `mutate` returns `null` to write nothing. A reply that is not a policy snapshot throws instead of being treated as an empty document. |
-| `upsertExecApprovalPolicy`     | function  | `(client, agentId, execAsk) => Promise<void>`. Writes one Boo's exec posture. `execAsk: 'off'` removes the two posture fields and keeps the allowlist, so standing grants survive Run Freely. An emptied bucket is dropped, since absent and empty resolve the same way.                                                                                                                                                                                                                     |
-| `ExecAllowlistClass`           | type      | A tagged union of the eight ways one stored row is read: `bound-grant`, `node-marker`, `exact-command-grant`, `inert-allow-always`, `path-rule`, `arg-rule`, `catch-all`, `inert`.                                                                                                                                                                                                                                                                                                           |
-| `ClassifiableEntry`            | interface | `{ pattern?; argPattern?; source?; [key: string]: unknown }`, the minimum an entry needs for the classifier.                                                                                                                                                                                                                                                                                                                                                                                 |
-| `isCwdBoundArgPattern`         | function  | `(value: unknown) => boolean`. True when the value is a string starting `sha256:cwd-argv:v1:`.                                                                                                                                                                                                                                                                                                                                                                                               |
-| `classifyExecAllowlistEntry`   | function  | `(entry: ClassifiableEntry) => ExecAllowlistClass`. A transcription of the branches the enforcing matcher was observed taking, written in that same order so the two can be compared clause by clause when OpenClaw changes.                                                                                                                                                                                                                                                                 |
-| `isEffectiveExecGrant`         | function  | `(entry: ClassifiableEntry) => boolean`. Whether this row can let a command through ON ITS OWN. False for `node-marker`.                                                                                                                                                                                                                                                                                                                                                                     |
-| `affectsEnforcement`           | function  | `(entry: ClassifiableEntry) => boolean`. Whether removing this row could change what the Boo can run. Broader than `isEffectiveExecGrant` by exactly the companion markers, and it is the question a revoke button needs answered.                                                                                                                                                                                                                                                           |
-| `execAllowlistEntryKey`        | function  | `(entry: ClassifiableEntry) => string`. A content fingerprint over `pattern`, `argPattern` and `source`, NUL-joined. Not the entry `id`: ids are minted during normalisation for rows that lack one, so a revoke keyed on an id can miss, or hit a neighbour.                                                                                                                                                                                                                                |
-| `ExecRevokeOutcome`            | type      | A tagged union of five outcomes: `revoked`, `already-absent`, `blocked-wildcard`, `no-such-agent`, `not-verified`. `not-verified` is the one that is not a no-op: the write landed and the rows are still there.                                                                                                                                                                                                                                                                             |
-| `removeExecAllowlistEntries`   | function  | `(doc, agentId, keys) => { next; removed }`. Pure. Rows are filtered, never mapped, so no surviving entry is rebuilt. An emptied allowlist is kept rather than deleted, because dropping the bucket would hand the Boo's posture back to the document defaults.                                                                                                                                                                                                                              |
-| `revokeExecAllowlistEntries`   | function  | `(client, { agentId, keys }) => Promise<ExecRevokeOutcome>`. `agentId` is OpenClaw's id and `keys` are `execAllowlistEntryKey` fingerprints. It refuses the whole request when any key also lives in the `agents['*']` bucket, since that copy would keep granting, and it checks the removal against the Gateway's post-write reply before reporting `revoked`.                                                                                                                             |
+Use this page when you change how Clawboo talks to OpenClaw or touch dashboard access control. The operator's
+view of the same controls is on [Security model](/operating/security).
 
 <Note>
-The runtime constants above are the barrel's only ones. The connect protocol range (`minProtocol: 3, maxProtocol: 4`), the retry constants, and the close codes stay private to `client.ts` / `helpers.ts`.
+
+The Ed25519 device identity only proves this Clawboo install to the OpenClaw Gateway. Who may open the dashboard
+is decided by the access gate (off unless `STUDIO_ACCESS_TOKEN` is set) and the Origin and Host guard.
+
 </Note>
 
-## Used by
+## The Gateway client
 
-- `apps/web/src/stores/connection.ts`, holds the live `GatewayClient` instance (`ConnectionStatus` superset adds an `'error'` state).
-- `apps/web/src/features/connection/{GatewayBootstrap,GatewayConnectScreen,useGatewayEvents}.tsx?`, connect/reconnect lifecycle and event subscription; `GatewayResponseError.code` drives the `NOT_PAIRED` pairing branch.
-- `apps/web/server/lib/agentSource/registry.ts`, the server-side `OpenClawAgentSource` connection injects `WebSocketLikeCtor` + `signConnect` for Node device auth.
-- `apps/web/server/lib/capabilitySource/openclaw.ts`, uses `encodeConfigPatchParams` for the `config.patch` envelope.
-- `apps/web/server/lib/agentSource/openclawExecAllowlistRead.ts`, uses `classifyExecAllowlistEntry` + `execAllowlistEntryKey` to read a Boo's standing grants out of OpenClaw's own state database rather than through the Gateway.
-- `apps/web/server/api/execAllowlist.ts` and `apps/web/server/lib/agentSource/execApprovalPolicy.ts`, the routes behind the Permissions tab: `revokeExecAllowlistEntries` and `upsertExecApprovalPolicy`.
-- `packages/events/src/{index,bridge,types}.ts`, consumes the `EventFrame` / `AgentStatus` / `ConnectionStatus` types in the Bridge → Policy → Handler pipeline.
-- `packages/adapters/openclaw/src/{adapter,mapFrame,types}.ts`, maps `EventFrame` / `AgentsListResult` / `SessionPatchResult` into the normalized `RuntimeEvent` stream.
+`GatewayClient` connects to a Gateway, correlates requests and responses, delivers event frames to `onEvent`
+subscribers, and reconnects with backoff when a connection that was open drops. `call(method, params)` sends any
+RPC, and typed groups cover the common ones: `agents` (list, create, files), `sessions`, `config` and `chat`.
 
-## Source
+`connect(url, options)` negotiates OpenClaw's protocol range and takes these options:
 
-Barrel: [`packages/gateway-client/src/index.ts`](https://github.com/clawboo/clawboo/tree/main/packages/gateway-client/src/index.ts). Modules: `types.ts` (frame + domain + connect types), `errors.ts` (`GatewayResponseError`), `client.ts` (the `GatewayClient` class), `helpers.ts` (frame/session/url/error/retry helpers, plus the two connect constants), `execApprovals.ts` (the Gateway-held exec policy, read-modify-write under compare-and-swap), `execAllowlist.ts` (what one stored grant means, plus the three pattern prefixes), `execRevoke.ts` (removing grants, and proving it). `device-auth.ts` is internal and not re-exported.
+- `token` or `password` for the Gateway's own auth.
+- `caps`, the capabilities the connection declares. The default, `GATEWAY_BROWSER_CAPS`, declares exec approvals.
+  The server's own connection declares `tool-events` and `exec-approvals`.
+- `signConnect`, for a caller that signs the connect frame with its own identity, and `webSocketImpl` and
+  `origin`, for a caller outside the browser. The server passes the `ws` package's constructor and the Gateway
+  host as the origin.
+- `disableDeviceAuth`. The client can sign the connect frame itself in a secure browser context, with an Ed25519
+  key kept in `localStorage`, but the dashboard turns that off because the proxy signs for it.
 
-## See also
+`GatewayResponseError` carries the Gateway's error code (the pairing flow keys off `NOT_PAIRED`), and
+`isAuthConnectError` and `authRetryAfterMs` tell a caller whether and when to retry an auth failure.
 
-- [Gateway & events pipeline](/concepts/gateway-and-events), how frames flow Bridge → Policy → Handler.
-- [@clawboo/events](/reference/packages/events), the consumer that turns `EventFrame`s into store mutations.
-- [@clawboo/adapter-openclaw](/reference/packages/adapter-openclaw), the RuntimeAdapter wrapping this client.
-- [@clawboo/gateway-proxy](/reference/packages/gateway-proxy), the same-origin WS proxy + the `signConnectParams` server wires to `signConnect`.
-- [OpenClaw runtime](/runtimes/openclaw), device pairing and channels.
+The package is browser-safe: it uses the global `WebSocket` and never imports `ws`, although its manifest still
+lists it. The SPA uses it for the live connection, events and the pairing flow. On the server it backs the shared
+Gateway connection in `apps/web/server/lib/agentSource/registry.ts`, the OpenClaw capability source, and the
+Permissions tab routes. `@clawboo/events` and `@clawboo/adapter-openclaw` import its types.
+
+## Exec approvals
+
+The Gateway keeps every agent's exec posture and its standing command grants in one fleet-wide document, reachable
+only through `exec.approvals.get` and `exec.approvals.set`. The package's exec helpers follow four rules, and any
+new code that touches the document must too:
+
+- **Treat `exec.approvals.get` as a write.** The Gateway re-saves the document when it answers, and an unparseable
+  stored document would be replaced with a fail-closed default for every agent. Code that only reads grants reads
+  OpenClaw's stored row directly and read-only, as `openclawExecAllowlistRead.ts` does.
+- **Write under compare-and-swap.** `mutateExecApprovalsDoc(client, mutate)` reads the document, applies `mutate`,
+  and writes it back against the base hash, re-running `mutate` on a fresh read after a conflict.
+  `upsertExecApprovalPolicy` uses it to set one agent's posture while keeping its grants.
+- **Filter rows, never rebuild them.** A grant that loses its `argPattern` in a round trip stops matching the
+  command it was made for. `revokeExecAllowlistEntries` removes rows by content fingerprint
+  (`execAllowlistEntryKey`), refuses a row that also lives in the wildcard bucket, and checks the Gateway's
+  post-write reply before it reports `revoked`.
+- **Patch sessions with `execHost` only.** OpenClaw refuses the retired `execSecurity` and `execAsk` session fields,
+  so `resolveExecPatchParams()` returns only `execHost`.
+
+`classifyExecAllowlistEntry`, `isEffectiveExecGrant` and `affectsEnforcement` say what one stored row means. The user
+side is [Review and revoke command permissions](/using/command-permissions).
+
+## The proxy and device identity
+
+`createGatewayProxy({ loadUpstreamSettings })` serves the WebSocket at `/api/gateway/ws`. The browser opens a
+same-origin socket, and the proxy opens the upstream Gateway connection for it, fills in the Gateway token and a
+device signature on the `connect` frame, and then forwards frames both ways with a bounded buffer and a keepalive.
+The browser never sees the Gateway token.
+
+`loadOrCreateProxyDeviceIdentity()` keeps one Ed25519 keypair in `proxy-device-identity.json` in Clawboo's state
+folder, with the folder limited to your user and the file re-tightened on every load. `signConnectParams` signs a
+connect frame with it. The server's own Gateway connection reuses the same identity through the client's
+`signConnect` hook, so the dashboard and the server count as one paired device.
+
+## The access gate
+
+`createAccessGate({ token, basePath, authorizeRuntime })` is off unless `STUDIO_ACCESS_TOKEN` is set. When it is on:
+
+- Opening the dashboard with `?access_token=<token>` sets an HttpOnly `clawboo_access` cookie, scoped to the base
+  path and marked `Secure` over TLS, then redirects to remove the token from the address bar.
+- Every `/api/*` request and every Gateway WebSocket upgrade needs that cookie. The comparison is constant-time,
+  and the path check ignores case.
+- The one exception is an `/api/mcp/*` call from a runtime the server started. `authorizeRuntime` admits it only
+  when it carries a valid attach token, came straight to the loopback port, and was not forwarded.
+  `isForwardedRequest` looks for `Forwarded`, `X-Forwarded-*` and `X-Real-IP`, and those headers can only take
+  access away.
+
+A token with a character outside `A-Z a-z 0-9 . _ ~ -` turns the gate off with a console warning instead of
+breaking the cookie. A non-loopback bind still refuses to start without a working gate, unless
+`CLAWBOO_ALLOW_INSECURE=1`, but a loopback server behind a same-host reverse proxy would then be open. Generate the
+token with `openssl rand -hex 24`. When a forwarded request reaches a server with no token, the server logs a
+one-time warning (`proxyExposureWarning.ts`).
+
+## The Origin and Host guard
+
+`createOriginGuard({ port, bindHost, allowedOrigins, allowedHosts })` runs on every `/api/*` request and WebSocket
+upgrade, whether or not the access gate is on. It closes cross-site WebSocket hijacking, DNS rebinding and
+cross-site requests on a default install with no configuration. A request passes when:
+
+- its `Host` is a loopback name, the bind host, or listed in `CLAWBOO_ALLOWED_HOSTS`;
+- its `Origin`, when present, is a loopback origin on the API port, the bind host, the Vite dev server in
+  development, or listed in `CLAWBOO_ALLOWED_ORIGINS`;
+- its `Sec-Fetch-Site`, when present, is `same-origin`, `same-site` or `none`.
+
+Anything else gets `403` with `Cross-origin request blocked.` The two environment lists only widen the allowed
+set, so a reverse proxy or a LAN address must be listed in them. The guard is not authentication: a non-browser
+client can send any headers it likes, which is why a non-loopback bind needs the access gate.
+
+## Test it
+
+Run `pnpm --filter @clawboo/gateway-client test` and `pnpm --filter @clawboo/gateway-proxy test`. The dashboard's
+end-to-end suite runs against a mock Gateway; see [Testing strategy](/internals/testing).
+
+## Related
+
+- [Security model](/operating/security): the access model, tokens and safe exposure.
+- [Reach Clawboo from another machine](/guides/self-host-securely): tunnels, proxies and the environment lists in
+  practice.
+- [Gateway connection internals](/internals/gateway-and-events): how Gateway frames flow into the dashboard.
+- [OpenClaw](/runtimes/openclaw): pairing, the Gateway connection and OpenClaw setup.
+- [@clawboo/mcp](/reference/packages/mcp): the attach token the access gate checks.

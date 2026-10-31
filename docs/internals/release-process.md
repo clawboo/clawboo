@@ -1,208 +1,186 @@
 ---
-title: Release process
-description: "How Clawboo ships: Changesets, the CI gate, the Version-PR publish flow, and why a release is the CLI's npm publish with the libs inlined."
+title: 'Release process'
+description: 'How Clawboo ships: changesets, the two-phase publish workflow, what it reruns before npm, provenance, and why only the clawboo CLI publishes.'
+keywords: ['changesets', 'publish', 'npm', 'version packages', 'release', 'provenance']
 ---
 
-A Clawboo release is the publish of **one npm package**: the `clawboo` CLI in `apps/cli`. Every `@clawboo/*` library in the workspace is `private: true` and never reaches npm on its own; the libraries it needs are _inlined_ into the CLI's shipped bundle. The release machinery is Changesets for versioning + changelog, a CI gate that mirrors the publish steps, and a two-phase `publish.yml` (open a Version PR, then publish on its merge).
+A Clawboo release publishes one npm package: `clawboo`, the CLI in `apps/cli`. Changesets track the version and write the changelog, and `.github/workflows/publish.yml` does the rest in two phases: it opens a Version PR, and when that PR merges it publishes. Contributors add changesets; maintainers merge the Version PR.
 
-This page is for people working _on_ Clawboo who need to cut a release or understand why the publish posture looks the way it does. It covers the `.changeset` workflow, the CI gate (`lint` / `typecheck` / `test` / `build` / `verify:connectors` / `smoke-test-bundle` / `e2e`), the `publish.yml` flow including its provenance attestation, and the single-artifact posture enforced by a test. For the build mechanics behind it, Turbo, the bundle, `assemble-cli.sh`, read [Monorepo and build](/internals/monorepo-and-build).
+Use this page when you write a changeset, cut a release, or need to know why the publish posture looks the way it does. The build side (Turbo, the bundle, `assemble-cli.sh`) is in [Monorepo and build](/internals/monorepo-and-build).
 
-## What ships, and what doesn't
+## What ships
 
-There are 30 scoped `@clawboo/*` packages under `packages/` (25 top-level plus 5 runtime adapters under `packages/adapters/*`) plus two apps. Run `git grep '"private"' packages` and you find `"private": true` on every library; the same is true of `apps/web` (`@clawboo/web`) and `docs` (`@clawboo/docs`). The **only** non-private package in the entire workspace is `apps/cli`, whose `name` is `clawboo` (no scope) and whose `files` array is just `["dist"]`. So `pnpm changeset publish` skips everything private and publishes exactly one tarball: the CLI.
+`packages/` holds 33 `@clawboo/*` packages (27 at the top level, 6 under `packages/adapters/*`), and every one is `private: true`, like `@clawboo/web` and `@clawboo/docs`. The only public package is `apps/cli`, named `clawboo` (no scope), with `files: ["dist"]`. So `pnpm changeset publish` skips everything else and publishes one tarball.
 
-The libraries still ship; they just travel _inside_ the CLI bundle, not as separate npm installs. The web server's tsup config marks the whole `@clawboo/*` scope `noExternal`, so `dist/server.js` inlines `db`, `mcp`, `governance`, the adapters, and the rest into one file. `assemble-cli.sh` copies that `server.js`, the Vite `ui/`, and the four bundled MCP stdio bins into `apps/cli/dist/`. The published tarball is therefore: the CLI entrypoint, the inlined server bundle, the SPA assets, and the MCP bins, nothing else.
-
-<Info>
-This single-artifact posture is **enforced by a test**, not just a convention. `packagePosture.test.ts` walks the library and app directories (`packages/*`, `packages/adapters/*`, `apps/*`) and asserts two invariants: (1) the set of non-private packages is *exactly* `['clawboo (apps/cli)']`, and (2) no non-private package has a runtime `@clawboo/*` dependency on a private one. The second guard matters because a public package that depended on a private one would publish a manifest pointing at packages that are never published; `npm install` would 404. The test fails the build if you mark a second package non-private.
-</Info>
+The libraries still ship, inside that tarball. `tsup.server.config.ts` inlines the whole `@clawboo/*` scope into `dist/server.js`, and `scripts/assemble-cli.sh` copies the server bundle, the SPA and the MCP bins into `apps/cli/dist/`. [What publishes](/internals/monorepo-and-build#what-publishes) lists the tarball's contents and its few external modules.
 
 ```mermaid
 graph TD
-  subgraph ws["workspace (30 @clawboo/* packages + apps/web + docs)"]
-    libs["@clawboo/db, mcp, governance,<br/>adapters, … — all private:true"]
-  end
-  libs -- "tsup noExternal: /^@clawboo/" --> bundle["apps/web dist/server.js<br/>(inlines the libs)"]
-  bundle -- "assemble-cli.sh copies" --> clidist["apps/cli/dist/<br/>server.js + ui/ + bin/*"]
-  clidist -- "files: ['dist']" --> npm["npm publish → clawboo (CLI only)"]
+  libs["33 private @clawboo/* packages"] -- "tsup inlines /^@clawboo/" --> bundle["apps/web dist/server.js"]
+  bundle -- "assemble-cli.sh copies" --> clidist["apps/cli/dist/: server.js, ui/, bin/"]
+  clidist -- "files: dist" --> npm["npm: clawboo"]
 ```
 
-## Version posture
+`apps/web/server/lib/__tests__/packagePosture.test.ts` enforces this. It asserts that the set of public packages is exactly `clawboo (apps/cli)`, and that no public package has a runtime dependency on a private one, which would publish a manifest pointing at packages npm does not have.
 
-The CLI is `clawboo@0.5.0` in `apps/cli/package.json` and `CHANGELOG.md`, and v0.5.0 is published: the npm `latest` dist-tag is **`clawboo@0.5.0`** and the `clawboo@0.5.0` git tag exists, so `npx clawboo@latest` installs 0.5.0.
+## Versions
 
-The CLI's runtime version string comes from the build, not from reading `package.json` at runtime: `apps/cli/tsup.config.ts` injects `define: { __CLI_VERSION__: JSON.stringify(pkg.version) }`, and `src/index.ts` reads `__CLI_VERSION__` into `VERSION` (falling back to `'0.0.0-dev'` when the define is absent, e.g. running the TS directly in dev). So `clawboo --version` reports whatever version was set in `package.json` at build time.
+`apps/cli/package.json` holds the version of the last release. The `.changeset/*.md` files on `main` describe the next one, so `ls .changeset` tells you what the next `publish.yml` run does: any changeset file means it opens or updates a Version PR, none means it publishes.
+
+The CLI's version string comes from the build. `apps/cli/tsup.config.ts` sets `define: { __CLI_VERSION__: JSON.stringify(pkg.version) }`, and `apps/cli/src/version.ts` exports it as `VERSION`, falling back to `0.0.0-dev` when the code runs unbundled under tsx or Vitest. `clawboo --version` prints it, and the CLI passes it to every server it starts as `CLAWBOO_VERSION`.
 
 ## Changesets
 
-Versioning and changelog generation are driven by [Changesets](https://github.com/changesets/changesets). The configuration in `.changeset/config.json` is deliberately small:
+The whole `.changeset/config.json`:
 
 ```json
 {
+  "$schema": "https://unpkg.com/@changesets/config@4.0.0/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
+  "fixed": [],
+  "linked": [],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@clawboo/docs", "@clawboo/web"]
+  "ignore": ["@clawboo/docs", "@clawboo/web"],
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  }
 }
 ```
 
-A few of these are load-bearing:
+The root `package.json` pins `@changesets/cli` at `^3.0.2`. The fields that matter:
 
-- **`ignore: ["@clawboo/docs", "@clawboo/web"]`** keeps the docs placeholder and the web app out of the changeset version-bumping flow entirely. (They are private anyway, but ignoring them stops Changesets from prompting about them or bumping them.) The CLI (`clawboo`) is the package Changesets actually versions.
-- **`commit: false`**: Changesets doesn't commit on your behalf; the CI action does that step explicitly (it commits the version bump as `chore: version packages`).
-- **`access: "public"`** is the npm publish access for the artifact it does publish (the CLI). It's harmless for the private packages because they're never published.
-- **`updateInternalDependencies: "patch"`** governs how an internal `workspace:*` dependency edge gets re-versioned when a dependency bumps, relevant only if a private package were ever published, which it isn't, so it has no practical effect today.
+- **`privatePackages: { version: false, tag: false }`** is what keeps every private package out of versioning and tagging, so only `clawboo` gets a version bump and a git tag.
+- **`ignore`** keeps `@clawboo/web` and `@clawboo/docs` out of the flow as well. They never publish on their own, so a changeset never names them.
+- **`commit: false`** means `pnpm changeset` writes files and commits nothing. The Changesets action makes the release commit, titled `chore: version packages`.
+- **`access: "public"`** applies to the one package that publishes.
+- **`updateInternalDependencies: "patch"`** would re-version internal dependency edges, but no other package publishes, so it changes nothing today.
 
-### Authoring a changeset
-
-The release flow is intent-first: you describe the change in a `.changeset/*.md` file, and the bump + changelog are derived from it later.
+### Write a changeset
 
 ```bash
 pnpm changeset
 ```
 
-This walks you through which package changed (in practice, `clawboo`) and at what semver level (patch / minor / major), then writes a markdown file under `.changeset/` describing the bump. You commit that `.md` file alongside your code change. A clone of `main` may or may not carry pending changesets: `ls .changeset` tells you which phase the next `publish.yml` run will take, because any `*.md` present means the next run opens a Version PR, and none present means it publishes.
+Pick `clawboo` and a bump level (`patch`, `minor` or `major`), then write the summary. The command creates a file under `.changeset/`; commit it with your change. The file looks like this:
 
-<Note>
-Because the libraries don't publish, a changeset is in practice always *about the `clawboo` CLI*. A code change deep in `@clawboo/db` is still released as a CLI version bump; the lib change rides inside the CLI bundle, so the user-facing artifact that changed is the CLI.
-</Note>
+```md
+---
+'clawboo': patch
+---
 
-## The CI gate
+One or two sentences a user of the npm package can read.
+```
 
-Every push to `main` and every pull request runs `.github/workflows/ci.yml`. A `filter` job runs first and decides whether the rest run at all (see below); the ten jobs it gates are parallel, all on Node 22 with `pnpm install --frozen-lockfile` (so the lockfile is authoritative; an out-of-sync lockfile fails the install):
+Add one for any change a user of the npm package would notice, including dashboard changes in `apps/web`: the server and the SPA ship inside `clawboo`. A code change deep in a library such as `@clawboo/db` is also released as a `clawboo` bump. Docs-only, CI-only and test-only changes need no changeset.
 
-| Job                 | Command                                     | What it guards                                                                           |
-| ------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `lint`              | `pnpm format:check` → `pnpm lint`           | Prettier formatting, then ESLint across the workspace + the docs frontmatter check.      |
-| `typecheck`         | `pnpm typecheck`                            | `tsc --noEmit` across the workspace.                                                     |
-| `test`              | `pnpm test:coverage`                        | Per-package Vitest suites plus a coverage table (no gate).                               |
-| `build`             | `pnpm build` → `check-entry-chunk.mjs`      | Builds every package + app `dist/`, and asserts no agent prose reaches an emitted chunk. |
-| `catalog-verify`    | `pnpm catalog:verify` → `budget.mjs`        | The marketplace packs pass every content rule, and `catalog/dist` is current.            |
-| `verify-connectors` | `pnpm verify:connectors`                    | The committed connector catalog is internally consistent — offline, no upstream fetch.   |
-| `smoke-test-bundle` | `pnpm assemble` → `pnpm test:clean-install` | The published tarball actually works end-to-end.                                         |
-| `e2e`               | `pnpm build` → `pnpm e2e`                   | Playwright: the chat → board round-trip and onboarding.                                  |
+## The publish workflow
 
-### The content-only fast path
+`publish.yml` has one job, `publish`, and it runs on every push to `main` with no path filter and no condition. Its steps, in order:
 
-A pull request that touches only `catalog/` is content, not code. The `filter`
-job detects that and every job above skips, leaving
-`.github/workflows/catalog-ci.yml` to run the content gate in about two minutes.
+1. Check out with `fetch-depth: 0` (Changesets needs the full history), set up pnpm and Node 22 with the npm registry.
+2. `pnpm install --frozen-lockfile`.
+3. `pnpm exec playwright install --with-deps chromium`, for the clean-install gate's browser step.
+4. `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`.
+5. `pnpm catalog:verify`. A content-only pull request skips the test matrix by design, so this is what keeps a bad marketplace pack off npm.
+6. `bash scripts/assemble-cli.sh`, then `pnpm test:clean-install`: the tarball about to be published is installed and booted first.
+7. `changesets/action`, pinned to the v2.1.2 commit, with `publish-script: pnpm changeset publish`, `commit-message` and `pr-title` both `chore: version packages`, and `push-with-git-cli: true`.
 
-One carve-out: `catalog/packs/clawboo/**` is the compiled seed, so changing it
-changes bytes in the published tarball and the full matrix runs.
+`lint`, `typecheck` and `test` run before assembly, so a failure costs no bundle work and no Turbo task can restore a stale `apps/cli/dist` over the fresh one. The build does not type-check the web app or the CLI, so `typecheck` is the step that stops a type error there from reaching npm.
 
-This is a JOB and not a `paths-ignore`, deliberately. GitHub's `paths-ignore`
-has no exception syntax, so a blanket `catalog/**` entry would also skip the
-carve-out and a merge that changed the shipped seed would run zero CI. The push
-trigger's `paths-ignore` is therefore left alone.
+The rerun is partial. It does not repeat `pnpm format:check`, `pnpm e2e`, `pnpm verify:connectors`, the cross-platform tests, the website build, the real-concurrency suite, the entry-chunk and catalog size checks, or CodeQL; those ran on the pull request. It also needs the network: the install, the Chromium download, and the real `npm install` inside the clean-install gate. The catalog gate is offline by design: it reads what is committed and never fetches the upstream sources the content came from.
 
-`catalog-ci.yml` must never be a branch-protection required check: it is
-paths-filtered, so on a PR that touches no catalog file it never reports, and a
-required check that never reports blocks the PR forever. `catalog-verify` in
-`ci.yml` is the one to require.
+The last step gives the flow its two phases:
 
-The Prettier half of the `lint` job runs first because it takes seconds and needs no build, whereas `turbo lint` builds every workspace dependency before it can run ESLint. It also means a formatting-only failure reddens the `lint` job while ESLint itself is green; the fix is `pnpm format`.
-
-The `smoke-test-bundle` job is the one that earns its keep at release time, and it runs on a **`[ubuntu-latest, windows-latest, macos-latest]` matrix**. It first `pnpm assemble`s the CLI bundle, then `pnpm test:clean-install` simulates `npx clawboo` on a real machine. Crucially, it does not run the repo build in place: it `pnpm pack`s `apps/cli` and `npm install`s the tarball into a throwaway directory under the OS temp dir, so nothing resolves through the workspace's `node_modules` and the published `files` whitelist plus the published dependency closure are what get exercised. Against that install it asserts the packaged `bin` entries and their npm shims exist, that every module the bundles still load is declared / builtin / documented-optional, that the CLI's HTTP-signature port probe skips a fake non-Clawboo listener on 18791 (it picks 18790, never 18791), that the SPA renders at `/` and a deep route falls through to `index.html`, that `/api/settings` returns Clawboo-shaped JSON, that the SPA actually boots in headless Chromium rather than merely being served, that an installed MCP stdio bin completes a real JSON-RPC `tools/list` handshake, that a real `POST /api/runtimes/clawboo-native/run` drives a board task to `done`, and that a SECOND launch against an already-running dashboard reuses it instead of forking a second server. This exists because v0.1.1 shipped a `Cannot GET /` SPA-catch-all bug and v0.1.2 shipped a port-collision `Unauthorized` bug; the smoke test catches that whole class before a bundle reaches npm. The Windows leg is the regression gate for the v0.1.4 Windows-compat fixes (`npm.cmd` resolution, the `which`→`where` shim, `netstat`-based process lookup); the macOS leg covers a primary user OS. See [Testing](/internals/testing#the-clean-install-smoke-does-npx-clawboo-actually-work) for the full assertion list.
-
-<Tip>
-You can reproduce the release gate locally before authoring a changeset. `pnpm prepublish:check` is the alias for `pnpm catalog:verify && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install` — the catalog-and-artifact slice of the release gate, not the whole of it: `publish.yml` also runs `build`, `lint`, `typecheck` and `test`, so run those separately (or rely on the PR jobs) before cutting a release. If it fails locally, the release is broken; fix it before opening the PR. It drives the SPA in headless Chromium, so run `pnpm exec playwright install chromium` once on a fresh clone; the smoke fails with that exact command in the message if the browser is missing.
-</Tip>
-
-## The publish flow
-
-`.github/workflows/publish.yml` runs on every push to `main` and implements the standard two-phase Changesets release: a first run opens a "Version Packages" PR, and merging that PR triggers a second run that publishes.
+- **Changesets present** (a feature PR with a `.changeset/*.md` just merged): the action opens or updates the Version PR, titled `chore: version packages`. Its commit consumes the changeset files, bumps `clawboo` in `apps/cli/package.json` and adds the entry to `apps/cli/CHANGELOG.md`; merging it lands those on `main`.
+- **No changesets present** (the Version PR just merged): the action runs `pnpm changeset publish`, which publishes `clawboo` to npm with `NODE_AUTH_TOKEN` from the `NPM_TOKEN` secret, then pushes the `clawboo@<version>` git tag and creates the GitHub release.
 
 ```mermaid
 sequenceDiagram
-    participant Dev as Feature PR (with a .changeset/*.md)
+    participant PR as Feature PR with a changeset
     participant Main as main
     participant Pub as publish.yml
     participant VPR as Version PR
     participant npm
 
-    Dev->>Main: merge feature PR (changeset present)
-    Main->>Pub: push triggers publish.yml
-    Pub->>Pub: build → lint/typecheck/test → assemble → test:clean-install
-    Pub->>VPR: changesets/action opens "chore: version packages" PR
-    Note over VPR: consumes the .changeset/*.md,<br/>bumps clawboo's version, writes CHANGELOG
-    VPR->>Main: merge Version PR (no changeset left)
-    Main->>Pub: push triggers publish.yml again
-    Pub->>Pub: build → lint/typecheck/test → assemble → test:clean-install
-    Pub->>npm: pnpm changeset publish → clawboo@<new>
+    PR->>Main: merge
+    Main->>Pub: push runs the workflow
+    Pub->>Pub: build, lint, typecheck, test, catalog:verify, assemble, test:clean-install
+    Pub->>VPR: open or update "chore: version packages"
+    VPR->>Main: merge (bumps clawboo, writes the changelog)
+    Main->>Pub: push runs the workflow again
+    Pub->>Pub: the same checks
+    Pub->>npm: pnpm changeset publish
 ```
 
-The workflow is a single `publish` job, and it runs unconditionally (see the warning below). It checks out with `fetch-depth: 0` (Changesets needs the full git history to compute tags), installs frozen, pulls headless Chromium for the clean-install gate, then re-runs the whole PR gate in order: `pnpm build` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `bash scripts/assemble-cli.sh` → `pnpm test:clean-install`, _before_ the Changesets action. Finally it runs `changesets/action` (pinned to the v2.1.2 commit) with `publish-script: pnpm changeset publish`, `commit-message: 'chore: version packages'` and `pr-title: 'chore: version packages'`.
-
-Two details in that order are deliberate. `pnpm build` is bundler-only (Vite + tsup, no `tsc`), so a type error survives it — `typecheck` is the step that catches one, and without it a broken type could reach npm even though the build was green. And `lint` / `typecheck` / `test` run _before_ `assemble-cli.sh`, so a failure costs no bundle work and no Turbo task can restore a stale `apps/cli/dist` over the freshly assembled one.
-
-The Changesets action step is what gives the flow its two phases, deciding internally based on the repo state:
-
-- **Changesets present** (a feature PR merged with a `.changeset/*.md`) → the action opens (or updates) a **Version PR** titled `chore: version packages`. That PR, when merged, consumes the `.md` file, bumps `clawboo`'s version in `package.json`, and writes the `CHANGELOG.md` entry.
-- **No changesets present** (the Version PR itself just merged; Changesets already consumed the `.md`) → the action runs `pnpm changeset publish`, which publishes the CLI to npm (using `NODE_AUTH_TOKEN` from the `NPM_TOKEN` secret) and creates the git tag + GitHub release.
-
-### Publish provenance
-
-The published tarball carries an [npm provenance](https://docs.npmjs.com/generating-provenance-statements) attestation: a signed statement that _this_ tarball was built from _this_ repository, at a specific commit, by _this_ workflow. Two things in `publish.yml` produce it, and both are load-bearing:
-
-- `id-token: write` in the `publish` job's `permissions:` block. This is what lets the job mint a short-lived OIDC token from GitHub; npm verifies that token to establish who is publishing. It is the reason that job's permission block is wider than the workflow's `contents: read` default.
-- `NPM_CONFIG_PROVENANCE: true` in the Changesets action step's `env:`. This is the npm-side switch; without it the OIDC permission sits unused.
-
-A third requirement lives outside the workflow: `apps/cli/package.json` must carry a `repository` field (it does, pointing at this repo with `directory: apps/cli`). npm refuses to generate provenance for a package that doesn't say where it came from.
-
-Anyone can check their own install:
-
-```bash
-npm audit signatures
-```
-
-This matters more here than for a typical library. Clawboo is installed with `npx` and then spawns coding-agent runtimes on the user's machine, so "is the code I'm about to run the code in the public repository?" is a question worth being able to answer without trusting us.
+The workflow's concurrency group never cancels a run in progress. `changeset publish` pushes to npm before it creates the tags, so a cancel between the two would leave a version on npm with no tag behind it.
 
 <Warning>
-The `publish` job has **no changeset gate**, and must not get one. Counting `.changeset/*.md` and adding `if: has_changesets == 'true'` looks right, and is right for the "open a Version PR" run (changesets are present), but it would **block the publish step on the Version-PR-merge run**; at that point Changesets has *already consumed* the `.md` file, so the count is zero and the gate would skip the very run that's supposed to publish. The Changesets action handles both phases internally; it just needs the job to run unconditionally.
-
-The workflow used to carry a separate `check` job that computed exactly that count. The `if:` was removed once the trap was hit, which left the job wired in by `needs:` but feeding nothing; it has since been deleted so the workflow's intent reads plainly. A comment in `publish.yml` records the same reasoning at the point where someone would be tempted to re-add it.
+The `publish` job has no changeset gate, and must not get one. A condition such as "run only when `.changeset/*.md` files exist" is right for the run that opens the Version PR, but it skips the run that publishes: by then the Version PR has merged and Changesets has consumed the files. The action decides between the two phases itself; it needs the job to run every time. A comment in `publish.yml` says the same where someone would add the gate.
 </Warning>
 
-## Releasing, step by step
+## Provenance
 
-The normal path to npm is:
+The published tarball carries an [npm provenance](https://docs.npmjs.com/generating-provenance-statements) statement: a signed record that it was built from this repository, at a given commit, by this workflow. Three things produce it:
 
-1. **Author a changeset.** `pnpm changeset` → commit the generated `.changeset/*.md` alongside your change on a feature branch; open a PR.
-2. **Pass CI.** The ten gated jobs (`lint`, `typecheck`, `test`, `test-cross-platform`, `build`, `catalog-verify`, `verify-connectors`, `smoke-test-bundle`, `e2e`, `website`) must all be green, as must CodeQL. The bundle smoke test runs on Ubuntu, Windows, and macOS.
-3. **Merge the feature PR.** `publish.yml` runs and `changesets/action` opens a `chore: version packages` Version PR.
-4. **Merge the Version PR.** `publish.yml` runs again: `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` → `pnpm changeset publish`. The CLI publishes, the tag and changelog land.
-5. **Verify.** `npm view clawboo version` should reflect the new version within roughly half a minute.
+- `id-token: write` in the `publish` job's permissions, which lets the job mint the short-lived OIDC token npm checks. It is why that job's permissions are wider than the workflow's `contents: read` default.
+- `NPM_CONFIG_PROVENANCE: true` in the Changesets step's environment, which turns provenance on for the publish.
+- A `repository` field in `apps/cli/package.json` (this repo, `directory: apps/cli`). npm refuses provenance for a package that does not say where it came from.
 
-<Danger>
-If a version is published manually (outside the Changesets flow) before the Changesets `version` step has run, the repo state and npm diverge. The recovery is to run `pnpm changeset version` and commit it as `chore: version packages` so the changelog and tag catch up, **not** to re-run `changeset publish` for a version that is already live on npm.
-</Danger>
+Anyone can check an install with `npm audit signatures`. That matters for a tool that is installed with `npx` and then starts coding agents on the user's machine.
 
-## Design rationale and trade-offs
+## Cut a release
 
-**Why one published artifact?** Clawboo's value is the end-to-end product, not a constellation of reusable libraries. Keeping every `@clawboo/*` package private means there is no semver contract to maintain for two dozen internal packages, no internal publish-then-install loop, and no risk of a partial release where the CLI publishes against an unpublished lib. The cost is that the only way to consume a Clawboo library is to vendor the CLI bundle, which is exactly the intent. The `packagePosture.test.ts` guard turns "we only publish the CLI" from a habit into an enforced invariant.
+<Steps>
+<Step title="Add a changeset">
 
-**Why inline the libs instead of declaring them as CLI dependencies?** A clean `npx clawboo` install must run with no surprises. Inlining via tsup `noExternal` means a fresh machine needs only the CLI's small set of genuinely-external runtime deps (`better-sqlite3`, `ws`, `pino`, `pino-pretty`, plus the lazily-imported optional ones); everything else, including the provider SDKs and the scheduler's `croner`, is already in `server.js`. The clean-install smoke test is what proves this holds, and `pnpm test:bundle-externals` (also run inside that gate) is the static half: it extracts every `require(...)` / `import(...)` left in the shipped bundles and fails if one is neither declared, a Node builtin, nor on the documented-optional allowlist. That allowlist is deliberately tiny — `@opentelemetry/*` and [`@anthropic-ai/claude-agent-sdk`](/runtimes/claude-code), both lazy-imported and both degrading with an actionable message — because every entry is a thing a clean install cannot do until the user installs it themselves.
+Run `pnpm changeset` on your feature branch, pick `clawboo`, and commit the new `.changeset/*.md` file with the change.
 
-**Why re-run the gate inside `publish.yml`?** The PR already ran CI, but a merge race or an upstream-changed lockfile between PR-green and main-merge could ship a bundle that no longer assembles, or that assembles from code the PR gate never saw. Re-running lint, typecheck, tests, and the bundle smoke immediately before `changeset publish` makes a broken release impossible even if a PR slipped through, the same belt-and-suspenders reasoning that made the smoke test exist in the first place. The alternative, gating the publish job on the CI workflow via `workflow_run` or a required status check, was not taken: it would couple the release to a second workflow's run history across the Version-PR merge, where inline steps keep the job self-contained and readable in one file.
+</Step>
+<Step title="Pass CI">
 
-## Boundaries and non-goals
+Every job in `ci.yml` must be green, and CodeQL too. [Testing](/internals/testing) lists the jobs.
 
-- **Not a multi-package release.** Despite the monorepo, there is no scenario where a `@clawboo/*` library publishes independently. If you ever need that, it's a deliberate posture change; start by reading `packagePosture.test.ts`, which will fail the moment a second package goes non-private.
-- **Not a hosted-deployment pipeline.** `publish.yml` ships an npm package; it does not deploy a service. Operating a running Clawboo instance is a separate concern; see [Deployment](/operating/deployment).
-- **No migration step at release.** Clawboo has no database migration ladder; the schema is created by `ensureSchema`'s DDL, and a user's existing database is reconciled up to it the first time the new version opens it. There is nothing to run as part of a release. See [Monorepo and build](/internals/monorepo-and-build#dbstudio-is-the-only-database-script) and [Database schema](/reference/database-schema#upgrading-an-existing-database).
+</Step>
+<Step title="Merge the feature pull request">
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+`publish.yml` runs its checks, then opens or updates the `chore: version packages` pull request. Check that its version bump and changelog entry are what you expect.
 
-## See also
+</Step>
+<Step title="Merge the Version PR">
 
-- [Monorepo and build](/internals/monorepo-and-build): Turbo, the build order, the bundle, and `assemble-cli.sh`
-- [Testing](/internals/testing): the unit / component / e2e / clean-install / evals strategy behind the CI gate
-- [Marketplace catalog](/reference/marketplace-catalog): the pack format, the content gates, and the `catalog:build` / `catalog:verify` steps
-- [CLI reference](/reference/cli): `npx clawboo` and the bundled MCP bins
-- [Changelog](/appendices/changelog): the release history (0.1.0 → 0.5.0)
-- [Internals overview](/internals/index): the contributor map
+`publish.yml` runs its checks again and then `pnpm changeset publish`. When the run is green, the new version is on npm with its git tag and GitHub release.
+
+</Step>
+<Step title="Check npm">
+
+Run `npm view clawboo@<version> version`. Asking for the exact version avoids a cached answer; the registry can take a few minutes to show a new release.
+
+</Step>
+</Steps>
+
+There is no manual `npm publish` step. Releases go through this flow only.
+
+## Design notes
+
+**One published artifact.** Clawboo is used as a product, not as a set of libraries. Keeping every `@clawboo/*` package private means no semver contract for 33 internal packages, no publish-then-install loop, and no partial release where the CLI ships against a library that never reached npm. `packagePosture.test.ts` turns that posture into a test.
+
+**Inlined libraries.** A clean `npx clawboo` install should need nothing beyond the CLI's short `dependencies` list, so tsup inlines everything else, the provider SDKs and `croner` included. The clean-install gate proves it at runtime, and `pnpm test:bundle-externals` proves it statically.
+
+**Checks inside `publish.yml`.** The pull request already ran CI, but a merge race or a lockfile change can make `main` differ from what the pull request tested. Rerunning the key checks right before `changeset publish` stops that commit from reaching npm. Running them as steps in the same job, rather than waiting on another workflow's result, keeps the release self-contained in one file.
+
+## Limits
+
+- **One package.** No `@clawboo/*` library publishes on its own. Making one public is a posture change, and `packagePosture.test.ts` fails until the test is changed with it.
+- **An npm package, not a deployment.** `publish.yml` publishes to npm; running a Clawboo instance is covered under [Deployment](/operating/deployment).
+- **No migration step.** A new version brings a user's existing database up to date the first time it opens it, by adding missing columns. See [Schema changes](/internals/monorepo-and-build#schema-changes).
+
+## Related
+
+- [Monorepo and build](/internals/monorepo-and-build): the bundle, `assemble-cli.sh` and the root commands.
+- [Testing](/internals/testing): the CI jobs and the clean-install gate.
+- [Contributing](/appendices/contributing): where changesets fit in a pull request.
+- [Changelog](/appendices/changelog): the release history.

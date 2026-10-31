@@ -1,55 +1,159 @@
 ---
-title: MCP tools reference
-description: The four clawboo-hosted MCP servers (tasks, memory, tools, teamchat) and every tool each exposes, with its zod input schema.
+title: 'MCP tools reference'
+sidebarTitle: 'MCP tools'
+description: 'Every tool on the Tasks, Memory, Tools and TeamChat MCP servers, with arguments, results, errors and what each kind of caller is served.'
+keywords:
+  [
+    'mcp',
+    'clawboo-tasks',
+    'clawboo-memory',
+    'clawboo-tools',
+    'clawboo-teamchat',
+    'read_tool_result',
+    'team_delegate',
+    'scopeSig',
+    'attachToken',
+  ]
 ---
 
-Clawboo hosts four MCP servers over the shared SQLite substrate, exposed to consuming runtimes over two transports: a stdio bin per server, and an in-process Streamable HTTP mount at `/api/mcp/<name>`. Each server is a thin protocol façade over a `@clawboo/db` service core, the same database file the API server and every spawned runtime read and write, so a tool call from an externally-spawned agent and a UI action land on one store.
+Clawboo hosts four MCP servers. Agents on every runtime use them to read and update the shared board, save and recall memory, call brokered tools, and talk in their peer room. This page lists every tool with its arguments, results and errors, and explains which tools each kind of caller is served and what it can see.
 
-This page lists each server, its `tools/list` name and version, and every tool it exposes with the tool's name, one-line description, and zod input schema. Three servers (tasks, memory, teamchat) carry an authoritative connection-bound scope that the calling model cannot override: the anti-spoof binding, covered per server below.
+To attach an agent of your own, follow [Attaching Clawboo's MCP servers](/operating/mcp-servers). For the HTTP routes behind the servers, see the [Tools and MCP API](/reference/rest-api/tools-and-mcp).
 
-<Note>
-Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API, not `McpServer.registerTool`. Each tool's zod object is converted to JSON Schema for `tools/list` by a small in-package converter; non-optional fields appear in the schema's `required` array. The reported server version for all four is `0.1.0`.
-</Note>
+## Servers
 
-## At a glance
+| Server                       | Name in `tools/list` | Tools                                                             | What it fronts                        |
+| ---------------------------- | -------------------- | ----------------------------------------------------------------- | ------------------------------------- |
+| [Tasks](#tasks-server)       | `clawboo-tasks`      | 12                                                                | The [board](/concepts/the-board)      |
+| [Memory](#memory-server)     | `clawboo-memory`     | 4                                                                 | Shared [memory](/concepts/memory)     |
+| [Tools](#tools-server)       | `clawboo-tools`      | Visible builtins, granted connector tools, and `read_tool_result` | The tool broker (approvals and audit) |
+| [TeamChat](#teamchat-server) | `clawboo-teamchat`   | 2, plus `team_delegate` on orchestrated team runs                 | The agents' peer room                 |
 
-| Server                       | `tools/list` name  | Tools                             | Service core                             | Bound scope                     |
-| ---------------------------- | ------------------ | --------------------------------- | ---------------------------------------- | ------------------------------- |
-| [Tasks](#tasks-server)       | `clawboo-tasks`    | 12 (2 in read-only mode)          | durable board repository                 | `boundScope` (team; reads only) |
-| [Memory](#memory-server)     | `clawboo-memory`   | 3                                 | `SqliteMemoryStore` (facts + procedures) | `boundScope` (team/agent)       |
-| [Tools](#tools-server)       | `clawboo-tools`    | 4 builtin (availability-filtered) | tool broker                              | n/a                             |
-| [TeamChat](#teamchat-server) | `clawboo-teamchat` | 2 (+1 when orchestrator-driven)   | `team_chat` room substrate               | `boundIdentity` (author + room) |
+Every server reports version `0.1.0` and declares the `tools.listChanged` capability. Only the Tools server sends list-changed notifications, when a connector connects or disconnects.
 
-| Server   | stdio bin              | HTTP path           |
-| -------- | ---------------------- | ------------------- |
-| Tasks    | `clawboo-mcp-tasks`    | `/api/mcp/tasks`    |
-| Memory   | `clawboo-mcp-memory`   | `/api/mcp/memory`   |
-| Tools    | `clawboo-mcp-tools`    | `/api/mcp/tools`    |
-| TeamChat | `clawboo-mcp-teamchat` | `/api/mcp/teamchat` |
+## Tool index
 
----
+| Tool                                                          | Server   | What it does                                             |
+| ------------------------------------------------------------- | -------- | -------------------------------------------------------- |
+| [`list_tasks`](#list_tasks)                                   | Tasks    | List tasks, or only the ones ready to claim              |
+| [`get_task`](#get_task)                                       | Tasks    | Read one task with its comments and parent chain         |
+| [`create_task`](#create_task)                                 | Tasks    | Create a root task or a subtask                          |
+| [`create_subtask`](#create_subtask)                           | Tasks    | Create a subtask under a parent                          |
+| [`claim_task`](#claim_task)                                   | Tasks    | Atomically claim a `todo` task                           |
+| [`assign_task`](#assign_task)                                 | Tasks    | Atomically hand a `todo` task to an agent                |
+| [`release_task`](#release_task)                               | Tasks    | Put an `in_progress` task back to `todo`                 |
+| [`update_task_status`](#update_task_status)                   | Tasks    | Move a task to another status                            |
+| [`block_task`](#block_task)                                   | Tasks    | Move a task to `blocked`                                 |
+| [`unblock_task`](#unblock_task)                               | Tasks    | Move a task back to `todo`                               |
+| [`add_comment`](#add_comment)                                 | Tasks    | Comment on a task                                        |
+| [`link_task`](#link_task)                                     | Tasks    | Make one task wait for another                           |
+| [`memory_save`](#memory_save)                                 | Memory   | Save a fact or a new version of a procedure              |
+| [`memory_search`](#memory_search)                             | Memory   | Search facts by keyword, meaning, or both                |
+| [`memory_browse`](#memory_browse)                             | Memory   | List the most recently updated facts                     |
+| [`memory_feedback`](#memory_feedback)                         | Memory   | Report whether a recalled fact helped                    |
+| [`echo`, `note`, `web_search`, `delete_path`](#builtin-tools) | Tools    | Demonstration builtins that exercise approvals and audit |
+| [Connector tools](#connector-tools)                           | Tools    | Tools from connectors the agent has been granted         |
+| [`read_tool_result`](#read_tool_result)                       | Tools    | Page through a result that was too large to return whole |
+| [`team_chat_post`](#team_chat_post)                           | TeamChat | Post to the peer room as a named teammate                |
+| [`team_chat_subscribe`](#team_chat_subscribe)                 | TeamChat | Read new peer-room posts since a cursor                  |
+| [`team_delegate`](#team_delegate)                             | TeamChat | Hand work to a teammate by name (orchestrated runs only) |
+
+## Callers and scoping
+
+A caller's identity decides which tools it is served and what those tools can see. Over HTTP, a session reads its identity once, when it sends `initialize`, from query parameters on its attach URL. Clawboo signs those parameters with a secret kept in its own database, so an identity counts only when its signature verifies.
+
+There are four kinds of caller:
+
+- **Bound caller.** A run Clawboo started with a signed attach URL. Claude Code, Codex and Hermes runs are bound to their team and agent this way. Clawboo Native agents are bound in-process.
+- **Unverified HTTP caller.** Any HTTP session without a valid signature. Every OpenClaw agent is one, because the OpenClaw Gateway uses one shared configuration for all of its agents. So is an external agent attached with an unscoped URL, or with parameters edited by hand.
+- **Operator (stdio bin).** Someone ran a `clawboo-mcp-*` bin directly. The operator is trusted, so scope and identity come from the tool arguments.
+- **In-process (Clawboo Native).** The servers run inside the dashboard server and are bound to the run's team and agent.
+
+| Server   | Bound caller                                                                                                                                 | Unverified HTTP caller                                                                                                   | Operator (stdio bin)                                |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| Tasks    | 12 tools. When the run has a team, reads and writes are limited to its tasks and new tasks land in it. Mailbox notices ride along on results | 10 tools (no `claim_task` or `assign_task`). Board-wide. Comments post as a plain `agent` comment                        | 12 tools, board-wide                                |
+| Memory   | Saves are shared with the team. Reads see team facts, this agent's own facts and facts that belong to no team. Provenance is recorded        | Saves and reads use only facts that belong to no team. No reporter or provenance is recorded                             | Scope comes from `scopeTeamId` and `scopeAgentId`   |
+| Tools    | Builtins plus the connector tools this agent's grants allow                                                                                  | Builtins and `read_tool_result`, plus any connector tools a `global` grant allows. Agent and team grants cannot be found | Builtins and `read_tool_result`; no connector tools |
+| TeamChat | 2 tools, posting as the bound agent in its peer room. `team_delegate` too on orchestrated runs                                               | No tools                                                                                                                 | 2 tools; author and team come from the arguments    |
+
+<Warning>
+
+An attach URL you assemble by hand binds nothing. Unsigned or edited scope parameters are ignored and the session is served as an unverified caller. To give an external agent an identity, copy a signed URL from `GET /api/mcp/config` with `scopeTeamId` and `scopeAgentId` set. A scoped session for an existing agent also consumes that agent's mailbox notices.
+
+</Warning>
+
+### What each runtime attaches
+
+| Runtime                    | Servers                                                                | Caller kind                                    |
+| -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------- |
+| Clawboo Native             | Tasks (read-only by default), Memory, Tools, and TeamChat on team runs | In-process, bound to the run's team and agent  |
+| Claude Code, Codex, Hermes | All four, over HTTP                                                    | Bound, with a signed team and agent scope      |
+| OpenClaw                   | Tasks, Memory and Tools, over HTTP (never TeamChat)                    | Unverified                                     |
+| An agent you attach        | Whatever you configure                                                 | Unverified unless you use a signed, scoped URL |
+
+A Clawboo Native agent's tool settings choose which servers it gets. The default is the read-only Tasks surface (`list_tasks` and `get_task`), Memory, Tools and TeamChat, because the team engine owns board writes on team runs. An OpenClaw agent takes part in the peer room through the server instead of the TeamChat tools. The critic run that [verification](/concepts/verification) can start attaches with no scope, so it is an unverified caller too.
+
+### Attach URL parameters
+
+| Server   | Identity parameters                                                                                             | Signed by                                      |
+| -------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Tasks    | `scopeTeamId` limits reads and writes to the team; `scopeAgentId` turns on mailbox delivery                     | `scopeSig`                                     |
+| Memory   | `scopeTeamId`, `scopeAgentId`, `scopeTenantId`; provenance stamps `provRuntime`, `provTaskId`, `provSessionKey` | `scopeSig`; the provenance stamps by `provSig` |
+| Tools    | `scopeTeamId`, `scopeAgentId` (decide which connector grants apply)                                             | `scopeSig`                                     |
+| TeamChat | `roomTeamId` (the room is `team:<roomTeamId>`), `postAuthorAgentId`, and `delegate=1` on orchestrated runs      | `scopeSig`, which also covers `delegate`       |
+
+- `scopeSig` is an HMAC-SHA256 over the team, agent, tenant and delegate fields under a per-install secret stored in the `settings` table (`mcp-attach-scope-secret`). A spawned runtime only ever sees the derived signature.
+- Provenance stamps record which run saved a fact or reported an outcome. They never widen what a session can see, and they are dropped when `provSig` does not verify.
+- `delegate=1` is inside the signature, so a run cannot add it to its own URL. Clawboo writes it only for runs driven by the team engine, which is watching for the `team_delegate` call.
+- Every URL Clawboo writes also carries an `attachToken`. When the access gate is on, a cookieless MCP request needs it (see [Transports](#transports)).
+- The request log keeps attach URLs but masks `attachToken`, `scopeSig` and `provSig`.
 
 ## Tasks server
 
-`createTasksServer(db, opts?)` → `clawboo-tasks`. A protocol façade over the durable board so any runtime can coordinate on the same kanban board. The atomic claim surfaces a conflict as a tool-error the model must not retry (the "never retry a 409" rule). `opts.readOnly` serves only `list_tasks` and `get_task`, which is how a team agent gets board visibility without racing the engine's claims.
+The Tasks server is the board over MCP. Any runtime can list, create, claim and update tasks on the same board the dashboard shows. Board rules (statuses, legal moves, the verification check before `done`) are described in [The board](/concepts/the-board).
 
-A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition or a card a person moved after the task's latest run started, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown, the parent is already at its child-count or depth ceiling, or the root-creation rate is exhausted.
-
-### `list_tasks`
-
-List board tasks. Pass `ready=true` for only claimable (deps satisfied) work.
+Statuses in the schemas below are `TaskStatus`:
 
 ```ts
-{
-  teamId?: string
-  status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  ready?: boolean
-}
+type TaskStatus =
+  'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
 ```
 
-### `get_task`
+Rules that apply to every Tasks tool:
 
-Get a task with its comments and ancestor chain. Returns `{ task, comments, ancestors }`; a tool-error `not found: <id>` when the task does not exist.
+- **Team-bound sessions.** When the session is bound to a team, every tool refuses a task from another team with the same `not found: <taskId>` a missing task gets, so a bound run cannot probe other teams. `list_tasks` lists only the team's tasks, and new tasks are created in the team.
+- **Refusals are tool errors.** A refused call returns `isError: true` with the text shown under each tool, not a protocol error.
+- **Never retry a lost claim.** `claim failed: conflict` means another agent won the claim. Retrying the same call cannot succeed.
+- **Mailbox delivery.** On a session bound to an agent, each successful result can carry an extra text block headed `[team updates` with up to five undelivered mailbox notices for that agent. Each notice is delivered once, on whichever channel reaches the agent first.
+
+### Creation caps
+
+Creates through these tools are capped so a looping agent cannot flood the board. The caps count every task on the board, including tasks created through the dashboard, the API or the team engine, which are not capped themselves.
+
+| Cap                 | Limit                                                             | Tool error                                                                                                                                                    | `_meta.denied`     |
+| ------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| Children per parent | 24 live (not dropped) subtasks; `done` and `cancelled` ones count | `subtask rejected: parent <id> already has <n> children (max 24); drop one or attach the new task elsewhere`                                                  | `child_cap`        |
+| Nesting depth       | 2 levels below a root task (root, child, grandchild)              | `subtask rejected: parent <id> is at the maximum nesting depth (2); attach the new task higher in the tree`                                                   | `depth_cap`        |
+| Root tasks          | 30 new root tasks per rolling 5 minutes                           | `task rejected: <n> root tasks already created in the last 5 min (max 30); attach this work to an existing task with parentTaskId instead of opening another` | `root_rate_cap`    |
+| Missing parent      | The parent must exist                                             | `parent not found: <id>`                                                                                                                                      | `parent_not_found` |
+
+The check and the insert run in one write transaction, so two runtimes racing for the last slot cannot both get it. An unchanged retry gets the same answer; dropping a stale child frees a slot, and the root window rolls. A refusal also carries its reason in the result's `_meta.denied` field. Clawboo Native turns that field into a `policy_denied` error, and repeated identical refusals in a task-runner run trip the circuit breaker (see [Governance](/concepts/governance)).
+
+### list_tasks
+
+List tasks, most recently updated first. Dropped (soft-deleted) tasks are left out.
+
+```ts
+{ teamId?: string; status?: TaskStatus; ready?: boolean }
+```
+
+- `ready: true` lists only tasks ready to claim: `todo`, not dropped, and every dependency `done`, highest `priority` first. `status` is ignored then.
+- On a team-bound session the session's team is used and `teamId` is ignored. Otherwise a call with no `teamId` lists every team's tasks.
+- Returns a JSON array of task rows (the [`tasks` table](/reference/database-schema#tasks)).
+
+### get_task
+
+Read one task with its comments and its ancestor chain.
 
 ```ts
 {
@@ -57,86 +161,61 @@ Get a task with its comments and ancestor chain. Returns `{ task, comments, ance
 }
 ```
 
-### `create_task`
+- Returns `{ task, comments, ancestors }`.
+- Error: `not found: <taskId>` for a missing task or one outside the session's team.
 
-Create a board task. Setting `parentTaskId` makes this a subtask: the per-parent child-count and nesting-depth caps apply, and it inherits the parent's team unless `teamId` is given. Without one it is a root task, bounded instead by a rolling-window creation rate. Both paths are covered by the caps note under [`create_subtask`](#create_subtask).
+### create_task
+
+Create a task. With `parentTaskId` it is a subtask and the per-parent caps apply. Without one it is a root task and the root rate cap applies (see [Creation caps](#creation-caps)).
 
 ```ts
 {
   title: string
   description?: string
-  status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  priority?: number        // integer
+  status?: TaskStatus // default 'todo'
+  priority?: number // integer, default 0
   teamId?: string
-  parentTaskId?: string    // non-empty when present
+  parentTaskId?: string // non-empty when present
   assigneeRuntime?: string
 }
 ```
 
-### `create_subtask`
+- A subtask takes its parent's team and chat room.
+- On a team-bound session the task is created in the session's team and `teamId` is ignored. A parent outside the team is refused with `not found: <parentTaskId>`.
+- An empty `parentTaskId` fails argument validation (`invalid args: ...`); it is never treated as a root task.
+- Returns the new task row, or one of the cap errors.
 
-Create a subtask under a parent (inherits the parent's team). Same creation caps and tool-errors as a parented `create_task`, including its team guard: on a team-bound session, a parent from another team is refused with the same `not found` a read would get.
+### create_subtask
+
+Create a subtask under a parent. It takes the parent's team and chat room, and starts in `todo`.
 
 ```ts
 { parentTaskId: string; title: string; description?: string }
 ```
 
-<Note>
-**Creation caps.** A parented create is bounded so a looping agent cannot fill the board: a parent may have at most **24 live (non-dropped) children**, and a task may nest at most **2 levels** deep (`root → child → grandchild`), the same ceiling the delegation depth cap applies at dispatch. Soft-deleting a stale child frees a slot; `done` and `cancelled` children still count, since they are still rows on the board.
+- Same caps and errors as a `create_task` with `parentTaskId`, including the team-bound parent check.
+- Returns the new task row.
 
-Both checks and the insert run inside **one `BEGIN IMMEDIATE` transaction** in the board's `createCappedSubtask`, so two attached runtimes racing the same parent cannot both land the N+1th child. Do not automatically retry the unchanged request: while the board state stays as it is, the answer does not change. A retry _after_ remediation can legitimately succeed — dropping a stale child frees a slot, and the root-rate window rolls.
+### claim_task
 
-- `parent not found: <id>` — previously this reached the foreign key and failed the tool call with a protocol error instead of returning a tool-error.
-- `subtask rejected: parent <id> is at the maximum nesting depth (2); attach the new task higher in the tree`
-- `subtask rejected: parent <id> already has 24 children (max 24); drop one or attach the new task elsewhere`
-
-A **root** create (no `parentTaskId`) is bounded too, by a rolling-window **rate** rather than a total: at most **30 root tasks per 5 minutes**, counted across every surface. A lifetime ceiling on roots would eventually jam a long-lived board, and counting only open roots would be trivially evadable by an agent that completes-then-creates; velocity is the actual runaway signature and it self-clears. The refusal is `task rejected: <n> root tasks already created in the last 5 min (max 30); …`. A subtask is never charged against it, so decomposition still works while filing is limited.
-
-An **empty** `parentTaskId` is rejected by the schema (`invalid args`), never silently treated as a root task.
-
-The caps bound this protocol boundary only: the REST board API and the in-process team-chat orchestrator write through the uncapped repository primitive and carry their own per-turn fan-out and dispatch-depth limits. Measurement is global, though — rows those surfaces create still count toward a parent's total, so an agent cannot launder rows in through another surface to raise its own ceiling. A refusal is returned to the calling model and is not recorded in the governance audit log. It does ride the typed `_meta.denied` channel with its machine-readable reason (`child_cap`, `depth_cap`, `root_rate_cap`, `parent_not_found`), so an in-process caller classifies it without parsing prose — and an agent that keeps hitting the same wall trips the circuit breaker's repeat-policy-denied rule instead of looping forever.
-</Note>
-
-### `claim_task`
-
-Atomically claim a `todo` task. A `conflict` error means another agent won; do not retry. Returns the claimed task on success.
+Claim a `todo` task for an agent. The claim is atomic: when two agents race, exactly one wins. The claimed task moves to `in_progress` with the assignee set.
 
 ```ts
 { taskId: string; assigneeAgentId: string; assigneeRuntime?: string }
 ```
 
-### `assign_task`
+- Succeeds only for a task that is `todo`, has no assignee and is not dropped.
+- Returns the claimed task row.
+- Errors: `claim failed: conflict` (the task exists but is not claimable, for example another agent won; do not retry), `claim failed: not_found`, and `not found: <taskId>` for a task outside the session's team.
+- Not served to an unverified HTTP caller, because `assigneeAgentId` would let it act as any agent.
 
-Assign a `todo` task to an agent (the same atomic claim as `claim_task`; a conflict means already assigned). Same input schema as `claim_task`.
+### assign_task
 
-```ts
-{ taskId: string; assigneeAgentId: string; assigneeRuntime?: string }
-```
+Hand a `todo` task to an agent. It is the same atomic claim as `claim_task`, with the same arguments, results and errors; `conflict` means the task is already taken. Not served to an unverified HTTP caller.
 
-### `release_task`
+### release_task
 
-Release an `in_progress` task back to `todo`.
-
-```ts
-{
-  taskId: string
-}
-```
-
-### `update_task_status`
-
-Transition a task status. State-machine enforced; an illegal transition returns a tool-error `status change failed: <reason>`. When a person moved the card after the task's latest run started, the run was overruled: the call returns a tool-error that names the column the person chose and says not to retry, and the status stays as the person left it. A run started after the move writes as usual.
-
-```ts
-{
-  taskId: string
-  status: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-}
-```
-
-### `block_task`
-
-Mark a task blocked. Tool-error `block failed: <reason>` on an illegal transition; refused the same way as `update_task_status` after a person moved the card.
+Put an `in_progress` task back to `todo` and clear its assignee and its verification verdict, so another agent can claim it.
 
 ```ts
 {
@@ -144,9 +223,27 @@ Mark a task blocked. Tool-error `block failed: <reason>` on an illegal transitio
 }
 ```
 
-### `unblock_task`
+- Returns the text `released: <taskId>`. A task that is not `in_progress` is left unchanged, and the same text is returned.
 
-Unblock a task (back to `todo`). Tool-error `unblock failed: <reason>` on an illegal transition; refused the same way as `update_task_status` after a person moved the card.
+### update_task_status
+
+Move a task to another status. Legal moves follow the board's state machine; `done` and `cancelled` are final, and setting the current status again is a harmless no-op.
+
+```ts
+{
+  taskId: string
+  status: TaskStatus
+}
+```
+
+- Moving a task to `todo` also clears its assignee and its verification verdict.
+- Returns the updated task row.
+- Errors: `status change failed: illegal_transition`, `status change failed: not_found`, and `status change failed: verification_required` when the task holds a failing verification verdict (only a person's override, from the board or the board API, can finish it). See [When work is checked](/concepts/verification).
+- Refused when a person moved the card on the board or in the task drawer after the task's latest run started (or the task has not run since): that run was overruled, and the status stays where the person put it. The tool error reads `A person moved this task to <column> after your run on it started, so its status is theirs to set. Leave it as it is and do not retry this call.` A run started after the move writes as usual.
+
+### block_task
+
+Move a task to `blocked`. It is `update_task_status` with `status: 'blocked'`.
 
 ```ts
 {
@@ -154,22 +251,39 @@ Unblock a task (back to `todo`). Tool-error `unblock failed: <reason>` on an ill
 }
 ```
 
-### `add_comment`
+- Returns the updated task row. Error: `block failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
 
-Add a comment to a task (report-up summaries, system notes). `authorType` defaults to `'agent'`.
+### unblock_task
+
+Move a task to `todo` (from `blocked`, or any status that may move to `todo`). It clears the assignee and the verification verdict, like any move to `todo`.
+
+```ts
+{
+  taskId: string
+}
+```
+
+- Returns the updated task row. Error: `unblock failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
+
+### add_comment
+
+Add a comment to a task, such as a progress report or a note for the person.
 
 ```ts
 {
   taskId: string
   body: string
   authorAgentId?: string
-  authorType?: 'agent' | 'user' | 'system'
+  authorType?: 'agent' | 'user' | 'system' // default 'agent'
 }
 ```
 
-### `link_task`
+- For an unverified HTTP caller both `authorAgentId` and `authorType` are dropped, and the comment posts as a plain `agent` comment with no author. A caller that cannot prove who it is cannot sign as someone else, or as the person.
+- Returns the new comment row. Error: `not found: <taskId>` for a task outside the session's team.
 
-Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency is done. A link that would close a cycle — directly (`A → B`, then `B → A`) or transitively (`A → B → C → A`) — is refused with the tool-error `linking <taskId> to <dependsOnTaskId> would create a dependency cycle`. Re-linking an edge that already exists is still a harmless no-op.
+### link_task
+
+Make `taskId` wait for `dependsOnTaskId`: it is not ready to claim until that task is `done`.
 
 ```ts
 {
@@ -178,202 +292,280 @@ Make `taskId` depend on `dependsOnTaskId`; it stays unready until the dependency
 }
 ```
 
-<Warning>
-Do not work around the cycle refusal by re-linking in the other direction. A cycle can never resolve: a task is ready only when _every_ dependency is `done`, so both ends sit un-ready forever and nothing surfaces the stall — the ready-pump simply has nothing to fire. That silent deadlock is what the check exists to prevent.
-</Warning>
-
----
+- Returns the text `linked: <taskId> depends on <dependsOnTaskId>`. Linking an edge that already exists changes nothing.
+- A link to the task itself, or one that would close a loop (directly or through other tasks), is refused: `linking <taskId> to <dependsOnTaskId> would create a dependency cycle`. A loop could never finish, because every task in it waits on another.
+- On a team-bound session both tasks must belong to the team, otherwise `not found: <id>`.
 
 ## Memory server
 
-`createMemoryServer(db, embed?, opts?)` → `clawboo-memory`. `embed` is a fixed `EmbeddingProvider`, `null`, or a function asked on every tool call; the dashboard passes a function, so a long-lived session follows the current provider. The stdio bin's function is `createStdioEmbedSource(db)`, also exported, which applies the local-first rules below. Four tools over the shared `SqliteMemoryStore`: declarative facts plus versioned procedures, with FTS / vector / hybrid search. The store scrubs secrets on write.
+The Memory server saves and recalls the team's shared memory: declarative facts ("the client prefers short emails") and versioned procedures. See [Memory](/concepts/memory) for the tiers and how memory reaches an agent's prompt.
 
-<Info>
-**The `boundScope` binding (anti-spoof).** When the server is constructed with `opts.boundScope`, the run's scope is authoritative and the model's `scopeTeamId` / `scopeAgentId` args are ignored:
-- **Save** tags the fact with the bound team only (agentId dropped = team-shared, so any runtime's agent on the team recalls it).
-- **Search / browse** filter by the full bound scope (team + agent inclusive + global), never another team's private facts.
+Where a call reads and writes depends on the caller:
 
-When unset, what happens depends on how the caller reached the server, because the two absences mean different things. Over the raw **stdio bin** the operator is the caller, so the model's scope args are used as before. Over **HTTP** an absent binding means an attach URL that carried no signed scope, so the caller is unidentified: its scope args are ignored, saves go to the global tier and reads see the global tier only. The binding itself rides query params on the Memory attach URL (`scopeTeamId` / `scopeAgentId` / `scopeTenantId`); see [the attach-URL scope](#scope-and-identity-binding).
-</Info>
+| Caller                 | Saves go to                                               | Searches and browses see                                                                   | Feedback is recorded as                        |
+| ---------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| Bound                  | The bound team, shared with every teammate on any runtime | Team facts, this agent's own facts, and facts that belong to no team; never another team's | The bound agent, team and task                 |
+| Unverified HTTP caller | Facts that belong to no team                              | Only facts that belong to no team                                                          | No one                                         |
+| Operator (stdio bin)   | The `scopeTeamId` and `scopeAgentId` arguments            | The `scopeTeamId` and `scopeAgentId` arguments                                             | The `scopeAgentId` and `scopeTeamId` arguments |
 
-### `memory_save`
+On a bound session the `scopeTeamId` and `scopeAgentId` arguments are ignored. A bound save also records provenance (the agent, runtime, task and session that saved it), which never changes who can see the fact.
 
-Save a durable fact (`title` + `content`) or a versioned procedure (set `procedureName`). Facts are declarative ("user prefers X"), not instructions. A fact requires a `title`; a procedure requires `procedureName`. If the content scrubs down to nothing but redaction sentinels, the save is declined (a tool-error). Returns `{ saved: 'fact', fact }` or `{ saved: 'procedure', procedure }`.
+### memory_save
+
+Save a fact (`title` and `content`), or a new version of a procedure (set `procedureName`).
 
 ```ts
 {
   content: string
-  title?: string            // required for a fact (not a procedure)
+  title?: string // required for a fact
   tags?: string[]
-  procedureName?: string    // set to save a procedure instead of a fact
-  scopeTeamId?: string      // ignored when the connection is boundScope-bound
-  scopeAgentId?: string     // ignored when bound
+  procedureName?: string // save a procedure instead of a fact
+  scopeTeamId?: string
+  scopeAgentId?: string
 }
 ```
 
-### `memory_search`
+- Secrets in the content are replaced with `[REDACTED]` before storage.
+- Returns `{ saved: 'fact', fact }` or `{ saved: 'procedure', procedure }`. Saving a procedure under an existing name and scope stores the next version.
+- Errors: `nothing to save: content was entirely redacted secrets`, and `a fact requires a title (or set procedureName for a procedure)`.
 
-Search saved facts. `mode` is `fts` (default), `vector`, or `hybrid`. Results cite a fact id. `limit` is `1`–`100`.
+### memory_search
+
+Search facts by keyword, by meaning, or both.
 
 ```ts
 {
   query: string
   mode?: 'fts' | 'vector' | 'hybrid'
-  limit?: number            // integer, 1..100
-  scopeTeamId?: string      // ignored when bound
-  scopeAgentId?: string     // ignored when bound
+  limit?: number // integer, 1 to 100, default 10
+  scopeTeamId?: string
+  scopeAgentId?: string
 }
 ```
 
-### `memory_browse`
+- With no `mode`, search is `hybrid` (meaning plus keyword) when an embedding provider is available and `fts` (keyword) when not. `vector` and `hybrid` also fall back to keyword search when there is no provider or the query cannot be embedded.
+- Returns an array of facts, best first. Each carries `score`, `matchedVia` (the mode that found it) and `learning`.
+- `learning` is `null` for a fact nothing has used or rated yet. Otherwise its `status` is `preferred` (two or more different agent and task pairs found it useful), `tentative` (one did), `contested` (mixed reports), `dead_end` (only negative reports), or `null` (it has only been used, not rated).
+- The tool's own description says `fts` is the default; the rule above is what the server does.
 
-List recent saved facts (scoped). `limit` is `1`–`200`.
+### memory_browse
+
+List the most recently updated facts the caller can see.
 
 ```ts
-{
-  limit?: number            // integer, 1..200
-  scopeTeamId?: string      // ignored when bound
-  scopeAgentId?: string     // ignored when bound
-}
+{ limit?: number; scopeTeamId?: string; scopeAgentId?: string } // limit: integer, 1 to 200, default 10
 ```
 
-### `memory_feedback`
+- Returns an array of facts, each with `learning` as in `memory_search`.
 
-Report whether a recalled fact helped: `useful`, `dead_end` (it misled or wasted effort) or `corrected` (it was wrong, and `note` carries the correction). Cite the id from `memory_search` or the `(id …)` prefix in the auto-memory block; an 8+ character prefix is accepted. A fact the caller cannot see gets the same error as one that does not exist. Returns `{ recorded, learning }`.
+### memory_feedback
 
-The reporter comes from the binding when there is one. An unidentified HTTP caller is recorded as no one, because two distinct reporters (an agent and task pair) make a fact **preferred** in every team's recall, and a caller that could name itself could do that alone. Each reporter counts once per direction in the score, at the weight of its newest report, so repeating a report adds nothing.
+Report whether a recalled fact helped. Reports feed the `learning` status that search results carry.
 
 ```ts
 {
-  factId: string
+  factId: string // the full id, or a unique prefix of 8 or more hex characters
   outcome: 'useful' | 'dead_end' | 'corrected'
-  note?: string             // required for 'corrected'
-  scopeTeamId?: string      // ignored when bound, and for an unidentified HTTP caller
-  scopeAgentId?: string     // same
+  note?: string // required for 'corrected'
+  scopeTeamId?: string
+  scopeAgentId?: string
 }
 ```
 
----
+- `useful` means the fact was right and helped, `dead_end` that it misled or wasted effort, and `corrected` that it was wrong (put the correction in `note`; secrets in it are scrubbed).
+- Cite the id from `memory_search`, or the id prefix shown in the memory block of the agent's prompt.
+- A fact the caller cannot see gets the same error as a missing one, so feedback cannot reveal another team's facts. That error begins `unknown fact id (or ambiguous prefix)`. The other error is `corrected requires a note with the correction`.
+- Returns `{ recorded, learning }`.
+- Each reporter (an agent and task pair) counts once per direction, at the weight of its newest report, so repeating a report adds nothing. An unverified caller is recorded as no one, so it cannot promote a fact on its own.
 
 ## Tools server
 
-`createToolsServer(db, opts?)` → `clawboo-tools`. The tool broker. Unlike the other three servers, its tool list is dynamic: it lists only the builtin tools whose availability is satisfied; a hidden tool is absent from `tools/list`, so a model can't hallucinate it. Every call routes through the broker pipeline (inspector chain → DB-mediated approval → execute → compaction → audit), and a typed denial reason rides the result's `_meta` channel.
+The Tools server is Clawboo's tool broker. Every call is checked, may wait for a person's approval, then runs and is recorded in the tool audit. Approval requests appear under **Needs you** on the Board and in the Governance approval queue (see [Approvals](/using/approvals)).
 
-The four builtin descriptors:
+`tools/list` contains:
 
-| Tool          | Description                                                                                | Input schema                        | Risk        | Availability                                                                                       |
-| ------------- | ------------------------------------------------------------------------------------------ | ----------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
-| `echo`        | Echo a message back. Safe, no side effects.                                                | `{ message: string }`               | safe        | always                                                                                             |
-| `note`        | Record a short note. Safe.                                                                 | `{ note: string }` (min 1)          | safe        | always                                                                                             |
-| `web_search`  | Search the web. External side effect → requires approval.                                  | `{ query: string; limit?: number }` | external    | hidden until a search provider is configured (`TAVILY_API_KEY` env or an authed `tavily` provider) |
-| `delete_path` | Delete a path. Destructive → requires approval. (Demo executor, does not actually delete.) | `{ path: string }` (min 1)          | destructive | always                                                                                             |
+- The [builtin tools](#builtin-tools) whose requirements are met.
+- The tools of every live [connector](/using/connectors) that the calling agent's grants allow. A connector tool the agent has not been granted is not listed at all. The list is recomputed for every list and every call, and the server sends a list-changed notification when a connector connects or disconnects.
+- [`read_tool_result`](#read_tool_result), always. Grants, availability and connector tools never hide or replace it.
 
-<Note>
-These builtins re-express real capabilities so the broker has tools to gate, inspect, approve, and audit; the executor bodies are intentionally lightweight. The broker pipeline, not the tool bodies, is the point.
-</Note>
+A call goes through these checks in order:
 
----
+1. The tool must exist, be enabled and be available, and its arguments must validate.
+2. A connector tool must pass the grant check for the calling agent and team.
+3. A security scan of the arguments can refuse the call. Numeric `limit`, `max`, `count`, `maxResults`, `top_k` and `topK` arguments above 1,000 are lowered to 1,000.
+4. A destructive tool, an external tool that is not read-only, or a grant that asks for approval waits up to 5 minutes for a person to answer.
+5. The call runs, and its arguments and result are recorded in the audit with secrets scrubbed.
+
+Results:
+
+- A refused call returns the tool error `denied: <reason>`, and the same reason in `_meta.denied`. Reasons start with `unknown-tool:`, `disabled:`, `unavailable:`, `provenance:`, `invalid-args:`, `grant:` (for example `grant:no-grant`; see the [grant decision reasons](/reference/events-and-errors#grant_decision)), `security:` or `scope:`.
+- A call whose approval is refused, expires or times out returns `approval deny`, `approval expired` or `approval timeout`.
+- A text result larger than 16 KiB is stored whole (up to 8 MiB) and the model gets a trimmed view: the start and the end of the result, with a notice between them that carries a `tr_` handle and the exact `read_tool_result` call for the rest. Only the Tools server trims results; the other three servers bound theirs with `limit` arguments. Stored results are deleted after 7 days (`CLAWBOO_TOOL_RESULT_TTL_MS`).
+
+### Builtin tools
+
+These four exist to exercise the broker (approvals, audit and denials). None of them has a side effect.
+
+| Tool          | Arguments                                             | Risk                           | Listed                      | Returns                                    |
+| ------------- | ----------------------------------------------------- | ------------------------------ | --------------------------- | ------------------------------------------ |
+| `echo`        | `{ message: string }`                                 | safe                           | Always                      | The message                                |
+| `note`        | `{ note: string }` (non-empty)                        | safe                           | Always                      | `noted: <note>`; nothing is stored         |
+| `web_search`  | `{ query: string; limit?: number }` (query non-empty) | external, asks for approval    | Only with a search provider | `searched: <query>`; no search runs        |
+| `delete_path` | `{ path: string }` (non-empty)                        | destructive, asks for approval | Always                      | `would delete: <path>`; nothing is deleted |
+
+A search provider means the `TAVILY_API_KEY` environment variable, or an authorized `tavily` provider. With no search provider and no grant that covers every agent (a `global` grant), an unverified caller is served four tools: `echo`, `note`, `delete_path` and `read_tool_result`.
+
+### Connector tools
+
+- A connector tool is named `mcp__<connector-slug>__<tool-name>`, at most 128 characters. Its description is the connector's own, unchanged.
+- A brokered connector (one service that fronts many apps, such as Composio) gets one line appended to its app-facing tools' descriptions: `Apps this agent may use: ...` for a bound agent, or `Apps reachable here, each subject to the operator approving the first call: ...` for an unverified caller.
+- The agent's grants decide which connector tools it is offered and whether a call is allowed, asks for approval, or is denied. See [Connectors](/using/connectors).
+
+### read_tool_result
+
+Read back a result that was too large to return whole.
+
+```ts
+{
+  handle: string // the tr_ handle from the trimmed result
+  offset?: number // integer, at least 0, in bytes
+  limit?: number // integer, at least 1, in bytes; capped at 16 KiB
+  search?: string
+}
+```
+
+- Returns the requested bytes, then a line with the total size and the exact call for the next page, or `This is the end of the result.` When the stored copy itself was cut at 8 MiB, that line says how many bytes were kept.
+- With `search`, returns only the lines that contain the text (case-insensitive), each prefixed with its byte offset as `[byte <n>]` so the next call can seek to it.
+- An unknown or expired handle is an error that begins `No stored result for handle` and tells the model to re-run the original call with narrower arguments.
+- Its own result is never trimmed. Handles are random and work from any session, so a handle is as sensitive as the result it points to.
 
 ## TeamChat server
 
-`createTeamChatServer(db, opts?)` → `clawboo-teamchat`. Two tools that let every runtime, regardless of dialect, post to and listen on the shared team room over the `team_chat` substrate, plus a third, `team_delegate`, pushed onto the tool list only on orchestrator-driven team runs. The board stays canonical; a post is narration, never a board mutation (this server has no board access).
+The TeamChat server is the agents' peer room. Teammates on any runtime post as named peers and read each other's posts. This room is separate from the team chat you see in the dashboard (General and its rooms); see [Peer chat](/concepts/peer-chat). A post never changes the board.
 
-<Info>
-**The `boundIdentity` binding (anti-spoof).** When the server is constructed with `opts.boundIdentity`, the post author and room are authoritative, taken from the binding, never from tool args. A runtime may pass `authorAgentId` / `teamId` / `roomId` in args; they are ignored. The binding rides the clawboo-written attach URL (`roomTeamId` / `postAuthorAgentId`), so a runtime cannot post as a peer it is not. When unbound on the raw stdio bin, the model must pass `authorAgentId` + `teamId` in args; the default room is `team:<teamId>`. An **HTTP** session without a verified binding is served neither tool: identity from args would let it read any room and post as any agent.
-</Info>
+- On a bound session the author and room come from the binding, and any `authorAgentId`, `teamId` or `roomId` argument is ignored, so a runtime cannot post as a teammate it is not. The room is `team:<teamId>`.
+- On the stdio bin, pass `authorAgentId` and `teamId`; `roomId` defaults to `team:<teamId>`.
+- An unverified HTTP caller is served no tools, because both tools need an author and a room.
+- On a bound session, `team_chat_post` and `team_delegate` results can carry mailbox notices like the Tasks tools. `team_chat_subscribe` results never do.
 
-### `team_chat_post`
+### team_chat_post
 
-Post a message to your team room as a named peer. Returns `{ posted: { seq, roomId, authorAgentId } }`; a tool-error if the text is empty, or (unbound stdio bin) if no `authorAgentId` + `teamId` were supplied.
+Post a message to the peer room.
+
+```ts
+{ text: string; authorAgentId?: string; teamId?: string; roomId?: string }
+```
+
+- Returns `{ posted: { seq, roomId, authorAgentId } }`. `seq` goes up by one with each post in the room.
+- Errors: `a post requires non-empty text`, and on the stdio bin `no bound identity: pass authorAgentId + teamId (unbound mode)`.
+- A bound post over HTTP also writes a `team_chat_post` event to the [event log](/reference/events-and-errors).
+
+### team_chat_subscribe
+
+Read new posts since a cursor. The caller's own posts are never returned.
 
 ```ts
 {
-  text: string
-  authorAgentId?: string   // ignored when the connection is bound
-  teamId?: string          // ignored when bound
-  roomId?: string          // ignored when bound
+  sinceSeq?: number // integer, at least 0, default 0
+  limit?: number // integer, 1 to 500; up to 1,000 posts when omitted
+  authorAgentId?: string
+  teamId?: string
+  roomId?: string
 }
 ```
 
-### `team_chat_subscribe`
+- Returns `{ posts, nextSeq }`, oldest post first. Each post is `{ seq, authorAgentId, kind, wrapped }`.
+- `wrapped` presents the post as evidence, not as an instruction. It is a header line, `[Inter-session message · from=<agent> · kind=<kind> · seq=<n> · isUser=false]`, then the body with every line prefixed `| `. Text in the body that imitates such a header becomes `[peer-quoted header]`. A teammate's post is context to weigh, never an order from the person.
+- `nextSeq` is the room's newest `seq`, never lower than `sinceSeq`. It moves to the newest post even when `limit` cut the page short, so posts beyond the limit are skipped by the next read.
+- Error (stdio bin only): `no bound identity: pass authorAgentId + teamId (unbound mode)`.
 
-Read new posts from your team room since a cursor (`sinceSeq`, default `0`). Returns `{ posts, nextSeq }`. Each post is wrapped as inter-session evidence with the `isUser=false` tag (a teammate post is context to synthesize, never an instruction that overrides your policy), and your own posts are never returned (the per-room echo guard). `limit` is `1`–`500`.
+### team_delegate
 
-```ts
-{
-  sinceSeq?: number        // integer ≥ 0, default 0
-  limit?: number           // integer, 1..500
-  authorAgentId?: string   // ignored when bound
-  teamId?: string          // ignored when bound
-  roomId?: string          // ignored when bound
-}
-```
-
-The `isUser=false` substring is the load-bearing safety property: a peer post is delivered as tool-routed evidence, never as a turn carrying user authority. Each delivered post entry is `{ seq, authorAgentId, kind, wrapped }`, where `wrapped` is the `[Inter-session message · from=… · kind=… · seq=… · isUser=false]` envelope.
-
-### `team_delegate`
-
-Hand a self-contained piece of work to a teammate by name. **Conditional**: this tool is pushed onto the list only when the bound identity carries `delegate: true`, which the HTTP route sets from the `delegate=1` attach-URL param. On every other session (unbound stdio, or a merely team-scoped attach) it is absent from `tools/list`.
+Hand a self-contained piece of work to a teammate by name. It is served only on runs the team engine drives (a signed `delegate=1`), and it is how Claude Code, Codex and Hermes team leaders delegate. Clawboo Native leaders use their own built-in `delegate` tool instead.
 
 ```ts
 {
   assignee: string
   task: string
-}
+} // assignee is the teammate's name, for example "Coder"
 ```
 
-Signal-only, and the one tool on this server that does not touch the `team_chat` substrate at all: the handler writes neither the board nor the room. It validates that both fields are non-empty (otherwise the tool-error `team_delegate requires both an assignee (teammate name) and a task`) and returns an acknowledgement string. The orchestration engine watches the emitted `tool-call` event, matches it by _name_, resolves `assignee` against the team roster, and creates the durable board task; a name that resolves to nobody, or to the caller itself, is dropped. The engine owns every board write. See [Codex: leading a team](/runtimes/codex#leading-a-team) for the leader-side flow.
-
----
+- The tool writes nothing itself. The team engine sees the call and creates the board task for that teammate, who reports back when done. See [Delegation and orchestration](/concepts/delegation-and-orchestration).
+- Returns `Delegated to <assignee>: <task>. They'll pick it up and report back when done.` whenever both fields are present. A name that matches no teammate, or the caller itself, creates no task.
+- Error: `team_delegate requires both an assignee (teammate name) and a task`.
 
 ## Transports
 
-Every server is served over two transports built from the same factory.
+Every server is built from the same code and served three ways.
 
-### stdio bin
+### stdio bins
 
-A consuming runtime spawns one bin per server; the runtime owns the process lifecycle and the server serves over stdio. The `@clawboo/mcp` package declares them as bins, and the `clawboo` CLI re-exposes them so a clean Clawboo install ships them:
+The `clawboo` npm package installs one command per server. The client that spawns a bin owns its process.
 
-| Bin                    | Server   |
+| Command                | Server   |
 | ---------------------- | -------- |
-| `clawboo-mcp-tasks`    | tasks    |
-| `clawboo-mcp-memory`   | memory   |
-| `clawboo-mcp-tools`    | tools    |
-| `clawboo-mcp-teamchat` | teamchat |
+| `clawboo-mcp-tasks`    | Tasks    |
+| `clawboo-mcp-memory`   | Memory   |
+| `clawboo-mcp-tools`    | Tools    |
+| `clawboo-mcp-teamchat` | TeamChat |
 
-Each bin opens the shared clawboo DB. The default DB path is the bins' own default; set `CLAWBOO_DB_PATH` so a spawned bin reaches the same board the API server uses (the attach snippets embed it for you). The Memory bin also resolves an embedding provider, and re-resolves it once a minute (an Ollama with `nomic-embed-text` installed → `OPENAI_API_KEY` from its environment → none; vector/hybrid degrades to FTS when none is available). A store that has ever had Ollama vectors never gets OpenAI from the bin unless the dashboard's user chose OpenAI for the current outage, and the bin withdraws that choice itself as soon as it finds Ollama serving. With `CLAWBOO_DB_PATH` pointing it at the dashboard's database, facts it saves without a vector are indexed by the dashboard server, which checks for waiting facts on its own every few minutes. The TeamChat bin runs unbound by default; an external attach passes `authorAgentId` + `teamId` in the tool args.
+- The bins open `CLAWBOO_DB_PATH`, or `~/.openclaw/clawboo/clawboo.db` when it is unset. That is a different file from the dashboard's database (`~/.clawboo/clawboo.db`), on purpose. To work on the dashboard's board and memory, set `CLAWBOO_DB_PATH` to the dashboard's file; the stdio snippets from `GET /api/mcp/config` already do.
+- The Memory bin picks an embedding provider and checks again once a minute: a local Ollama with `nomic-embed-text` at `http://localhost:11434` first, then `OPENAI_API_KEY` from its environment, unless the store holds local vectors and you have not allowed remote embeddings. With neither, search is keyword-only. `CLAWBOO_DISABLE_EMBEDDINGS=1` turns embeddings off.
+- The Tools bin serves the builtins and `read_tool_result`; it has no connector tools.
+- The TeamChat bin is unbound, so author and team come from the tool arguments.
 
 ### Streamable HTTP
 
-The API server mounts each server in-process over MCP's Streamable HTTP transport. Sessions are keyed by the `mcp-session-id` header: a fresh server + transport is created on the `initialize` request and reused for that session's subsequent calls.
+The dashboard server mounts each server at `/api/mcp/<server>`, where `<server>` is `tasks`, `memory`, `tools` or `teamchat`.
 
-| Method | Path (× tasks / memory / tools / teamchat) | Role                                                         |
-| ------ | ------------------------------------------ | ------------------------------------------------------------ |
-| POST   | `/api/mcp/<name>`                          | JSON-RPC requests (`initialize`, `tools/list`, `tools/call`) |
-| GET    | `/api/mcp/<name>`                          | SSE stream for an established session                        |
-| DELETE | `/api/mcp/<name>`                          | session teardown                                             |
+| Method   | Path                | Use                                                         |
+| -------- | ------------------- | ----------------------------------------------------------- |
+| `POST`   | `/api/mcp/<server>` | JSON-RPC requests: `initialize`, `tools/list`, `tools/call` |
+| `GET`    | `/api/mcp/<server>` | The event stream of an open session                         |
+| `DELETE` | `/api/mcp/<server>` | Close a session                                             |
 
-A POST without a valid session that is not an `initialize` request returns a JSON-RPC error `No valid session; send an initialize request first.`; a GET/DELETE with an invalid or missing session id returns `Invalid or missing MCP session id.`. A handler throw surfaces as a `500 { error }` if headers have not been sent.
+- A session starts with `initialize`. Its response carries an `mcp-session-id` header that every later request must send. Sessions live in the server's memory, so after a restart a client must initialize again.
+- A `POST` must send `Accept: application/json, text/event-stream`, or it gets HTTP 406; a `GET` needs `Accept: text/event-stream`. A body that is not JSON gets HTTP 415.
+- `No valid session; send an initialize request first.` (HTTP 400) answers a `POST` that is not `initialize` and has no known session. `Invalid or missing MCP session id.` (HTTP 400) answers a `GET` or `DELETE` without one. Both are JSON-RPC errors with code `-32000` and `id: null`. A server failure before the response starts returns HTTP 500 with `{ "error": "..." }`.
+- The MCP routes share the general API rate limit; see [Limits and defaults](/reference/limits-and-defaults).
 
-`GET /api/mcp/config?runtime=&server=&transport=` emits a copy-pasteable attach snippet for the chosen runtime (`claude-code` | `codex` | `openclaw`) and transport (`http` default | `stdio`). See [Tools & MCP API](/reference/rest-api/tools-and-mcp) for the full route reference.
+When the access gate is on (`STUDIO_ACCESS_TOKEN` is set), every `/api/` request needs the access cookie. A cookieless request to one of the four MCP paths is let through only when it carries a valid `attachToken`, arrives on a loopback connection, and has none of the `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or `X-Real-IP` headers. A request through a reverse proxy therefore always needs the cookie. `GET /api/mcp/config` always needs the cookie when the gate is on, because it signs identities. See [Security](/operating/security).
 
-### Scope and identity binding
+### In-process
 
-Over HTTP, the authoritative bindings ride query params on the attach URL the server itself writes (the model never controls the URL):
+Clawboo Native agents use the same servers inside the dashboard server, through an in-memory MCP client. There is no URL and no token, and the run's team and agent are bound directly.
 
-- **Memory**: `scopeTeamId` / `scopeAgentId` / `scopeTenantId` set the run's visibility scope (`boundScope`). `provRuntime` / `provTaskId` / `provSessionKey` record which run saved a fact or reported an outcome; they carry their own `provSig` and are dropped when it does not verify, since the task id decides whether two reports count as independent.
-- **TeamChat**: `roomTeamId` / `postAuthorAgentId` set the room and post author (`boundIdentity`); an added `delegate=1` marks the session orchestrator-driven and exposes [`team_delegate`](#team_delegate). Clawboo writes that param on orchestrator-driven team runs and nowhere else: an external attach must not add it, because nothing is observing the tool-call there and the delegation would silently no-op.
-- **Tasks**: `scopeTeamId` / `scopeAgentId` bind the run's board reads to its team (`boundScope`); `scopeAgentId` also carries the mid-run inbox piggyback.
-- **Tools**: `scopeTeamId` / `scopeAgentId` (with `scopeSig`) identify the calling agent, because a connector tool reaches an agent only through an agent-scoped grant. An unidentified attach is served the builtin tools only.
+### Attach snippets
 
-When these params are absent, the server is unbound, and what that means splits by transport. For the **stdio bins** the model supplies scope/identity in args, as before, because the operator is the caller. For an **HTTP** attach the caller is unidentified instead, and identity taken from tool args is refused: Memory ignores `scopeTeamId`/`scopeAgentId` and works on the global tier only, Tasks does not serve `claim_task` or `assign_task`, `add_comment` drops both `authorAgentId` and `authorType`, and TeamChat serves no tools at all, because both of its tools need an author and a room. The anonymous board writes (create, release, status, block, unblock, link) are unaffected, because they name no agent. Every OpenClaw agent currently attaches this way.
+`GET /api/mcp/config` returns a ready-to-paste attach snippet. Copy URLs from it rather than building them, because only it can sign them.
 
-## See also
+| Parameter                     | Values                                          | Default       |
+| ----------------------------- | ----------------------------------------------- | ------------- |
+| `server`                      | `tasks`, `memory`, `tools`, `teamchat`          | `tasks`       |
+| `runtime`                     | `claude-code`, `codex`, `openclaw`              | `claude-code` |
+| `transport`                   | `http`, `stdio` (any other value means `stdio`) | `http`        |
+| `scopeTeamId`, `scopeAgentId` | Ids to bind the session to                      | Unscoped      |
 
-- [MCP servers as teammates: attach config, transports, scoping](/operating/mcp-servers)
-- [Tools & MCP API](/reference/rest-api/tools-and-mcp), the `/api/mcp/*` and `/api/tools*` REST surface
-- [Memory](/concepts/memory), the shared Memory tier vs each runtime's private tier
-- [Peer chat](/concepts/peer-chat), rooms, speaker selection, the `isUser=false` evidence wrapper
-- [The board](/concepts/the-board), the durable kanban the Tasks server fronts
-- [@clawboo/mcp](/reference/packages/mcp), package API
-- [Glossary](/appendices/glossary)
+- Returns `{ ok: true, config: { id, transport, snippet, structured } }`. An unknown `server` is HTTP 400 `unknown server: <name>`. An unknown `runtime` returns `{ ok: true }` with no `config`.
+- HTTP URLs use the server's own loopback address and port, never the request's `Host` header. They always carry `attachToken`, and a `scopeSig` when scoped.
+- A Claude Code HTTP snippet looks like `claude mcp add --transport http clawboo-tasks 'http://127.0.0.1:<port>/api/mcp/tasks?attachToken=<hex>'`. The URL is single-quoted because it carries a query string.
+
+The full route reference is in the [Tools and MCP API](/reference/rest-api/tools-and-mcp).
+
+## Errors on every server
+
+| Error text                | Meaning                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `unknown tool: <name>`    | The tool is not on this session's list, for example a hidden or ungranted tool |
+| `invalid args: <details>` | The arguments failed the tool's schema; `<details>` lists the problems         |
+
+Both are tool results with `isError: true`. Errors specific to a tool are listed under that tool.
+
+## Related
+
+- [Attaching Clawboo's MCP servers](/operating/mcp-servers): attach an agent of your own, step by step.
+- [Tools and MCP API](/reference/rest-api/tools-and-mcp): approvals, audit and the attach-config route.
+- [The board](/concepts/the-board): statuses, legal moves and claiming.
+- [Memory](/concepts/memory): memory tiers, recall and learning.
+- [Connectors](/using/connectors): connect services and grant them to agents.
+- [Events and errors](/reference/events-and-errors): the events these tools write.

@@ -1,54 +1,71 @@
 ---
-title: Board API
-description: 'REST reference for the durable board: tasks, atomic claim, status gate, comments, executions, deps, and per-task worktrees.'
+title: 'Board API'
+sidebarTitle: 'Board'
+description: 'REST reference for the board: tasks, claims, status changes, comments, retry, assign, the run ledger, dependencies, worktrees, workspace files and preview.'
+keywords: ['board', 'tasks', 'kanban', 'claim', 'worktree', 'workspace', 'preview', 'executions']
 ---
 
-REST surface over the durable [board](/concepts/the-board), the transactional source of truth for team/task coordination. These routes create and list tasks, atomically claim a task for a single assignee, transition status through the state machine (with the intrinsic verification gate), record the execution ledger, link dependency chains, cancel a dead downstream chain, and provision / inspect / pause / complete a task's per-task git worktree (its system-of-record).
+These routes read and change the [board](/concepts/the-board), where every team's tasks live. They create and list tasks, claim a task for one agent, move tasks through the status rules (including the check that guards `done`), record each run in the run ledger, link dependencies, and manage a task's git worktree: create it, read it, pause or complete it, browse its files and preview what the agent built.
 
-The board is a thin HTTP layer over `@clawboo/db`'s board repository, the data boundary. Every POST/PATCH body is validated by a co-located zod schema; an invalid body returns **400** `{ error: 'invalid body', details: <zod flatten> }`. The worktree-handoff route validates against `@clawboo/worktrees`' handoff schema and returns **400** `{ error: 'invalid handoff', details: <zod flatten> }` instead. All bodies are parsed by `express.json({ limit: '2mb' })`.
+Several routes also post a short system line to the team's peer room, the agents' shared room behind the TeamChat tools (see [Peer chat](/concepts/peer-chat)). The dashboard's team chat does not show those lines, and a failed post never fails the request.
+
+Every POST and PATCH body is validated. An invalid body returns **400** `{ "error": "invalid body", "details": <zod flatten> }`; the handoff route returns `{ "error": "invalid handoff", "details": ... }` instead. Every route here is on the general rate tier (see [rate limits](/reference/rest-api/index#rate-limits)).
 
 <Info>
-The atomic claim is the board's concurrency primitive. `POST /api/board/:taskId/claim` returns **409** when another worker already won. Per the board contract, **a 409 is data, not a transient error; do not retry it.** The loser did not lose a race it can re-run; the task is simply taken. The same rule applies to the `409 illegal_transition` on `PATCH /api/board/:taskId`.
+
+A claim is how agents share work without doing it twice: `POST /api/board/:taskId/claim` answers **409** when another worker already holds the task. **A 409 is an answer, not a transient error; do not retry it.** The task is simply taken. The same applies to `409 illegal_transition` on `PATCH /api/board/:taskId`.
+
 </Info>
 
 ## Routes
 
-| Method | Path                                     | Summary                                                     | Stream? |
-| ------ | ---------------------------------------- | ----------------------------------------------------------- | ------- |
-| GET    | `/api/board`                             | List tasks (or ready-to-work tasks) for a team              | No      |
-| POST   | `/api/board`                             | Create a task (optionally for one agent, started at once)   | No      |
-| POST   | `/api/board/:taskId/retry`               | Run a stuck task again, straight to its agent               | No      |
-| POST   | `/api/board/:taskId/assign`              | Give an unowned task to one team member and start it        | No      |
-| GET    | `/api/board/:taskId`                     | One task + its comments + ancestor chain                    | No      |
-| POST   | `/api/board/:taskId/claim`               | Atomically claim a `todo` task (409 contract)               | No      |
-| PATCH  | `/api/board/:taskId`                     | Transition status (verification-gated) and/or edit metadata | No      |
-| POST   | `/api/board/:taskId/comments`            | Add a comment                                               | No      |
-| GET    | `/api/board/:taskId/executions`          | The run ledger for a task                                   | No      |
-| POST   | `/api/board/:taskId/executions`          | Open an execution row (after a claim)                       | No      |
-| PATCH  | `/api/board/executions/:execId`          | Close an execution with its outcome + ledger                | No      |
-| POST   | `/api/board/:taskId/deps`                | Link a dependency (plan / blocked-by)                       | No      |
-| POST   | `/api/board/:taskId/cancel-dependents`   | Cancel the dead downstream chain of a failed task           | No      |
-| POST   | `/api/board/:taskId/workspace`           | Provision a worktree + branch + SoR scaffold                | No      |
-| GET    | `/api/board/:taskId/workspace`           | Cold-resume read: workspace + reconstructed state           | No      |
-| PATCH  | `/api/board/:taskId/workspace`           | `pause` or `complete` the worktree                          | No      |
-| POST   | `/api/board/:taskId/workspace/handoff`   | Write the clock-out `AGENT_HANDOFF.json`                    | No      |
-| GET    | `/api/board/:taskId/workspace/detail`    | SoR file contents + unified diff (drawer view)              | No      |
-| GET    | `/api/board/:taskId/workspace/tree`      | List ONE directory level of the worktree                    | No      |
-| GET    | `/api/board/:taskId/workspace/file`      | Read one file, size-capped                                  | No      |
-| GET    | `/api/board/:taskId/workspace/file-diff` | Unified diff for ONE file vs the baseline                   | No      |
-| GET    | `/api/board/:taskId/workspace/status`    | `git status --porcelain` for the worktree                   | No      |
+| Method | Path                                     | Summary                                                       | Stream? |
+| ------ | ---------------------------------------- | ------------------------------------------------------------- | ------- |
+| GET    | `/api/board`                             | List tasks (or the ready-to-work ones)                        | No      |
+| POST   | `/api/board`                             | Create a task (optionally for one agent, started at once)     | No      |
+| POST   | `/api/board/:taskId/retry`               | Run a stuck task again, straight to its agent                 | No      |
+| POST   | `/api/board/:taskId/assign`              | Give an unowned task to one team member and start it          | No      |
+| GET    | `/api/board/:taskId`                     | One task with its comments and parent chain                   | No      |
+| POST   | `/api/board/:taskId/claim`               | Claim a `todo` task for one agent (409 if taken)              | No      |
+| PATCH  | `/api/board/:taskId`                     | Change status (checked) and edit title, description, priority | No      |
+| POST   | `/api/board/:taskId/comments`            | Add a comment (a person's reply reaches the task's agent)     | No      |
+| POST   | `/api/board/:taskId/executions`          | Open a run in the ledger (after a claim)                      | No      |
+| PATCH  | `/api/board/executions/:execId`          | Close a run with its outcome, tokens and cost                 | No      |
+| GET    | `/api/board/:taskId/executions`          | The task's run ledger                                         | No      |
+| POST   | `/api/board/:taskId/deps`                | Make one task wait for another                                | No      |
+| POST   | `/api/board/:taskId/cancel-dependents`   | Cancel the waiting tasks behind a failed one                  | No      |
+| POST   | `/api/board/:taskId/workspace`           | Create the task's worktree, branch and task files             | No      |
+| GET    | `/api/board/:taskId/workspace`           | Read the workspace and the state to resume from               | No      |
+| PATCH  | `/api/board/:taskId/workspace`           | `pause` or `complete` the worktree                            | No      |
+| POST   | `/api/board/:taskId/workspace/handoff`   | Write `AGENT_HANDOFF.json` for the next runtime or person     | No      |
+| GET    | `/api/board/:taskId/workspace/detail`    | Task file contents and the diff (the task drawer view)        | No      |
+| GET    | `/api/board/:taskId/workspace/tree`      | One directory level of the worktree                           | No      |
+| GET    | `/api/board/:taskId/workspace/file`      | One file, size-capped                                         | No      |
+| GET    | `/api/board/:taskId/workspace/file-diff` | One file's diff against the starting commit                   | No      |
+| GET    | `/api/board/:taskId/workspace/status`    | `git status` for the worktree                                 | No      |
+| GET    | `/api/board/:taskId/preview`             | Serve the worktree's `index.html` (redirects to `preview/`)   | No      |
+| GET    | `/api/board/:taskId/preview/<path>`      | Serve one file from the worktree, for the preview frame       | No      |
 
-<Note>
-The worktree routes share a `:taskId` prefix; the router registers every longer two-segment path (`/workspace/handoff`, `/workspace/detail`, `/workspace/tree`, `/workspace/file`, `/workspace/file-diff`, `/workspace/status`) before the bare `/workspace`, and the execution paths (`/executions`, `/executions/:execId`) are distinct two-segment forms, so there is no path collision with `/:taskId`.
-</Note>
+## Task statuses
 
-The 7 task statuses are `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. `done` and `cancelled` are terminal. The legal forward transitions are fixed by the state machine; an illegal transition is rejected with **409** `illegal_transition`.
+A task is in one of seven statuses: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. `done` and `cancelled` are final. Writing the status a task already has is allowed and changes nothing. Any move not in this table is refused with **409** `illegal_transition`:
+
+| From                | Can move to                                         |
+| ------------------- | --------------------------------------------------- |
+| `backlog`           | `todo`, `blocked`, `cancelled`                      |
+| `todo`              | `in_progress`, `blocked`, `backlog`, `cancelled`    |
+| `in_progress`       | `in_review`, `done`, `blocked`, `todo`, `cancelled` |
+| `in_review`         | `done`, `in_progress`, `blocked`, `cancelled`       |
+| `blocked`           | `todo`, `in_progress`, `backlog`, `cancelled`       |
+| `done`, `cancelled` | nothing                                             |
+
+Moving a task to `todo` clears its assignee and its check result, so it can be claimed again.
 
 ---
 
 ## `GET /api/board`
 
-Lists tasks for a team, or the subset that is ready to work. With `ready=true` the response is `getReadyTasks` (status `todo`, not dropped, with every dependency `done`); otherwise it is `listTasks` filtered by `teamId` / `status` / `includeDropped`. Dropped (soft-deleted) tasks are excluded unless `includeDropped=true`.
+Lists tasks, for one team or all of them, or only the tasks that are ready to work. With `ready=true` the list holds `todo` tasks that are not dropped and whose dependencies are all `done`. Otherwise it is filtered by `teamId`, `status` and `includeDropped`. Dropped (soft-deleted) tasks are left out unless `includeDropped=true`.
 
 - **Query params**:
 
@@ -63,7 +80,7 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
 
 ### Responses
 
-**`200 OK`**: the task list (`tasks[]` is `DbTask[]`, newest-`updatedAt` first; the `ready` variant orders by `priority` then `updatedAt`):
+**`200 OK`**: the task list, most recently updated first (the `ready=true` list puts the highest `priority` first, then the most recently updated). The `ready=true` rows carry none of `attention`, `runCost` and `runningSince`. Other sections call one of these rows `DbTask`:
 
 ```ts
 {
@@ -84,9 +101,9 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
     costUsd: number // the sum of the task's recorded run costs (0 before any)
     parentSessionId: string | null
     dropped: number // 0 | 1 (soft-delete flag)
-    tenantId: string | null // dormant multi-tenant seam
+    tenantId: string | null // always null
     scheduledBy: string // 'manual' | 'clawboo' | runtime id
-    verification: string | null // typed VerificationResult JSON, null until a gate runs
+    verification: string | null // the check's result as JSON; null until a check runs
     createdAt: number
     updatedAt: number
     completedAt: number | null
@@ -105,15 +122,18 @@ Lists tasks for a team, or the subset that is ready to work. With `ready=true` t
       usd: number | null // null when no run recorded a cost
       estimated: boolean // true when any part of usd is an estimate
     }
+    // When the current run started (epoch ms); null when no run is going. Not
+    // returned by the `ready=true` variant.
+    runningSince: number | null
   }>
 }
 ```
 
-`attention` is computed from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its execution ledger, and its verification verdict, with the pure `taskAttention` rule from `@clawboo/board-core`. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: it was moved there by hand, which starts nothing. The board renders every task with an `attention` in its **Needs you** column.
+`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger and its check result. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: it was moved there by hand, which starts nothing. The board renders every task with an `attention` in its **Needs you** column.
 
-`runCost` sums the `costUsd` of the task's execution rows, with the pure `summarizeRunCost` rule from `@clawboo/board-core`. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource: 'reported'`; a row with a null source counts as an estimate. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
+`runCost` sums the `costUsd` of the task's run ledger rows. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource: 'reported'`; a row with a null source counts as an estimate. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
-**`500 Internal Server Error`**: any DB failure:
+**`500 Internal Server Error`**: a database failure:
 
 ```json
 { "error": "<message>" }
@@ -133,18 +153,20 @@ curl 'http://localhost:18790/api/board?teamId=<team-id>&status=in_progress'
 
 ## `POST /api/board`
 
-Creates a task. `status` defaults to `todo` (immediately claimable); pass `backlog` for triage. A subtask is created by setting `parentTaskId` (the parent chain bounds delegation depth). This route is **not** capped; the per-parent child-count and depth ceilings are enforced at the [Tasks MCP boundary](/reference/mcp-tools#create_subtask), where an attached model creates rows unsupervised. On success the handler emits a `task_created` observability event (best-effort: an append failure is swallowed and never fails the request).
+Creates a task. `status` defaults to `todo` (ready to be claimed); pass `backlog` to park it. On success the route writes a `task_created` event to the [event log](/reference/rest-api/observability); a failed event write never fails the request.
+
+Set `parentTaskId` to make a subtask. This route applies no child-count or depth limit (the Tasks MCP server's `create_subtask` does; see [MCP tools](/reference/mcp-tools)), and it does not copy the parent's team or room. A `parentTaskId` that does not exist fails the database's foreign key and answers **500**.
 
 - **Path/query params**: none.
-- **Request body** (validated by `createTaskBody`):
+- **Request body**:
 
 ```ts
 {
-  title: string                 // required, 1–500 chars
-  description?: string          // ≤ 20000 chars
+  title: string                 // required, 1 to 500 chars
+  description?: string          // up to 20000 chars
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
   priority?: number             // integer
-  teamId?: string               // non-empty if present (no '' scope-escape)
+  teamId?: string               // non-empty if present
   assigneeRuntime?: string
   parentTaskId?: string
   sourceDelegationId?: string
@@ -153,7 +175,7 @@ Creates a task. `status` defaults to `todo` (immediately claimable); pass `backl
 }
 ```
 
-**With `assigneeAgentId`** (the board's New task dialog), the task is created for one agent: `teamId` is required, the agent must be an active member of that team, and `status` may only be `todo` (the default) or `backlog`. The server writes a `sourceDelegationId` that binds the task to the agent and marks it as assigned by a person, then, for a `todo` task, hands it to the team's orchestrator to run now (detached: the response does not wait for the run to start). The agent receives the title and description together. Its result is recorded on the task (the report comment) and is **not** delivered to the team lead as a task update: a person-assigned task reports to the person, on its card. If the agent is busy, the task waits in `todo` and runs when the agent is free.
+**With `assigneeAgentId`** (the board's New task dialog), the task is created for one agent: `teamId` is required, the agent must be an active member of that team, and `status` may only be `todo` (the default) or `backlog`. The server writes a `sourceDelegationId` that binds the task to the agent and marks it as assigned by a person, then, for a `todo` task, hands it to the team's engine to run now (the response does not wait for the run to start). The agent receives the title and description together. Its result is recorded on the task (the report comment) and is **not** delivered to the team lead as a task update: a person-assigned task reports to the person, on its card. If the agent is busy, the task waits in `todo` and runs when the agent is free.
 
 ### Responses
 
@@ -163,13 +185,13 @@ Creates a task. `status` defaults to `todo` (immediately claimable); pass `backl
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
-**`200 OK`**: the created task (full `DbTask` with `attention` and `runCost`, shape as in `GET /api/board`):
+**`200 OK`**: the created task, shaped as a `GET /api/board` row with `attention` and `runCost` (no `runningSince`):
 
 ```ts
-{ task: { id: string, title: string, status: 'todo', /* …full DbTask… */ } }
+{ task: { id: string, title: string, status: 'todo' /* ...the rest of the row */ } }
 ```
 
-**`500 Internal Server Error`**: DB failure:
+**`500 Internal Server Error`**: a database failure, including an unknown `parentTaskId`:
 
 ```json
 { "error": "<message>" }
@@ -192,43 +214,65 @@ curl -X POST http://localhost:18790/api/board \
 
 ## `POST /api/board/:taskId/retry`
 
-Runs a stuck task again because a person asked: one that failed, timed out, was stopped, or was parked after failing three times in a row. A `blocked` or `backlog` task is moved back to `todo` first (which clears its assignee and verdict), a `user` comment `Retry requested.` is added to its trail, and the task is handed straight to its bound agent. The ready-pump's automatic re-fire limit is waived for this run: it stops the machine from retrying forever, not the person from asking again. Detached, like the create above.
+Runs a stuck task again because a person asked: one that failed, timed out, was stopped, or was parked after failing three times in a row. A `blocked`, `backlog` or stranded `in_progress` task (no assignee and no run going) is moved back to `todo` first, which clears its assignee and check result. The route adds a `user` comment `Retry requested.` to the task and hands it straight to its bound agent. The board's automatic limit of three re-runs does not apply to a retry a person asks for. The response does not wait for the run to start.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
 
 ### Responses
 
-**`202 Accepted`**: `{ ok: true, task: DbTask }` (the task as it now stands, in `todo`).
+**`202 Accepted`**: the task as it now stands, in `todo`:
 
-**`404 Not Found`**: unknown task.
+```ts
+{ ok: true, task: DbTask }
+```
 
-**`409 Conflict`**: `{ ok: false, error }` where `error` is `not_retryable` (the task is running, finished, or cancelled), `no_team`, or `unassigned` (no agent is bound to it; use `assign`). A task left `in_progress` with no assignee and no running run counts as retryable.
+**`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
+
+**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team`, or `unassigned` (no agent is bound to it; use `assign`).
+
+**`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/board/<task-id>/retry
+```
 
 ---
 
 ## `POST /api/board/:taskId/assign`
 
-Gives a task that nobody is working on to one member of its team, and starts it. For a card no agent will ever pick up (created without one, or by an agent's own `create_task`), and for handing a failed task to someone else. The task is re-bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked` or `backlog`, noted on its trail (`Assigned to <name>.`), and dispatched.
+Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started.
 
 - **Path params**: `taskId`.
 - **Request body**: `{ agentId: string }`.
 
 ### Responses
 
-**`200 OK`**: `{ ok: true, task: DbTask }`.
+**`200 OK`**: `{ "ok": true, "task": DbTask }`.
 
-**`400 Bad Request`**: `agentId required`, or `agent_not_in_team`.
+**`400 Bad Request`**: `{ "ok": false, "error": "agentId required" }`, or `agent_not_in_team` (the agent is unknown, archived or on another team).
 
-**`404 Not Found`**: unknown task.
+**`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `no_team`, or `not_assignable` (the task is being worked on, finished, cancelled, or dropped).
+**`409 Conflict`**: `no_team`, or `not_assignable` (the task is being worked on, finished, cancelled or dropped).
+
+**`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/board/<task-id>/assign \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"<agent-id>"}'
+```
 
 ---
 
 ## `GET /api/board/:taskId`
 
-Returns one task plus its comments (oldest first) and its ancestor chain (the parent-task lineage, via recursive CTE).
+Returns one task with its comments (oldest first) and its ancestors (the chain of parent tasks).
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -280,14 +324,12 @@ curl http://localhost:18790/api/board/<task-id>
 
 ## `POST /api/board/:taskId/claim`
 
-Atomically claims a `todo` task for a single assignee. The claim is a guarded UPDATE (`status='todo' AND assignee IS NULL AND dropped=0`); at most one caller wins, the task flips to `in_progress`, and the loser gets a **409**. On a win the handler emits a `task_claimed` event and narrates the claim into the team chat room (best-effort, after the canonical write, never a write path back).
+Claims a `todo` task for one assignee. The claim succeeds only while the task is `todo`, unassigned and not dropped, so at most one caller wins: the task moves to `in_progress`, and every other caller gets **409**. A won claim writes a `task_claimed` event and posts a line to the team's peer room.
 
-<Danger>
-A **409** means another worker holds the task. Do **not** retry it. A dead `in_progress` task is recovered by orphan reconciliation (which releases it to `todo`), after which a normal claim re-acquires it; the liveness logic lives there, not in the claim.
-</Danger>
+A **409** means another worker holds the task: do not retry it. A task left `in_progress` by a run that died is released back to `todo` by the server's stale-run cleanup, and a normal claim can then take it.
 
 - **Path params**: `taskId`.
-- **Request body** (validated by `claimBody`):
+- **Request body**:
 
 ```ts
 {
@@ -340,32 +382,34 @@ curl -X POST http://localhost:18790/api/board/<task-id>/claim \
 
 ## `PATCH /api/board/:taskId`
 
-Transitions a task's status and/or edits its metadata (`priority` / `title` / `description`). At least one field is required. The status change is enforced by the state machine inside a `BEGIN IMMEDIATE` transaction (illegal transition → **409**). When the target is `done`, the **intrinsic verification gate** applies: a task carrying a non-promotable verdict (a failing deterministic gate, including red-gate debt) is rejected with **409** `verification_required`. The only bypass is `humanOverride: true`; when used with `status: 'done'` the override is recorded in the governance audit log so it is never silent.
+Changes a task's status, edits its `priority`, `title` or `description`, or both. At least one field is required. The status change follows the [status rules](#task-statuses) (an illegal move is **409** `illegal_transition`). A move to `done` is also refused with **409** `verification_required` when the task's stored check result is `fail`, or `completed_with_debt` with a failing last check. The only way past that is `humanOverride: true`, and a `done` with the override writes a `verification` row to the [audit log](/reference/rest-api/governance).
 
 This is the route a **person** uses (the board and the task drawer), and a person's move is the final word on the task:
 
-- A move to `done` or `cancelled` may carry `completedAt`, the day it really finished. It must fall between the task's creation and now (a few minutes of clock skew are allowed), else **400** `invalid_completed_at`. Without it the finish time is now. Writing the same finished status again never moves the finish time.
+- A move to `done` or `cancelled` may carry `completedAt`, the day it really finished. It must fall between the task's creation and now (up to 5 minutes ahead of the server clock is allowed), else **400** `invalid_completed_at`. Without it the finish time is now. Writing the same finished status again never moves the finish time.
 - A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`.
-- A run working on the task is stopped, whether the team engine, the executor runner or an OpenClaw routine fire started it, and its execution is closed as cancelled. A task moved back to `todo` while it was running is started again for its bound agent.
+- A move to `backlog`, `todo`, `blocked`, `done` or `cancelled` stops the run working on the task, whether team chat, the task runner or an OpenClaw Routine fire started it, and closes its ledger row as cancelled. A move to `in_progress` or `in_review` stops nothing. A task moved back to `todo` while it was running is started again for its bound agent.
 - Whoever delegated the task (the `:reflectTo:` agent in its `sourceDelegationId`) is told a person marked it done or cancelled it: through a `[Task Update]` when the team's engine is running, else as a mailbox notice read at its next turn. A task a person assigned reports to nobody.
 - The move is stamped on the task as `personMovedAt`. Until a run starts after it, the agent's own status writes through the [tasks MCP tools](/reference/mcp-tools) (`update_task_status`, `block_task`, `unblock_task`) are refused with a tool error that names the column the person chose and tells the agent not to retry, so the run the person overruled cannot put the card back. A run that starts after the move writes as usual.
 
 <Note>
-A task with **no** stored verification verdict is *unverified*, not *failing*; it lands `done` normally. The gate blocks known-failing verdicts, not un-run verification; manually completing unverified work is an intentional human judgment call (the autonomous path always writes a verdict via the verification gate before this transition). Moving a task to `todo` releases it (clears the assignee + verdict) so the atomic claim can re-acquire it.
+
+A task with no stored check result is unchecked, not failing, and moves to `done` normally. Most tasks never get a check: only task-runner runs in a git worktree with a non-empty diff are checked (see [Verification](/concepts/verification)). Moving a task to `todo` clears its assignee and check result so it can be claimed again.
+
 </Note>
 
-On a successful status change the handler emits a `status_changed` event and narrates the mutation into the team chat room as `A person moved "<title>" to <Status>.` (best-effort, after the canonical write).
+A status change writes a `status_changed` event and posts `A person moved "<title>" to <Status>.` to the team's peer room.
 
 - **Path params**: `taskId`.
-- **Request body** (validated by `updateTaskBody`; at least one field required):
+- **Request body** (at least one field required):
 
 ```ts
 {
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
   priority?: number             // integer
-  title?: string                // 1–500 chars
-  description?: string          // ≤ 20000 chars
-  humanOverride?: boolean        // audited bypass of the →done gate; only with status:'done'
+  title?: string                // 1 to 500 chars
+  description?: string          // up to 20000 chars
+  humanOverride?: boolean        // move to done despite a failed check (audited); only with status 'done'
   completedAt?: number           // epoch ms; only with status 'done' or 'cancelled'
 }
 ```
@@ -429,30 +473,24 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 
 ## `POST /api/board/:taskId/comments`
 
-Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The handler emits a `comment_added` event and narrates a truncated form of the comment into the team chat room (best-effort, after the write). The handler does not 404 a missing task before inserting; the comment row is created against the supplied `taskId`.
+Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The route writes a `comment_added` event and posts the first 160 characters to the team's peer room. An unknown `taskId` is not checked first: the insert fails the database's foreign key and the route answers **500** (`FOREIGN KEY constraint failed`).
 
-A `user` comment is a person's reply to the agent the task belongs to: its assignee, or, while the task has none (waiting in `todo`, or waiting on a person), the agent its `sourceDelegationId` binds it to. The handler delivers it before it answers and says where it went in `delivery`:
+A `user` comment is a person's reply. After the comment is saved, the route delivers it to the agent the task belongs to: the assignee, or else the agent named in the task's `sourceDelegationId` (a task moved back to `todo` keeps that binding). Nothing is delivered when there is no such agent, or when the task is `done`, `cancelled` or dropped.
 
-1. **The mailbox**, first. The reply lands in the agent's inbox, which every run reads when it starts. A queued or restarted task finds it there, and so does the next turn of a running task when the steer below did not deliver it first.
-2. **Then, by the task's status:**
+1. **The mailbox**, always first. The agent's inbox gets `A person commented on your task "<title>": ...` with the comment's first 1000 characters. Every run reads the inbox when it starts.
+2. **Then by status:**
+   - `in_progress` with a run working on it: a steer into that run. How it gets in depends on the runtime (see [Choose a runtime](/runtimes/index)). The route waits up to 2.5 seconds for the steer to land, and the steer carries on in the background after that. When it lands, the mailbox row is marked delivered so the agent does not read the comment twice.
+   - `blocked`, `todo`, or `in_progress` with no assignee and no run going: the task is started again, as the retry route above does. A task that is not `todo` moves there first (with a `status_changed` event whose reason is `reply`). If every task it depends on is `done`, the route adds the `system` comment `Started again for a person’s reply.` and dispatches the task to its agent; otherwise the reply waits in the mailbox. A `todo` task that a reply started less than 15 seconds ago is not dispatched again.
+   - `in_review` and `backlog`: the reply waits in the mailbox.
 
-| Status                                                        | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `delivery`                               |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `in_progress`, with a run working on it                       | The reply is steered into that run; how it gets in depends on the runtime (see [steering a running task](/runtimes/index#steering-a-running-task)). The handler waits up to about 2.5 seconds for the steer. When it lands, the mailbox row is marked delivered so the agent does not read the reply a second time at its next run. When it does not land in that time, the mailbox row stays and carries it                                                                                                                                          | `steered`, or `queued` with `next-run`   |
-| `blocked`, `todo`, or `in_progress` with no run working on it | The task is started again, as [`/retry`](#post-apiboardtaskidretry) starts it: moved back to `todo` (a `status_changed` event with reason `reply`), noted on its trail as `Started again for a person's reply.` (a `system` comment), and handed to its agent through the same person dispatch, so the automatic re-run limit does not hold it back. Replies to a `todo` task within 15 seconds of a restart start no second run; the run on its way reads them too. A plan step whose dependency is not done is not started; the reply waits with it | `woke-agent`, or `queued` with `waiting` |
-| `in_review`                                                   | The reply waits in the mailbox; the agent reads it after the check                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `queued` with `in-review`                |
-| `backlog`                                                     | The reply waits in the mailbox for the task's next run; a parked task is not started                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `queued` with `next-run`                 |
-| `done`, `cancelled`, or dropped, with an agent                | Nothing is delivered: the task will not run again. The dashboard offers to send the reply as a follow-up task instead (a `POST /api/board` for the same agent with this task as `parentTaskId`)                                                                                                                                                                                                                                                                                                                                                       | `not-delivered` with `finished`          |
-| No agent bound, whatever the status                           | The reply is saved on the task only. This is checked first, so a finished task with no agent gets this rather than `finished`                                                                                                                                                                                                                                                                                                                                                                                                                         | `not-delivered` with `unassigned`        |
-
-A task with no team, or one whose move back to `todo` is refused, gets `queued` with `next-run` instead of a restart. When the mailbox write fails, or delivery throws after the comment is saved, the comment stays saved and `delivery` is `not-delivered` with `failed`, rather than a **500** that would have the person send it again. Comments by an agent or the system are saved and narrated only, with no `delivery`.
+A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits in the mailbox for its next run.
 
 - **Path params**: `taskId`.
-- **Request body** (validated by `commentBody`):
+- **Request body**:
 
 ```ts
 {
-  body: string                          // required, 1–20000 chars
+  body: string                          // required, 1 to 20000 chars
   authorAgentId?: string
   authorType?: 'agent' | 'user' | 'system'   // default 'agent'
 }
@@ -480,22 +518,33 @@ A task with no team, or one whose move back to `todo` is refused, gets `queued` 
     tenantId: string | null
     createdAt: number
   }
-  forwarded: boolean // true when a `user` comment was delivered: steered, started again, or queued
-  delivery?: ReplyDelivery // `user` comments on an existing task only
+  forwarded: boolean // true when `delivery` is present and its status is not 'not-delivered'
+  delivery?: // present for a `user` comment only
+    | { status: 'steered'; agentId: string }
+    | { status: 'woke-agent'; agentId: string }
+    | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' }
+    | {
+        status: 'not-delivered'
+        agentId: string | null
+        reason: 'finished' | 'unassigned' | 'failed'
+      }
 }
-
-type ReplyDelivery =
-  | { status: 'steered'; agentId: string } // in front of the run working on the task
-  | { status: 'woke-agent'; agentId: string } // the task was started again for the reply
-  | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' }
-  | {
-      status: 'not-delivered'
-      agentId: string | null
-      reason: 'finished' | 'unassigned' | 'failed'
-    }
 ```
 
-For an `in_progress` task the response can take up to about 2.5 seconds, while the handler waits for the steer.
+`delivery` says where a person's reply went. `agentId` is the agent the task belongs to.
+
+| `status`        | `reason`     | Meaning                                                                                                                                                        |
+| --------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `steered`       |              | The reply got into the run working on the task                                                                                                                 |
+| `woke-agent`    |              | The task was started again for the reply, or a reply less than 15 seconds earlier already started it                                                           |
+| `queued`        | `next-run`   | The reply is in the mailbox for the agent's next run, for example on a `backlog` task, or on an `in_progress` task whose steer did not land within 2.5 seconds |
+| `queued`        | `in-review`  | The task is `in_review`; the agent reads the reply after the check                                                                                             |
+| `queued`        | `waiting`    | The task waits on a dependency that is not `done`, so it cannot start yet                                                                                      |
+| `not-delivered` | `finished`   | The task is `done`, `cancelled` or dropped. The comment is saved and nothing is sent                                                                           |
+| `not-delivered` | `unassigned` | No agent has the task, and `agentId` is `null`                                                                                                                 |
+| `not-delivered` | `failed`     | Writing to the mailbox or starting the task failed. The comment is saved, and the route still answers `200` so the reply is not sent twice                     |
+
+For a `finished` reply, the dashboard offers **Send as a follow-up task**, which calls `POST /api/board` (above) with `title: "Follow up: <title>"`, the reply as `description`, the same `teamId` and `assigneeAgentId`, and the finished task as `parentTaskId`.
 
 **`500 Internal Server Error`**:
 
@@ -511,7 +560,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Blocked on the upstream schema.","authorType":"agent","authorAgentId":"native-leader-abc"}'
 
-# A person's reply, delivered to the task's agent
+# A person's reply, which answers with `delivery`
 curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Use the v2 schema; it landed this morning.","authorType":"user"}'
@@ -521,17 +570,17 @@ curl -X POST http://localhost:18790/api/board/<task-id>/comments \
 
 ## `POST /api/board/:taskId/executions`
 
-Opens an execution-process row for a task, recorded only after a successful claim. The exec ledger is what orphan reconciliation reads on restart: an executor that starts work MUST open one here and close it via the PATCH below, or a crash leaves the run orphaned (reconciliation then marks it `failed` and releases the task). On success the handler emits an `execution_started` event.
+Opens a row in the task's run ledger, after a successful claim. The server reads the ledger after a restart to find runs that died: a worker that starts work must open a row here and close it with the `PATCH` below. A row left open by a crash is marked `failed` and its task released. A new row writes an `execution_started` event.
 
 - **Path params**: `taskId`.
-- **Request body** (validated by `createExecutionBody`):
+- **Request body**:
 
 ```ts
 {
-  executorType: string          // required, 1–100 chars (the runtime id)
+  executorType: string          // required, 1 to 100 chars (the runtime id)
   workspaceId?: string
-  runReason?: string            // ≤ 2000 chars
-  beforeCommit?: string         // ≤ 200 chars (git checkpoint)
+  runReason?: string            // up to 2000 chars
+  beforeCommit?: string         // up to 200 chars (git checkpoint)
 }
 ```
 
@@ -604,17 +653,17 @@ curl -X POST http://localhost:18790/api/board/<task-id>/executions \
 
 ## `PATCH /api/board/executions/:execId`
 
-Closes out an execution row with its outcome and an optional token/cost ledger. The handler emits an `execution_completed` event carrying the run's `taskId`, `teamId`, `agentId` and `runtime`, recovered from the closed row, so the event correlates with the `execution_started` it pairs with. A terminal ledger row is immutable, so only a still-`running` execution can be closed: an `execId` that is unknown, or whose row some other path already closed, closes nothing and returns `404` without appending an event.
+Closes a run in the ledger with its outcome, and optionally its tokens and cost. The route writes an `execution_completed` event carrying the run's `taskId`, `teamId`, `agentId` and `runtime`, so it pairs with the `execution_started` event. A closed row never changes again, so only a `running` row can be closed: an unknown `execId`, or one already closed elsewhere, closes nothing and answers `404` without an event.
 
 - **Path params**: `execId`.
-- **Request body** (validated by `completeExecutionBody`):
+- **Request body**:
 
 ```ts
 {
   status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled'   // required
-  summary?: string              // ≤ 20000 chars
-  error?: string                // ≤ 20000 chars
-  afterCommit?: string          // ≤ 200 chars
+  summary?: string              // up to 20000 chars
+  error?: string                // up to 20000 chars
+  afterCommit?: string          // up to 200 chars
   inputTokens?: number          // integer
   outputTokens?: number         // integer
   cacheRead?: number            // integer
@@ -664,7 +713,7 @@ curl -X PATCH http://localhost:18790/api/board/executions/<exec-id> \
 
 ## `GET /api/board/:taskId/executions`
 
-Lists a task's execution-process rows (the run ledger), every spawned run, oldest first.
+Lists every run in the task's ledger, oldest first.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -693,10 +742,10 @@ curl http://localhost:18790/api/board/<task-id>/executions
 
 ## `POST /api/board/:taskId/deps`
 
-Links a dependency: `taskId` will not become ready until `dependsOnTaskId` is `done`. Plans become a dep chain; the orchestrator's ready-pump fires the next step when its blocker completes. Both endpoints of the edge must exist (the handler guards against orphan dep rows). On success the handler emits a `dep_linked` event and narrates the dependency into the team chat room.
+Makes `taskId` wait for `dependsOnTaskId`: it is not ready until the other task is `done`. A plan is a chain of these links, and the team's engine starts the next step when the one before it finishes. Both tasks must exist. A new link writes a `dep_linked` event and posts a line to the team's peer room.
 
 - **Path params**: `taskId` (the dependent).
-- **Request body** (validated by `linkDepBody`):
+- **Request body**:
 
 ```ts
 {
@@ -748,7 +797,7 @@ curl -X POST http://localhost:18790/api/board/<step-2-id>/deps \
 
 ## `POST /api/board/:taskId/cancel-dependents`
 
-Cancels the still-pending (`todo`/`backlog`) transitive dependents of a failed task. A `blocked`/failed blocker can never become `done`, so its downstream chain is dead; cancelling it surfaces the stall instead of leaving ghost `todo` cards that can never become ready. Dependents already `in_progress`/`done`/`cancelled` are left untouched. Each cancelled task emits a `status_changed` event with `reason: 'blocker_failed'`. The returned list lets the caller report the stalled plan chain to the leader.
+Cancels the tasks still waiting (`todo` or `backlog`) behind a failed task, directly or further down the chain. A failed task never becomes `done`, so those tasks could never run; cancelling them shows the stall instead of leaving cards that never become ready. Tasks in any other status (`in_progress`, `in_review`, `blocked`, `done` or `cancelled`) are left alone. Each cancelled task writes a `status_changed` event with `reason: 'blocker_failed'`, and the response lists them so the caller can tell the team lead.
 
 - **Path params**: `taskId` (the failed blocker).
 - **Request body**: none.
@@ -785,21 +834,19 @@ curl -X POST http://localhost:18790/api/board/<failed-task-id>/cancel-dependents
 
 ## `POST /api/board/:taskId/workspace`
 
-Provisions a git worktree + branch + system-of-record (SoR) scaffold for a file-mutating task, and records the worktree/branch refs on the task. The worktree lives outside the user's repo (under the clawboo state dir, namespaced by a hash of the repo path) so it never pollutes the repo's own `git status`. Isolation is decided by task `kind`: `code` (and unknown kinds) → `worktree`; `research` / `review` → `none` (refused). A repeated provision for a task that already has a live, registered checkout reuses it rather than inserting a duplicate workspace row.
+Creates a git worktree and a `clawboo/task-<id>` branch for a task that changes files, writes the task files into it, and records the worktree and branch on the task. The task files are `TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh` and `VERIFICATION.md` (plus `AGENT_HANDOFF.json` once someone writes a handoff); the other workspace routes read them. The worktree lives outside your repo, at `<clawboo home>/worktrees/<repo hash>/<taskId>`, so it never shows up in the repo's own `git status`. A worktree keeps file changes apart; it is not a sandbox (see [What agents can do](/concepts/permissions)).
 
-<Note>
-A read-only / research task is refused with **422**; it has no file mutations to isolate, so it should not pay the worktree cost.
-</Note>
+The task `kind` decides whether a worktree is made: `code` (the default) and any unknown kind get one; `research` and `review` are refused with **422**. Asking again for a task that already has a live worktree reuses it.
 
 - **Path params**: `taskId`.
-- **Request body** (validated by `provisionWorkspaceBody`):
+- **Request body**:
 
 ```ts
 {
-  repoPath: string              // required, 1–4000 chars — the git repo to branch from
-  baseSha?: string              // ≤ 200 chars — pins the branch point
-  baseRef?: string              // ≤ 400 chars — branch point (default HEAD) when no baseSha
-  kind?: string                 // ≤ 100 chars — task kind → isolation; defaults to 'code'
+  repoPath: string              // required, 1 to 4000 chars: the git repo to branch from
+  baseSha?: string              // up to 200 chars: pins the branch point
+  baseRef?: string              // up to 400 chars: the branch point (default HEAD) when no baseSha
+  kind?: string                 // up to 100 chars: the task kind, which decides isolation; default 'code'
 }
 ```
 
@@ -817,10 +864,10 @@ A read-only / research task is refused with **422**; it has no file mutations to
 { "ok": false, "error": "task not found" }
 ```
 
-**`422 Unprocessable Entity`**: the task kind resolves to no worktree isolation (research/review):
+**`422 Unprocessable Entity`**: the task kind gets no worktree (`research` or `review`):
 
 ```ts
-{ ok: false, error: 'no_isolation', isolation: 'none' | 'container' }
+{ ok: false, error: 'no_isolation', isolation: 'none' }
 ```
 
 **`200 OK`**: the worktree was provisioned (or an existing one reused):
@@ -832,7 +879,7 @@ A read-only / research task is refused with **422**; it has no file mutations to
     taskId: string
     worktreePath: string // absolute path to the checkout
     branch: string // 'clawboo/task-<id>'
-    baseCommit: string // the SoR-scaffold baseline commit
+    baseCommit: string // the commit holding the task files: the diff baseline
     detached: boolean // false for a task worktree
   }
   workspaceId: string
@@ -858,7 +905,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace \
 
 ## `GET /api/board/:taskId/workspace`
 
-The cold-resume read: the task's workspace row plus the resume state reconstructed purely from the worktree's system-of-record (`AGENT_HANDOFF.json`, falling back to `task-progress.md` + `init.sh`), no chat history, no board UI. This is what lets a fresh runtime (or a human) pick up a task from the worktree alone.
+Reads the task's workspace row and the state to resume from, rebuilt only from the worktree's task files (`AGENT_HANDOFF.json`, else `task-progress.md` and `init.sh`): no chat history and no board state. A different runtime, or a person, can pick the task up from this alone.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -871,7 +918,7 @@ The cold-resume read: the task's workspace row plus the resume state reconstruct
 { "error": "workspace not found" }
 ```
 
-**`200 OK`**: the workspace, the reconstructed resume state, and the parsed handoff (each may be `null` when the worktree is paused-away or no handoff was written):
+**`200 OK`**: the workspace, the resume state and the parsed handoff (`resume` and `handoff` are `null` when the worktree is paused or no handoff was written):
 
 ```ts
 {
@@ -914,11 +961,14 @@ curl http://localhost:18790/api/board/<task-id>/workspace
 
 Pauses or completes a task's worktree.
 
-- **`pause`**: commit any uncommitted work, drop the worktree, keep the branch (the workspace stays `active` and resumable).
-- **`complete`**: an empty diff cleans up the worktree + branch and drives the task to `done` (an empty diff has no deliverable, so the verification gate is intentionally bypassed). A non-empty diff lands the task in `in_review`, runs the verification gate, then gates `→done`: only a `pass` promotes to `done`; a `fail` with attempts left reverts to `in_progress`; a `fail` at the attempt budget, and `completed_with_debt`, both route to `blocked` with a system comment and an inbox notice to the delegator. A repeat `complete` on an already-`blocked` task cannot re-enter `in_review`, so it returns the task's current status with `verified: 'fail'` and does not re-run the gate. SoR bookkeeping files are excluded from the diff (a session that only wrote its own progress/handoff is still "empty").
+- **`pause`**: commits any uncommitted work, removes the worktree and keeps the branch. The workspace stays `active` and can be resumed.
+- **`complete`** with an empty diff: removes the worktree and branch and moves the task to `done`. There is nothing to check, so the check is skipped. The task files do not count toward the diff, so a run that only updated its own progress or handoff is still empty.
+- **`complete`** with a non-empty diff: moves the task to `in_review` and runs the check. Only a `pass` moves it to `done`. A `fail` with attempts left moves it back to `in_progress`. A `fail` on the last attempt, or `completed_with_debt`, moves it to `blocked` with a system comment and a mailbox notice to whoever delegated it. A repeat `complete` on a `blocked` task does not run the check again; it returns the current status with `verified: 'fail'`.
+
+Through this route the check is the task's own verify command only; the separate reviewer pass never runs. The command is `VERIFY_CMD` in the worktree's `init.sh` (else the `Verify:` line in `VERIFICATION.md`). The task files start with a placeholder command, which counts as no command, so the check fails until a real one is set. If a person moves the task to `done` or `cancelled` while the check runs, their move stands and the result is only recorded. See [Verification](/concepts/verification).
 
 - **Path params**: `taskId`.
-- **Request body** (validated by `workspaceActionBody`):
+- **Request body**:
 
 ```ts
 {
@@ -976,7 +1026,7 @@ curl -X PATCH http://localhost:18790/api/board/<task-id>/workspace \
   -H 'Content-Type: application/json' \
   -d '{"action":"pause"}'
 
-# Complete (runs the verification gate on a dirty diff)
+# Complete (runs the check when the diff is not empty)
 curl -X PATCH http://localhost:18790/api/board/<task-id>/workspace \
   -H 'Content-Type: application/json' \
   -d '{"action":"complete"}'
@@ -986,15 +1036,15 @@ curl -X PATCH http://localhost:18790/api/board/<task-id>/workspace \
 
 ## `POST /api/board/:taskId/workspace/handoff`
 
-Writes the clock-out `AGENT_HANDOFF.json` into the task's worktree, structured data, not prose, so a different runtime (or a human) can pick up the task cleanly. `timestamp` is defaulted server-side to the current ISO-8601 time when omitted before validation.
+Writes `AGENT_HANDOFF.json` into the task's worktree: structured notes on what was done, what is broken and what to do next, so a different runtime or a person can pick the task up. When `timestamp` is left out, the server fills in the current ISO-8601 time.
 
 - **Path params**: `taskId`.
-- **Request body** (validated by `agentHandoffSchema`; `timestamp` defaulted server-side):
+- **Request body** (`timestamp` defaulted server-side):
 
 ```ts
 {
-  handoffFrom: string                 // required, non-empty — who is handing off
-  runtime: string                     // required, non-empty — the producing runtime (may be 'human')
+  handoffFrom: string                 // required, non-empty: who is handing off
+  runtime: string                     // required, non-empty: the runtime that produced it (may be 'human')
   timestamp?: string                  // ISO-8601; defaulted server-side when omitted
   completedSubtasks?: string[]        // default []
   brokenOrUnverified?: string[]       // default []
@@ -1052,7 +1102,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace/handoff \
 
 ## `GET /api/board/:taskId/workspace/detail`
 
-The task-detail drawer's Workspace tab: the SoR file contents (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`, only those present) plus the unified diff and diff-stat against the branch-point baseline, with the SoR bookkeeping files excluded.
+The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -1065,15 +1115,15 @@ The task-detail drawer's Workspace tab: the SoR file contents (`TASK.md`, `task-
 { "error": "workspace not found" }
 ```
 
-**`200 OK`**: the SoR contents + diff (`diffStat` / `diff` may be empty when the worktree is paused-away or git is unavailable):
+**`200 OK`**: the task files and the diff (`diffStat` and `diff` are empty when the worktree is paused or git is unavailable):
 
 ```ts
 {
   ok: true
   workspace: DbWorkspace        // shape as in GET .../workspace
-  sorFiles: Record<string, string>   // keyed by SoR filename
+  sorFiles: Record<string, string>   // task file contents, keyed by file name
   diffStat: { filesChanged: number, insertions: number, deletions: number, dirty: boolean } | null
-  diff: string                  // unified diff (SoR bookkeeping excluded), '' when unavailable
+  diff: string                  // unified diff without the task files; '' when unavailable
 }
 ```
 
@@ -1091,66 +1141,117 @@ curl http://localhost:18790/api/board/<task-id>/workspace/detail
 
 ---
 
-## Error envelope
+## The workspace file view
 
-Every error response on these routes is the standard envelope `{ error: string }`, except:
+Four read-only routes behind an agent's **Workspace** tab. They serve a task's worktree: one directory level, one file, one file's diff, and the git status behind the change badges. Nothing here writes.
 
-- Body-validation 400s, which add `details` (the zod `flatten()` output): `{ error: 'invalid body', details: {...} }` (or `{ error: 'invalid handoff', details: {...} }` on the handoff route).
-- The `claim` route's failure paths and the `PATCH /:taskId` status-failure paths, which return `{ ok: false, error: <reason> }` (`reason` ∈ `not_found` | `conflict` | `illegal_transition` | `verification_required`).
-- The `provision` route's failure paths, which return `{ ok: false, error: 'task not found' }` (404) or `{ ok: false, error: 'no_isolation', isolation }` (422).
-- The `workspace` action / handoff 404s, which return `{ ok: false, error: 'workspace not found' }` (the cold-resume GET and the detail GET use the bare `{ error: 'workspace not found' }`).
+The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
 
-## See also
+When the workspace itself cannot be read, all four answer `{ "ok": false, "error": "<message>", "reason": "<reason>" }`:
 
-- [The board](/concepts/the-board), the state machine, atomic claim, dep chains, and orphan reconciliation
-- [Worktrees and handoff](/concepts/worktrees-and-handoff), the per-task system-of-record + cross-runtime `AGENT_HANDOFF.json`
-- [Verification](/concepts/verification), builder≠judge, the deterministic gate + critic, `completed_with_debt`
-- [Runtimes API](/reference/rest-api/runtimes), `POST /api/runtimes/:id/run` claims and drives one of these tasks end to end
-- [Database schema](/reference/database-schema), the `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes` tables
-- [REST API overview](/reference/rest-api/index)
+| Status | `error`                | `reason`     | Meaning                                                                                   |
+| ------ | ---------------------- | ------------ | ----------------------------------------------------------------------------------------- |
+| `404`  | `workspace not found`  | `not_found`  | No workspace row, or the row has no worktree path                                         |
+| `404`  | `workspace not found`  | `gone`       | The row exists but the checkout is not on disk (paused or cleaned up; the branch remains) |
+| `409`  | `workspace unreadable` | `unreadable` | The checkout is on disk but git refuses it (moved repo, corrupt index)                    |
 
----
-
-## The workspace filesystem view
-
-Four read-only routes behind the agent-detail **Workspace** tab. They serve the task's worktree: the tree, one file, one file's diff, and the git status that drives the change badges. Nothing here writes.
-
-Paths are resolved from the stored `workspaces` row, never from the request. Every relative path is confined to the worktree root in three layers: absolute paths and `..` segments are refused; the resolved path must sit inside the root (checked with `path.relative`, so a sibling directory like `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the result re-checked after resolving any symlinked ancestor. A refused path answers **400** with a message naming the problem.
-
-All four share one miss shape. `reason` distinguishes three states that must not be conflated:
-
-| Status | `reason`     | Meaning                                                                             |
-| ------ | ------------ | ----------------------------------------------------------------------------------- |
-| 404    | `not_found`  | No workspace row, or the row carries no worktree path                               |
-| 404    | `gone`       | The row exists but the checkout is not on disk (paused or reaped; branch survives)  |
-| 409    | `unreadable` | The checkout is on disk but git refuses it (orphaned by a repo move, corrupt index) |
-
-`unreadable` is deliberately **not** a 404: a client that treated a git failure as "no workspace" would render a dirty worktree as clean.
+`unreadable` is not a 404 on purpose: a client that read a git failure as "no workspace" would show a changed worktree as clean.
 
 ### `GET /api/board/:taskId/workspace/tree`
 
-One directory level, for a lazily-expanded tree. `.git`, symlinks and special files are omitted; directories sort before files, then case-insensitively by name.
+One directory level, for a tree that expands on demand. `.git`, symlinks and special files are left out; folders sort before files, then by name, ignoring case.
 
-- **Query**: `dir` (worktree-relative; omitted or empty lists the root).
-- **`200 OK`**: `{ ok, dir, entries: [{ name, kind: "file" | "dir", size? }], truncated }`. `size` is present on files only. At most 500 entries; `truncated` reports that the cap was hit.
+- **Query**: `dir` (relative to the worktree; empty or left out lists the root).
+- **`200 OK`**: `{ ok, dir, entries: [{ name, kind: "file" | "dir", size? }], truncated }`. Only files carry `size`. At most 500 entries; `truncated` says the limit was hit.
 
 ### `GET /api/board/:taskId/workspace/file`
 
-One file's contents, capped at 256 KB.
+One file's contents, up to 256 KB.
 
-- **Query**: `path` (worktree-relative).
-- **`200 OK`** (text): `{ ok, path, binary: false, size, content, truncated }`. A cut lands on a codepoint boundary, so a truncated file never ends in a broken character.
-- **`200 OK`** (binary): `{ ok, path, binary: true, size }`. A NUL byte in the first 8 KB classifies the file as binary; no bytes are returned.
+- **Query**: `path` (relative to the worktree).
+- **`200 OK`** (text): `{ ok, path, binary: false, size, content, truncated }`. A cut falls on a character boundary, so a truncated file never ends in a broken character.
+- **`200 OK`** (binary): `{ ok, path, binary: true, size }`. A NUL byte in the first 8 KB marks the file as binary, and no bytes are returned.
 
 ### `GET /api/board/:taskId/workspace/file-diff`
 
-The unified diff for ONE file against the task's baseline commit.
+The unified diff for one file against the task's starting commit.
 
-- **Query**: `path` (worktree-relative). A directory is refused with **400** `Not a file.`, since git pathspecs match by prefix and would otherwise return a whole subtree.
-- **`200 OK`**: `{ ok, path, diff, truncated }`. Capped at 1 MB, measured in bytes and cut on a codepoint boundary. The diff is empty for an untracked file; clients fall back to the file route.
+- **Query**: `path` (relative to the worktree). A folder is refused with **400** `Not a file.`, since a git path match would otherwise return everything under it.
+- **`200 OK`**: `{ ok, path, diff, truncated }`, capped at 1 MB. The diff is empty for an untracked file; show the file's contents instead.
 
 ### `GET /api/board/:taskId/workspace/status`
 
-`git status --porcelain -z --untracked-files=all`, parsed.
+`git status --porcelain -z --untracked-files=all` for the worktree, parsed.
 
-- **`200 OK`**: `{ ok, branch, entries: [{ path, x, y, origPath? }], truncated }`. `x` is the index column and `y` the worktree column; `origPath` carries the rename or copy source. At most 2000 entries.
+- **`200 OK`**: `{ ok, branch, entries: [{ path, x, y, origPath? }], truncated }`. `x` is the index column and `y` the worktree column; `origPath` is the source of a rename or copy. At most 2000 entries.
+
+### Example
+
+```bash
+curl 'http://localhost:18790/api/board/<task-id>/workspace/tree?dir=src'
+curl 'http://localhost:18790/api/board/<task-id>/workspace/file?path=src/index.ts'
+```
+
+---
+
+## `GET /api/board/:taskId/preview` and `GET /api/board/:taskId/preview/<path>`
+
+Serves the files in a task's worktree as a static website, so the task drawer's **Preview** can show the page an agent built next to the diff. It only serves files: it never runs a build or a dev server. The drawer checks for a preview every 10 seconds while it is open.
+
+- `GET /api/board/:taskId/preview` and `GET /api/board/:taskId/preview/<path>` serve the same tree. A folder (including the bare route) serves its `index.html`. A folder URL without a trailing slash answers `302` to the same URL with a `/` added (the base path and query are kept), so the page's relative links resolve.
+- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no absolute paths, `..`, symlinks, backslashes or control characters, and at most 1024 characters.
+- `Content-Type` comes from a fixed list: `html`/`htm`, `css`, `js`/`mjs`, `json`/`map`, `txt` and `md` (as `text/plain`), `svg`, `png`, `jpg`/`jpeg`, `gif`, `webp`, `avif`, `ico`, `woff`/`woff2`, `ttf`, `otf`, `mp4`, `webm`, `wasm`. Anything else is sent as `application/octet-stream`, which a browser downloads rather than runs.
+- Every file is sent with `Content-Length`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, and streamed.
+- The routes sit under `/api`, so the same-origin guard and the access gate apply, and the dashboard's access cookie reaches the preview frame.
+
+The drawer shows the page in a frame that runs no scripts, so a script-driven page appears as its static shell. The **Open** link shows the same URL in a new tab without that restriction: there the page's scripts run in the dashboard's origin and can call this API, so open it only for work you trust.
+
+### Responses
+
+**`200 OK`**: the file's bytes.
+
+**`302 Found`**: a folder requested without a trailing slash.
+
+**`400 Bad Request`**: a refused path, or a missing file. The message names the problem, for example:
+
+```json
+{ "ok": false, "error": "No such file in the workspace." }
+```
+
+**`404 Not Found`**: `{ "ok": false, "error": "<message>" }`, where the message is `workspace not_found` or `workspace gone` (no usable worktree), `No index.html in that directory.`, or `Not a file.`
+
+**`413 Payload Too Large`**: a file over 8 MB: `{ "ok": false, "error": "That file is too large to preview." }`
+
+**`500 Internal Server Error`**: `{ "error": "<message>" }` (or `preview read failed` when the file cannot be read).
+
+### Example
+
+```bash
+# The worktree's index.html (follow the redirect to preview/)
+curl -L http://localhost:18790/api/board/<task-id>/preview
+
+# One asset
+curl -I http://localhost:18790/api/board/<task-id>/preview/dist/app.css
+```
+
+---
+
+## Error envelope
+
+Most error bodies are `{ "error": "<message>" }`. The exceptions:
+
+- Validation `400`s add `details` (the zod `flatten()` output): `{ "error": "invalid body", "details": {...} }`, or `invalid handoff` on the handoff route.
+- `{ "ok": false, "error": "<reason>" }` comes from: the claim (`not_found`, `conflict`); a status change on `PATCH /api/board/:taskId` (`not_found`, `illegal_transition`, `verification_required`, and `invalid_completed_at` as a `400`); every retry and assign failure (`task not found`, `agentId required`, `not_retryable`, `no_team`, `unassigned`, `agent_not_in_team`, `not_assignable`); the dependency cycle (`409 task_dependency_cycle`); the provision route (`task not found`, and `no_isolation` with `isolation`); and the pause, complete and handoff `404`s (`workspace not found`).
+- The workspace file view adds `reason` to its misses and answers a refused path with `{ "ok": false, "error": "<message>" }`.
+- The preview routes answer `{ "ok": false, "error": "<message>" }` on `400`, `404` and `413`.
+- `GET /api/board/:taskId/workspace` and `/workspace/detail` answer a missing workspace with a bare `{ "error": "workspace not found" }`.
+
+An unknown `taskId` on a comment, or an unknown `parentTaskId` on a create, is a `500` from the database's foreign key, not a `404`.
+
+## Related
+
+- [The board](/concepts/the-board): statuses, claims, dependencies and how stuck tasks are recovered.
+- [Worktrees and handoff](/concepts/worktrees-and-handoff): the task files and `AGENT_HANDOFF.json` across runtimes.
+- [Verification](/concepts/verification): which tasks are checked, and what `completed_with_debt` means.
+- [Runtimes API](/reference/rest-api/runtimes): `POST /api/runtimes/:id/run` claims one of these tasks and runs it.
+- [Database schema](/reference/database-schema): the `tasks`, `task_deps`, `task_comments`, `workspaces` and `execution_processes` tables.

@@ -1,496 +1,871 @@
 ---
-title: Database schema reference
-description: The 35 SQLite tables Clawboo persists, their columns, indexes, and how the schema is bootstrapped without a migration ladder.
+title: 'Database schema reference'
+sidebarTitle: 'Database schema'
+description: 'Every table, column and index in the SQLite database that holds Clawboo state, and how the schema is created and upgraded.'
+keywords:
+  [
+    'sqlite',
+    'clawboo.db',
+    'tables',
+    'columns',
+    'indexes',
+    'migrations',
+    'ensureSchema',
+    'reconcileSchema',
+  ]
 ---
 
-Clawboo persists all of its durable state in one local SQLite file. This page documents every table defined in `packages/db/src/schema.ts`: purpose, key columns, indexes, and foreign keys, plus how the schema is created and where the file lives.
-
-There are **35 tables**. They cluster by subsystem: the agent/team **registry of record**, the durable **board**, the **memory** store, the **tools** broker, **governance**, the **observability** event log, the **capability** inventory, **connectors and grants**, and **team chat** (a team's chat rooms, the peer-chat room substrate, and the agent mailbox). The `memory_facts_fts` FTS5 virtual table (and its shadow tables) are not in the table count; they are raw DDL in `createDb`, not modellable in `schema.ts`.
-
-<Info>
-There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source. `schema.ts` is the Drizzle type layer over the same tables, used for typed queries, never to apply migrations. Upgrading in place adds columns an older database is missing, derived from that same DDL; changing or removing an existing column is still a reset. See [Schema source of truth](#schema-source-of-truth--no-migration-ladder) below.
-</Info>
-
-## At a glance
-
-| Table                  | Cluster      | PK                              | Purpose                                                          |
-| ---------------------- | ------------ | ------------------------------- | ---------------------------------------------------------------- |
-| `chat_messages`        | registry     | `id` (autoinc)                  | Persisted transcript entries so chat history survives refresh    |
-| `teams`                | registry     | `id` (text)                     | Agent groups deployed together (name, icon, color, leader)       |
-| `agents`               | registry     | `id` (text)                     | The agent registry of record (synced from sources into SQLite)   |
-| `sessions`             | registry     | `id` (text)                     | Session lineage / native-runtime sessions (dormant for OpenClaw) |
-| `cost_records`         | registry     | `id` (autoinc)                  | Per-agent token/USD cost ledger                                  |
-| `graph_layouts`        | registry     | `id` (autoinc)                  | Saved Ghost Graph node/edge positions                            |
-| `settings`             | registry     | `key` (text)                    | Typed key/value store (briefs, rules, onboarding flags, …)       |
-| `skills`               | registry     | `id` (text)                     | Installed-skill tracking (legacy markdown-bullet model)          |
-| `team_profiles`        | registry     | `id` (text)                     | Stored team profile templates                                    |
-| `boo_zero_team_briefs` | registry     | `team_id` (FK)                  | Per-team Boo Zero context briefs (markdown)                      |
-| `approval_history`     | registry     | `id` (autoinc)                  | Resolved exec-approval audit trail                               |
-| `tasks`                | board        | `id` (text)                     | The kanban cards (the coordination source of truth)              |
-| `task_deps`            | board        | `(task_id, depends_on_task_id)` | Blocks / blocked-by dependency edges                             |
-| `task_comments`        | board        | `id` (text)                     | Per-task discussion / system notes                               |
-| `workspaces`           | board        | `id` (text)                     | Per-task git worktree isolation                                  |
-| `execution_processes`  | board        | `id` (text)                     | One spawned run per task (any executor) + token/cost ledger      |
-| `scheduled_runs`       | board        | `id` (text)                     | The Routines ledger: durable team-task schedules                 |
-| `memory_facts`         | memory       | `id` (text)                     | Declarative facts (+ optional embedding BLOB)                    |
-| `memory_procedures`    | memory       | `id` (text)                     | Versioned procedures                                             |
-| `memory_outcomes`      | memory       | `id` (text)                     | Outcome events against facts (the learning overlay's input)      |
-| `tool_registry`        | tools        | `name` (text)                   | Brokered tool descriptors + provenance + enabled flag            |
-| `tool_call_audit`      | tools        | `id` (text)                     | Append-only before/after tool-call audit (secrets scrubbed)      |
-| `tool_call_approvals`  | tools        | `id` (text)                     | Tool-approval handshake, plus mirrored OpenClaw exec approvals   |
-| `tool_result_blobs`    | tools        | `handle` (text)                 | Oversized tool results kept whole, read back by handle           |
-| `budgets`              | governance   | `id` (text)                     | Scoped USD budgets (cap/warn) with cent-exact spend              |
-| `governance_audit`     | governance   | `id` (text)                     | Append-only forensic governance audit                            |
-| `orchestration_events` | obs          | `seq` (autoinc)                 | Append-only orchestration event log (trace + graph source)       |
-| `capabilities`         | capabilities | `id` (text)                     | Unified capability inventory across all runtimes                 |
-| `connectors`           | connectors   | `id` (text)                     | Connectors Clawboo connected itself, one row per instance        |
-| `capability_grants`    | connectors   | `id` (text)                     | The grant spine: one row is both a permission and a graph edge   |
-| `approval_rules`       | connectors   | `id` (text)                     | Remembered **Always** decisions, each bound to a grant           |
-| `rooms`                | team-chat    | `id` (text)                     | A team's chat rooms, each a subset of its members                |
-| `room_members`         | team-chat    | `(room_id, agent_id)`           | Which agents belong to which chat room                           |
-| `team_chat`            | team-chat    | `id` (text)                     | Mixed-runtime peer-chat room substrate                           |
-| `agent_inbox`          | team-chat    | `id` (text)                     | Durable per-agent mailbox for coordination notices               |
-
-Integer columns are epoch-milliseconds when named `*_at` / `*_ms` (e.g. `created_at`, `timestamp_ms`); boolean-ish flags are stored as `INTEGER` `0`/`1` (e.g. `is_archived`, `dropped`, `enabled`, `is_error`, `recovery_tombstone`). JSON payloads are stored as `TEXT` and noted per column.
-
-## ER diagram (main clusters)
-
-The diagram shows the FK-enforced edges and the load-bearing soft references (board ids are upstream-owned, so most board edges are soft refs by design; only `tasks.parent_task_id` self-reference and the `task_*` → `tasks` edges are FK-enforced).
-
-```mermaid
-erDiagram
-  teams ||--o{ agents : "team_id (FK)"
-  teams ||--o| boo_zero_team_briefs : "team_id (FK, cascade)"
-  teams ||--o{ rooms : "team_id (FK, cascade)"
-  rooms ||--o{ room_members : "room_id (FK, cascade)"
-  agents ||--o{ room_members : "agent_id (FK, cascade)"
-  agents ||--o{ cost_records : "agent_id (FK)"
-  agents ||--o{ approval_history : "agent_id (FK)"
-
-  tasks ||--o{ task_deps : "task_id (FK)"
-  tasks ||--o{ task_comments : "task_id (FK)"
-  tasks ||--o{ workspaces : "task_id (FK)"
-  tasks ||--o{ execution_processes : "task_id (FK)"
-  tasks ||--o| tasks : "parent_task_id (FK self)"
-  workspaces ||--o{ execution_processes : "workspace_id (FK)"
-
-  teams }o..o{ tasks : "team_id (soft ref)"
-  agents }o..o{ tasks : "assignee_agent_id (soft ref)"
-  rooms }o..o{ tasks : "room_id (soft ref)"
-  scheduled_runs }o..o{ tasks : "fires (soft ref)"
-
-  memory_facts {
-    text id PK
-    blob embedding "Float32 LE; null = FTS fallback"
-  }
-  memory_procedures {
-    text id PK
-  }
-
-  tool_registry {
-    text name PK
-  }
-  tool_call_audit {
-    text id PK
-  }
-  tool_call_approvals {
-    text id PK
-    text kind "tool|exec"
-    text task_id "soft ref → tasks"
-  }
-
-  budgets {
-    text id PK
-    text scope "agent|mission|team|tenant"
-  }
-  governance_audit {
-    text id PK
-  }
-  orchestration_events {
-    integer seq PK "AUTOINCREMENT, cross-process monotonic"
-    text trace_id "trace = events sharing trace_id"
-  }
-  capabilities {
-    text id PK "sourceId:rawKey"
-    text source_id "reconcile scope"
-  }
-  team_chat {
-    text id PK
-    text room_id "team:<teamId>"
-    integer seq "per-room monotonic"
-  }
-```
-
-<Note>
-`task_deps`, `task_comments`, `workspaces`, and `execution_processes` reference `tasks(id)` with a real FK. Cross-subsystem references (board `team_id`/`assignee_agent_id`/`room_id`, `tool_call_approvals.task_id`, `scheduled_runs.agent_id`/`team_id`, all memory/obs/governance scope columns) are **soft refs with no FK constraint**; those ids are owned by the Gateway, the chat store, or another source, so the board only references them, never duplicates or constrains them.
-</Note>
-
----
-
-## Registry cluster
-
-### `chat_messages`
-
-Persisted transcript entries so chat history survives a page refresh. Keyed internally by an autoincrement `id`, but deduplicated on the application-supplied `entry_id` (UUID) for idempotent batch inserts.
-
-A team chat's rows are keyed `agent:<agentId>:team:<teamId>` in General and `agent:<agentId>:team:<teamId>:room:<roomId>` in a [room](#rooms). Clearing a chat sets its rows aside rather than deleting them: `session_key` and `entry_id` both gain a `#cleared:<ts>` suffix, so no reader matches them again (see [`POST /api/teams/:id/chat/clear`](/reference/rest-api/teams#post-apiteamsidchatclear)).
-
-- **Columns**: `id` (PK, autoinc), `session_key`, `gateway_url`, `entry_id`, `timestamp_ms`, `data` (JSON-serialised `TranscriptEntry`).
-- **Indexes**: `uniq_chat_messages_entry_id` (unique on `entry_id`), `idx_chat_messages_session_ts` on `(session_key, timestamp_ms)`, `idx_chat_messages_session_id` on `(session_key, id)` (the tail index the live SSE stream range-seeks on, so each poll is O(new rows) per key instead of an O(history) scan + sort).
-
-### `teams`
-
-Groups of agents deployed together. Holds team identity (name, emoji `icon`, `color`, optional `color_collection_id`), the optional in-team `leader_agent_id`, and an `is_archived` flag.
-
-- **Columns**: `id` (PK, text), `name`, `icon`, `color`, `color_collection_id`, `template_id`, `leader_agent_id`, `is_archived` (`0`/`1`), `tenant_id` (dormant), `created_at`, `updated_at`.
-- **Indexes**: `idx_teams_name` on `(name)`.
-- **Referenced by**: `agents.team_id`, `boo_zero_team_briefs.team_id` (cascade), `rooms.team_id` (cascade).
-
-### `agents`
-
-The agent registry of record. An `AgentSource` (e.g. `OpenClawAgentSource`) syncs upstream agents INTO this table; SQLite then serves reads so the fleet renders even when the Gateway is down. Columns split into Gateway-synced (overwritten every sync: `name`, `status`, `identity_json`, `source_agent_id`) and clawboo-native (preserved across re-sync: `team_id`, `personality_config`, `exec_config`, `avatar_seed`, `participant_kind`, `runtime`, `capabilities`, `tenant_id`).
-
-- **Columns**: `id` (PK, text), `name`, `gateway_id`, `avatar_seed`, `personality_config` (JSON slider values), `exec_config` (JSON `{ execAsk, execSecurity }`), `team_id` (**FK → `teams.id`**), `status` (default `idle`), `source_id` (default `openclaw`), `source_agent_id`, `identity_json` (JSON Gateway identity), `participant_kind` (default `agent`; `agent`|`human`, dormant), `runtime` (default `openclaw`, open set, dormant), `capabilities` (JSON, dormant), `tenant_id` (dormant), `archived_at` (soft-delete tombstone, epoch ms; `null` = live), `created_at`, `updated_at`.
-- **Indexes**: `idx_agents_gateway_id`, `idx_agents_status`, `idx_agents_team_id`, `idx_agents_source` on `(source_id, source_agent_id)`.
-
-### `sessions`
-
-A dormant seam plus the live session-rotation lineage. For OpenClaw, sessions stay Gateway-live and this table is inert; the native runtime owns its sessions here, and the session-rotation engine records successor sessions linked by `parent_session_id`.
-
-- **Columns**: `id` (PK, text), `source_id` (default `openclaw`), `source_session_id`, `agent_id` (soft ref), `team_id`, `status` (default `idle`), `parent_session_id` (soft self-ref → rotation predecessor), `runtime`, `tenant_id` (dormant), `created_at`, `updated_at`.
-- **Indexes**: `uniq_sessions_source` (unique on `(source_id, source_session_id)`), `idx_sessions_agent`, `idx_sessions_parent`.
-
-### `cost_records`
-
-Per-agent token and USD cost ledger.
-
-- **Columns**: `id` (PK, autoinc), `agent_id` (**FK → `agents.id`**), `model`, `input_tokens`, `output_tokens`, `cost_usd` (`REAL`), `run_id`, `session_key` (nullable), `created_at`.
-- **Indexes**: `idx_cost_records_agent_id`, `idx_cost_records_session` on `(session_key, created_at)`, `idx_cost_records_run_id`, `idx_cost_records_created_at`.
-
-`session_key` names the conversation a row's spend belongs to. Billing is seeded from the last recorded spend so a restart does not re-bill a live turn, and without the key that lookup could pick up a different session of the same agent. It is nullable: rows written before the column existed have no answer to give, and `POST /api/cost-records`, the route the browser estimator posts to, does not send one either. The column and its index are additive, so an existing database gains them from the same DDL with no migration.
-
-### `graph_layouts`
-
-Saved node and edge positions for the Ghost Graph and the Org chart (formerly Atlas), keyed per layout name + gateway URL. The names (`atlas-radial` / `atlas-top-down` for the Org chart's two layouts, `team-<teamId>` for a team's graph, `team-<teamId>-room-<roomId>` for a room's) are listed on the [Misc resources API](/reference/rest-api/misc) page.
-
-- **Columns**: `id` (PK, autoinc), `name` (default `default`), `gateway_url`, `layout_data` (JSON node + edge positions), `created_at`, `updated_at`.
-- **Indexes**: `uniq_graph_layouts_name_url` (unique on `(name, gateway_url)`).
-
-### `settings`
-
-A typed key/value store. Backs team rules, onboarding flags, the Boo Zero global brief / display name, and any other simple config-by-key. (Keys are documented where they are set: see [Boo Zero](/using/boo-zero) for `boo-zero:global-brief` and `boo-zero:display-name:<agentId>`, [Using teams](/using/teams) for `team-rules:<teamId>` and `team-onboarding:<teamId>`, and the [Teams API](/reference/rest-api/teams) for the chat-clear times `team-chat-cleared:<teamId>` and `team-chat-cleared:<teamId>:room:<roomId>`.)
-
-- **Columns**: `key` (PK, text), `value` (text), `updated_at`.
-- **Helpers**: `getSetting(db, key)` / `setSetting(db, key, value)` (upsert on conflict).
-
-### `skills`
-
-Installed-skill tracking for the legacy markdown-bullet skill model (the brokered tool layer in `tool_registry` supersedes it; both coexist).
-
-- **Columns**: `id` (PK, text), `name`, `source` (free-text provenance, e.g. `curated`; not an external registry), `category`, `trust_score` (`REAL`, nullable — retained but no longer populated), `installed_at`, `metadata` (JSON; carries the `agentIds` list).
-- **Indexes**: `idx_skills_source`, `idx_skills_category`.
-
-### `team_profiles`
-
-Stored team profile templates (JSON agent + skill configs and an optional saved layout).
-
-- **Columns**: `id` (PK, text), `name`, `description`, `agents_config` (JSON), `skills_config` (JSON), `graph_layout` (JSON), `is_builtin` (`0`/`1`), `created_at`.
-
-### `boo_zero_team_briefs`
-
-Per-team context briefs that Boo Zero (the universal team leader) reads when operating on a team. One row per team, markdown content, injected into Boo Zero's context preamble at runtime.
-
-- **Columns**: `team_id` (PK, **FK → `teams.id` `ON DELETE CASCADE`**), `content` (markdown), `updated_at`.
-
-### `approval_history`
-
-A resolved-exec-approval audit trail (distinct from the live tool-call approval handshake in `tool_call_approvals`).
-
-- **Columns**: `id` (PK, autoinc), `agent_id` (**FK → `agents.id`**), `action` (`allow_once`|`always_allow`|`deny`), `tool_name`, `details` (JSON), `created_at`.
-- **Indexes**: `idx_approval_history_agent_id`, `idx_approval_history_created_at`.
-
----
-
-## Board cluster
-
-The transactional source of truth for team/task coordination state. The board references agents/runtimes/sessions/delegations by id but never duplicates them; only the internal `parent_task_id` self-reference and the `task_*` → `tasks` edges are FK-enforced.
-
-### `tasks`
-
-The kanban cards.
-
-- **Columns**: `id` (PK, text), `title`, `description`, `status` (default `backlog`; one of `backlog`|`todo`|`in_progress`|`in_review`|`blocked`|`done`|`cancelled`), `priority` (default `0`), `team_id` (soft ref), `assignee_agent_id` (soft ref), `assignee_runtime`, `parent_task_id` (**FK → `tasks.id` self-ref**), `source_delegation_id`, `worktree_ref`, `branch_ref`, `cost_usd` (`REAL`, default `0`; the sum of the task's recorded run costs), `parent_session_id`, `dropped` (`0`/`1` soft-delete), `tenant_id` (dormant), `verification` (JSON `VerificationResult`; `null` until a gate runs; the `in_review → done` gate reads `.status === 'pass'`), `scheduled_by` (default `manual`; the one-firing-owner label, open set: `manual`|`clawboo`|`openclaw`|…), `created_at`, `updated_at`, `completed_at`, `room_id` (soft ref → `rooms.id`, no FK; the chat room the task was delegated in, `null` = General, which covers every task created before rooms existed; a subtask inherits its parent's room), `person_moved_at` (when a person last moved the card on the board; an agent's own status write through the tasks MCP tools is refused while no run has started since).
-- **Indexes**: `idx_tasks_team_status` on `(team_id, status)`, `idx_tasks_team_room` on `(team_id, room_id)` (a room's orchestrator and its Tasks card read only that room's tasks), `idx_tasks_assignee`, `idx_tasks_parent`, `idx_tasks_parent_dropped_created` on `(parent_task_id, dropped, created_at)`. The composite serves both guarded-create counts, which run while the write lock is held: the per-parent child count (`parent_task_id = ? AND dropped = 0`, an index prefix) and the root-rate count (`parent_task_id IS NULL AND dropped = 0 AND created_at > ?`, equality-equality-range, so the range column comes last). `idx_tasks_parent` is deliberately retained: dropping it from the DDL would not drop it from databases that already bootstrapped it.
-
-### `task_deps`
-
-The blocks / blocked-by dependency graph. The composite primary key prevents duplicate edges.
-
-- **Columns**: `task_id` (**FK → `tasks.id`**), `depends_on_task_id` (**FK → `tasks.id`**), `tenant_id`.
-- **Indexes**: composite PK `(task_id, depends_on_task_id)`, `idx_task_deps_task`, `idx_task_deps_depends`.
-
-### `task_comments`
-
-Per-task discussion and system notes (report-up summaries, verification verdicts, board narration).
-
-- **Columns**: `id` (PK, text), `task_id` (**FK → `tasks.id`**), `author_agent_id`, `author_type` (`agent`|`user`|`system`), `body`, `tenant_id`, `created_at`.
-- **Indexes**: `idx_task_comments_task`.
-
-### `workspaces`
-
-Per-task git worktree isolation.
-
-- **Columns**: `id` (PK, text), `task_id` (**FK → `tasks.id`**), `repo_path`, `branch`, `worktree_path`, `status` (default `active`; `active`|`archived`|`stale`), `tenant_id`, `created_at`, `last_used_at`.
-- **Indexes**: `idx_workspaces_task`.
-
-### `execution_processes`
-
-One spawned run per task, for any executor. Records git checkpoints (before/after commit), a token/cost ledger, and the `recovery_tombstone` that makes startup orphan reconciliation idempotent (no infinite auto-resume).
-
-- **Columns**: `id` (PK, text), `task_id` (**FK → `tasks.id`**), `workspace_id` (**FK → `workspaces.id`**), `executor_type` (`openclaw`|`claude-code`|`codex`|…), `runtime` (nullable; the runtime that actually ran when `executor_type` records the engine's `openclaw` marker instead), `status` (default `queued`; `queued`|`running`|`succeeded`|`failed`|`timed_out`|`cancelled`), `claimed_at`, `started_at`, `completed_at`, `before_commit`, `after_commit`, `input_tokens`, `output_tokens`, `cache_read`, `cache_write`, `cost_usd` (`REAL`), `cost_source` (nullable; `reported`|`token-estimate`|`char-estimate`), `summary`, `run_reason`, `error`, `recovery_tombstone` (`0`/`1`), `tenant_id`, `created_at`.
-- **Indexes**: `idx_exec_task`, `idx_exec_status`.
-
-### `scheduled_runs`
-
-The Routines ledger: durable team-task schedules, the external wake for every runtime class. The row is the source of truth; the in-process ticker is a rebuildable actuator that re-arms from `next_run_at` on boot. `next_run_at` `NULL` = disarmed (a spent `once@`, paused, or errored routine).
-
-- **Columns**: `id` (PK, text), `agent_id` (soft ref), `team_id` (soft ref), `cron_spec` (a croner expression or `once@<iso>`), `task_template` (JSON `TaskTemplate`), `status` (default `idle`; `idle`|`queued`|`claimed`|`running`|`paused`|`error`), `last_run_at`, `next_run_at`, `scheduled_by` (default `clawboo`; the firing owner), `last_error`, `tenant_id` (dormant), `created_at`, `updated_at`.
-- **Indexes**: `idx_scheduled_runs_next` on `(next_run_at)`, `idx_scheduled_runs_status_next` on `(status, next_run_at)`, `idx_scheduled_runs_agent`.
-
----
-
-## Memory cluster
-
-A two-tier memory store: declarative facts + versioned procedures, plus the outcome events that feed the learning overlay. Full-text search rides a companion FTS5 virtual table (see [FTS5 search](#fts5-search-memory_facts_fts)); the optional `embedding` BLOB powers vector / hybrid search.
-
-### `memory_facts`
-
-- **Columns**: `id` (PK, text), `title`, `content`, `tags` (JSON `string[]`, default `[]`), `embedding` (Float32 little-endian BLOB; `null` when no embedding provider, so search falls back to FTS), `embedding_model` (the provider id that produced it), `scope_agent_id`, `scope_team_id`, `tenant_id` (dormant), `created_by_agent_id`, `created_by_runtime` (`user` = saved from the UI), `source_task_id`, `source_session_key`, `created_at`, `updated_at`.
-- **Indexes**: `idx_memory_facts_team` on `(scope_team_id)`, `idx_memory_facts_agent` on `(scope_agent_id)`, `idx_memory_facts_created`, `idx_memory_facts_model_created` on `(embedding_model, created_at, id)`.
-
-The four `created_by_*` / `source_*` columns are provenance: who or what produced the row. They are nullable, written at save time only, and never affect which scopes can see the fact.
-
-### `memory_procedures`
-
-- **Columns**: `id` (PK, text), `name`, `version` (default `1`), `content`, `scope_agent_id`, `scope_team_id`, `tenant_id`, `created_by_agent_id`, `created_by_runtime`, `source_task_id`, `source_session_key` (the same provenance columns as `memory_facts`), `created_at`.
-- **Indexes**: `idx_memory_procedures_name`, `idx_memory_procedures_team` on `(scope_team_id)`.
-
-### `memory_outcomes`
-
-Append-only outcome events against facts, the input to the derived learning overlay. Explicit feedback (`useful`, `dead_end`, `corrected`) comes from agents and from the UI; `cited` rows are written only by run-start memory injection, and the external input schemas exclude that value, so a usage count cannot be forged. `fact_id` is a soft reference with no FK, matching the rest of the memory cluster.
-
-- **Columns**: `id` (PK, text), `fact_id` (not null, soft ref → `memory_facts.id`), `outcome` (not null; `useful`|`dead_end`|`corrected`|`cited`), `note`, `agent_id`, `team_id`, `task_id`, `runtime`, `created_at`.
-- **Indexes**: `idx_memory_outcomes_fact` on `(fact_id)`, `idx_memory_outcomes_created`.
-
----
-
-## Tools cluster
-
-The brokered tool layer that supersedes the markdown-bullet skill model. The registry persists descriptor metadata plus the provenance seam (Ed25519 signature verify is real but enforcement is off by default). Every call is audited (args/result scrubbed of secrets); risky calls open a DB-mediated approval the UI resolves.
-
-### `tool_registry`
-
-- **Columns**: `name` (PK, text), `description`, `input_schema` (serialised JSON Schema), `availability` (JSON availability requirement), `owner` (default `core`; `core`|`plugin`|`channel`|`mcp`), `provenance_signer_id`, `provenance_signature`, `provenance_signed_at`, `enabled` (`0`/`1`, default `1`), `created_at`, `updated_at`.
-- **Indexes**: `idx_tool_registry_owner`.
-
-### `tool_call_audit`
-
-Append-only before/after audit of every brokered call. `args_summary` / `result_summary` are scrubbed of secrets (and the result is compacted) before storage; the model still receives the real, unscrubbed output.
-
-- **Columns**: `id` (PK, text), `tool_name`, `agent_id`, `phase` (`before`|`after`), `decision` (`allow`|`deny`|`require_approval`|`rewrite`, set on the `before` row), `args_summary` (scrubbed JSON), `result_summary` (scrubbed + compacted), `is_error` (`0`/`1`), `tenant_id`, `created_at`.
-- **Indexes**: `idx_tool_audit_tool`, `idx_tool_audit_created`.
-
-### `tool_call_approvals`
-
-The DB-mediated approval handshake, uniform across both MCP transports and cross-process. `task_id` lets the TTL reaper unblock a gated board task on expiry; it is nullable because a bare tool-call approval carries no task.
-
-- **Columns**: `id` (PK, text), `tool_name`, `agent_id`, `args_summary` (scrubbed JSON), `reason`, `status` (default `pending`; `pending`|`allow_once`|`allow_always`|`deny`|`expired`), `task_id` (soft ref → `tasks`), `tenant_id`, `grant_id`, `connector_id`, `never_remember` (`0`/`1`, default `0`), `rule_reason`, `tool_class` (`read`|`write`|`destructive`), `tool_summary`, `kind` (not null, default `tool`; `tool`|`exec`), `created_at`, `expires_at` (not null), `resolved_at`.
-- **Indexes**: `idx_tool_approvals_status`, `idx_tool_approvals_created`, `idx_tool_approvals_grant` on `(grant_id, status)`.
-
-`kind` says who is holding the call while the human decides. `tool` is a call Clawboo is holding in its own process, the broker blocked inside `waitForApproval` or the native shell waiting on the row it just wrote; `exec` is an OpenClaw shell command held by the Gateway, which Clawboo mirrors into a row here and answers over `exec.approval.resolve`. The two are released by different means, so the resolver is told which it is rather than left to infer it from a null `connector_id` or a tool named `exec`.
-
-A mirrored exec row is keyed by the Gateway's own request id, which is what makes a redelivered request idempotent, and it carries `tool_name` `exec`, `tool_class` `destructive`, `tool_summary` set to the first 200 characters of the command, and `args_summary` set to `{command, cwd}`. See [Approvals](/using/approvals).
-
-`never_remember` is `1` when "Always" must not be offered for this prompt. It is persisted at prompt time rather than recomputed, so the resolve path cannot mint a durable rule the prompt never offered. `grant_id` and `connector_id` name the connector grant the call was decided against, and `rule_reason` is why that decision asked rather than allowed (`policy-always`, `policy-writes`, `risk-destructive`, `risk-external`, `lethal-trifecta`, `tainted-run`, `never-remembered`). `tool_class` and `tool_summary` carry the server's own reading of the tool, so the card never has to guess a risk level from the tool's name.
-
-### `tool_result_blobs`
-
-Tool results too large to hand a model in one piece, kept whole. The full bytes are stored here first and only then trimmed for the transcript, so the trimmed view carries a `handle` and the model can read the rest back through the Tools MCP server's `read_tool_result` tool instead of mistaking a prefix for the whole answer. A handle is an unguessable `tr_` id, because it is a read capability for someone else's payload. One stored result is capped at 8 MiB; past that the row keeps a part and says so (`stored_bytes` < `total_bytes`). Rows older than seven days are reaped by the hourly approval reaper (`CLAWBOO_TOOL_RESULT_TTL_MS`).
-
-- **Columns**: `handle` (PK, text), `tool_name` (not null), `agent_id`, `tenant_id` (dormant), `body` (not null), `total_bytes` (not null; what the tool produced), `stored_bytes` (not null; what was kept), `created_at`.
-- **Indexes**: `idx_tool_result_blobs_created`.
-
----
-
-## Governance cluster
-
-The hard USD budget kill-switch plus an append-only forensic audit.
-
-### `budgets`
-
-Scoped budgets with cent-exact integer spend, so the atomic read-modify-write never drifts. `spent_micro_cents` is a lossless accumulator in ten-thousandths of a cent (sub-cent cost events carry here so repeated tiny amounts are not floored to zero); `spent_usd_cents` is the whole-cent display mirror = `floor(micro / 10000)`.
-
-- **Columns**: `id` (PK, text), `scope` (`agent`|`mission`|`team`|`tenant`), `scope_id`, `limit_usd_cents` (`INTEGER`), `spent_usd_cents` (default `0`), `spent_micro_cents` (default `0`), `status` (default `active`; `active`|`soft_capped`|`paused`), `mode` (default `warn`; `cap` = hard cap auto-pause at 100%, `warn` = track-and-warn, never auto-pause), `tenant_id`, `created_at`, `updated_at`.
-- **Indexes**: `uniq_budgets_scope` (unique on `(scope, scope_id)`), `idx_budgets_status`.
-
-<Note>
-The default `mode` is `warn` (track-and-warn): spend is recorded and a warning is emitted at the 80% / 100% crossings, but the run is never auto-paused. A hard cap (`mode: 'cap'`) is opt-in. See [Production defaults](/operating/production-defaults).
-</Note>
-
-### `governance_audit`
-
-Insert-only forensic governance log (no update/delete writer), secrets scrubbed before storage, indexed by `(agent_id, created_at)` for lineage queries.
-
-- **Columns**: `id` (PK, text), `event_type` (`install`|`approval`|`tool_call`|`budget`|`cap_hit`|`verification`), `agent_id`, `task_id`, `team_id`, `tenant_id`, `summary` (scrubbed JSON), `created_at`.
-- **Indexes**: `idx_gov_audit_agent` on `(agent_id, created_at)`, `idx_gov_audit_created`.
-
----
-
-## Observability cluster
-
-### `orchestration_events`
-
-The append-only orchestration event stream: the always-on local trace store (a trace = events sharing a `trace_id`, ordered by `seq`), the Ghost-Graph projection source, and the metric + error-taxonomy source. `seq` is `INTEGER PRIMARY KEY AUTOINCREMENT` so ordering is monotonic and never reused across multiple writers (the Express server and the MCP stdio bins open the same file). Insert-only by discipline; `data` is scrubbed before storage.
-
-- **Columns**: `seq` (PK, autoinc: the cross-process monotonic key), `id` (text, not null), `ts`, `kind`, `team_id`, `task_id`, `agent_id`, `runtime`, `trace_id`, `span_id`, `parent_span_id`, `correlation_id`, `data` (scrubbed JSON), `tenant_id`, `created_at`.
-- **Indexes**: `uniq_orch_events_id` (unique on `id`), `idx_orch_events_team_seq` on `(team_id, seq)`, `idx_orch_events_task_seq` on `(task_id, seq)`, `idx_orch_events_trace_seq` on `(trace_id, seq)`, `idx_orch_events_kind_ts` on `(kind, ts)`, `idx_orch_events_created`.
-
----
-
-## Capabilities cluster
-
-### `capabilities`
-
-The durable projection of every runtime's capabilities (skills / tools / connectors), read by the six `CapabilitySource` adapters and fanned by the `CapabilityMultiplexer`. One stream drives both the Ghost Graph and the Capabilities dashboard. The primary key `id` (`${source_id}:${rawKey}`) deterministically encodes the composite identity, so the PK is the upsert key; `source_id` scopes the read-reconcile so one source's re-read never deletes another source's rows.
-
-- **Columns**: `id` (PK, text: `sourceId:rawKey`), `source_id` (the owning adapter: `native`|`hermes`|`claude-code`|`codex`|`openclaw`), `source_key`, `kind` (`skill`|`tool`|`connector`), `runtime` (open set), `scope` (`team`|`agent`|`global`), `agent_id` (`null` for team/global scope), `origin` (`brokered-mcp`|`curated-skill`|`filesystem-skill-md`|`mcp-connector`|`runtime-builtin`|`openclaw-extension`|`external-vendor-cli`), `manageability` (`managed`|`external-write`|`runtime-of-record`|`observe-only`), `name`, `description` (default `''`), `availability` (JSON | null), `available` (`0`/`1`, default `1`), `diagnostics` (JSON `string[]`, default `[]`), `provenance` (JSON | null), `status` (default `ready`), `tenant_id` (dormant), `synced_at`, `created_at`, `updated_at`.
-- **Indexes**: `idx_capabilities_source`, `idx_capabilities_runtime`, `idx_capabilities_agent`, `idx_capabilities_kind`.
-
----
-
-## Connector and grant cluster
-
-### `connectors`
-
-One row per connector clawboo has actually connected, written by the supervisor once discovery has succeeded and never before: a row for a server that never answered would claim a connection that does not exist. Three nouns are kept apart on purpose. The catalog **type** is committed TypeScript in `@clawboo/connector-catalog`, this row is a configured **instance**, and a `capabilities` row is one callable **tool**.
-
-`spec_hash` and `tools_hash` are sha256 hex over the canonical strings `@clawboo/governance` produces, which is what makes a server that rewrites its own tool list detectable as drift. No secret material lands here: `spec` carries only `secret:NAME` references, which is also why it is safe to hash and to log.
-
-- **Columns**: `id` (PK, text), `slug`, `catalog_id` (null for a connector the operator added themselves), `display_name`, `transport` (`stdio`|`streamable-http`), `spec` (JSON), `spec_hash`, `tools_hash`, `egress_allow` (JSON `string[]`), `trifecta` (JSON), `health` (`unknown`|`ok`|`needs-auth`|`degraded`|`error`|`drift`, default `unknown`), `health_detail`, `failures` (default `0`), `tenant_id` (dormant), `created_at`, `updated_at`.
-- **Indexes**: `uniq_connectors_slug` (unique on `slug`).
-
-### `capability_grants`
-
-The grant spine. One row is **both** the permission `executeBrokeredCall` enforces and the edge an operator reads on the [Ghost Graph](/using/ghost-graph). The renderer calls the same `decideGrant` the gate calls, over the same candidate rows, so a badge cannot be computed by a second code path.
-
-`grant_key` is the canonicalised `(subject, capability)` composite, and it is the only column uniqueness can live on: a `UNIQUE` index over the five nullable identity columns does not enforce one grant per pair, because SQLite treats NULLs as distinct. Identity normalisation is enforced by `grantKey` in `@clawboo/db`: when `connector_id` is set, `capability_id` is stored NULL, because a `capabilities.id` folds the owning agent into its raw key and a grant keyed on one would be unfindable by the grantee.
-
-There is deliberately **no** `last_used_at` and **no** `use_count`. A team- or global-scoped grant is a hot single row on a single-writer database, and a contended write can block the event loop for the full retry budget. Both values are derived from `tool_call_audit` via `idx_tool_audit_grant`.
-
-- **Columns**: `id` (PK, text), `grant_key`, `subject_kind` (`agent`|`team`|`global`), `subject_id` (null for global), `capability_kind`, `connector_id`, `capability_id`, `tool_allow` (JSON glob list, default `["*"]`), `tool_deny` (JSON, default `[]`), `mode` (`read`|`write`|`admin`, default `read`), `approval_policy` (`never`|`risk`|`writes`|`always`, default `risk`), `state` (`proposed`|`active`|`suspended`|`revoked`|`expired`, default `active`), `origin` (`owner` = the runtime already attaches this, never drawn as an edge; `operator` = a human deliberately shared it, which is what draws one), `expires_at`, `spec_hash_pin`, `tools_hash_pin`, `call_ceiling_per_hour`, `granted_by`, `granted_at`, `revoked_at`, `revoked_reason`, `tenant_id` (dormant), `created_at`, `updated_at`.
-- **Indexes**: `uniq_capability_grants_key` (unique on `grant_key`), `idx_grants_subject`, `idx_grants_connector`, `idx_grants_capability`, `idx_grants_state`, `idx_grants_expires`.
-
-### `approval_rules`
-
-A remembered **Always**, bound to the grant it was approved under. Minted when an operator resolves a tool approval with `allow_always`, and cascade-deleted when that grant is revoked: a remembered approval outliving its grant would let a re-grant silently inherit permissions given under different circumstances.
-
-`expires_at` is **not null**, and that is load-bearing. The matcher treats a null expiry as immortal, and an immortal allow bought with one click is a permission nobody revisits. A rule whose prompt was marked never-rememberable (a lethal trifecta, a tainted run) is never minted at all.
-
-- **Columns**: `id` (PK, text), `rule_key` (canonical `(grant_id, tool_name, args_shape)` composite, for the same NULL reason as `grant_key`), `grant_id` (not null), `tool_name` (not null), `args_shape` (null = covers any arguments; a value scopes the rule to one argument shape and is strictly more specific), `decision` (`allow`|`deny`), `created_from_approval_id`, `expires_at` (not null), `tenant_id` (dormant), `created_at`.
-- **Indexes**: `uniq_approval_rules_key` (unique on `rule_key`).
-
----
-
-## Team-chat cluster
-
-Two different things in this cluster are called rooms. `rooms` and `room_members` hold a team's **chat rooms**: conversations inside the team's group chat, whose transcripts live in `chat_messages`. `team_chat` is the **peer-chat** substrate the TeamChat MCP server writes, and its `room_id` (`team:<teamId>`) is never a `rooms.id`.
-
-### `rooms`
-
-A team's chat rooms: extra conversations inside the team's group chat, each between a subset of its members, with its own transcript, its own orchestrator, and its own tasks. The team's own group chat, General, is the implicit default room and has **no** row (a room id is `null` wherever General is meant), so its history never moved. The team's rules, brief, memory, and board stay team-wide, and Boo Zero presides over every room without being a member.
-
-A room is archived, never deleted: archiving sets `archived_at`, which takes the room out of every list, and its transcript stays in `chat_messages` under the room's session keys. The only way a row goes is with its team (`ON DELETE CASCADE`). A room's last clear time is the `settings` key `team-chat-cleared:<teamId>:room:<roomId>`, and the resume pointers of its native and Codex leaders are `native-team-session:<agentId>:<teamId>:room:<roomId>`.
-
-- **Columns**: `id` (PK, text), `team_id` (not null, **FK → `teams.id` `ON DELETE CASCADE`**), `name` (not null; the API collapses its whitespace and caps it at 80 characters), `tenant_id` (dormant), `archived_at` (epoch ms; `null` = active), `pinned_at` (when it was pinned to the top of the room list, epoch ms; `null` = not pinned), `created_at`, `updated_at`.
-- **Indexes**: `idx_rooms_team` on `(team_id)`.
-- **Referenced by**: `room_members.room_id` (cascade), `tasks.room_id` (soft ref).
-
-### `room_members`
-
-Which agents belong to which chat room. Membership is a table rather than a JSON list on the room: the room FK cascades memberships away, the primary key dedupes them, deleting an agent row sweeps that agent's memberships, and a member edit is one set-replace transaction. Membership is stored but never trusted on its own: a room's live roster is its stored members that are still active (not archived) agents of the room's team, so an agent that is archived or moves to another team drops out of every room without a sweep.
-
-- **Columns**: `room_id` (not null, **FK → `rooms.id` `ON DELETE CASCADE`**), `agent_id` (not null, **FK → `agents.id` `ON DELETE CASCADE`**), `created_at` (the join time; the roster is ordered by it, and a member kept across an edit keeps its original time).
-- **Indexes**: composite PK `(room_id, agent_id)`, `idx_room_members_agent` on `(agent_id)`.
-
-### `team_chat`
-
-The durable group-chat room substrate for mixed-runtime peer chat: every team member posts as a named peer into one room. This is the team's narration transcript, distinct from the leader-orchestrated `task_comments` thread. `seq` is per-room monotonic (assigned in an `immediateWrite` transaction as `MAX(seq)+1 WHERE room_id=?`), so a cursor read (`subscribe`) is stable. The board stays canonical; a post never mutates the board.
-
-- **Columns**: `id` (PK, text), `room_id` (`team:<teamId>` by default; kept distinct from `team_id` for a future multi-room seam of its own, and never a `rooms.id`), `team_id` (not null), `author_agent_id` (not null; resolved from the MCP connection binding, never spoofable via tool args), `body`, `kind` (default `peer`; `peer` = a teammate's post, `system` = board-mutation narration, `user`), `created_at`, `seq` (per-room monotonic).
-- **Indexes**: `uniq_team_chat_room_seq` (unique on `(room_id, seq)`), `idx_team_chat_team`.
-
-<Note>
-`team_chat` carries no `tenant_id` column. The room query is kept tenant-scopable via `team_id`, but the dormant multi-tenant column is not yet present on this table.
-</Note>
-
-### `agent_inbox`
-
-The durable per-agent mailbox: the delivery plane that makes a coordination notice survive whatever happens to the agent it is aimed at. A row is something the agent must eventually receive, written by a board-lifecycle subscriber or the orchestrator. Delivery is exactly-once across channels rather than per channel: whichever channel reaches the agent first claims the row and stamps `delivered_at` with its own name in `delivered_via`, so a digest racing a mid-run piggyback cannot render the same notice twice. Undelivered rows outlive orchestrator eviction and server restarts, which is what makes a restart a pause instead of amnesia.
-
-- **Columns**: `id` (PK, text), `team_id`, `agent_id` (not null, the recipient), `kind` (not null; `task_update` = a delegated or executor task reached a terminal, `alert` = a coordination failure such as a parked or delivery-exhausted task, `signal` = an ambient FYI), `body` (not null), `task_id`, `created_at` (not null), `delivered_at` (null while pending), `delivered_via` (`digest` | `mcp` | `signal`), `tenant_id`.
-- **Indexes**: `idx_agent_inbox_pending` on `(agent_id, delivered_at)`, which is the pending-rows read every delivery channel makes.
-
----
-
-## FTS5 search: `memory_facts_fts`
-
-`memory_facts` full-text search rides a companion FTS5 virtual table, `memory_facts_fts`, declared as raw DDL in `createDb` (Drizzle cannot model a virtual table, so it is not in `schema.ts` and not counted among the 35 tables). It mirrors `title`, `content`, and an unindexed `fact_id`, kept in sync by three triggers:
-
-- `memory_facts_ai`: `AFTER INSERT`: copies the new row into the FTS index.
-- `memory_facts_ad`: `AFTER DELETE`: removes the FTS row.
-- `memory_facts_au`: `AFTER UPDATE`: deletes then re-inserts the FTS row.
-
-The schema-drift guard (`schemaSource.test.ts`) deliberately excludes `memory_facts_fts` (and its auto-created shadow tables) from the column comparison.
-
----
-
-## Schema source of truth: no migration ladder
-
-There is **no live migration ladder**. The model is "bootstrap-via-`createDb`":
-
-- **The single source of truth** is the `CREATE TABLE IF NOT EXISTS …` block in `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`). It declares every table, index, the FTS5 virtual table, and its triggers on a fresh DB outright. Running it twice is a no-op (`IF NOT EXISTS`).
-- **`schema.ts` is the Drizzle type layer** over the same tables, used for typed queries (`db.select()…`, the `Db*` / `Db*Insert` inferred types), never to apply migrations.
-- **Upgrading in place is additive**, and derived from that same DDL rather than hand-listed. See below.
-
-This posture is enforced by `schemaSource.test.ts`, which:
-
-1. builds a DB through the real `createDb()` and asserts every `schema.ts` table and its column set matches the live DDL (and vice versa), the drift guard;
-2. asserts the unapplied drizzle ladder does **not** ship or run: `package.json` `files` excludes `drizzle`, there are no `db:migrate` / `db:generate` scripts, and **no migration-ladder directory exists on disk**.
+This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 35 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
+
+To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI reference](/reference/cli)). Where the file lives and how to reset it are in [Data and state](/operating/data-and-state).
+
+## Tables at a glance
+
+| Table                                           | Group                    | Holds                                            |
+| ----------------------------------------------- | ------------------------ | ------------------------------------------------ |
+| [`teams`](#teams)                               | Teams and agents         | Teams                                            |
+| [`agents`](#agents)                             | Teams and agents         | The agent registry, for every runtime            |
+| [`sessions`](#sessions)                         | Teams and agents         | Clawboo Native sessions and rotated run sessions |
+| [`boo_zero_team_briefs`](#boo_zero_team_briefs) | Teams and agents         | Boo Zero's brief for each team                   |
+| [`team_profiles`](#team_profiles)               | Teams and agents         | Stored team templates (unused by the server)     |
+| [`chat_messages`](#chat_messages)               | Chat                     | Chat transcripts                                 |
+| [`rooms`](#rooms)                               | Chat                     | A team's chat rooms                              |
+| [`room_members`](#room_members)                 | Chat                     | Room membership                                  |
+| [`tasks`](#tasks)                               | Board                    | Task cards                                       |
+| [`task_deps`](#task_deps)                       | Board                    | Which task waits for which                       |
+| [`task_comments`](#task_comments)               | Board                    | Comments and notes on tasks                      |
+| [`workspaces`](#workspaces)                     | Board                    | The git worktree a task ran in                   |
+| [`execution_processes`](#execution_processes)   | Board                    | One row per run, with cost and status            |
+| [`scheduled_runs`](#scheduled_runs)             | Routines                 | Routines                                         |
+| [`memory_facts`](#memory_facts)                 | Memory                   | Facts                                            |
+| [`memory_procedures`](#memory_procedures)       | Memory                   | Versioned procedures                             |
+| [`memory_outcomes`](#memory_outcomes)           | Memory                   | Feedback on facts                                |
+| [`tool_registry`](#tool_registry)               | Tools and approvals      | Tool metadata and on/off switches                |
+| [`tool_call_audit`](#tool_call_audit)           | Tools and approvals      | Audit of every brokered tool call                |
+| [`tool_call_approvals`](#tool_call_approvals)   | Tools and approvals      | Approval requests                                |
+| [`tool_result_blobs`](#tool_result_blobs)       | Tools and approvals      | Oversized tool results, kept whole               |
+| [`approval_history`](#approval_history)         | Tools and approvals      | A log of approval decisions                      |
+| [`connectors`](#connectors)                     | Connectors and grants    | Connected connectors                             |
+| [`capability_grants`](#capability_grants)       | Connectors and grants    | Who may use which connector, tool or skill       |
+| [`approval_rules`](#approval_rules)             | Connectors and grants    | Remembered **Always** decisions                  |
+| [`capabilities`](#capabilities)                 | Capabilities and skills  | Every runtime's skills, tools and connectors     |
+| [`skills`](#skills)                             | Capabilities and skills  | Skills added to agents                           |
+| [`team_chat`](#team_chat)                       | Peer room and mailbox    | Posts in the agents' own peer room               |
+| [`agent_inbox`](#agent_inbox)                   | Peer room and mailbox    | Each agent's mailbox                             |
+| [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                          |
+| [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                    |
+| [`governance_audit`](#governance_audit)         | Spend, budgets and audit | Audit of governance decisions                    |
+| [`orchestration_events`](#orchestration_events) | Event log                | The event log                                    |
+| [`settings`](#settings)                         | Settings and layout      | Key and value settings                           |
+| [`graph_layouts`](#graph_layouts)               | Settings and layout      | Saved graph positions                            |
+
+## Conventions
+
+- Times are `INTEGER` epoch milliseconds (columns ending in `_at`, plus `ts` and `timestamp_ms`).
+- Flags are `INTEGER` `0` or `1`. JSON is stored as `TEXT`.
+- `tenant_id` columns are unused and always null.
+- Most ids are `TEXT`: UUIDs, or ids from an agent source. `chat_messages`, `cost_records`, `graph_layouts` and `approval_history` use an autoincrement `INTEGER` id, and `orchestration_events` is keyed by `seq`.
+- Foreign keys are switched on, but only the columns below are declared as foreign keys. Every other id column (for example `tasks.team_id` or `tasks.assignee_agent_id`) is a plain reference that SQLite does not check.
+- Nothing deletes rows from `orchestration_events`, `tool_call_audit` or `governance_audit`, so they grow until you reset or trim the database.
+
+### Foreign keys
+
+| Column                                              | References      | When the referenced row is deleted |
+| --------------------------------------------------- | --------------- | ---------------------------------- |
+| `agents.team_id`                                    | `teams.id`      | Refused while rows point at it     |
+| `cost_records.agent_id`                             | `agents.id`     | Refused while rows point at it     |
+| `approval_history.agent_id`                         | `agents.id`     | Refused while rows point at it     |
+| `boo_zero_team_briefs.team_id`                      | `teams.id`      | The brief is deleted with it       |
+| `rooms.team_id`                                     | `teams.id`      | The rooms are deleted with it      |
+| `room_members.room_id`                              | `rooms.id`      | Memberships are deleted with it    |
+| `room_members.agent_id`                             | `agents.id`     | Memberships are deleted with it    |
+| `tasks.parent_task_id`                              | `tasks.id`      | Refused while rows point at it     |
+| `task_deps.task_id`, `task_deps.depends_on_task_id` | `tasks.id`      | Refused while rows point at it     |
+| `task_comments.task_id`                             | `tasks.id`      | Refused while rows point at it     |
+| `workspaces.task_id`                                | `tasks.id`      | Refused while rows point at it     |
+| `execution_processes.task_id`                       | `tasks.id`      | Refused while rows point at it     |
+| `execution_processes.workspace_id`                  | `workspaces.id` | Refused while rows point at it     |
+
+In the column tables below, `FK` marks these columns and `cascade` marks the ones deleted with their parent.
+
+## Teams and agents
+
+### teams
+
+One row per team.
+
+| Column                | Type                             | Notes                                             |
+| --------------------- | -------------------------------- | ------------------------------------------------- |
+| `id`                  | `TEXT`, PK                       |                                                   |
+| `name`                | `TEXT`, not null                 | Display name                                      |
+| `icon`                | `TEXT`, not null                 | An emoji                                          |
+| `color`               | `TEXT`, not null                 | Hex color                                         |
+| `color_collection_id` | `TEXT`                           | The Boo color collection the team's avatars use   |
+| `template_id`         | `TEXT`                           | The marketplace team it was deployed from, if any |
+| `leader_agent_id`     | `TEXT`                           | The team's Leader, when one is set                |
+| `is_archived`         | `INTEGER`, not null, default `0` | `1` once the team is archived                     |
+| `tenant_id`           | `TEXT`                           | Unused                                            |
+| `created_at`          | `INTEGER`, not null              |                                                   |
+| `updated_at`          | `INTEGER`, not null              |                                                   |
+
+Indexes: `idx_teams_name` (`name`).
+
+### agents
+
+The agent registry. Every agent source (OpenClaw, Clawboo Native, Claude Code, Codex and Hermes) records its agents here, so the fleet still renders when the OpenClaw Gateway is offline. For OpenClaw agents, `name`, `status`, `identity_json` and `source_agent_id` are overwritten on every sync; the other columns are Clawboo's own.
+
+| Column               | Type                                   | Notes                                                                                                                                             |
+| -------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | `TEXT`, PK                             |                                                                                                                                                   |
+| `name`               | `TEXT`, not null                       | Display name                                                                                                                                      |
+| `gateway_id`         | `TEXT`, not null                       | The agent's id in its source; for OpenClaw, the Gateway's agent id                                                                                |
+| `avatar_seed`        | `TEXT`                                 | Seed for the agent's Boo avatar                                                                                                                   |
+| `personality_config` | `TEXT`                                 | JSON `{ values, customText }`: personality sliders and custom text                                                                                |
+| `exec_config`        | `TEXT`                                 | JSON run settings, such as an OpenClaw agent's exec policy or a coding-runtime agent's model                                                      |
+| `team_id`            | `TEXT`, FK `teams.id`                  | Null when the agent belongs to no team                                                                                                            |
+| `status`             | `TEXT`, not null, default `'idle'`     | Synced status                                                                                                                                     |
+| `source_id`          | `TEXT`, not null, default `'openclaw'` | The agent source that owns the row: `openclaw`, `clawboo-native`, `claude-code`, `codex` or `hermes`                                              |
+| `source_agent_id`    | `TEXT`                                 | The upstream id; equal to `gateway_id`                                                                                                            |
+| `identity_json`      | `TEXT`                                 | JSON identity from the Gateway (name, emoji, avatar, theme)                                                                                       |
+| `participant_kind`   | `TEXT`, not null, default `'agent'`    | `agent` or `human`; a routine cannot target a `human`                                                                                             |
+| `runtime`            | `TEXT`, not null, default `'openclaw'` | The runtime the agent runs on: `openclaw`, `clawboo-native`, `claude-code`, `codex` or `hermes` (`clawboo-mock` when the mock runtime is enabled) |
+| `capabilities`       | `TEXT`                                 | JSON capability hints; unused                                                                                                                     |
+| `tenant_id`          | `TEXT`                                 | Unused                                                                                                                                            |
+| `archived_at`        | `INTEGER`                              | Set when the agent is archived (a soft delete); null while it is live                                                                             |
+| `created_at`         | `INTEGER`, not null                    |                                                                                                                                                   |
+| `updated_at`         | `INTEGER`, not null                    |                                                                                                                                                   |
+
+Indexes: `idx_agents_gateway_id` (`gateway_id`), `idx_agents_status` (`status`), `idx_agents_team_id` (`team_id`), `idx_agents_source` (`source_id`, `source_agent_id`).
+
+### sessions
+
+Clawboo Native's sessions, and the chain of sessions a task-runner run moves through when it rotates. OpenClaw sessions live in the Gateway and are not stored here.
+
+| Column              | Type                                   | Notes                                                                   |
+| ------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| `id`                | `TEXT`, PK                             |                                                                         |
+| `source_id`         | `TEXT`, not null, default `'openclaw'` | Who owns the session: `clawboo-native`, or the runtime of a rotated run |
+| `source_session_id` | `TEXT`, not null                       | The session's id in its source                                          |
+| `agent_id`          | `TEXT`                                 | Plain reference to `agents.id`                                          |
+| `team_id`           | `TEXT`                                 |                                                                         |
+| `status`            | `TEXT`, not null, default `'idle'`     | For example `active`, or `closed` for a rotated-away session            |
+| `parent_session_id` | `TEXT`                                 | The session this one replaced after a rotation                          |
+| `runtime`           | `TEXT`                                 |                                                                         |
+| `tenant_id`         | `TEXT`                                 | Unused                                                                  |
+| `created_at`        | `INTEGER`, not null                    |                                                                         |
+| `updated_at`        | `INTEGER`, not null                    |                                                                         |
+
+Indexes: `uniq_sessions_source` (unique: `source_id`, `source_session_id`), `idx_sessions_agent` (`agent_id`), `idx_sessions_parent` (`parent_session_id`).
+
+### boo_zero_team_briefs
+
+Boo Zero's brief for one team (Markdown), added to Boo Zero's context when it works on that team.
+
+| Column       | Type                               | Notes    |
+| ------------ | ---------------------------------- | -------- |
+| `team_id`    | `TEXT`, PK, FK `teams.id`, cascade |          |
+| `content`    | `TEXT`, not null                   | Markdown |
+| `updated_at` | `INTEGER`, not null                |          |
+
+No indexes beyond the primary key.
+
+### team_profiles
+
+Stored team templates. The server neither reads nor writes this table.
+
+| Column          | Type                             | Notes                                      |
+| --------------- | -------------------------------- | ------------------------------------------ |
+| `id`            | `TEXT`, PK                       |                                            |
+| `name`          | `TEXT`, not null                 |                                            |
+| `description`   | `TEXT`                           |                                            |
+| `agents_config` | `TEXT`, not null                 | JSON array of agent definitions            |
+| `skills_config` | `TEXT`, not null                 | JSON array of skill references             |
+| `graph_layout`  | `TEXT`                           | JSON node positions                        |
+| `is_builtin`    | `INTEGER`, not null, default `0` | `1` for a template that ships with Clawboo |
+| `created_at`    | `INTEGER`, not null              |                                            |
+
+No indexes beyond the primary key.
+
+## Chat
+
+The team chats you use in the dashboard (General and its rooms) and one-to-one agent chats. The agents' peer room is a different table, [`team_chat`](#team_chat).
+
+### chat_messages
+
+Chat transcripts, so history survives a page refresh. A team chat's rows use the session key `agent:<agentId>:team:<teamId>` in General and `agent:<agentId>:team:<teamId>:room:<roomId>` in a room. **Clear chat** keeps the rows and appends `#cleared:<ts>` to `session_key` and `entry_id`, so no reader matches them again.
+
+| Column         | Type                         | Notes                                                             |
+| -------------- | ---------------------------- | ----------------------------------------------------------------- |
+| `id`           | `INTEGER`, PK, autoincrement |                                                                   |
+| `session_key`  | `TEXT`, not null             | The conversation the entry belongs to                             |
+| `gateway_url`  | `TEXT`, not null             | The Gateway URL in use when it was saved; empty without a Gateway |
+| `entry_id`     | `TEXT`, not null             | Unique per entry, so a repeated save is ignored                   |
+| `timestamp_ms` | `INTEGER`, not null          | Epoch milliseconds                                                |
+| `data`         | `TEXT`, not null             | JSON transcript entry                                             |
+
+Indexes: `uniq_chat_messages_entry_id` (unique: `entry_id`), `idx_chat_messages_session_ts` (`session_key`, `timestamp_ms`), `idx_chat_messages_session_id` (`session_key`, `id`).
+
+### rooms
+
+A team's chat rooms: extra conversations inside its team chat, each with a subset of its members. General has no row; a room id of null means General. A room is archived, never deleted, and goes only with its team.
+
+| Column        | Type                                     | Notes                                                         |
+| ------------- | ---------------------------------------- | ------------------------------------------------------------- |
+| `id`          | `TEXT`, PK                               |                                                               |
+| `team_id`     | `TEXT`, not null, FK `teams.id`, cascade |                                                               |
+| `name`        | `TEXT`, not null                         | The API collapses whitespace and allows at most 80 characters |
+| `tenant_id`   | `TEXT`                                   | Unused                                                        |
+| `archived_at` | `INTEGER`                                | Set when the room is archived; null while active              |
+| `pinned_at`   | `INTEGER`                                | Set when the room is pinned to the top of the room list       |
+| `created_at`  | `INTEGER`, not null                      |                                                               |
+| `updated_at`  | `INTEGER`, not null                      |                                                               |
+
+Indexes: `idx_rooms_team` (`team_id`).
+
+### room_members
+
+Which agents belong to which room. A room's live roster is its members that are still active agents of the room's team.
+
+| Column       | Type                                      | Notes                                              |
+| ------------ | ----------------------------------------- | -------------------------------------------------- |
+| `room_id`    | `TEXT`, not null, FK `rooms.id`, cascade  |                                                    |
+| `agent_id`   | `TEXT`, not null, FK `agents.id`, cascade |                                                    |
+| `created_at` | `INTEGER`, not null                       | When the agent joined; the roster is ordered by it |
+
+Primary key: `room_id`, `agent_id`. Indexes: `idx_room_members_agent` (`agent_id`).
+
+## Board
+
+The board is where team work is coordinated. Statuses and legal moves are described in [The board](/concepts/the-board).
+
+### tasks
+
+The task cards.
+
+| Column                 | Type                                  | Notes                                                                                                                                                                                    |
+| ---------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                   | `TEXT`, PK                            |                                                                                                                                                                                          |
+| `title`                | `TEXT`, not null                      |                                                                                                                                                                                          |
+| `description`          | `TEXT`                                |                                                                                                                                                                                          |
+| `status`               | `TEXT`, not null, default `'backlog'` | `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done` or `cancelled`. Clawboo creates tasks in `todo` unless the creator picks a status, so the column default rarely applies |
+| `priority`             | `INTEGER`, not null, default `0`      | Higher runs first among ready tasks                                                                                                                                                      |
+| `team_id`              | `TEXT`                                | Plain reference to `teams.id`                                                                                                                                                            |
+| `assignee_agent_id`    | `TEXT`                                | Plain reference to `agents.id`                                                                                                                                                           |
+| `assignee_runtime`     | `TEXT`                                | The runtime that claimed it                                                                                                                                                              |
+| `parent_task_id`       | `TEXT`, FK `tasks.id`                 | The parent task, for a subtask                                                                                                                                                           |
+| `source_delegation_id` | `TEXT`                                | Set by the team engine: which delegation created the task and whom it reports back to                                                                                                    |
+| `worktree_ref`         | `TEXT`                                | The git worktree the work happened in                                                                                                                                                    |
+| `branch_ref`           | `TEXT`                                | Its git branch                                                                                                                                                                           |
+| `cost_usd`             | `REAL`, not null, default `0`         | The sum of the task's recorded run costs                                                                                                                                                 |
+| `parent_session_id`    | `TEXT`                                | Unused                                                                                                                                                                                   |
+| `dropped`              | `INTEGER`, not null, default `0`      | `1` once soft-deleted                                                                                                                                                                    |
+| `tenant_id`            | `TEXT`                                | Unused                                                                                                                                                                                   |
+| `verification`         | `TEXT`                                | JSON verification verdict; null until a check runs. While it holds a failing verdict, a move to `done` is refused (`verification_required`) unless a person overrides it                 |
+| `scheduled_by`         | `TEXT`, not null, default `'manual'`  | Who fires the task: `manual`, `clawboo` (the Routines engine) or `openclaw`                                                                                                              |
+| `created_at`           | `INTEGER`, not null                   |                                                                                                                                                                                          |
+| `updated_at`           | `INTEGER`, not null                   |                                                                                                                                                                                          |
+| `completed_at`         | `INTEGER`                             | Set when the task first reaches `done` or `cancelled`                                                                                                                                    |
+| `room_id`              | `TEXT`                                | Plain reference to `rooms.id`: the room the task was delegated in; null means General. A subtask takes its parent's room                                                                 |
+| `person_moved_at`      | `INTEGER`                             | When a person last moved the card on the board or in the task drawer. While no run has started since, an agent's own status write through the tasks MCP tools is refused                 |
+
+Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`).
+
+The `(parent_task_id, dropped, created_at)` index serves the Tasks MCP creation caps, which count live children per parent and new root tasks per 5 minutes.
+
+### task_deps
+
+Dependency edges: `task_id` waits for `depends_on_task_id` to be `done`.
+
+| Column               | Type                            | Notes  |
+| -------------------- | ------------------------------- | ------ |
+| `task_id`            | `TEXT`, not null, FK `tasks.id` |        |
+| `depends_on_task_id` | `TEXT`, not null, FK `tasks.id` |        |
+| `tenant_id`          | `TEXT`                          | Unused |
+
+Primary key: `task_id`, `depends_on_task_id`. Indexes: `idx_task_deps_task` (`task_id`), `idx_task_deps_depends` (`depends_on_task_id`).
+
+### task_comments
+
+Comments and system notes on a task, such as report-backs and verification results.
+
+| Column            | Type                            | Notes                       |
+| ----------------- | ------------------------------- | --------------------------- |
+| `id`              | `TEXT`, PK                      |                             |
+| `task_id`         | `TEXT`, not null, FK `tasks.id` |                             |
+| `author_agent_id` | `TEXT`                          |                             |
+| `author_type`     | `TEXT`, not null                | `agent`, `user` or `system` |
+| `body`            | `TEXT`, not null                |                             |
+| `tenant_id`       | `TEXT`                          | Unused                      |
+| `created_at`      | `INTEGER`, not null             |                             |
+
+Indexes: `idx_task_comments_task` (`task_id`).
+
+### workspaces
+
+The git worktree a task ran in.
+
+| Column          | Type                                 | Notes                                     |
+| --------------- | ------------------------------------ | ----------------------------------------- |
+| `id`            | `TEXT`, PK                           |                                           |
+| `task_id`       | `TEXT`, not null, FK `tasks.id`      |                                           |
+| `repo_path`     | `TEXT`, not null                     | The repository the worktree was made from |
+| `branch`        | `TEXT`                               |                                           |
+| `worktree_path` | `TEXT`                               | The worktree folder                       |
+| `status`        | `TEXT`, not null, default `'active'` | `active`, `archived` or `stale`           |
+| `tenant_id`     | `TEXT`                               | Unused                                    |
+| `created_at`    | `INTEGER`, not null                  |                                           |
+| `last_used_at`  | `INTEGER`                            |                                           |
+
+Indexes: `idx_workspaces_task` (`task_id`).
+
+### execution_processes
+
+One row per run of a task, on any runtime: its status, git checkpoints, and token and cost totals.
+
+| Column               | Type                                 | Notes                                                                                                           |
+| -------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `id`                 | `TEXT`, PK                           |                                                                                                                 |
+| `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                 |
+| `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                               |
+| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran) |
+| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                 |
+| `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                          |
+| `claimed_at`         | `INTEGER`                            |                                                                                                                 |
+| `started_at`         | `INTEGER`                            |                                                                                                                 |
+| `completed_at`       | `INTEGER`                            |                                                                                                                 |
+| `before_commit`      | `TEXT`                               | Git commit before the run                                                                                       |
+| `after_commit`       | `TEXT`                               | Git commit after the run                                                                                        |
+| `input_tokens`       | `INTEGER`                            |                                                                                                                 |
+| `output_tokens`      | `INTEGER`                            |                                                                                                                 |
+| `cache_read`         | `INTEGER`                            |                                                                                                                 |
+| `cache_write`        | `INTEGER`                            |                                                                                                                 |
+| `cost_usd`           | `REAL`                               |                                                                                                                 |
+| `cost_source`        | `TEXT`                               | How `cost_usd` was obtained: `reported`, `token-estimate` or `char-estimate`; null when no cost was recorded    |
+| `summary`            | `TEXT`                               | The run's result summary                                                                                        |
+| `run_reason`         | `TEXT`                               | Why the run started                                                                                             |
+| `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                |
+| `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                      |
+| `tenant_id`          | `TEXT`                               | Unused                                                                                                          |
+| `created_at`         | `INTEGER`, not null                  |                                                                                                                 |
+
+Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
+
+## Routines
+
+### scheduled_runs
+
+One row per routine. The row is the source of truth; the in-memory timer re-arms from `next_run_at` when the server starts. See [Routines](/using/routines).
+
+| Column          | Type                                  | Notes                                                                                           |
+| --------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `id`            | `TEXT`, PK                            |                                                                                                 |
+| `agent_id`      | `TEXT`, not null                      | Plain reference to `agents.id`; empty for a team routine                                        |
+| `team_id`       | `TEXT`                                | Plain reference to `teams.id`                                                                   |
+| `cron_spec`     | `TEXT`, not null                      | A cron expression, or `once@<ISO time>` for a one-time routine                                  |
+| `task_template` | `TEXT`, not null                      | JSON description of the work each fire creates                                                  |
+| `status`        | `TEXT`, not null, default `'idle'`    | `idle`, `queued`, `claimed`, `running`, `paused` or `error`                                     |
+| `last_run_at`   | `INTEGER`                             |                                                                                                 |
+| `next_run_at`   | `INTEGER`                             | Null when nothing will fire: a spent one-time routine, a paused one, or one stopped by an error |
+| `scheduled_by`  | `TEXT`, not null, default `'clawboo'` | The firing owner; the Routines engine writes `clawboo`                                          |
+| `last_error`    | `TEXT`                                | The last fire's error message                                                                   |
+| `tenant_id`     | `TEXT`                                | Unused                                                                                          |
+| `created_at`    | `INTEGER`, not null                   |                                                                                                 |
+| `updated_at`    | `INTEGER`, not null                   |                                                                                                 |
+
+Indexes: `idx_scheduled_runs_next` (`next_run_at`), `idx_scheduled_runs_status_next` (`status`, `next_run_at`), `idx_scheduled_runs_agent` (`agent_id`).
+
+## Memory
+
+Shared memory: facts, versioned procedures, and the feedback that scores them. See [Memory](/concepts/memory).
+
+### memory_facts
+
+Declarative facts. Keyword search uses the [`memory_facts_fts`](#full-text-search) table; meaning-based search uses `embedding`. The `created_by_*` and `source_*` columns record who saved a fact and never change who can see it.
+
+| Column                | Type                             | Notes                                                                   |
+| --------------------- | -------------------------------- | ----------------------------------------------------------------------- |
+| `id`                  | `TEXT`, PK                       |                                                                         |
+| `title`               | `TEXT`, not null                 |                                                                         |
+| `content`             | `TEXT`, not null                 |                                                                         |
+| `tags`                | `TEXT`, not null, default `'[]'` | JSON array of strings                                                   |
+| `embedding`           | `BLOB`                           | Float32 little-endian vector; null without an embedding provider        |
+| `embedding_model`     | `TEXT`                           | The provider id that produced the vector                                |
+| `scope_agent_id`      | `TEXT`                           | Set for a fact private to one agent                                     |
+| `scope_team_id`       | `TEXT`                           | Set for a fact shared within one team; null means it belongs to no team |
+| `tenant_id`           | `TEXT`                           | Unused                                                                  |
+| `created_by_agent_id` | `TEXT`                           |                                                                         |
+| `created_by_runtime`  | `TEXT`                           | `user` when saved from the dashboard                                    |
+| `source_task_id`      | `TEXT`                           | The task whose run saved it                                             |
+| `source_session_key`  | `TEXT`                           | The session that saved it                                               |
+| `created_at`          | `INTEGER`, not null              |                                                                         |
+| `updated_at`          | `INTEGER`, not null              |                                                                         |
+
+Indexes: `idx_memory_facts_team` (`scope_team_id`), `idx_memory_facts_agent` (`scope_agent_id`), `idx_memory_facts_created` (`created_at`), `idx_memory_facts_model_created` (`embedding_model`, `created_at`, `id`).
+
+### memory_procedures
+
+Versioned procedures. Saving under an existing name and scope adds the next version. The provenance columns match `memory_facts`.
+
+| Column                | Type                             | Notes  |
+| --------------------- | -------------------------------- | ------ |
+| `id`                  | `TEXT`, PK                       |        |
+| `name`                | `TEXT`, not null                 |        |
+| `version`             | `INTEGER`, not null, default `1` |        |
+| `content`             | `TEXT`, not null                 |        |
+| `scope_agent_id`      | `TEXT`                           |        |
+| `scope_team_id`       | `TEXT`                           |        |
+| `tenant_id`           | `TEXT`                           | Unused |
+| `created_by_agent_id` | `TEXT`                           |        |
+| `created_by_runtime`  | `TEXT`                           |        |
+| `source_task_id`      | `TEXT`                           |        |
+| `source_session_key`  | `TEXT`                           |        |
+| `created_at`          | `INTEGER`, not null              |        |
+
+Indexes: `idx_memory_procedures_name` (`name`), `idx_memory_procedures_team` (`scope_team_id`).
+
+### memory_outcomes
+
+Feedback on facts, append-only. It feeds the learning status that recall shows.
+
+| Column       | Type                | Notes                                                                                                                            |
+| ------------ | ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `id`         | `TEXT`, PK          |                                                                                                                                  |
+| `fact_id`    | `TEXT`, not null    | Plain reference to `memory_facts.id`                                                                                             |
+| `outcome`    | `TEXT`, not null    | `useful`, `dead_end` or `corrected` from agents and the dashboard, or `cited` when a run used the fact (written only by Clawboo) |
+| `note`       | `TEXT`              | The correction, for `corrected`                                                                                                  |
+| `agent_id`   | `TEXT`              |                                                                                                                                  |
+| `team_id`    | `TEXT`              |                                                                                                                                  |
+| `task_id`    | `TEXT`              |                                                                                                                                  |
+| `runtime`    | `TEXT`              |                                                                                                                                  |
+| `created_at` | `INTEGER`, not null |                                                                                                                                  |
+
+Indexes: `idx_memory_outcomes_fact` (`fact_id`), `idx_memory_outcomes_created` (`created_at`).
+
+## Tools and approvals
+
+The tool broker behind the [Tools MCP server](/reference/mcp-tools#tools-server): tool settings, the audit trail, approvals, and stored oversized results.
+
+### tool_registry
+
+Saved tool metadata and the on/off switch. A tool with no row counts as enabled.
+
+| Column                 | Type                               | Notes                                                            |
+| ---------------------- | ---------------------------------- | ---------------------------------------------------------------- |
+| `name`                 | `TEXT`, PK                         |                                                                  |
+| `description`          | `TEXT`, not null                   |                                                                  |
+| `input_schema`         | `TEXT`                             | JSON Schema                                                      |
+| `availability`         | `TEXT`                             | JSON requirement, such as an environment variable                |
+| `owner`                | `TEXT`, not null, default `'core'` | `core`, `plugin`, `channel` or `mcp`                             |
+| `provenance_signer_id` | `TEXT`                             | Signature fields; checking them is off by default                |
+| `provenance_signature` | `TEXT`                             |                                                                  |
+| `provenance_signed_at` | `INTEGER`                          |                                                                  |
+| `enabled`              | `INTEGER`, not null, default `1`   | `0` makes the broker refuse the tool (`denied: disabled:<name>`) |
+| `connector_id`         | `TEXT`                             | The connector the tool came from; null for a builtin             |
+| `created_at`           | `INTEGER`, not null                |                                                                  |
+| `updated_at`           | `INTEGER`, not null                |                                                                  |
+
+Indexes: `idx_tool_registry_owner` (`owner`), `idx_tool_registry_connector` (`connector_id`).
+
+### tool_call_audit
+
+Append-only audit of every brokered call, written before and after it runs. Arguments and results are scrubbed of secrets before they are stored; the model still gets the real result.
+
+| Column           | Type                             | Notes                                                              |
+| ---------------- | -------------------------------- | ------------------------------------------------------------------ |
+| `id`             | `TEXT`, PK                       |                                                                    |
+| `tool_name`      | `TEXT`, not null                 |                                                                    |
+| `agent_id`       | `TEXT`                           |                                                                    |
+| `phase`          | `TEXT`, not null                 | `before` or `after`                                                |
+| `decision`       | `TEXT`                           | On `before` rows: `allow`, `deny`, `require_approval` or `rewrite` |
+| `args_summary`   | `TEXT`                           | Scrubbed JSON                                                      |
+| `result_summary` | `TEXT`                           | Scrubbed and shortened result                                      |
+| `is_error`       | `INTEGER`, not null, default `0` |                                                                    |
+| `tenant_id`      | `TEXT`                           | Unused                                                             |
+| `grant_id`       | `TEXT`                           | The grant the call was decided under; null for builtins            |
+| `connector_id`   | `TEXT`                           | The call's connector; null for builtins                            |
+| `rule_id`        | `TEXT`                           | The remembered rule that decided it, if any                        |
+| `created_at`     | `INTEGER`, not null              |                                                                    |
+
+Indexes: `idx_tool_audit_tool` (`tool_name`), `idx_tool_audit_created` (`created_at`), `idx_tool_audit_grant` (`grant_id`, `created_at`).
+
+### tool_call_approvals
+
+Approval requests. `kind: 'tool'` is a call Clawboo itself is holding (the broker, a Clawboo Native agent's command, or a delegation). `kind: 'exec'` mirrors a shell command the OpenClaw Gateway is holding: its row id is the Gateway's request id, `tool_name` is `exec`, `tool_class` is `destructive`, and `args_summary` is `{ command, cwd }`.
+
+| Column           | Type                                  | Notes                                                                                                                                              |
+| ---------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`             | `TEXT`, PK                            |                                                                                                                                                    |
+| `tool_name`      | `TEXT`, not null                      |                                                                                                                                                    |
+| `agent_id`       | `TEXT`                                |                                                                                                                                                    |
+| `args_summary`   | `TEXT`                                | Scrubbed JSON                                                                                                                                      |
+| `reason`         | `TEXT`                                | Why it needs approval                                                                                                                              |
+| `status`         | `TEXT`, not null, default `'pending'` | `pending`, `allow_once`, `allow_always`, `deny` or `expired`                                                                                       |
+| `task_id`        | `TEXT`                                | Plain reference to `tasks.id`, so an expired approval can unblock its task                                                                         |
+| `tenant_id`      | `TEXT`                                | Unused                                                                                                                                             |
+| `grant_id`       | `TEXT`                                | The connector grant the call was checked against                                                                                                   |
+| `connector_id`   | `TEXT`                                |                                                                                                                                                    |
+| `never_remember` | `INTEGER`, not null, default `0`      | `1` when "Always" must not be offered                                                                                                              |
+| `rule_reason`    | `TEXT`                                | Why the grant asked: `policy-always`, `policy-writes`, `risk-destructive`, `risk-external`, `lethal-trifecta`, `tainted-run` or `never-remembered` |
+| `tool_class`     | `TEXT`                                | `read`, `write` or `destructive`                                                                                                                   |
+| `tool_summary`   | `TEXT`                                | The tool's own one-line description (for `exec`, the first 200 characters of the command)                                                          |
+| `kind`           | `TEXT`, not null, default `'tool'`    | `tool` or `exec`                                                                                                                                   |
+| `created_at`     | `INTEGER`, not null                   |                                                                                                                                                    |
+| `expires_at`     | `INTEGER`, not null                   | When the waiting call stops waiting; 5 minutes after creation for broker calls                                                                     |
+| `resolved_at`    | `INTEGER`                             |                                                                                                                                                    |
+
+Indexes: `idx_tool_approvals_status` (`status`), `idx_tool_approvals_created` (`created_at`), `idx_tool_approvals_grant` (`grant_id`, `status`).
+
+### tool_result_blobs
+
+Tool results too large to hand a model whole (over 16 KiB). The model gets a trimmed view and a `tr_` handle that `read_tool_result` reads back. One result keeps at most 8 MiB. Rows older than 7 days are deleted (`CLAWBOO_TOOL_RESULT_TTL_MS`).
+
+| Column         | Type                | Notes                                                              |
+| -------------- | ------------------- | ------------------------------------------------------------------ |
+| `handle`       | `TEXT`, PK          | An unguessable `tr_` id                                            |
+| `tool_name`    | `TEXT`, not null    |                                                                    |
+| `agent_id`     | `TEXT`              |                                                                    |
+| `tenant_id`    | `TEXT`              | Unused                                                             |
+| `body`         | `TEXT`, not null    |                                                                    |
+| `total_bytes`  | `INTEGER`, not null | What the tool produced                                             |
+| `stored_bytes` | `INTEGER`, not null | What was kept; less than `total_bytes` when the 8 MiB limit cut it |
+| `created_at`   | `INTEGER`, not null |                                                                    |
+
+Indexes: `idx_tool_result_blobs_created` (`created_at`).
+
+### approval_history
+
+A log of approval decisions posted to `POST /api/approvals`.
+
+| Column       | Type                             | Notes                                  |
+| ------------ | -------------------------------- | -------------------------------------- |
+| `id`         | `INTEGER`, PK, autoincrement     |                                        |
+| `agent_id`   | `TEXT`, not null, FK `agents.id` |                                        |
+| `action`     | `TEXT`, not null                 | `allow-once`, `allow-always` or `deny` |
+| `tool_name`  | `TEXT`, not null                 |                                        |
+| `details`    | `TEXT`                           | JSON                                   |
+| `created_at` | `INTEGER`, not null              |                                        |
+
+Indexes: `idx_approval_history_agent_id` (`agent_id`), `idx_approval_history_created_at` (`created_at`).
+
+## Connectors and grants
+
+Connectors Clawboo runs, and the grants that decide which agents may use them. See [Connectors](/using/connectors).
+
+### connectors
+
+One row per connector Clawboo has connected, written only after the connector answered. No secret is stored: `spec` holds only `secret:NAME` references.
+
+| Column          | Type                                    | Notes                                                                                                                    |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `id`            | `TEXT`, PK                              |                                                                                                                          |
+| `slug`          | `TEXT`, not null                        |                                                                                                                          |
+| `catalog_id`    | `TEXT`                                  | The connector directory entry; null for one you added yourself                                                           |
+| `display_name`  | `TEXT`, not null                        |                                                                                                                          |
+| `transport`     | `TEXT`, not null                        | `stdio` or `streamable-http`                                                                                             |
+| `spec`          | `TEXT`, not null, default `'{}'`        | JSON launch or connection spec                                                                                           |
+| `spec_hash`     | `TEXT`, not null                        | SHA-256 of the spec, for drift checks                                                                                    |
+| `tools_hash`    | `TEXT`                                  | SHA-256 of the tool list, for drift checks                                                                               |
+| `egress_allow`  | `TEXT`, not null, default `'[]'`        | JSON array of hosts it may reach                                                                                         |
+| `trifecta`      | `TEXT`, not null, has a default         | JSON `{ readsPrivateData, ingestsUntrustedContent, canEgress }`; all `false` by default                                  |
+| `health`        | `TEXT`, not null, default `'unknown'`   | `unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`. Set to `ok` on connect and `error` when its process exits |
+| `desired_state` | `TEXT`, not null, default `'connected'` | `connected` or `disconnected`: whether you left it on. A start restores only `connected` ones                            |
+| `health_detail` | `TEXT`                                  |                                                                                                                          |
+| `failures`      | `INTEGER`, not null, default `0`        | Consecutive failures                                                                                                     |
+| `tenant_id`     | `TEXT`                                  | Unused                                                                                                                   |
+| `created_at`    | `INTEGER`, not null                     |                                                                                                                          |
+| `updated_at`    | `INTEGER`, not null                     |                                                                                                                          |
+
+Indexes: `uniq_connectors_slug` (unique: `slug`), `idx_connectors_health` (`health`), `idx_connectors_catalog` (`catalog_id`).
+
+### capability_grants
+
+Grants: one row lets an agent, a team or every agent use a connector, tool or skill, and is also the edge the graph draws. There is no last-used column; that comes from `tool_call_audit`.
+
+| Column                  | Type                                   | Notes                                                                                              |
+| ----------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `id`                    | `TEXT`, PK                             |                                                                                                    |
+| `grant_key`             | `TEXT`, not null                       | The canonical (subject, capability) pair; unique, so one grant per pair                            |
+| `subject_kind`          | `TEXT`, not null                       | `agent`, `team` or `global`                                                                        |
+| `subject_id`            | `TEXT`                                 | Null for `global`                                                                                  |
+| `capability_kind`       | `TEXT`, not null                       | `connector`, `tool` or `skill`                                                                     |
+| `connector_id`          | `TEXT`                                 | Set for a connector grant (then `capability_id` is null)                                           |
+| `capability_id`         | `TEXT`                                 |                                                                                                    |
+| `tool_allow`            | `TEXT`, not null, default `'["*"]'`    | JSON glob list                                                                                     |
+| `tool_deny`             | `TEXT`, not null, default `'[]'`       | JSON glob list                                                                                     |
+| `mode`                  | `TEXT`, not null, default `'read'`     | `read`, `write` or `admin`                                                                         |
+| `approval_policy`       | `TEXT`, not null, default `'risk'`     | `never`, `risk`, `writes` or `always`                                                              |
+| `state`                 | `TEXT`, not null, default `'active'`   | `proposed`, `active`, `suspended`, `revoked` or `expired`                                          |
+| `origin`                | `TEXT`, not null, default `'operator'` | `owner` (the runtime already attaches it; not drawn as an edge) or `operator` (a person shared it) |
+| `expires_at`            | `INTEGER`                              |                                                                                                    |
+| `spec_hash_pin`         | `TEXT`                                 | The connector spec hash approved; a mismatch denies calls (`spec-drift`)                           |
+| `tools_hash_pin`        | `TEXT`                                 | The tool list hash approved                                                                        |
+| `call_ceiling_per_hour` | `INTEGER`                              | Hourly call limit; null for none                                                                   |
+| `granted_by`            | `TEXT`                                 |                                                                                                    |
+| `granted_at`            | `INTEGER`, not null                    |                                                                                                    |
+| `revoked_at`            | `INTEGER`                              |                                                                                                    |
+| `revoked_reason`        | `TEXT`                                 |                                                                                                    |
+| `tenant_id`             | `TEXT`                                 | Unused                                                                                             |
+| `created_at`            | `INTEGER`, not null                    |                                                                                                    |
+| `updated_at`            | `INTEGER`, not null                    |                                                                                                    |
+
+Indexes: `uniq_capability_grants_key` (unique: `grant_key`), `idx_grants_subject` (`subject_kind`, `subject_id`), `idx_grants_connector` (`connector_id`), `idx_grants_capability` (`capability_id`), `idx_grants_state` (`state`), `idx_grants_expires` (`expires_at`).
+
+### approval_rules
+
+Remembered **Always** decisions, each bound to a grant. Revoking the grant deletes its rules in the same step (there is no foreign key). A rule made from **Always** expires after 30 days.
+
+| Column                     | Type                | Notes                                                                    |
+| -------------------------- | ------------------- | ------------------------------------------------------------------------ |
+| `id`                       | `TEXT`, PK          |                                                                          |
+| `rule_key`                 | `TEXT`, not null    | The canonical (grant, tool, argument shape) triple; unique               |
+| `grant_id`                 | `TEXT`, not null    | Plain reference to `capability_grants.id`                                |
+| `tool_name`                | `TEXT`, not null    |                                                                          |
+| `args_shape`               | `TEXT`              | Null covers any arguments; a value limits the rule to one argument shape |
+| `decision`                 | `TEXT`, not null    | `allow` or `deny`                                                        |
+| `created_from_approval_id` | `TEXT`              | The approval it came from                                                |
+| `expires_at`               | `INTEGER`, not null | Required; a rule never lasts forever                                     |
+| `tenant_id`                | `TEXT`              | Unused                                                                   |
+| `created_at`               | `INTEGER`, not null |                                                                          |
+
+Indexes: `uniq_approval_rules_key` (unique: `rule_key`), `idx_approval_rules_grant` (`grant_id`), `idx_approval_rules_expires` (`expires_at`).
+
+## Capabilities and skills
+
+### capabilities
+
+Every runtime's skills, tools and connectors in one list, which the **Capabilities** panel and the graph read. Each source re-reads its own rows without touching another source's.
+
+| Column          | Type                                | Notes                                                                                                                                                             |
+| --------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | `TEXT`, PK                          | `<source_id>:<key>`, so the id is the upsert key                                                                                                                  |
+| `source_id`     | `TEXT`, not null                    | The source that read it: `native`, `claude-code`, `codex`, `hermes`, `openclaw` or `connector`                                                                    |
+| `source_key`    | `TEXT`, not null                    | The item's own name in that source                                                                                                                                |
+| `kind`          | `TEXT`, not null                    | `skill`, `tool` or `connector`                                                                                                                                    |
+| `runtime`       | `TEXT`, not null                    | The runtime it belongs to                                                                                                                                         |
+| `scope`         | `TEXT`, not null                    | `team`, `agent` or `global`                                                                                                                                       |
+| `agent_id`      | `TEXT`                              | Null for `team` and `global` scope                                                                                                                                |
+| `origin`        | `TEXT`, not null                    | Where it was read from: `brokered-mcp`, `curated-skill`, `filesystem-skill-md`, `mcp-connector`, `runtime-builtin`, `openclaw-extension` or `external-vendor-cli` |
+| `manageability` | `TEXT`, not null                    | `managed`, `external-write`, `runtime-of-record` or `observe-only`                                                                                                |
+| `name`          | `TEXT`, not null                    |                                                                                                                                                                   |
+| `description`   | `TEXT`, not null, default `''`      |                                                                                                                                                                   |
+| `availability`  | `TEXT`                              | JSON requirement, or null                                                                                                                                         |
+| `available`     | `INTEGER`, not null, default `1`    | `1` when its requirement is met                                                                                                                                   |
+| `diagnostics`   | `TEXT`, not null, default `'[]'`    | JSON array of strings                                                                                                                                             |
+| `provenance`    | `TEXT`                              | JSON, or null                                                                                                                                                     |
+| `status`        | `TEXT`, not null, default `'ready'` | `ready`, `disabled`, `manageable-but-pending-auth` or `unavailable`                                                                                               |
+| `tenant_id`     | `TEXT`                              | Unused                                                                                                                                                            |
+| `synced_at`     | `INTEGER`, not null                 | When its source last read it                                                                                                                                      |
+| `created_at`    | `INTEGER`, not null                 |                                                                                                                                                                   |
+| `updated_at`    | `INTEGER`, not null                 |                                                                                                                                                                   |
+
+Indexes: `idx_capabilities_source` (`source_id`), `idx_capabilities_runtime` (`runtime`), `idx_capabilities_agent` (`agent_id`), `idx_capabilities_kind` (`kind`).
+
+### skills
+
+Skills added to agents from the Marketplace or the Capabilities panel.
+
+| Column         | Type             | Notes                                                      |
+| -------------- | ---------------- | ---------------------------------------------------------- |
+| `id`           | `TEXT`, PK       |                                                            |
+| `name`         | `TEXT`, not null |                                                            |
+| `source`       | `TEXT`, not null | `curated` or `capability`                                  |
+| `category`     | `TEXT`           |                                                            |
+| `trust_score`  | `REAL`           | Not written                                                |
+| `installed_at` | `INTEGER`        | Epoch milliseconds                                         |
+| `metadata`     | `TEXT`           | JSON, including `agentIds`, the agents that have the skill |
+
+Indexes: `idx_skills_source` (`source`), `idx_skills_category` (`category`).
+
+## Peer room and mailbox
+
+The agents' peer room behind the TeamChat MCP server, and each agent's mailbox. Neither is the dashboard's team chat.
+
+### team_chat
+
+Posts in the agents' peer room. A post never changes the board. The table has no `tenant_id` column.
+
+| Column            | Type                               | Notes                                                             |
+| ----------------- | ---------------------------------- | ----------------------------------------------------------------- |
+| `id`              | `TEXT`, PK                         |                                                                   |
+| `room_id`         | `TEXT`, not null                   | `team:<teamId>`; never a `rooms.id`                               |
+| `team_id`         | `TEXT`, not null                   |                                                                   |
+| `author_agent_id` | `TEXT`, not null                   | Taken from the poster's signed binding, never from tool arguments |
+| `body`            | `TEXT`, not null                   |                                                                   |
+| `kind`            | `TEXT`, not null, default `'peer'` | `peer` (a teammate), `system` (board narration) or `user`         |
+| `created_at`      | `INTEGER`, not null                |                                                                   |
+| `seq`             | `INTEGER`, not null                | Position in the room, counting up from 1                          |
+
+Indexes: `uniq_team_chat_room_seq` (unique: `room_id`, `seq`), `idx_team_chat_team` (`team_id`).
+
+### agent_inbox
+
+Each agent's mailbox of coordination notices. A notice is delivered once, by whichever channel reaches the agent first (the digest at the start of a run, or the MCP tool-result piggyback). Undelivered notices survive restarts.
+
+| Column          | Type                | Notes                                                                                            |
+| --------------- | ------------------- | ------------------------------------------------------------------------------------------------ |
+| `id`            | `TEXT`, PK          |                                                                                                  |
+| `team_id`       | `TEXT`              |                                                                                                  |
+| `agent_id`      | `TEXT`, not null    | The recipient                                                                                    |
+| `kind`          | `TEXT`, not null    | `task_update` (a delegated task finished), `alert` (a coordination failure) or `signal` (an FYI) |
+| `body`          | `TEXT`, not null    |                                                                                                  |
+| `task_id`       | `TEXT`              |                                                                                                  |
+| `created_at`    | `INTEGER`, not null |                                                                                                  |
+| `delivered_at`  | `INTEGER`           | Null while pending                                                                               |
+| `delivered_via` | `TEXT`              | `digest`, `mcp` or `signal`                                                                      |
+| `tenant_id`     | `TEXT`              | Unused                                                                                           |
+
+Indexes: `idx_agent_inbox_pending` (`agent_id`, `delivered_at`).
+
+## Spend, budgets and audit
+
+### cost_records
+
+Per-agent token and spend records, which the **Tokens Used** panel reads. Rows come from `POST /api/cost-records` and from the server watching OpenClaw sessions.
+
+| Column          | Type                             | Notes                                                                      |
+| --------------- | -------------------------------- | -------------------------------------------------------------------------- |
+| `id`            | `INTEGER`, PK, autoincrement     |                                                                            |
+| `agent_id`      | `TEXT`, not null, FK `agents.id` |                                                                            |
+| `model`         | `TEXT`, not null                 |                                                                            |
+| `input_tokens`  | `INTEGER`, not null              |                                                                            |
+| `output_tokens` | `INTEGER`, not null              |                                                                            |
+| `cost_usd`      | `REAL`, not null                 | US dollars                                                                 |
+| `run_id`        | `TEXT`                           | The run it belongs to                                                      |
+| `session_key`   | `TEXT`                           | The conversation it belongs to; null on rows from `POST /api/cost-records` |
+| `created_at`    | `INTEGER`, not null              |                                                                            |
+
+Indexes: `idx_cost_records_agent_id` (`agent_id`), `idx_cost_records_session` (`session_key`, `created_at`), `idx_cost_records_run_id` (`run_id`), `idx_cost_records_created_at` (`created_at`).
+
+### budgets
+
+Spend budgets. Spend is tracked in whole and fractional cents so many tiny charges still add up. The default `mode` is `warn` (track and warn); `cap` (pause at 100%) is opt-in. See [Budgets and spend](/using/budgets-and-spend).
+
+| Column              | Type                                 | Notes                                                                                            |
+| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `id`                | `TEXT`, PK                           |                                                                                                  |
+| `scope`             | `TEXT`, not null                     | `agent`, `mission` (a root task and its subtasks), `team`, or `tenant` (accepted, never charged) |
+| `scope_id`          | `TEXT`, not null                     |                                                                                                  |
+| `limit_usd_cents`   | `INTEGER`, not null                  | The limit, in cents                                                                              |
+| `spent_usd_cents`   | `INTEGER`, not null, default `0`     | Spend in whole cents                                                                             |
+| `spent_micro_cents` | `INTEGER`, not null, default `0`     | Spend in ten-thousandths of a cent                                                               |
+| `status`            | `TEXT`, not null, default `'active'` | `active`, `soft_capped` or `paused`                                                              |
+| `mode`              | `TEXT`, not null, default `'warn'`   | `warn` (warn at 80% and 100%, never pause) or `cap` (pause at 100%)                              |
+| `tenant_id`         | `TEXT`                               | Unused                                                                                           |
+| `created_at`        | `INTEGER`, not null                  |                                                                                                  |
+| `updated_at`        | `INTEGER`, not null                  |                                                                                                  |
+
+Indexes: `uniq_budgets_scope` (unique: `scope`, `scope_id`), `idx_budgets_status` (`status`).
+
+### governance_audit
+
+Append-only audit of governance decisions, with secrets scrubbed.
+
+| Column       | Type                | Notes                                                                     |
+| ------------ | ------------------- | ------------------------------------------------------------------------- |
+| `id`         | `TEXT`, PK          |                                                                           |
+| `event_type` | `TEXT`, not null    | `install`, `approval`, `tool_call`, `budget`, `cap_hit` or `verification` |
+| `agent_id`   | `TEXT`              |                                                                           |
+| `task_id`    | `TEXT`              |                                                                           |
+| `team_id`    | `TEXT`              |                                                                           |
+| `tenant_id`  | `TEXT`              | Unused                                                                    |
+| `summary`    | `TEXT`, not null    | Scrubbed JSON                                                             |
+| `created_at` | `INTEGER`, not null |                                                                           |
+
+Indexes: `idx_gov_audit_agent` (`agent_id`, `created_at`), `idx_gov_audit_created` (`created_at`).
+
+## Event log
+
+### orchestration_events
+
+The append-only event log that observability reads. Kinds and their data are in [Events and errors](/reference/events-and-errors).
+
+| Column           | Type                         | Notes                                                            |
+| ---------------- | ---------------------------- | ---------------------------------------------------------------- |
+| `seq`            | `INTEGER`, PK, autoincrement | Increases with every row and is never reused, across processes   |
+| `id`             | `TEXT`, not null             | Event UUID                                                       |
+| `ts`             | `INTEGER`, not null          | When the event happened                                          |
+| `kind`           | `TEXT`, not null             | One of the 25 event kinds                                        |
+| `team_id`        | `TEXT`                       |                                                                  |
+| `task_id`        | `TEXT`                       |                                                                  |
+| `agent_id`       | `TEXT`                       |                                                                  |
+| `runtime`        | `TEXT`                       |                                                                  |
+| `trace_id`       | `TEXT`                       | Set on task-runner runs; shared by every run under one root task |
+| `span_id`        | `TEXT`                       |                                                                  |
+| `parent_span_id` | `TEXT`                       |                                                                  |
+| `correlation_id` | `TEXT`                       |                                                                  |
+| `data`           | `TEXT`, not null             | Scrubbed JSON payload                                            |
+| `tenant_id`      | `TEXT`                       | Unused                                                           |
+| `created_at`     | `INTEGER`, not null          |                                                                  |
+
+Indexes: `uniq_orch_events_id` (unique: `id`), `idx_orch_events_team_seq` (`team_id`, `seq`), `idx_orch_events_task_seq` (`task_id`, `seq`), `idx_orch_events_trace_seq` (`trace_id`, `seq`), `idx_orch_events_kind_ts` (`kind`, `ts`), `idx_orch_events_created` (`created_at`).
+
+## Settings and layout
+
+### settings
+
+Key and value rows for most dashboard settings and for Clawboo's own state, including the per-install secret that signs MCP attach URLs (`mcp-attach-scope-secret`). What the rows hold is listed in [Configuration](/reference/configuration).
+
+| Column       | Type                | Notes |
+| ------------ | ------------------- | ----- |
+| `key`        | `TEXT`, PK          |       |
+| `value`      | `TEXT`, not null    |       |
+| `updated_at` | `INTEGER`, not null |       |
+
+No indexes beyond the primary key.
+
+### graph_layouts
+
+Saved node positions for the graphs. `name` is `atlas-radial` or `atlas-top-down` for the Org chart, `team-<teamId>` for a team graph, `team-<teamId>-room-<roomId>` for a room graph, and `default` with no team selected.
+
+| Column        | Type                                  | Notes                                           |
+| ------------- | ------------------------------------- | ----------------------------------------------- |
+| `id`          | `INTEGER`, PK, autoincrement          |                                                 |
+| `name`        | `TEXT`, not null, default `'default'` | The layout name                                 |
+| `gateway_url` | `TEXT`, not null                      | The Gateway URL in use; empty without a Gateway |
+| `layout_data` | `TEXT`, not null                      | JSON node and edge positions                    |
+| `created_at`  | `INTEGER`, not null                   |                                                 |
+| `updated_at`  | `INTEGER`, not null                   |                                                 |
+
+Indexes: `uniq_graph_layouts_name_url` (unique: `name`, `gateway_url`).
+
+## Full-text search
+
+Keyword search over facts uses `memory_facts_fts`, an FTS5 virtual table with the columns `title`, `content` and `fact_id` (`fact_id` is stored but not indexed). The same schema definition creates it, and it is not counted among the 35 tables. Three triggers keep it in step with `memory_facts`:
+
+| Trigger           | Runs         | Does                                        |
+| ----------------- | ------------ | ------------------------------------------- |
+| `memory_facts_ai` | After insert | Adds the new fact to the search table       |
+| `memory_facts_ad` | After delete | Removes the fact from the search table      |
+| `memory_facts_au` | After update | Replaces the fact's row in the search table |
+
+## How the schema is created
+
+There is no migration ladder: no numbered migration files, no `user_version` bookkeeping, and no `db:migrate` script. The `CREATE TABLE IF NOT EXISTS` statements in `packages/db/src/schemaBootstrap.ts` are the only place tables, indexes and triggers are created. `packages/db/src/schema.ts` is the Drizzle type layer for typed queries; it never changes the database. Contributor rules for schema changes are in [Monorepo and build](/internals/monorepo-and-build).
 
 ### Upgrading an existing database
 
-`CREATE TABLE IF NOT EXISTS` skips the **whole** statement when the table is already there, so a column added to an existing table would be a silent no-op on every database created before the change: the upgrade appears to succeed, then fails at runtime on the first query that touches the column.
+When the server starts, it brings the file up to the current schema in one transaction:
 
-`ensureSchema` closes that with one derived, additive step, in this order:
+1. It compares each existing table's columns with the schema definition and adds any column the file is missing (`ALTER TABLE ... ADD COLUMN`, using the column's definition from the same source).
+2. It then runs the definition, which creates any missing table, index or trigger.
 
-1. **`reconcileSchema`** (`packages/db/src/schemaReconcile.ts`) reads the declared column set back out of the same DDL, diffs it against `PRAGMA table_info` for each table that already exists, and issues `ALTER TABLE … ADD COLUMN` for anything missing.
-2. **the DDL batch** then creates everything absent: new tables, indexes, triggers.
+Columns go first because a new column usually comes with a new index on it. If any step fails, the transaction rolls back and the file stays exactly as it was. The one start that adds columns logs `SQLite: added missing columns to an existing database`.
 
-The order is load-bearing. A new column normally ships with an index over it, and `CREATE INDEX IF NOT EXISTS … ON t (new_col)` fails with "no such column" if the batch runs first, which takes the whole batch, and the boot, with it.
+Nothing else changes in an existing database:
 
-Parsing the DDL rather than maintaining a list of `ALTER`s keeps one source of truth; `schemaReconcile.test.ts` makes that safe by asserting the parsed column set is identical to what SQLite actually creates from the same DDL, so a construct the parser cannot read fails the build instead of shipping.
+- A column whose type, `NOT NULL` or `DEFAULT` changed keeps its old definition. Only new databases get the new one, and nothing reports the difference.
+- A column the definition no longer declares stays in place. That is also what an older Clawboo sees when it opens a newer database, so leaving the column keeps the newer version's data.
+- A changed index or trigger is skipped, because `IF NOT EXISTS` matches on the name. New table constraints and changes to the full-text table are not applied either.
 
-<Warning>
-`ADD COLUMN` is the only schema change SQLite makes without rewriting the table, so this covers **additive** evolution only. A new column on an existing table must be addable: it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one. A test catches one that is not before it ships, and if one ever escapes, the bootstrap throws with a message naming the column and the remedy, which the boot probe reports as a fatal `databaseSchema` check. Changing an existing column's type or constraints, dropping one, adding a table constraint, redefining an index or trigger (their `IF NOT EXISTS` matches on **name**), and any change to the FTS5 virtual table are all still not in-place upgrades. Columns the DDL no longer declares are left alone, so opening a newer database with an older Clawboo does not destroy them.
-</Warning>
+Clawboo never drops, rebuilds or resets a table to apply a change. A change of those kinds reaches only databases created after it.
 
-<Danger>
-Five drizzle migration stubs (`0000`–`0004`) existed before the migration ladder was removed; they now survive only in git history, never on disk. There is no `packages/db/drizzle/` directory in the checked-out tree, and `schemaSource.test.ts` asserts it stays absent. Nothing applies them, so never resurrect one from history against a bootstrapped DB. The only `drizzle-kit` script wired up is `db:studio` (a read-only browser), and `drizzle.config.ts` exists for that tool only.
-</Danger>
+A column added to an existing table must be one SQLite can add in place: no `PRIMARY KEY`, `UNIQUE` or `STORED` generated column; a literal `DEFAULT`, not an expression such as `CURRENT_TIMESTAMP`; a `DEFAULT` on every `NOT NULL` column; and no non-null `DEFAULT` on a `REFERENCES` column. If such a column ever reached a user, the start would stop before changing the file. The server keeps running without a usable database, and **System Health** shows the `databaseSchema` check as failed with `SQLite schema cannot be upgraded in place` and an error naming the column. Tests catch such a column before release.
 
-## Pragmas and contention
+The other `databaseSchema` failures are `core tables missing` and `schema is missing <n> column(s); queries touching them will fail`.
 
-`openDb` opens the file with the multi-writer-safe pragma recipe (many agents may write one DB); `createDb` is `openDb` followed by `ensureSchema`:
+## Connection settings
+
+Every connection opens with:
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -500,26 +875,19 @@ PRAGMA busy_timeout = 250;
 PRAGMA wal_autocheckpoint = 50;
 ```
 
-This pairs with the application-level jittered retry + `BEGIN IMMEDIATE` in the board repository (`packages/db/src/board/contention.ts`), the write-contention recipe behind the board's atomic claim. The retry is bounded by a 1.5-second wall-clock budget (`CLAWBOO_DB_WRITE_BUDGET_MS`), which is why `busy_timeout` is deliberately short.
+Several processes can open the file at once, for example the server and a stdio MCP bin pointed at it. Board writes take the write lock up front (`BEGIN IMMEDIATE`) and retry with jitter for up to 1.5 seconds (`CLAWBOO_DB_WRITE_BUDGET_MS`), which is why `busy_timeout` is short. The server holds one connection for as long as it runs, and on shutdown it checkpoints the write-ahead log into the main file (`wal_checkpoint(TRUNCATE)`) before closing.
 
 ## Where the file lives
 
-The package-level default DB path is `~/.openclaw/clawboo/clawboo.db`, returned by `defaultDbPath()` and used by the out-of-process MCP stdio bins so they open the same file the server serves. A `CLAWBOO_DB_PATH` override takes precedence.
+- The dashboard server uses `clawboo.db` in its data folder: `~/.clawboo/clawboo.db`, or the folder `CLAWBOO_HOME` names.
+- The stdio MCP bins use `CLAWBOO_DB_PATH`, or `~/.openclaw/clawboo/clawboo.db` when it is unset; `CLAWBOO_DB_PATH` affects only the bins. To make a bin share the dashboard's database, set `CLAWBOO_DB_PATH` to the dashboard's file. The stdio snippets from `GET /api/mcp/config` do this.
+- On open, Clawboo sets the folder to `0700` and the database and its `-wal` and `-shm` files to `0600`, because the file holds the secret that signs MCP attach URLs. Where that fails (for example on Windows, or for a file another user owns), Clawboo logs a warning and opens the file anyway.
+- At start, **System Health** runs `PRAGMA integrity_check` (`databaseIntegrity`) and the schema check above (`databaseSchema`).
 
-<Info>
-The Express server does **not** use the package default. It resolves the path through `getDbPath()` → `resolveClawbooDir()`, which is `~/.clawboo/clawboo.db` by default (`CLAWBOO_HOME`-overridable). `CLAWBOO_DB_PATH` overrides the package-level `defaultDbPath()` only. See [Configuration](/reference/configuration) and [Environment variables](/reference/environment-variables).
-</Info>
+## Related
 
-Boot-time health helpers also live in `db.ts`: `integrityCheck(db)` runs `PRAGMA integrity_check` (`'ok'` when healthy), and `listTableNames(db)` lists the user tables; both feed the system boot probe.
-
-## See also
-
-- [Configuration](/reference/configuration): `settings.json`, file/dir locations
-- [Boo Zero](/using/boo-zero) and [Using teams](/using/teams): the documented `settings`-table keys
-- [Environment variables](/reference/environment-variables): `CLAWBOO_DB_PATH`, `CLAWBOO_HOME`
-- [Data and state](/operating/data-and-state): SQLite file, backup, reset
-- [The board](/concepts/the-board): `tasks` / `task_deps` / `execution_processes` state machine and atomic claim
-- [Memory](/concepts/memory): the `memory_facts` / `memory_procedures` tiers
-- [Governance](/concepts/governance): `budgets` / `governance_audit`
-- [Observability](/concepts/observability): the `orchestration_events` log
-- [@clawboo/db package reference](/reference/packages/db): the data-access exports over these tables
+- [Data and state](/operating/data-and-state): where Clawboo keeps its files, and how to back up and reset.
+- [Configuration](/reference/configuration): what the `settings` rows hold.
+- [Events and errors](/reference/events-and-errors): the event kinds stored in `orchestration_events`.
+- [MCP tools](/reference/mcp-tools): the tools that read and write the board and memory tables.
+- [Monorepo and build](/internals/monorepo-and-build): the rules for changing the schema.
