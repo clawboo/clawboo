@@ -107,6 +107,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     createdAt: number
     updatedAt: number
     completedAt: number | null
+    personMovedAt: number | null // when a person last moved the card (see PATCH below)
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {
@@ -389,6 +390,7 @@ This is the route a **person** uses (the board and the task drawer), and a perso
 - A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`.
 - A move to `backlog`, `todo`, `blocked`, `done` or `cancelled` stops the run working on the task, whether team chat, the task runner or an OpenClaw Routine fire started it, and closes its ledger row as cancelled. A move to `in_progress` or `in_review` stops nothing. A task moved back to `todo` while it was running is started again for its bound agent.
 - Whoever delegated the task (the `:reflectTo:` agent in its `sourceDelegationId`) is told a person marked it done or cancelled it: through a `[Task Update]` when the team's engine is running, else as a mailbox notice read at its next turn. A task a person assigned reports to nobody.
+- The move is stamped on the task as `personMovedAt`. Until a run starts after it, the agent's own status writes through the [tasks MCP tools](/reference/mcp-tools) (`update_task_status`, `block_task`, `unblock_task`) are refused with a tool error that names the column the person chose and tells the agent not to retry, so the run the person overruled cannot put the card back. A run that starts after the move writes as usual.
 
 <Note>
 
@@ -481,6 +483,8 @@ A `user` comment is a person's reply. After the comment is saved, the route deli
    - `blocked`, `todo`, or `in_progress` with no assignee and no run going: the task is started again, as the retry route above does. A task that is not `todo` moves there first (with a `status_changed` event whose reason is `reply`). If every task it depends on is `done`, the route adds the `system` comment `Started again for a person’s reply.` and dispatches the task to its agent; otherwise the reply waits in the mailbox. A `todo` task that a reply started less than 15 seconds ago is not dispatched again.
    - `in_review` and `backlog`: the reply waits in the mailbox.
 
+A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits in the mailbox for its next run.
+
 - **Path params**: `taskId`.
 - **Request body**:
 
@@ -551,17 +555,15 @@ For a `finished` reply, the dashboard offers **Send as a follow-up task**, which
 ### Example
 
 ```bash
+# An agent's note
 curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Blocked on the upstream schema.","authorType":"agent","authorAgentId":"native-leader-abc"}'
-```
 
-A person's reply, which answers with `delivery`:
-
-```bash
+# A person's reply, which answers with `delivery`
 curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
-  -d '{"body":"Use the March numbers.","authorType":"user"}'
+  -d '{"body":"Use the v2 schema; it landed this morning.","authorType":"user"}'
 ```
 
 ---

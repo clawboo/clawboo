@@ -24,6 +24,7 @@ import {
   type CreateTaskInput,
   type GuardedCreateResult,
   type TaskStatus,
+  type UpdateStatusResult,
 } from '@clawboo/db'
 import { z } from 'zod'
 
@@ -41,6 +42,35 @@ import {
 // the shared state machine (@clawboo/board-core, re-exported by @clawboo/db) rather
 // than hand-listed, so a status added server-side reaches MCP clients automatically.
 const STATUS = taskStatusSchema
+
+/** A status as the board labels it, for messages to the model. */
+const STATUS_WORD: Record<string, string> = {
+  backlog: 'Backlog',
+  todo: 'To do',
+  in_progress: 'In progress',
+  in_review: 'In review',
+  blocked: 'Blocked',
+  done: 'Done',
+  cancelled: 'Cancelled',
+}
+
+/**
+ * The tool result for an agent's own status write. A person who moved the card
+ * after this task's latest run started has the final word on it, so the refusal
+ * tells the model to leave the status alone instead of retrying (the same
+ * never-retry rule as a lost claim).
+ */
+function statusWriteResult(r: UpdateStatusResult, verb: string): McpToolResult {
+  if (r.ok) return jsonResult(r.task)
+  if (r.reason === 'person_moved') {
+    const where = r.task ? (STATUS_WORD[r.task.status] ?? r.task.status) : 'another column'
+    return textResult(
+      `A person moved this task to ${where} after your run on it started, so its status is theirs to set. Leave it as it is and do not retry this call.`,
+      true,
+    )
+  }
+  return textResult(`${verb} failed: ${r.reason}`, true)
+}
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
@@ -318,8 +348,10 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       handler: (args) => {
         const denied = outOfTeam(str(args['taskId']))
         if (denied) return denied
-        const r = updateStatus(db, str(args['taskId']), str(args['status']) as TaskStatus)
-        return r.ok ? jsonResult(r.task) : textResult(`status change failed: ${r.reason}`, true)
+        const r = updateStatus(db, str(args['taskId']), str(args['status']) as TaskStatus, {
+          unlessPersonMoved: true,
+        })
+        return statusWriteResult(r, 'status change')
       },
     },
     {
@@ -329,8 +361,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       handler: (args) => {
         const denied = outOfTeam(str(args['taskId']))
         if (denied) return denied
-        const r = blockTask(db, str(args['taskId']))
-        return r.ok ? jsonResult(r.task) : textResult(`block failed: ${r.reason}`, true)
+        const r = blockTask(db, str(args['taskId']), { unlessPersonMoved: true })
+        return statusWriteResult(r, 'block')
       },
     },
     {
@@ -340,8 +372,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       handler: (args) => {
         const denied = outOfTeam(str(args['taskId']))
         if (denied) return denied
-        const r = unblockTask(db, str(args['taskId']))
-        return r.ok ? jsonResult(r.task) : textResult(`unblock failed: ${r.reason}`, true)
+        const r = unblockTask(db, str(args['taskId']), { unlessPersonMoved: true })
+        return statusWriteResult(r, 'unblock')
       },
     },
     {

@@ -42,6 +42,10 @@ export const server = setupServer(
   // and polls them, so every test that mounts the Board fetches this. Empty by
   // default; a test about routines overrides it.
   http.get('/api/schedules/occurrences', () => HttpResponse.json({ now: 0, routines: [] })),
+  // The Board's New task dialog reads each member's role when it opens, to
+  // suggest who fits the sentence. None by default; a test about the suggestion
+  // overrides it.
+  http.get('/api/teams/member-roles', () => HttpResponse.json({ roles: {} })),
   // ConfigureNativeStep probes the Codex sign-in (Sign in with ChatGPT is the
   // DEFAULT method on the OpenAI card, so merely selecting OpenAI fires this).
   // Empty default = "codex not installed"; ChatGPT-path tests override it.

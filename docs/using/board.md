@@ -27,7 +27,7 @@ The board shows every task your teams work on. Each task is a card, and its colu
 
 The board opens on **Kanban**: every task by status, newest first. **Today**, **Week** and **Month** are calendar views that lay the same cards out by the day each was added or finished. Every task handed out in a [team chat](/using/team-chat) is a card here. How tasks, statuses and dependencies work underneath is explained in [The board](/concepts/the-board).
 
-![The board in Week view: status columns across the days of the week, three tasks waiting on a person in today's row, and two routine runs on the next day](/images/board-kanban.png)
+![The board on Kanban for all teams: five tasks that need a person lead the first column, each with its reason and one button, then Backlog, To do, In progress and Done, with Cancelled folded into a rail](/images/board-kanban.png)
 
 ## Track work in five steps
 
@@ -157,27 +157,39 @@ Click **New task** in the board's header, or press `C`. The **+** in the **To do
 
 </Step>
 
-<Step title="Pick the team and the agent">
+<Step title="Say what should get done">
 
-Choose the **Team**, then the **Agent**. A team with one agent picks it for you.
+Write one sentence under **What should get done?**, for example "Draft the launch announcement". It becomes the task's title.
 
 </Step>
 
-<Step title="Describe the work">
+<Step title="Check the agent">
 
-Write the **Task** as a short title. Add **Details** if the agent needs context, constraints, or a description of what done looks like.
+Beside **For**, Clawboo suggests an agent, with a note that says why: **Fits the task**, **Last used** or **Team lead**. To give the task to someone else, pick another agent from the list. Picking an agent also picks its team.
+
+</Step>
+
+<Step title="Add details if you need to">
+
+**More options** opens **Team**, **Agent** and **Details**. Use **Details** for context, constraints, or a description of what done looks like.
 
 </Step>
 
 <Step title="Send it">
 
-Click **Send to** followed by the agent's name.
+Press **Enter**, or click **Send to** followed by the agent's name.
 
 </Step>
 
 </Steps>
 
 You should see the card appear in **To do** and move to **In progress** when the agent starts. If the agent is busy, the task waits in **To do** and starts when the agent is free.
+
+How Clawboo picks the agent it suggests:
+
+- It matches the words of your sentence against each agent's name and the role in its SOUL.md (see [Agents](/using/agents)). A word in the name counts more than one in the role, and forms of a word count as one, so "drafting" matches "drafts". OpenClaw agents, and agents whose SOUL.md states no role, match by name only.
+- When nothing matches, it suggests the agent you last gave a task to in this browser, then the team lead, then the team's first agent.
+- The list holds the agents of the team in the board's team filter. With **All teams**, it holds every team's agents, each with its team's name.
 
 A task you give an agent this way is yours:
 
@@ -255,7 +267,7 @@ Click the **Parent** to open that task in the drawer. A run that is still going 
 
 An image in the agent's report or its comments shows as a link named after its alt text, such as **Image: sales chart**. It opens in a new tab only when you click it. Clawboo never loads it by itself, so an agent cannot send data out in an image's address without your click. An address that is not a web or same-site one is only named, not linked.
 
-![The task drawer open over the board: Rin's report, the task's status, agent, runtime and cost, its verification result and workspace, one run, and the start of the Activity log](/images/task-detail-drawer.png)
+![The task drawer open over the Kanban board: Rin's report, the brief, the task's properties, and a passed verification](/images/task-detail-drawer.png)
 
 ### Change a task's status
 
@@ -266,6 +278,7 @@ Use **Status** in the drawer's **Properties**, or drag the card to another colum
 - Moving a card to **Done** or **Cancelled** from a day other than today asks which day it finished: **Today**, the day it sits on, or **Another day**.
 - Cancelling always asks first, because it cannot be undone. Later plan steps that were waiting on the task are cancelled with it.
 - If an agent is still working on the task, the prompt says so. Moving the card to Done, Cancelled or To do stops that run. When an agent handed the task out, that agent is told a person decided it.
+- Your move stands. After you move a card, its agent cannot change the task's status, block it or unblock it until a new run starts on the task. The agent is told the status is yours to set and not to try again. A run that starts after your move works the task as usual.
 - A card moved back to **To do** goes back to its agent's queue, and a run that was going starts over from the beginning. A card with no agent waits in **Needs you** as **Unassigned**.
 - If the task's stored check result cannot pass, moving it to **Done** asks you to confirm with **Complete anyway**. The override is recorded in the audit log.
 
@@ -429,8 +442,9 @@ The board shows "Couldn’t load the board." when its first read fails. Click **
 <Accordion title="Under the hood">
 
 - The board reads `GET /api/board`, every five seconds while the tab is visible. The drawer reads `GET /api/board/:taskId`, `GET /api/board/:taskId/executions` and `GET /api/board/:taskId/workspace/detail`. The preview is served from `GET /api/board/:taskId/preview/`.
-- **New task** is `POST /api/board` with an `assigneeAgentId`. **Retry**, **Assign** and replies are `POST /api/board/:taskId/retry`, `/assign` and `/comments`; the reply's answer carries a `delivery` field that says where it went. A status change is `PATCH /api/board/:taskId`, and a confirmed **Complete anyway** sends `humanOverride`, which is written to the audit log.
-- The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`.
+- **New task** is `POST /api/board` with an `assigneeAgentId`. It reads each agent's role from `GET /api/teams/member-roles`. **Retry**, **Assign** and replies are `POST /api/board/:taskId/retry`, `/assign` and `/comments`; the reply's answer carries a `delivery` field that says where it went. A status change is `PATCH /api/board/:taskId`, and a confirmed **Complete anyway** sends `humanOverride`, which is written to the audit log.
+- A status change you make records its time on the task (`personMovedAt`). Until a run starts after that time, the agent's `update_task_status`, `block_task` and `unblock_task` tools are refused. See the [tasks tools](/reference/mcp-tools#tasks-server).
+- The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`, and the agent you last gave a task to, per team, under `clawboo.board.new-task-agents`.
 - Full request and response shapes are in the [Board API](/reference/rest-api/board). How the board stores tasks and recovers stuck work is in [Board internals](/internals/board-internals).
 
 </Accordion>

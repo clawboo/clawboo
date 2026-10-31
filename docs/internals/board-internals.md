@@ -62,10 +62,11 @@ flowchart TD
 
 The row is read inside the `BEGIN IMMEDIATE` transaction, so two concurrent callers cannot both pass a stale check; a REST-layer pre-check is only fast-fail ergonomics. `PATCH /api/board/:taskId` maps `not_found` to `404`, `invalid_completed_at` to `400` and the rest to `409`.
 
-Two side effects ride the same write:
+Three side effects ride the same write:
 
 - **The first move to `done` or `cancelled` stamps `completedAt`, once.** Writing the same terminal status again (a run's late result after a person marked the task done) leaves it alone. `opts.completedAt` back-dates the stamp for a person marking work done on the day it was really done; it must fall between the task's `createdAt` and now plus five minutes of clock skew (a time inside the skew is recorded as now), or the move is refused with `invalid_completed_at`.
 - **Any move to `todo` releases the task.** It clears `assigneeAgentId`, `assigneeRuntime` and the stored `verification` verdict, from any source status. Clearing the assignee lets the [claim](#the-atomic-claim) re-acquire the task (its guard requires a null assignee); clearing the verdict means a previous runtime's failing verdict cannot block a fresh runtime's completion. `releaseTask` does the same three-field clear directly, for a task still `in_progress`, and publishes `task_released`.
+- **A person's move is stamped.** With `opts.actor: 'person'` the write sets `personMovedAt` to now. An agent's own write through the Tasks MCP tools (`update_task_status`, `block_task`, `unblock_task`) passes `opts.unlessPersonMoved`, and is refused with `person_moved` when `personMovedAt` is later than the task's latest run start (the latest, across its executions, of each one's `startedAt`, else `claimedAt`, else `createdAt`), or when the task has no execution yet. The run the person overruled cannot put the card back; a run started after the move writes as usual.
 
 The two recovery passes write outside the table on purpose: they release stuck `in_progress` and `in_review` work straight to `todo`, and `in_review` to `todo` is not a legal transition. See [Orphan and stale reconciliation](#orphan-and-stale-reconciliation).
 

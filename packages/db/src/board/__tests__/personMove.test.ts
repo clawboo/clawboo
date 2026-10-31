@@ -284,3 +284,65 @@ describe('updateTaskBody: completedAt', () => {
     }
   })
 })
+
+describe('an agent’s status write after a person moved the card', () => {
+  /** A task whose run started at `runAt` (a claim and an execution). */
+  function runStartedAt(runAt: number) {
+    vi.setSystemTime(runAt)
+    const t = createTask(db, { title: 'draft the post', teamId: 'T', sourceDelegationId: BOUND })
+    claimTask(db, t.id, 'a2')
+    createExecutionProcess(db, { taskId: t.id, executorType: 'claude-code' })
+    return t
+  }
+
+  it('records when a person moved the card, and only a person', () => {
+    const t = runStartedAt(CREATED_AT)
+    vi.setSystemTime(CREATED_AT + MIN)
+    expect(updateStatus(db, t.id, 'blocked').ok).toBe(true)
+    expect(getTask(db, t.id)?.personMovedAt).toBeNull()
+    vi.setSystemTime(CREATED_AT + 2 * MIN)
+    expect(updateStatus(db, t.id, 'todo', { actor: 'person' }).ok).toBe(true)
+    expect(getTask(db, t.id)?.personMovedAt).toBe(CREATED_AT + 2 * MIN)
+  })
+
+  it('refuses the overruled run’s write, naming where the person put the card', () => {
+    const t = runStartedAt(CREATED_AT)
+    vi.setSystemTime(CREATED_AT + MIN)
+    expect(updateStatus(db, t.id, 'todo', { actor: 'person' }).ok).toBe(true)
+    vi.setSystemTime(CREATED_AT + 2 * MIN)
+    // In progress is a legal move from To do, so only the guard stops it.
+    const r = updateStatus(db, t.id, 'in_progress', { unlessPersonMoved: true })
+    expect(r).toMatchObject({ ok: false, reason: 'person_moved' })
+    expect(r.task?.status).toBe('todo')
+    expect(getTask(db, t.id)?.status).toBe('todo')
+  })
+
+  it('lets a run started after the move write as usual', () => {
+    const t = runStartedAt(CREATED_AT)
+    vi.setSystemTime(CREATED_AT + MIN)
+    expect(updateStatus(db, t.id, 'todo', { actor: 'person' }).ok).toBe(true)
+    vi.setSystemTime(CREATED_AT + 2 * MIN)
+    claimTask(db, t.id, 'a2')
+    createExecutionProcess(db, { taskId: t.id, executorType: 'claude-code' })
+    vi.setSystemTime(CREATED_AT + 3 * MIN)
+    expect(updateStatus(db, t.id, 'blocked', { unlessPersonMoved: true }).ok).toBe(true)
+  })
+
+  it('leaves a write alone when no person moved the card, or when it is not an agent’s', () => {
+    const t = runStartedAt(CREATED_AT)
+    vi.setSystemTime(CREATED_AT + MIN)
+    expect(updateStatus(db, t.id, 'blocked', { unlessPersonMoved: true }).ok).toBe(true)
+    expect(updateStatus(db, t.id, 'todo', { actor: 'person' }).ok).toBe(true)
+    // The engine and the board's own writes carry no flag and are not refused.
+    vi.setSystemTime(CREATED_AT + 2 * MIN)
+    expect(updateStatus(db, t.id, 'blocked').ok).toBe(true)
+  })
+
+  it('refuses a write on a card a person moved that never ran', () => {
+    vi.setSystemTime(CREATED_AT)
+    const t = createTask(db, { title: 'loose idea', teamId: 'T', status: 'todo' })
+    vi.setSystemTime(CREATED_AT + MIN)
+    expect(updateStatus(db, t.id, 'backlog', { actor: 'person' }).ok).toBe(true)
+    expect(updateStatus(db, t.id, 'todo', { unlessPersonMoved: true }).reason).toBe('person_moved')
+  })
+})

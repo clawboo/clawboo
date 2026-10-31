@@ -336,18 +336,23 @@ function gutterStyle(tone: Tone): CSSProperties {
 const LANE_RULE_INSET = 8
 
 /** A cell's fill and rule. The fill is the column's `--lane`; the first row
- *  rounds the lane's top. */
+ *  rounds the lane's top. Kanban's one row has no row under it, so it draws no
+ *  rule, and the lane runs on unbroken into the space below its cards. */
 function cellStyle(tone: Tone, row: Row, first = false): CSSProperties {
+  const fill: CSSProperties = {
+    backgroundColor: tone.selected ? SELECTED_LANE : 'var(--lane)',
+    ...(first ? { borderTopLeftRadius: LANE_RADIUS, borderTopRightRadius: LANE_RADIUS } : null),
+  }
+  if (row.kind === 'all') return fill
   const rule = fullRule(row) ? 'var(--border-strong)' : 'var(--border)'
   return {
-    backgroundColor: tone.selected ? SELECTED_LANE : 'var(--lane)',
+    ...fill,
     borderBottom: '1px solid transparent',
     backgroundImage: `linear-gradient(${rule}, ${rule})`,
     backgroundOrigin: 'border-box',
     backgroundRepeat: 'no-repeat',
     backgroundPosition: 'center bottom',
     backgroundSize: `calc(100% - ${LANE_RULE_INSET * 2}px) 1px`,
-    ...(first ? { borderTopLeftRadius: LANE_RADIUS, borderTopRightRadius: LANE_RADIUS } : null),
   }
 }
 

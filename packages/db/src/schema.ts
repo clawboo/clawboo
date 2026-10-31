@@ -357,6 +357,10 @@ export const tasks = sqliteTable(
     // The chat room the task was delegated in (see `rooms`). NULL = the team's own
     // group chat (the default room), which is every task created before rooms.
     roomId: text('room_id'),
+    // When a person last moved the card (the board, the task drawer). A run that
+    // started before then was overruled, so an agent's own status write from it
+    // is refused (see `updateStatus`'s `unlessPersonMoved`).
+    personMovedAt: integer('person_moved_at'),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),

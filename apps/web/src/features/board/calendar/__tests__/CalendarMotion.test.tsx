@@ -619,7 +619,7 @@ describe('the settle after the person sets a card down', () => {
     const dialog = await screen.findByTestId('new-task-dialog')
     await user.click(within(dialog).getByLabelText('Agent'))
     await user.click(await screen.findByRole('option', { name: 'Coder' }))
-    await user.type(within(dialog).getByLabelText('Task'), 'Draft the changelog')
+    await user.type(within(dialog).getByLabelText('What should get done?'), 'Draft the changelog')
     await user.click(within(dialog).getByRole('button', { name: /Send to Coder/i }))
 
     await screen.findByText('Draft the changelog')

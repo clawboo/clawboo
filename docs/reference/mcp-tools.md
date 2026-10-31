@@ -239,6 +239,7 @@ Move a task to another status. Legal moves follow the board's state machine; `do
 - Moving a task to `todo` also clears its assignee and its verification verdict.
 - Returns the updated task row.
 - Errors: `status change failed: illegal_transition`, `status change failed: not_found`, and `status change failed: verification_required` when the task holds a failing verification verdict (only a person's override, from the board or the board API, can finish it). See [When work is checked](/concepts/verification).
+- Refused when a person moved the card on the board or in the task drawer after the task's latest run started (or the task has not run since): that run was overruled, and the status stays where the person put it. The tool error reads `A person moved this task to <column> after your run on it started, so its status is theirs to set. Leave it as it is and do not retry this call.` A run started after the move writes as usual.
 
 ### block_task
 
@@ -250,7 +251,7 @@ Move a task to `blocked`. It is `update_task_status` with `status: 'blocked'`.
 }
 ```
 
-- Returns the updated task row. Error: `block failed: <reason>`, with the same reasons.
+- Returns the updated task row. Error: `block failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
 
 ### unblock_task
 
@@ -262,7 +263,7 @@ Move a task to `todo` (from `blocked`, or any status that may move to `todo`). I
 }
 ```
 
-- Returns the updated task row. Error: `unblock failed: <reason>`, with the same reasons.
+- Returns the updated task row. Error: `unblock failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
 
 ### add_comment
 

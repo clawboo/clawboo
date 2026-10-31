@@ -4,7 +4,7 @@
 // selected row on every parent re-render for inline-array / <option>-children
 // consumers.
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
 import { Select } from '../Select'
@@ -59,5 +59,93 @@ describe('Select keyboard behavior', () => {
     rerender(<Harness tick={1} />) // parent re-render (fresh <option> array)
     fireEvent.keyDown(trigger, { key: 'Enter' }) // commit the STILL-highlighted 'b'
     expect(onChange).toHaveBeenCalledWith('b')
+  })
+})
+
+describe('Select menu width', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  // jsdom lays nothing out, so give the trigger a box and the menu a natural width:
+  // what it takes laid out at max-content, held between its min and max widths.
+  function layout({
+    left = 100,
+    trigger,
+    natural,
+  }: {
+    left?: number
+    trigger: number
+    /** The menu's width at max-content, or a function of the laid-out menu. */
+    natural: number | ((menu: HTMLElement) => number)
+  }) {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.getAttribute('role') === 'listbox') {
+        const { width, minWidth, maxWidth } = this.style
+        const fit = typeof natural === 'function' ? natural(this) : natural
+        const w =
+          width === 'max-content'
+            ? Math.min(Math.max(fit, parseFloat(minWidth) || 0), parseFloat(maxWidth) || Infinity)
+            : parseFloat(width)
+        return new DOMRect(0, 0, w, 120)
+      }
+      if (this.getAttribute('aria-haspopup') === 'listbox')
+        return new DOMRect(left, 10, trigger, 26)
+      return new DOMRect()
+    })
+  }
+
+  function openMenu() {
+    render(<Select aria-label="pick" value="b" onChange={vi.fn()} options={OPTIONS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'pick' }))
+    return screen.getByRole('listbox')
+  }
+
+  it('grows past a compact trigger to fit its widest option and the check', () => {
+    layout({ trigger: 96, natural: 131 })
+    expect(openMenu().style.width).toBe('131px')
+  })
+
+  it('is never narrower than its trigger', () => {
+    layout({ trigger: 203, natural: 150 })
+    expect(openMenu().style.width).toBe('203px')
+  })
+
+  it('stops growing at 320px and stays inside the viewport', () => {
+    layout({ left: 900, trigger: 96, natural: 480 })
+    const menu = openMenu()
+    expect(menu.style.width).toBe('320px')
+    expect(menu.style.left).toBe(`${window.innerWidth - 8 - 320}px`)
+  })
+
+  it('keeps a menuWidth wider than the viewport inside it', () => {
+    const innerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 180 })
+    try {
+      layout({ trigger: 120, natural: 150 })
+      render(
+        <Select aria-label="pick" value="b" onChange={vi.fn()} options={OPTIONS} menuWidth={200} />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'pick' }))
+      const menu = screen.getByRole('listbox')
+      expect(menu.style.width).toBe('164px')
+      expect(menu.style.left).toBe('8px')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: innerWidth })
+    }
+  })
+
+  it('keeps its width while a search filters the list', () => {
+    // Narrower with fewer rows, so a menu measured again after filtering would shrink.
+    layout({ trigger: 96, natural: (menu) => menu.querySelectorAll('[role="option"]').length * 60 })
+    render(<Select aria-label="pick" value="b" onChange={vi.fn()} options={OPTIONS} searchable />)
+    fireEvent.click(screen.getByRole('button', { name: 'pick' }))
+    const menu = screen.getByRole('listbox')
+    expect(menu.style.width).toBe('180px')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search pick' }), {
+      target: { value: 'Alp' },
+    })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(screen.getByRole('listbox').style.width).toBe('180px')
   })
 })

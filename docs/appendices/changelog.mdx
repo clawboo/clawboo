@@ -78,6 +78,7 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 - **Kanban first.** The Board opens on **Kanban** (the view called All before, key **K**), every task by status with Needs you first. **Today**, **Week** and **Month** stay as the calendar views, and a view you already picked is kept. On Kanban, cards say how long ago they were added or finished ("4m ago", "Yesterday", "3d ago"); the calendar views keep clock times.
 - **One header and one toolbar.** The header holds the title, the team filter, **Star** and **New task** (key **C**). **Refresh** and the subtitle are gone; a spinner shows only when a background read is slow. The toolbar holds **Find** (**/** or **Cmd/Ctrl+K**), **Filter** (agents, tasks with no agent, what is running now), **Display** (routine runs, the Cancelled column, cost and time on cards), an agents-working chip and the view menu. "Since you last looked" is a chip that shows only when something changed.
 - **Calmer cards.** Cards and lanes are neutral, with color only in each column's status mark and amber for Needs you. Cards drop the runtime mark, the corner clip and the hover lift, and counts no longer roll.
+- **New task in one sentence.** Write what should get done and press Enter. Clawboo suggests who should do it by matching your words to each agent's name and the role in its SOUL.md, else the agent you last gave a task to, then the team lead, and says why. Picking an agent also picks its team. **More options** opens the full form with Team, Agent and Details.
 - **Needs you cards lead with one action.** Each card says why it waits and offers **Retry**, **Assign**, **Review** or **Open**, with the other choices, including **Dismiss**, in a **More** menu.
 - **The task drawer reads like a document.** The agent's report once, as formatted text, then the brief, the properties, verification, the workspace, run history, comments and activity. Each section folds from its heading, empty ones are not shown, and **J** and **K** step through the column. See [Board](/using/board).
 
@@ -91,6 +92,8 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 - While one of a routine's runs is still going, the Board's calendar marks the right next run.
 - Loading the dashboard no longer counts against the API's request limit.
 - A Boo no longer loses its body when another copy of it is hidden.
+- An agent can no longer put a card back after you moved it: its own status changes are refused, with a message telling it not to try again, until the task runs again.
+- The Kanban lanes run unbroken to the bottom, and dropdown menus are as wide as their longest option.
 
 </Update>
 

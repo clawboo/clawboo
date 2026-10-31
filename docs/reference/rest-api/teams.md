@@ -38,6 +38,7 @@ Request bodies are JSON (up to 2 MB). Every route here is on the general [rate l
 | Method | Path                              | Summary                                                      | Stream? |
 | ------ | --------------------------------- | ------------------------------------------------------------ | ------- |
 | GET    | `/api/teams`                      | List teams with `agentCount`, plus agent→team assignments    | No      |
+| GET    | `/api/teams/member-roles`         | Each team member's one-line role, for New task suggestions   | No      |
 | POST   | `/api/teams`                      | Create a team (optional client-provided UUID)                | No      |
 | PATCH  | `/api/teams/:id`                  | Update a team (partial)                                      | No      |
 | DELETE | `/api/teams/:id`                  | Delete a team, orphan its agents, clean team-scoped settings | No      |
@@ -110,6 +111,37 @@ Lists every team with a computed `agentCount` (a `COUNT(*)` subquery over `agent
 ```bash
 curl http://localhost:18790/api/teams
 curl 'http://localhost:18790/api/teams?includeArchived=true'
+```
+
+---
+
+## `GET /api/teams/member-roles`
+
+The one-line role each live team member states in its SOUL.md, for the board's New task dialog to suggest who fits a sentence (see [Giving an agent a task](/using/board#give-an-agent-a-task)). Roles are read with the same reader as the team lead's roster: a `- **Role**:` bullet, else the first Role or Mission section, else the intro paragraph. An agent with no role there is left out: OpenClaw agents (their files live on the Gateway), agents with no persona or the shipped default prompt, teamless agents and archived agents.
+
+- **Path params**: none.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: roles keyed by agent id:
+
+```ts
+{
+  roles: Record<string, string> // agentId -> one-line role; agents without one are absent
+}
+```
+
+**`500 Internal Server Error`**: a DB failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl http://localhost:18790/api/teams/member-roles
 ```
 
 ---

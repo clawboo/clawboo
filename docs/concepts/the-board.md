@@ -112,7 +112,7 @@ Runs that name a repository, started through the runtime run API or by an agent 
 ## What you control
 
 - **Give an agent a task**: use **New task** on the board. It starts at once if the agent is free, and waits in To do otherwise.
-- **Move a card**: drag it, or change its status in the task drawer. Your move is final. Clawboo stops any run working on the task, and tells whoever handed it off when you finish or cancel it.
+- **Move a card**: drag it, or change its status in the task drawer. Your move is final. Clawboo stops any run working on the task, and tells whoever handed it off when you finish or cancel it. The agent cannot move the card back: its own status changes are refused until a new run on the task starts.
 - **Steer a task**: reply on it in the board's task drawer, the team chat's **Tasks** card or the agent's page.
 - **Unstick a task**: use **Retry**, assign an agent, or **Dismiss** from Needs you.
 

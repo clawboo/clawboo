@@ -94,6 +94,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     updatedAt: now,
     completedAt: null,
     roomId: input.roomId ?? null,
+    personMovedAt: null,
   }
 }
 
@@ -578,7 +579,11 @@ export function releaseTask(db: ClawbooDb, taskId: string): void {
 // ─── Status transitions (state-machine enforced) ─────────────────────────────
 
 export type UpdateStatusReason =
-  'not_found' | 'illegal_transition' | 'verification_required' | 'invalid_completed_at'
+  | 'not_found'
+  | 'illegal_transition'
+  | 'verification_required'
+  | 'invalid_completed_at'
+  | 'person_moved'
 export interface UpdateStatusResult {
   ok: boolean
   task?: DbTask
@@ -600,8 +605,29 @@ export interface UpdateStatusOptions {
   /** Who made the move, carried on the lifecycle event. `person` is a human
    *  moving the card (the board, the task drawer), which the engine treats as
    *  the final word on that task: it stops the run and does not report its
-   *  late result as the task's outcome. */
+   *  late result as the task's outcome. The move's time is kept on the task
+   *  (`personMovedAt`). */
   actor?: 'person'
+  /** An agent's own write (its task tools). Refused with `person_moved` when a
+   *  person moved the card after the task's latest run started: that run was
+   *  overruled, and its status write would put the card back where the person
+   *  took it from. A run started after the move writes as usual. */
+  unlessPersonMoved?: boolean
+}
+
+/** When the task's latest run started (its newest execution's start, claim or
+ *  creation), or null when it never ran. */
+function latestRunStart(tx: ClawbooDb | BoardTx, taskId: string): number | null {
+  const row = tx
+    .select({
+      at: sql<
+        number | null
+      >`max(coalesce(${executionProcesses.startedAt}, ${executionProcesses.claimedAt}, ${executionProcesses.createdAt}))`,
+    })
+    .from(executionProcesses)
+    .where(eq(executionProcesses.taskId, taskId))
+    .get()
+  return row?.at ?? null
 }
 
 /** How far ahead of the server clock a person's finish time may be (clock skew
@@ -649,6 +675,11 @@ export function updateStatus(
   const result = immediateWrite(db, (tx): UpdateStatusResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
+    if (opts.unlessPersonMoved && row.personMovedAt != null) {
+      const lastRun = latestRunStart(tx, taskId)
+      if (lastRun == null || row.personMovedAt > lastRun)
+        return { ok: false, reason: 'person_moved', task: row }
+    }
     const from = row.status as TaskStatus
     if (!canTransition(from, to)) return { ok: false, reason: 'illegal_transition' }
     if (to === 'done' && !opts.humanOverride && !verdictCellPromotable(row.verification)) {
@@ -671,6 +702,7 @@ export function updateStatus(
         status: to,
         updatedAt: now,
         ...(finishing ? { completedAt } : {}),
+        ...(opts.actor === 'person' ? { personMovedAt: now } : {}),
         // A task moved back to `todo` is released for re-claim — clear the assignee
         // so the atomic claim (`assignee IS NULL`) can re-acquire it (matches
         // releaseTask / orphan reconciliation, which also unassign on release).
@@ -794,12 +826,20 @@ export function assignTaskDelegation(
   return result
 }
 
-export function blockTask(db: ClawbooDb, taskId: string): UpdateStatusResult {
-  return updateStatus(db, taskId, 'blocked')
+export function blockTask(
+  db: ClawbooDb,
+  taskId: string,
+  opts: UpdateStatusOptions = {},
+): UpdateStatusResult {
+  return updateStatus(db, taskId, 'blocked', opts)
 }
 
-export function unblockTask(db: ClawbooDb, taskId: string): UpdateStatusResult {
-  return updateStatus(db, taskId, 'todo')
+export function unblockTask(
+  db: ClawbooDb,
+  taskId: string,
+  opts: UpdateStatusOptions = {},
+): UpdateStatusResult {
+  return updateStatus(db, taskId, 'todo', opts)
 }
 
 /** Soft-delete (auditable / restorable) — never destructive. */
