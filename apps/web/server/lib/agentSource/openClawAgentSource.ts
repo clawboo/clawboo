@@ -38,7 +38,7 @@ import { authRetryAfterMs, GatewayResponseError, isAuthConnectError } from '@cla
 import { createLogger } from '@clawboo/logger'
 import { mcpHttpUrl } from '@clawboo/mcp'
 
-import { getMcpAttachSecret } from '../mcpAttachSecret'
+import { getMcpAttachSecret, type GatewayAttachRefresh } from '../mcpAttachSecret'
 import { isLoopbackHost } from '../resolveHost'
 import { applyExecApprovalPolicy, isExecAsk, type ExecAsk } from './execApprovalPolicy'
 import { and, eq, inArray, isNull, like, sql } from 'drizzle-orm'
@@ -110,6 +110,9 @@ export interface OpenClawAgentSourceDeps {
    *  the shared MCP servers can be registered in the Gateway config. Null until
    *  the port is resolved at boot — registration is a best-effort no-op then. */
   mcpBaseUrl?: () => string | null
+  /** Test seam: the waits between retries of a failed MCP re-registration after
+   *  an attach-secret rotation. Defaults to MCP_REFRESH_RETRY_MS. */
+  mcpRefreshRetryMs?: readonly number[]
   log?: (level: 'info' | 'warn' | 'error', obj: object, msg: string) => void
 }
 
@@ -161,6 +164,13 @@ const BACKOFF_CAP_MS = 60_000
 // lockout, still self-healing once the credentials/pairing are fixed or the lockout
 // window clears. Honours the Gateway's own `retryAfterMs` when it sends one.
 const AUTH_RETRY_FLOOR_MS = 120_000
+// After an attach-secret rotation, a Gateway that refused the config write is
+// asked again on this schedule. Spaced for the Gateway's limit of three
+// control-plane writes a minute; once it runs out, the next connect registers.
+const MCP_REFRESH_RETRY_MS = [15_000, 30_000, 60_000, 120_000, 240_000] as const
+// How long a rotation waits for the first write before answering `retrying`.
+// The write itself carries on (Gateway requests time out after 60 seconds).
+const MCP_REFRESH_ANSWER_MS = 5_000
 
 // OpenClaw's native sub-agent-spawning tools. Clawboo's team model forbids agents
 // from spawning their own throwaway sub-agents (they must delegate to the EXISTING
@@ -236,6 +246,7 @@ export class OpenClawAgentSource implements AgentSource {
   private authBlocked = false
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private resyncTimer: ReturnType<typeof setTimeout> | null = null
+  private mcpRefreshTimer: ReturnType<typeof setTimeout> | null = null
   private retries = 0
   private readonly listeners = new Set<(e: AgentEvent) => void>()
   // Reconnect-stable broadcast fan-out: the client (and its onEvent
@@ -335,10 +346,10 @@ export class OpenClawAgentSource implements AgentSource {
    * registry lives at the TOP-LEVEL `mcp.servers` key (not `tools.mcp.servers`),
    * and a Streamable-HTTP server entry is `{ url, transport: 'streamable-http' }`.
    */
-  private async registerSharedMcpServers(): Promise<void> {
+  private async registerSharedMcpServers(): Promise<'updated' | 'not-connected' | 'failed'> {
     const baseUrl = this.deps.mcpBaseUrl?.()
     const client = this.client
-    if (!baseUrl || !client || !this.isConnected()) return
+    if (!baseUrl || !client || !this.isConnected()) return 'not-connected'
     try {
       // `config.get` returns a SNAPSHOT wrapper — the live config sits under
       // `.config` (older shapes spread it to the top level too); read both
@@ -477,7 +488,7 @@ export class OpenClawAgentSource implements AgentSource {
       const alreadyRegistered =
         stale.length === 0 &&
         Object.entries(desired).every(([name, e]) => current[name]?.url === e.url)
-      if (alreadyRegistered && denyOk) return
+      if (alreadyRegistered && denyOk) return 'updated'
       // The Gateway deep-merges partials, so unrelated config — the user's own MCP
       // servers, other `mcp.*` keys, existing `tools.*` — is preserved; we re-assert
       // `current` (servers) + the deny UNION to keep the merge explicit.
@@ -501,8 +512,10 @@ export class OpenClawAgentSource implements AgentSource {
         { baseUrl, denied: ownedDeny, retired: [...retired] },
         'agent-source: registered clawboo MCP servers + applied the clawboo deny set in Gateway config',
       )
+      return 'updated'
     } catch (err) {
       this.log('warn', { err: String(err) }, 'agent-source: MCP registration failed (non-blocking)')
+      return 'failed'
     }
   }
 
@@ -519,15 +532,61 @@ export class OpenClawAgentSource implements AgentSource {
     if (this.resyncTimer) clearTimeout(this.resyncTimer)
     this.retryTimer = null
     this.resyncTimer = null
+    this.cancelMcpRefresh()
     this.teardownClient()
     this.setConnection('disconnected')
   }
 
-  /** Re-register Clawboo's MCP URLs in the Gateway config now, for a change that
-   *  alters them (an attach-secret rotation). A disconnected source skips it: the
-   *  next connect registers the current URLs anyway. Never throws. */
-  async refreshMcpServers(): Promise<void> {
-    await this.registerSharedMcpServers()
+  /**
+   * Re-register Clawboo's MCP URLs in the Gateway config now, for a change that
+   * alters them (an attach-secret rotation). A disconnected source skips it: the
+   * next connect registers the current URLs anyway. A refused write is retried on
+   * MCP_REFRESH_RETRY_MS, cancelled by `stop()` or the next refresh. Answers
+   * within MCP_REFRESH_ANSWER_MS. Never throws.
+   */
+  async refreshMcpServers(): Promise<GatewayAttachRefresh> {
+    this.cancelMcpRefresh()
+    const first = this.registerSharedMcpServers().then((outcome): GatewayAttachRefresh => {
+      if (outcome !== 'failed') return outcome
+      this.scheduleMcpRefresh(0)
+      return 'retrying'
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const slow = new Promise<GatewayAttachRefresh>((resolve) => {
+      timer = setTimeout(() => resolve('retrying'), MCP_REFRESH_ANSWER_MS)
+      timer.unref?.()
+    })
+    try {
+      return await Promise.race([first, slow])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private scheduleMcpRefresh(attempt: number): void {
+    if (this.stopped) return
+    const delay = (this.deps.mcpRefreshRetryMs ?? MCP_REFRESH_RETRY_MS)[attempt]
+    if (delay === undefined) {
+      this.log(
+        'warn',
+        { attempts: attempt + 1 },
+        'agent-source: the Gateway kept refusing the new MCP URLs; they go in on its next connect',
+      )
+      return
+    }
+    this.cancelMcpRefresh()
+    this.mcpRefreshTimer = setTimeout(() => {
+      this.mcpRefreshTimer = null
+      void this.registerSharedMcpServers().then((outcome) => {
+        if (outcome === 'failed') this.scheduleMcpRefresh(attempt + 1)
+      })
+    }, delay)
+    this.mcpRefreshTimer.unref?.()
+  }
+
+  private cancelMcpRefresh(): void {
+    if (this.mcpRefreshTimer) clearTimeout(this.mcpRefreshTimer)
+    this.mcpRefreshTimer = null
   }
 
   /** Re-read settings + reconnect (called when settings change or the gateway starts).

@@ -15,7 +15,10 @@
 //     under `~/.clawboo`, so that walk reaches `~/.claude/CLAUDE.md` and loads it
 //     as a project file. `claudeMdExcludes` cuts every directory above the
 //     working folder, and the home directory itself.
-//   - `autoMemoryEnabled: false`, because auto memory is not a settings source.
+//   - `autoMemoryEnabled: false`, because auto memory is not a settings source,
+//     plus `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the child env, because the CLI
+//     reads that variable before any setting: an inherited `0` turns auto memory
+//     back on over `autoMemoryEnabled: false`.
 //
 // None of this touches sign-in: an API key arrives in the env, and the CLI's own
 // login lives in its credential store, which no settings source gates. Auth that
@@ -24,6 +27,9 @@
 
 import { realpathSync } from 'node:fs'
 import path from 'node:path'
+
+/** Laid over the child env last, after the caller's own variables. */
+export const CLAUDE_CODE_ISOLATION_ENV = { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } as const
 
 /** The `query()` options that keep a run off the operator's Claude Code setup. */
 export interface ClaudeCodeIsolation {

@@ -161,7 +161,7 @@ The token and the signatures never change on their own. To replace them, ask Cla
 curl -s -X POST http://127.0.0.1:18790/api/mcp/attach-secret/rotate
 ```
 
-You should see `{"ok":true}`. Every URL you copied stops working at once, so get new ones from `/api/mcp/config`. Clawboo's own runtimes get new URLs on their next run. A local OpenClaw Gateway gets new URLs at once, or on its next connection if it is not connected. A run already in progress keeps its old URLs: for the rest of that run Clawboo's servers treat it as an unsigned caller, or refuse it when an access token is set.
+You should see `"ok":true` and a `gateway` value. Every URL you copied stops working at once, so get new ones from `/api/mcp/config`. Clawboo's own runtimes get new URLs on their next run. `gateway` says what happened to a local OpenClaw Gateway's URLs: `updated` means it has the new ones; `retrying` means it did not take them yet and Clawboo asks again over the next few minutes; `not-connected` means it gets them the next time Clawboo connects to it. If it still has the old ones after that, restart the Clawboo server so it connects again. A run already in progress keeps its old URLs: for the rest of that run Clawboo's servers treat it as an unsigned caller, or refuse it when an access token is set.
 
 </Accordion>
 

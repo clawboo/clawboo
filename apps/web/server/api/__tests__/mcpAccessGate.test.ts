@@ -21,8 +21,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { getDb, resetDb } from '../../lib/db'
 import {
   getMcpAttachSecret,
-  onMcpAttachSecretRotated,
-  resetMcpAttachSecretCache,
+  setGatewayAttachRefresher,
+  type GatewayAttachRefresh,
 } from '../../lib/mcpAttachSecret'
 import { withAttachSecret } from '../../lib/runtimes'
 import {
@@ -42,11 +42,9 @@ beforeAll(() => {
   prevHome = process.env['CLAWBOO_HOME']
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-mcpgate-'))
   process.env['CLAWBOO_HOME'] = dir
-  resetMcpAttachSecretCache()
 })
 afterAll(() => {
   resetDb()
-  resetMcpAttachSecretCache()
   if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
   else process.env['CLAWBOO_HOME'] = prevHome
   rmSync(dir, { recursive: true, force: true })
@@ -311,14 +309,7 @@ describe('rotating the attach secret', () => {
     expect(admitted(gate, mockReq(path))).toBe(false)
   })
 
-  it('voids every token and signature minted before, and tells the Gateway source', () => {
-    const before = signAttachAccess(secret())
-    expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${before}`))).toBe(true)
-    let notified = 0
-    const stop = onMcpAttachSecretRotated(() => {
-      notified += 1
-    })
-
+  async function rotate(): Promise<unknown> {
     let body: unknown
     const res = {
       json(v: unknown) {
@@ -329,17 +320,34 @@ describe('rotating the attach secret', () => {
         return this
       },
     } as unknown as Response
-    mcpAttachSecretRotatePOST({} as Request, res)
-    stop()
+    await mcpAttachSecretRotatePOST({} as Request, res)
+    return body
+  }
 
-    expect(body).toEqual({ ok: true })
-    expect(notified).toBe(1)
+  it('voids every token and signature minted before, and says what the Gateway got', async () => {
+    const before = signAttachAccess(secret())
+    expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${before}`))).toBe(true)
+    let asked = 0
+    setGatewayAttachRefresher(async (): Promise<GatewayAttachRefresh> => {
+      asked += 1
+      // The refresher runs after the new secret is stored, so it re-registers with it.
+      expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${before}`))).toBe(false)
+      return 'retrying'
+    })
+    try {
+      expect(await rotate()).toEqual({ ok: true, gateway: 'retrying' })
+    } finally {
+      setGatewayAttachRefresher(null)
+    }
+
+    expect(asked).toBe(1)
     expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${before}`))).toBe(false)
     const after = signAttachAccess(secret())
     expect(after).not.toBe(before)
     expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${after}`))).toBe(true)
-    // The new secret is the stored one, not only the process cache.
-    resetMcpAttachSecretCache()
-    expect(signAttachAccess(secret())).toBe(after)
+  })
+
+  it('answers not-connected when no Gateway source is listening', async () => {
+    expect(await rotate()).toEqual({ ok: true, gateway: 'not-connected' })
   })
 })

@@ -31,7 +31,7 @@ import { buildAttachConfig, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/
 import type { StartOpts, SteerOptions } from '@clawboo/executor'
 
 import { buildChildEnv } from './childEnv'
-import { claudeCodeIsolation } from './claudeCodeIsolation'
+import { CLAUDE_CODE_ISOLATION_ENV, claudeCodeIsolation } from './claudeCodeIsolation'
 import type { RuntimeRunContext } from './types'
 
 // Minimal structural shapes for the SDK objects we read — deliberately decoupled
@@ -392,7 +392,7 @@ export function createClaudeCodeDriver(
       // merged in so API-key auth is deterministic. The spawned CLI keeps PATH / HOME /
       // etc. When the key is absent (Keychain/OAuth user), apiKeyEnv is empty and the
       // SDK falls back to the logged-in CLI's own auth (not env-based).
-      options['env'] = buildChildEnv(ctx.apiKeyEnv ?? {})
+      options['env'] = { ...buildChildEnv(ctx.apiKeyEnv ?? {}), ...CLAUDE_CODE_ISOLATION_ENV }
       for await (const msg of mod.query({ prompt: input.stream, options })) {
         if (finished) break
         if (msg.type === 'assistant') noteConsumed(msg)

@@ -15,7 +15,7 @@ import { mcpHttpUrl } from '@clawboo/mcp'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
-import { getMcpAttachSecret, resetMcpAttachSecretCache } from '../../lib/mcpAttachSecret'
+import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
 import { parseBoundProvenance, parseBoundScope } from '../mcp'
 
 const req = (url: string): IncomingMessage => ({ url }) as IncomingMessage
@@ -26,11 +26,9 @@ beforeAll(() => {
   prevHome = process.env['CLAWBOO_HOME']
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-mcpscope-'))
   process.env['CLAWBOO_HOME'] = dir
-  resetMcpAttachSecretCache()
 })
 afterAll(() => {
   resetDb()
-  resetMcpAttachSecretCache()
   if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
   else process.env['CLAWBOO_HOME'] = prevHome
   rmSync(dir, { recursive: true, force: true })

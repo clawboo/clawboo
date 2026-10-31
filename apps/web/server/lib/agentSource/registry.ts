@@ -19,7 +19,7 @@ import {
 } from '@clawboo/gateway-proxy'
 
 import { getDb } from '../db'
-import { onMcpAttachSecretRotated } from '../mcpAttachSecret'
+import { setGatewayAttachRefresher } from '../mcpAttachSecret'
 import { ClawbooNativeAgentSource } from './clawbooNativeAgentSource'
 import { OpenClawAgentSource, type OpenClawClientLike } from './openClawAgentSource'
 import { RuntimeAgentSource } from './runtimeAgentSource'
@@ -139,7 +139,7 @@ class ServerAgentRegistry {
     })
     this.registry.register(this.source)
     // A rotated attach secret voids the token in the Gateway's registered URLs.
-    onMcpAttachSecretRotated(() => void this.source.refreshMcpServers())
+    setGatewayAttachRefresher(() => this.source.refreshMcpServers())
     this.nativeSource = new ClawbooNativeAgentSource({ getDb })
     this.registry.register(this.nativeSource)
     // The executor-driven coding runtimes as record sources (peers). Their agents

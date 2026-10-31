@@ -469,7 +469,7 @@ curl 'http://localhost:18790/api/mcp/config?runtime=claude-code&server=memory&sc
 
 ## `POST /api/mcp/attach-secret/rotate`
 
-Replaces the per-install secret that every `attachToken`, `scopeSig` and `provSig` is derived from. Every attach URL minted before stops verifying at once: the ones you copied, the ones a local OpenClaw Gateway holds, and those of runs already in progress. Clawboo's own runtimes get new URLs on their next run, and the OpenClaw Gateway's registered URLs are replaced straight away when it is connected (otherwise on its next connection). Use it when an attach URL leaks, then copy new URLs from `GET /api/mcp/config`.
+Replaces the per-install secret that every `attachToken`, `scopeSig` and `provSig` is derived from. Every attach URL minted before stops verifying at once, in every Clawboo process that uses this database: the ones you copied, the ones a local OpenClaw Gateway holds, and those of runs already in progress. Clawboo's own runtimes get new URLs on their next run. When this server is connected to an OpenClaw Gateway, it re-registers the Gateway's URLs and waits up to 5 seconds for the write before it answers. Use it when an attach URL leaks, then copy new URLs from `GET /api/mcp/config`.
 
 Like `GET /api/mcp/config`, it always needs the access cookie while the gate is on; the `attachToken` does not open it.
 
@@ -477,11 +477,20 @@ Like `GET /api/mcp/config`, it always needs the access cookie while the gate is 
 
 ### Responses
 
-**`200 OK`**:
+**`200 OK`**: the secret is replaced. `gateway` says what became of the OpenClaw Gateway's registered URLs:
 
-```json
-{ "ok": true }
+```ts
+{
+  ok: true
+  gateway: 'updated' | 'retrying' | 'not-connected'
+}
 ```
+
+| `gateway`       | Meaning                                                                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `updated`       | The Gateway holds the new URLs                                                                                                                                                                     |
+| `retrying`      | The Gateway refused the config write, or did not answer within 5 seconds. Clawboo tries again after waits of 15, 30, 60, 120 and 240 seconds, then leaves it to its next connection to the Gateway |
+| `not-connected` | No Gateway connection. The Gateway gets the new URLs when Clawboo next connects to it                                                                                                              |
 
 **`500 Internal Server Error`**: the new secret could not be stored:
 

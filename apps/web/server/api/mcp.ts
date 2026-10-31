@@ -473,12 +473,13 @@ export function mcpConfigGET(req: Request, res: Response): void {
 // POST /api/mcp/attach-secret/rotate: replace the attach-signing secret, so
 // every attach token and signed scope minted before stops working. Operator-only
 // like /api/mcp/config: the gate's attach-token exemption covers only the
-// transport mounts.
-export function mcpAttachSecretRotatePOST(_req: Request, res: Response): void {
+// transport mounts. `gateway` says what became of a connected OpenClaw
+// Gateway's registered URLs (see GatewayAttachRefresh).
+export async function mcpAttachSecretRotatePOST(_req: Request, res: Response): Promise<void> {
   try {
-    rotateMcpAttachSecret(getDb())
-    log.info('mcp attach secret rotated')
-    res.json({ ok: true })
+    const gateway = await rotateMcpAttachSecret(getDb())
+    log.info({ gateway }, 'mcp attach secret rotated')
+    res.json({ ok: true, gateway })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

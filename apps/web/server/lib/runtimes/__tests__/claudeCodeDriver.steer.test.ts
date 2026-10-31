@@ -265,6 +265,31 @@ describe('createClaudeCodeDriver: steering through streaming input', () => {
     expect((await options)['permissionMode']).toBe('bypassPermissions')
   })
 
+  it('forces auto memory off in the child env, over an inherited or passed-in 0', async () => {
+    const prev = process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']
+    process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '0'
+    try {
+      const { sdk, options } = scriptedSdk(async function* (input) {
+        const first = (await input.next()).value as SdkUserMessage
+        yield { type: 'result', subtype: 'success', result: 'ok', user_message_uuids: [first.uuid] }
+      })
+      const driver = createClaudeCodeDriver(
+        OPTS,
+        {
+          ...CTX,
+          apiKeyEnv: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0' },
+        } as unknown as RuntimeRunContext,
+        { loadSdk: async () => sdk },
+      )
+      await driver.start()
+      const env = (await options)['env'] as Record<string, string>
+      expect(env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']).toBe('1')
+    } finally {
+      if (prev === undefined) delete process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']
+      else process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = prev
+    }
+  })
+
   it("keeps the run off the operator's own Claude Code settings and memory", async () => {
     const { sdk, options } = scriptedSdk(async function* (input) {
       const first = (await input.next()).value as SdkUserMessage

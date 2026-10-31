@@ -15,7 +15,7 @@ import express from 'express'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
-import { getMcpAttachSecret, resetMcpAttachSecretCache } from '../../lib/mcpAttachSecret'
+import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
 import { mcpTeamchatPost } from '../mcp'
 
 let dir: string
@@ -27,7 +27,6 @@ beforeAll(async () => {
   prevHome = process.env['CLAWBOO_HOME']
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-teamchat-http-'))
   process.env['CLAWBOO_HOME'] = dir
-  resetMcpAttachSecretCache()
   const app = express()
   app.use(express.json())
   app.post('/api/mcp/teamchat', mcpTeamchatPost)
@@ -38,7 +37,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()))
   resetDb()
-  resetMcpAttachSecretCache()
   if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
   else process.env['CLAWBOO_HOME'] = prevHome
   rmSync(dir, { recursive: true, force: true })
