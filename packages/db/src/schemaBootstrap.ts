@@ -240,7 +240,8 @@ const SCHEMA_DDL = `
       created_at           INTEGER NOT NULL,
       updated_at           INTEGER NOT NULL,
       completed_at         INTEGER,
-      room_id              TEXT
+      room_id              TEXT,
+      person_moved_at      INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_team_room   ON tasks (team_id, room_id);
