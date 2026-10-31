@@ -56,9 +56,9 @@ export interface SelectProps {
   onChange: (value: string) => void
   /** Compact (sm = 26 px) vs default (md = 32 px) trigger heights. */
   size?: SelectSize
-  /** Optional fixed menu width (px). Defaults to the trigger width; pass a larger
-   *  value when the trigger is compact but the option labels are long, so the menu
-   *  stays readable (it's clamped to the viewport so it never overflows the edge). */
+  /** Optional least menu width (px). The menu is never narrower than the trigger
+   *  or this, and grows past both to fit its widest option (up to
+   *  `MENU_MAX_WIDTH`, and never past the viewport's edge). */
   menuWidth?: number
   /** Render a sticky search box that filters the options. For long lists. */
   searchable?: boolean
@@ -84,7 +84,11 @@ const SIZE_STYLES: Record<
 
 interface MenuPosition {
   left: number
-  width: number
+  /** Null on the first layout of each open, while the menu takes its natural
+   *  width between `minWidth` and `maxWidth` to be measured. */
+  width: number | null
+  minWidth: number
+  maxWidth: number
   top?: number
   bottom?: number
   maxHeight: number
@@ -92,6 +96,8 @@ interface MenuPosition {
 
 const MENU_DESIRED_HEIGHT = 264
 const MENU_GAP = 4
+/** How wide the menu grows to fit its widest option, unless the trigger is wider. */
+const MENU_MAX_WIDTH = 320
 
 // Parse `<option>` children into the normalized option shape. Handles the two
 // forms consumers use — a mapped array of `<option>` and inline `<option>`
@@ -158,6 +164,8 @@ export function Select({
   const valueRef = useRef(value)
   valueRef.current = value
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([])
+  // The menu's natural width, measured once each open (see below). Null until then.
+  const fitWidthRef = useRef<number | null>(null)
 
   const selectedIndex = normalized.findIndex((o) => o.value === value)
   const selected = selectedIndex >= 0 ? normalized[selectedIndex] : undefined
@@ -178,13 +186,20 @@ export function Select({
       120,
       Math.min(MENU_DESIRED_HEIGHT, (openUp ? spaceAbove : spaceBelow) - 12),
     )
-    // The menu may be wider than a compact trigger (menuWidth); keep it left-anchored
-    // to the trigger but clamp so it never overflows the viewport's right edge.
-    const width = menuWidth && menuWidth > r.width ? menuWidth : r.width
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - width))
+    // The menu fits its widest option, so a long label, or the checked row's bold
+    // and check mark, never clips to a compact trigger: at least the trigger (or
+    // menuWidth), at most MENU_MAX_WIDTH unless the trigger is wider. It stays
+    // left-anchored to the trigger, clamped so it never overflows the viewport.
+    const minWidth = Math.max(r.width, menuWidth ?? 0)
+    const maxWidth = Math.max(minWidth, Math.min(MENU_MAX_WIDTH, window.innerWidth - 16))
+    const fit = fitWidthRef.current
+    const width = fit == null ? null : Math.min(Math.max(fit, minWidth), maxWidth)
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - (width ?? minWidth)))
     setPos({
       left,
       width,
+      minWidth,
+      maxWidth,
       maxHeight,
       ...(openUp
         ? { bottom: window.innerHeight - r.top + MENU_GAP }
@@ -193,8 +208,20 @@ export function Select({
   }, [normalized.length, menuWidth])
 
   useLayoutEffect(() => {
-    if (open) computePosition()
+    if (!open) return
+    fitWidthRef.current = null
+    computePosition()
   }, [open, computePosition])
+
+  // The first layout of each open lays the menu out at its natural width; measure
+  // it and place the menu for good. Kept for the whole open, so filtering a
+  // searchable list never resizes it. Both passes land before the first paint.
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (!pos || pos.width != null || !menu) return
+    fitWidthRef.current = Math.ceil(menu.getBoundingClientRect().width)
+    computePosition()
+  }, [pos, computePosition])
 
   // Escape and outside-press both run through the shared layer stack, which
   // hands the gesture to the TOPMOST open layer only. That is what keeps a
@@ -398,7 +425,9 @@ export function Select({
             style={{
               position: 'fixed',
               left: pos.left,
-              width: pos.width,
+              ...(pos.width != null
+                ? { width: pos.width }
+                : { width: 'max-content', minWidth: pos.minWidth, maxWidth: pos.maxWidth }),
               ...(pos.top !== undefined ? { top: pos.top } : {}),
               ...(pos.bottom !== undefined ? { bottom: pos.bottom } : {}),
               zIndex: 1000,
