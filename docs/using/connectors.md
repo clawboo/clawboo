@@ -1,136 +1,364 @@
 ---
-title: Connect an MCP server
-description: Run a verified MCP connector from Clawboo itself, sign in to a remote provider, add a server of your own, and see how grants govern what its tools may do.
+title: 'Connect tools to your agents'
+sidebarTitle: 'Connectors'
+description: 'Connect MCP servers and apps in Connectors, then give each one to the agents that should use it. Connecting alone gives no agent access.'
+icon: 'plug'
+keywords:
+  [
+    'connectors',
+    'MCP server',
+    'Connect an MCP server',
+    'Composio',
+    'grant',
+    'Stop sharing',
+    'Playwright',
+    'Chrome DevTools',
+  ]
 ---
 
-Use this page when you want an agent to reach something outside Clawboo: a Postgres database, a Linear workspace, a browser, your own filesystem. Open **Connectors** in the sidebar's nav (the plug icon), or press **Cmd/Ctrl + 3**. It lists 20 popular MCP servers, all of which Clawboo can connect for you, plus 400 more from the MCP registry that it has not checked.
+A connector gives your agents tools beyond chat: a browser, a database, Linear, Notion, Gmail. Each connector is an MCP server (Model Context Protocol, the common way to hand tools to an AI agent). Use this page to connect one, give it to the agents that need it, and take it back.
 
-Unlike the Marketplace, Connectors is not purely a catalog. Deploying an agent creates a record; connecting a connector starts a real process on your machine, or opens an authenticated session to somebody else's server, and hands its tools to your agents through the broker.
+Connecting and giving access are two separate steps. **Connect** starts the connector, but no agent can see or call its tools until you give it to that agent on the graph.
 
-## Prerequisites
+## Before you begin
 
-- Node on your `PATH`. A local connector is spawned with `npx`, and the first run downloads the pinned package.
-- For a remote connector, a browser on the same machine as the server. Sign-in redirects to a loopback port.
-- Nothing else. The catalog is committed, so the tab browses offline.
+- Node.js on the machine that runs Clawboo. Most connectors start with `npx`, and the first start downloads the connector's pinned package.
+- For a connector you sign in to (Linear, Sentry, Stripe, Composio), a browser on that same machine. The sign-in page sends you back to a temporary address on that machine.
+- An account or key for the service, when the connector asks for one.
 
-## The two kinds
+## Connect a connector
 
-| Kind       | What connecting does                                                             | What disconnecting does                                        |
-| ---------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| **Local**  | Spawns the server as a child process under your user account and lists its tools | Stops the process and reaps its tree                           |
-| **Remote** | Opens an authenticated HTTPS session using the token you signed in with          | Closes the connection; your sign-in is kept until you sign out |
+<Steps>
 
-The tile tells you which one you are looking at, and the detail pane's copy changes with it.
+<Step title="Open Connectors">
 
-## The two lists
+Click **Connectors** in the sidebar, or press **Cmd/Ctrl + 3**.
 
-### Gmail, Slack, Jira and the rest
+</Step>
 
-Clawboo cannot register an OAuth application with Google, Atlassian or Salesforce, so for a long time it had no Gmail, no Slack and no Jira. Those apps are in the list now, in their own band, reached through **Composio**.
+<Step title="Find the connector">
 
-Paste a Composio project key into the field on that band, once. From then on, press **Connect** on an app, approve it at the provider, and it stays connected. The key lives in Clawboo's encrypted vault and is never sent back to the browser: the app only ever learns whether one exists.
+Search by name, or pick a category. Connected ones come first, then the ones that need the least setup.
 
-Every app you connect appears as its own node on the graph, attached to the agents that can reach it. That is deliberate. One node marked "Composio" would hide the fact that an agent can read your email; a Gmail node says it plainly, and it is the form in which you can reason about it or take it away.
+</Step>
 
-The trade is worth knowing once. Composio signs you in to each app and keeps that app's tokens on its own servers. Clawboo holds only the project key. Anything you connect there is reachable by Composio, not only by your agents.
+<Step title="Press Connect">
 
-**Popular** and **More connectors** are the sets Clawboo has run and vouches for, split by how likely you are to recognise the name. **From the community** is the MCP registry snapshot, which Clawboo has not read. The counts stay separate and never merge into one total.
+What happens next depends on what the connector needs:
 
-A connected connector shows a green tick and nothing else. Everything else shows a button, and the button's verb is the price.
+| The connector needs                                                                          | What **Connect** does                                                                    |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Nothing (Playwright, Chrome DevTools, Context7, Knowledge Graph Memory, Sequential Thinking) | Starts it right away                                                                     |
+| A sign-in (Linear, Sentry, Stripe, Composio)                                                 | Opens the provider's sign-in page in a new tab, then connects                            |
+| A key (GitHub, Notion, Figma, Supabase, Airtable and others)                                 | Opens a field in the row. Paste the key and press **Save and connect**                   |
+| A folder or a database file (Filesystem, SQLite)                                             | Opens a field with suggestions. Pick one or type a path, then press **Save and connect** |
+| Nothing Clawboo has reviewed (a community entry)                                             | Shows the exact command it will run and asks you to confirm                              |
 
-| The button    | What happens                                                                                               |
-| ------------- | ---------------------------------------------------------------------------------------------------------- |
-| Turn on       | Nothing to set up. Five of the twenty are like this                                                        |
-| Connect       | A tab opens at the provider's own consent screen, then it connects                                         |
-| Add key       | One field, one **Save and connect** button. The value goes to the encrypted vault, never to a settings row |
-| Choose folder | Pick from folders Clawboo verified exist, or type a path                                                   |
-| Add it        | A registry entry. You are shown the exact command before anything runs                                     |
-| Turn off      | Stops it. Appears on the row when you hover or focus it                                                    |
+</Step>
 
-The list is ordered by distance from working, so the top of it is what you can have right now. Nothing needs the detail pane to get started: a key or a folder opens in place, on the row. The same predicate decides the row and the API, so a button you can see is a button the server will accept.
+<Step title="Check that it connected">
 
-For a connector that needs a folder or a file, a row of suggestion chips sits above the field: your Documents, Desktop, and the folder Clawboo runs in, each one checked server-side to actually exist. For SQLite, Clawboo looks for `.db` files near where it runs and offers those. Clicking a chip fills the field; typing still works. Saving what a connector asked for also connects it, in the one button, because there is no reason you should have to know that storing a key and starting the process are different operations.
+The row shows a green tick, and a message confirms it with the connector's tool count and the reminder "Connect it to an agent to use it."
 
-A search that misses everything says so plainly: nothing set up, and whether the MCP registry has a match. It never leaves you staring at an empty grid.
+</Step>
 
-<Note>
-The row never scores a connector. It used to show a `3/3 risk` chip counting [lethal trifecta](/appendices/glossary) legs, which describe what a connector can **reach** rather than whether it is safe. The detail pane says the same three things in sentences, where a consequence fits and a fraction does not.
-</Note>
+</Steps>
 
-## Signing in to a remote connector
+Now give it to an agent: see [Give a connector to an agent](#give-a-connector-to-an-agent).
 
-Clawboo has no registered OAuth app and cannot keep a client secret, so it registers **itself** with the provider, once per install, using [dynamic client registration](https://www.rfc-editor.org/rfc/rfc7591). The redirect lands on an ephemeral loopback listener rather than on an API route, because the redirect back is a cross-site navigation and Clawboo's always-on origin guard refuses exactly that.
+A connector that cannot run on this install shows **Why not** instead of **Connect**. It says what is missing and offers a config block you can paste into another app that can run it.
 
-A provider that publishes no registration endpoint cannot be signed into this way, and **GitHub** is the live case. Its MCP server accepts a personal access token instead, so its card reads **Needs a key**: create a fine-grained token scoped to the repositories your agents should work in, give it read and write on Contents, Issues and Pull requests, and paste it in.
+Keys and sign-in tokens go to Clawboo's encrypted vault on this machine, and no API sends them back to the browser. A key you exported in your shell (for example `NOTION_TOKEN`) is not picked up: enter it in Connectors.
 
-Tokens and the client registration live in the same encrypted vault as connector credentials, namespaced per connector, and are never returned by any API. **Sign out** deletes both and stops the connection.
+<AccordionGroup>
 
-<Note>
-Discovery is pinned to the server that answered: its OAuth metadata must live on its own origin, and the resource identifier it declares must name the server Clawboo is talking to. Without those two checks a compromised server could name somebody else's authorization server, send you to a genuine consent screen for that provider, and receive a token minted for them. See [SECURITY.md](https://github.com/clawboo/clawboo/blob/main/SECURITY.md).
-</Note>
+<Accordion title="Suggestions for Filesystem and SQLite">
 
-## Adding a server the catalog does not list
+Filesystem suggests the folder you started Clawboo from, plus your Documents, Desktop and Downloads folders, each only if it exists. SQLite suggests up to five `.db`, `.sqlite` or `.sqlite3` files within two folder levels of where you started Clawboo. You can always type a path instead.
 
-**Add your own MCP server** takes a command or a URL. A custom connector is connectable, and it gets no less access than a curated one: Clawboo assumes it reads private data, ingests untrusted content and can reach the network, because it cannot know otherwise. Adding one is the same act of trust as writing that command into any other MCP client's config.
+</Accordion>
 
-## The long tail
+<Accordion title="GitHub needs a token, not a sign-in">
 
-The list reads top to bottom in three bands: **Popular** first, then **More connectors**, then **From the community**. That last band is 400 servers from the official [MCP registry](https://registry.modelcontextprotocol.io). Press **Show 400 more** at the foot of the list, or type at least two characters in the search box, and they appear alongside the results above rather than instead of them. That first press opens the band; after it, the button reads **Show 60 more** and walks the rest a page at a time. A single character brings them in too, but only when nothing else matches it. The counts never merge into one total, because Clawboo has run the first two bands and none of the third.
+GitHub offers no sign-in that Clawboo can use, so its connector takes a personal access token. Create a fine-grained token, choose only the repositories your agents should work in, and give it Read and write on Contents, Issues and Pull requests. Paste it into the GitHub row.
 
-The band shows sixty at a time, with the ones whose name Clawboo recognises first. The registry itself holds far more than 400: Clawboo commits a snapshot of the most recently updated servers that pass its runnability checks, so the number is a reviewed slice rather than the whole directory.
+</Accordion>
 
-They are a committed snapshot, not a live fetch, so the directory still works with no network and does not change under you between releases. Refreshing it is a deliberate act: someone runs the ingest, reads the diff, and ships it.
+</AccordionGroup>
 
-**Add it** opens a confirmation, not a connection. It shows the exact command, the package and version it came from, and what it will ask you for:
+## What the list holds
 
-> Clawboo has not checked this one. It will run on your machine, as you, with the same access to your files and network that you have.
->
-> `npx -y pretrip-mcp@1.0.1`
+The list reads top to bottom in four bands:
 
-Confirming turns it into one of **your own** entries, with its origin recorded, and it lands on the ordinary key flow from there. Clawboo vouches for nothing, you see the command before it runs, and finding it and running it are two clicks apart rather than a retyped command line.
+| Band                         | What it is                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| **Popular**                  | Well-known connectors Clawboo has run and reviewed                                         |
+| **More connectors**          | The rest of the reviewed set, plus any server you added yourself                           |
+| **Reached through Composio** | Apps such as Gmail, Slack, Google Calendar and Jira, which you sign in to through Composio |
+| **From the community**       | Servers from the public MCP registry that Clawboo has not reviewed                         |
 
-## When an agent asks for one
+The reviewed set holds 20 connectors. The community band holds a snapshot of 400 registry servers, shipped with Clawboo, so the list works offline. It stays hidden until you press **Show 400 more** at the foot of the list or search for something; then it shows 60 at a time (**Show 60 more**, then **Show the last N**).
 
-An agent that needs something it cannot reach names the connector and stops, rather than browsing to the vendor's website or asking you to sign in on its behalf. Clawboo turns that into a card in the conversation, with one button per connector, labelled with what that connector actually costs: **Connect** where a sign-in is all it takes, **Add key** where you have to fetch a token first.
+### Apps reached through Composio
 
-The button opens that connector's own page, not the tab. You are one click from the field you need to fill, at the moment you learned you needed it.
+Clawboo cannot sign in to Google, Slack or Atlassian directly, so those apps go through [Composio](https://composio.dev), a separate service that signs you in to each app.
 
-The agent only knows to ask because each turn tells it which connectors are live, and names a few it could have with their prices. It is told never to work around a missing one. Nothing is connected on its say-so: the card is an offer, and you are the one who presses the button.
+<Steps>
 
-## What happens to its tools
+<Step title="Add your Composio key">
 
-Discovered tools are namespaced `mcp__<slug>__<tool>` and registered with the broker, so both HTTP-attached agents and native in-process runs see them. A tool that cannot be represented, or whose name collides with one already claimed, is dropped and reported rather than taking the connector down with it.
+In the **Reached through Composio** band, press **Get a key** to open Composio's API keys page. Copy the project key (it starts with `ak_`), paste it into the **Composio key** field and press **Save**. You do this once.
 
-Every connector-supplied tool is **grant-governed** from the moment you connect. Core builtins are not: they are Clawboo's own verbs, and a grant that could revoke them would be a switch for turning the product off.
+</Step>
 
-## Governance
+<Step title="Connect an app">
 
-Connecting mints an **owner** grant, which records that Clawboo attached this connector. It is real and it gates real calls, but it is never drawn as an edge: the tile itself is that statement. Dragging a connector tile onto a second agent on the [Ghost Graph](/using/ghost-graph) creates an **operator** grant, which is the one that draws an edge and carries a **Stop sharing** control. A connector tile also carries **Turn off**, which stops the connector itself. The two are deliberately never in the same position, because they do different things to different people.
+Press **Connect** on the app and approve it in the tab that opens. Back in Clawboo, the app's row reads **Connected**.
 
-The badge on a tile is not a second reading of a status column. The graph and the broker call the same `decideGrant`, over the same rows, so an expired grant renders as expired because that is what the runtime would do with it. A connector whose tool list no longer hashes to what you approved shows **drift**, and that is deliberately not collapsed into an error: the remediation is to read what changed, not to retry.
+</Step>
 
-## Environment and isolation
+<Step title="Connect the Composio connector">
 
-A connector child inherits an explicit **allowlist** of environment variables plus whatever credentials you entered for that connector. It never sees your provider API keys, your cloud credentials, or Clawboo's own vault key. Arguments are passed as an argv array, never as a shell string.
+Your agents reach every Composio app through the **Composio** connector in the **Popular** band. Press **Connect** on it once and sign in to Composio.
+
+</Step>
+
+<Step title="Give the app to an agent">
+
+Give the app to an agent the same way as any connector (next section): the graph's picker lists connected apps with the connectors. Each app an agent holds shows as its own tile, so you can see which agents can reach your email.
+
+</Step>
+
+</Steps>
+
+Composio keeps each app's sign-in tokens on its own servers, and Clawboo holds only its own key and sign-in for Composio. Anything you connect there is reachable by Composio, not only by your agents.
+
+## Give a connector to an agent
+
+You give access on a graph: the **Org chart**, a team's **Team graph** card, or the **Graph** card on an agent's page. Click a Boo to open its ring of tiles; each connector tile on the ring is one the agent can use.
+
+<Tabs>
+
+<Tab title="Pull a thread off the Boo">
+
+<Steps>
+
+<Step title="Start from the Boo">
+
+Hover the Boo: a small **+** port appears with **Drag to connect** beside it. Drag from the port and let go on an empty spot.
+
+</Step>
+
+<Step title="Pick the connector">
+
+In the menu that opens, choose **Connectors** and pick one. A connected connector reads **Give access**. One that is not connected yet shows what it needs (for example **Turn on** or **Connect**), and Clawboo connects it first. Connectors that need a key or a folder say to set them up in Connectors first.
+
+</Step>
+
+<Step title="Check the ring">
+
+The Boo's ring opens and the new tile joins it. The agent has write access, and risky calls ask you first.
+
+</Step>
+
+</Steps>
+
+</Tab>
+
+<Tab title="Place a tile, then drop it on a Boo">
+
+<Steps>
+
+<Step title="Add the tile">
+
+Press **+** on the graph, choose **Connectors**, and pick one. A loose tile marked **Not attached** appears.
+
+</Step>
+
+<Step title="Drop it on the Boo">
+
+Point at the tile: a port appears with **Drag onto an agent** beside it. Drag from the port and let go on the Boo that should have it. The tile joins the Boo's ring, with write access and risky calls asking first.
+
+</Step>
+
+</Steps>
+
+</Tab>
+
+<Tab title="Share it from another agent">
+
+<Steps>
+
+<Step title="Drag an existing tile">
+
+On the ring of an agent that has the connector, drag from the small handle on the right edge of its tile and let go on another Boo.
+
+</Step>
+
+<Step title="Choose the access">
+
+The **Share** dialog asks for **Read**, **Write** or **Admin** access (see the table below) and starts on **Read**. Press **Grant read access** (the label follows your choice). The first agent keeps its own access.
+
+</Step>
+
+</Steps>
+
+</Tab>
+
+</Tabs>
+
+| Access    | What the agent may do                                                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------- |
+| **Read**  | Look things up. Only tools that a reviewed connector marks as read-only; the agent does not see the rest |
+| **Write** | Create and update. Risky calls ask you first                                                             |
+| **Admin** | Also the tools a reviewed connector marks as destructive, such as deleting. Use sparingly                |
+
+Pick **Write** for most connectors. Many tools do not say whether they only read, so a **Read** grant hides them.
+
+### Who can use a connector
+
+- **Right after you connect it:** no agent. Its tools are hidden from every agent, and a call to them is refused.
+- **After you give it to an agent on the graph:** that agent only, with the access you chose. Every other agent still has no access until you give it to them too.
+- **The exception:** the two browser connectors, which every agent gets automatically (next section).
+
+### Every agent gets a browser
+
+The two browser connectors, **Playwright** and **Chrome DevTools**, are connected for you the first time Clawboo starts, and every agent gets both with write access. In Chrome DevTools, actions that change something, such as opening a page or clicking, ask you first. Playwright marks each of those actions as destructive, so with write access an agent sees only Playwright's reading tools, such as a snapshot of the page. To let an agent act through Playwright, **Stop sharing** Playwright with it, then share it again from another agent's tile with **Admin** access. Each action still asks first. Each agent has its own browser profile, so two agents can be signed in to different accounts on the same site. The browser tiles sit on the agent's ring like any other connector, so you can take them away (next section), and a removed browser stays removed after a restart.
+
+## See and take back access
+
+The graph is the list of who can use what: every tile on a Boo's ring is something that agent can reach. A tile that several agents share shows a small count, such as **x3**; hover it to highlight the others.
+
+Click a connector tile to see its toolbar:
+
+| Button                   | What it does                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| **Stop sharing**         | Takes the connector away from this agent only. The message that confirms it offers **Undo** for a few seconds |
+| **Turn off**             | Stops the connector for every agent. It stays off after a restart until you connect it again                  |
+| **Sign in**              | Shown when the connector's sign-in has expired                                                                |
+| **Retry**                | Shown when the connector reports an error. Reads its state again                                              |
+| **Enable** / **Disable** | Shown on capabilities that a runtime lets Clawboo switch                                                      |
+
+In Connectors, **Turn off** appears when you hover a connected row. A connector you signed in to also has **Sign out** in its detail pane (click the row): it deletes the stored tokens and stops the connection. A server you added yourself has **Remove**.
+
+## When a connector call asks you first
+
+Every call an agent makes through a connector passes Clawboo's checks first. When a call needs your answer, an approval card appears in **Needs you** on the board, in the chat where the agent is working, and in the **Governance** and **Capabilities** panels. If nobody answers within five minutes, the call is refused. See [Approvals](/using/approvals) for the cards themselves.
+
+Which calls ask depends on the connector:
+
+- **GitHub, Linear, Sentry, Airtable and Notion, and any server you added yourself, ask before every call.** They can read your private data, take in content from outside and send data out. That combination is how data gets leaked, so you cannot turn these questions off.
+- **Actions in apps reached through Composio ask every time too.**
+- **On the other connectors**, a call that only reads runs without asking when Clawboo reviewed the connector and the tool says it only reads. A call that changes something asks first when the connector can reach the internet. A tool the connector marks as destructive needs **Admin** access and asks first.
+
+Some cards offer **Do not ask again for this for 30 days**. Ticking it saves your answer for that tool on that agent, but a call that changes or deletes something still asks every time: a second check asks about those calls whatever you ticked.
+
+## When an agent asks for a connector
+
+Agents are told which connectors are connected and which ones you could add. An agent that needs one it does not have says so and stops, and a card in the chat offers a button for each connector it named, such as **Connect Linear** or **Add key Notion**. The button opens that connector in Connectors.
+
+The card only takes you to the connector: connecting it there does not give the agent access. Give it to the agent on the graph, then press **Continue** on the card (in a team chat) so the agent picks the work back up.
+
+## Add your own MCP server
+
+At the foot of the list, **Add your own MCP server** adds a server that speaks MCP over stdio, which means a program Clawboo starts on this machine.
+
+<Steps>
+
+<Step title="Fill in the form">
+
+Enter a **Name**, the **Command** (an absolute path, or a program name found on your `PATH`) and its **Arguments**, separated by spaces. Arguments go straight to the program, never through a shell.
+
+</Step>
+
+<Step title="Add it">
+
+Press **Add**. The server joins **More connectors** as one of your own entries.
+
+</Step>
+
+<Step title="Connect it and give it to an agent">
+
+Press **Connect** on its row, then give it to an agent on the graph.
+
+</Step>
+
+</Steps>
+
+The form has no URL field, so a remote MCP server cannot be added here. A community entry works the same way once added: **Connect** on it shows the exact command, package and version, and **I trust it, add it** makes it one of your own entries. Clawboo has reviewed neither kind, so it treats them as able to read private data, take in outside content and send data out, and every call they make asks you first.
+
+## OpenClaw agents and connectors
+
+OpenClaw agents reach Clawboo's tools through one setting in the OpenClaw Gateway that all of them share, so Clawboo cannot tell which OpenClaw agent is calling. As a result, connectors you give an OpenClaw agent on the graph do not reach it, the browser connectors included. It can use apps reached through Composio, and each action in those apps asks you first. The Gateway's own MCP servers and plugins are separate: they are listed in the [Capabilities](/using/capabilities) panel.
+
+## Keep connectors safe
 
 <Warning>
-A connector child is still a process running as you. It can read your home directory, your SSH keys, and the Clawboo database. The environment allowlist is the vector a local-first tool can close; this one it cannot. Connect servers you would be willing to run yourself.
+
+A local connector is a program running under your user account. Clawboo starts it with a short list of ordinary environment variables plus the keys you entered for it, never your AI provider keys, and passes its arguments without a shell. That is not a sandbox: the connector can still read any file your account can, including your SSH keys and Clawboo's database. Connect only servers you would be willing to run yourself.
+
 </Warning>
 
 ## Troubleshooting
 
-**The first connect takes a minute.** A cold `npx` downloads the pinned package before the handshake completes. The card shows **Working** throughout, and a disconnect issued during that window waits for the attempt rather than reporting that nothing was connected.
+<AccordionGroup>
 
-**"Could not list tools".** The server came up and then failed discovery. Its own last words are included in the error where it printed any. The child is stopped, so nothing is left running.
+<Accordion title="An agent says a connector is connected but cannot use it">
 
-**Sign-in opens a blank tab.** Your browser blocked the popup. Allow pop-ups for Clawboo and press **Sign in** again.
+Connecting makes a connector available; it gives no agent access. Agents are told which connectors are connected whether or not they hold one. Give the connector to that agent on the graph, then ask again.
 
-**Every call is denied with spec drift.** The connector no longer matches what was approved for it. Reconnecting re-pins the command and the launch argument you can see, but never the tool inventory, which nobody has reviewed. Clearing tool drift takes revoking the grant and granting it again.
+</Accordion>
 
-## See also
+<Accordion title="Connect fails with: needs npx, which comes with Node.js">
 
-- [Marketplace](/using/marketplace) for teams, agents and skills
-- [Ghost Graph](/using/ghost-graph) for sharing and revoking a connector
-- [Capabilities dashboard](/using/capabilities-dashboard) for the inventory view
-- [Approvals](/using/approvals) for what happens when a call needs one
-- [Ghost Graph](/using/ghost-graph) for `Turn off` and `Stop sharing` on a connector tile
+The machine running Clawboo has no `npx` on its `PATH`. Install Node.js from [nodejs.org](https://nodejs.org), restart Clawboo, and press **Connect** again.
+
+</Accordion>
+
+<Accordion title="The first connect fails with: did not respond in time">
+
+The first start of a connector downloads its package, which can take a minute on a slow network. The button reads **Working…** meanwhile. Press **Connect** again; the second start is faster.
+
+</Accordion>
+
+<Accordion title="Connect fails with: did not accept that key">
+
+The service refused the key or token. Copy it again in full, and check that it has not expired. Then open the connector's detail pane (click its row) and paste it under **What you gave it**.
+
+</Accordion>
+
+<Accordion title="Connect fails with: accepted the key but refused the request">
+
+The key works but lacks a permission. Check the scopes or permissions on the token you created at the service, for example Read and write on Contents, Issues and Pull requests for GitHub.
+
+</Accordion>
+
+<Accordion title="Sign-in says: Your browser blocked the sign-in window">
+
+Allow pop-ups for the Clawboo address in your browser, then press **Connect** (or **Sign in**) again.
+
+</Accordion>
+
+<Accordion title="Saving the Composio key says: That is a Composio login key">
+
+You pasted the key the Composio command line uses. The key this field needs starts with `ak_` and is on your Composio project's API keys page (**Get a key** opens it).
+
+</Accordion>
+
+<Accordion title="A tile shows: Changed since you approved it">
+
+Clawboo refuses that connector's calls because its command or its list of tools changed after you gave access. If you changed its key, folder or command yourself, turn it off and connect it again in Connectors: that approves the new setup. A changed tool list is not approved again automatically, and there is no dashboard control that approves one, so read what changed in the connector's detail pane before you rely on it.
+
+</Accordion>
+
+</AccordionGroup>
+
+More fixes for error messages are in [Troubleshooting](/help/troubleshooting).
+
+## Next steps
+
+- [Approvals](/using/approvals): answer the cards that connector calls raise.
+- [Capabilities](/using/capabilities): every skill, tool and connector your agents have, in one list.
+- [Org chart](/using/org-chart): the graph where you give and take back access.
+- [What agents can do](/concepts/permissions): what an agent can reach on each runtime, beyond connectors.
+- [Connectors API](/reference/rest-api/connectors): connect connectors and manage access from scripts.

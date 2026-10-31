@@ -1,371 +1,279 @@
 ---
-title: Clawboo Native runtime
-description: 'The clawboo-native in-process conversational harness: provider SDKs direct, no Gateway, jailed file tools, an approval-gated shell, in-process MCP, and how to connect a key.'
+title: 'Clawboo Native'
+sidebarTitle: 'Clawboo Native'
+description: 'The built-in runtime: agents run on a provider key or a local Ollama with nothing to install. Providers, default models, tools, costs and limits.'
+keywords:
+  [
+    'clawboo-native',
+    'native runtime',
+    'native harness',
+    'built-in runtime',
+    'ollama',
+    'providers',
+    'default provider',
+    'make default',
+    'run_command',
+    'delegate',
+  ]
 ---
 
-`clawboo-native` is Clawboo's own [runtime](/appendices/glossary): an in-process conversational harness that talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama, plus seven more OpenAI-compatible providers) with **no OpenClaw Gateway** in the loop. It is one of the five runtimes, a co-equal peer beside `openclaw`, `claude-code`, `codex`, and `hermes`; there is no conversion or export between a native agent and any other runtime's agent.
+Clawboo Native is the runtime built into Clawboo. It runs each agent's conversation inside the Clawboo server and calls your AI provider directly, so there is nothing to install and no Gateway to run. Onboarding puts your first team on it.
 
-Use this page to understand what the native runtime is, its capabilities and the shared MCP spine it consumes, its persistent per-identity home, its jailed file tools, the approval-gated shell a board task can switch on, how providers are routed and how fallback works, how a turn is priced, and how to connect it (paste a provider key; that is the entire setup, because nothing has to be installed).
+- **Best for:** most teams. It works with ten cloud providers or a free local model, and it reports cost after every turn.
+- **You need:** an API key for one of the providers below, or a local [Ollama](https://ollama.com) with a chat model pulled.
 
-## What it is
+## Set up
 
-The native runtime is the only [RuntimeAdapter](/appendices/glossary) that _hosts_ its own conversation. The wrapped one-shot runtimes (`claude-code`, `codex`, `hermes`) re-shape a CLI or SDK subprocess's output into the normalized [RuntimeEvent](/appendices/glossary) stream; the native runtime instead runs an in-process turn loop, calling provider SDKs directly and emitting native events that map straight onto the same event shape.
+Pick one way to give Clawboo Native a model. You can add more providers later.
 
-Two consequences follow:
+<Tabs>
+<Tab title="Provider key">
 
-- **No install, no subprocess.** The adapter (`@clawboo/adapter-native`) and the server-side harness ship inside the Clawboo server. The descriptor marks it `builtIn: true` with `healthBin: null` and `installCommand: null`. There is nothing to install; connecting is purely pasting a provider key (or none, for Ollama).
-- **No Gateway.** With a single pasted key, the native runtime runs Clawboo end-to-end: a leader delegates over the Tasks MCP, a specialist claims and works in a [worktree](/appendices/glossary), and the result lands on [the board](/concepts/the-board), all without an OpenClaw Gateway. The provider SDKs (`@anthropic-ai/sdk`, `openai`) are imported lazily inside the first turn, so booting the server costs nothing.
+<Steps>
+<Step title="Get an API key">
 
-<Note>
-The native runtime is a peer, not a substitute. Clawboo never migrates a `claude-code` / `codex` / `hermes` / `openclaw` agent *into* a native agent; the adapter package deliberately ships no cross-runtime agent-file mapping. A team can mix native agents with agents on any other runtime.
-</Note>
+Create a key on your provider's site. Most provider rows on the **Providers** page have a **Get a key** link.
 
-## Capabilities
+</Step>
+<Step title="Save it in Clawboo">
 
-The native adapter reports the following capabilities. Callers branch on these (never on the runtime id), so they describe what the host may do with a native run.
+Open **Settings > Providers**, click **Connect** on the provider's row, paste the key and click **Save**. Clawboo checks the key with the provider before it saves it. If the check fails, the reason shows under the field, and **Save anyway** stores the key without the check (useful when the provider just can't be reached).
 
-| Capability            | Value                                                                | Meaning                                                                          |
-| --------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `streaming`           | `true`                                                               | Token deltas surface live                                                        |
-| `mcp`                 | `true`                                                               | Attaches Clawboo's MCP servers in-process                                        |
-| `worktrees`           | `true`                                                               | Gets an isolated git worktree for file-mutating tasks                            |
-| `resume`              | `true`                                                               | A same-runtime resume reloads the prior transcript                               |
-| `toolApproval`        | `true`                                                               | Tool calls go through the broker's approval pipeline                             |
-| `steering`            | `'live'`                                                             | A comment on the task is read at the next turn (see the turn loop below)         |
-| `models`              | `['claude-haiku-4-5', 'claude-sonnet-4-6', 'gpt-4o-mini', 'gpt-4o']` | A routable surface, not an exhaustive list; `AgentConfig` picks the actual model |
-| `contextWindowTokens` | `200000`                                                             | Conservative floor across providers; drives the session-rotation watermark       |
-| `runtimeClass`        | `'native'`                                                           | Resolves to the native-preservation integration plan                             |
-| `nativeHome`          | `{ scope: 'per-identity', persist: true }`                           | A stable home that survives across runs                                          |
-| `nativeMemory`        | `'preserve'`                                                         | The persisted transcript is its private cognitive plane                          |
-| `nativeSkills`        | `'none'`                                                             | Capabilities ride the shared broker, not a native skills dir                     |
-| `nativeChannels`      | `'none'`                                                             | The shared MCP spine is the only voice                                           |
-| `nativeScheduler`     | `false`                                                              | The host owns when-to-run                                                        |
+In onboarding, the **Connect your AI provider** step does the same thing.
 
-Because `runtimeClass` is `'native'` with `nativeHome: { scope: 'per-identity', persist: true }`, the integration planner resolves the run to a **persistent per-identity home** with `preserveMemory: true`. This is the [private plane](/appendices/glossary) the native runtime keeps: its conversation transcripts. Clawboo's [shared plane](/appendices/glossary) (board, memory, tools, team chat) is reached through MCP; the native runtime never co-runs its own scheduler.
+</Step>
+<Step title="Check the runtime">
 
-## The agent config
+Open **Settings > Runtimes**. **Clawboo Native** reads **Connected**. Click **Manage**, and your provider is listed under **LLM providers**.
 
-A native agent is more than its registry row. Its behaviour is a normalized `AgentConfig`, persisted as JSON in a settings key-value row keyed by agent id (`native-agent-config:<agentId>`) and validated through a Zod schema on every load; a corrupt blob degrades to the default config instead of crashing a run.
+</Step>
+</Steps>
 
-```ts
-interface AgentConfig {
-  id: string
-  name: string
-  systemPrompt: string // the STABLE prompt tier (KV-cache safe)
-  primaryProvider: string // one of the 11 KNOWN_PROVIDERS ids (see the routing table)
-  primaryModel: string
-  fallbacks?: { provider: string; model: string }[]
-  envVar: string // vault env-var NAME for the primary key (never the secret)
-  tools: {
-    memory: boolean // Memory MCP (shared facts)
-    tools: boolean // Tools MCP / managed capability broker
-    tasks: boolean | 'read' // Tasks MCP / the durable board; 'read' attaches only list_tasks + get_task
-    teamchat: boolean // TeamChat MCP — post + listen as a named peer
-    shell?: boolean // the run_command tool; optional, and absent from the defaults, so absent means off
-    custom?: string[] // reserved
-  }
-  participantKind: string // 'agent' today; open set
-  maxTurns?: number // default 16
-  budgetUsd?: number | null // null = system default; a set value mints an agent-scope hard-cap budget
-  createdAt: number
-  updatedAt: number
-  tenantId: string | null // dormant multi-tenant seam — always null today
-}
-```
+</Tab>
+<Tab title="Local Ollama (no key)">
 
-When the assigned agent id has no stored config (for example a board task assigned to an arbitrary id), the run falls back to a default config: provider `anthropic`, model `claude-haiku-4-5`, `maxTurns` 16, and Memory, Tools and TeamChat on with Tasks attached read-only. Board writes are deliberate, never a fallback: a team agent silently defaulting to full board access would race the orchestrator's claims. The provider key still resolves through the host's vault chain.
+<Steps>
+<Step title="Pull a model">
 
-A native agent is created through the native AgentSource; there is no Gateway and no provider SDK call at creation. The id is minted as `native-<slug>-<6 chars>`, the `AgentConfig` rides the registry input's `execConfig` (with `SOUL.md` as the `systemPrompt` fallback), and if `budgetUsd` is set, an agent-scope hard-cap budget is created at the same time.
-
-An agent created without a provider (a team deployed with its model rows left on **Default**) gets one at creation, by tier:
-
-1. **Your default, when its provider is set up.** That is the provider + model you picked at onboarding or with **Make default** in **Settings → Runtimes → Clawboo Native → Manage**, used while its key resolves (or, for Ollama, while Ollama is set up). The leader runs that model. Specialists run the provider's cheaper specialist model (`claude-haiku-4-5` on Anthropic, `gpt-4o-mini` on OpenAI), except on Ollama, where every agent runs the model you picked, still checked against what Ollama has pulled (see [Ollama models](#ollama-models)).
-2. **Otherwise, the first set-up provider** in the order Anthropic, OpenAI, OpenRouter, Ollama, then the extra providers, on its built-in leader or specialist model. With nothing set up, the agent is created on Anthropic and its first run reports the missing key.
-
-A key in your shell or in OpenClaw's `~/.openclaw/.env` therefore never outranks the provider you picked. The team-deploy dialog labels each row left on **Default** with the model that row will get (`GET /api/onboarding/native-leader-model` returns both tiers as `resolved`), so the leader row and the specialist rows can name different models.
-
-## Providers and routing
-
-A native run's candidate list is the agent's `primaryProvider` plus its declared `fallbacks`, each keyed by the conventional vault env var:
-
-| Provider     | Env var              | Client                                                                                | Notes                                                            |
-| ------------ | -------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `anthropic`  | `ANTHROPIC_API_KEY`  | Anthropic SDK (`messages.create`, streaming)                                          | Empty assistant text blocks are omitted (Anthropic rejects them) |
-| `openai`     | `OPENAI_API_KEY`     | OpenAI SDK (Chat Completions, streaming)                                              | `api.openai.com` gets `max_completion_tokens`                    |
-| `openrouter` | `OPENROUTER_API_KEY` | OpenAI SDK with `baseURL: https://openrouter.ai/api/v1`                               | Compat endpoint gets `max_tokens`                                |
-| `ollama`     | _(keyless)_          | OpenAI SDK with `baseURL: <OLLAMA_BASE_URL>` (default is `http://localhost:11434/v1`) | No key needed                                                    |
-| `google`     | `GEMINI_API_KEY`     | OpenAI SDK with `baseURL: https://generativelanguage.googleapis.com/v1beta/openai`    | Google                                                           |
-| `xai`        | `XAI_API_KEY`        | OpenAI SDK with `baseURL: https://api.x.ai/v1`                                        | xAI                                                              |
-| `groq`       | `GROQ_API_KEY`       | OpenAI SDK with `baseURL: https://api.groq.com/openai/v1`                             | Groq                                                             |
-| `mistral`    | `MISTRAL_API_KEY`    | OpenAI SDK with `baseURL: https://api.mistral.ai/v1`                                  | Mistral                                                          |
-| `together`   | `TOGETHER_API_KEY`   | OpenAI SDK with `baseURL: https://api.together.xyz/v1`                                | Together                                                         |
-| `cerebras`   | `CEREBRAS_API_KEY`   | OpenAI SDK with `baseURL: https://api.cerebras.ai/v1`                                 | Cerebras                                                         |
-| `moonshot`   | `MOONSHOT_API_KEY`   | OpenAI SDK with `baseURL: https://api.moonshot.ai/v1`                                 | Moonshot                                                         |
-
-The OpenAI client is also the carrier for OpenRouter, Ollama, and the seven extra providers; they all ride the exact same client with a base-URL override, so no extra dependency is needed. The last seven are resolved through one registry (`NATIVE_COMPAT_PROVIDERS`), which the router, the live-model fetcher, and the key-health probe all read. An unknown provider id with no base-URL convention is refused.
-
-### Fallback
-
-HTTP SDK construction can't fail, so fallback fires **per turn, at the first call failure**, and only _before anything was yielded_:
-
-1. The active candidate streams a turn. If it fails with a fallback-worthy error (`auth`, `rate_limit`, `overloaded`, `network`) before yielding any output, the next candidate is tried.
-2. Once a candidate yields, it is surfaced as-is; a mid-stream retry would duplicate the streamed text, so a mid-stream error propagates.
-3. A working candidate becomes **sticky** for the rest of the conversation, and cost is attributed to the provider that actually served the turn.
-
-Keyless non-Ollama candidates (a provider whose env var resolves to nothing) are dropped from the candidate list; there is nothing to authenticate with. Ollama candidates are dropped too once you remove Ollama (**Disconnect Ollama**), until you turn it back on.
-
-<Note>
-Provider error codes are read structurally from the HTTP `.status` (`401`/`403` → `auth`, `429` → `rate_limit`, `5xx`/`529` → `overloaded`), never from SDK error-class names, so a provider SDK major-version bump can't break the routing logic.
-</Note>
-
-## The turn loop
-
-Each `start()` is exactly one session: a fresh session id (`native-<uuid>`), a neutral message transcript, the routed provider client, and a tool universe. The loop runs up to `maxTurns` iterations:
-
-```mermaid
-flowchart TD
-    A[start: fresh session id] --> B[assemble system prompt<br/>+ build tool universe once]
-    B --> C[turn 1 user message:<br/>context + message]
-    C --> D{turn loop<br/>≤ maxTurns}
-    D --> E[stream a model response]
-    E --> F[emit text-deltas<br/>+ per-turn cost delta]
-    F --> G{model called<br/>tools?}
-    G -->|no| H[done: success]
-    G -->|yes| I[execute each tool call<br/>local file tool or MCP]
-    I --> J[feed tool results back<br/>as next-turn input]
-    J --> D
-    D -->|ceiling hit| K[done: max_turns<br/>host rotates session]
-```
-
-Some loop properties worth knowing:
-
-- **KV-cache discipline.** The system prompt is the stable tier (the agent's `systemPrompt` plus a _date-only_ stamp, never minute precision, which would bust the cache prefix). The tool universe is built **once** before turn 1 and sorted by name (deterministic order is a cache key). The caller-assembled run context (which already carries the volatile memory block in its tail) arrives as the first user message; nothing volatile ever enters the system prompt.
-- **Per-turn cost.** Each completed provider response emits a `cost` event whose usage and USD are _that turn's deltas_, not a running total. The host's budget kill-switch therefore sees live spend mid-run, not one bill at the end. This is something the wrapped one-shot runtimes can't offer.
-- **Steering.** A comment on the task the run is working on is queued into the conversation and read at the start of the next turn, as a user message. If the model answers without calling a tool while a comment sits unread, the loop runs one more turn so the comment is read rather than dropped. Ambient inputs (a teammate's post, a team notice) use a separate queue that never keeps a finishing run going. See [steering a running task](/runtimes/index#steering-a-running-task).
-- **Terminals.** No tool calls → a clean `success` done. Hitting `maxTurns` is a clean `max_turns` terminal (the host rotates to a fresh successor session carrying a handoff note), distinct from a failure. An abort or a provider error ends the run too; and _every_ terminal persists the transcript.
-
-## Built-in file tools
-
-When a native run has a working directory (a worktree), it gets three built-in file tools, the runtime's [private plane](/appendices/glossary), the way every coding runtime ships its own file primitives. The shared MCP spine carries coordination, not workspace edits. A fourth local tool, `run_command`, joins them only when someone switched the shell on for that Boo; see [Running commands](#running-commands).
-
-| Tool         | Purpose                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------- |
-| `read_file`  | Read a UTF-8 file relative to the workspace root (capped at 64 KiB; truncated past that) |
-| `write_file` | Write a UTF-8 file (creates parent directories)                                          |
-| `list_files` | List a directory's entries (default: the workspace root)                                 |
-
-<Info>
-The file tools are **strictly jailed to the run's worktree**. Every path is resolved under the working directory and must stay inside it; an absolute path or any `..` escape is rejected. A run with **no working directory** (a research or review task) gets **no file tools at all**; there is nothing to edit.
-</Info>
-
-## Running commands
-
-`run_command` lets a native Boo propose running **one program** in its working folder. It is the only way a native Boo can run anything at all, and every single command is put in front of a person before it runs.
-
-### Every precondition for the tool to exist
-
-All four must hold, or `run_command` is simply **absent** from the model's tool list rather than present and refusing:
-
-1. **The shell is switched on for that Boo**, `AgentConfig.tools.shell === true`. The field is optional and deliberately absent from the default config, so absent reads as off and a shell never arrives switched on.
-2. **The run has a working directory.** In practice that means a **board task with a provisioned worktree**. A 1:1 chat, a team-room turn and a dispatch turn carry no working directory, so the tool is absent there. (The post-task verification critic does get one, but it runs under the default config with the switch off.)
-3. **The host is not Windows.** See [Windows has no shell at all](#windows-has-no-shell-at-all).
-4. **The run is a `clawboo-native` run.** `run_command` is a **local** tool, dispatched by the native conversation loop rather than registered with the capability broker, precisely so it cannot appear inside a `claude-code`, `codex`, `hermes` or `openclaw` agent. It is not an MCP tool and is not listed in [MCP tools](/reference/mcp-tools).
-
-### The switch
-
-Agent detail, the **Permissions** tab (which appears for native and OpenClaw Boos only), under **Running commands**.
-
-- The switch reads **"Let this Boo ask to run commands"**, with the helper line "You are asked before every command. Nothing is remembered, so a command you allowed once will ask again the next time."
-- Turning it on raises a confirm dialog titled **"Let this Boo ask to run commands?"**, with the body "It will be able to propose running programs on this computer. You are asked to approve every command before it runs, and nothing is remembered, so you will see each one." The confirm button reads **"Allow it to ask"**.
-- Once it is on, the card adds: "Commands run in this Boo's working folder, as you, with access to the network. One program at a time: it cannot use pipes, redirects, or a shell."
-
-The same setting over REST: `GET /api/agents/:agentId/shell` returns `{ enabled }`, and `POST /api/agents/:agentId/shell` with `{ enabled: boolean }` changes it. The POST is rate-limited, and it re-reads the stored config after writing, so the response is what is actually stored rather than what was asked for. Both routes answer `400` for a Boo on any other runtime: an OpenClaw Boo's shell is governed by its Gateway policy instead.
-
-<Note>
-The confirm dialog is **browser-side only**. `POST /api/agents/:agentId/shell` accepts `{ "enabled": true }` directly, and `POST /api/agents` with `sourceId: 'clawboo-native'` can set `execConfig.tools.shell` at creation. So: every native Boo created through clawboo's own screens starts with the shell off.
-</Note>
-
-### The tool contract
-
-- Input is `argv` (an array of strings, required) and `why` (a string, optional: "One short sentence on why this command is needed").
-- **argv only.** The program and each argument are separate array items, never one string, and the child is spawned with `shell: false`, always. There are no pipes, no redirects and no shell operators.
-- **A person is asked every single time, and nothing is remembered.** There is no allowlist at this tier, so the card never offers **Always**: an "Always" that behaved as an allow-once would be a control that lies.
-- **One run may ask about 10 commands.** The next call is refused without reaching anyone.
-- **The card stays answerable for 10 minutes.**
-- **Output is capped at 64 KiB**, stdout and stderr in arrival order, and the result says when the tail was dropped. A command is never killed merely for being chatty.
-- A **non-zero exit is returned as an error result with the output still attached**. A command stopped by a signal has no exit code, and the result then opens with `The command finished with exit code unknown.`
-- A command that runs past five minutes is stopped: SIGTERM to the process group, escalating to **SIGKILL after a 3 second** grace window. Stopping the run kills it the same way.
-
-What the approval card shows: the headline `<Boo> wants to run a command on this computer.`, the chip "Runs a command", the **Command** and the **Folder** inline (never behind the disclosure), and an allow button reading **"Run it"**. See [Approvals](/using/approvals) for answering one.
-
-### Refused before anyone is asked
-
-These never reach a person. They come back to the model as a plain error so it can rephrase, and are not recorded as a human refusal:
-
-- An `argv` that is not a non-empty array of strings, holds more than 64 items, or carries an item over 2048 bytes.
-- Any control character in an argument. A NUL would truncate the string at the syscall boundary, so what a person read on the card and what the kernel receives would differ.
-- An `argv[0]` carrying a path separator without being an absolute path: a bare program name or an absolute path, nothing in between.
-- A program that resolves to a denylisted name, or a script whose shebang names one.
-
-### Program resolution
-
-Before the approval row is written, clawboo resolves the program with `realpath` against the **child's** `PATH`, applies the denylist to the **resolved** basename, reads the file's first line and checks **both** of the first two shebang words (so `#!/usr/bin/env python3` cannot hide the interpreter in the second word), and records the file's identity (device, inode, size, and both timestamps). The **resolved path is what gets spawned**, so the program named on the card is the program that runs. That identity is re-checked immediately before the spawn, so a binary swapped while the card waits is not run. It narrows the window rather than closing it: the file can still change between that last check and the spawn.
-
-The denylist is 59 basenames in six groups: shells, run-another-program wrappers, interpreters, package runners, build tools whose job is running shell recipes, and anything that runs a command on another machine or in a container. Matching strips version suffixes, so `python3.11` and `node22` are caught alongside `python` and `node`.
-
-<Danger>
-**The denylist is a speed bump, not a sandbox.** `git -c core.pager=...`, `find -exec` and `awk 'BEGIN{system(...)}'` all reach a shell without appearing on it, and a test in the repo pins those shapes as **accepted** so that no future reader mistakes the list for a boundary. The list only removes the commands whose effect a person could not have read off the card. **The human answering the card is the boundary.** Nothing sandboxes an approved command: it runs on this computer, in the Boo's working folder, as the user running clawboo, with access to the network.
-</Danger>
-
-### The child process
-
-- The child gets an **allowlist** environment, not the server's ambient one. On a Unix host the names that pass through are `PATH`, `HOME`, `SHELL`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `TMPDIR`, `LOGNAME`, `TERM`, `USER`, and the proxy variables.
-- **Provider credentials are not forwarded**, so an approved `printenv` does not return your API keys.
-- It runs in the Boo's working folder, as the user running clawboo, with network access.
-
-### Windows has no shell at all
-
-On Windows the tool is **absent, not degraded**. A Windows shim cannot be launched without a shell, and launching a shell is the property this design refuses, so `run_command` is never offered on a Windows host. The switch and its routes still work there; the tool simply never appears in a run.
-
-### Honest limits
-
-- **The card does not show the Boo's stated reason.** `why` is stored on the approval row, but the shell card carries no agent note: what you see is the command and the folder, and nothing about why the Boo wants it.
-- **Declining can end the task, not just the command.** A refusal latches the tool for the rest of the run, and the next attempt is a second policy denial in a row, which trips the run's repeat-denial breaker and aborts the board task. An unanswered card sets the same latch, but the expiry itself is not recorded as a denial, so it takes two later attempts rather than one to trip the breaker.
-- **A card nobody answers blocks the run** for the full 10 minutes, and the run makes no other progress while it waits.
-- **The ceiling and the latch are per driver run, not per task.** A task that is re-driven starts again at zero asks, with the latch cleared.
-- **No audit row is written for a `run_command` execution**, so it never appears in `GET /api/tools/audit`. The approval itself is an ordinary row in the approvals queue.
-
-## In-process MCP
-
-The native runtime consumes Clawboo's shared MCP spine: Tasks, Memory, Tools, and TeamChat, _in-process_, without spawning a stdio server for it to call itself. Each enabled server is connected over a linked in-memory transport pair, held open for the conversation's lifetime; the servers wrap the same SQLite cores every other runtime reaches over HTTP or stdio, so the broker's availability, approval, and audit pipeline applies to native tool calls identically.
-
-Which servers attach is driven by `AgentConfig.tools`:
-
-- **Tasks** (`tasks`): the durable board.
-- **Memory** (`memory`): shared facts. The run's authoritative memory scope (team id plus agent id) is bound onto the in-process Memory server, so native saves are team-shared and reads are team-limited, matching the HTTP-attached runtimes. The native server carries vectors too (hybrid search parity with every other runtime).
-- **Tools** (`tools`): the managed capability broker.
-- **TeamChat** (`teamchat`): posting and listening in the shared team room as a named peer. It binds the author identity from the run (anti-spoof) and requires both an agent id and a team.
-
-Tool names are served unprefixed (they are distinct across the servers), with a routing map remembering which server owns each name; a duplicate name registered later is skipped so routing stays unambiguous. The combined tool universe (local file tools plus the MCP tools, minus any child-tool blocklist) is what the model sees; and because the native runtime hosts its own loop, it genuinely _enforces_ the blocklist: a stripped tool is invisible to the model.
-
-## The per-identity home
-
-A native agent's conversation transcripts live in a **stable per-identity home** that the host materializes once at `<clawboo home>/runtimes/clawboo-native/<sanitized agentId>/`. Each terminal persists the transcript to `<home>/sessions/<sessionId>.json`, and a matching `sessions` table row (source id `clawboo-native`) is upserted so the registry's session list has data.
-
-This is what makes `resume: true` real for the native runtime. A same-runtime resume reloads the prior transcript from the home, a genuine continuation of the conversation, not just lineage. A run with no home (an ephemeral integration plan) simply no-ops the persistence; continuity then rides the prose handoff note instead.
-
-<Note>
-The verification critic deliberately runs *without* a home; builder ≠ judge, so the reviewer must not share the builder's persisted transcripts. See [Verification](/concepts/verification).
-</Note>
-
-## How to connect
-
-The native runtime is built in, so it never reaches the `not-installed` state; connecting is entirely a key (or, for Ollama, choosing it: no key, just the recorded choice). The full connect/disconnect/healthcheck mechanics are shared with the other runtimes; see [Connecting runtimes](/runtimes/connecting-runtimes) for the card UI, the encrypted vault, and the resolution chain. The native specifics:
-
-### 1. Verify a key before committing
-
-`POST /api/runtimes/clawboo-native/healthcheck` with `{ provider, apiKey? }` makes a single authenticated `GET` to the provider's models/health endpoint (`anthropic` → `https://api.anthropic.com/v1/models`, `openai` → `https://api.openai.com/v1/models`, `openrouter` → `https://openrouter.ai/api/v1/models`, an extra OpenAI-compatible provider → its own `<baseURL>/models`, `ollama` → the native Ollama base URL (`OLLAMA_BASE_URL` with a trailing `/v1` stripped, else `http://localhost:11434`) followed by `/api/tags`, keyless), bounded by an 8-second timeout. It returns `{ ok: true }` on a 2xx or `{ ok: false, error }` on a bad key (`401`/`403` → `"Invalid API key."`), a timeout, or a network failure. **The key is used for that one fetch only, never persisted, never logged, never echoed.** This route is native-only; any other runtime id returns `400`.
-
-`apiKey` is optional. Omit it to check the key already stored for that provider — that's how the Providers manager's one-click **Use** confirms a saved key still works before reconnecting on it. With no `apiKey` and nothing stored, the route returns `400`.
-
-For `ollama` the body can also carry `model`. An Ollama that answers is not enough on its own, because a model it never pulled fails every run, so the route checks `model` against the `/api/tags` list it just fetched and returns `{ ok: false, error, missingModel }` when the model is not there, with the `ollama pull <model>` command in `error`. Ollama reads an untagged name as `:latest`, so `llama3.2` is met by `llama3.2:latest` and not by `llama3.2:1b`. The onboarding connect step sends the model you picked; every other provider ignores the field.
-
-The UI does not treat this as an opt-in extra: every surface that accepts a credential runs it first. The onboarding step verifies on **Continue** (the **Test connection** button is just an earlier chance to run the same check), the Providers hub verifies on **Save**, and the runtime connect card verifies before it writes the vault. A refused credential is not stored on the normal path. The one exception is deliberate and user-driven: each surface offers an explicit override (**Continue anyway** / **Save anyway** / **Connect anyway** / **Use anyway**) which stores the credential unverified, so a machine that simply can't reach the provider is never stranded.
+Install Ollama, start it (`ollama serve`) and pull a chat model that can use tools:
 
 ```bash
-curl -X POST http://localhost:18790/api/runtimes/clawboo-native/healthcheck \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"anthropic","apiKey":"sk-ant-..."}'
+ollama pull llama3.2
 ```
 
-### 2. Connect the key
+</Step>
+<Step title="Turn Ollama on">
 
-`POST /api/runtimes/clawboo-native/connect` with `{ apiKey, provider? }` stores the key in the encrypted vault, keyed by env var. The native runtime is multi-provider, so the optional `provider` field routes the key to the right slot:
+Open **Settings > Runtimes** and click **Connect** (or **Manage**) on **Clawboo Native**. On the **Ollama** line ("Local · no key needed"), click **Use**. Clawboo checks that Ollama answers first; **Use anyway** skips the check.
 
-| `provider`                 | Vault env var written                |
-| -------------------------- | ------------------------------------ |
-| _(omitted)_ or `anthropic` | `ANTHROPIC_API_KEY`                  |
-| `openai`                   | `OPENAI_API_KEY`                     |
-| `openrouter`               | `OPENROUTER_API_KEY`                 |
-| `google`                   | `GEMINI_API_KEY`                     |
-| `xai`                      | `XAI_API_KEY`                        |
-| `groq`                     | `GROQ_API_KEY`                       |
-| `mistral`                  | `MISTRAL_API_KEY`                    |
-| `together`                 | `TOGETHER_API_KEY`                   |
-| `cerebras`                 | `CEREBRAS_API_KEY`                   |
-| `moonshot`                 | `MOONSHOT_API_KEY`                   |
-| `ollama`                   | _(keyless: records the Ollama pick)_ |
+In onboarding, picking the **Ollama** card on the connect step does the same thing.
 
-The provider is validated against the runtime's known env-var set (`ANTHROPIC_API_KEY` plus its `altEnvVars`); an unrecognized provider falls back to the default `ANTHROPIC_API_KEY`. The response never echoes the key.
+</Step>
+<Step title="Check the model">
 
-**Local Ollama.** With `provider: "ollama"` there is no key to store, so the route records the choice itself (in `secrets/keyless-providers.json` beside the vault, no secret material), and that choice alone readies the runtime: `GET /api/runtimes` reports `connectionState: "ready"` and `ollamaConnected: true` with no key and no `OLLAMA_BASE_URL`. Agents then reach Ollama at `OLLAMA_BASE_URL` when it is set, else `http://localhost:11434/v1`. An agent deployed without a model pick takes your default provider when it is set up (see [The agent config](#the-agent-config)), else the first set-up provider in the order Anthropic, OpenAI, OpenRouter, Ollama, then the extra providers, so with Ollama as your default, or with Ollama set up and no keys, every agent lands on Ollama, on a model it has pulled (see [Ollama models](#ollama-models)), and the universal Boo Zero is created on it. With no key and Ollama not set up, agents get the Anthropic default, no native Boo Zero is created, and the first run reports the missing key. The onboarding connect step makes this call when you pick **Ollama**; later, **Settings → Runtimes → Clawboo Native → Manage** lists Ollama under its providers, with **Use** to turn it on and, once on, its default model and **Disconnect Ollama**. `POST /api/runtimes/clawboo-native/disconnect` with `{ "provider": "ollama" }` removes only that choice (it also stops a configured `OLLAMA_BASE_URL` from counting as set up). Removed, Ollama runs nothing: the router drops every Ollama candidate, so an agent set to an Ollama model stops running and reads `providerReady: false` unless it has a runnable fallback, which then serves it. A recorded Ollama leader pick no longer places Boo Zero on Ollama either, until you choose **Use** again. A full disconnect removes Ollama too, along with the keys, so disconnect means the same for every provider: a later key connect or `OLLAMA_BASE_URL` does not bring Ollama back, only picking it again does.
+Under **LLM providers**, open the **Ollama** row and click **Make default** if Ollama isn't your default yet. Its **Default model** list then shows the chat models your Ollama has pulled.
 
-```bash
-# Anthropic (the default slot)
-curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
-  -H 'Content-Type: application/json' \
-  -d '{"apiKey":"sk-ant-..."}'
+</Step>
+</Steps>
 
-# OpenRouter
-curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
-  -H 'Content-Type: application/json' \
-  -d '{"apiKey":"sk-or-...","provider":"openrouter"}'
+</Tab>
+</Tabs>
 
-# Local Ollama (no key)
-curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"ollama"}'
-```
+Saving a key on the **Providers** page also copies it, in plain text, into OpenClaw's `~/.openclaw/.env`, so an OpenClaw Gateway can use it too. See [Connect providers and runtimes](/using/providers-and-runtimes) for where keys are kept.
 
-#### Ollama models
+## Providers and default models
 
-Clawboo lists the models your Ollama has actually pulled rather than a fixed set. `GET /api/providers/ollama/models` reads Ollama's native `/api/tags` at `OLLAMA_BASE_URL` with a trailing `/v1` stripped (else `http://localhost:11434`), with a 3-second timeout, and answers `{ models, reachable, recommendedModel }`:
+Clawboo Native works with eleven providers: ten with an API key, plus a local Ollama. The **Providers** page also lists MiniMax, NVIDIA, Hugging Face and Venice; their keys reach OpenClaw only.
 
-- **Embedding-only models are left out.** A model such as `nomic-embed-text` turns text into vectors and cannot answer a chat turn. Current Ollama versions report each model's `capabilities` in `/api/tags`, and a model without `completion` is dropped; for an Ollama that doesn't, the embedding families (`bert`, `nomic-bert`, `xlm-roberta`) and names containing `embed`, `minilm`, `rerank` or `bge-` are dropped.
-- **Models that can't use tools are marked.** Agents call tools on nearly every turn, and Ollama refuses a tool call to a model without tool support, so such a model is listed as `<model> (can't use tools)`.
-- **`reachable`** is `false` when nothing that speaks Ollama's API answered, which is how the pickers tell "Ollama is stopped" from "Ollama has no chat model".
-- **`recommendedModel`** is a fallback recommendation: the pick rule below applied to `llama3.2`, not to your recorded default model. The pickers preselect it when the current pick isn't pulled.
+These are the built-in models for an agent whose model you leave on **Default** when you deploy a team. A team's leader, and a native Boo Zero, get the leader model; everyone else gets the specialist model. On your default provider, the leader runs the model you picked instead (see the next section).
 
-The onboarding model dropdown and the Ollama row's **Default model** in the providers manager both list these models. With Ollama running and no chat model pulled, each says so and shows `ollama pull llama3.2` with a **Check again** button. In the manager, a stored default that Ollama no longer has is shown as `<model> (not pulled)` with its `ollama pull` command, so the list never passes another model off as the default.
+| Provider       | Key name             | Leader model                               | Specialist model                          |
+| -------------- | -------------------- | ------------------------------------------ | ----------------------------------------- |
+| Anthropic      | `ANTHROPIC_API_KEY`  | `claude-sonnet-5`                          | `claude-haiku-4-5`                        |
+| OpenAI         | `OPENAI_API_KEY`     | `gpt-5.4`                                  | `gpt-4o-mini`                             |
+| OpenRouter     | `OPENROUTER_API_KEY` | `anthropic/claude-haiku-4.5`               | `openai/gpt-4o-mini`                      |
+| Ollama (local) | none                 | A model you have pulled (`llama3.2` first) | Same as the leader                        |
+| Google         | `GEMINI_API_KEY`     | `gemini-2.0-flash`                         | `gemini-2.0-flash`                        |
+| xAI            | `XAI_API_KEY`        | `grok-2-latest`                            | `grok-2-latest`                           |
+| Groq           | `GROQ_API_KEY`       | `llama-3.3-70b-versatile`                  | `llama-3.1-8b-instant`                    |
+| Mistral        | `MISTRAL_API_KEY`    | `mistral-large-latest`                     | `mistral-small-latest`                    |
+| Together       | `TOGETHER_API_KEY`   | `meta-llama/Llama-3.3-70B-Instruct-Turbo`  | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| Cerebras       | `CEREBRAS_API_KEY`   | `llama-3.3-70b`                            | `llama-3.3-70b`                           |
+| Moonshot       | `MOONSHOT_API_KEY`   | `moonshot-v1-32k`                          | `moonshot-v1-8k`                          |
 
-**The model an agent is created with.** An agent deployed without a model pick resolves to Ollama with your default Ollama model when Ollama is your default, else `llama3.2`; at create time that is checked against `/api/tags`. A pulled model is kept. Otherwise the agent gets the most recently pulled model that can use tools, then the most recent one whose tool support Ollama doesn't report, then the most recent of the rest. The leader and the specialists get the same model on purpose: a laptop holds one or two models in memory, and two different picks would reload a model on nearly every hand-off of a delegation cascade. With nothing pulled, or Ollama unreachable at deploy time, the agent keeps the model it resolved to. One `/api/tags` answer is reused for up to 10 seconds, so a team deploy asks once.
+The key name is where Clawboo stores the key, and the variable it reads if you export the key in your shell instead. Keys look like `sk-ant-…` (Anthropic), `sk-…` (OpenAI), `sk-or-…` (OpenRouter), `AIza…` (Google), `xai-…` (xAI), `gsk_…` (Groq) and `csk-…` (Cerebras).
 
-**A run on a model Ollama can't serve.** A run that reaches an unpulled model fails before its first token, and instead of Ollama's raw `model 'llama3.2' not found` the chat says Ollama doesn't have the model and gives the `ollama pull` command. A model without tool support gets a plain sentence too, naming the model and suggesting one that can use tools.
+### Which provider a new agent gets
 
-### 3. Deploy a team
+When an agent's model is left on **Default**, Clawboo picks its provider in this order:
 
-A connected native runtime runs any team you deploy. Onboarding creates no team of its own: its last step opens the marketplace, where you pick a team, choose the runtime each member runs on, and deploy it. Later teams come from the same place, through the **+** button on the team rail or the Marketplace's **Teams** tab. See [Deploy your first team](/getting-started/first-team).
+1. **Your default provider, if it is set up.** That is the provider and model you chose in onboarding, or later with **Make default** (open a provider row under **Settings > Runtimes > Clawboo Native > Manage**). The leader runs the model you picked, and specialists run that provider's specialist model. On Ollama, every agent runs the model you picked.
+2. **Otherwise, the first provider that is set up**, in this order: Anthropic, OpenAI, OpenRouter, Ollama, Google, xAI, Groq, Mistral, Together, Cerebras, Moonshot. The agent gets that provider's models from the table above.
+3. **With nothing set up**, the agent is created on Anthropic, and its first run reports the missing key.
 
-## Verify it worked
+A key in your shell, or in OpenClaw's `~/.openclaw/.env`, never outranks the default you picked. The deploy dialog names the model each row will get (`Default · <model>`), so you can check before you deploy.
 
-- `GET /api/runtimes` should show the `clawboo-native` entry with `installed: true`, `binPath: null`, and `connectionState: "ready"`. Its `health.ok` is `true` when **any** of the routable provider keys in the [provider table](#providers-and-routing) resolves (all eleven count, not just the first three), or local Ollama is set up (`ollamaConnected`: you chose it, or `OLLAMA_BASE_URL` is set and you have not removed Ollama or disconnected the runtime), no binary probe, no network call. Runtime health is deliberately runtime-wide; each agent's own routing is reported per agent as `providerReady` on `GET /api/agents`, which mirrors the router's candidate rule: true when a key resolves in that agent's `envVar`, or in one of its `fallbacks`, or its provider is keyless Ollama that you have not removed. The agent detail and chat headers badge an agent whose `providerReady` is `false` even while the runtime card is green.
-- Run a board task on it via `POST /api/runtimes/clawboo-native/run`. Every resolvable provider key is injected from the vault into the run, so a key connected from the UI authenticates automatically.
+Changing the default model later also moves a native Boo Zero onto it. Other agents keep their model; change one from its own page.
+
+### Local Ollama
+
+- Clawboo reaches Ollama at `http://localhost:11434/v1`. To use another address, set `OLLAMA_BASE_URL` to its OpenAI-compatible base, `/v1` included.
+- The model lists show only the chat models your Ollama has pulled. Embedding models such as `nomic-embed-text` are left out, and a model that can't use tools is marked `(can't use tools)`. Agents call tools on almost every turn, so pick one that can.
+- An agent created without a model pick gets your default Ollama model if Ollama has it. If not, it gets the most recently pulled model that can use tools. The leader and the specialists get the same model, so Ollama doesn't swap models in and out of memory between turns.
+- A default model that Ollama doesn't have, for example one you removed, shows as `<model> (not pulled)`, with its `ollama pull` command and a **Check again** button.
+- When Ollama is your only provider, a native Boo Zero runs on it too.
+- **Disconnect Ollama** (on the Ollama row) stops Clawboo Native from using Ollama and leaves your keys alone. Agents on an Ollama model can't run until you click **Use** again.
+
+## What Clawboo Native can do
+
+A native agent acts only through the tools Clawboo gives it. Which tools it has depends on where it runs.
+
+| Tool                                    | What it does                                                                                                    | When the agent has it                                        |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Peer room                               | Posts and reads notes in its team's [peer room](/concepts/peer-chat), as itself. The dashboard doesn't show it. | Team chat and team tasks                                     |
+| Memory                                  | Reads and saves shared [memory](/concepts/memory): its team's in team runs, the global memory in 1:1 chat       | Every run                                                    |
+| Board                                   | Reads tasks on the board. Clawboo itself makes the board changes.                                               | Every run                                                    |
+| Connectors                              | Uses the [connectors](/using/connectors) you grant it                                                           | Every run                                                    |
+| `delegate`                              | Hands a task to a teammate by name. Clawboo turns each call into a board task.                                  | Team chat                                                    |
+| `read_file`, `write_file`, `list_files` | Reads and writes files inside the task's worktree, and nowhere else                                             | Task runs with their own worktree                            |
+| `run_command`                           | Runs one program after you approve it                                                                           | Task runs with a worktree, once you allow it, not on Windows |
+
+Team chat, 1:1 chat and the tasks agents delegate in team chat run without a worktree. There, a native agent has no file tools and can't run commands. Only a task run that names a git repository gets a worktree; see [Worktrees and handoff](/concepts/worktrees-and-handoff). For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
+
+### Running commands
+
+`run_command` is off for every agent until you allow it. To allow it, open the agent's page, then **Details**, then the **Permissions** tab. Under **Running commands**, switch on **Let this Boo ask to run commands** and confirm with **Allow it to ask**.
+
+- **You approve every command, and nothing is remembered.** Each one raises a card that reads "_agent_ wants to run a command on this computer." with the command and the folder. **Run it** approves it. There is no **Always** option.
+- **One program, no shell.** The agent can't use pipes, redirects or shell operators. Programs that run other programs (shells, interpreters, package runners and similar) are refused before you're asked.
+- **It runs as you.** The command runs in the task's worktree, under your user account, with network access. Your API keys are not passed to it.
+- **Limits per run:** the agent can ask about 10 commands. Each card waits 10 minutes for an answer, a command is stopped after 5 minutes, and output is cut at 64 KiB.
+- **A refusal ends it.** If you decline, or nobody answers in time, the agent can't ask again in that run.
+
+<Warning>
+
+The list of refused programs is a speed bump, not a sandbox: some allowed programs can still reach a shell. You reading each card is the safeguard. Check the command and the folder before you click **Run it**.
+
+</Warning>
+
+See [Approvals](/using/approvals) for answering a card, and [Command permissions](/using/command-permissions) for the OpenClaw equivalent.
+
+## Costs
+
+Clawboo Native reports the cost of every turn:
+
+- **Six models have an exact price:** `claude-haiku-4-5`, `claude-sonnet-4-6`, `gpt-4o`, `gpt-4o-mini`, `openai/gpt-4o-mini` and `anthropic/claude-haiku-4.5`. Clawboo records their cost at list price.
+- **Every other model is estimated**, including the default leader models `claude-sonnet-5` and `gpt-5.4`. Clawboo prices the turn's token counts from its rate table and records the result as an estimate. A model missing from the table is priced at USD 3 per million input tokens and USD 15 per million output tokens.
+- **Local Ollama models are estimated too**, so Ollama runs show spend even though they cost you nothing.
+
+Estimates count toward your budgets. Budgets only warn you unless you set a hard cap. Turns with an exact price are charged as they happen, so a hard cap can stop a native run partway through. In team chat, estimated turns are charged when the run ends; in a 1:1 chat, only turns with an exact price are charged. See [Budgets and spend](/using/budgets-and-spend).
+
+## Disconnect
+
+Open **Settings > Runtimes > Clawboo Native > Manage**. You can remove one provider or the whole runtime:
+
+- **Disconnect _Provider_** (for example **Disconnect OpenAI**) on an open provider row removes that provider's key from Clawboo's vault and from OpenClaw's `~/.openclaw/.env`. Your other keys stay.
+- **Disconnect Ollama** stops Clawboo Native from using Ollama. Your keys stay.
+- **Disconnect**, at the bottom of **Manage**, disconnects Clawboo Native itself.
+
+<Warning>
+
+The bottom **Disconnect** deletes all ten provider keys from Clawboo's vault, not one, and turns Ollama off. Clawboo keeps a single copy of each key, so Claude Code and Hermes lose the keys they shared with Clawboo Native. Until you connect Clawboo Native again (for example with **Use** on a provider row), a key in your shell or in `~/.openclaw/.env` doesn't count for it. To remove one key, use its provider row instead.
+
+</Warning>
+
+## Limits
+
+- **No files or commands outside a task run with its own worktree.** In team chat and 1:1 chat, a native agent has no file or command tools of its own.
+- **No commands on Windows.** `run_command` is never offered there.
+- **16 turns per run.** A run ends after 16 turns (model calls).
+- **No ChatGPT plan.** A ChatGPT subscription runs agents on [Codex](/runtimes/codex), not on Clawboo Native.
+- **Ten keyed providers.** Keys for MiniMax, NVIDIA, Hugging Face and Venice don't work with Clawboo Native.
 
 ## Troubleshooting
 
-<Warning>
-**`clawboo-native` reads as not connected even though you connected a key.** Native health is provider-key presence, not a binary. Confirm the key landed in the *expected* vault slot: an OpenAI or OpenRouter key connected without the `provider` field is written to `ANTHROPIC_API_KEY`. Re-connect with the matching `provider`. A key exported in the server's environment, or present in OpenClaw's `~/.openclaw/.env`, also satisfies the check (the resolution chain falls back to both).
-</Warning>
+<AccordionGroup>
+<Accordion title="Clawboo Native has no provider key connected">
 
-<Warning>
-**A run reports `costUsd: null`.** Native pricing is an exact-match table for the pinned models (`claude-haiku-4-5`, `claude-sonnet-4-6`, `gpt-4o-mini`, `gpt-4o`, plus the OpenRouter aliases for the Anthropic/OpenAI pins). Any other model is honestly reported as `costUsd: null, estimated: true` rather than priced as a fabricated default. A trailing `-YYYYMMDD` date suffix is normalized before lookup.
-</Warning>
+The full message is `Clawboo Native has no provider key connected. Open Settings → Runtimes → Clawboo Native to connect a provider.`
 
-<Warning>
-**The Boo says it cannot run commands, or never proposes one.** `run_command` is absent unless all four preconditions hold, so walk them in order: the **Permissions** tab has *Let this Boo ask to run commands* switched on; the run has a working folder (a board task with a worktree, never a 1:1 chat, a team-room turn, or a dispatch turn); the server is not on Windows; and the Boo is a `clawboo-native` Boo, because this switch governs no other runtime. A Boo that reports being *refused* is a different case: the tool was there, and the command named a program that runs other programs, so it was refused before anyone was asked. See [Running commands](#running-commands).
-</Warning>
+**What it means:** the provider this agent runs on has no key Clawboo can use. Clawboo Native can still read **Connected** when another provider has a key. The agent's page shows **No provider key**, or **Disconnected** when no provider is set up at all, next to **Set up in Runtimes →**.
 
-<Danger>
-**Ollama is keyless and local.** `provider: "ollama"` stores no key; it records that you chose Ollama, and the run reaches the model at `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`; set the variable to the full OpenAI-compatible base, `/v1` included). The model has to be pulled in that Ollama. The pickers list the pulled models (with none pulled they fall back to `llama3.2` and show the pull command) and an agent created without a pick gets one that is pulled (see [Ollama models](#ollama-models)), but a model picked while nothing was pulled, or removed since, still fails: the chat says Ollama doesn't have it and gives the `ollama pull <model>` command. Pull it, or pick a pulled model on the agent's page. If Ollama is not running there at all, the provider call fails like any unreachable endpoint.
-</Danger>
+**Fix:** connect a key for that provider on the **Providers** page, or open the agent's page and pick a model from a provider you have connected. An agent on Ollama shows this message after **Disconnect Ollama**; click **Use** on the Ollama line to turn it back on.
+
+</Accordion>
+<Accordion title="Ollama doesn't have the model yet">
+
+The chat shows `Ollama doesn't have <model> yet, so this run couldn't start. Pull it with "ollama pull <model>", or pick a model you have pulled in this agent's settings.`
+
+**Fix:** run the `ollama pull` command it gives, or pick a pulled model on the agent's page. After a pull, **Check again** refreshes the model lists.
+
+</Accordion>
+<Accordion title="The model can't use tools">
+
+The chat shows `<model> can't use tools, and this agent needs them. Pick a model that can in this agent's settings, or pull one with "ollama pull llama3.2".`
+
+**Fix:** pick a model that isn't marked `(can't use tools)`, or pull one that can.
+
+</Accordion>
+<Accordion title="Invalid API key, or Could not reach the provider">
+
+When you save a key, Clawboo checks it with the provider. `Invalid API key.` means the provider refused it: copy the key again from the provider's site. `Provider returned <status>.` is another refusal. `Could not reach <provider>.` (or `Could not reach <provider> (timed out).`) means the check got no answer. If you are sure the key is right, **Save anyway** stores it without the check.
+
+</Accordion>
+<Accordion title="Ollama isn't answering on this machine">
+
+`Ollama isn't answering on this machine. Start it (ollama serve) and try again.` appears when you click **Use** on the Ollama line and nothing answers. Start Ollama, or check `OLLAMA_BASE_URL`, then click **Use** again. **Use anyway** turns Ollama on without the check.
+
+</Accordion>
+<Accordion title="The agent never offers to run a command">
+
+`run_command` exists only when all of these hold: **Let this Boo ask to run commands** is on for that agent; the run is a task run with its own worktree, never team chat or a 1:1 chat; and the server is not on Windows. If the agent says a command was refused, the program was on the refused list, or a command was already declined in that run.
+
+</Accordion>
+<Accordion title="Clawboo Native reads Connected though you never connected it">
+
+A key exported in the shell that started Clawboo, or present in OpenClaw's `~/.openclaw/.env`, counts as connected. So does an `OLLAMA_BASE_URL` you set, unless you turned Ollama off. After you disconnect Clawboo Native (see the warning above), only keys you connect again count.
+
+</Accordion>
+</AccordionGroup>
+
+## Check it works
+
+<Steps>
+<Step title="Check the runtime">
+
+Open **Settings > Runtimes**. **Clawboo Native** reads **Connected**.
+
+</Step>
+<Step title="Send a message">
+
+Open an agent that runs on Clawboo Native from the agent column, type a short message in its chat and send it.
+
+</Step>
+<Step title="Read the reply">
+
+You should see a reply stream in. If an error appears instead, find it under [Troubleshooting](#troubleshooting).
+
+</Step>
+</Steps>
+
+<Accordion title="Under the hood">
+
+- **Where it runs.** Inside the Clawboo server process. Anthropic models go through the Anthropic SDK. Every other provider goes through the OpenAI SDK with that provider's base URL; Ollama's is `OLLAMA_BASE_URL`, default `http://localhost:11434/v1`.
+- **A run.** Up to 16 turns; each turn is one model call plus the tool calls it asks for, and each turn reports its own cost.
+- **Fallback providers.** An agent's config can list fallback providers (through the API). If a provider fails with an auth, rate-limit, overload or network error before it has produced any output, the next one is tried. A provider that answers is kept for the rest of the conversation.
+- **Saved conversations.** Each run's transcript is saved under `~/.clawboo/runtimes/clawboo-native/<agent>/sessions/` (the folder follows `CLAWBOO_HOME`).
+- **Context window.** Clawboo Native declares 200,000 tokens for every provider, set high on purpose. A long task run moves to a fresh session late rather than early, and a provider's own context-limit error ends the run cleanly.
+- **Agent config.** Each agent's provider, model and tool switches are stored as JSON in the settings table (`native-agent-config:<agentId>`) and checked on every load. A corrupt one falls back to the defaults: Anthropic, `claude-haiku-4-5`, read-only board access.
+- **REST.** Connecting, key checks and disconnecting are in the [Runtimes API](/reference/rest-api/runtimes). The command switch is `GET` and `POST /api/agents/:agentId/shell`.
+
+</Accordion>
 
 ## Related
 
-- [Connecting runtimes](/runtimes/connecting-runtimes), the install/connect/disconnect lifecycle and the encrypted vault
-- [Runtimes overview](/runtimes/index), the capability matrix across all five runtimes
-- [`/api/runtimes` reference](/reference/rest-api/runtimes), full request/response shapes for connect, healthcheck, and run
-- [Quickstart: native-first](/getting-started/quickstart-native), paste a key and land in a team with no Gateway
-- [The board](/concepts/the-board), the durable task substrate a native run drives
-- [Memory](/concepts/memory), the shared facts tier a native run reads and writes over MCP
-- [Teams and planes](/concepts/teams-and-planes), the shared-plane / private-plane split
-- [Environment variables](/reference/environment-variables), `CLAWBOO_HOME`, `OLLAMA_BASE_URL`, provider keys
+- [Choose a runtime](/runtimes/index): how Clawboo Native compares with the other runtimes
+- [Connect providers and runtimes](/using/providers-and-runtimes): keys, where they are stored, and what Disconnect removes
+- [What agents can do](/concepts/permissions): what each runtime can touch on your computer
+- [Budgets and spend](/using/budgets-and-spend): warn-only and hard-cap budgets, and estimated costs
+- [Run Clawboo without an API key](/guides/no-api-key): a full team on a local Ollama

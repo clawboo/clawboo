@@ -1,174 +1,161 @@
 ---
-title: Verification
-description: 'Builder≠judge: a deterministic gate plus an independent read-only critic that make "done" mean verified, with an exhausted fix loop routed to blocked for a human.'
+title: 'How work is checked'
+sidebarTitle: 'How work is checked'
+description: 'When Clawboo runs a test command and a reviewer on finished work, what each outcome means on the Board, and what is never checked.'
+icon: 'list-checks'
+keywords:
+  [
+    'verification',
+    'verify',
+    'VERIFY_CMD',
+    'init.sh',
+    'critic',
+    'reviewer',
+    'builder judge',
+    'completed_with_debt',
+    'Needs review',
+    'Verifying',
+    'Complete anyway',
+  ]
 ---
 
-Verification is the rule that makes `done` mean _verified_. A code task that mutated files can reach `done` only when two independent checks agree: a **deterministic gate** (the task's own build/test/lint command, judged by its exit code) passes, and, on a green gate, for a risky or large change, a read-only **critic** (an independent reviewer that cannot push) raises no blocking finding. The principle underneath is **builder≠judge**: the agent that did the work never certifies its own work. A generator self-grading is a known failure mode; Clawboo's only signals into `done` are a machine truth (an exit code) and a structurally-independent reviewer.
+Clawboo can check an agent's work before the task counts as done. It runs the project's test command, and for bigger or handed-off changes a second agent reviews the change. These checks run in one narrow case: a task-runner run that worked in its own git worktree and changed files. Most work, including everything handed off in team chat, is never checked.
 
-This page explains what verification is and isn't, the two-layer model and the typed verdict it produces, the [swe-af](/appendices/glossary) severity taxonomy that rations blocking, the bounded fix loop and its `completed_with_debt` exit, and the intrinsic board gate that makes the rule un-bypassable.
+## When checks run
 
-<Info>
-The verification gate is **intrinsic to the board state machine**, not an opt-in step. Any transition to `done` is rejected when the task carries a non-promotable verdict, by *any* caller, including the generic board PATCH route, the Tasks-MCP `update_status` tool, and the orchestrator. The only escape is an explicit, audited `humanOverride`. See [The intrinsic board gate](#the-intrinsic-board-gate).
-</Info>
+Checks run only when all three of these are true:
 
-## What it is, and what it isn't
+1. **The task ran on the task runner.** That means an agent Routine whose task names a repository (set through the API), or a run started with `POST /api/runtimes/:id/run` and a `repoPath`. [How a team works](/intro/how-it-works) explains the two paths. A worktree completed through the board's workspace API is also checked, without a reviewer.
+2. **The task changes files**, so it got its own git worktree. Research and review tasks get none.
+3. **The agent changed something.** A run that changed no files lands in **Done** without a check.
 
-Verification is a **gate on `→ done` for file-mutating work**, not a continuous test runner and not a quality score. It runs once, at completion, when a task's worktree carries a non-empty diff. It produces a typed verdict that the board state machine reads mechanically, never prose a model can argue with.
+Nothing in the dashboard starts a checked run. A Routine you create in the app sends only its instructions, so it runs without a repository, and its work is not checked.
 
-A few things verification is _not_:
+### Never checked
 
-- **Not a quality opinion.** The deterministic gate is an exit code, not a judgement; the critic emits structured findings against a fixed severity taxonomy, not a free-form review.
-- **Not run on every change.** A read-only task, a research task, an empty diff, or a small low-risk diff is not sent to the critic; a model is spent only where it earns its keep (see [When the critic runs](#when-the-critic-runs)).
-- **Not a deadlock for the task, and not a rescue for its chain.** When the attempt budget is spent, the verdict is recorded as `completed_with_debt` and the task lands `blocked` with its delegator notified, rather than sitting in a column that implies someone is still working on it. Its dependents keep waiting: the ready query requires every dependency to be `done`. The move buys visibility, not recovery (see [The bounded fix loop](#the-bounded-fix-loop-and-completed_with_debt)).
-- **Not applicable to non-worktree work.** A task with no isolated [worktree](/concepts/worktrees-and-handoff) (an OpenClaw-substrate run, a non-file-mutating native run) has no diff to verify, so it carries _no_ verdict; and a task with no verdict is unverified, not failing.
+- Work handed off in team chat, in General or a room, including the steps of a plan
+- Tasks you give an agent on the Board, and reruns from **Retry** or **Assign**
+- One-to-one chats
+- OpenClaw work. An OpenClaw Routine run gets a comment saying it completed without verification.
+- Routines created in the app
+- Research and review tasks
+- Tasks you move to **Done** yourself
 
-The board owns _where_ the gate lives (the `→ done` transition and a single verification cell on the task row); the [worktree](/concepts/worktrees-and-handoff) subsystem owns the isolated checkout the gate runs in; the verification subsystem owns the gate-and-critic composition. Verification is downstream of [delegation](/concepts/delegation-and-orchestration): the orchestrator routes a structured failure verdict back to the team leader as a real, actionable fix request, not the string "FAIL".
+A task with no check result reaches **Done** normally. Unchecked is not the same as failed.
 
-## The model
+## What happens during a check
 
-The completion path for a file-mutating task: land the work in review, run the deterministic gate, run the critic only if the gate is green and the diff is risky, then map the verdict to a terminal status. The board gate then enforces that mapping.
+1. The agent's run ends. On the [Board](/using/board) the card stays in **In progress** with a **Verifying** badge.
+2. Clawboo runs the verify command named in the worktree's `init.sh`, inside the worktree, and reads its exit code. The command gets 10 minutes.
+3. If the command passes and the change is large or was handed off, a reviewer agent reads the committed change.
+4. Clawboo stores the result on the task and moves the card to match.
 
 ```mermaid
 flowchart TD
-    builder["Builder run completes<br/>(non-empty worktree diff)"] --> review["Task → in_review"]
-    review --> gate["Deterministic gate:<br/>run VERIFY_CMD, read exit code"]
-
-    gate -->|"exit != 0 / timeout /<br/>no command"| fail["Attempt = fail"]
-    gate -->|"exit 0"| risky{"Risky or large diff?<br/>(delegated, riskFlag,<br/>&gt;5 files, &gt;300 lines)"}
-
-    risky -->|no| pass["Attempt = pass"]
-    risky -->|yes| critic["Critic (builder ≠ judge):<br/>detached push-less checkout<br/>at the committed SHA"]
-
-    critic -->|blocking finding| fail
-    critic -->|"clean / non-blocking only"| pass
-
-    fail --> loop{"Attempts left?<br/>(attempt &lt; verifyMaxAttempts,<br/>default 2)"}
-    loop -->|yes| retry["Status = in_progress<br/>(structured fix routed back)"]
-    loop -->|no| blocked["completed_with_debt → blocked<br/>(verdict recorded,<br/>routed to a human)"]
-
-    pass --> done["pass → done<br/>(intrinsic board gate allows)"]
+    A["Agent finishes"] --> B{"Changed files?"}
+    B -->|No| D["Done, unchecked"]
+    B -->|Yes| C["Run the verify command"]
+    C -->|Fails| F["Fail"]
+    C -->|Passes| R{"Large or handed off?"}
+    R -->|No| P["Pass: Done"]
+    R -->|Yes| V["Reviewer reads the change"]
+    V -->|Blocking issue| F
+    V -->|Nothing blocking| P
+    F --> L{"Attempt left?"}
+    L -->|"Yes: fix note"| A
+    L -->|No| N["Needs you"]
 ```
 
-On the [Board](/using/board#the-columns) there is no In review column: an `in_review` card stays in **In progress** under a **Verifying** mark while the check runs. A task the completion path routes to `blocked` shows in **Needs you**, marked **Needs review** when its verdict cannot be promoted.
+## The three outcomes
 
-## The two layers
+| Outcome                   | When                                                                    | What you see                                                                                                         |
+| ------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Pass**                  | The command passed, and the reviewer, if it ran, found nothing blocking | The card moves to **Done**                                                                                           |
+| **Fail, attempt left**    | The command failed, or the reviewer found a blocking issue              | The task goes back to the agent with a note: what failed, why, and how to fix it. The agent tries again              |
+| **Fail, no attempt left** | The last attempt failed too. By default that is the second attempt      | The card moves to **Needs you** with a comment, and whoever handed out the task (or the team's leader) gets a notice |
 
-### The deterministic gate
+In **Needs you**, the card reads **Needs review** while the test command still fails. When only reviewer findings are left, it reads **Blocked**.
 
-The deterministic gate is the strongest signal because it reads a truth, not an opinion. It runs the task's configured verify command, the build/test/lint command from the worktree's [system-of-record](/appendices/glossary), inside the isolated worktree and records the result as a typed `DeterministicResult` (`command`, `exitCode`, `passed`, scrubbed stdout/stderr tails, `durationMs`, `timedOut`).
+Each task gets two attempts by default: the first, plus one fix round. The `CLAWBOO_MAX_FIX_CYCLES` environment variable sets the number of fix rounds; `0` means a single attempt.
 
-The command is resolved without scraping rendered output. The scaffold writes `VERIFY_CMD='<shell-quoted>'` into `init.sh` and a `` - Verify: `<cmd>` `` line into `VERIFICATION.md`; the gate parses that structured line (`init.sh` first, then `VERIFICATION.md`) and reverses the bash single-quote escaping. `passed` is true only when the command exits `0` and did not time out. A timeout kills the whole process tree (the shell wrapper plus the real test runner it spawned). The command + a scrubbed output tail are appended to `VERIFICATION.md` as evidence; the typed verdict on the task is the source of truth.
+## The verify command in practice
 
-A **missing or placeholder verify command is a structured `fail`**, not a skip. `done` requires real evidence, so the absence of a check cannot certify completion; an unconfigured task fails the gate with `(none configured)` until someone sets `VERIFY_CMD`.
+Clawboo does not know your project's test command. Each new worktree gets an `init.sh` whose verify line is a placeholder:
 
-<Note>
-The deterministic gate uses `shell: true` because the verify command is a free-form shell string (unlike the runtime drivers, which spawn a known binary by argv). It sets `windowsHide` to suppress the console popup on Windows, matching the repo's spawn convention.
-</Note>
+```bash
+VERIFY_CMD='echo "[init] configure VERIFY_CMD in init.sh"'
+```
 
-### The critic
+A placeholder counts as no command, and no command counts as a failure, because a check cannot pass work it never tested. So the first check fails unless the agent has already set a real command. The fix note tells the agent to set `VERIFY_CMD` in `init.sh`. If it does, and that command passes, the second attempt can pass. Otherwise the task ends in **Needs you**.
 
-When the gate is green and the change is non-trivial, an independent reviewer runs second. The critic's independence is **structural**: it provisions a _detached_ review worktree, checked out at the work's committed SHA with no branch, so the reviewer literally has nothing to push and cannot mutate the builder's branch. It then drives a reviewer adapter with a structured-output instruction and parses a typed `CriticVerdict`.
+<Tip>
 
-Independence is layered. At minimum it is **context-level**: a fresh session, a detached push-less checkout, and _no builder home directory_; the reviewer never shares the builder's persisted native memory. When an operator sets a distinct reviewer model via `CLAWBOO_REVIEWER_MODEL`, independence becomes **model-level** too. The stored verdict records the `reviewerModel` and `reviewerRuntime`, so a same-model review's bias caveat stays visible rather than hidden.
+To get a useful check, say in the task which command proves the work, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`."
 
-The critic is asked to emit **only** a single JSON object of `findings`, each a typed `Finding` with a severity, a title, an optional body / file path / start line, and a confidence. The output is parsed through the same structured-judge drive the eval grader uses (`@clawboo/obs`): valid JSON yields findings, an empty result yields no findings (a valid, good outcome), and **anything unparseable becomes a single non-blocking `other` finding rather than a crash**. A malformed or failed critic must never block the deterministic verdict; the gate is the hard signal; the critic is the second opinion.
+</Tip>
 
-#### When the critic runs
+The agent that did the work can edit `init.sh`, so it can also weaken its own check. The reviewer is the independent part.
 
-The critic is rationed. It fires only when at least one of these is true:
+## When the reviewer runs
 
-| Trigger                     | Why                                                          |
-| --------------------------- | ------------------------------------------------------------ |
-| `riskFlag` set              | The task was explicitly flagged sensitive.                   |
-| Task has a parent           | Delegated work (delegation depth > 0) is inherently riskier. |
-| More than 5 files changed   | A large surface deserves review (default threshold).         |
-| More than 300 changed lines | A large diff deserves review (default threshold).            |
+The reviewer runs only after the test command passes, and only when at least one of these holds:
 
-A small, undelegated, unflagged change skips the critic entirely (`ran: false`), no review worktree, no model spend, and its verdict comes from the deterministic gate alone. The thresholds (`files`, `lines`) are overridable.
+- The task was handed out by another agent (it has a parent task).
+- More than 5 files changed.
+- More than 300 lines changed, counting lines added and removed.
 
-## Composing one verdict
+These thresholds are fixed. A small change on a task nobody handed out is judged by the test command alone.
 
-The two layers fold into a single attempt status, with the deterministic gate as the hard authority:
+How the reviewer works:
 
-- A **red gate is always `fail`**, full stop, the critic never even runs.
-- A **green gate plus a critic with a blocking finding is `fail`**, route the fix back.
-- A **green gate with the critic not run, or only non-blocking findings, is `pass`**.
+- **It is a second run of the same runtime.** It starts a fresh session, on a separate checkout of the committed change that has no branch to push. It gets none of the first agent's session or runtime home.
+- **It uses the same model** unless you set `CLAWBOO_REVIEWER_MODEL`, which picks a different model on that runtime.
+- **Only five kinds of finding block:** security, crash, data loss, wrong algorithm, and missing acceptance criteria. Style, performance and other notes are recorded and never block.
+- **It cannot hold the work back by failing.** If the reviewer fails to run, the test command alone decides. A reply Clawboo cannot read becomes one note that does not block.
+- **Its spend is not recorded.** Your provider bills the reviewer's run, but it does not count toward budgets or show in the cost views.
 
-What counts as _blocking_ is the rationed-blocking rule. Only five severities force a fix back to the specialist; the rest are debt, recorded, never deadlocking.
+## What you can do
 
-| Severity                                   | Class       |
-| ------------------------------------------ | ----------- |
-| `security`                                 | block       |
-| `crash`                                    | block       |
-| `data_loss`                                | block       |
-| `wrong_algorithm`                          | block       |
-| `missing_ac` (missing acceptance criteria) | block       |
-| `style`                                    | warn (debt) |
-| `perf`                                     | warn (debt) |
-| `other`                                    | warn (debt) |
+- **Move a card while it is being checked.** If you move it to **Done** or **Cancelled**, your move wins. Clawboo keeps the check's result on the task but moves nothing.
+- **Accept the work anyway.** While the card is still in **In progress** with **Verifying**, move it to **Done**: if the stored result is a failure, the board asks you to confirm with **Complete anyway**, and Clawboo records the override in the audit log. Once the card is in **Needs you**, the dashboard cannot move it to **Done**; through the API, move the task to `in_progress` and then to `done` with `humanOverride` (see the [Board API](/reference/rest-api/board)).
+- **Run it again.** **Retry**, or another agent picked from the card's **More** menu, sends the task back to **To do** and clears its check result. That rerun goes through the team, not the task runner, so it has no worktree and is not checked.
+- **Drop it.** **Dismiss** moves the task to **Cancelled**.
 
-This is deliberate: a style nit or a perf observation must not deadlock a task, but a security hole, a crash, data loss, a wrong algorithm, or unmet acceptance criteria must. Rationing blocking to genuine defects keeps the fix loop from churning on cosmetics.
+## The failures checks are for
 
-A failing attempt does not return the string "FAIL". It carries a structured `{ what, why, howToFix }`, for a red gate, the failing command and its scrubbed output tail; for blocking critic findings, the list of `[severity] title (file:line)`, so the leader routes a concrete fix, not a guess.
+| Failure                                   | What Clawboo does                                               | What you see                                        | What you can do                                    |
+| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------- |
+| The agent says it is done, but tests fail | Runs the verify command itself and trusts only its exit code    | The task goes back for a fix, then to **Needs you** | Read the failure comment on the card               |
+| The agent marks its own work              | A reviewer in a fresh session reads large or handed-off changes | Blocking findings send the work back                | Set `CLAWBOO_REVIEWER_MODEL` for a different model |
+| No test command is set                    | The placeholder counts as a failure                             | **Needs review** after the last attempt             | Name the command in the task                       |
+| A fix loop that never ends                | Two attempts by default, then stop                              | The card waits in **Needs you**                     | Retry, complete it anyway, or dismiss it           |
+| A check that hangs                        | Stops the command after 10 minutes, with everything it started  | Counts as a failure                                 | Make the command finish faster                     |
 
-## The bounded fix loop and `completed_with_debt`
+## Limits
 
-The independent evaluator is _permanent_; only the _retry budget_ is bounded. Each verify attempt is recorded in an `attempts[]` array on the task, that array **is** the loop history, which is why the `→ done` gate is a single-row read.
+- Only task-runner runs in a worktree are checked, and the dashboard cannot start one.
+- A check is only as strong as its command, and the agent can edit `init.sh`.
+- The reviewer runs on the agent's own runtime, with the agent's model unless you set `CLAWBOO_REVIEWER_MODEL`.
+- Checked work stays on its own branch, `clawboo/task-<id>`. Clawboo never merges it; merging is up to you.
+- A check is not continuous integration: it runs one command, once per attempt, with no pipeline, cache or test matrix.
 
-After a failing attempt, the loop decides whether to retry or stop. One budget governs both halves of that decision, `verifyMaxAttempts()`, which reads `CLAWBOO_MAX_FIX_CYCLES` as a count of _fix cycles_ and returns the total _attempts_, one more. The default is **2 attempts**: the initial verify plus one fix cycle. While attempts remain, the task goes back to `in_progress` with the structured fix note and the specialist tries again. On the last attempt the verdict is marked **`completed_with_debt`** and the open issues are recorded as `debtNotes` (each a `{ criterion, severity, justification }`), and the task itself routes to `blocked` for a human.
+<Accordion title="Under the hood">
 
-`completed_with_debt` is **not** an unconditional pass. Its promotability is the load-bearing rule:
+- **Where it runs.** `verifyTask` (`apps/web/server/lib/verification/index.ts`) is called only from `actOnTaskWorkspace` (`apps/web/server/lib/worktrees.ts`). The task runner calls it with a reviewer when a run completes (`apps/web/server/lib/executorRunner.ts`). `PATCH /api/board/:taskId/workspace` with `{"action": "complete"}` calls it without one, so that route never runs the reviewer.
+- **The command.** The gate reads `VERIFY_CMD='...'` from `init.sh`, then the `- Verify:` line of `VERIFICATION.md`. A command containing `configure VERIFY_CMD` counts as none (`packages/governance/src/verify/commandParser.ts`). It runs through a shell in the worktree with Clawboo's secrets removed from its environment, keeps the last 4,000 characters of output, and refuses a worktree outside the Clawboo folder (`apps/web/server/lib/verification/deterministicGate.ts`).
+- **The stored result.** Statuses are `pass`, `fail` and `completed_with_debt`, which is given at the last attempt. `PATCH /api/board/:taskId` refuses `done` with `409 verification_required` while a stored result blocks it, unless the request sets `humanOverride`, which writes a `verification` audit row. A stored result that cannot be parsed does not block, and `completed_with_debt` over a passing command does not block a later move to Done.
+- **Skipped by Clawboo.** A run that changed nothing, and an OpenClaw Routine completion (an `unverified` audit row), both reach `done` without the gate.
+- **The reviewer trigger.** `shouldRunCritic` in `packages/governance/src/verify/criticTrigger.ts`. It also accepts a `riskFlag`, which nothing sets.
+- **Clearing.** Any move to `todo` clears the stored result.
 
-- `completed_with_debt` **over a green deterministic gate** is still _promotable_ by the board's `→ done` gate, but the completion path no longer promotes it. A green gate with a failing verdict means the critic raised a **blocking** finding (security, crash, data loss, wrong algorithm, missing acceptance criteria), so the task routes to `blocked` for review rather than landing `done`.
-- `completed_with_debt` **over a red deterministic gate** (the build/test gate is still failing after the loop exhausts) → **not promotable**. A red gate is the canonical blocking case; it routes to `blocked` for a human rather than silently shipping.
+See [Executor runner](/internals/executor-runner) and the [Board API](/reference/rest-api/board).
 
-The completion path is stricter than the gate: only a clean `pass` lands `done`. A `completed_with_debt` verdict, and any `fail` that has spent the attempt budget, lands `blocked` with a system comment recording how many attempts failed and an inbox notice to the delegator, or to the team leader when the task has no delegator. A `fail` with attempts left reverts to `in_progress` so the next fix cycle can re-dispatch it.
+</Accordion>
 
-A person's move on the board outranks this path. If someone marks the task done or cancels it while its check is still running, the verdict is still stored on the task as a record of what the check found, but the completion path moves nothing and tells no one the task was routed for review.
+## Related
 
-## The intrinsic board gate
-
-The rule above is enforced in the board state machine itself, so it cannot be skipped by reaching `done` through a different door. Every transition to `done` runs a single shared check, `isVerdictPromotable`, against the freshly-read task row inside a `BEGIN IMMEDIATE` transaction:
-
-- **`pass`** → promotable.
-- **`completed_with_debt`** → promotable _only_ if the latest attempt's deterministic gate was green.
-- **anything else** (`fail`, or an unparseable verdict that _is_ present and non-promotable) → not promotable.
-- **no stored verdict** → the task is unverified, not failing, and lands `done` normally. The gate blocks _known-failing_ verdicts, not un-run verification. (An unparseable-but-present cell is treated leniently, if promotability can't be determined, the gate doesn't block.)
-
-When the verdict is non-promotable, the transition returns `verification_required`, which the [board REST](/reference/rest-api/board) layer maps to a `409`. The state machine is the backstop for any caller that reaches `done` another way; the worktree completion path is stricter still and promotes only a clean `pass`, so "done means verified" holds at every entry point.
-
-The one escape is `humanOverride`, a human deciding to ship despite a non-promotable verdict. It is the _only_ way a task with a known-failing verdict can reach `done`, and the caller must audit it: the `PATCH /api/board/:taskId` handler writes a `verification` audit row (`{ override: true, route: 'board_patch', priorStatus, to: 'done' }`) whenever an override-to-`done` succeeds. The override is never silent. On the [Board](/using/board#moving-a-task-by-drag-and-drop), moving a card whose stored verdict would block Done, by dragging it or from the task drawer's status editor, asks **Complete … anyway?** before the card moves; confirming sends the override.
-
-<Danger>
-Moving a task back to `todo` **clears the stored verification verdict**, on the `in_progress → todo` re-claim path and on the `blocked → todo` re-queue a human uses after an exhausted fix loop. This is intentional: a release is a cross-runtime rebind boundary, and a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The next runtime re-verifies from scratch.
-</Danger>
-
-## Design rationale and trade-offs
-
-Verification exists because a self-grading generator is unreliable, and because "the agent said it's done" is not evidence. Making `done` mean _verified_ buys a real completion guarantee, at the cost of a verify command per task and, on risky changes, a second model run.
-
-The two-layer split is deliberate. The deterministic gate is cheap, objective, and non-negotiable: a red gate is always a failure, with no model in the loop to be talked out of it. The critic adds judgement that an exit code can't capture (a security hole that still compiles, a wrong algorithm that still passes thin tests); but judgement is expensive and a same-model self-review is biased, so it is rationed to risky surfaces and made structurally independent (detached, push-less, no shared home).
-
-`completed_with_debt` is the record, not a shortcut. Bounding the _retry budget_ (never the evaluator) keeps a task from churning forever, and the debt notes say what was still open when the budget ran out; but nothing ships on that record. Only a clean `pass` lands `done`, so a red gate and an unresolved blocking finding both end in front of a human. Non-blocking findings never reach this path at all: a green gate with only `style` / `perf` / `other` findings is a `pass`. The trade-off is that a task nobody revisits stays `blocked` indefinitely, and its dependents stay unready with it.
-
-Making the gate intrinsic to the state machine, rather than a step the orchestrator is trusted to call, is what makes the rule un-bypassable. The cost is a small inline read of the verification cell on every `→ done` transition; the benefit is that no caller (MCP tool, REST route, future orchestrator) can route around it without the audited override.
-
-## Boundaries and non-goals
-
-- **Not a CI system.** Verification runs the task's own verify command once at completion; it does not provide a pipeline, scheduling, caching, or matrix builds.
-- **Only worktree-backed work is verified.** Tasks without an isolated worktree carry no verdict and land `done` un-gated. Verification is for file-mutating work that has a diff to check.
-- **The critic's model independence is opt-in.** Without `CLAWBOO_REVIEWER_MODEL`, the critic reuses the run's own adapter factory; independence is context-level (fresh session, detached checkout, no builder home), and the verdict records the reviewer model so the same-model caveat is visible.
-- **The deterministic gate trusts the configured command.** It reads an exit code; it does not validate that the command actually exercises the change. A weak `VERIFY_CMD` yields a weak gate.
-
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## See also
-
-- [The board](/concepts/the-board), the state machine the `→ done` gate lives in
-- [Governance](/concepts/governance), budgets, circuit breakers, caps, and approvals that bound a run
-- [Worktrees and handoff](/concepts/worktrees-and-handoff), the isolated checkout the gate runs in and the system-of-record `VERIFY_CMD` lives in
-- [Delegation and orchestration](/concepts/delegation-and-orchestration), how a structured fix verdict routes back to the leader
-- [Board API](/reference/rest-api/board), the REST surface, including the `409 verification_required` and the audited `humanOverride`
-- [Glossary](/appendices/glossary), canonical term definitions
+- [How a team works](/intro/how-it-works): which work runs on the task runner.
+- [Worktrees and handoff](/concepts/worktrees-and-handoff): the checkout a check runs in.
+- [Board](/using/board): Needs you, Retry and Dismiss.
+- [What agents can do](/concepts/permissions): why a worktree is not a sandbox.
+- [Environment variables](/reference/environment-variables): `CLAWBOO_MAX_FIX_CYCLES` and `CLAWBOO_REVIEWER_MODEL`.

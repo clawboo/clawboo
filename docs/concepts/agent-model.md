@@ -1,154 +1,104 @@
 ---
-title: The agent model
-description: What a Boo is, how Boo Zero leads, and how a runtime-agnostic agent record maps onto the five runtimes and the three runtime classes.
+title: 'Agents and Boo Zero'
+sidebarTitle: 'Agents and Boo Zero'
+description: 'What an agent is, how Boo Zero is chosen to lead every team, how it differs from a team Leader, and why an agent keeps its runtime.'
+keywords:
+  ['agent model', 'Boo', 'Boo Zero', 'team leader', 'Leader badge', 'runtime', 'AgentRecord']
 ---
 
-A **Boo** is a single agent in Clawboo. Concretely it is an `AgentRecord`, a runtime-agnostic row in the agent [registry of record](/appendices/glossary). The record says _who exists_: a stable id, a display name, a status, an optional team, and, critically, a `runtime` field and a `participantKind`. The record does **not** contain the agent's execution loop. That belongs to a [runtime](/appendices/glossary), reached through the uniform `RuntimeAdapter` trait. The same Boo can be backed by any of Clawboo's five runtimes, and the team layer never branches on which one.
+An **agent** is one AI worker in Clawboo. It has a name, a personality, a team and a runtime, the engine that runs its turns. The dashboard draws each agent as a **Boo**, the ghost avatar you see in the sidebar, the Org chart and team chat. One agent, **Boo Zero**, leads every team.
 
-This page explains what a Boo is and isn't, the `AgentRecord` shape and its source-of-truth discipline, **Boo Zero** (the universal team leader), the open-set `participantKind` seam, and how the five runtimes collapse onto just three _runtime classes_ that decide how the host composes with each runtime.
+Use this page to understand what an agent is made of, who leads a team, and what you can change after you create an agent.
 
-## What a Boo is, and what it isn't
+## The mental model
 
-A Boo is the answer to _who exists_. It is **not** the answer to _how it runs_ (that's the runtime) or _what work it's doing_ (that's [the board](/concepts/the-board)). Those three concerns are deliberately separate:
-
-- **Registry of record**: the `AgentRecord`. Owns identity, display, team membership, personality config, and the runtime tag. Reads of the fleet go through this (the `/api/agents` REST surface), which is why the dashboard renders even when a backing runtime is offline.
-- **Runtime**: the `RuntimeAdapter` that actually executes a turn. Owns the execution loop, the session, and the runtime's own private state.
-- **Board**: references agents and runtimes by id and owns only task state.
-
-This separation is what makes "runtime-agnostic" real. A Boo is not "an OpenClaw agent" or "a Claude Code agent"; it is a record whose `runtime` field happens to name one of five runtimes today, and whose execution is delegated to that runtime behind a trait the rest of the codebase treats as a black box.
-
-<Note>
-Every Boo is a real `AgentRecord`. There are no synthetic or decorative agents; even Boo Zero, the universal leader, is a real record (the runtime's default agent). The Ghost Graph and the sidebar render records, not fictions.
-</Note>
-
-## The AgentRecord
-
-`AgentRecord` is the neutral, Clawboo-native shape the rest of the codebase reads, not an OpenClaw protocol shape. An `OpenClawAgentSource` adapts the upstream Gateway into this shape in both directions; future sources (the native runtime) populate it directly. Each field is annotated with its source of truth: **Gateway-synced** fields are overwritten on every sync; **SQLite-native** fields are Clawboo-owned and preserved across re-sync.
-
-| Field                              | Type                 | Source of truth | Meaning                                                       |
-| ---------------------------------- | -------------------- | --------------- | ------------------------------------------------------------- |
-| `id`                               | `string`             | SQLite-native   | Clawboo's stable primary key.                                 |
-| `sourceId`                         | `RuntimeId`          | SQLite-native   | Which `AgentSource` owns the upstream record.                 |
-| `sourceAgentId`                    | `string`             | Gateway-synced  | The upstream id within that source.                           |
-| `displayName`                      | `string`             | merged          | Boo-Zero override ▸ Gateway identity name ▸ id.               |
-| `emoji` / `avatarUrl`              | `string \| null`     | Gateway-synced  | Runtime identity visuals.                                     |
-| `avatarSeed`                       | `string \| null`     | SQLite-native   | Seed for the procedural Boo avatar.                           |
-| `status`                           | `AgentRecordStatus`  | Gateway-synced  | `idle` · `running` · `error` · `sleeping` · `archived`.       |
-| `sessionKey`                       | `string \| null`     | Gateway-synced  | The agent's main session key.                                 |
-| `isDefault`                        | `boolean`            | Gateway-synced  | True when this is the source's default agent (Boo Zero).      |
-| `teamId`                           | `string \| null`     | SQLite-native   | Team membership; `null` = unassigned.                         |
-| `personalityConfig` / `execConfig` | `unknown \| null`    | SQLite-native   | Clawboo config preserved across re-sync; see below.           |
-| `participantKind`                  | `'agent' \| 'human'` | seam            | Who executes: `agent` today (see below).                      |
-| `runtime`                          | `RuntimeId`          | seam            | Which runtime backs this agent.                               |
-| `tenantId`                         | `string \| null`     | seam            | Dormant multi-tenant scope (`null` = single implicit tenant). |
-| `archivedAt`                       | `number \| null`     | SQLite-native   | Soft-delete tombstone (epoch ms); `null` = live.              |
-| `createdAt` / `updatedAt`          | `number`             | SQLite-native   | Lifecycle timestamps.                                         |
-
-`execConfig` is SQLite-native in the sense that a re-sync never overwrites it, but for an OpenClaw Boo it is not the setting itself. The command-approval posture it records is enforced by the Gateway, not by Clawboo, so Clawboo writes it there: once when the agent is created (a Gateway that refuses the write fails the creation: the agent is removed upstream and no row is written), and again whenever you change it in the **Permissions** tab. The two can still drift on that later change: a Gateway refusal is reported as an error, and the refused value stays in Clawboo's own record and is what the tab shows after a reload. On every other runtime there is no second copy, and the local record is the whole setting. See [What a new Boo is allowed to run](/runtimes/openclaw#what-a-new-boo-is-allowed-to-run).
-
-`RuntimeId` is an **open set**: `'openclaw' | 'claude-code' | 'codex' | 'hermes' | (string & {})`. The string-union escape hatch means the type is a list of autocomplete hints, not a closed enum; a sixth runtime is a new value, not a type change. `AgentRecordStatus` is a _superset_ of the runtime's own status, adding the `archived` tombstone that Clawboo owns.
-
-The sync that keeps a record fresh is idempotency-disciplined: a re-sync from the upstream overwrites only the Gateway-synced columns and never clobbers the SQLite-native ones. So a Boo's team, personality, and avatar seed survive a runtime reconnect untouched. The internals of that sync live in [AgentSource](/internals/agent-source).
-
-## Boo Zero, the universal team leader
-
-Exactly one Boo in the fleet is **Boo Zero**: the universal team leader. It is the runtime's _default agent_, and it is _teamless_ in the database, `teamId === null`, yet it participates in **every** team. It does so through a team-scoped session key of the form `agent:<booZeroId>:team:<teamId>`, so its conversation in each team is isolated even though the underlying record is shared.
-
-Boo Zero is identified on connect, not stored as a flag. The identification function walks a three-step priority:
-
-1. The runtime's reported default agent (`defaultId`), if it exists in the fleet.
-2. Otherwise, the first agent with `teamId === null` (the first unassigned agent).
-3. Otherwise, the first agent overall.
-
-```mermaid
-flowchart TD
-    A[Fleet hydrated] --> B{gatewayDefaultId<br/>present in fleet?}
-    B -- yes --> Z[Boo Zero = defaultId agent]
-    B -- no --> C{any agent with<br/>teamId === null?}
-    C -- yes --> Y[Boo Zero = first teamless agent]
-    C -- no --> X[Boo Zero = first agent overall]
-```
-
-Because Boo Zero is teamless but leads every team, the leader-resolution rule is layered. When resolving a team's effective leader, Boo Zero wins **regardless** of any team-internal lead. The team-internal lead (a CTO / Team Lead role, when one is detected) is a secondary concept that sits _between_ Boo Zero and the rest of the team, and it becomes the routing fallback only when Boo Zero is absent. The full precedence is:
-
-1. Boo Zero (when it exists in the fleet).
-2. The team-internal lead (when set and a member of the team).
-3. The first member of the team.
-4. `null`: an empty team with no Boo Zero.
-
-<Note>
-Boo Zero's identity is determined at hydration from live fleet data, so it can change if the default agent changes. It is not a persisted boolean on the record; `isDefault` reflects the upstream default, and the identification function turns that (plus the teamless fallbacks) into the single Boo Zero id the UI uses.
-</Note>
-
-## participantKind, the human seam
-
-Every `AgentRecord` and every `RuntimeAdapter` carries a `participantKind` of `'agent' | 'human'`. Today every participant is an `agent`; nothing in the shipped code branches on this field. It is a deliberate, reserved seam so that a person can later become a first-class task assignee, delegation target, or approver behind the **same** interface, without baking "executor == automated agent" into the trait, the board's assignee model, or the lifecycle event stream.
-
-<Info>
-`participantKind: 'human'` is a **future seam, not a shipped feature** in v0.5.0. There is no human-participant path yet. The field exists so the surrounding machinery (registry, board, events) doesn't have to be rewritten when one is added.
-</Info>
-
-## How a Boo relates to a runtime
-
-A Boo's `runtime` field names one of five runtimes: `openclaw`, `clawboo-native`, `claude-code`, `codex`, or `hermes`. Each is wrapped by a `RuntimeAdapter`, one interface over every runtime, that normalizes the runtime's native signals into Clawboo's `RuntimeEvent` lifecycle stream. The hot path is supervision, relay, and UI, so Clawboo _wraps_ runtimes rather than reimplementing their loops.
-
-Each adapter declares a `Capabilities` block. The capability the host actually routes on is `runtimeClass`, which describes **how a runtime composes with the host**:
-
-| `runtimeClass`        | Meaning                                                                                                                                       | Runtimes                         |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `connected-substrate` | A long-lived runtime the host drives over its live connection; it owns its own home, skills, memory, channels, and scheduler entirely.        | `openclaw`                       |
-| `native`              | A host-native participant whose private state (persisted conversation transcripts) lives in a stable per-identity home the host materializes. | `clawboo-native`                 |
-| `wrapped-oneshot`     | A per-run spawned one-shot worker (a CLI/SDK process the host launches, drives, and exits).                                                   | `claude-code`, `codex`, `hermes` |
-
-The five runtimes therefore collapse onto **three classes**. This matters because the executor branches **only** on the runtime class, never on a runtime id. A pure function, `resolveRuntimeIntegration(capabilities)`, turns the declared `runtimeClass` (plus the `nativeHome` / `nativeSkills` / `nativeMemory` / `nativeChannels` seam) into a normalized integration plan: where the run's home lives (`connected`, `persistent` per-identity, or `ephemeral`), whether native skills and memory are preserved across runs, and whether deliveries ride the runtime's own channels.
+Think of an agent as a staff card. The card says who the agent is and which team it works on. The runtime is the engine behind the card: it reads the conversation, calls tools and writes the reply. The board holds the work the agent has been given.
 
 ```mermaid
 flowchart LR
-    subgraph Runtimes
-      O[openclaw]
-      N[clawboo-native]
-      CC[claude-code]
-      CX[codex]
-      H[hermes]
-    end
-    O --> CS[connected-substrate]
-    N --> NV[native]
-    CC --> WO[wrapped-oneshot]
-    CX --> WO
-    H --> WO
-    CS --> R[resolveRuntimeIntegration]
-    NV --> R
-    WO --> R
-    R --> P[Integration plan:<br/>home · preserveSkills ·<br/>preserveMemory · channels]
+    A["Agent<br/>name, personality, team"] -->|runs on| R["Runtime<br/>does the thinking"]
+    A -->|works on| B["Board<br/>its tasks"]
 ```
 
-The class also gates dispatch. The one-shot executor runner spawns a fresh process per run; so a `connected-substrate` runtime like OpenClaw must **never** be routed to it (it executes over its live Gateway connection instead). The runner refuses a connected-substrate adapter _before_ the atomic claim, so a misrouted call never mutates the board. Because the refusal keys on the resolved integration home being `connected`, not on a runtime-id check, adding a sixth runtime is handled by construction.
+Clawboo keeps every agent's card in its own database. That is why the sidebar and the Org chart still list your agents while a runtime is offline: you can see an agent you cannot reach at the moment.
 
-A subtlety worth noting: `runtimeClass` lives on the adapter's `Capabilities`, not on the runtime _descriptor_. The descriptor (`RUNTIME_DESCRIPTORS`) covers install and auth: package name, health binary, auth kind, the env var written to the encrypted vault, for the four non-OpenClaw runtimes. The runtime class is an execution property the adapter declares. They answer different questions: the descriptor is "how do I bring this runtime online?", the class is "how does the host drive it once it's online?". For the install/connect side, see [Connecting runtimes](/runtimes/connecting-runtimes).
+## Every agent runs on one runtime
 
-## Design rationale and trade-offs
+A runtime is the software that runs an agent's turns. Clawboo supports five, and they work in three ways:
 
-The agent model is built around one decision: **the registry is the source of truth for who exists; the runtime is the source of truth for how an agent runs.** Splitting identity from execution buys three things. Reads serve from SQLite, so the fleet renders even when a runtime is down. A Boo can move between runtimes (or be backed by a new one) without rewriting any consumer, because consumers see `AgentRecord`, not a runtime-specific shape. And the open-set `runtime` / `participantKind` / `tenantId` fields let future capabilities (a sixth runtime, human teammates, multi-tenancy) land as data changes rather than type rewrites.
+| How it runs     | Runtimes                   | What that means for you                                                                                                  |
+| --------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Built in        | Clawboo Native             | Runs inside the Clawboo server, on the provider key or local Ollama you connect.                                         |
+| Connected       | OpenClaw                   | Runs in your OpenClaw Gateway, a separate program Clawboo connects to. Clawboo keeps its own copy of each agent in sync. |
+| Started per run | Claude Code, Codex, Hermes | Coding tools that Clawboo starts for a turn or a task, and stops when it ends.                                           |
 
-The cost is indirection: a Boo and its runtime are two layers, and a change to a runtime's behavior often touches its adapter rather than the record. The `runtimeClass → resolveRuntimeIntegration` routing is the same trade-off applied to execution; the host pays a small abstraction tax (a plan computed from capabilities) to never hardcode a runtime id in the hot path.
+The runtime is set when the agent is created and never changes. No dashboard control or API call moves an existing agent to another runtime. To try the same role on a different runtime, create a new agent there.
 
-## Boundaries and non-goals
+Which runtime a new agent gets:
 
-- **A Boo is not its runtime.** The record carries a `runtime` tag and execution config, but the execution loop, the live session, and the runtime's private on-disk state belong to the runtime. The board references the agent by id; it does not own agent identity or session state.
-- **`participantKind: 'human'` is dormant.** No human-participant path exists in v0.5.0. The field is a seam.
-- **`tenantId` is dormant.** Every record carries a `tenantId`, but there is no active per-tenant scoping, a single implicit tenant today.
-- **Boo Zero is identified, not declared.** It is whatever the three-step priority resolves to at hydration, not a persisted leader flag. Change the runtime's default agent and Boo Zero can change.
+- **Create Boo**, and adding an agent on the Org chart, put the agent on OpenClaw while the Clawboo server is connected to a Gateway, and on Clawboo Native otherwise.
+- Deploying a team lets you pick the runtime for each member in **Customize team**, so one team can mix runtimes.
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+After that you can edit its personality and its files. See [Manage agents](/using/agents) for the controls and [Choose a runtime](/runtimes/index) to compare the runtimes.
 
-## See also
+A Clawboo Native agent that has no key for its provider shows **No provider key** at the top of its chat. Connect that provider in [Providers and runtimes](/using/providers-and-runtimes) and it can run again.
 
-- [Teams and planes](/concepts/teams-and-planes), how Boos group into teams and the shared-plane / private-plane split
-- [Runtimes overview](/runtimes/index), the five runtimes and the capability matrix
-- [Connecting runtimes](/runtimes/connecting-runtimes), install/connect/disconnect a runtime
-- [The board](/concepts/the-board), where a Boo's work lives once it's dispatched
-- [AgentSource (internals)](/internals/agent-source), the registry-of-record sync discipline
-- [RuntimeAdapter (internals)](/internals/runtime-adapter), the trait and the `RuntimeEvent` union
-- [Glossary](/appendices/glossary), canonical term definitions
+## Boo Zero leads every team
+
+**Boo Zero** is the one agent that leads all of your teams, and every room inside each team. When you send a message in a team chat, Boo Zero answers it or hands the work to a teammate. Start a message with `@` and a teammate's name to send it to that teammate instead. [How work is delegated](/concepts/delegation-and-orchestration) explains the hand-off.
+
+Usually Boo Zero belongs to no team, which is how it can preside over all of them. Clawboo picks Boo Zero in this order, and the first match wins:
+
+1. **An agent designated as Boo Zero**, on any runtime. The dashboard has no control for this. If you set up Clawboo with **Sign in with ChatGPT**, the lead of the team you deploy during setup (its Leader, or else its first agent) is designated automatically, unless you already have a Boo Zero from this rung or the next. You can also set one through the API (see the [Boo Zero API](/reference/rest-api/boo-zero)).
+2. **The Boo Zero that Clawboo creates for you** on Clawboo Native. Clawboo creates it as soon as a Clawboo Native agent is on a team and a provider is connected for Clawboo Native.
+3. **Your OpenClaw Gateway's default agent**, when you use OpenClaw and neither of the above exists.
+
+If none of these exists, each chat is led by the team's Leader (below) when that agent is in the chat, and otherwise by the chat's first member. A team with no active members has no lead at all.
+
+To rename Boo Zero, open Boo Zero's own page and use its **Brief** tab. The briefs you can write for Boo Zero reach it less often than their names suggest: the global brief is saved but not read, and a team's brief is read only when you mention that team in Boo Zero's own chat. [Configure Boo Zero](/using/boo-zero) lists exactly what Boo Zero reads.
+
+## A team's Leader
+
+Some teams also have a **Leader**: one member marked with a **Leader** badge. When you deploy a team, Clawboo gives the badge to the member whose name or role reads as a leadership title, such as CEO, CTO or Team Lead. Many teams have no Leader, and that is fine: Boo Zero coordinates them.
+
+On Clawboo Native, the Leader is set up as a lead. It gets the lead instructions and, unless you pick a model, the provider's default lead model. The other members get the provider's default specialist model, often a faster, cheaper one.
+
+|                   | Boo Zero                                                                  | A team's Leader                                                                                            |
+| ----------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| How many          | One for your whole Clawboo                                                | At most one per team, often none                                                                           |
+| Team membership   | Usually none                                                              | A member of its own team                                                                                   |
+| Answers team chat | Every team and every room                                                 | Only when there is no Boo Zero, in chats it belongs to                                                     |
+| How it is chosen  | Designated, created by Clawboo, or your Gateway's default (in that order) | Detected from names and roles at deploy; in a ChatGPT sign-in setup, the first agent when none is detected |
+
+## What you control
+
+- **Who an agent is**: its personality and files, on the agent's page. See [Manage agents](/using/agents).
+- **Its team**: set when you create it. **Create Boo** adds the new agent to the team you have selected. An agent belongs to one team at a time, or to none.
+- **Its runtime**: chosen once, when you create the agent or deploy its team.
+- **Boo Zero's name**: on Boo Zero's page. [Configure Boo Zero](/using/boo-zero) covers the name, the briefs, and which of them Boo Zero reads.
+
+## Limits
+
+- An agent's runtime cannot be changed. Create a new agent to use another runtime.
+- There is no dashboard control to choose a different Boo Zero.
+- A team chat needs at least one active member. Boo Zero does not lead an empty team.
+
+<Accordion title="Under the hood">
+
+- **The agent record.** Every agent is an `AgentRecord` row in Clawboo's database with `id`, `runtime`, `teamId`, `participantKind`, `personalityConfig` and `execConfig`, among others. Three kinds of source fill it. The OpenClaw source syncs from the Gateway, and a re-sync rewrites only Gateway-owned fields, keeping Clawboo's own. The Clawboo Native source and one source per coding runtime keep the only copy in Clawboo's database. See [AgentSource](/internals/agent-source).
+- **Runtime classes.** Each adapter declares a `runtimeClass`: `native` (Clawboo Native), `connected-substrate` (OpenClaw) or `wrapped-oneshot` (Claude Code, Codex, Hermes). Clawboo routes runs on this class, never on a runtime id. See [RuntimeAdapter](/internals/runtime-adapter).
+- **Boo Zero resolution.** The server resolves Boo Zero in the order above and returns its id as `defaultId` from `GET /api/agents`. `GET /api/boo-zero/override` reports `{ overrideAgentId, effective, tier }`, and `POST /api/boo-zero/override` with `{ "agentId": "<id>" }` designates one (`null` clears it). `isDefault` on a record marks the Gateway's own default agent, which is Boo Zero only when nothing outranks it.
+- **Sessions.** Boo Zero talks to each team in a team-scoped session, `agent:<agentId>:team:<teamId>` for General, with `:room:<roomId>` added for each room, so its conversations never mix.
+- **Reserved fields.** `participantKind` is `agent` or `human`. Nothing runs a human participant: a Routine aimed at one is refused. `tenantId` is always `null`.
+- **`providerReady`.** Set on Clawboo Native agents only. It is `false` when no key resolves for the agent's provider or its fallbacks, which is what the **No provider key** label reads.
+- **Command approval on OpenClaw.** The Gateway, not Clawboo, enforces an OpenClaw agent's command-approval setting, so Clawboo writes the setting there when it creates the agent and when you change it. If the Gateway refuses it at creation, the agent is removed and not created. See [OpenClaw](/runtimes/openclaw).
+
+</Accordion>
+
+## Related
+
+- [Teams, rooms and runtimes](/concepts/teams-and-planes): what a team shares and what each runtime keeps to itself.
+- [How work is delegated](/concepts/delegation-and-orchestration): how Boo Zero hands work to teammates.
+- [Choose a runtime](/runtimes/index): what each of the five runtimes is good at.
+- [Configure Boo Zero](/using/boo-zero): Boo Zero's name, global brief and team briefs.
+- [Manage agents](/using/agents): create, edit and remove agents.

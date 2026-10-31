@@ -1,139 +1,129 @@
 ---
-title: Teams and planes
-description: How teams group agents, and the split between the shared coordination plane and each runtime's private plane.
+title: 'Teams, rooms and runtimes'
+sidebarTitle: 'Teams and rooms'
+description: 'What a team is, how its General chat and rooms run, what the whole team shares, and what each runtime keeps to itself.'
+keywords:
+  [
+    'teams and planes',
+    'shared plane',
+    'private plane',
+    'rooms',
+    'General',
+    'team rules',
+    'team brief',
+    'mixed runtimes',
+    'team space',
+  ]
 ---
 
-A **team** is the unit Clawboo coordinates around: a durable row that groups [agents](/concepts/agent-model) deployed together and names an optional leader. Inside a team, agents may run on _different_ [runtimes](/appendices/glossary), one OpenClaw agent, one Clawboo Native agent, one Hermes agent, and still collaborate as peers. They can do that because Clawboo splits the world into two planes.
+A **team** is a group of agents that work together. It has one board, one set of team rules and a shared memory. You talk to a team in its **General** chat, or in a **room**, a smaller conversation with some of its members. A team can mix runtimes: one member on Clawboo Native, another on Claude Code, a third on OpenClaw.
 
-The **shared plane** is everything the whole team coordinates over: the [board](/concepts/the-board), [team chat](/concepts/peer-chat), [shared memory](/concepts/memory), the [capability inventory](/concepts/capabilities), and [Routines](/concepts/scheduling). It is canonical and cross-runtime; every runtime reads and writes the same shared plane through the [MCP](/appendices/glossary) spine. The **private plane** is everything a runtime keeps to itself: its native memory, its self-created skills, its session/transcript state, and its own delivery channels. Clawboo _observes_ the private plane (it materializes a stable home for it, attaches MCP to it) but _never clobbers_ it.
+Use this page to understand what a team has, how its chats run, and what the team shares compared with what each runtime keeps to itself.
 
-This page explains what a team is, what lives on each plane, how the boundary is derived purely from a runtime's declared capabilities (never a runtime-id `switch`), and why "preserve, don't homogenize" is the rule that lets a mixed-runtime team work.
+## The mental model
 
-## What it is, and what it isn't
-
-A team groups agents and a leader; it is **not** a workspace, a tenant, or an execution context. It owns identity (`name`, `icon`, `color`), an optional `colorCollectionId` and `templateId`, an optional `leaderAgentId`, and an `isArchived` flag. It does **not** own agents; agents reference _their_ team through a nullable `teamId` foreign key, so an agent belongs to at most one team (or none), and "the agents on team X" is a query, not a stored list. A team's `agentCount` is computed on read (`SELECT COUNT(*) FROM agents WHERE team_id = ?`).
-
-The shared/private split is **not** a privilege boundary and **not** a sandbox. It is a _coordination_ boundary. The shared plane is the single source of truth the whole team agrees on; the private plane is where a runtime's own cognition compounds. The split exists so that a team can mix runtimes without forcing every runtime into a lowest-common-denominator behavior; a runtime that has rich native memory or self-improving skills keeps them, while still pulling shared facts and pushing shared decisions through the same MCP servers as every other runtime.
-
-<Note>
-Teams are **single implicit tenant** today. The `teams` row (and every other table) carries a dormant `tenant_id` column, but no per-tenant filtering is active. Multi-tenant scoping is a future seam, not a shipped feature.
-</Note>
-
-## The model
-
-A team is N agents, each on some runtime. They all share one shared plane; each keeps its own private plane.
+Picture a small office. Everyone shares the whiteboard (the board), the house rules (team rules) and the filing cabinet (shared memory). Each person also keeps a private notebook, which here is the runtime's own memory and settings. Teammates cannot read each other's notebooks. Claude Code is the exception: every Claude Code agent uses your own Claude Code setup, as the table below shows.
 
 ```mermaid
 flowchart TB
-    subgraph SHARED["Shared plane — canonical, cross-runtime"]
-        BOARD["Board<br/>(tasks, claim, deps)"]
-        CHAT["Team chat room<br/>team:&lt;teamId&gt;"]
-        MEM["Shared memory<br/>(team-shared facts via MCP)"]
-        CAPS["Capability inventory"]
-        ROUT["Routines<br/>(the single external wake)"]
+    subgraph SHARED["Shared by the whole team"]
+        BOARD["Board"]
+        RULES["Team rules"]
+        MEM["Shared memory"]
     end
-
-    subgraph TEAM["Team"]
-        A["Agent A<br/>runtime: openclaw"]
-        B["Agent B<br/>runtime: clawboo-native"]
-        C["Agent C<br/>runtime: hermes"]
-    end
-
-    A <--> SHARED
-    B <--> SHARED
-    C <--> SHARED
-
-    A -.-> PA["Private plane A<br/>Gateway state, channels,<br/>own cron"]
-    B -.-> PB["Private plane B<br/>per-identity home,<br/>persisted transcripts"]
-    C -.-> PC["Private plane C<br/>per-identity home,<br/>MEMORY.md, state.db, skills/"]
-
-    style SHARED fill:#0f3,stroke:#093,color:#000
-    style PA stroke-dasharray: 4 4
-    style PB stroke-dasharray: 4 4
-    style PC stroke-dasharray: 4 4
+    A["Agent on Clawboo Native"] --> SHARED
+    B["Agent on Hermes"] --> SHARED
+    C["Agent on OpenClaw"] --> SHARED
+    A -.-> PA["Its saved conversations"]
+    B -.-> PB["Its Hermes memory and skills"]
+    C -.-> PC["Its state in your Gateway"]
 ```
 
-The solid arrows are the shared plane; every agent reads and writes it the same way. The dashed arrows are private planes; each is owned by its runtime; Clawboo observes them but routes nothing between them.
+Solid lines are what every member reaches the same way, whatever its runtime. Dotted lines are what each runtime keeps for itself. OpenClaw is a partial exception, described [below](#openclaw-shares-less).
 
-## How it works
+## What a team has
 
-### Teams are a thin grouping row
+- **Members.** Agents on any mix of runtimes. An agent is on one team at a time, or on none. Boo Zero leads every team, usually without being a member of any (see [Agents and Boo Zero](/concepts/agent-model)).
+- **General.** The team's main chat, with every member in it. The sidebar shows it as **General (Main Room)**. It is always there: you can clear it, but not rename or delete it.
+- **Rooms.** Extra chats with some of the members, made with **New room**. Each room has its own conversation and its own list of tasks, and Boo Zero leads it too. You can rename, pin, clear or delete a room. Deleting a room archives it: its conversation is kept, its running work stops, and its tasks stay on the board.
+- **One board.** Every task from every chat of the team. A task remembers which chat it came from, and that chat runs it. If the task's room was deleted, General runs it. See [The board](/concepts/the-board).
+- **Team rules.** Rules you set, such as "always cite sources". Every agent gets them on every turn it takes in the team's chats, in General and in every room, including work handed off there.
+- **Your introduction.** What you write the first time you open a team. It reaches the agents whose replies you read (the lead, or an agent you address directly), not the teammates working on handed-off tasks.
+- **A team brief.** Boo Zero's notes about the team. Boo Zero reads it, up to 900 characters, only in its own one-to-one chat, when you start a message there with `@` and the team's name. In team chat, the lead sees the roster with each member's role instead.
+- **Shared memory.** A fact a member saves during a team run is filed under the team, so any teammate on any runtime can recall it. See [Memory](/concepts/memory).
+- **A peer room.** A notice board that only the team's agents read, separate from General and the rooms. The dashboard does not show it; see [Peer chat](/concepts/peer-chat).
 
-The `teams` table holds identity and a leader pointer; agents carry the membership. This keeps a team a _label_ over the agent registry rather than a container that owns runtime state. Re-coloring a team, renaming it, or changing its leader touches only the `teams` row; moving an agent between teams is a write to that agent's `teamId`. Because membership lives on the agent, the agent [registry of record](/appendices/glossary) stays the single owner of _who exists_, and the team is just how Clawboo scopes coordination.
+You set the rules and the brief in the team settings, behind the gear in a team chat's header. [Manage teams](/using/teams) has the steps, and [Chat with your team](/using/team-chat) covers General, rooms and clearing a chat.
 
-### The shared plane is the same for every runtime
+## How a team's chats run
 
-Every shared-plane subsystem is keyed by team, and every runtime reaches it through the same surface:
+Each chat, General and every room, has its own **coordinator** on the Clawboo server. The coordinator is the part of Clawboo that routes your message, turns each hand-off into a task on the board, and reports results back. It runs on the server, so work keeps going when you close the browser, and it picks up unfinished work after a restart.
 
-- **The board** is canonical for task/coordination state. A delegation becomes a board task; a claim is atomic and single-assignee; an outcome lands on the board. Chat is narration of the board, never a write path back to it. See [The board](/concepts/the-board).
-- **The team chat room** is `team:<teamId>`, one room per team by default. A post is delivered to every teammate _except_ its own author (the per-`(roomId, authorAgentId)` echo guard is just the read's `excludeAuthorId`). A teammate's post arrives tagged as evidence, never as a user instruction. See [Peer chat](/concepts/peer-chat).
-- **Shared memory** is team-shared by construction. When a run auto-saves a fact, it is tagged with the **team only** (`agentId` left null), so any teammate on _any_ runtime recalls it; reads see team-shared plus global plus this-agent-private, never another team's. See [Memory](/concepts/memory).
-- **The capability inventory** and **Routines** are likewise team-scoped. Routines are the _single external wake_ for every runtime class; a scheduled fire is just another board-task dispatch through the standard executor pipeline (budgets, verification, observability all apply), never a side channel into a runtime's own cron.
+A coordinator sees only its own chat's members and tasks, so two rooms never take each other's work. An agent that belongs to two rooms still runs one turn at a time.
 
-The point is uniformity: a Hermes agent and a Clawboo Native agent on the same team see the same board, the same chat, and the same team facts, because all three arrive over MCP / REST keyed by the same `teamId`.
+Routines use the same path. A team Routine posts its instructions into the team's General chat as if you typed them, and Boo Zero answers. An agent Routine gives that agent a task on the board. Clawboo never drives a runtime's own scheduled jobs. See [How routines run](/concepts/scheduling).
 
-### The private plane is derived from capabilities, not runtime ids
+## Shared and private
 
-Which native powers a runtime keeps is _declared_ by the [RuntimeAdapter](/appendices/glossary), not hardcoded by Clawboo. A runtime's `capabilities()` carries a native-preservation seam: `runtimeClass`, a `nativeHome` claim (`scope` + `persist`), and `nativeSkills` / `nativeMemory` / `nativeChannels` / `nativeScheduler` flags. The host turns those claims into a normalized integration plan with one pure function, and **branches only on that plan, never on a runtime id**:
+**Shared** means Clawboo stores it, and every teammate reaches it the same way, whatever its runtime: the board, the team's chats, team rules and shared memory.
 
-```ts
-resolveRuntimeIntegration(caps): {
-  home: { kind: 'persistent'; scope: 'per-identity' } | { kind: 'ephemeral' } | { kind: 'connected' }
-  preserveSkills: boolean
-  preserveMemory: boolean
-  useGatewayChannels: boolean
-  coRunScheduler: false   // always false — the host's scheduler owns when-to-run
-}
-```
+**Private** means the runtime keeps it for itself: its own memory, skills, saved sessions and settings. Clawboo does not copy it into shared memory or hand it to teammates (Claude Code aside, see the table). Private here is about coordination, not security. Most runtimes can read any file your user account can; see [What agents can do](/concepts/permissions).
 
-The function is conservative by default: an adapter that omits the seam resolves to `runtimeClass: 'wrapped-oneshot'` with an **ephemeral** home and nothing preserved; so omission never silently preserves _or_ strips state beyond the plain one-shot path. A persistent home is granted only when the claim is `scope: 'per-identity'` _and_ `persist: true`; the preserve flags are clamped to a persistent home, so a misdeclared adapter degrades to the safe default rather than producing a contradictory plan (preserving state inside a throwaway home is incoherent). For a `connected-substrate` runtime the host manages _no_ filesystem home at all; the substrate owns its world entirely and the host drives it over its live connection.
+Clawboo gives three runtimes a folder of their own per agent, inside Clawboo's home folder (`~/.clawboo`, or `CLAWBOO_HOME` if you set it). Only your user account can open these folders.
 
-Here is how each of the five runtimes declares its private plane, and what the host does with it:
+| Runtime        | Where its own state lives                                                                   | What Clawboo does there                                                                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clawboo Native | `~/.clawboo/runtimes/clawboo-native/<agent>`: its saved conversations                       | Creates the folder. A lead's conversation continues from one turn to the next.                                                                                                                                                  |
+| Hermes         | `~/.clawboo/runtimes/hermes/<agent>`: its `MEMORY.md`, `state.db` and the skills it creates | Writes three files and nothing else: `mcp.json` on every run, `config.yaml` copied once from your `~/.hermes` if missing, and `auth.json` copied from `~/.hermes` when yours is newer. It never writes to your own `~/.hermes`. |
+| Codex          | `~/.clawboo/runtimes/codex/<agent>`: that agent's `CODEX_HOME`                              | Copies in your `codex login` so the agent can run, and keeps its session files, so a Codex lead keeps its conversation between turns.                                                                                           |
+| Claude Code    | Your own home folder: your `~/.claude` settings and memory                                  | Nothing. Every Claude Code agent loads your own Claude Code setup, so this state is shared with you and with every other Claude Code agent. See [Memory](/concepts/memory).                                                     |
+| OpenClaw       | Your OpenClaw Gateway's own state                                                           | Nothing. The Gateway owns it.                                                                                                                                                                                                   |
 
-| Runtime          | `runtimeClass`        | `nativeHome`           | `nativeMemory` | `nativeSkills` | `nativeChannels` | What the host manages                                                                |
-| ---------------- | --------------------- | ---------------------- | -------------- | -------------- | ---------------- | ------------------------------------------------------------------------------------ |
-| `openclaw`       | `connected-substrate` | _(omitted)_            | `preserve`     | `preserve`     | `gateway`        | Nothing; the Gateway owns its state dir; runs ride its live connection               |
-| `clawboo-native` | `native`              | per-identity, persist  | `preserve`     | `none`         | `none`           | A persistent per-identity home holding persisted transcripts                         |
-| `hermes`         | `wrapped-oneshot`     | per-identity, persist  | `preserve`     | `preserve`     | `none`           | A persistent per-identity home where `MEMORY.md`, `state.db`, and `skills/` compound |
-| `claude-code`    | `wrapped-oneshot`     | _(omitted)_            | `none`         | `none`         | `none`           | Nothing; the SDK runs against the user's real home                                   |
-| `codex`          | `wrapped-oneshot`     | per-run, persist:false | `none`         | `none`         | `none`           | An ephemeral per-run home (auth lives in `CODEX_HOME`)                               |
+## OpenClaw shares less
 
-When the plan says `home.kind === 'persistent'`, the host materializes one stable home per `(runtime, agentId)` under Clawboo's own state dir, owner-only (`0700`), _before_ the driver touches it; that home is where the runtime's private memory and skills accrue across runs. The runner only computes the path; the driver provisions inside it.
+OpenClaw agents share the board, but one Gateway configuration serves all of them, so Clawboo's tools cannot tell one OpenClaw agent from another. As a result, OpenClaw agents:
 
-### Observe, but never clobber
+- read and save shared memory in the global area only, so they do not see the team's own facts;
+- have no tool for the agents' peer room (see [Peer chat](/concepts/peer-chat));
+- cannot claim or assign board tasks through Clawboo's task tools;
+- do not get the connectors you give them on the Org chart, and ask you for approval each time they use an app through Composio.
 
-"Never clobber" is enforced at every write boundary:
+They still receive the team rules and the roster, and they hand work to teammates with a delegate line in their reply. See [OpenClaw](/runtimes/openclaw).
 
-- **Hermes home.** Clawboo writes exactly two things into a Hermes home: `mcp.json` (Clawboo-owned, refreshed every run because the server port can change) and a _one-time_ `config.yaml` seeded copy-if-absent from the user's real `~/.hermes`. It never overwrites the seeded config and never writes back. Everything else in that home, `MEMORY.md`, `state.db`, self-created skills, is Hermes's, and it persists across runs.
-- **The verification critic.** The builder-≠-judge reviewer is built _without_ a `homeDir` on purpose: the critic must not share the builder's native memory. Preservation is per-identity precisely so a fresh, independent reviewer can run on the same runtime without inheriting the builder's private state. See [Verification](/concepts/verification).
-- **The AgentSource sync.** When the Gateway syncs agents into SQLite, the upsert touches only Gateway-owned columns; `teamId`, `personalityConfig`, `execConfig`, `avatarSeed`, `runtime`, and `capabilities` are Clawboo-native and preserved across every re-sync. A runtime's contribution to the shared registry never overwrites the team's local decisions about that agent.
+## Mixed runtimes in one team
 
-## Design rationale and trade-offs
+A team does not have one runtime; each member has its own. Boo Zero leads any mix, and every member receives work and reports back the same way. What differs is how each runtime signals a hand-off and what it can do on your machine:
 
-The split exists because the alternative, a single homogenized agent model, throws away exactly what makes a multi-runtime team worth assembling. A runtime that has built a rich `MEMORY.md` or a library of self-created skills is _more_ useful with that state intact; flattening every runtime to a stateless worker would erase its accumulated competence. So Clawboo preserves the private plane and unifies only the coordination plane.
+- [How work is delegated](/concepts/delegation-and-orchestration) lists the hand-off signal for each runtime.
+- [What agents can do](/concepts/permissions) explains file access and approvals per runtime.
+- [Run a mixed-runtime team](/guides/multi-runtime-team) walks through building one.
 
-Deriving the boundary from capabilities rather than runtime ids is what keeps that promise honest. Because the host branches on `resolveRuntimeIntegration(caps).home.kind` and never on `runtime === 'hermes'`, a _new_ runtime declares its own integration depth and slots in unchanged, and a misdeclared adapter degrades to the conservative one-shot path instead of silently corrupting state. The trade-off is a second persistence surface per preserved runtime (a per-identity home beside the shared board and memory), and a strict discipline at every write boundary so a shared-plane write never reaches into a private plane.
+## What you control
 
-The shared plane is canonical for a related reason: with N runtimes contributing to one team, the team needs exactly one place that everyone agrees on. Making the board, chat, memory, and Routines the canonical surfaces, and treating each runtime's own kanban, channels, or cron as _private_, avoids two sources of truth, the drift and double-dispatch races that come with them.
+- **Members and runtimes**: pick each member's runtime when you deploy a team, in **Customize team**. To add a member later, select the team and use **Create Boo**. See [Manage teams](/using/teams).
+- **Rooms**: create one with **New room**, then rename, pin, clear or delete it from its menu in the sidebar. See [Chat with your team](/using/team-chat).
+- **Team rules and the team brief**: in the team settings behind the gear in a team chat's header, or capture a rule with `/rule` in the composer.
 
-## Boundaries and non-goals
+## Limits
 
-- **A team is not a tenant.** Every table carries a dormant `tenant_id`, but no per-tenant scoping is active in v0.5.0. Multi-tenant teams are a future seam, not a shipped feature.
-- **An agent belongs to at most one team.** Membership is a single nullable `teamId` foreign key; there is no many-to-many agent↔team join. A documented future seam (an `agent_team_memberships` table) would change this; it is not built.
-- **Clawboo does not bridge private planes.** It never syncs a runtime's native kanban, never serves a runtime's messaging channel, and never co-runs a runtime's own scheduler for teammate dispatch (`coRunScheduler` is hard-typed `false`). Cross-runtime collaboration happens _only_ on the shared plane.
-- **The split is coordination, not isolation.** It does not enforce a security or privilege boundary. Concurrency isolation for file-mutating work is the job of per-task [worktrees](/concepts/worktrees-and-handoff), not of the plane split.
+- An agent is on one team at a time.
+- Team rules reach team chat turns only. A run started by an agent Routine does not include them.
+- The team brief is not part of team chat turns; only Boo Zero's one-to-one chat reads it, when you mention the team.
+- Deleting a room cannot be undone from the dashboard. Its conversation is kept, but the room is gone from the sidebar.
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+<Accordion title="Under the hood">
 
-## See also
+- **Storage.** A team is a row in the `teams` table (name, icon, colours, an optional `leaderAgentId`, `isArchived`). Membership lives on each agent's `teamId`. Rooms are `rooms` and `room_members` rows; General is the implicit room with id `null` and has no row. The visible transcript of every chat is `chat_messages`, keyed by session keys such as `agent:<agentId>:team:<teamId>` and `...:room:<roomId>`.
+- **One engine per chat.** The server keeps one long-lived orchestration engine per chat, keyed `<teamId>` for General and `<teamId>:room:<roomId>` for a room. Its roster is the room's live members plus Boo Zero. An idle engine is dropped after 30 minutes and rebuilt on the next message. See [Executor runner](/internals/executor-runner) for the other run path.
+- **Per-agent homes.** A runtime whose adapter declares a persistent per-identity home gets `<CLAWBOO_HOME>/runtimes/<runtime>/<agentId>`, created with mode `0700`. That is Clawboo Native, Hermes and Codex. Claude Code declares none and OpenClaw's Gateway owns its own state. See [RuntimeAdapter](/internals/runtime-adapter).
+- **OpenClaw identity.** The Gateway registers Clawboo's Memory, Tasks and Tools servers once for every OpenClaw agent, so those sessions carry no verified agent identity. Unverified callers get global-only memory, no `claim_task` or `assign_task`, and no TeamChat tools.
 
-- [The agent model](/concepts/agent-model): Boo, Boo Zero, and the five runtime classes
-- [The board](/concepts/the-board): the shared plane's canonical coordination substrate
-- [Peer chat](/concepts/peer-chat): the team chat room and how peer posts arrive
-- [Memory](/concepts/memory): the shared memory tier vs. each runtime's private tier
-- [Scheduling](/concepts/scheduling): Routines as the single external wake
-- [Verification](/concepts/verification): why the critic runs without the builder's home
-- [Connecting runtimes](/runtimes/connecting-runtimes): bringing a runtime online for a team
-- [Glossary](/appendices/glossary): canonical term definitions
+</Accordion>
+
+## Related
+
+- [Agents and Boo Zero](/concepts/agent-model): who leads a team, and what an agent is made of.
+- [The board](/concepts/the-board): the task list every chat of a team shares.
+- [Memory](/concepts/memory): shared memory compared with each runtime's own memory.
+- [Peer chat](/concepts/peer-chat): the agents' own room, separate from the chats you see.
+- [Manage teams](/using/teams): create teams, set rules and briefs.

@@ -2,6 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "maple",
   "name": "Clawboo",
+  "description": "Free, open-source (MIT) dashboard for running a team of AI agents on your own computer.",
   "colors": {
     "primary": "#dc2a48",
     "light": "#e94560",
@@ -28,8 +29,7 @@
     }
   },
   "appearance": {
-    "default": "system",
-    "strict": false
+    "default": "system"
   },
   "background": {
     "decoration": "gradient",
@@ -41,62 +41,125 @@
   "styling": {
     "eyebrows": "breadcrumbs",
     "codeblocks": {
-      "theme": {
-        "light": "github-dark",
-        "dark": "github-dark"
-      }
+      "theme": "github-dark"
     }
   },
-  "_banner": {
-    "_comment": "Disabled (key prefixed with _). Rename to \"banner\" to re-enable. Best used for a real announcement (a release, a launch), not a second star ask.",
-    "content": "New to Clawboo? Get a team running in about 60 seconds with the [native quickstart](/getting-started/quickstart-native).",
-    "dismissible": true
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "mcp",
+      "cursor",
+      "vscode",
+      {
+        "title": "Report a problem with this page",
+        "description": "Open a docs issue on GitHub with this page filled in",
+        "icon": "github",
+        "href": {
+          "base": "https://github.com/clawboo/clawboo/issues/new",
+          "query": [
+            {
+              "key": "template",
+              "value": "docs_issue.yml"
+            },
+            {
+              "key": "page",
+              "value": "$path"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "search": {
+    "prompt": "Search the Clawboo docs"
   },
   "navigation": {
     "tabs": [
       {
-        "tab": "Documentation",
+        "tab": "Get started",
+        "icon": "rocket",
         "groups": [
           {
-            "group": "Introduction",
+            "group": "Start here",
             "pages": [
               "intro/index",
               "intro/what-is-clawboo",
-              "intro/how-it-works",
-              "intro/why-clawboo"
-            ]
-          },
-          {
-            "group": "Getting Started",
-            "pages": [
-              "getting-started/index",
               "getting-started/installation",
-              "getting-started/quickstart-native",
-              "getting-started/quickstart-openclaw",
+              "getting-started/quickstart",
               "getting-started/first-team",
               "getting-started/dashboard-tour"
             ]
+          }
+        ]
+      },
+      {
+        "tab": "Use Clawboo",
+        "icon": "layout-dashboard",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["using/index"]
           },
           {
-            "group": "Core Concepts",
+            "group": "Build your team",
+            "pages": ["using/teams", "using/marketplace", "using/agents", "using/boo-zero"]
+          },
+          {
+            "group": "Work with your team",
+            "pages": ["using/team-chat", "using/board", "using/org-chart"]
+          },
+          {
+            "group": "Connect AI and tools",
             "pages": [
-              "concepts/index",
-              "concepts/agent-model",
-              "concepts/teams-and-planes",
-              "concepts/the-board",
-              "concepts/delegation-and-orchestration",
-              "concepts/peer-chat",
-              "concepts/memory",
-              "concepts/capabilities",
-              "concepts/verification",
-              "concepts/governance",
-              "concepts/observability",
-              "concepts/worktrees-and-handoff",
-              "concepts/scheduling",
-              "concepts/gateway-and-events",
-              "concepts/architecture-invariants"
+              "using/providers-and-runtimes",
+              "using/connectors",
+              "using/capabilities",
+              "using/memory"
             ]
           },
+          {
+            "group": "Automate",
+            "pages": ["using/routines"]
+          },
+          {
+            "group": "Stay in control",
+            "pages": ["using/approvals", "using/command-permissions", "using/budgets-and-spend"]
+          },
+          {
+            "group": "Monitor and maintain",
+            "pages": ["using/observability", "using/system-health", "using/system", "using/theming"]
+          },
+          {
+            "group": "Recipes",
+            "pages": [
+              "guides/index",
+              "guides/content-team",
+              "guides/no-api-key",
+              "guides/multi-runtime-team",
+              "guides/cross-runtime-handoff"
+            ]
+          },
+          {
+            "group": "Self-hosting",
+            "pages": [
+              "operating/index",
+              "guides/self-host-securely",
+              "operating/deployment",
+              "operating/security",
+              "operating/data-and-state",
+              "operating/mcp-servers",
+              "operating/production-defaults"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Runtimes",
+        "icon": "cpu",
+        "groups": [
           {
             "group": "Runtimes",
             "pages": [
@@ -105,62 +168,46 @@
               "runtimes/openclaw",
               "runtimes/claude-code",
               "runtimes/codex",
-              "runtimes/hermes",
-              "runtimes/connecting-runtimes"
+              "runtimes/hermes"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "How it works",
+        "icon": "lightbulb",
+        "groups": [
+          {
+            "group": "The big picture",
+            "pages": [
+              "concepts/index",
+              "intro/how-it-works",
+              "concepts/agent-context",
+              "concepts/permissions",
+              "concepts/verification"
             ]
           },
           {
-            "group": "Using Clawboo",
+            "group": "Building blocks",
             "pages": [
-              "using/index",
-              "using/agents",
-              "using/approvals",
-              "using/board",
-              "using/boo-zero",
-              "using/capabilities-dashboard",
-              "using/command-permissions",
-              "using/connectors",
-              "using/cost-and-budgets",
-              "using/ghost-graph",
-              "using/governance-dashboard",
-              "using/group-chat",
-              "using/marketplace",
-              "using/memory-browser",
-              "using/observability-dashboard",
-              "using/routines",
-              "using/system-health",
-              "using/system-maintenance",
-              "using/teams",
-              "using/theming"
-            ]
-          },
-          {
-            "group": "Operating",
-            "pages": [
-              "operating/index",
-              "operating/deployment",
-              "operating/security",
-              "operating/mcp-servers",
-              "operating/data-and-state",
-              "operating/production-defaults"
-            ]
-          },
-          {
-            "group": "Guides & Cookbook",
-            "pages": [
-              "guides/index",
-              "guides/attach-mcp-external-agent",
-              "guides/cross-runtime-handoff",
-              "guides/governance-and-budgets",
-              "guides/multi-runtime-team",
-              "guides/recurring-team-work",
-              "guides/self-host-securely"
+              "concepts/agent-model",
+              "concepts/teams-and-planes",
+              "concepts/the-board",
+              "concepts/delegation-and-orchestration",
+              "concepts/peer-chat",
+              "concepts/memory",
+              "concepts/capabilities",
+              "concepts/governance",
+              "concepts/observability",
+              "concepts/worktrees-and-handoff",
+              "concepts/scheduling"
             ]
           }
         ]
       },
       {
         "tab": "Reference",
+        "icon": "book-open",
         "groups": [
           {
             "group": "Reference",
@@ -169,10 +216,12 @@
               "reference/cli",
               "reference/configuration",
               "reference/environment-variables",
-              "reference/database-schema",
+              "reference/limits-and-defaults",
+              "reference/keyboard-shortcuts",
               "reference/mcp-tools",
-              "reference/marketplace-catalog",
-              "reference/events-and-errors"
+              "reference/events-and-errors",
+              "reference/database-schema",
+              "reference/marketplace-catalog"
             ]
           },
           {
@@ -180,96 +229,109 @@
             "pages": [
               "reference/rest-api/index",
               "reference/rest-api/agents",
+              "reference/rest-api/teams",
               "reference/rest-api/board",
-              "reference/rest-api/capabilities",
-              "reference/rest-api/governance",
               "reference/rest-api/memory",
-              "reference/rest-api/misc",
-              "reference/rest-api/observability",
+              "reference/rest-api/capabilities",
+              "reference/rest-api/connectors",
+              "reference/rest-api/boo-zero",
               "reference/rest-api/runtimes",
               "reference/rest-api/schedules",
+              "reference/rest-api/governance",
+              "reference/rest-api/costs",
+              "reference/rest-api/observability",
+              "reference/rest-api/tools-and-mcp",
+              "reference/rest-api/agent-settings",
+              "reference/rest-api/chat-history",
               "reference/rest-api/settings",
               "reference/rest-api/system",
-              "reference/rest-api/teams",
-              "reference/rest-api/tools-and-mcp"
+              "reference/rest-api/catalog"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Help",
+        "icon": "life-buoy",
+        "groups": [
+          {
+            "group": "Help",
+            "pages": [
+              "help/troubleshooting",
+              "appendices/faq",
+              "appendices/known-issues",
+              "appendices/glossary",
+              "appendices/changelog"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Contribute",
+        "icon": "git-pull-request",
+        "groups": [
+          {
+            "group": "Start here",
+            "pages": [
+              "internals/index",
+              "appendices/contributing",
+              "internals/monorepo-and-build",
+              "internals/testing",
+              "internals/release-process",
+              "internals/design-system"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "internals/architecture-invariants",
+              "internals/gateway-and-events",
+              "internals/runtime-adapter",
+              "internals/agent-source",
+              "internals/seams",
+              "internals/executor-runner",
+              "internals/board-internals",
+              "internals/event-pipeline"
             ]
           },
           {
             "group": "Packages",
             "pages": [
               "reference/packages/index",
-              "reference/packages/adapter-claude-code",
-              "reference/packages/adapter-codex",
-              "reference/packages/adapter-hermes",
-              "reference/packages/adapter-native",
-              "reference/packages/adapter-openclaw",
-              "reference/packages/agent-registry",
-              "reference/packages/board-core",
-              "reference/packages/boo-avatar",
-              "reference/packages/capability-registry",
-              "reference/packages/compaction",
-              "reference/packages/config",
-              "reference/packages/control-client",
-              "reference/packages/db",
-              "reference/packages/evals",
-              "reference/packages/events",
               "reference/packages/executor",
-              "reference/packages/gateway-client",
-              "reference/packages/gateway-proxy",
-              "reference/packages/governance",
-              "reference/packages/logger",
+              "reference/packages/adapters",
+              "reference/packages/db",
               "reference/packages/mcp",
-              "reference/packages/model-catalog",
-              "reference/packages/obs",
-              "reference/packages/process-lookup",
-              "reference/packages/protocol",
-              "reference/packages/scheduler",
+              "reference/packages/gateway-client",
+              "reference/packages/governance",
+              "reference/packages/connector-catalog",
+              "reference/packages/board-core",
               "reference/packages/team-orchestration",
-              "reference/packages/tsconfig",
-              "reference/packages/ui",
+              "reference/packages/scheduler",
               "reference/packages/worktrees"
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Internals",
-        "groups": [
+          },
           {
-            "group": "Internals & Contributing",
-            "pages": [
-              "internals/index",
-              "internals/monorepo-and-build",
-              "internals/runtime-adapter",
-              "internals/agent-source",
-              "internals/seams",
-              "internals/executor-runner",
-              "internals/board-internals",
-              "internals/event-pipeline",
-              "internals/testing",
-              "internals/release-process",
-              "internals/design-system"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Resources",
-        "groups": [
-          {
-            "group": "Appendices",
-            "pages": [
-              "appendices/glossary",
-              "appendices/known-issues",
-              "appendices/faq",
-              "appendices/changelog",
-              "appendices/contributing",
-              "appendices/license-and-notices"
-            ]
+            "group": "Legal",
+            "pages": ["appendices/license-and-notices"]
           }
         ]
       }
-    ]
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Discussions",
+          "icon": "messages-square",
+          "href": "https://github.com/clawboo/clawboo/discussions"
+        },
+        {
+          "anchor": "Changelog",
+          "icon": "history",
+          "href": "/appendices/changelog"
+        }
+      ]
+    }
   },
   "navbar": {
     "links": [
@@ -293,31 +355,238 @@
       {
         "header": "Product",
         "items": [
-          { "label": "Install", "href": "https://www.npmjs.com/package/clawboo" },
-          { "label": "Website", "href": "https://www.claw.boo" },
-          { "label": "Changelog", "href": "/appendices/changelog" }
+          {
+            "label": "Install",
+            "href": "https://www.npmjs.com/package/clawboo"
+          },
+          {
+            "label": "Website",
+            "href": "https://www.claw.boo"
+          },
+          {
+            "label": "Changelog",
+            "href": "/appendices/changelog"
+          }
         ]
       },
       {
         "header": "Docs",
         "items": [
-          { "label": "Quickstart", "href": "/getting-started/index" },
-          { "label": "Core Concepts", "href": "/concepts/index" },
-          { "label": "REST API", "href": "/reference/rest-api/index" }
+          {
+            "label": "Quickstart",
+            "href": "/getting-started/quickstart"
+          },
+          {
+            "label": "How it works",
+            "href": "/concepts/index"
+          },
+          {
+            "label": "REST API",
+            "href": "/reference/rest-api/index"
+          }
         ]
       },
       {
         "header": "Community",
         "items": [
-          { "label": "GitHub", "href": "https://github.com/clawboo/clawboo" },
-          { "label": "Contributing", "href": "/appendices/contributing" },
-          { "label": "License", "href": "/appendices/license-and-notices" }
+          {
+            "label": "GitHub",
+            "href": "https://github.com/clawboo/clawboo"
+          },
+          {
+            "label": "Contributing",
+            "href": "/appendices/contributing"
+          },
+          {
+            "label": "License",
+            "href": "/appendices/license-and-notices"
+          }
         ]
       }
     ]
   },
+  "errors": {
+    "404": {
+      "redirect": false,
+      "title": "We could not find that page",
+      "description": "Try search, start with the [quickstart](/getting-started/quickstart), or read the [troubleshooting guide](/help/troubleshooting)."
+    }
+  },
   "metadata": {
     "timestamp": true
   },
-  "redirects": [{ "source": "/using/scheduler", "destination": "/using/routines" }]
+  "redirects": [
+    {
+      "source": "/concepts/architecture-invariants",
+      "destination": "/internals/architecture-invariants"
+    },
+    {
+      "source": "/concepts/gateway-and-events",
+      "destination": "/internals/gateway-and-events"
+    },
+    {
+      "source": "/getting-started",
+      "destination": "/getting-started/quickstart"
+    },
+    {
+      "source": "/getting-started/index",
+      "destination": "/getting-started/quickstart"
+    },
+    {
+      "source": "/getting-started/quickstart-native",
+      "destination": "/getting-started/quickstart"
+    },
+    {
+      "source": "/getting-started/quickstart-openclaw",
+      "destination": "/runtimes/openclaw"
+    },
+    {
+      "source": "/guides/attach-mcp-external-agent",
+      "destination": "/operating/mcp-servers"
+    },
+    {
+      "source": "/guides/governance-and-budgets",
+      "destination": "/using/budgets-and-spend"
+    },
+    {
+      "source": "/guides/recurring-team-work",
+      "destination": "/using/routines"
+    },
+    {
+      "source": "/internals/codegen-and-ingestion",
+      "destination": "/reference/marketplace-catalog"
+    },
+    {
+      "source": "/intro/why-clawboo",
+      "destination": "/intro/what-is-clawboo"
+    },
+    {
+      "source": "/reference/packages/adapter-claude-code",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-codex",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-hermes",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-native",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/adapter-openclaw",
+      "destination": "/reference/packages/adapters"
+    },
+    {
+      "source": "/reference/packages/agent-registry",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/boo-avatar",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/capability-registry",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/compaction",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/config",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/control-client",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/evals",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/events",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/gateway-proxy",
+      "destination": "/reference/packages/gateway-client"
+    },
+    {
+      "source": "/reference/packages/logger",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/model-catalog",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/obs",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/process-lookup",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/protocol",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/tsconfig",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/packages/ui",
+      "destination": "/reference/packages/index"
+    },
+    {
+      "source": "/reference/rest-api/misc",
+      "destination": "/reference/rest-api/index"
+    },
+    {
+      "source": "/runtimes/connecting-runtimes",
+      "destination": "/using/providers-and-runtimes"
+    },
+    {
+      "source": "/using/capabilities-dashboard",
+      "destination": "/using/capabilities"
+    },
+    {
+      "source": "/using/cost-and-budgets",
+      "destination": "/using/budgets-and-spend"
+    },
+    {
+      "source": "/using/ghost-graph",
+      "destination": "/using/org-chart"
+    },
+    {
+      "source": "/using/governance-dashboard",
+      "destination": "/using/budgets-and-spend"
+    },
+    {
+      "source": "/using/group-chat",
+      "destination": "/using/team-chat"
+    },
+    {
+      "source": "/using/memory-browser",
+      "destination": "/using/memory"
+    },
+    {
+      "source": "/using/observability-dashboard",
+      "destination": "/using/observability"
+    },
+    {
+      "source": "/using/scheduler",
+      "destination": "/using/routines"
+    },
+    {
+      "source": "/using/system-maintenance",
+      "destination": "/using/system"
+    }
+  ]
 }

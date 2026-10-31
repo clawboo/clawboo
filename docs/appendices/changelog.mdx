@@ -1,261 +1,315 @@
 ---
-title: Changelog
-description: Release history of the clawboo CLI from the initial 0.1.0 release through v0.5.0.
+title: 'Changelog'
+description: 'What changed in each release of the clawboo npm package, newest first, and what is on the main branch waiting for the next release.'
+keywords: ['changelog', 'release notes', 'releases', 'versions', 'unreleased', 'upgrade', 'npm']
 ---
 
-Release history for the published artifact, the **`clawboo` CLI**. Clawboo is a monorepo of 33 `@clawboo/*` workspace packages (27 top-level plus 6 runtime adapters under `packages/adapters/`), but every one of those libraries is marked `private: true` and is never published to npm. They are bundled into the CLI's single executable at build time (`tsup` with `noExternal: [/^@clawboo\//]` for the server, leaving only `better-sqlite3`, `ws`, `pino`, `pino-pretty`, `@composio/client`, and `@opentelemetry/*` external), so the version line below is the version line of `apps/cli/package.json`.
-
-Clawboo follows [Changesets](https://github.com/changesets/changesets). A change lands a `.changeset/*.md` file; merging the resulting "Version Packages" bot PR runs `publish.yml`, which re-runs the full PR gate (`build`, `lint`, `typecheck`, `test`) plus the bundled-CLI clean-install smoke test, and then runs `pnpm changeset publish`. Every check on that path is offline: nothing fetches an upstream repository, so an upstream outage cannot hold up a release. The full mechanics are in [Release process](/internals/release-process).
+Release history of the `clawboo` npm package, newest first. Each entry starts with what changed for you. The full notes for every release are in [`apps/cli/CHANGELOG.md`](https://github.com/clawboo/clawboo/blob/main/apps/cli/CHANGELOG.md), and [Release process](/internals/release-process) explains how a release is made.
 
 <Note>
-  The current npm `latest` is **`clawboo@0.5.0`**, the version these docs describe, so `npx
-  clawboo@latest` installs v0.5.0.
-</Note>
 
-<Warning>
-  Every `0.1.x` release (0.1.0 through 0.1.9) is **deprecated** on npm. The 0.1.x line is
-  OpenClaw-only and predates the v0.2.0 native-first multi-runtime rewrite, so it no longer works
-  reliably against current OpenClaw. Install the supported release with `npm install -g
-  clawboo@latest`, or run `npx clawboo@latest`. The `@latest` is load-bearing here: a bare `npx
-  clawboo` can re-serve a deprecated build already sitting in npm's `_npx` cache, which is the exact
-  situation this warning is about.
-</Warning>
+These docs follow the main branch, which is ahead of the latest npm release, 0.5.0. What is listed under **Unreleased** is not in 0.5.0 yet. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
+
+</Note>
 
 ## At a glance
 
-| Version | Tag             | npm        | Theme                                                                                          |
-| ------- | --------------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| 0.5.0   | `clawboo@0.5.0` | published  | The Board as a calendar, honest task costs, a quieter team chat                                |
-| 0.4.0   | `clawboo@0.4.0` | published  | Connectors, a memory graph, building on the graph, Routines, a Needs you column                |
-| 0.3.1   | `clawboo@0.3.1` | published  | Team-chat reliability, live status badges, per-runtime provider manager                        |
-| 0.3.0   | `clawboo@0.3.0` | published  | Native-first: run Gateway-free on one provider key, mixed-runtime teams, live native team chat |
-| 0.2.0   | `clawboo@0.2.0` | published  | The liberated cut, full multi-runtime orchestrator                                             |
-| 0.1.9   | `clawboo@0.1.9` | deprecated | Welcome redesign, lighter install, team colors                                                 |
-| 0.1.8   | `clawboo@0.1.8` | deprecated | Light/dark theme + design-system pass                                                          |
-| 0.1.7   | `clawboo@0.1.7` | deprecated | Device pairing in the wizard + Windows hardening                                               |
-| 0.1.6   | `clawboo@0.1.6` | deprecated | Bootstrap: verify install state, don't trust localStorage                                      |
-| 0.1.5   | `clawboo@0.1.5` | deprecated | In-dashboard device pairing (OpenClaw 2026.5+)                                                 |
-| 0.1.4   | `clawboo@0.1.4` | deprecated | OpenClaw protocol-4 + Windows install support                                                  |
-| 0.1.3   | `clawboo@0.1.3` | deprecated | CLI port discovery: HTTP-verify Clawboo identity                                               |
-| 0.1.2   | `clawboo@0.1.2` | deprecated | SPA root-path fix (`Cannot GET /`)                                                             |
-| 0.1.1   | `clawboo@0.1.1` | deprecated | First real release (v0.1.0 marketplace milestone)                                              |
-| 0.1.0   | `clawboo@0.1.0` | deprecated | Initial package scaffold                                                                       |
+| Version    | Released   | Highlights                                                                                                 |
+| ---------- | ---------- | ---------------------------------------------------------------------------------------------------------- |
+| Unreleased | Not yet    | Rooms, steering a running task, a rebuilt workspace, a Kanban-first Board, Ollama with no key, a proxy fix |
+| 0.5.0      | 2026-10-21 | The Board as a calendar, task costs that count every run, a quieter team chat                              |
+| 0.4.0      | 2026-09-28 | Connectors, a memory graph, building on the graph, Routines, a Needs you column                            |
+| 0.3.1      | 2026-07-20 | Team-chat reliability, live status badges, a provider manager per runtime                                  |
+| 0.3.0      | 2026-07-15 | Native-first: run on one provider key with no Gateway, teams that mix runtimes                             |
+| 0.2.0      | 2026-06-20 | Clawboo runs its own agents and coordinates four other runtimes                                            |
+| 0.1.9      | 2026-06-01 | A lighter welcome screen, team colors                                                                      |
+| 0.1.8      | 2026-05-29 | Light and dark themes, a design-system pass                                                                |
+| 0.1.7      | 2026-05-20 | Device pairing in the setup wizard, Windows fixes                                                          |
+| 0.1.6      | 2026-05-20 | Setup checks what is really installed                                                                      |
+| 0.1.5      | 2026-05-20 | Approve a new device from the dashboard                                                                    |
+| 0.1.4      | 2026-05-20 | OpenClaw protocol 4, Windows install support                                                               |
+| 0.1.3      | 2026-05-19 | The CLI only opens a port that really serves Clawboo                                                       |
+| 0.1.2      | 2026-05-19 | Fixes `Cannot GET /`                                                                                       |
+| 0.1.1      | 2026-05-19 | First real release                                                                                         |
+| 0.1.0      | 2026-02-28 | Name placeholder                                                                                           |
 
-The 0.1.1–0.1.7 line is a run of first-time-user-blocker fixes: each one closed a concrete reason a fresh `npx clawboo` install failed to reach a working dashboard. 0.1.8 and 0.1.9 are the visual/onboarding releases. 0.2.0 is the architectural leap that made Clawboo runtime-agnostic, and 0.3.0 is the product that leap made possible: native-first, so the first run needs one provider key and nothing else. 0.3.1 is the follow-up patch that made the native path trustworthy day to day. 0.4.0 widened what a team can reach (connectors) and remember (a memory graph), and 0.5.0 turned the Board into a calendar.
+Every 0.1.x release is deprecated on npm. That line ran on OpenClaw only and does not work reliably with current OpenClaw. Install a supported release with `npm install -g clawboo@latest`, or run `npx clawboo@latest`. Keep the `@latest`: a bare `npx clawboo` can reuse an old copy from npm's cache.
 
----
+<Update label="Unreleased" description="On main, not yet on npm">
 
-## 0.5.0, the Board as a calendar
+The next release gives a team chat rooms, lets you steer a task while an agent works on it, and rebuilds the workspace around a team. The Board opens on a calmer Kanban view. Clawboo Native runs on a local Ollama with no key, and a security gap for installs behind a reverse proxy is closed.
 
-The Board is now a calendar and a task board at once, and moving a card by hand now does what it says. See [The Board](/using/board).
+**Security**
+
+- **The access token covers the MCP servers behind a proxy.** On 0.5.0 and older, any request from `127.0.0.1` reached `/api/mcp/` without the access cookie, so a reverse proxy on the same machine exposed the MCP servers and let anyone ask `/api/mcp/config` for a signed attach URL. Now a request without the cookie reaches an MCP server only with an attach token, only on a direct connection to `127.0.0.1`, and never through a proxy. `/api/mcp/config` always needs the cookie. Until you upgrade, deny all of `/api/mcp/` at the proxy: see [Security model](/operating/security).
+- **Re-copy attach URLs you set up by hand.** If you attached an agent by URL on an install with an access token, copy the URL again from `GET /api/mcp/config` (sending the access cookie). The old URL carries no token and gets a `401`.
+- **TeamChat takes no author from tool arguments over HTTP.** A session without a signed room-and-author binding gets no TeamChat tools.
+- **`create_subtask` checks the team.** A parent task from another team is refused.
+- **Images in an agent's text no longer load on their own.** In chat, a task's report and its comments, an image used to load from its address as soon as it was shown, so an agent steered by something it read could send data out in that address. It now shows as a link named after its alt text that opens only when you click it. An address that is not a web or same-site one is only named.
+- **API routes match letter case exactly**, and with no access token set, the server logs a one-time `SECURITY:` warning when a request arrives through a reverse proxy.
+
+**Rooms and chat**
+
+- **Rooms.** Next to the team's own chat, now called **General**, a team can have rooms, each with some of its members. A room has its own conversation, task cards and graph. Boo Zero leads every room, and the team's rules, brief, memory and board stay team-wide. Create one with **New room**, and pin, rename or delete it from its menu. Deleting a room archives it. See [Team chat](/using/team-chat).
+- **Clear chat.** Every chat's menu can clear it. The messages are set aside rather than deleted, the agents start that conversation fresh (OpenClaw agents are sent `/reset`), and the chat stops showing task cards from before the clear. Those stay on the Board and in the **Tasks** card.
+
+**Steering**
+
+- **Steer a running task.** Comment on a task from a team chat's **Tasks** card, or from **Tasks & Routines** on an agent's page, and the agent reads the comment during the run. Clawboo Native, Claude Code, Codex and OpenClaw take it at the run's next step; Hermes pauses the run and resumes the same session with your comment. The comment always lands in the agent's mailbox as well, so a task that is not running yet still gets it. See [Steering a running task](/runtimes/index#steering-a-running-task).
+- **Codex runs in `codex app-server`**, which is what lets it be steered. An older Codex without it falls back to `codex exec`, where a comment waits for the next run.
+- **A reply reaches the agent, and says where it went.** A reply on a task now goes to the agent it belongs to whatever the task's status, including a task moved back to To do. A reply to a task waiting on you, or waiting in To do, starts the agent on it again, so answering a blocker no longer needs a second click on **Retry**; replies within 15 seconds start one run. A reply to a task in review waits for the agent to read after the check. A finished task cannot run again, so the reply is not sent, and the note under it offers **Send as a follow-up task**, a new task for the same agent. The Board's task drawer now has a reply box, and a note under each reply you send, there and in the chat's **Tasks** card, says where it went. The **Tasks** card's **Send and retry** button is gone, since **Send** does both. See [Steer a running task](/using/board#steer-a-running-task).
+
+**The workspace**
+
+- **A sidebar you can resize and hide.** Drag the agent column's edge to resize it, or hide it with `Cmd/Ctrl + \`. The nav reads **Home**, **Org chart** (the new name for Atlas), **Board**, **Connectors**, **Memory**, **Marketplace** and **Settings**, and `Cmd/Ctrl + 1` to `4` open Org chart, Board, Connectors and Memory. **Fleet** moves to **Settings** > **Insights**.
+- **Cards beside every chat.** An agent's page shows **Graph**, **Tasks & Routines**, **Browser**, **Activity** and **Details** next to its chat. A team chat shows **Browser**, the team's or room's graph, **Tasks** and **Activity**.
+- **Home.** Each team has a Home page, the place its dashboards and its agents' artifacts will live.
+- **The Org chart turns.** With the browser panel open, the radial Org chart turns around Boo Zero to bring the team you pick next to the panel.
+
+**Ollama and providers**
+
+- **Ollama with no key.** Picking **Ollama** during setup now counts as a connected provider everywhere: agents deployed without a model pick run on it, Boo Zero is created on it, and team chat and one-to-one chat both work. Turn it on or off in **Settings** > **Runtimes** > **Clawboo Native** > **Manage**.
+- **Your pulled models.** The model lists show the chat models your Ollama has pulled, mark the ones that cannot use tools, and show `ollama pull llama3.2` with **Check again** when none is pulled.
+- **Your default provider wins.** Agents deployed without a model pick run on the provider you chose as your default, instead of the first one with a key.
+- **OpenClaw on Ollama.** When Ollama is your provider, **Set up OpenClaw** configures OpenClaw on it instead of asking for a key, and stops with the `ollama pull` command when the model is missing. Setup also connects to the Gateway port in your OpenClaw config.
 
 **The Board**
 
-- **Days as rows.** Status columns run across the top and days run down the side. Week is the default; Today, Month and All are a click (or **D**, **W**, **M**, **A**) away. Open work sits on the day it was added, and work that reaches Done or Cancelled moves to the day it finished. Open work from before the range gathers in an Earlier row, and empty days fold into a thin seam you can open.
-- **Needs you lives in today.** Approvals and stuck tasks sit in today's row with Retry, Assign and Dismiss, and tasks that broke the same way share one card.
-- **Routines on their days.** Each routine's upcoming runs show in To do on the days they are scheduled, from the new `GET /api/schedules/occurrences`. While a routine's run is still going, its next scheduled run is marked as one that is skipped if that run has not finished by then. A Routines switch hides them.
-- **Since you last looked, and Find.** A line under the title says what changed while you were away, and the changed cards carry a dot until you look. **/** finds any task or routine.
+- **Kanban first.** The Board opens on **Kanban** (the view called All before, key **K**), every task by status with Needs you first. **Today**, **Week** and **Month** stay as the calendar views, and a view you already picked is kept. On Kanban, cards say how long ago they were added or finished ("4m ago", "Yesterday", "3d ago"); the calendar views keep clock times.
+- **One header and one toolbar.** The header holds the title, the team filter, **Star** and **New task** (key **C**). **Refresh** and the subtitle are gone; a spinner shows only when a background read is slow. The toolbar holds **Find** (**/** or **Cmd/Ctrl+K**), **Filter** (agents, tasks with no agent, what is running now), **Display** (routine runs, the Cancelled column, cost and time on cards), an agents-working chip and the view menu. "Since you last looked" is a chip that shows only when something changed.
+- **Calmer cards.** Cards and lanes are neutral, with color only in each column's status mark and amber for Needs you. Cards drop the runtime mark, the corner clip and the hover lift, and counts no longer roll.
+- **Needs you cards lead with one action.** Each card says why it waits and offers **Retry**, **Assign**, **Review** or **Open**, with the other choices, including **Dismiss**, in a **More** menu.
+- **The task drawer reads like a document.** The agent's report once, as formatted text, then the brief, the properties, verification, the workspace, run history, comments and activity. Each section folds from its heading, empty ones are not shown, and **J** and **K** step through the column. See [Board](/using/board).
+
+**Fixes**
+
+- Creating and deleting agents works without an OpenClaw Gateway, and a new agent made on the Org chart always joins a team.
+- An OpenClaw agent deleted while its Gateway is down stays deleted.
+- Approving this device during OpenClaw setup shows what went wrong, with **Retry**, instead of sticking on "Approved. Reconnecting…".
+- Updating from the dashboard keeps working after the first update, a failed update shows npm's own reason, and Clawboo runs `openclaw doctor --fix --non-interactive` once when a newer OpenClaw needs it before the Gateway will start.
+- The Org chart's Radial layout spaces each team's Boos apart, also with "reduce motion" turned on.
+- While one of a routine's runs is still going, the Board's calendar marks the right next run.
+- Loading the dashboard no longer counts against the API's request limit.
+- A Boo no longer loses its body when another copy of it is hidden.
+
+</Update>
+
+<Update label="0.5.0" description="2026-10-21">
+
+The Board becomes a calendar and a task board at once, moving a card by hand does what it says, and a task's cost counts every run. See [Board](/using/board).
+
+**The Board**
+
+- **Days as rows.** Status columns run across the top and days run down the side. Week is the default; Today, Month and All are a click away, or **D**, **W**, **M** and **A**. Open work sits on the day it was added, and work that reaches Done or Cancelled moves to the day it finished. Open work from before the range gathers in an Earlier row, and empty days fold into a thin line you can open.
+- **Needs you lives in today.** Approvals and stuck tasks sit in today's row with **Retry**, **Assign** and **Dismiss**, and tasks that broke the same way share one card.
+- **Routines on their days.** Each routine's upcoming runs show in To do on the days they are scheduled, from the new `GET /api/schedules/occurrences`. A **Routines** switch hides them.
+- **Since you last looked, and Find.** A line under the title says what changed while you were away, and changed cards carry a dot until you look. **/** finds any task or routine.
 - **Calmer cards.** One detail row: the agent, its runtime, one status mark or the cost, and when the card was added or finished. Unassigned work no longer claims to run on OpenClaw.
 
 **Moving cards by hand**
 
 - A drop goes to the column under the pointer and nowhere else.
-- In progress takes no card by hand, because that started nothing. A card left there shows in Needs you as Not started.
-- Finishing a card asks which day it finished when it sits on another day, and the board `PATCH` takes a `completedAt`. Cancelling always asks, and cancels the plan steps that were waiting on it.
+- In progress takes no card by hand, because moving it there started nothing. A card left there shows in Needs you as **Not started**.
+- Finishing a card asks which day it finished when it sits on another day, and the board `PATCH` takes a `completedAt`. Cancelling always asks first, and cancels the plan steps that were waiting on it.
 - Moving a card an agent is working on stops that run, its late result can no longer override you, and whoever delegated the task is told.
 
 **Also in this release**
 
-- **Honest task costs.** A task's cost is the sum of every run, failed ones included. A run with no reported charge is priced from its token usage and marked as an estimate.
-- **A quieter team chat.** A teammate's reply reaches the chat only when you addressed it or it is the lead's summary, and Stop also stops a run that was about to start.
-- **Routing by role.** On the lead's turn the roster lists each teammate's runtime and a one-line role, so Boo Zero routes work by what a teammate does.
+- **Task costs that count every run.** A task's cost is the sum of every run, failed ones included. A run with no reported charge is priced from its token usage, or from its prompt and reply length when there is none, and marked as an estimate.
+- **A quieter team chat.** A teammate's reply reaches the chat only when you addressed it or it is the lead's summary, and **Stop** also stops a run that was about to start.
+- **Routing by role.** On the lead's turn the roster lists each teammate's runtime and a one-line role from its SOUL.md, so Boo Zero routes work by what a teammate does.
 
----
+</Update>
 
-## 0.4.0, connectors, a memory graph and Routines
+<Update label="0.4.0" description="2026-09-28">
+
+Agents reach outside apps through connectors, team memory becomes a graph that learns, the Scheduler becomes Routines, and the Board gains a Needs you column.
 
 **Connectors**
 
-- **A Connectors directory.** The marketplace gains a Connectors tab: curated MCP connectors Clawboo runs itself, plus Gmail, Slack, Jira and more through Composio. Turning one on is a switch, and sharing it with an agent is an edge on the Ghost Graph that is also the permission the tool broker enforces. See [Connectors](/using/connectors).
+- **A Connectors view in the sidebar.** Curated connectors Clawboo runs itself, a longer list from the official MCP registry, and Gmail, Slack, Jira and more through Composio. Turning one on is one button, and sharing it with an agent is a line on the graph that is also the permission Clawboo enforces. See [Connectors](/using/connectors).
 
-**The Ghost Graph**
+**The graph**
 
-- **Build on the graph.** Every Boo carries one visible port. Pull a thread onto a node to connect it, or let go on empty canvas to pick a skill, a connector or a new agent, already wired. Routes, skills and shares all come off the same way, and a share has an Undo. See [Ghost Graph](/using/ghost-graph).
+- **Build on the graph.** Every Boo carries one visible port. Pull a thread onto another Boo to connect them, or let go on empty canvas to pick a skill, a connector or a new agent, already wired. Routes, skills and shares all come off the same way, and a share has an Undo. See [Org chart and team graphs](/using/org-chart).
 
 **Memory**
 
-- **Team memory is a graph that learns.** Memory is a sidebar view where facts cluster and link by similarity. Agents report whether a recalled fact helped, so a fact two teammates found useful is surfaced first and one that misled someone leaves automatic recall. Every recalled line carries an id the agent can cite. See [Memory browser](/using/memory-browser).
+- **Team memory is a graph that learns.** Memory is a sidebar view where facts cluster and link by similarity. Agents report whether a recalled fact helped, so a fact two teammates found useful comes first, and one that misled someone leaves automatic recall. Every recalled line carries an id the agent can cite. See [Memory](/using/memory).
 
 **Work**
 
 - **Routines.** The Scheduler is now Routines, and a routine targets a team or one agent. A team routine posts its instructions into the team chat for the lead; an agent routine files a task for that agent. See [Routines](/using/routines).
-- **Needs you, and tasks for one agent.** The Board gains a Needs you column for approvals and stuck tasks, with Retry, Assign and Dismiss. **New task** asks for a team, then an agent, and only that agent works on it.
+- **Needs you, and tasks for one agent.** The Board gains a Needs you column for approvals and stuck tasks, with **Retry**, **Assign** and **Dismiss**. **New task** asks for a team, then an agent, and only that agent works on it.
 
 **Platform**
 
-- **The catalog leaves the package.** The agent and team catalog is fetched at runtime instead of bundled, and grew to nineteen packs, each naming its source repository, commit and licence.
+- **The catalog leaves the package.** The agent and team catalog is downloaded instead of bundled, and grew to nineteen packs, each naming its source repository, commit and license.
 - **OpenClaw 2026.9.** The Gateway pin moves from `~2026.5` to `~2026.9`, with the fixes that line needed.
 - **Served under a path.** `CLAWBOO_BASE_PATH` mounts the whole app under a URL prefix behind a reverse proxy.
-- **In-place database upgrades.** A column added to an existing table now reaches an existing `clawboo.db` instead of failing on first use.
-- **Coordination that stays awake.** A board lifecycle bus and run liveness checks keep agents from going stale mid-task, and a team-chat run that ends without an answer now says why.
+- **In-place database upgrades.** An upgrade adds new columns to an existing `clawboo.db` instead of failing on first use.
+- **Coordination that stays awake.** Task changes reach running agents through a per-agent mailbox, runs prove they are alive with regular heartbeats, and a team-chat run that ends without an answer says why.
 
----
+**Removed and limits**
 
-## 0.3.1, team-chat reliability and provider UX
+- `POST /api/onboarding/seed-native-team` is removed. Deploy a team from the Marketplace, or with `POST /api/teams`.
+- The API has request rate limits, with a much lower one on the costliest routes, such as installing a runtime, driving the Gateway, signing in a CLI and approving a device. See [Limits and defaults](/reference/limits-and-defaults).
+- The Tasks MCP server caps task creation: 24 live subtasks per parent, 2 levels of nesting, and 30 top-level tasks per rolling 5 minutes.
+- A task dependency that would form a cycle is refused.
 
-A patch release on top of native-first. Nothing architectural moved; the changes are the ones you feel while actually using a native team.
+</Update>
+
+<Update label="0.3.1" description="2026-07-20">
+
+A patch for running Clawboo Native teams day to day: team-chat replies stay put, status badges update live, and each runtime manages its own providers.
 
 **Team chat**
 
-- **Replies no longer vanish.** Every streamed team-chat reply now commits to the transcript or is cleanly cleared, so a delegating agent's message can't disappear on the next update or on reload. A native 1:1 reply that fails mid-stream is preserved rather than silently dropped.
-- **Live Working / Idle badges.** The sidebar agent and Group Chat status indicators update in real time for native and server-orchestrated team runs and native 1:1 chats, not only for OpenClaw over a live Gateway.
+- **Replies stay in the transcript.** Every streamed team-chat reply is saved or cleanly cleared, so a delegating agent's message cannot vanish on the next update or on reload. A Clawboo Native one-to-one reply that fails mid-stream is kept.
+- **Live Working and Idle badges.** The status marks in the sidebar and in team chat update in real time for Clawboo Native and server-run team work, not only for OpenClaw.
 
 **Providers and models**
 
-- **Runtime provider manager.** The Runtimes panel's Manage view for Clawboo Native, OpenClaw, and Hermes lists the LLM providers you have actually connected (synced with Settings → Providers), each with per-provider connect and disconnect, one-click reconnect using an existing key, and a default-model picker for Native. A native runtime with no key now honestly reads "Disconnected" with a "Set up in Runtimes" shortcut.
-- **Reconnect any provider.** Reconnecting Clawboo Native is no longer Anthropic-only; reconnect with any provider you have already configured.
-- **Two-layer team model picker.** When creating a team you pick a provider first (only the connected ones), then its model. The trigger shows the exact default model that will run instead of an opaque "Recommended", and the panel opens on the provider the current model actually belongs to. See [Teams](/using/teams).
+- **A provider manager per runtime.** **Manage** on Clawboo Native, OpenClaw and Hermes in the Runtimes panel lists the providers you connected, each with connect, disconnect and reconnect, plus a default-model picker for Clawboo Native. A Clawboo Native runtime with no key reads **Disconnected**, with a shortcut to set it up.
+- **Reconnect with any provider.** Reconnecting Clawboo Native works with any provider you already set up, not only Anthropic.
+- **Provider first, then model.** Creating a team asks for a provider (only the connected ones), then its model, and shows the exact default model that will run.
 
-**Onboarding and polish**
+**Polish**
 
-- The Add-runtimes step shows connected providers read-only, with a Back button to the provider step where keys are added.
-- The sidebar mascot's hover tooltip appears promptly and reads "Boo Zero", matching what clicking it opens.
+- The **Add runtimes** step of setup shows your connected providers read-only, with **Back** to the step where you add keys.
+- The sidebar mascot's tooltip reads "Boo Zero", matching what clicking it opens.
 
----
+</Update>
 
-## 0.3.0, native-first
+<Update label="0.3.0" description="2026-07-15">
 
-0.2.0 made Clawboo runtime-agnostic. 0.3.0 is what that unlocked: **the first run needs one provider key and nothing else**. No OpenClaw install, no Gateway, no external CLI. Everything else, OpenClaw, Claude Code, Codex, and Hermes, is now something you add to a working setup rather than a prerequisite for having one.
+Native-first: the first run needs one provider key and nothing else. No OpenClaw install, no Gateway and no other CLI. OpenClaw, Claude Code, Codex and Hermes become runtimes you add to a setup that already works.
 
-**Onboarding and providers**
+**Setup and providers**
 
-- **Native-first wizard**: the first real step connects a provider key, then optionally adds runtimes, then deploys a real team from the 82-team marketplace. Connect, Runtimes, Team, Ready. The generic auto-seeded pair is gone: you pick the team you actually want, and it deploys fully native. See [Quickstart (native)](/getting-started/quickstart-native).
-- **Ten key-based native providers plus keyless Ollama**: Anthropic, OpenAI, OpenRouter, and Ollama, plus Google, xAI, Groq, Mistral, Together, Cerebras, and Moonshot routed through an OpenAI-compatible base URL. Pasting a key fetches that provider's live model list, so the model picker offers what your key can actually reach.
-- **Providers hub** in Settings, with API keys moved out of Maintenance into one surface, backed by an encrypted vault under `~/.clawboo/secrets/`. A key you connect once is reused: an Anthropic key satisfies Claude Code, an OpenRouter key satisfies Hermes, and OpenClaw setup no longer asks for a second key.
-- **First-run capability tour**: a one-time, skippable spotlight over the real sidebar controls that ends by opening your team's group chat. See the [dashboard tour](/getting-started/dashboard-tour).
+- **Setup starts with a key.** Connect a provider, optionally add runtimes, then deploy a real team from the Marketplace. See [Quickstart](/getting-started/quickstart).
+- **A Providers hub in Settings** covers ten providers. Pasting a key fetches that provider's live model list, so the model picker offers what your key can reach.
+- **A first-run tour**: a one-time, skippable spotlight over the sidebar. See [Tour the dashboard](/getting-started/dashboard-tour).
 
-**Teams, models, and chat**
+**Teams and chat**
 
-- **Per-agent runtime and model pickers** in create-team: every member, leader included, gets its own runtime (Native, OpenClaw, Claude Code, Codex, Hermes) and, where the runtime honors one, its own model. An unavailable choice degrades to Native rather than blocking the deploy, so a marketplace team still ships with the Gateway down. See the [multi-runtime team guide](/guides/multi-runtime-team).
-- **Native team chat, live**: a native-only team sends from the group-chat composer and streams back. The earlier read-only limitation is gone. Native 1:1 chat resumes its prior session each turn, so Boo Zero remembers the conversation. See [Using group chat](/using/group-chat).
-- **Server-side, persistent orchestration**: every team's delegation engine runs on the server, per team, over one shared core, with the browser a thin client over REST and SSE. A cascade continues with no client connected and survives a tab close or a server restart. See [Delegation and orchestration](/concepts/delegation-and-orchestration).
-- **Native multi-agent delegation**: a native leader hands work to teammates through a structured `delegate` signal the engine observes, so the claim, run, and report-up loop fires for native teams exactly as it does for OpenClaw. Failed and abandoned delegations now surface on the board instead of leaving the delegator waiting. See [The board](/concepts/the-board).
-- **Editable model per agent**: the agent view fuses each agent's runtime badge with its model control, so you can see which runtime an agent runs on and change its model where that is meaningful. Codex and Claude Code show a runtime-managed note rather than a dropdown that would not take effect.
+- **A runtime and a model for each member.** Creating a team gives every member, the lead included, its own runtime and, where the runtime uses one, its own model. A choice that is not available falls back to Clawboo Native instead of blocking the deploy. See [Mix runtimes on one team](/guides/multi-runtime-team).
+- **Clawboo Native teams chat and delegate.** A Clawboo Native team sends from team chat and streams back, and its lead hands work to teammates the way an OpenClaw lead does. See [Work with your team in chat](/using/team-chat).
+- **Orchestration runs on the server**, per team, so delegated work carries on after you close the tab.
+- Failed and abandoned delegations show on the Board instead of leaving the delegating agent waiting.
 
 **The graph**
 
-- **Runtime badges and model orbitals**: every Boo carries its runtime's brand mark, and expanding one reveals the model it runs on. See [Ghost Graph](/using/ghost-graph).
-- **MCP connector nodes**: an agent's attached MCP servers appear as their own tiles with per-service glyphs, alongside its skills and built-ins, each type colour-coded so the fan reads at a glance. An agent with no per-agent capabilities of its own now surfaces its runtime's shared ones, so Codex, OpenClaw, and Hermes agents are no longer bare. See [Capabilities dashboard](/using/capabilities-dashboard).
-- The Gateway's built-in `main` agent is hidden from the graph and sidebar unless it is genuinely your default agent, so a native-first install is not cluttered by Gateway plumbing.
+- Every Boo carries its runtime's mark and shows its model when expanded, and an agent's MCP servers appear as tiles beside its skills. See [Org chart and team graphs](/using/org-chart).
 
-**Resilience**
+**Resilience and security**
 
-- **A degraded Gateway no longer blocks you**: if you have any non-OpenClaw agent, the dashboard loads and a non-blocking banner offers recovery, instead of a full-screen wall. The banner offers the action that actually applies: restarting the Gateway when it rejected the token, approving the device when it is unpaired, retrying when it is genuinely unreachable.
-- **Hermes installs on a modern Python**: the installer resolves a 3.11+ interpreter instead of failing against the system 3.9. **Codex login is detected**, so an existing `codex login` is recognised rather than prompting again.
-- **Security**: a non-loopback bind now refuses to start without an access token, and CI workflows run with least-privilege permissions.
+- **A degraded Gateway no longer blocks the dashboard** when you have other agents. A banner offers the recovery that applies: restart the Gateway, approve this device, or retry.
+- Hermes installs on Python 3.11 or newer instead of failing on an older system Python, and an existing `codex login` is recognized.
+- Binding to a non-loopback address refuses to start without an access token.
 
-The 304-agent, 82-team marketplace catalog, the MCP quartet, verification, governance, and observability all carry forward from 0.2.0. There is no schema migration between 0.2.0 and 0.3.0; the [no-migration-ladder](/operating/data-and-state) reset caveat is the same.
+</Update>
 
----
+<Update label="0.2.0" description="2026-06-20">
 
-## 0.2.0, the liberated cut
+Clawboo becomes an orchestrator for several agent runtimes instead of a control panel for OpenClaw. Clawboo Native agents are built in: paste a provider key and start. OpenClaw, Claude Code, Codex and Hermes join as teammates in one chat, sharing one board and one memory.
 
-The version that turns Clawboo from an OpenClaw control surface into a runtime-agnostic orchestrator. The headline: **native agents are built in**: paste a provider key, no external CLI, no Gateway. OpenClaw, Claude Code, Codex, and Hermes join as peer teammates in one chat, sharing one durable [board](/concepts/the-board), one tiered [memory](/concepts/memory), and one [capability dashboard](/using/capabilities-dashboard), all [governed](/concepts/governance) and [verified](/concepts/verification).
+- **Five runtimes** behind one adapter: Clawboo Native, OpenClaw, Claude Code, Codex and Hermes. See [Choose a runtime](/runtimes/index).
+- **A durable task board** that agents claim work from, replacing delegation parsed out of chat text. See [The board](/concepts/the-board).
+- **Four MCP servers**, Tasks, Memory, Tools and TeamChat, that give any attached agent the board, team memory, tools and team chat. See [MCP tools reference](/reference/mcp-tools).
+- **Verification**: fixed checks plus an independent critic agent review some task results before they count as done. See [How work is checked](/concepts/verification).
+- **Guardrails**: USD budgets, tool-loop breakers, limits on delegation depth and fan-out, and an audit log. See [Budgets and guardrails](/concepts/governance).
+- **Observability**: an append-only event log, traces and an error taxonomy. See [Observability](/concepts/observability).
+- **Its own home** in `~/.clawboo/`: the database, settings, an encrypted key vault, and a folder per runtime and agent.
+- **A team-task scheduler**, which later became Routines.
+- **A release security audit**, and a loopback-only bind by default.
 
-What this cut brings over the 0.1.x line:
+**Removed**: the delegation engine that parsed chat text, the experimental Labs UI, and the per-feature flags.
 
-- **Five runtimes** behind one `RuntimeAdapter` trait (`clawboo-native`, `openclaw`, `claude-code`, `codex`, `hermes`): see [Runtimes overview](/runtimes/index).
-- **A durable task board** as the canonical coordination surface, with an atomic single-assignee claim and a board-driven orchestration path that replaced the prose/regex chat-relay engine: see [The board](/concepts/the-board) and [Delegation & orchestration](/concepts/delegation-and-orchestration).
-- **The MCP quartet**: four clawboo-hosted servers (tasks, memory, tools, teamchat) exposing the board/memory/tools/peer-chat as MCP tools an external agent can attach: see [MCP tools reference](/reference/mcp-tools).
-- **Verification (builder ≠ judge)**: a deterministic gate plus an independent critic, with a `completed_with_debt` outcome: see [Verification](/concepts/verification).
-- **Governance**: USD budgets with a kill-switch, tool-loop circuit breakers, depth/fan-out caps, and an audit log: see [Governance](/concepts/governance).
-- **Observability**: an append-only orchestration event log, traces, an error taxonomy, and a Ghost-Graph-over-event-log projection: see [Observability](/concepts/observability).
-- **Native-first onboarding**: the wizard's first real choice is which runtime to run, with the native path seeding a default leader + specialist team: see [Quickstart (native)](/getting-started/quickstart-native).
-- **Per-runtime native homes** under `~/.clawboo/runtimes/<runtime>/<agentId>/`, an **encrypted credential vault** under `~/.clawboo/secrets/`, the **team-task scheduler** (Routines), and a release-cut security audit (case-folded access gate, loopback-exempt `/api/mcp/*`, default loopback bind).
+**Upgrading**: in 0.2.0 a database schema change meant resetting the database, and a 0.1.x database could not be upgraded in place. Since 0.4.0 an upgrade adds missing columns in place. See [Data and state](/operating/data-and-state).
 
-<Info>
-  Schema model: there is **no migration ladder**. The `createDb` inline `CREATE TABLE IF NOT EXISTS`
-  DDL is the sole schema source; a schema change is a hard reset, and there is no in-place upgrade
-  from a 0.1.x database to 0.2.0. See [Data & state](/operating/data-and-state).
-</Info>
+</Update>
 
----
+<Update label="0.1.9" description="2026-06-01">
 
-## 0.1.9
+- **A calm welcome screen.** A soft animated sky replaces the WebGL welcome animation on the setup splash and the home screen, which also makes the install smaller and spares the GPU on first load.
+- **Light theme first.** Fresh installs start in the light theme. Switch to dark or system afterwards.
+- **Team colors.** Each team picks one of 8 color palettes, and the create-team preview matches the deployed team.
+- Token usage is tracked by team and by agent.
+- On Windows, the setup's detect step no longer hangs when a program lookup is slow.
 
-Welcome redesign, lighter install, and team color collections (changesets `53a05b2`, `6f718e2`).
+</Update>
 
-- **Calm Day-sky welcome**: a soft animated sky with drifting clouds (pure CSS/SVG) replaces the WebGL ShaderGradient atmosphere on the onboarding splash and home welcome, with a faint "boo-verse" of distant boo silhouettes drifting behind the clouds. The welcome is theme-independent (always the bright sky).
-- **Removed the WebGL/three.js stack** (`@shadergradient/react`, `@react-three/fiber`, `three`, `three-stdlib`), smaller install/bundle, no GPU cost on first paint.
-- **Fresh installs default to light theme** so onboarding happens in light mode; switchable to light/dark/system afterward.
-- **Team color collections**: each team picks from 8 color palettes with per-team hue rotation, and the create-team preview matches the deployed palette.
-- **Token-usage tracking by team and agent**; onboarding flow improvements; removed the unused Ollama-check API.
-- **Windows `/api/system/status` hang fixed**; the synchronous `where`/`which` binary probe (`findExecutable`) is now timeout-bounded, so a slow spawn under Windows Defender can no longer block the server's event loop and stall the onboarding DetectStep.
+<Update label="0.1.8" description="2026-05-29">
 
-## 0.1.8
+- **Light and dark themes**, with a toggle that remembers your choice. See [Choose a light or dark theme](/using/theming).
+- A design pass over surfaces, type and motion, and the radial layout for the all-teams graph (then called Atlas, now the Org chart).
+- Real provider logos and a consistent model dropdown in setup, plus fixes for setup hangs.
 
-Light/dark theme with toggle + persisted preference; premium design-system pass (4-tier surfaces, type scale, motion); Atlas radial layout; GitHub star CTA; authentic provider brand marks and an app-consistent model dropdown in onboarding; onboarding-hang and atmosphere fixes (changeset `4ecda72`). This was the first feature release after the 0.1.1–0.1.7 blocker-fix run. See [Theming](/using/theming).
+</Update>
 
-## 0.1.7
+<Update label="0.1.7" description="2026-05-20">
 
-Device pairing in the onboarding wizard and Windows compatibility hardening (changesets `9309ee0`, `9038cab`).
+- **Device pairing in the setup wizard.** On a fresh macOS install with OpenClaw 2026.5, the approval card appears inside the wizard, with no page refresh needed.
+- **Windows fixes.** Launching OpenClaw and npm commands on Windows no longer fails or pops up a console window, and longer timeouts cover a slow first start.
+- **Retry** at the Gateway start step joins a launch already in progress instead of starting a second Gateway.
 
-- **Device pairing fixed on fresh macOS installs**: `POST /api/system/approve-device` uses `spawnSync` for the `openclaw devices approve --latest` preview step so the CLI's preview-mode non-zero exit code no longer swallows the request-id stdout that the handler parses. The wizard's `StartGatewayStep` now catches `GatewayResponseError { code: 'NOT_PAIRED' }` and renders the in-product `DevicePairingApproval` card inline, so users no longer need a manual page refresh to escape the wizard on a fresh install with OpenClaw 2026.5.x.
-- **Windows `.cmd` spawn compatibility**: launch `.cmd`/`.bat` shims with `shell: isWindows` + `windowsHide: isWindows` across six `child_process` sites (CVE-2024-27980 hardening; no `cmd.exe` console popup), with the SSE-emitting sites wrapped in try/catch so a synchronous spawn throw surfaces as a clean SSE error instead of crashing the request handler. Also bumped the CLI dashboard poll to 45s for slow Windows cold-boot, raised gateway-client RPC timeouts (default 60s, per-call 120s on `agents.create`/`agents.files.set`), and added mid-launch Gateway-detection so a Retry click joins the existing launch instead of spawning a duplicate `openclaw` process. All no-ops on Unix.
+</Update>
 
-## 0.1.6
+<Update label="0.1.6" description="2026-05-20">
 
-Bootstrap reliability: always verify OpenClaw install state instead of trusting stale `localStorage` (changeset `7a8c3ff`). A user who had onboarded an older Clawboo and then uninstalled OpenClaw was dumped onto the connect screen with no path back to the install wizard, because `GatewayBootstrap` short-circuited on the `clawboo.onboarded` localStorage flag (which persists by browser origin and survives both an npm uninstall and clearing `~/.openclaw/`). The fix always fetches `/api/system/status`: on-disk state is the source of truth, and the localStorage flag is cleared whenever it disagrees.
+- Setup checks what is really installed on disk instead of trusting a flag saved in the browser, so you can run the install wizard again after removing OpenClaw.
 
-## 0.1.5
+</Update>
 
-In-dashboard device pairing approval for OpenClaw 2026.5+ (changeset `1cc97fe`). OpenClaw 2026.5.x dropped auto-pair-on-first-connect, so every fresh install hit a `NOT_PAIRED` rejection requiring two manual `openclaw devices approve` CLI commands. This release added an inline "Approve this device" UI: when the connect throws `NOT_PAIRED`, the form swaps to a single button hitting `POST /api/system/approve-device`, which shells out to `openclaw devices approve --latest` to extract the pending request-id, then `openclaw devices approve <UUID>` for the approval. After approval the SPA auto-retries the connect. See [Device pairing](/runtimes/openclaw).
+<Update label="0.1.5" description="2026-05-20">
 
-## 0.1.4
+- **Approve this device from the dashboard.** OpenClaw 2026.5 stopped pairing new devices on first connect. An **Approve this device** button approves it without a trip to the terminal, then retries the connection. See [OpenClaw](/runtimes/openclaw).
 
-OpenClaw protocol-4 compatibility and Windows install support (changeset `68ebc29`).
+</Update>
 
-- **Protocol mismatch**: OpenClaw 2026.5.18 bumped the WS connect protocol from 3 to 4, but the gateway-client advertised `maxProtocol: 3` only, so fresh installs (which ran `npm install -g openclaw@latest`) hit a protocol mismatch at connect. The fix bumped `maxProtocol` to 4 (`minProtocol` stays at 3 for older OpenClaw) and pinned the install spec to `openclaw@^2026.5` so a future protocol 5 cannot silently break users.
-- **Windows spawn `ENOENT`**: `execFileSync('which', ...)` and `spawn('npm', ...)` are Unix-only (Windows npm is `npm.cmd`), causing `spawn npm ENOENT` at the Install step and a persistent "not installed" detection. The fix added a `platform.ts` helper (`findExecutable` for cross-platform `which`/`where`, `resolveShimName` to append `.cmd`), plus a `netstat`-based port-to-PID fallback. CI's clean-install smoke test now runs on a `[ubuntu-latest, windows-latest]` matrix.
+<Update label="0.1.4" description="2026-05-20">
 
-## 0.1.3
+- **OpenClaw protocol 4.** Clawboo connects to OpenClaw 2026.5.18 and later (protocol 4) as well as older releases (protocol 3), and installs OpenClaw as `openclaw@^2026.5`.
+- **Windows install support.** The install and detect steps find Windows commands such as `npm.cmd`, so **Install** no longer fails with `spawn npm ENOENT`. The CI bundle smoke test gained a Windows leg.
 
-CLI port discovery: HTTP-verify Clawboo identity during port scanning instead of probing TCP blindly (changeset `aef820f`). The OpenClaw Gateway listens on auxiliary ports (18791, 18792) inside Clawboo's 18790–18809 fallback window, so a TCP-only probe could mistake an unrelated listener (Gateway aux ports, Chrome's `--remote-debugging-port`, etc.) for an already-running Clawboo dashboard and open the browser to a 401 page. The fix added `probeClawbooDashboard()`, which does a TCP probe **and** a Clawboo-shaped JSON check on `/api/settings`; only ports that return a real Clawboo response are accepted. The release also added `scripts/test-clean-install.mjs`, a full clean-install simulation that boots a fake non-Clawboo listener on 18791 before invoking the CLI, wired into both CI and the publish gate.
+</Update>
 
-## 0.1.2
+<Update label="0.1.3" description="2026-05-19">
 
-SPA root-path fix in the bundled production server (changeset `e7b9363`). v0.1.1 shipped an Express 5 wildcard catch-all (`/{*splat}`) that failed to match the bare `/` route under `path-to-regexp` v8, so users got `Cannot GET /` instead of the SPA. The fix replaced it with a version-agnostic `app.use(handler)` pattern and added a `smoke-test-bundle` CI job that boots the bundled server and curls `/`.
+- The CLI checks that a port really serves Clawboo before opening it, so it no longer opens your browser on an OpenClaw Gateway port or another app's port. A clean-install test joins CI and the publish gate.
 
-## 0.1.1
+</Update>
 
-First real release, replaces the v0.0.0 / v0.1.0 placeholder builds (changeset `be71923`). Ships the v0.1.0 marketplace-redesign milestone:
+<Update label="0.1.2" description="2026-05-19">
 
-- 304 first-class agent catalog entries across 3 sources (agency-agents, awesome-openclaw, clawboo builtin) and 82 workflow team templates (5 builtin, 5 agency-workflows, 42 awesome-openclaw, 30 synthetic excellence partitions).
-- A 3-tab marketplace (Skills / Agents / Teams) with single-agent deploy flow.
-- The Atlas global org-graph, Group Chat team halos, and Boo Zero as universal leader.
-- Multi-agent orchestration via the structured `<delegate>` protocol, multi-step `<plan>` state machine, and parallel workstreams with auto-synthesis.
-- Auto-install onboarding (Detect → Install → Configure → StartGateway → Team → Deploy).
-- Dynamic API port resolution (default 18790, auto-fallback through 18809) so the server never collides with other dev servers.
-- Local-DB ghost cleanup and per-agent KV cleanup on agent delete.
+- Fixes `Cannot GET /` in 0.1.1: the bundled server serves the dashboard at `/`.
 
-<Note>
-  The 0.1.1 orchestration model, prose/regex chat-relay with
-  DelegationCards/PlanCards/WorkstreamCards, was superseded in v0.2.0 by board-driven orchestration
-  over structured lifecycle events. The marketplace catalog carries forward. See [the marketplace
-  catalog reference](/reference/marketplace-catalog) for its current shape and the gates that keep
-  it honest.
-</Note>
+</Update>
 
-## 0.1.0
+<Update label="0.1.1" description="2026-05-19">
 
-Name-claim placeholder. Published to reserve the `clawboo` name on npm; superseded by the first real release at 0.1.1.
+The first real release.
 
----
+- A Marketplace with **Skills**, **Agents** and **Teams** tabs: 304 agents and 82 team templates.
+- The all-teams graph (then called Atlas) and team chat, with Boo Zero leading every team.
+- Delegation between agents, with multi-step plans and parallel work.
+- A setup wizard that detects, installs, configures and starts OpenClaw, then deploys a team.
+- A dashboard port that starts at 18790 and moves up as far as 18809 when a port is taken.
 
-## See also
+This release ran on OpenClaw only. 0.2.0 replaced its chat-text delegation with board-driven orchestration.
 
-- [Known issues](/appendices/known-issues), candid limitations and dormant seams
-- [Release process](/internals/release-process), Changesets, `publish.yml`, the clean-install gate
-- [Installation](/getting-started/installation), `npx clawboo` and what it launches
-- [What is Clawboo](/intro/what-is-clawboo), positioning and the v0.2.0 wedge
-- [Glossary](/appendices/glossary), canonical term definitions
+</Update>
+
+<Update label="0.1.0" description="2026-02-28">
+
+- A placeholder published to reserve the `clawboo` name on npm.
+
+</Update>
+
+## Related
+
+- [Known issues and limitations](/appendices/known-issues): current limits, and fixes on main that are not released yet.
+- [Install, update and remove Clawboo](/getting-started/installation): install the latest release or update in place.
+- [Release process](/internals/release-process): how changesets become a release.
+- [Glossary](/appendices/glossary): what the product terms mean, and their old names.

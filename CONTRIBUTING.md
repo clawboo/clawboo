@@ -6,7 +6,7 @@ Thanks for taking the time to contribute. Please read this guide before opening 
 
 ## Prerequisites
 
-- Node.js 22+
+- Node.js 22.12 or later (the root `package.json` requires `>=22.12.0`)
 - pnpm 9 (pinned to 9.15.0; `corepack enable` selects it, see Setup)
 
 That's it. Clawboo runs agents natively (paste a provider key), so you do not need any external runtime to develop or test. Connecting OpenClaw, Claude Code, Codex, or Hermes is optional and only needed when you are working on those adapters.
@@ -41,7 +41,7 @@ The docs live in `docs/`, and that directory **is** the site: hand-edited Mintli
 
 **Frontmatter is parsed as YAML, so quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick.** An unquoted `:` followed by a space parses as a nested mapping and Mintlify serves the page as a 404 instead of rendering it. Preview with `mint dev` (the Mintlify CLI, `npx mint dev` if you have not installed it) before opening a docs PR: a full build is what surfaces this, whereas `check-links` only validates links. `pnpm check:docs` catches it too, and runs as part of `pnpm lint` and CI.
 
-Either quote style is valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats your page. One sibling rule, same class of breakage: **never put a bare `%` in a body heading** — Mintlify URI-decodes headings into anchor slugs and fails the page on invalid percent-encoding. A `%` in prose is fine. `pnpm check:docs` enforces both.
+Either quote style is valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats your page. One sibling rule, same class of breakage: **never put a bare `%` in a body heading**: Mintlify URI-decodes headings into anchor slugs and fails the page on invalid percent-encoding. A `%` in prose is fine. `pnpm check:docs` enforces both.
 
 See [`docs/README.md`](./docs/README.md) for the rest of the workflow: the directory layout, adding a page to the `docs.json` navigation, previewing locally, and the Mintlify-flavored conventions these pages use.
 
@@ -70,11 +70,11 @@ pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the
 pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
 ```
 
-Run them locally before pushing to avoid back-and-forth. Every one of them runs as a CI job too.
+Run them locally before pushing to avoid back-and-forth. CI runs every one of them except `pnpm catalog:build`, whose output CI's `catalog:verify` checks instead (`pnpm test` runs there as `pnpm test:coverage`, and `pnpm test:bundle-externals` runs inside `pnpm test:clean-install`).
 
 `pnpm e2e` needs a built workspace (`pnpm build` first) and a Chromium download (`pnpm exec playwright install chromium`). It sandboxes itself into a throwaway `$HOME`, so it never touches your real `~/.clawboo`.
 
-`pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also drives the installed SPA in headless Chromium, so it needs the same `pnpm exec playwright install chromium` download as `pnpm e2e`. And it refuses to run while another Clawboo dashboard is listening on `18790`–`18809` (it would attach to that one instead of the tarball) — stop your `pnpm dev` server first.
+`pnpm test:clean-install` packs `apps/cli` and installs the tarball into a throwaway temp dir, so it needs network access for the `npm install`. It also drives the installed SPA in headless Chromium, so it needs the same `pnpm exec playwright install chromium` download as `pnpm e2e`. And it refuses to run while another Clawboo dashboard is listening on ports 18790 to 18809 (it would attach to that one instead of the tarball), so stop your `pnpm dev` server first.
 
 ---
 
@@ -160,7 +160,7 @@ Keep the `pnpm-lock.yaml` diff minimal. If yours balloons by thousands of lines,
 
 ### 2. Pass CI before requesting review
 
-Every PR must pass CI: `pnpm build`, `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm e2e`, and CodeQL code scanning. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
+Every PR must pass CI: `pnpm format:check` and `pnpm lint`, `pnpm typecheck`, `pnpm test` (as `pnpm test:coverage`, plus the real-concurrency board suite), the Windows and macOS test leg, `pnpm build`, the `website/` build, `pnpm catalog:verify`, `pnpm verify:connectors`, the clean-install smoke test on Ubuntu, Windows and macOS, `pnpm e2e`, and CodeQL code scanning. The [Testing](https://docs.claw.boo/internals/testing) page lists every job. Not every one of those blocks the merge button today, but a red check is a red check: fix it, or say in the PR why it is unrelated.
 
 ### 3. Add a changeset for user-facing changes
 
@@ -172,7 +172,7 @@ pnpm changeset
 
 The interactive CLI asks which packages changed, the bump type (`patch` / `minor` / `major`), and a one-line summary. Commit the generated file in `.changeset/` alongside your code.
 
-Documentation-only, CI-only, and `apps/web`-only changes do not need a changeset (the dashboard is not published).
+Documentation-only, CI-only, and test-only changes do not need a changeset. Dashboard changes do: `apps/web` ships inside the `clawboo` package, so pick `clawboo` for them too.
 
 ### 4. Tests for new surfaces
 
@@ -187,8 +187,8 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 - **Lucide icons only.** Never emoji in the UI.
 - **Theme tokens, never raw hex.** Use the CSS variables and Tailwind tokens (brand marks are the only exception).
 - **No migration ladder; keep new columns addable.** The SQLite schema is the `CREATE TABLE IF NOT EXISTS` DDL in `packages/db/src/schemaBootstrap.ts` (there is no `drizzle/` directory, no `.sql` migrations, and no `db:migrate`/`db:generate`). Keep that DDL additive and idempotent. `CREATE TABLE IF NOT EXISTS` skips the whole statement when the table already exists, so a new column would be a silent no-op on every existing database; `reconcileSchema` closes that by reading the column set back out of the same DDL and adding what an older file is missing. What it asks of you: a **new column on an existing table** must be addable, which means it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one. Break one of those and the build fails, because `schemaBaseline.ts` records the columns as of the last review and a test asserts everything added since can reach a database that already exists. That file needs no upkeep: a column added after the snapshot simply reads as new and is held to the rule, which is the rule anyway. Changing an existing column's type or constraints, or removing one, is still not an in-place upgrade. `schemaSource.test.ts` and `schemaReconcile.test.ts` guard this.
-- **Version every persisted client store.** The rule above is about the server's SQLite; the browser is the opposite case, because you cannot hard-reset a user's storage for them. So a zustand `persist` store sets **both** `version` and `migrate` — never one without the other. Without a `migrate`, bumping the version makes zustand log an error and merge `undefined`, silently discarding the rows it just read back; and `migrate` receives the _partialized_ shape and fires on any version mismatch, downgrades included. Keep the migrate a pure exported function with its own `*.test.ts` in the node project. (There is currently no `persist` store in the repo. For a trivial single value, the Atlas layout toggle in `features/graph/store.ts` shows the lighter pattern — validate on read with an exact match, fall back to the default — which is the right weight for one enum; note the graph store must _not_ become a `persist` store, because `persist` re-serializes on every `set` and that store mutates per drag frame.)
-- **Pollers pause when the tab is hidden.** A new interval-based refresh uses `useVisiblePolling` from `apps/web/src/lib/useVisiblePolling.ts`, not a bare `setInterval`, so a backgrounded tab stops hitting the local API and catches up once on return. A wall-clock grace or expiry timer is the exception (see `ChatPanel.tsx`) — pausing those changes behaviour, so they keep a plain interval and say why in a comment.
+- **Version every persisted client store.** The rule above is about the server's SQLite; the browser is the opposite case, because you cannot hard-reset a user's storage for them. So a zustand `persist` store sets **both** `version` and `migrate`, never one without the other. Without a `migrate`, bumping the version makes zustand log an error and merge `undefined`, silently discarding the rows it just read back; and `migrate` receives the _partialized_ shape and fires on any version mismatch, downgrades included. Keep the migrate a pure exported function with its own `*.test.ts` in the node project. (There is currently no `persist` store in the repo. For a trivial single value, the Org chart layout toggle (`atlasLayout` in `features/graph/store.ts`) shows the lighter pattern (validate on read with an exact match, fall back to the default), which is the right weight for one enum; note the graph store must _not_ become a `persist` store, because `persist` re-serializes on every `set` and that store mutates per drag frame.)
+- **Pollers pause when the tab is hidden.** A new interval-based refresh uses `useVisiblePolling` from `apps/web/src/lib/useVisiblePolling.ts`, not a bare `setInterval`, so a backgrounded tab stops hitting the local API and catches up once on return. A wall-clock grace or expiry timer is the exception (see `ChatPanel.tsx`): pausing those changes behaviour, so they keep a plain interval and say why in a comment.
 - **Schema fixtures are append-only.** `packages/pack-format/src/__fixtures__/v1/*.json` is the frozen record of what schema v1 looked like. Editing one to make a test pass is exactly how a version ladder silently stops covering the shape it claims to: the fixture stops being evidence and becomes a copy of the current code. When a shape changes, add a fixture under the new version's folder; never rewrite an old one.
 - **Every schema version gets a `kitchen-sink.json`.** Alongside `minimal.json` (the smallest valid document), each version needs one fixture that sets **every** optional field to a legal value. Optional fields are where a ladder rots unnoticed, because a `minimal` fixture keeps passing while nothing exercises the half of the schema that only some packs use.
 - **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
@@ -198,9 +198,9 @@ Add a test for anything you add. Unit logic goes in Vitest (`*.test.ts` in the n
 
 ## Release process (maintainers only)
 
-Releases are automated via the `publish.yml` GitHub Actions workflow: when changesets land on `main`, the Changesets action opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the changed packages to npm. No manual `npm publish` needed.
+Releases are automated via the `publish.yml` GitHub Actions workflow: when changesets land on `main`, the Changesets action opens a `chore: version packages` PR; merging it bumps the version, updates the changelog, and publishes the `clawboo` package to npm (the only package that publishes). No manual `npm publish` needed.
 
-Before it publishes, the workflow re-runs the whole PR gate — `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. Every check there is offline by design: nothing fetches an upstream repository, so an upstream outage cannot hold up a release. `typecheck` matters most there: `pnpm build` is bundler-only and never runs `tsc`, so it is the only step that would stop a type error reaching npm.
+Before it publishes, the workflow reruns most of the PR gate: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm catalog:verify`, then `bash scripts/assemble-cli.sh` and `pnpm test:clean-install`. It does not repeat `pnpm format:check`, `pnpm e2e`, `pnpm verify:connectors` or the cross-platform tests, and it needs the network for the install, the Chromium download and the clean-install gate's `npm install`. The catalog and connector gates are offline by design: they never fetch the upstream repositories their content came from. `typecheck` matters most there: the web app and CLI builds are bundler-only and never type-check, so it is the step that stops a type error there from reaching npm.
 
 ---
 

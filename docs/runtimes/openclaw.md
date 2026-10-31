@@ -1,267 +1,379 @@
 ---
-title: OpenClaw
-description: Connect the OpenClaw runtime, a connected substrate driven over the Gateway, with device pairing, registry sync, and global memory scope.
+title: 'OpenClaw'
+sidebarTitle: 'OpenClaw'
+description: 'Run OpenClaw agents in Clawboo: set up the OpenClaw Gateway from the dashboard, approve this device, and see what Clawboo writes, runs and costs.'
+keywords:
+  [
+    'openclaw',
+    'openclaw gateway',
+    'gateway',
+    'quickstart openclaw',
+    'set up openclaw',
+    'device pairing',
+    'NOT_PAIRED',
+    'connected substrate',
+    'auto-configure',
+    'TOOLS.md',
+  ]
 ---
 
-Use this page to bring the **OpenClaw** [runtime](/appendices/glossary) online. Unlike the other four runtimes, OpenClaw is **not a CLI you install**; it is a _connected substrate_. Clawboo connects to a running **OpenClaw Gateway** (a WebSocket server that hosts OpenClaw agents), syncs the Gateway's agent list into SQLite as the [registry of record](/appendices/glossary), and drives chat over that long-lived connection. There is no per-task subprocess to spawn.
+[OpenClaw](https://docs.openclaw.ai) is a separate agent platform. Its agents live in a long-running server called the **OpenClaw Gateway**, where they keep their own workspaces, messaging channels and cron jobs. Clawboo connects to a Gateway on your computer, shows its agents next to your others, and runs them in team chat, on the board and in Routines.
 
-This is why OpenClaw is connected and managed differently from `claude-code`, `codex`, `hermes`, and `clawboo-native`; those are CLIs Clawboo installs and runs per task (see [Connecting runtimes](/runtimes/connecting-runtimes)). OpenClaw has its own state directory, its own scheduler, and its own external messaging channels; Clawboo coordinates with it, it does not run it.
+- **Best for:** people who already use OpenClaw, or who want agents that also answer on OpenClaw's messaging channels (set up in OpenClaw itself).
+- **You need:** a Node.js version that OpenClaw supports, and a credential it can use: a provider key, a ChatGPT sign-in or a local Ollama. Clawboo installs and starts the Gateway for you.
 
-```mermaid
-flowchart LR
-    Browser["Browser (SPA)"] -->|"/api/gateway/ws"| Proxy["Same-origin WS proxy<br/>(token + device auth<br/>injected server-side)"]
-    Proxy --> Gateway["OpenClaw Gateway<br/>(ws://localhost:18789)"]
-    Server["Clawboo server<br/>OpenClawAgentSource"] -->|"signed connect<br/>(proxy device identity)"| Gateway
-    Server -->|"agents.list() → upsert"| DB[("SQLite<br/>registry of record")]
-    Gateway -.->|"WhatsApp / Telegram / …"| Channels["Native channels<br/>(Clawboo never serves)"]
-```
+## Before you begin
 
-## Prerequisites
+- **Node.js in OpenClaw's range:** 22.22.3 or later in the 22 line, 24.15.0 or later in the 24 line, or 25.9.0 and later (`>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`). That is stricter than Clawboo's own minimum of 22.12, so a Node that runs Clawboo can still be refused. The setup doesn't check, so run `node --version` first. See OpenClaw's [Node.js guide](https://docs.openclaw.ai/install/node).
+- **`npm` on your `PATH`.** The setup installs OpenClaw with `npm install -g openclaw@~2026.9`.
+- **A credential OpenClaw can reuse:** a provider key you connected in Clawboo, a ChatGPT sign-in, or the local Ollama you set up for [Clawboo Native](/runtimes/native). With none of these, the setup asks you for a key.
 
-<Note>
-OpenClaw is a separate project. Clawboo connects to an OpenClaw Gateway you run locally; it does not bundle OpenClaw. The onboarding wizard's OpenClaw path can install, configure, and start one for you, or you can point Clawboo at a Gateway you already run.
-</Note>
+You don't need OpenClaw installed already. If it is, the setup keeps your install, fills in only the settings that are missing, and uses a Gateway that is already running.
 
-- An OpenClaw Gateway, reachable over WebSocket (default `ws://localhost:18789`). The Clawboo server connects to the URL stored in [settings](/reference/configuration) (`gatewayUrl`).
-- The Gateway's auth token. Clawboo's onboarding writes one into OpenClaw's `~/.openclaw/.env` as `GATEWAY_AUTH_TOKEN` and mirrors it into Clawboo's `settings.json` (`gatewayToken`).
-- Node.js (Clawboo's prerequisite). The install step runs `npm install -g openclaw@~2026.9`, so `npm` must be on `PATH`.
-- For OpenClaw **2026.5.x and later**: a one-time **device pairing approval**, see [Device pairing](#device-pairing-not_paired).
+## Set up OpenClaw
 
-## How OpenClaw connects
+**Set up OpenClaw** is one button. It reuses a credential you already connected, installs OpenClaw if needed, starts the Gateway and connects to it. The same setup runs from **Settings > Runtimes** and from onboarding's **Add more runtimes** step.
 
-There are **two** connections to the Gateway, and they exist for different reasons.
+<Steps>
+<Step title="Start the setup">
 
-### The browser connection (same-origin proxy)
+Open **Settings > Runtimes**. On the **OpenClaw** row ("Run OpenClaw agents on a local Gateway"), click **Set up**, then **Set up OpenClaw**. In onboarding, the **Add more runtimes** step has the same row.
 
-The browser never talks to the Gateway directly. The SPA opens a WebSocket to the Clawboo server's own `/api/gateway/ws` endpoint, and the server proxies it upstream to the Gateway. The proxy is what injects the auth token and signs the Ed25519 device-auth connect frame **server-side**, so the browser never sees the credential. WS upgrades to any path other than `/api/gateway/ws` are dropped (`socket.destroy()`).
+The row's footer reads **In setup**, and the panel shows **Preparing OpenClaw…**.
 
-This is the runtime/execution path: the chat stream (`chat.send`, `chat.abort`), session control (`sessions.abort`, `sessions.patch`), and live config patches ride this browser→proxy→Gateway connection.
+</Step>
+<Step title="Let Clawboo reuse a credential">
 
-### The server connection (OpenClawAgentSource)
+Clawboo looks for a credential in this order and uses the first one it finds:
 
-The Clawboo server opens its **own** Gateway connection, the `OpenClawAgentSource`. This is the _registry of record_ leg: it calls `agents.list()` and mirrors the result into SQLite so the fleet list, agent files, and team membership survive the Gateway being down. Reads (`listAgents`, `getAgent`, `listTeams`) come from SQLite and work offline; writes, file I/O, and live sessions delegate to the Gateway and require a live connection.
+1. **A provider key saved in Clawboo** (on the **Providers** page, in onboarding or on a runtime's card) or already in OpenClaw's `~/.openclaw/.env`. A key that is only exported in your shell doesn't count. With several keys, it takes the first in this order: Anthropic, OpenAI, Google, OpenRouter, xAI, Groq, Mistral, Moonshot, MiniMax, Together, NVIDIA, Hugging Face, Cerebras, Venice.
+2. **A ChatGPT sign-in that OpenClaw already holds.**
+3. **A ChatGPT sign-in that only Codex holds.** The panel asks you to sign OpenClaw in too (next step).
+4. **The local Ollama you set up for Clawboo Native.**
+5. **Nothing.** The panel asks you for a key (next step).
 
-It is also an **approval surface**. The server connection declares `caps: ['tool-events', 'exec-approvals']`, so when an agent's policy says to ask about a command, the Gateway can put that request to the server and not only to a browser tab. Clawboo mirrors each request into its own approvals queue, which is what lets a command waiting for your decision survive a closed tab or a refresh. See [Approvals](/using/approvals).
+It then writes OpenClaw's configuration. It sets the Gateway to local mode and otherwise fills in only what is missing, so your default model and other settings stay. See [What Clawboo writes to OpenClaw](#what-clawboo-writes-to-openclaw).
 
-A headless Node connection can't use the browser's `crypto.subtle` device-auth path, so the server reuses the **already-paired proxy device identity** (`~/.clawboo/proxy-device-identity.json`) to sign its connect frame via the gateway-client `signConnect` hook. Two details are load-bearing here, both confirmed against OpenClaw 2026.5.x:
+</Step>
+<Step title="Add a key or sign in, if asked">
 
-- The server connects with `client.id` = `cli` (the Gateway validates `client.id` against a fixed allowlist; a custom id like `clawboo-server` is rejected and the socket closes with code `1008`).
-- The server presents an `Origin` of the gateway host (`http(s)://<gateway-host>`). A headless Node WebSocket sends no `Origin` by default, which the Gateway rejects with `CONTROL_UI_ORIGIN_NOT_ALLOWED`; Clawboo injects the `ws` package's WebSocket (which honours a custom `origin`) to satisfy the check.
+**Nothing connected.** The panel reads "Connect a provider key for OpenClaw to use. It powers the local Gateway." Pick **Anthropic**, **OpenAI** or **OpenRouter**, paste the key and click **Connect & set up** (or press Enter). Clawboo saves the key the way the **Providers** page does, then runs the setup again.
 
-<Info>
-If the server connection is down, reads still serve SQLite (the agent list renders, flagged `stale: true`), but what needs the Gateway fails. `GET /api/agents` returns `{ defaultId, mainKey, agents, stale, lastSyncedAt, pendingDeleteIds }`. Creating an OpenClaw agent, an OpenClaw agent's file `GET`/`PUT`, and session reads return `503 { "error": "gateway_disconnected" }`. Creating a Clawboo Native agent (`sourceId: "clawboo-native"`) still works, and deleting an OpenClaw agent is recorded and sent to the Gateway when the server reconnects. See [Agents API](/reference/rest-api/agents).
-</Info>
+**Codex is signed in, OpenClaw isn't.** Each runtime keeps its own ChatGPT sign-in, so OpenClaw needs one too. The panel installs OpenClaw first if it is missing, then shows **Sign in with ChatGPT**. Click it: your browser opens on OpenAI's sign-in page, with no code to type, and the setup carries on once the sign-in is saved. **Re-check** runs the setup again, and **Use an API key instead** switches to the key prompt. On Windows, the panel gives you the command to run in your own terminal instead.
 
-## Channels
+**Ollama doesn't have the model.** If your Ollama is missing OpenClaw's default model, or isn't running, the setup stops before it starts the Gateway. The panel names the model it couldn't find and shows the `ollama pull` command for it. Run that command, then click **Check again**. **Continue anyway** starts the Gateway regardless, but OpenClaw agents can't answer until the model is there.
 
-OpenClaw can connect to external messaging channels (WhatsApp, Telegram, and the like) and runs its own cron/heartbeat scheduler. These are the runtime's _private plane_; Clawboo never serves a channel and never co-runs the Gateway's scheduler. The OpenClaw adapter declares this in its capabilities: `nativeChannels: 'gateway'`, `nativeScheduler: true`, `nativeSkills: 'preserve'`, `nativeMemory: 'preserve'`. Clawboo's [Routines](/concepts/scheduling) schedule _team-task_ work, a different domain from OpenClaw's own-life cron, so the two never conflate.
+</Step>
+<Step title="Install OpenClaw and start the Gateway">
 
-## Steps
+If OpenClaw isn't installed, the panel shows **Installing OpenClaw…** and runs `npm install -g openclaw@~2026.9`, with npm's output in a log. Then it shows **Starting the Gateway…**. A Gateway that is already running on OpenClaw's port is used as it is. Otherwise Clawboo starts one and waits up to 60 seconds for it to answer.
 
-The OpenClaw onboarding path runs these from the wizard, but each maps to a `/api/system/*` route you can also drive directly. See the [System API](/reference/rest-api/system) for full shapes.
+If OpenClaw asks for `openclaw doctor --fix` before it will start (this can happen after an OpenClaw upgrade), Clawboo runs it once and starts the Gateway again.
 
-### 1. Detect
+The log fills with install and Gateway lines, then the panel moves on to connecting.
 
-`GET /api/system/status` reports whether OpenClaw is installed, the Gateway is running, and Node is sufficient:
+</Step>
+<Step title="Approve this device">
 
-```json
-{
-  "node": { "version": "v22.x.x", "major": 22, "sufficient": true, "path": "…" },
-  "openclaw": {
-    "installed": true,
-    "version": "2026.5.x",
-    "path": "…",
-    "stateDir": "~/.openclaw",
-    "configExists": true,
-    "envExists": true
-  },
-  "gateway": {
-    "running": true,
-    "port": 18789,
-    "pid": 12345,
-    "managedByClawboo": true,
-    "uptimeMs": 9000
-  }
-}
-```
+OpenClaw asks you to approve each new device once before it can connect, so the panel shows an **Approve this device** card. Click **Approve this device**. The card reads "Approved. Reconnecting…" and connects again.
 
-`gateway.running` is true when a managed PID is alive **or** the port probes reachable. When the Gateway is running and `~/.openclaw/.env` exists, the handler syncs the `.env` token into Clawboo's settings as a side effect.
+You should see **OpenClaw connected**. The panel closes about a second later, and the OpenClaw row reads **Connected**.
 
-### 2. Install (optional)
+</Step>
+</Steps>
 
-`POST /api/system/install-openclaw` is a Server-Sent Events stream that runs `npm install -g openclaw@~2026.9`. The version is pinned to the `~2026.9` range deliberately. Both 2026.5 and 2026.9 speak connect protocol v4, so the pin is not a protocol pin; what it holds is the OpenClaw config shape (`agents.entries`, and the `replacePaths` requirement on `config.patch`) that Clawboo writes against.
+![Set up OpenClaw on onboarding's Add more runtimes step: the install log streams while the Gateway starts](/images/openclaw-inline-setup.png)
 
-| Event `type` | Payload                      | Meaning                                   |
-| ------------ | ---------------------------- | ----------------------------------------- |
-| `progress`   | `{ step, message }`          | Phase marker                              |
-| `output`     | `{ line }`                   | A line of npm output                      |
-| `error`      | `{ code, message }`          | `EACCES`, `SPAWN_THROW`, or `EXIT_<code>` |
-| `complete`   | `{ success: true, version }` | Install finished                          |
+### If a step fails
 
-<Warning>
-A global npm install can hit `EACCES`. The stream emits an `error` event with code `EACCES` and a `sudo` hint. Prefer a Node version manager (nvm/fnm) or Homebrew over `sudo`.
-</Warning>
+The panel replaces its progress with the error and a **Retry** button. **Retry** runs the whole setup again: it skips the install once OpenClaw is installed, and joins a Gateway that is still starting instead of launching a second one.
 
-### 3. Configure
+If the reconnect after approval fails, or OpenClaw still says the device isn't approved, the error reads "OpenClaw still needs this device approved. Retry to approve it again." **Retry** then brings back a fresh approval card.
 
-`POST /api/system/configure-openclaw` with body `{ provider, apiKey?, model?, gatewayPort? }` writes OpenClaw's `openclaw.json` and `.env`, generates a Gateway token, and saves Clawboo's settings. `provider` is required; `apiKey` is required for every provider except the keyless ones — `ollama` (local) and `openai-codex` (the ChatGPT subscription; see below). The handler writes a local-mode Gateway config (`gateway.mode: 'local'`, token auth via `${GATEWAY_AUTH_TOKEN}`), enables agent-to-agent tooling (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and resolves a default model from the provider.
+**Cancel** closes the panel at any point before it connects. An install that has already started still finishes in the background. The exact errors and their fixes are under [Troubleshooting](#troubleshooting).
 
-For `ollama`, the default model is one your Ollama has pulled: the requested model (or `llama3.2`) when it is pulled, otherwise the most recently pulled model that can use tools. With no chat model pulled, run `ollama pull llama3.2` first. The handler also writes `OLLAMA_API_KEY=ollama-local` to `.env`, the local marker OpenClaw needs before it will run any `ollama/*` model, and points OpenClaw at `OLLAMA_BASE_URL` when you set one (OpenClaw itself only knows `http://127.0.0.1:11434`).
+### Approve from a terminal instead
 
-```json
-{ "ok": true, "gatewayUrl": "ws://localhost:18789", "model": "ollama/qwen2.5:7b" }
-```
-
-`model` is the default it wrote, which for Ollama can differ from the one you asked for. The raw token is never returned in the body; it is persisted server-side, and the same-origin proxy injects it on connect.
-
-**Set up OpenClaw** in Settings → Runtimes, and in the onboarding wizard's **Add more runtimes** step, skips this prompt. It posts [`POST /api/system/auto-configure-openclaw`](/reference/rest-api/system#post-apisystemauto-configure-openclaw), which configures OpenClaw from what you already connected: a provider key, else OpenClaw's own ChatGPT sign-in (below). Without either, a signed-in `codex` CLI gets the offer of that ChatGPT sign-in. Only then does it fall back to the local Ollama you set up for [Clawboo Native](/runtimes/native#2-connect-the-key), with the same `OLLAMA_API_KEY=ollama-local` marker and pulled default model described above, so with Ollama as your only provider OpenClaw runs on it without asking for a cloud key. If Ollama doesn't have that default model (or isn't running), the setup stops before starting the Gateway and shows the `ollama pull` command, with **Check again** and **Continue anyway**. With none of these, it asks for a key. It never replaces a default model you already set, and keeps an `OLLAMA_API_KEY` that already has a value.
-
-### Or: use your ChatGPT subscription
-
-OpenClaw has a built-in `openai-codex` provider that runs on a ChatGPT subscription (the same backend the [Codex runtime](/runtimes/codex) uses) — no API key anywhere. Its credential is OpenClaw's OWN OAuth profile, created by running OpenClaw's login in your terminal (Clawboo never automates the exchange):
+The approval card runs two OpenClaw commands for you. You can run them yourself:
 
 ```bash
-openclaw models auth login --provider openai-codex
+openclaw devices approve --latest
+openclaw devices approve <requestId>
 ```
 
-<Warning>
-Use `models auth login`, never `openclaw onboard` — the onboard wizard can reset channels, memory, and cron unless you carefully choose "Use existing values". The login command is non-destructive: it only adds the auth profile.
-</Warning>
+The first prints the id of the waiting request; the second approves it. Then run **Set up OpenClaw** or **Reconnect OpenClaw** again so Clawboo connects. See OpenClaw's [devices command](https://docs.openclaw.ai/cli/devices).
 
-Clawboo surfaces this in two places: the onboarding wizard's OpenAI card offers **Sign in with ChatGPT** (Recommended — the economical path), and once Codex is connected the OpenClaw setup flow offers a one-click **Sign in with ChatGPT** of its own. The one-click button spawns OpenClaw's login locally and relays its output; the login runs the same browser flow as `codex login` (your browser opens, you approve, no code to type, and no dependence on the ChatGPT device-authorization setting). Detection is a presence-only scan of the auth-profile files (an `oauth`-type `openai-codex` profile; token values are never read into responses or logs). Once the profile exists, the configure path is fully keyless: the default model is set to `openai-codex/gpt-5.5` and no key line touches `.env`. A codex-CLI login alone is NOT enough — OpenClaw needs its own sign-in (distinct OAuth grants; this also keeps refresh-token lineages separate).
+### Use your ChatGPT plan
 
-<Note>
-Model refs: Clawboo writes `openai-codex/<model>`, which is the minimal activation that validates on its own. OpenClaw 2026.8.1 made `openai/*` the canonical form, and `openclaw doctor --fix` migrates the ref for you: it rewrites `openai-codex/<model>` to `openai/<model>` **and** enables the `openai` and `codex` plugin entries that the canonical ref needs. Both halves matter, which is why Clawboo does not write `openai/*` directly. A config naming `openai/<model>` without those plugin entries does not merely warn, it stops the CLI with `Unable to resolve Codex doctor health API: install the official Codex plugin with openclaw plugins install @openclaw/codex`. Also note the subscription quota is shared: OpenClaw agents, Codex-runtime agents, Hermes subscription runs, and your own `codex` usage all draw from the same ChatGPT plan allowance, and these turns report no USD cost to Clawboo's budgets.
-</Note>
+OpenClaw can run on a ChatGPT subscription instead of an API key, through its own `openai-codex` provider. It needs its own sign-in, separate from Codex's:
 
-### 4. Start the Gateway
+- During setup, or later under **Manage > ChatGPT subscription**, click **Sign in with ChatGPT**. This needs Codex connected first; until then the row reads "Connect Codex first".
+- Or run OpenClaw's own login in a terminal: `openclaw models auth login --provider openai-codex`. Use it rather than `openclaw onboard`, which can reset your channels, memory and cron jobs.
 
-`POST /api/system/gateway` with body `{ action }` controls the Gateway process. `action: "status"` and `action: "stop"` return JSON; `action: "start"` and `action: "restart"` are SSE streams that spawn the Gateway detached, poll until the port is reachable (up to 60s), sync the token, and reconnect the server-side `OpenClawAgentSource`. An unknown `action` returns `400`.
+With the sign-in in place, the setup writes no key, and sets OpenClaw's default model to `openai-codex/gpt-5.5` if none is set. OpenClaw agents, Codex agents, Hermes on a ChatGPT sign-in and your own Codex use all share your plan's limits.
 
-| `action`  | Response                                | Notes                                  |
-| --------- | --------------------------------------- | -------------------------------------- |
-| `status`  | JSON `{ running, pid, port, uptimeMs }` | Quick liveness check                   |
-| `stop`    | JSON `{ ok, stopped }`                  | Stops the managed process              |
-| `start`   | SSE                                     | Spawns + polls + reconnects the source |
-| `restart` | SSE                                     | Stops, waits, then starts              |
+## Default models
 
-### 5. Connect (and pair the device)
+When OpenClaw has no default model yet, the setup picks one for the provider it reused. It never replaces a default you already have.
 
-Once the Gateway is reachable, the SPA connects through `/api/gateway/ws`. On a fresh OpenClaw 2026.5.x install the first connect fails with `NOT_PAIRED`; proceed to the next section.
+| Provider        | Default model                                                    |
+| --------------- | ---------------------------------------------------------------- |
+| Anthropic       | `anthropic/claude-sonnet-4-5`                                    |
+| OpenAI          | `openai/gpt-5.4`                                                 |
+| Google          | `google/gemini-2.0-flash`                                        |
+| OpenRouter      | `openrouter/anthropic/claude-sonnet-4-5`                         |
+| xAI             | `xai/grok-3`                                                     |
+| Groq            | `groq/llama-3.3-70b-versatile`                                   |
+| Mistral         | `mistral/mistral-large-latest`                                   |
+| Moonshot        | `moonshot/kimi-k2.5`                                             |
+| MiniMax         | `minimax/MiniMax-M2.5`                                           |
+| Together        | `together/meta-llama/Llama-3.3-70B-Instruct-Turbo`               |
+| NVIDIA          | `nvidia/llama-3.1-nemotron-70b-instruct`                         |
+| Hugging Face    | `huggingface/deepseek-ai/DeepSeek-R1`                            |
+| Cerebras        | `cerebras/zai-glm-4.7`                                           |
+| Venice          | `venice/llama-3.3-70b`                                           |
+| Local Ollama    | `ollama/` plus a model your Ollama has pulled (`llama3.2` first) |
+| ChatGPT sign-in | `openai-codex/gpt-5.5`                                           |
 
-## Device pairing (NOT_PAIRED)
-
-OpenClaw **2026.5.x and later** dropped auto-pair-on-first-connect. A new device lands in OpenClaw's pending list, and every connect attempt rejects with a structured error until a human approves it:
-
-```
-GatewayResponseError { code: 'NOT_PAIRED', message: 'pairing required: device is not approved yet' }
-```
-
-The SPA branches on `err.code === 'NOT_PAIRED'` in three places: the connect screen, the in-place OpenClaw setup (`OpenClawInlineSetup`, shared by onboarding and Settings, Runtimes), and the bootstrap auto-reconnect, and swaps in a **DevicePairingApproval** card. The card's "Approve this device" button hits `POST /api/system/approve-device`, which performs a two-step shell-out against the OpenClaw CLI:
-
-1. `openclaw devices approve --latest` runs in **preview** mode: it prints `Approve this exact request with: openclaw devices approve <UUID>` and exits non-zero. Clawboo regex-extracts the UUID from the captured stdout/stderr.
-2. `openclaw devices approve <UUID>` performs the actual approval.
-
-On success the SPA auto-retries the original connect with the same URL and token, and the connection completes.
-
-| Status                                                               | When                             |
-| -------------------------------------------------------------------- | -------------------------------- |
-| `200 { ok: true, requestId, output }`                                | Device approved                  |
-| `400 { error: "OpenClaw not installed" }`                            | No `openclaw` binary found       |
-| `404 { error: "No pending device pairing requests found", details }` | The preview emitted no requestId |
-| `500 { error: "Failed to approve device: …" }`                       | The approval command failed      |
-
-<Tip>
-Power users can pair from a terminal instead: `openclaw devices approve --latest` to see the requestId, then `openclaw devices approve <UUID>`. The DevicePairingApproval card surfaces this manual fallback too.
-</Tip>
+Change it under **Manage > Default model**, which every OpenClaw agent uses unless it has its own model. An agent's own model is set on its page. For OpenClaw's model settings, see [Model providers](https://docs.openclaw.ai/concepts/model-providers) and, for Ollama, [Ollama](https://docs.openclaw.ai/providers/ollama).
 
 ## What a new Boo is allowed to run
 
-An OpenClaw agent runs commands on your computer, and the Gateway is the only thing that gates them. An agent with no entry in the Gateway's approvals store resolves to unrestricted: it runs commands without asking. That was the shipped default for every Boo created before this release.
+OpenClaw's Gateway decides whether an OpenClaw agent may run a command, from each agent's command policy. Clawboo sets that policy when it creates an agent:
 
-Clawboo now applies a posture at the Gateway as part of creating the agent. When the caller supplies no exec config, the posture is **Ask for Unknown** (`on-miss`), so the new Boo asks you before running a command it has not been allowed before. A caller that does supply a posture gets that one written to the Gateway too, so a Boo created with **Always Ask** is under that posture at the Gateway and not only in Clawboo's own record.
+- **A new OpenClaw agent gets Ask for Unknown.** It asks you before running a command it hasn't been allowed. (A caller of the REST API can pass another posture, and Clawboo writes that one instead.)
+- **A refused policy stops the creation.** If the Gateway won't take the policy, Clawboo removes the half-made agent and **Create Boo** shows "Could not set this agent's command permissions on the Gateway, so it was not created", followed by the reason.
+- **An agent made outside Clawboo** has no policy from Clawboo. It follows the Gateway's own defaults, which let it run commands without asking unless you changed them.
+- **Nothing re-applies a posture later.** Clawboo writes it when it creates the agent, and when you change **Command Execution** on the agent's **Permissions** tab. A change made outside Clawboo stays.
 
-One condition rides on this: the Gateway write happens only when the resolved exec config carries an `execAsk` of `off`, `on-miss`, or `always`. An exec config carrying anything else sends no posture at all, and that Boo is left with whatever the Gateway already resolves for it.
+Answering **Always** to a command card adds a standing permission. The agent's **Permissions** tab lists those under **Commands this Boo can run without asking**, where you can revoke one. See [Command permissions](/using/command-permissions) and OpenClaw's [exec approvals](https://docs.openclaw.ai/tools/exec-approvals).
+
+## Manage OpenClaw
+
+Once OpenClaw is connected, its row reads **Connected** and offers **Manage**:
+
+| In **Manage**            | What it does                                                                                             |
+| ------------------------ | -------------------------------------------------------------------------------------------------------- |
+| **Gateway**              | Shows **Running** or **Stopped**, the port and the uptime, with **Restart** (or **Start** if it stopped) |
+| **LLM providers**        | Lists the keys saved on the **Providers** page, each with its own **Disconnect**                         |
+| **ChatGPT subscription** | OpenClaw's own ChatGPT sign-in: **Sign in with ChatGPT**, "Connect Codex first", or **Connected**        |
+| **Default model**        | The model every OpenClaw agent uses unless it has its own                                                |
+| **MCP attach config**    | The snippet for attaching Clawboo's MCP servers by hand; see [MCP servers](/operating/mcp-servers)       |
+| **Re-check**             | Checks the connection again                                                                              |
+| **Disconnect**           | Stops the local Gateway ("Stop the OpenClaw gateway?"). OpenClaw agents go offline until it starts again |
+| **Details**              | A read-only diagnostics view                                                                             |
+
+When OpenClaw is set up but its Gateway is offline, the row shows that and offers **Reconnect**. **Reconnect OpenClaw** runs the same setup as above: it reuses your configuration and starts the Gateway. For OpenClaw's own service commands, see [the gateway command](https://docs.openclaw.ai/cli/gateway).
+
+## What Clawboo writes to OpenClaw
+
+Clawboo changes OpenClaw's files in these places. `~/.openclaw` is OpenClaw's state folder (`OPENCLAW_STATE_DIR` moves it), and `~/.clawboo` is Clawboo's (`CLAWBOO_HOME` moves it).
+
+| Where                                                 | What Clawboo writes                                                                                                                                                                                                                                                  | When                                                                                                                         |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `~/.openclaw/.env`                                    | A Gateway token (`GATEWAY_AUTH_TOKEN`) when there is none yet; the provider key it reused, under its usual name such as `ANTHROPIC_API_KEY`; `OLLAMA_API_KEY=ollama-local` for Ollama, a marker rather than a secret                                                 | **Set up OpenClaw**, and every key you save on the **Providers** page                                                        |
+| `~/.openclaw/agents/<agent>/agent/auth-profiles.json` | The same provider key, for each OpenClaw agent that exists                                                                                                                                                                                                           | Same as above                                                                                                                |
+| `~/.openclaw/openclaw.json`                           | Local Gateway mode (`gateway.mode: local`). Only where missing: port 18789, token authentication, a default model, and agent-to-agent messaging. With `OLLAMA_BASE_URL` set, an Ollama provider entry that points at it, because OpenClaw doesn't read that variable | **Set up OpenClaw**                                                                                                          |
+| `openclaw.json`, through the Gateway                  | Clawboo's MCP servers, and `sessions_spawn` and `sessions_yield` on the denied tools list (see [Clawboo tools inside OpenClaw](#clawboo-tools-inside-openclaw))                                                                                                      | Each time the server connects, skipped when nothing changed                                                                  |
+| `openclaw.json`                                       | The default model (with its context window, when Clawboo knows it), an agent's own model, and the default command approval for all agents                                                                                                                            | When you change **Default model** in **Manage**, an OpenClaw agent's model, or **Command Approval** in **Settings > System** |
+| The Gateway's command policies                        | Each agent's **Command Execution** posture                                                                                                                                                                                                                           | When Clawboo creates an agent, and when you change its posture                                                               |
+| The agent's workspace, `~/.openclaw/workspace-<name>` | `SOUL.md`, `IDENTITY.md`, `TOOLS.md` and `AGENTS.md` (see [Agent files](#agent-files))                                                                                                                                                                               | When Clawboo creates the agent, and when you edit a file                                                                     |
+| `~/.clawboo/settings.json`                            | The Gateway address, with the port from `openclaw.json`, and the Gateway token                                                                                                                                                                                       | **Set up OpenClaw**, and when Clawboo reads a new token from `.env`                                                          |
 
 <Warning>
-**A Gateway that refuses the policy fails the creation.** Clawboo deletes the agent it just created upstream and the call throws, with a message naming the permissions write (`Could not set this agent's command permissions on the Gateway, so it was not created: …`); **Create Boo** shows that message inline and no agent is left in your fleet. A Boo whose stated posture is not the one in force is worse than no Boo, so creation stops rather than degrading quietly. With the Gateway down you cannot create an OpenClaw Boo at all: `POST /api/agents` answers `503 { "error": "gateway_disconnected" }`. **Create Boo** and the graph's **New agent** ask for OpenClaw only while the server is connected to the Gateway; otherwise they make a Clawboo Native Boo instead.
+
+Provider keys in `~/.openclaw/.env` and in each agent's `auth-profiles.json` are stored in plain text, because that is where OpenClaw reads them. Anyone who can read those files can read the keys. Clawboo's own copy stays in its encrypted vault.
+
 </Warning>
 
-A per-agent entry wins over the fleet-wide default, so the **Command Approval** dropdown in Settings → System no longer loosens a Boo created this way: that Boo carries its own explicit entry. See [System maintenance](/using/system-maintenance).
+To back up or reset these folders, see [Where Clawboo keeps data](/operating/data-and-state). For OpenClaw's own settings, see its [configuration guide](https://docs.openclaw.ai/gateway/configuration).
 
-Nothing re-asserts a posture afterwards. The two write sites are this one, at creation, and an explicit change in the Boo's **Permissions** tab (**Execution Permissions** → **Command Execution**). There is no reconciliation on connect, on sync, or on boot, so a posture changed outside Clawboo stays changed.
+## How Clawboo talks to the Gateway
 
-### Seeing what a Boo has already been allowed
+Clawboo keeps two connections to the Gateway. Both use a device identity that you approved once during setup, stored in `~/.clawboo/proxy-device-identity.json`. That identity only proves Clawboo to the Gateway; it does not protect the dashboard itself (see [Self-host securely](/guides/self-host-securely)).
 
-Answering **Always** to a command prompt records a standing permission that outlives the run. The same **Permissions** tab lists them under **Commands this Boo can run without asking**, read from OpenClaw's own stored policy rather than from Clawboo's records. A row Clawboo can take back carries a revoke control; a row that is also granted to every Boo on the computer, or that is part of another grant, says so instead of offering a button you cannot use. Grants that apply fleet-wide appear only as a count in the footer and are set outside Clawboo.
+**The server's own connection** stays open whenever the Gateway runs, with or without a browser tab. Over it, Clawboo:
 
-The list is read when the tab opens, on its **Refresh** button, and after a revoke attempt, so a permission minted by answering **Always** while the tab is open shows up once you refresh. If that policy cannot be read at all, the panel says so and names how many rules the document last held, rather than showing an empty list over rules that are still being enforced. See [Working with agents](/using/agents) for the tab, and [Approvals](/using/approvals) for answering a prompt in the first place.
+- runs every OpenClaw agent turn in team chat, including the tasks those agents are given;
+- runs OpenClaw agent Routines, and lists the Gateway's own cron jobs on the Routines page, where you can turn them on or off, run them or delete them;
+- keeps its copy of your OpenClaw agents up to date, so they still show when the Gateway is down;
+- receives command approval requests, so they wait in Clawboo's approvals even with no tab open;
+- records activity and token use from OpenClaw sessions, including ones Clawboo didn't start, such as a channel message or one of an agent's own cron jobs;
+- registers its MCP servers in the Gateway's configuration, and passes your comments into running tasks.
 
-## Steering a running task
+**The browser's connection** goes through the Clawboo server, which adds the saved Gateway token, so the server never sends that token to the browser. It carries your 1:1 chats with an OpenClaw agent and streams replies as they arrive.
 
-When you comment on a task an OpenClaw agent is working on, Clawboo sends the comment with `chat.send` and `queueMode: 'steer'` over the server's operator connection. The Gateway puts it into the session's active run at the next runtime boundary (before the next tool launch or model call) without stopping the tool that is running, and confirms it with a `chat` final carrying the steer's own run id once the message is committed to the transcript. Clawboo filters that frame out of the run's event stream, so it can never be mistaken for the run's own end.
+**When the Gateway is down**, your OpenClaw agents still show (from Clawboo's last copy) but can't run. You can't create an OpenClaw agent or edit its files: **Create Boo** makes a Clawboo Native agent instead, and says so. Deleting an OpenClaw agent is remembered and sent to the Gateway when it reconnects. If you also have agents on other runtimes, the dashboard loads as usual with a banner, "OpenClaw Gateway is offline", and a **Reconnect** button.
 
-If the active run cannot take the steer (it is not streaming, or it is about to finish), the Gateway would queue the message as a follow-up turn after the run, which nobody would be watching. So when the run ends with a steer still unread, Clawboo cancels it (`chat.abort` with the steer's run id) and leaves the comment in the agent's mailbox for its next run. Verified against OpenClaw 2026.9.2's `chat.send` handler. See [steering a running task](/runtimes/index#steering-a-running-task).
+For the protocol detail, see [Gateway and events](/internals/gateway-and-events).
 
-## Why OpenClaw can't be run by the per-task executor
+## Clawboo tools inside OpenClaw
 
-The other four runtimes execute a board task by spawning a one-shot process: claim the task, provision a worktree, run the CLI/SDK, report up. OpenClaw is a **connected substrate**; its runs ride the live Gateway session over the server's long-lived connection, so the one-shot executor runner refuses it **by construction**, before any board mutation:
+Each time the server connects, Clawboo registers three of its MCP servers in the Gateway's configuration, so every OpenClaw agent can use them. One Gateway configuration serves every OpenClaw agent, so Clawboo can't tell which agent is calling, and each server is limited accordingly:
 
-- The OpenClaw adapter's `capabilities()` declare `runtimeClass: 'connected-substrate'` (and `worktrees: false`).
-- `resolveRuntimeIntegration(caps)` maps that class to `home.kind === 'connected'`.
-- The executor runner checks this _before the atomic claim_ and returns `{ ok: false, reason: 'connected_substrate' }`, which the REST layer maps to `422`. The refusal landing pre-claim is the point: a misrouted run never touches the board.
+| Server | What OpenClaw agents can do                     | The limit on OpenClaw                                                                                                                                        |
+| ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Memory | Read and save shared [memory](/concepts/memory) | Global memory only: no team's memory, and nothing saved to one team                                                                                          |
+| Tasks  | Create, update, block and link board tasks      | Can't claim or assign a task                                                                                                                                 |
+| Tools  | Use apps reached through Composio               | Connectors you give an agent on the graph don't reach it, and every Composio action asks you first ([why](/using/connectors#openclaw-agents-and-connectors)) |
 
-There is a second wall in front of it: `/api/runtimes/:id/run` only accepts the four non-OpenClaw runtime ids (`isRuntimeId` excludes `openclaw`), so calling it with `openclaw` returns `404 { "error": "unknown runtime 'openclaw'" }`. OpenClaw's team work flows through its live session and the board orchestration over the Gateway connection, not through the per-task runner.
+TeamChat isn't registered. OpenClaw agents take part in team chat through Clawboo, which posts each of their turns under the right name. Clawboo also adds `sessions_spawn` and `sessions_yield` to OpenClaw's denied tools, so agents hand work to their team instead of spawning sub-agents of their own. An OpenClaw leader hands work on by calling OpenClaw's `sessions_send` tool, or with a `<delegate to="@Name">…</delegate>` block in its reply; Clawboo turns either one into a board task.
 
-## Global memory scope
+## Agent files
 
-When the server-side connection comes up, `OpenClawAgentSource` registers Clawboo's shared **Memory** and **Tasks** [MCP](/appendices/glossary) servers into the Gateway's top-level `mcp.servers` config (each as `{ url, transport: 'streamable-http' }`), so OpenClaw agents can read and write the one shared team memory. This is **idempotent**; it reads the current config, skips the patch when both servers are already registered with the right URLs (so the per-reconnect re-apply can't burn the Gateway's 3-writes-per-60s control-plane budget), and a stale config is re-merged on reconnect.
+An OpenClaw agent's files live in its workspace on the Gateway. Clawboo writes them when it creates the agent, and when you edit them on the agent's page (**Details**, then the file tabs). Editing needs the Gateway running.
 
-Two scoping facts follow from the Gateway config being process-wide:
+| File          | What it is for                                                                                                                                                                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SOUL.md`     | Persona, tone and boundaries. OpenClaw loads it every session.                                                                                                                                                                                  |
+| `AGENTS.md`   | Operating instructions, loaded every session. For a team's agents, Clawboo writes the team roster and how to work with the team here. It also adds web-browsing instructions to every OpenClaw agent. Put tool notes in its `## Tools` section. |
+| `IDENTITY.md` | The agent's name, vibe and emoji.                                                                                                                                                                                                               |
+| `TOOLS.md`    | Clawboo still shows this tab, but OpenClaw 2026.9 and later doesn't load it. Move its content into `AGENTS.md`; OpenClaw's `openclaw doctor --fix` merges an existing `TOOLS.md` there for you.                                                 |
 
-- **Memory is registered at GLOBAL scope for OpenClaw.** The other four runtimes get a _per-run team scope_ baked into their attach URL; a single static Gateway-config URL can't carry a per-run team binding, so an OpenClaw agent's memory facts are team-unscoped. This is an organizational boundary for the local-first single-user model, not a security one.
+Clawboo neither creates nor reads `HEARTBEAT.md`, `USER.md` or `MEMORY.md`; the file editor shows them only when they already have content. To schedule an OpenClaw agent's own work, use OpenClaw's [cron jobs](https://docs.openclaw.ai/automation/cron-jobs) or a Clawboo [Routine](/using/routines). OpenClaw's [agent workspace guide](https://docs.openclaw.ai/concepts/agent-workspace) covers every file.
 
-  Global scope here is **enforced, not assumed**. Because the Gateway's URLs carry no signed scope, an OpenClaw agent's MCP session is treated as an unidentified HTTP caller: the `scopeTeamId` / `scopeAgentId` arguments it passes are ignored, saves land on the global tier and reads see the global tier only. Without that, "global" would have meant "whatever the model asked for", and any agent could have written a fact tagged as another team and read every team's facts back.
+## Comments on a running task
 
-- **Tasks refuses the tools that name an agent.** For the same reason, an OpenClaw session is not served `claim_task` or `assign_task` (both require an `assigneeAgentId` the caller cannot prove), and `add_comment` drops a caller-supplied `authorAgentId` and `authorType`. The anonymous board writes are unaffected, so an OpenClaw agent can still create, re-status, block, unblock and link tasks. Server-orchestrated board runs are unaffected either way: Clawboo claims those directly, without going through the MCP tool.
-- **TeamChat is deliberately NOT registered for OpenClaw.** A process-wide static URL can't carry a per-run author binding, and registering the `team_chat` tool unbound would let an OpenClaw agent post as any author (identity from tool args), breaking the anti-spoof property that the [peer-chat](/concepts/peer-chat) room depends on. Instead, an OpenClaw agent's room participation is fully server-mediated through the team exchange, which posts the agent's drained turn under the authoritative bound identity.
+A comment you leave on a task an OpenClaw agent is working on joins its running turn at the next step, without stopping a tool that is running. If the run can't take it, the comment waits for the agent's next run. See [Steering a running task](/runtimes/index#steering-a-running-task).
 
-## Verify it worked
+## Costs
 
-- `GET /api/agents/registry/health` (always `200`) reports the source `connection`; it should read `connected` with a recent `lastSyncedAt`.
-- `GET /api/agents` should return your OpenClaw agents with `stale: false`.
-- `GET /api/system/status` should show `gateway.running: true`.
-- Send a message in group chat; the send is an HTTP `POST /api/teams/:id/chat` and the reply streams back over SSE (`/api/teams/:id/chat/stream`), because team orchestration runs server-side. The same-origin WS proxy carries the 1:1 chat, not the team run. Exec approvals ride **both** Gateway connections: the browser's proxied socket and the server's own connection, so a command waiting on you is still there after you close the tab.
+OpenClaw's Gateway reports no cost to Clawboo, so every OpenClaw figure you see is Clawboo's estimate:
+
+- **Budgets** are charged an estimate for each OpenClaw turn in team chat, and for each OpenClaw Routine run that succeeds (a failed or timed-out run records nothing). It is worked out from the length of the prompt and the reply, at about four characters per token.
+- **Tokens Used** shows the token counts OpenClaw records for each turn, priced from Clawboo's rate table.
+- **A 1:1 chat** with an OpenClaw agent shows in **Tokens Used**, but is not charged to budgets.
+
+On a ChatGPT plan you pay a flat fee, so these figures are a budget guide, not your bill. Budgets only warn you unless you set a hard cap. See [Budgets and spend](/using/budgets-and-spend).
+
+## Limits
+
+- **No worktree, no checks.** OpenClaw agents work in their own Gateway workspace. Clawboo never gives them a git worktree and never runs verification on their work; see [How work is checked](/concepts/verification).
+- **Global memory, no connectors from the graph.** See [Clawboo tools inside OpenClaw](#clawboo-tools-inside-openclaw).
+- **A Gateway on this computer.** **Set up OpenClaw** configures and starts a local Gateway. Clawboo registers its MCP servers at a `127.0.0.1` address, which a Gateway on another machine can't reach.
+- **Routine runs stop after 10 minutes.** An OpenClaw Routine run that hasn't finished by then is stopped. `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS` changes the limit.
+- **The 2026.9 line.** Clawboo installs `openclaw@~2026.9`, because it writes OpenClaw's configuration in that line's format.
+- **Not on the runtimes API.** `/api/runtimes/openclaw/...` answers `404`. OpenClaw is managed through the [System API](/reference/rest-api/system).
 
 ## Troubleshooting
 
-<Warning>
-**Connect rejects with `NOT_PAIRED`.** Expected on OpenClaw 2026.5.x's first connect. Click "Approve this device" (or run `openclaw devices approve --latest` then `openclaw devices approve <UUID>` in a terminal), then retry. See [Device pairing](#device-pairing-not_paired).
-</Warning>
+<AccordionGroup>
+<Accordion title="NOT_PAIRED: pairing required, device is not approved yet">
 
-<Warning>
-**Agents render but writes 503.** The fleet list reads from SQLite, so it survives the Gateway being down; agent-file writes and live sessions need the connection. `GET /api/agents` will show `stale: true` and the registry health `connection` will be `disconnected` / `reconnecting`. Start the Gateway (`POST /api/system/gateway { "action": "start" }`) and the source reconnects.
-</Warning>
+**What it means:** OpenClaw hasn't approved this device yet. Every connect is refused until you approve it once.
 
-<Note>
-**A down Gateway doesn't block you if you have other agents.** When the browser can't reach the Gateway on load, a **pure-OpenClaw** user gets the connect / offline screen. But if you also have Native, Codex, Claude Code, or Hermes agents, Clawboo loads your dashboard anyway and floats a **reconnect banner** at the top instead of blocking, so you keep working with those agents. The banner's **Reconnect** starts the Gateway if needed and brings your OpenClaw agents back online.
-</Note>
+**Fix:** click **Approve this device** on the card the setup shows. If you approve from a terminal instead (see [Approve from a terminal instead](#approve-from-a-terminal-instead)), run **Set up OpenClaw** or **Reconnect OpenClaw** again afterwards to connect.
 
-<Note>
-**The Gateway asks for `openclaw doctor --fix` after an OpenClaw upgrade.** A newer OpenClaw can refuse to start until it has migrated data an older one wrote, with a line such as `Gateway failed to start: Legacy workspace setup state requires migration ... run openclaw doctor --fix` in `~/.clawboo/gateway.log`. When Clawboo starts the Gateway and sees that, it runs `openclaw doctor --fix --non-interactive` once, then starts it again; the progress shows "Running openclaw doctor --fix". It tells doctor to leave launchd and systemd Gateway services alone. If the repair fails, the error carries doctor's last line: run `openclaw doctor --fix` in a terminal to see the whole report, then start the Gateway again.
-</Note>
+</Accordion>
+<Accordion title="OpenClaw still needs this device approved. Retry to approve it again.">
 
-<Danger>
-**`POST /api/runtimes/openclaw/...` returns `404`.** OpenClaw is not a `/api/runtimes` runtime; only `claude-code`, `codex`, `hermes`, and `clawboo-native` are. Drive OpenClaw through `/api/system/*` and `/api/gateway/ws`, not the runtime install/connect/run routes.
-</Danger>
+**What it means:** the approval went through, but the reconnect after it failed, or OpenClaw still reported the device as unapproved.
+
+**Fix:** click **Retry**. The setup runs again and shows a fresh approval card if the device still needs one.
+
+</Accordion>
+<Accordion title="The approval card shows an error">
+
+The card shows what the approval step reported:
+
+- `No pending device pairing requests found`: OpenClaw had no request waiting, for example because the device is already approved. Close the panel with **Cancel** and run **Set up OpenClaw** again; it connects, or shows a fresh card.
+- `OpenClaw not installed`: Clawboo can't find the `openclaw` command. Run the setup again, or check that npm's global folder is on your `PATH`.
+- `Failed to approve device: …` or `Failed to run openclaw: …`: the OpenClaw command failed. Run the two terminal commands above to see OpenClaw's own message.
+
+</Accordion>
+<Accordion title="Permission denied. Your Node.js installation may require sudo for global installs.">
+
+**What it means:** npm can't write to its global folder. The message suggests `sudo npm install -g openclaw@~2026.9`.
+
+**Fix:** prefer a Node.js version manager (nvm or fnm) or Homebrew's Node, which install global packages without `sudo`. Then click **Retry**.
+
+</Accordion>
+<Accordion title="Installation failed with exit code">
+
+**What it means:** `npm install -g openclaw@~2026.9` failed. A Node.js version outside OpenClaw's range is a common cause.
+
+**Fix:** run `node --version` and compare it with [Before you begin](#before-you-begin). Install a supported Node.js, then click **Retry**.
+
+</Accordion>
+<Accordion title="Gateway did not start, or did not become reachable within 60s">
+
+**What it means:** the Gateway exited with a reason (`Gateway did not start: …`), or never answered on its port within 60 seconds.
+
+**Fix:** read the Gateway's log at `~/.clawboo/gateway.log`, fix what it reports, then click **Retry**. OpenClaw's [troubleshooting guide](https://docs.openclaw.ai/help/troubleshooting) and [doctor command](https://docs.openclaw.ai/gateway/doctor) help with OpenClaw's own errors.
+
+</Accordion>
+<Accordion title="OpenClaw needs openclaw doctor --fix, and running it failed">
+
+**What it means:** OpenClaw asked for a data migration before it would start, and the `openclaw doctor --fix` that Clawboo ran failed.
+
+**Fix:** run `openclaw doctor --fix` in a terminal to see the whole report, then start the Gateway again with **Retry** or **Reconnect OpenClaw**. Do the same if the message says OpenClaw still asks for `openclaw doctor --fix` after Clawboo ran it.
+
+</Accordion>
+<Accordion title="Clawboo couldn't find the model in your Ollama">
+
+**What it means:** OpenClaw's default model isn't pulled in your Ollama, or Ollama isn't running.
+
+**Fix:** start Ollama, run the `ollama pull` command the panel shows, then click **Check again**.
+
+</Accordion>
+<Accordion title="OpenClaw Gateway is offline, or unreachable">
+
+**What it means:** the Gateway stopped or can't be reached. Your OpenClaw agents are paused; agents on other runtimes keep working.
+
+**Fix:** click **Reconnect** on the banner, or **Reconnect OpenClaw** in **Settings > Runtimes**. If the Gateway rejected Clawboo's token, the banner offers **Restart Gateway** instead, because the Gateway reads its token only when it starts.
+
+</Accordion>
+<Accordion title="Could not set this agent's command permissions on the Gateway, so it was not created">
+
+**What it means:** the Gateway refused the command policy for a new agent, so Clawboo removed the agent rather than leave it unguarded. The reason follows the message.
+
+**Fix:** check that the Gateway is running and connected (**Manage > Re-check**), then create the agent again.
+
+</Accordion>
+<Accordion title="The API answers 503 gateway_disconnected">
+
+**What it means:** the request needs the Gateway (creating an OpenClaw agent, reading or writing its files), and Clawboo's server isn't connected to it.
+
+**Fix:** start the Gateway from **Settings > Runtimes > OpenClaw**, then try again.
+
+</Accordion>
+</AccordionGroup>
+
+## Check it works
+
+<Steps>
+<Step title="Check the runtime">
+
+Open **Settings > Runtimes**. **OpenClaw** reads **Connected**, and under **Manage** the **Gateway** reads **Running**.
+
+</Step>
+<Step title="Talk to an OpenClaw agent">
+
+Open an OpenClaw agent from the agent column and send a short message in its chat. With no OpenClaw agent yet, **Create Boo** makes one while the Gateway is connected. You should see a reply stream in.
+
+</Step>
+<Step title="Put OpenClaw agents on a team">
+
+Deploy a team from the **Marketplace**. While the Gateway is connected, a marketplace team's members default to OpenClaw; change any member in **Customize team**. In onboarding, members default to Clawboo Native instead, or to Codex if you signed in with ChatGPT.
+
+</Step>
+</Steps>
+
+<Accordion title="Under the hood">
+
+- **The connections.** The browser connects to `/api/gateway/ws` on the Clawboo server, which adds the token and signs the device before passing it on. The server's own connection is an operator client (client id `cli`) that sends the Gateway host as its Origin and declares the `tool-events` and `exec-approvals` capabilities. Clawboo supports Gateway connect protocols 3 and 4.
+- **Write budget.** The Gateway allows three configuration writes per 60 seconds, so the MCP registration skips its write when nothing has changed.
+- **`configure-openclaw`.** The dashboard never calls `POST /api/system/configure-openclaw`. It writes a fresh `openclaw.json` and `.env`, replacing what is there, and makes a new Gateway token on every call, so use it only on a fresh OpenClaw. **Set up OpenClaw** uses `POST /api/system/auto-configure-openclaw`, which fills in only what is missing. See the [System API](/reference/rest-api/system).
+- **Model refs.** Clawboo writes the ChatGPT model as `openai-codex/<model>`. `openclaw doctor --fix` later rewrites it to `openai/<model>` and turns on the plugins that form needs.
+- **The pin.** `openclaw@~2026.9` holds OpenClaw's configuration format (the agent roster under `agents.entries`, and stricter `config.patch` rules), not the connect protocol.
+- **More detail:** [Gateway and events](/internals/gateway-and-events) and [Agent sources](/internals/agent-source).
+
+</Accordion>
 
 ## Related
 
-- [Connecting runtimes](/runtimes/connecting-runtimes), the CLI runtimes (different connection model)
-- [Runtimes overview](/runtimes/index), the capability matrix
-- [Gateway and events](/concepts/gateway-and-events), the Gateway flow and the Bridge→Policy→Handler pipeline
-- [AgentSource](/internals/agent-source), the registry-of-record sync internals
-- [Memory](/concepts/memory), the shared Memory-MCP tier
-- [Peer chat](/concepts/peer-chat), why TeamChat is server-mediated for OpenClaw
-- [System API](/reference/rest-api/system) · [Agents API](/reference/rest-api/agents), full request/response shapes
-- [Glossary](/appendices/glossary), canonical term definitions
+- [Choose a runtime](/runtimes/index): how OpenClaw compares with the other runtimes
+- [Connect providers and runtimes](/using/providers-and-runtimes): keys, sign-ins and what Disconnect removes
+- [Command permissions](/using/command-permissions): review and revoke what an OpenClaw agent may run
+- [Where Clawboo keeps data](/operating/data-and-state): back up or reset `~/.clawboo` and `~/.openclaw`
+- [OpenClaw docs](https://docs.openclaw.ai): install, channels, cron jobs and troubleshooting for OpenClaw itself

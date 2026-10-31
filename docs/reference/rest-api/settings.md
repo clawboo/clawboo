@@ -1,265 +1,299 @@
 ---
-title: Settings & Health API
-description: REST reference for /api/settings (gateway URL + token) and /api/health (the boot probe / System Health surface).
+title: 'Settings, health and layout API'
+sidebarTitle: 'Settings and health'
+description: 'REST reference for the OpenClaw Gateway connection settings, the boot report behind System Health, and the saved positions of graph nodes.'
+keywords: ['misc', 'health', 'boot probe', 'system health', 'graph-layout', 'gateway url']
 ---
 
-REST surface for two operator-facing concerns: the persisted Clawboo settings (`/api/settings`, the upstream OpenClaw Gateway URL + token, plus a first-run dismiss timestamp) and the boot probe (`/api/health` + `/api/health/recheck`, a fresh-install health check that backs the System Health view and answers a one-field liveness query).
+Three small surfaces: the OpenClaw Gateway connection settings, the boot report the **System Health** panel shows, and the node positions the dashboard saves for its graphs. Use this page when you point Clawboo at a Gateway from a script, or check an install's health from a monitor.
 
-<Note>
-The raw gateway token is never returned by any route here. `GET /api/settings` exposes only `hasToken: boolean`; the same-origin proxy injects the upstream token server-side, so the browser never needs the credential.
-</Note>
-
-All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Every error response is the standard `{ error: string }` envelope (the health routes' 500 path uses `{ ok: false, error }`, see below).
+Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All six routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index).
 
 ## Routes
 
-| Method | Path                  | Summary                                                          | Stream? |
-| ------ | --------------------- | ---------------------------------------------------------------- | ------- |
-| GET    | `/api/settings`       | Read persisted settings (token redacted to `hasToken`)           | No      |
-| POST   | `/api/settings`       | Persist gateway URL / token / first-run dismiss (partial update) | No      |
-| GET    | `/api/health`         | Latest boot report (or compute one on demand)                    | No      |
-| POST   | `/api/health/recheck` | Recompute the boot report fresh                                  | No      |
+| Method | Path                  | Summary                                                          |
+| ------ | --------------------- | ---------------------------------------------------------------- |
+| GET    | `/api/settings`       | The Gateway URL, whether a token resolves, the first-run dismiss |
+| POST   | `/api/settings`       | Save the Gateway URL, token or first-run dismiss                 |
+| GET    | `/api/health`         | The latest boot report                                           |
+| POST   | `/api/health/recheck` | Run the boot probe again                                         |
+| GET    | `/api/graph-layout`   | Saved node positions for one graph                               |
+| POST   | `/api/graph-layout`   | Save node positions for one graph                                |
 
----
+## Settings
 
-## `GET /api/settings`
+Clawboo keeps the Gateway URL, the Gateway token and the time the first-run notice was dismissed in `<clawboo home>/settings.json` (`~/.clawboo/settings.json` unless `CLAWBOO_HOME` is set). Most other dashboard settings live in the SQLite `settings` table and are not served here.
 
-Returns the current persisted settings from `~/.clawboo/settings.json` (via `loadSettings()`). The gateway token is redacted to a presence boolean.
+No route returns the Gateway token. The server adds it itself when it connects to the Gateway, so the browser never needs it. Errors use `{ "error": "<message>" }`.
 
-- **Path/query params**: none.
-- **Request body**: none.
+### `GET /api/settings`
 
-### Responses
+#### Responses
 
-**`200 OK`**: the persisted settings, token-redacted:
+**`200 OK`**:
 
 ```ts
 {
-  gatewayUrl: string // e.g. "ws://localhost:18789" (may be empty)
-  hasToken: boolean // true if a non-empty gatewayToken is stored
-  firstRunDismissedAt: number | null // epoch ms when the first-run UI was dismissed, else null
+  gatewayUrl: string // never empty, see below
+  hasToken: boolean
+  firstRunDismissedAt: number | null // epoch ms, or null
 }
 ```
 
-**`500 Internal Server Error`**: settings could not be loaded:
+`gatewayUrl` is the first of:
 
-```json
-{ "error": "Failed to load settings" }
-```
+1. the URL saved in `settings.json`;
+2. `ws://localhost:<port>`, when no token is saved and OpenClaw's `openclaw.json` has both a Gateway token and a port;
+3. `ws://localhost:18789`.
 
-### Example
+`hasToken` is `true` when a Gateway token resolves: the token saved in `settings.json` (a `${VAR}` value is read from the environment, then from OpenClaw's `.env`), or else the `gateway.auth.token` in OpenClaw's `openclaw.json`. So it can be `true` with nothing saved in Clawboo. OpenClaw's files are in its state directory, `~/.openclaw` by default.
+
+**`500 Internal Server Error`**: the settings could not be read, `{ "error": "<message>" }`.
+
+#### Example
 
 ```bash
 curl http://localhost:18790/api/settings
 ```
 
----
+### `POST /api/settings`
 
-## `POST /api/settings`
+Saves only the fields you send; the rest keep their values, so a dismiss-only request leaves the Gateway URL alone. A field of the wrong type is ignored rather than rejected.
 
-Persists settings with a **partial update**: only fields present in the body are written; an omitted field is left unchanged (so a dismiss-only POST does not clear the gateway URL). When `gatewayUrl` or `gatewayToken` is present, the server-side AgentSource registry is reconnected best-effort (non-blocking, errors swallowed).
-
-- **Path/query params**: none.
 - **Request body**:
 
 ```ts
 {
-  gatewayUrl?: string          // must be ws:// or wss:// if non-empty (host unrestricted); '' clears it
-  gatewayToken?: string        // '' clears the stored token
-  firstRunDismissedAt?: number // epoch ms; only applied when typeof === 'number'
+  gatewayUrl?: string // ws:// or wss:// on any host; '' clears the saved URL
+  gatewayToken?: string // '' clears the saved token
+  firstRunDismissedAt?: number // epoch ms
 }
 ```
 
-<Info>
-`gatewayUrl` is validated to a `ws:`/`wss:` scheme before it is stored, because the same-origin proxy later dials it (`new WebSocket(upstreamUrl)`). A non-websocket target (`http`/`file`/`javascript`) is rejected. The host is intentionally not restricted; a remote gateway is a supported choice.
-</Info>
+The URL is checked after trimming, and only a `ws:` or `wss:` URL is accepted, because the server later connects to it. After you clear it, `GET` returns the fallback above. Changing `gatewayUrl` or `gatewayToken` makes the server reconnect to the Gateway in the background.
 
-### Responses
+#### Responses
 
-**`200 OK`**: settings saved:
+**`200 OK`**: `{ "ok": true }`.
 
-```json
-{ "ok": true }
-```
-
-**`400 Bad Request`**: the body is missing or not an object:
+**`400 Bad Request`**: the body is missing or not a JSON object:
 
 ```json
 { "error": "JSON body required" }
 ```
 
-**`400 Bad Request`**: `gatewayUrl` is present, non-empty, and not a `ws:`/`wss:` URL:
+**`400 Bad Request`**: a non-empty `gatewayUrl` that is not a `ws://` or `wss://` URL:
 
 ```json
 { "error": "gatewayUrl must be a ws:// or wss:// URL" }
 ```
 
-**`500 Internal Server Error`**: saving failed:
+**`500 Internal Server Error`**: saving failed, `{ "error": "<message>" }`.
 
-```json
-{ "error": "Failed to save settings" }
-```
-
-### Example
+#### Example
 
 ```bash
-# Set the upstream gateway URL and token
+# Point Clawboo at a Gateway
 curl -X POST http://localhost:18790/api/settings \
   -H 'Content-Type: application/json' \
   -d '{"gatewayUrl":"ws://localhost:18789","gatewayToken":"<token>"}'
 
-# Dismiss-only update — leaves the gateway URL/token untouched
+# Record the first-run dismiss only
 curl -X POST http://localhost:18790/api/settings \
   -H 'Content-Type: application/json' \
-  -d '{"firstRunDismissedAt":1750000000000}'
+  -d '{"firstRunDismissedAt":1761650000000}'
 ```
 
----
+## Health
 
-## `GET /api/health`
+The server runs a boot probe at startup and keeps the result: one pass or fail per check, plus what the install resolved (folders, port, vault). The **System Health** panel shows it. These routes answer with the Gateway down, and `ok` (`true` when no check is fatal) is the one field a monitor needs.
 
-Returns the latest `BootReport`. The boot probe runs once at server start and the result is cached; if no report exists yet (a pre-boot request), the handler computes one on demand so the endpoint is always answerable; this is the one liveness surface that works with the Gateway down. The `ok` field (`= no fatal checks`) is the one-field summary a simple liveness probe can read.
+Responses pass through the same redaction as the logs, so a credential-shaped string inside a check's message is masked. On failure the health routes answer `{ "ok": false, "error": "<message>" }`.
 
-- **Path/query params**: none.
-- **Request body**: none.
+### `GET /api/health`
 
-### Responses
+Returns the latest boot report. A request that arrives before the first report exists computes one.
 
-**`200 OK`**: the boot report (see [The BootReport shape](#the-bootreport-shape) below). `Date` fields serialize to ISO strings via JSON.
+#### Responses
 
-```ts
-{
-  ok: boolean // = fatal.length === 0; the one-field liveness summary
-  // ...the full BootReport (startedAt, finishedAt, checks, degraded, fatal, config, resolved)
-}
-```
+**`200 OK`**: the boot report (see [The boot report](#the-boot-report) below), with `ok` added. Dates are ISO strings.
 
-<Note>
-The response is passed through `redactObject` before send (the same redact-on-display applied to obs/audit/tools): a credential-shaped substring landing in any check `message`/`detail` is masked, while readable paths and config stay intact.
-</Note>
+**`500 Internal Server Error`**: computing a first report failed, `{ "ok": false, "error": "<message>" }`.
 
-**`500 Internal Server Error`**: only on the pre-boot path, if computing the report throws:
-
-```json
-{ "ok": false, "error": "<message>" }
-```
-
-### Example
+#### Example
 
 ```bash
 curl http://localhost:18790/api/health
 ```
 
----
+### `POST /api/health/recheck`
 
-## `POST /api/health/recheck`
+Runs the boot probe again: the **Re-run probe** button in System Health. When the Gateway cannot be reached, the answer waits out the Gateway check, about 1.5 seconds. Takes no body.
 
-Recomputes the boot report fresh (the "Re-run probe" action after the user fixes a problem). Same response shape as `GET /api/health`.
+#### Responses
 
-- **Path/query params**: none.
-- **Request body**: none (ignored).
+**`200 OK`**: the new boot report, the same shape as `GET /api/health`.
 
-### Responses
+**`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 
-**`200 OK`**: the freshly-computed boot report, redacted (identical shape to `GET /api/health`).
-
-**`500 Internal Server Error`**: if recomputing throws:
-
-```json
-{ "ok": false, "error": "<message>" }
-```
-
-### Example
+#### Example
 
 ```bash
 curl -X POST http://localhost:18790/api/health/recheck
 ```
 
----
-
-## The BootReport shape
-
-`GET /api/health` and `POST /api/health/recheck` both return this structure (with `ok` prepended). It is the output of the boot probe (`runBootProbe` in `apps/web/server/lib/bootProbe.ts`).
+### The boot report
 
 ```ts
 interface BootReport {
-  startedAt: Date // ISO string in JSON
-  finishedAt: Date // ISO string in JSON
-  checks: BootCheck[]
-  degraded: string[] // check ids that failed but the server still runs
-  fatal: string[] // check ids that prevent a working server
-  config: BootConfig
+  ok: boolean // true when fatal is empty
+  startedAt: string // ISO date
+  finishedAt: string
+  checks: Array<{
+    id: string
+    ok: boolean
+    message: string // short status
+    detail?: string // longer detail, when there is any
+    durationMs: number
+  }>
+  degraded: string[] // ids of failed checks the server runs without
+  fatal: string[] // ids of failed checks nothing works without
+  config: {
+    logLevel: string
+    budgetPosture: string
+    budgetHardCapUsdCents: number | null
+    budgetWarnSoftPct: number
+    otelEnabledByDefault: boolean
+    otelActive: boolean
+  }
   resolved: {
     clawbooHome: string
     dbPath: string
     apiPort: number | null
-    stateDir: string
-    vaultPresent: boolean
+    stateDir: string // OpenClaw's state directory
+    vaultPresent: boolean // the encrypted vault file, secrets/runtime-keys.json, exists
     masterKeyOk: boolean
   }
 }
+```
 
-interface BootCheck {
-  id: string
-  ok: boolean
-  message: string // short, user-friendly status
-  detail?: string // optional multi-line detail
-  durationMs: number
-}
+Most failures only degrade: the server keeps running and the panel shows a warning, so a degraded install still answers `ok: true` with a non-empty `degraded`. Three failures are fatal: `clawbooHomeWritable`, `databaseIntegrity` and `databaseSchema`. Each failed check's `detail` says what to do; resetting the Clawboo home folder is the last resort (see [Data and state](/operating/data-and-state)).
 
-interface BootConfig {
-  logLevel: string
-  budgetPosture: string
-  budgetHardCapUsdCents: number | null
-  budgetWarnSoftPct: number
-  otelEnabledByDefault: boolean
-  otelActive: boolean // whether an OTLP endpoint is configured THIS boot
+The checks, in the order they run:
+
+| `id`                       | What it checks                                                                                                                                                                                                                                             | Fatal   |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `clawbooHomeWritable`      | The Clawboo home folder exists (it is created if missing) and is writable                                                                                                                                                                                  | **Yes** |
+| `vaultPerms`               | `secrets/`, the master key and `proxy-device-identity.json` give no access to group or others. Passes on Windows, and before any of them exist                                                                                                             | No      |
+| `masterKeyBootSentinel`    | A value encrypted on first boot still decrypts, so the master key has not changed. When it fails, saved runtime keys cannot be read                                                                                                                        | No      |
+| `databaseIntegrity`        | SQLite's `PRAGMA integrity_check` returns `ok`                                                                                                                                                                                                             | **Yes** |
+| `databaseSchema`           | The core tables exist and no column the schema declares is missing                                                                                                                                                                                         | **Yes** |
+| `apiPortFileMatches`       | The api-port file holds the port the server listens on. Passes without checking when the probe runs before the server has a port                                                                                                                           | No      |
+| `mcpServersHealthy`        | Each built-in MCP server (Tasks, Memory, Tools, TeamChat) can be built and lists its tools                                                                                                                                                                 | No      |
+| `openclawGatewayReachable` | The server's Gateway connection comes up within 1.5 seconds. It always runs, because a Gateway URL always resolves, so an install without OpenClaw lists it in `degraded` while `ok` stays `true`; the server then serves the agents last synced to SQLite | No      |
+| `otelExporterReachable`    | With an OTLP endpoint set, the OpenTelemetry exporter started. With none set, it passes                                                                                                                                                                    | No      |
+
+`config` reports the defaults this build ships, not live overrides: `logLevel` reads `info` even when `LOG_LEVEL` is set. Only `otelActive` reflects this boot.
+
+| Field                   | Shipped value      | Meaning                                                                                    |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| `logLevel`              | `"info"`           | The default log level                                                                      |
+| `budgetPosture`         | `"track-and-warn"` | Spend is tracked and warned about; nothing pauses unless you set a budget in hard-cap mode |
+| `budgetHardCapUsdCents` | `null`             | No install-wide hard cap                                                                   |
+| `budgetWarnSoftPct`     | `80`               | A budget warns at 80% of its limit                                                         |
+| `otelEnabledByDefault`  | `false`            | OpenTelemetry export is opt-in                                                             |
+| `otelActive`            | this boot          | `true` when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set   |
+
+## Graph layout
+
+The node positions the dashboard saves when you drag nodes on a graph, stored in the SQLite `graph_layouts` table under a pair of keys: a layout `name` and a Gateway URL. The URL is only part of the storage key: when the dashboard runs without a Gateway, it saves under `''`. Errors on `POST` use `{ "ok": false, "error": "<message>" }`.
+
+| `name`                        | Graph                                                                                                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `atlas-radial`                | The Org chart in its radial layout (`atlas` is the Org chart's internal name)                                                                              |
+| `atlas-top-down`              | The Org chart in its tree layout; each layout keeps its own positions                                                                                      |
+| `team-<teamId>`               | A team's **Team graph**                                                                                                                                    |
+| `team-<teamId>-room-<roomId>` | A room's **Room graph**, kept apart from the team's                                                                                                        |
+| `default`                     | The team graph when no team is selected                                                                                                                    |
+| `loose-<canvas>`              | Skills and connectors placed on a graph with **+** and not yet attached to an agent: `loose-atlas` on the Org chart, `loose-team-<teamId>` on a team graph |
+
+In a `loose-` layout the position keys are node ids such as `loose:skill:web-search`.
+
+### `GET /api/graph-layout`
+
+The query parameter for the Gateway URL is `url`, not `gatewayUrl`.
+
+- **Query params**:
+
+| Param  | Type   | Default     | Notes                                      |
+| ------ | ------ | ----------- | ------------------------------------------ |
+| `name` | string | `'default'` | The layout name                            |
+| `url`  | string | `''`        | The Gateway URL the layout was saved under |
+
+#### Responses
+
+**`200 OK`**: the saved layout, or no positions when nothing is saved:
+
+```ts
+{
+  positions: Record<string, { x: number; y: number }>
 }
 ```
 
-### Fatal vs degraded
+This route never answers an error: a database failure also returns `{ "positions": {} }`.
 
-Almost every check **degrades** (the server keeps running and the UI shows a banner) rather than being fatal. Three failures are fatal: `clawbooHomeWritable`, `databaseIntegrity` and `databaseSchema`, because nothing works without them. A fatal check's `detail` says what to do; resetting `~/.clawboo` and re-running the onboarding wizard is the last resort.
+#### Example
 
-`ok = report.fatal.length === 0`. A degraded-but-not-fatal install returns `ok: true` with a non-empty `degraded[]`.
+```bash
+curl "http://localhost:18790/api/graph-layout?name=team-<team-id>&url="
+```
 
-### The checks (in run order)
+### `POST /api/graph-layout`
 
-| `id`                       | What it verifies                                                                                                                                | Fatal?  |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `clawbooHomeWritable`      | `~/.clawboo` exists and is writable                                                                                                             | **Yes** |
-| `vaultPerms`               | `secrets/` is `700`, `master.key`/`proxy-device-identity.json` are `600` (POSIX-only; skipped on Windows and on a fresh install)                | No      |
-| `masterKeyBootSentinel`    | A fixed value encrypted on first boot still decrypts (a rotated/lost master key fails closed)                                                   | No      |
-| `databaseIntegrity`        | `PRAGMA integrity_check` returns `ok`                                                                                                           | **Yes** |
-| `databaseSchema`           | The core tables are present, and no column the bootstrap DDL declares is missing from them                                                      | **Yes** |
-| `apiPortFileMatches`       | The on-disk api-port file matches the actual listening port (skipped when no port is supplied)                                                  | No      |
-| `mcpServersHealthy`        | Each in-process MCP server builds and answers a `tools/list` round-trip                                                                         | No      |
-| `openclawGatewayReachable` | The configured OpenClaw Gateway is reachable + synced (degrades to serving last-synced agents from SQLite; skipped when no `gatewayUrl` is set) | No      |
-| `otelExporterReachable`    | The OTel exporter initialized, only checked when an OTLP endpoint is configured                                                                 | No      |
+Creates or replaces the positions for one layout. The positions are stored as sent.
 
-### `config` (production-defaults posture)
+- **Request body**:
 
-`config` surfaces the shipped defaults so a user or bug report can see what the install runs with. The values come from `apps/web/server/lib/defaults.ts`:
+```ts
+{
+  name?: string // default 'default'
+  positions: Record<string, { x: number; y: number }>
+  gatewayUrl: string // required; '' is allowed
+}
+```
 
-| Field                   | Default value      | Meaning                                                                                                   |
-| ----------------------- | ------------------ | --------------------------------------------------------------------------------------------------------- |
-| `logLevel`              | `"info"`           | pino log level (override via `LOG_LEVEL`)                                                                 |
-| `budgetPosture`         | `"track-and-warn"` | Budgets warn rather than hard-cap by default                                                              |
-| `budgetHardCapUsdCents` | `null`             | No global hard USD cap (no auto-pause unless a user sets a `cap`-mode budget)                             |
-| `budgetWarnSoftPct`     | `80`               | Soft-warn threshold (mirrors `SOFT_CAP_PERCENT`)                                                          |
-| `otelEnabledByDefault`  | `false`            | The OTLP→Jaeger bridge is opt-in                                                                          |
-| `otelActive`            | runtime-resolved   | `true` only when `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set this boot |
+#### Responses
 
-## Error envelope
+**`200 OK`**: `{ "ok": true }`.
 
-Every error response on these routes is the standard envelope `{ error: string }` (`/api/settings`), except the health routes, which return `{ ok: false, error: string }` on their 500 path (their success body always carries `ok`).
+**`400 Bad Request`**: the body is not a JSON object:
 
-## See also
+```json
+{ "ok": false, "error": "invalid JSON" }
+```
 
-- [System Health (UI panel over these routes)](/using/system-health)
-- [Production defaults & posture](/operating/production-defaults), the `config` block's source of truth
-- [Configuration & file locations](/reference/configuration), `~/.clawboo/settings.json`, the vault, the api-port file
-- [Environment variables](/reference/environment-variables), `STUDIO_ACCESS_TOKEN`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `LOG_LEVEL`
-- [Security & access gate](/operating/security), why the token is never returned, redaction-on-display
-- [System API](/reference/rest-api/system), OpenClaw gateway lifecycle (start/stop/configure)
-- [REST API overview](/reference/rest-api/index)
+**`400 Bad Request`**: `gatewayUrl` is missing or not a string:
+
+```json
+{ "ok": false, "error": "gatewayUrl required" }
+```
+
+**`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
+
+#### Example
+
+```bash
+curl -X POST http://localhost:18790/api/graph-layout \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"team-<team-id>","gatewayUrl":"","positions":{"boo-a1":{"x":120,"y":40}}}'
+```
+
+**Source of truth:** `apps/web/server/api/settings.ts` with `packages/config/src/index.ts` (settings resolution), `apps/web/server/api/health.ts` with `apps/web/server/lib/bootProbe.ts` and `lib/defaults.ts`, and `apps/web/server/api/graphLayout.ts`.
+
+## Related
+
+- [System Health](/using/system-health): the panel over the boot report
+- [Configuration](/reference/configuration): `settings.json` and the other files in the Clawboo home folder
+- [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `LOG_LEVEL` and the OpenTelemetry variables
+- [System API](/reference/rest-api/system): installing, configuring and starting the OpenClaw Gateway
+- [Org chart](/using/org-chart): the graphs whose positions these routes save

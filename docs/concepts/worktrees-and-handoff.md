@@ -1,154 +1,133 @@
 ---
-title: Worktrees and handoff
-description: The per-task git-worktree system-of-record and the runtime-agnostic AGENT_HANDOFF.json that lets one runtime pick up another's work.
+title: 'Worktrees and handoff'
+sidebarTitle: 'Worktrees and handoff'
+description: 'When a task gets its own git worktree, what Clawboo writes into it, how another runtime picks the work up, and how you get the result back.'
+icon: 'git-branch'
+keywords:
+  [
+    'worktree',
+    'git worktree',
+    'branch',
+    'clawboo/task',
+    'AGENT_HANDOFF.json',
+    'handoff',
+    'system of record',
+    'cross-runtime',
+    'init.sh',
+  ]
 ---
 
-A file-mutating [task](/concepts/the-board) gets its own isolated git worktree, a separate checkout on its own branch, branched from a specific commit, so concurrent runs never collide. Into that worktree, Clawboo writes and commits a **system-of-record** (SoR): a fixed set of files (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`) that make the checkout self-describing. When a [runtime](/appendices/glossary) finishes a turn it writes `AGENT_HANDOFF.json`, structured data, not prose, and a _different_ runtime, or a human, can reconstruct what's done, what's broken, and what's next from the worktree alone, with no chat history and no board access.
+A **worktree** is a second checkout of your git repository, on its own branch, where one task's agent makes its changes. It keeps two tasks that work on the same repository from editing the same files at once. It leaves you a branch to review when the work is done. It also carries a few files that let a different runtime, or a person, pick the task up where it stopped.
 
-This is the seam that makes cross-runtime work possible. The board is the dispatcher; the worktree is the durable world the dispatched work happens in.
+Clawboo makes a worktree only in a few cases, and a worktree is not a sandbox. This page covers when a task gets one, what is in it, how a handoff works, and how you get the work back.
 
-## What it is, and what it isn't
+## When a task gets a worktree
 
-The worktree is **concurrency isolation, not a privilege boundary.** Two teammates working two file-mutating tasks at once each get their own checkout on their own branch, so they cannot trample each other's edits; collisions are impossible, not merely discouraged. That is the guarantee the worktree provides, and it is the _only_ one. A worktree does not sandbox what code can do: it does not stop a process from reading outside the checkout, calling the network, or running arbitrary commands. Untrusted code, Docker-in-Docker, or cross-tenant work needs a real privilege boundary, a container or microVM. That tier (`container`) is a documented escalation point, keyed off a repo `devcontainer.json`; the worktrees package never provisions it and never runs Docker.
+A task gets a worktree only when the task runner runs it with a repository path:
 
-The worktree is also the **system-of-record**, which is a precise claim: the checkout, not chat, not the board UI, is the agent's knowable universe. If a fact isn't in the worktree's files, it does not exist for the next runtime. This is what lets a cold runtime resume work it never saw being done.
+- an agent routine whose task template names a `repoPath`, which you set through the [Schedules API](/reference/rest-api/schedules);
+- a run started with `POST /api/runtimes/:id/run` and a `repoPath`.
 
-The board owns a _pointer_ to the worktree (`tasks.worktree_ref`, `tasks.branch_ref`) and a `workspaces` row tracking its lifecycle; the worktree subsystem owns the actual checkout and the SoR files inside it. The two are separate on purpose; see [The board](/concepts/the-board#worktree-linkage).
+You can also create one ahead of time with `POST /api/board/:taskId/workspace`. The task runner uses it when it later runs that task.
 
-## The model
+Everything else runs without a worktree:
 
-```mermaid
-stateDiagram-v2
-    [*] --> provisioned: provision (branch from SHA + write/commit SoR scaffold)
-    provisioned --> working: a runtime claims and runs in the checkout
-    working --> handed_off: clock-out (writeHandoff → AGENT_HANDOFF.json)
-    handed_off --> working: clock-in (reconstructState → done/broken/next)
-    handed_off --> paused: pause (commit + drop worktree, KEEP branch)
-    paused --> working: resume (re-attach branch into fresh checkout)
-    handed_off --> completing: complete
-    completing --> done_clean: empty diff → remove worktree + delete branch
-    completing --> retained: non-empty diff → retain for verification/review
-    working --> reaped: GC (commit-before-drop, KEEP branch)
-    reaped --> working: resume (rebuild from retained branch)
-    done_clean --> [*]
-```
+- **Team chat.** Chats, hand-offs and the Board tasks a team works on never get one, on any runtime.
+- **Routines made in the dashboard.** The Routines dialog has no repository field, so an agent routine made there runs as a research task, without a worktree.
+- **OpenClaw agents.** They work in their own workspace, which the OpenClaw Gateway manages. Clawboo never gives them a worktree.
 
-The lifecycle has five operations: `provision`, `pause`, `resume`, `complete`, and `gc`, plus a sixth, detached read-only path used by [verification](/concepts/verification). Every mutating operation on a given checkout is serialized through a per-path async mutex, so a provision, a pause, and a GC sweep can never interleave on the same worktree.
+In the task runner, the task's kind decides too:
 
-## How it works
+| Kind                 | Gets a worktree |
+| -------------------- | --------------- |
+| `code` (the default) | Yes             |
+| `research`, `review` | No              |
+| Any other value      | Yes             |
 
-### Provisioning: branch from a SHA, not the dirty tree
+A task-runner run of a kind that needs a worktree, with no repository path, is refused rather than run somewhere else. The task gets the comment `[blocked: no isolation] This task changes files, so it needs an isolated git worktree, but no repository path was provided for it.` and goes back to To do.
 
-When a file-mutating task starts, `provisionWorktree` creates a fresh checkout on the branch `clawboo/task-<id>`, branched from a **commit SHA**, never the dirty working tree. Branching from a SHA gives a stable diff baseline and avoids inheriting whatever uncommitted state happened to be in the repo. By default the branch point is `HEAD` resolved to a full SHA; a caller can pass an explicit `baseSha` or `baseRef`.
+<Warning>
 
-Provisioning is hardened against the failure modes a long-running worktree harness hits in practice:
+**Without a worktree, coding agents start in your Clawboo folder.** In team chat, and in any other run without a worktree, Claude Code, Codex and Hermes start in the Clawboo server's working folder. When you run the `clawboo` command, that is your Clawboo folder (`~/.clawboo`, or `CLAWBOO_HOME` if you set it), which holds Clawboo's database and saved keys. These runtimes also run with their own approval prompts turned off, so they can read and change any file your user account can. See [What agents can do](/concepts/permissions).
 
-- **Orphan-resilient**: any stale registration and leftover directory is force-removed before `git worktree add`.
-- **Branch-collision recovery**: if the branch already exists and already points at the branch point, the existing branch is reused; otherwise the branch is reset (`-B`) to the branch point. Only a fresh provision ever uses `-b`/`-B`; re-attach (resume) never does, so resume can never discard committed work.
-- **Verify both**: provisioning confirms both filesystem existence and git-metadata registration before declaring success.
-- **Comprehensive cleanup, then one retry**: on failure it prunes everything and tries once more.
+</Warning>
 
-After the checkout exists, Clawboo writes the SoR scaffold into the worktree root and commits it with a recognizable message (`clawboo: scaffold task <id>`). That scaffold commit is the worktree's `baseCommit`, the baseline an agent's _work_ is measured against. The scaffold is initialization, not work, so it does not count toward "did the agent do anything?"
+## What a worktree is
 
-<Info>
-Worktrees live **outside** the user's repo, under the Clawboo state directory, namespaced by a hash of the repo path (`<clawboo-dir>/worktrees/<repo-hash>/<task-id>`). They never pollute the repo's own `git status`, and multiple repos never collide.
-</Info>
+- **A separate checkout.** It lives in your Clawboo folder, at `worktrees/<hash of the repository path>/<task id>`. Your own checkout and its working files are not touched, though `git worktree list` and `git branch` in your repository show the extra checkout and its branch.
+- **Its own branch.** The branch is `clawboo/task-<task id>`, cut from your repository's current `HEAD`. A caller that creates the worktree through the API can name another commit or ref.
+- **A starting commit.** Before the agent starts, Clawboo commits five bookkeeping files to the branch, with the message `clawboo: scaffold task <id>`. The agent's changes are measured from that commit, so the bookkeeping never counts as work.
 
-### The system-of-record scaffold
+A worktree keeps one task's file changes apart from another's. It does not limit what the agent's process can do: the process runs with your user account's permissions, and it can read files outside the checkout, reach the network and start other programs. [What agents can do](/concepts/permissions) covers what each runtime can reach.
 
-`writeScaffold` lays down five files at the worktree root. Each answers one question a cold runtime must be able to answer from the checkout alone:
+## The files in a worktree
 
-| File               | Answers                       | Contents                                                                                                                                                               |
-| ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TASK.md`          | _What is this and why?_       | Title, task id, team, description, acceptance criteria, known gotchas, and a step-by-step "how to work this task" ritual.                                              |
-| `task-progress.md` | _Where are we?_               | Current verified state, done / in-progress / blocked sections, and the clock-in / clock-out ritual.                                                                    |
-| `DECISIONS.json`   | _Why was it built this way?_  | A structured append-only log of non-obvious decisions: what was chosen, why, the rejected alternative, the constraint. The rationale that summaries drop.              |
-| `init.sh`          | _How do I run and verify it?_ | A runtime-agnostic startup script (`set -euo pipefail`) with three project-specific command slots: `INSTALL_CMD`, `VERIFY_CMD`, `START_CMD`. Made executable on write. |
-| `VERIFICATION.md`  | _What proves it's done?_      | The evidence slot the completion gate reads: real test/lint output, not "the code looks fine."                                                                         |
+Each file answers a question that a runtime picking the task up cold needs answered from the checkout alone:
 
-`init.sh` is runtime-agnostic on purpose: shell plus git work for every runtime, so a Claude Code task and a Codex task boot the same way. It fails loud (`set -euo pipefail`) so a broken baseline surfaces immediately instead of leaking into later work.
+| File                 | What it holds                                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `TASK.md`            | The task's title, id and description, sections for acceptance criteria and known gotchas, and how to work the task |
+| `task-progress.md`   | Where things stand: what is done, in progress and blocked                                                          |
+| `DECISIONS.json`     | Decisions made along the way, and why                                                                              |
+| `init.sh`            | The install, verify and start commands                                                                             |
+| `VERIFICATION.md`    | The verify command and the evidence that the work is done; the verification check adds its results here            |
+| `AGENT_HANDOFF.json` | Written when a run finishes: what is done, what is broken or unverified, and the next step                         |
 
-`AGENT_HANDOFF.json` is deliberately _not_ part of the initial scaffold; it is the clock-out artifact, written only when a runtime first hands off.
+Clawboo writes the first five when it creates the worktree. `AGENT_HANDOFF.json` appears when the first run in it finishes successfully.
 
-### The cross-runtime handoff
+`init.sh` starts with placeholder commands that only print a reminder to set them. Clawboo does not fill them in: the agent, or you, has to replace them with real ones. Until the verify command is set, the verification check cannot pass the task. See [Verification](/concepts/verification) for when that check runs.
 
-`AGENT_HANDOFF.json` is the bridge that turns "one runtime's checkout" into "any runtime's checkout." It is **structured data**, validated against a Zod schema, so the next runtime parses it rather than interpreting English. The schema is **role-neutral**: its `runtime` field is any executor id and may be `'human'`, so a human teammate can pick up, or hand off, a task from the exact same artifact a Claude Code or Codex agent would.
+## The cross-runtime handoff
 
-The handoff records:
+When a task-runner run in a worktree finishes successfully, Clawboo writes `AGENT_HANDOFF.json` from the run's report. It records who handed off and on which runtime, the run's report (as what is done, or as the next step when the run pauses for another runtime), anything broken or unverified, and how to re-enter the work. If an earlier attempt on the task was interrupted, the handoff says so, so that the next runtime checks before it redoes anything with side effects.
 
-| Field                | Meaning                                                                                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `handoffFrom`        | Display name or id of who is handing off (an agent, or a person).                                                                                                                                                   |
-| `runtime`            | The runtime that produced the handoff (may be `human`).                                                                                                                                                             |
-| `timestamp`          | ISO-8601 time of the handoff (defaulted to now when omitted).                                                                                                                                                       |
-| `completedSubtasks`  | What works now: completed, verified subtasks.                                                                                                                                                                       |
-| `brokenOrUnverified` | What is broken or unverified: the next runtime's risk list.                                                                                                                                                         |
-| `nextBestStep`       | The single next best step.                                                                                                                                                                                          |
-| `whyBlocked`         | Why the task is blocked, if it is.                                                                                                                                                                                  |
-| `commands`           | `init` / `verify` / `start`: how to re-enter the work.                                                                                                                                                              |
-| `evidence`           | Captured `testResults` / `lintResults` for the completion gate.                                                                                                                                                     |
-| `warnings`           | Free-form warnings for the next runtime.                                                                                                                                                                            |
-| `nativeSessionId`    | The producing runtime's native session id, a same-runtime resume handle, _consumed only when the next dispatch's runtime matches._ A cross-runtime pickup ignores it and resumes from the structured handoff alone. |
-| `roomCursor`         | An optional team-chat room cursor for a worktree-backed [peer-chat](/concepts/peer-chat) leader turn (additive; absent for ordinary code tasks).                                                                    |
+The next run on that task, on any runtime, starts from the checkout alone:
 
-### Cold resume: reconstruct state from the worktree alone
+1. Clawboo reads `AGENT_HANDOFF.json`, or `task-progress.md` when there is no handoff yet, and adds what is done, what is broken and the next step to the run's prompt.
+2. `TASK.md` tells the agent to run `./init.sh` to confirm the starting point, then carry on from the next step.
 
-`reconstructState` is the clock-in read, and it is the proof that the system-of-record is runtime-agnostic. It reads **only** the worktree: `AGENT_HANDOFF.json`, falling back to `task-progress.md`, plus `init.sh` for commands, and returns a `ResumeState`: `{ done, broken, next, whyBlocked, commands, warnings, lastRuntime, nativeSessionId }`. No chat history. No board UI. Shell, git, and JSON, nothing else.
+Picking the work up needs no chat history and no access to the board. That is what lets a task move from one runtime to another, for example from Claude Code to Codex, or to a person.
 
-When a handoff is present, `done`/`broken`/`next` come straight from its structured fields. When there is no handoff yet (a first pickup), it falls back to parsing the `## Done` and `## Blocked` bullet sections of `task-progress.md`, so resume still works from the repo alone even before any handoff has been written. A malformed handoff is treated as no handoff, falling through to the progress log rather than crashing.
+- A run started through the API with `keepForResume: true` writes the handoff, keeps the worktree, and puts the task back in To do, ready for a different runtime to pick up.
+- The handoff also stores the runtime's own session id. It is used only when the next run is on the same runtime, to resume that session. A different runtime works from the handoff alone.
+- A person can write a handoff too, with `POST /api/board/:taskId/workspace/handoff`. Its `runtime` field can be `human`.
 
-This is what lets a task pass cleanly from one runtime to a different one (Claude Code → Codex), or to a human: the receiving party reads the checkout, runs `./init.sh` to confirm the baseline verifies, and picks up from `done`/`broken`/`next`.
+The [Cross-runtime handoff guide](/guides/cross-runtime-handoff) walks through it step by step.
 
-### Pause and resume
+## Getting the work back
 
-`pauseWorktree` frees disk and process slots without losing anything: it commits any uncommitted work to the branch (so nothing is lost), drops the worktree directory, and **keeps the branch.** `resumeWorktree` re-creates the worktree from the preserved branch by attaching it at its current tip, and never uses `-b`/`-B`, so prior commits are always preserved. The baseline commit is recovered by searching the branch for the SoR-scaffold commit, so a later `complete` still diffs against the right baseline.
+Clawboo never merges. When a run in a worktree finishes, what happens next depends on whether it changed anything besides the bookkeeping files:
 
-In the [executor runner](/internals/executor-runner), pause-for-resume is the cross-runtime continuation path: a run dispatched with `keepForResume` writes its handoff, releases the task back to `todo`, and keeps the worktree, so the next dispatch (a different runtime) resumes from the handoff and the retained checkout.
+- **It changed files.** The worktree and the `clawboo/task-<id>` branch are kept, and the task goes to verification. Review the work and merge it into your own branch yourself.
+- **It changed nothing.** The worktree and its branch are removed, and the task lands Done without a verification check.
 
-### Completion: empty diff cleans up, non-empty retains
+Changes can still be uncommitted in the worktree folder when a run ends. Clawboo commits them to the branch when the verify command passes on a task-runner run, when a worktree is paused, and before a cleanup removes the folder. To see the work in the app, open the **Workspace** tab on the agent's page, or the **Workspace** section of the task on the Board, which shows the changed files and the diff.
 
-`completeWorktree` decides clean-vs-retain by diffing the worktree against its baseline commit, **excluding the SoR bookkeeping files.** That exclusion is load-bearing: a session that only wrote its own handoff and progress log produced no deliverable, so it counts as an _empty_ diff even though the checkout technically changed. The diff counts the committed delta, uncommitted edits, _and_ untracked files, so "did real work happen?" is answered precisely.
+### Cleanup
 
-- **Empty diff → auto-cleanup.** No integration work to do, so the worktree is removed, the branch deleted, and the task lands `done` (an empty diff has no deliverable to verify, so this intentionally bypasses the verification gate).
-- **Non-empty diff → retain.** The worktree and branch are kept, the diff-stat is returned, and the task moves to `in_review`, where the [verification](/concepts/verification) gate runs (a deterministic build/test/lint gate plus an optional read-only critic) and only a promotable verdict promotes `in_review → done`.
+When the Clawboo server starts, it removes worktree folders that are older than 72 hours, or beyond the newest 25 for a repository. Tasks that are in progress or in review are skipped. Before removing a folder, Clawboo commits any uncommitted work to the branch. The branch itself is kept, so nothing is lost: if the task runs again, Clawboo rebuilds the checkout from the branch.
 
-### The detached read-only reviewer
+Branches are never deleted by cleanup. Delete the `clawboo/task-<id>` branches you no longer need with git.
 
-Verification's critic needs to read a teammate's work without being able to change it. `provisionReviewWorktree` makes a **detached** checkout at a specific commit; detached HEAD means there is no branch, so a reviewer has literally nothing to push. This is the structural half of _builder ≠ judge_: review can never mutate a teammate's branch. (Tool-level write denial is the runtime's job; the detached checkout is the guarantee that holds regardless.) Because a runtime leaves its work uncommitted, `commitWorktreeWork` first checkpoints the worktree to a real, reviewable commit, then the reviewer detaches at it.
+<AccordionGroup>
 
-### Garbage collection
+<Accordion title="Under the hood">
 
-`gcWorktrees` reaps stale worktrees by **age** (older than 72 hours by default) and **count** (keep at most 25, reap the oldest beyond that). Reaping is **commit-before-drop**: any uncommitted work is auto-saved to the branch first, then only the worktree directory is removed; the branch is kept, so nothing is lost and a re-dispatched task can rebuild its checkout from the retained branch. Active tasks (`in_progress` / `in_review`) are skipped, and that liveness is re-checked _inside_ the per-path mutex immediately before the destructive step, so a task that became active mid-sweep is skipped rather than reaped. Failures are collected and never abort the sweep; only directories under the Clawboo worktree root are ever touched.
+- Clawboo's commits on a task branch use the messages `clawboo: scaffold task <id>`, `clawboo: checkpoint task <id>` (after the verify command passes, before the reviewer), `clawboo: pause task <id>` and `clawboo: gc autosave task <id>`.
+- `PATCH /api/board/:taskId/workspace` with `{ "action": "pause" }` commits the work, removes the folder and keeps the branch. `{ "action": "complete" }` runs the empty-or-changed decision above and, for changed work, the verify command without the reviewer. `POST /api/board/:taskId/workspace` refuses a `research` or `review` kind with `422 no_isolation`.
+- The reviewer works in a detached checkout at the committed work, under `reviews/<hash>` in your Clawboo folder. The checkout has no branch of its own.
+- If `AGENT_HANDOFF.json` cannot be read or parsed, Clawboo treats it as missing and falls back to the `## Done` and `## Blocked` sections of `task-progress.md`.
+- Every git call Clawboo makes has a 60-second timeout.
+- The lifecycle functions are documented in [@clawboo/worktrees](/reference/packages/worktrees), and the run loop in [Executor runner](/internals/executor-runner).
 
-GC runs once at server startup (best-effort, never blocking boot). The server-side orchestrator marks each reaped worktree's `workspaces` row `stale`; when a stale task is later re-dispatched, the executor detects the reaped checkout (stale row, missing directory, or no git registration) and rebuilds it from the retained branch via `resumeTaskWorkspace` before running, so a re-dispatched task never runs in a missing working directory.
+</Accordion>
 
-## Design rationale and trade-offs
+</AccordionGroup>
 
-**Why git worktrees and the git CLI.** Worktrees give parallel teammates real concurrency isolation with no merge dance during the work; each has its own checkout on its own branch off a shared baseline. The package shells out to the `git` CLI rather than a libgit2 binding because the CLI is the most robust path for mutable worktree operations and matches what every shipping worktree harness does. Every git invocation is bounded by a timeout and `windowsHide`, so a hung `git` can't wedge the single-threaded server event loop.
+## Related
 
-**Why the worktree is the system-of-record.** Chat is lossy and ephemeral; a board cell is structured but thin. The hard problem in cross-runtime work is that a runtime that _didn't_ do the work has to continue it. Making the checkout self-describing, task, progress, decisions, startup script, evidence, handoff, means resume needs nothing but the filesystem and git. The cost is that runtimes must follow the clock-in/clock-out ritual (read the handoff, do the work, write the handoff); the payoff is that a Claude Code agent, a Codex agent, and a human can each pick up the same task cold.
-
-**Why structured handoff, not prose.** A prose "here's where I left off" is exactly the kind of thing the next runtime would have to _interpret_, and interpretation drifts. `AGENT_HANDOFF.json` is parsed, not read, so done/broken/next are unambiguous. The `nativeSessionId` field is the one place where same-runtime continuity is preserved (resume the exact native session) while cross-runtime continuity falls back to the structured fields, the right asymmetry, since a session id is meaningless to a different runtime.
-
-**Why branch from a SHA.** Branching from the dirty tree would make the diff baseline unstable and import whatever uncommitted noise was in the repo. A SHA is a fixed point; the SoR-scaffold commit on top of it is the precise baseline that "did the agent do work?" measures against.
-
-## Boundaries and non-goals
-
-- **Not a privilege boundary.** A worktree isolates _writes_ between concurrent teammates. It does not sandbox what code can do: no network, filesystem, or syscall confinement. Untrusted or Docker-running work needs `container`-tier isolation (a container or microVM), which this subsystem documents as an escalation point but never provisions.
-- **Only file-mutating tasks get one.** Read-only and research tasks run in place with no worktree; provisioning a worktree for a non-file-mutating task is refused (`422`). Review runs in a _detached_ worktree (no branch to push), so it isn't a writable worktree either.
-- **OpenClaw agents do not get a worktree.** The OpenClaw runtime declares `worktrees: false` because its agents run in Gateway-owned per-agent workspace directories inside OpenClaw's own sandbox; Clawboo never retargets a live OpenClaw agent's working directory. The clawboo-native, Claude Code, Codex, and Hermes runtimes declare `worktrees: true`. See [Runtimes](/runtimes/index).
-- **GC heuristics, not a scheduler.** Reaping is age-and-count based, not a precise reference-counted lifecycle. The 72-hour age and 25-count defaults are field norms; active tasks are always skipped and commit-before-drop guarantees no data loss, so the heuristic can be conservative without being unsafe.
-
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## See also
-
-- [The board](/concepts/the-board), the dispatcher that owns the worktree pointer
-- [Verification](/concepts/verification), the builder-≠-judge gate that uses the detached reviewer
-- [Cross-runtime handoff guide](/guides/cross-runtime-handoff), pause on one runtime, resume on another
-- [Executor runner](/internals/executor-runner), claim → worktree → run → verify → handoff
-- [@clawboo/worktrees](/reference/packages/worktrees), the package's public API
-- [Board API](/reference/rest-api/board), the `/api/board/:taskId/workspace*` REST surface
-- [Glossary](/appendices/glossary), canonical term definitions
+- [What agents can do](/concepts/permissions): what each runtime can reach, with or without a worktree.
+- [Verification](/concepts/verification): when finished work is checked, and what a failing check does.
+- [Cross-runtime handoff guide](/guides/cross-runtime-handoff): pause a task on one runtime and resume it on another.
+- [How routines run](/concepts/scheduling): why routines made in the dashboard get no worktree.
+- [Board API](/reference/rest-api/board): the `/api/board/:taskId/workspace` routes.

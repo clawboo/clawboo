@@ -1,180 +1,193 @@
 ---
-title: Claude Code runtime
-description: 'Connect and run the Claude Code runtime: capabilities, the ANTHROPIC_API_KEY vault flow, install, and the SDK-backed driver.'
+title: 'Claude Code runtime'
+sidebarTitle: 'Claude Code'
+description: "Run agents on Anthropic's Claude Code: install it, connect an Anthropic API key, and see what it can do on your computer and what it costs."
+keywords:
+  ['claude-code', 'Claude Agent SDK', 'claude-agent-sdk', 'ANTHROPIC_API_KEY', 'bypassPermissions']
 ---
 
-Use this page when you want a [Boo](/appendices/glossary) backed by **Claude Code**, Anthropic's coding agent. Clawboo wraps the [Claude Agent SDK](https://docs.claude.com/en/docs/claude-code/overview) so a Claude Code run executes a durable board task in its own [worktree](/appendices/glossary), reports up, and resumes across runs.
+Claude Code is Anthropic's coding agent. Clawboo runs it through the Claude Agent SDK, so a Claude Code agent works with Claude Code's own tools: it reads and edits files, runs shell commands and fetches web pages. Clawboo records the cost Claude Code reports for each run. Use this page to set it up, see what Clawboo controls on it, and understand what it can do on your computer.
 
-Claude Code is one of the four non-OpenClaw [runtimes](/appendices/glossary). Like the others, it is a [RuntimeAdapter](/appendices/glossary): Clawboo installs its CLI, stores your `ANTHROPIC_API_KEY` in the [encrypted vault](/runtimes/connecting-runtimes#where-keys-are-stored), and reports its connection state. This page covers the bits specific to Claude Code; for the shared install/connect/disconnect lifecycle see [Connecting runtimes](/runtimes/connecting-runtimes).
+| Topic           | Claude Code                                                                  |
+| --------------- | ---------------------------------------------------------------------------- |
+| Best for        | Code changes and other file work on Anthropic models                         |
+| You need        | An Anthropic API key, plus the Claude Agent SDK on an npm install of Clawboo |
+| Who bills you   | Anthropic, per token, on your API key                                        |
+| Cost in Clawboo | The real cost Claude Code reports                                            |
+| Steering        | Your comments reach a running task                                           |
 
-## Prerequisites
+To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 
-<Note>
-Node 22+ and `npm` (bundled with Node); Claude Code installs via `npm install -g`. An Anthropic API key, **or** an existing local `claude` login (the SDK falls back to the logged-in CLI's own auth when no key is in the vault). On an install from npm you also need `@anthropic-ai/claude-agent-sdk` installed alongside Clawboo — see [step 3](#3-install-the-agent-sdk-published-installs).
-</Note>
+## Before you begin
 
-- The Clawboo dashboard running (`clawboo`).
-- A board task to run on, created via the [board](/concepts/the-board) (you can also drive it directly with `POST /api/runtimes/claude-code/run`).
+- Clawboo installed with npm (`npm install -g clawboo`) or running from source. A one-off `npx clawboo@latest` run cannot load the Agent SDK that Claude Code needs.
+- Node.js 22.12 or newer, with npm.
+- An Anthropic API key from [console.anthropic.com](https://console.anthropic.com/settings/keys). A `claude` CLI signed in with a Claude subscription is not enough: Clawboo shows Claude Code as connected, and offers it for your agents, only when an Anthropic API key is available.
 
-## Capabilities
+## Set up Claude Code
 
-The adapter declares its `capabilities()` so the host routes the run by construction (it never branches on the runtime id). Claude Code's are:
+<Steps>
 
-| Capability                                         | Value                          | Meaning                                                                             |
-| -------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------- |
-| `streaming`                                        | `true`                         | Emits incremental text deltas as the model writes                                   |
-| `mcp`                                              | `true`                         | Attaches Clawboo's hosted MCP servers (Tasks / Memory / Tools / TeamChat)           |
-| `worktrees`                                        | `true`                         | File-mutating tasks run in an isolated git worktree                                 |
-| `resume`                                           | `true`                         | A later run can resume the prior native session                                     |
-| `toolApproval`                                     | `true`                         | Surfaces tool-approval gates the host can resolve                                   |
-| `steering`                                         | `'live'`                       | A comment is pushed into the running turn (see [steering](#steering-a-running-run)) |
-| `models`                                           | `['sonnet', 'opus', 'haiku']`  | The model families it accepts                                                       |
-| `contextWindowTokens`                              | `200000`                       | Drives the proactive session-rotation watermark                                     |
-| `runtimeClass`                                     | `'wrapped-oneshot'`            | A per-run spawned worker, not a long-lived substrate                                |
-| `nativeSkills` / `nativeMemory` / `nativeChannels` | `'none'` / `'none'` / `'none'` | Stateless; the cognition is the model; no durable per-identity home to preserve     |
+<Step title="Install the Claude Agent SDK">
 
-Because `runtimeClass` is `wrapped-oneshot` and there is no `nativeHome` claim, the host provisions no persistent home for Claude Code. The SDK runs against your real `HOME` / Keychain auth; nothing native accrues per identity. (Contrast [Hermes](/runtimes/hermes), which keeps a persistent home that compounds skills and memory across runs.)
-
-## Steps
-
-### 1. Install the CLI
-
-From the **Runtimes** panel, click **Install** on the Claude Code card. The card opens an SSE install stream that runs:
-
-```bash
-npm install -g @anthropic-ai/claude-code@2
-```
-
-The package is pinned to the current major (`@2`) so a future major-incompatible publish is never auto-installed. The health binary the panel probes for is `claude`. If `npm` is missing the stream emits an `error` with code `NPM_MISSING`.
-
-<Warning>
-A global npm install can hit `EACCES` on a system Node. The installer detects "permission denied" in stderr and suggests `sudo npm install -g @anthropic-ai/claude-code@2`; but prefer a Node version manager (nvm/fnm) or Homebrew over `sudo`.
-</Warning>
-
-### 2. Connect your key
-
-Click **Connect** on the card (from the `needs-auth` state) and paste an Anthropic API key. The key is stored in the encrypted vault under `ANTHROPIC_API_KEY` and the card flips to `ready`. The connect response never echoes the key.
-
-The equivalent REST call:
-
-```bash
-curl -X POST http://localhost:18790/api/runtimes/claude-code/connect \
-  -H 'Content-Type: application/json' \
-  -d '{"apiKey":"sk-ant-..."}'
-```
-
-<Tip>
-You can skip the explicit Connect if a credential already resolves. At run time the key is resolved by `resolveRuntimeKey('ANTHROPIC_API_KEY')` in priority order: `process.env.ANTHROPIC_API_KEY` → the encrypted vault → OpenClaw's `~/.openclaw/.env`. If any of those holds the key, the card reads `ready` without a paste.
-</Tip>
-
-### 3. Install the Agent SDK (published installs)
-
-Clawboo drives Claude Code through the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk), which is a **separate package** from the `claude` CLI installed in step 1. If you are running Clawboo from source (the monorepo), it is already there and you can skip this. If you installed Clawboo from npm, it is not: the published tarball deliberately does not declare it, because the SDK's per-platform optional dependency is a ~210 MB `claude` binary that every install would otherwise download for a runtime most users never touch.
-
-Install it alongside Clawboo so Node can resolve it from the server bundle:
+Skip this step if you run Clawboo from source. On an npm install, install Clawboo and the SDK together:
 
 ```bash
 npm install -g clawboo @anthropic-ai/claude-agent-sdk
 ```
 
-<Warning>
-The SDK has to sit **next to** Clawboo in the same `node_modules` tree, which is why a global Clawboo pairs with a global SDK. A one-off `npx clawboo` runs out of npm's throwaway cache directory, so there is nowhere to add the SDK — install Clawboo globally (or as a project dependency) if you want to use the Claude Code runtime.
-</Warning>
+The SDK has to sit next to Clawboo, which is why both install globally. Clawboo does not ship it, because its Claude Code binary adds about 210 MB to every install. If Clawboo is already running, restart it with `clawboo restart`.
 
-Without it, the runtime card still reads `ready` (that reflects the `claude` binary plus your key), but a run fails immediately with a message naming the missing package and the command above.
+</Step>
 
-### 4. Run a board task on it
+<Step title="Install Claude Code">
 
-With the runtime `ready`, dispatch a board task:
+Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Claude Code** row, click **Install**, then **Install** in the panel that opens. Clawboo runs this and shows its output:
 
 ```bash
-curl -X POST http://localhost:18790/api/runtimes/claude-code/run \
-  -H 'Content-Type: application/json' \
-  -d '{"taskId":"<task-uuid>","repoPath":"/path/to/repo","kind":"code"}'
+npm install -g @anthropic-ai/claude-code@2
 ```
 
-The server-side executor runner claims the task, provisions a worktree from `repoPath`, spawns the Claude Agent SDK with the connected key injected into the child env, drives the SDK's message stream as a normalized event stream, then writes the report-up summary and `AGENT_HANDOFF.json`. See the [`/api/runtimes/:id/run` reference](/reference/rest-api/runtimes#post-apiruntimesidrun) for the full request/response shape.
+You should see the row change to **Needs key**, or to **Connected** if an Anthropic key is already saved. If Claude Code is already installed on this computer, the row shows that state straight away.
 
-## How the driver works
+</Step>
 
-The pure adapter lives in `@clawboo/adapter-claude-code`; the real driver that talks to the SDK lives server-side in `claudeCodeDriver.ts`. They are split deliberately so the adapter stays dependency-light (its only dependency is `@clawboo/executor`) and contract-testable against an in-memory fake.
+<Step title="Connect your Anthropic key">
 
-### The SDK is lazy-imported, and optional
+Click **Connect** on the row, paste your key into the `ANTHROPIC_API_KEY` field, and click **Connect**. Clawboo checks the key with Anthropic before it saves it. If the check fails, the panel shows the reason; fix the key, or click **Connect anyway** when Anthropic is only unreachable from this computer.
 
-`@anthropic-ai/claude-agent-sdk` is **not** bundled into the shipped server and **not** required at boot. The driver imports it lazily, inside the run, through a helper that turns a resolution failure into the remediation above rather than a raw resolver error:
+You should see the row read **Connected**. If you already saved an Anthropic key under **Settings** > **Providers**, Claude Code reads **Connected** without this step.
 
-```ts
-const mod = await loadAgentSdk() // wraps: await import('@anthropic-ai/claude-agent-sdk')
-```
+</Step>
 
-A default Clawboo install therefore carries no Claude Code dependency in its boot graph; the SDK is loaded only when a Claude Code run actually starts. The driver's structural types are deliberately decoupled from the SDK's deep generated types (which reference a different zod major).
+<Step title="Put a Claude Code agent on a team">
 
-It is also not a declared dependency of the published `clawboo` package, so **an install from npm does not ship it** — see [Install the Agent SDK](#3-install-the-agent-sdk-published-installs) above. The reason is size: the SDK's per-platform optional dependency is a ~210 MB `claude` binary, and npm installs optional dependencies by default, so declaring it would add that to every install for a runtime most users never touch. The clean-install gate treats it as a **documented optional external** for the same reason (`OPTIONAL_EXTERNALS` in `scripts/lib/bundle-externals.mjs`), and the driver turns Node's bare `Cannot find package` into the instruction that fixes it rather than surfacing a resolver error as the run's failure summary.
+Create a team, and in **Customize team** set a member's runtime to **Claude Code**, then deploy the team. You can pick Claude Code there only while its row reads **Connected**; until then it is greyed out with "Connect in Runtimes". See [Teams](/using/teams) for the full flow.
 
-### Message translation
+</Step>
 
-For each run the driver builds the SDK `query()` options from the run context: `cwd` (the worktree), `model`, `resume`, the MCP server config built from `mcpBaseUrl`, `disallowedTools` (the child tool blocklist), and a scrubbed child env with the provider key merged on top. The query runs in **streaming-input mode**: its prompt is an async stream of user messages rather than a string, which is what lets a comment be pushed in while the run works (see [steering](#steering-a-running-run)). It then translates each SDK message into the adapter's `ClaudeNativeEvent` union, which the pure `mapClaudeEvent` maps into the normalized `RuntimeEvent` stream:
+</Steps>
 
-```mermaid
-flowchart LR
-  SDK["Claude Agent SDK<br/>query() messages"] --> T["translateClaudeMessage<br/>(driver)"]
-  T --> N["ClaudeNativeEvent union<br/>init · text · tool-call ·<br/>tool-result · result"]
-  N --> M["mapClaudeEvent<br/>(pure adapter)"]
-  M --> R["RuntimeEvent stream<br/>status · text-delta ·<br/>tool-call · tool-result ·<br/>cost · done · error"]
-```
+## What Clawboo controls on Claude Code
 
-The `system`/`init` message carries the native session id and model; `assistant` content blocks become `text` (and `thinking` blocks become reasoning-channel text); `tool_use` blocks become `tool-call`; tool results become `tool-result`; and the terminal `result` message becomes a `cost` event plus a `done` (or `error`) event.
+| What              | On Claude Code                                                                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Persona           | The agent's `SOUL.md` (which the Personality sliders write into) is added to every prompt as a persona block, up to 4,000 characters.                                                             |
+| `AGENTS.md`       | Draws the agent's links on the team graph. Claude Code never reads it.                                                                                                                            |
+| Other agent files | Not used. `IDENTITY.md`, `TOOLS.md` and the rest are OpenClaw files; see [Agents](/using/agents).                                                                                                 |
+| Model             | Team setup has no model picker for Claude Code. It runs the model its own Claude Code settings choose.                                                                                            |
+| Clawboo tools     | Every run gets Clawboo's Tasks, Memory, Tools and TeamChat servers (MCP), so the agent can read the board, use shared memory and connectors, and talk to its team.                                |
+| Leading a team    | A Claude Code leader hands work to teammates with the `team_delegate` tool.                                                                                                                       |
+| Worktree          | Only a task-runner run that names a repository gets its own git worktree. Team chat and the tasks a team hands out run without one. See [Worktrees and handoff](/concepts/worktrees-and-handoff). |
+| Steering          | Live. A comment on a running task joins the run at its next step, after the tool call in progress. See [Board](/using/board).                                                                     |
+| Sessions          | No session carries over from one team chat turn to the next; each turn starts from the context Clawboo builds. See [What an agent sees](/concepts/agent-context).                                 |
+| Memory            | Clawboo's shared memory, through the Memory tools. Claude Code also loads your own Claude Code settings and memory files (below).                                                                 |
+| Cost              | The real cost each run reports. See [Costs](#costs).                                                                                                                                              |
 
-### Real USD cost, passed through
+### Your own Claude Code settings apply
 
-Claude Code reports a real `total_cost_usd` per run. The mapper passes it straight through as a concrete `costUsd` on the `cost` and `done` events, not an estimate. In streaming-input mode that figure is a running total across the run's turns, so the run reports the latest one, and token usage summed over its turns. (Contrast [Codex](/runtimes/codex), which emits no USD and is estimated.)
+Clawboo does not limit which settings files the Agent SDK loads. A Claude Code agent therefore reads the files your `claude` command reads: your user settings and memory in `~/.claude`, and any `.claude` settings and `CLAUDE.md` in the folder it works in. Every Claude Code agent shares them. Keep anything you do not want your agents to follow out of `~/.claude`, or run Clawboo under a separate user account.
 
-### `max_turns` is a clean terminal, not an error
+## Permissions and safety
 
-When a run hits its turn ceiling the SDK signals `result.subtype === 'error_max_turns'`. The driver surfaces this as a distinct `maxTurns` flag, and the mapper emits a `done` event with `reason: 'max_turns'`, **not** an `error`. This is a clean "ran out of room" terminal. The host treats it as a rotation signal: it spins up a fresh successor session carrying a handoff note (not the heavy transcript) and continues, rather than failing the task. The 200k-token `contextWindowTokens` also drives a proactive watermark so the host can rotate _before_ the window fills, bounded by `maxRotations`.
+<Warning>
 
-### Session resume across runs
+Clawboo starts Claude Code with its permission prompts turned off (`permissionMode: 'bypassPermissions'`). Nothing asks you before it runs a command, edits or deletes a file, or reaches the network. It runs as your user account and can read and change any file that account can.
 
-The adapter's `sessionCodec` serializes the native Claude session id (captured from the `init`/`result` frames). On a later same-runtime run, the executor runner threads that id back into the run context, and the driver sets the SDK's `resume` option, a genuine continuation of the prior session. A cross-runtime pickup (a different runtime resuming the task) rides the prose handoff in `AGENT_HANDOFF.json` instead.
+</Warning>
 
-### Steering a running run
+- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, and on research and review runs (which includes every agent Routine you create in the app), Claude Code starts in the folder the Clawboo server runs from. When you start Clawboo with the `clawboo` command, that is your Clawboo data folder (`~/.clawboo`), which holds Clawboo's database and key vault.
+- **Clawboo's approvals do not cover Claude Code's own tools.** Calls the agent makes through Clawboo's Tools server (connectors, for example) go through Clawboo's checks and can ask you first. Claude Code's built-in shell, file and web tools never do.
+- **Clawboo hides some secrets from it, by name only.** Before a run, Clawboo removes its own secrets (the OpenClaw Gateway token, the dashboard access token and the vault master key) from the environment Claude Code inherits. It also removes a fixed list of common credentials, such as GitHub, npm, cloud, Stripe, Slack and database variables. Other variables pass through, and credential files on disk stay readable.
 
-When you comment on a task a Claude Code agent is working on, the driver pushes the comment into the query's input as a user message with priority `next`. The CLI folds a `next` message into the turn in progress at its next boundary (after the tool call that is running, before the next model call), so nothing is stopped. A comment that arrives just as the turn is finishing gets a turn of its own, still inside the same run.
+For work you do not trust, run Clawboo under a separate user account or in a virtual machine. [What agents can do](/concepts/permissions) compares every runtime.
 
-In streaming-input mode the CLI reports one `result` per turn and keeps running until its input closes, so the driver keeps input open until every message it pushed appears in a turn's `user_message_uuids` (the CLI's record of what each turn consumed), then closes it. The host sees one run and one terminal either way. A comment that the run never reads (the run ended or failed first) is reported as not delivered and stays in the agent's mailbox for its next run. See [steering a running task](/runtimes/index#steering-a-running-task).
+## Costs
 
-### Headless permissions
+Claude Code reports the dollar cost of each run, and Clawboo records that figure as reported, not as an estimate. It counts toward your budgets, and Anthropic bills the same usage to your API key. If a team chat run ends without reporting a cost (it failed early, say), Clawboo records an estimate from the length of the prompt and reply instead.
 
-The run is a headless worker, so the driver sets `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. This is safe because Clawboo gates risky tools externally (the board, approvals) and the run is confined to an isolated per-task worktree; the SDK requires the explicit opt-in alongside `bypassPermissions`. The driver also strips Clawboo's own server secrets (gateway token, access-gate token, vault master key) from the child env before merging the provider key, so the spawned agent does not inherit them.
+The cost arrives when a run finishes, so a hard cap cannot stop a Claude Code run partway through. See [Budgets and spend](/using/budgets-and-spend) for how each runtime's cost reaches your budgets.
 
-## Verify it worked
+## Disconnect Claude Code
 
-- The Runtimes card reads `ready` and `GET /api/runtimes` reports the Claude Code entry with `connectionState: "ready"` and `health.ok: true`. For a CLI runtime, `health` reflects whether the `claude` binary resolves on PATH or a known user-install dir.
-- After a `POST /api/runtimes/claude-code/run`, the task advances on the board, the worktree carries the file changes plus an `AGENT_HANDOFF.json`, and the run's report-up summary lands as a board comment.
+In **Settings** > **Runtimes**, click **Manage** on the **Claude Code** row, then **Disconnect**. This deletes the Anthropic key from Clawboo's vault. The vault keeps one copy of each key for every runtime, so Clawboo Native and Hermes lose that key too unless they find it elsewhere. Until you connect Claude Code again, it also ignores an Anthropic key in your shell or in `~/.openclaw/.env`. To remove one key on purpose, or keep it for other runtimes, see [Disconnect a key or a runtime](/using/providers-and-runtimes#disconnect-a-key-or-a-runtime).
+
+## Limits
+
+- Team setup has no model picker for Claude Code members.
+- It needs an Anthropic API key to read **Connected**; a Claude subscription sign-in alone doesn't count.
+- A one-off `npx` run of Clawboo cannot load the Agent SDK.
+- A hard cap counts Claude Code's cost only when each run ends.
 
 ## Troubleshooting
 
-<Warning>
-**The run fails immediately saying `@anthropic-ai/claude-agent-sdk` is missing.** The card reads `ready` because that reflects the `claude` binary plus your key, but the Agent SDK is a separate, deliberately-not-shipped package. Install it alongside Clawboo (`npm install -g @anthropic-ai/claude-agent-sdk` for a global Clawboo) and re-run the task — see [step 3](#3-install-the-agent-sdk-published-installs).
-</Warning>
+<AccordionGroup>
 
-<Warning>
-**The run starts but cannot authenticate.** With no key in the vault, the SDK falls back to the logged-in `claude` CLI's auth, which lives under your real `HOME`/Keychain. If the Clawboo server runs with an isolated `HOME` (a sandboxed dev/e2e environment), that login is invisible. Set `ANTHROPIC_API_KEY` (env or vault) for deterministic API-key auth, or run the server at your normal `HOME`.
-</Warning>
+<Accordion title="The run failed: The Claude Code runtime needs @anthropic-ai/claude-agent-sdk">
 
-<Warning>
-**A task keeps hitting `max_turns`.** This is not a failure; the run terminated cleanly because it exhausted its turn budget. The host rotates the session and continues. If the chain hits `maxRotations` without finishing, the task is released back to `todo` for a retry. Raise `maxRotations` on the run body to allow a longer chain.
-</Warning>
+The full message continues "which this clawboo install does not ship". The row reads **Connected** because that only checks the `claude` command and your key; the Agent SDK is a separate package.
 
-<Danger>
-**`POST /api/runtimes/claude-code/run` returns `409`.** The task could not be atomically claimed; another worker won it. Per the board's atomic-claim contract, a `409` is data, **not** a transient error: do not retry it. See [the board](/concepts/the-board).
-</Danger>
+Install it next to Clawboo with `npm install -g clawboo @anthropic-ai/claude-agent-sdk`, run `clawboo restart`, then send the message or start the task again. If you started Clawboo with `npx`, switch to the global install first.
 
-## See also
+</Accordion>
 
-- [Connecting runtimes](/runtimes/connecting-runtimes): install/connect/disconnect, the encrypted vault, healthchecks
-- [Runtimes overview](/runtimes/index): the full capability matrix across all five runtimes
-- [`/api/runtimes` reference](/reference/rest-api/runtimes): request/response shapes for run, connect, install
-- [Codex](/runtimes/codex) · [Hermes](/runtimes/hermes) · [Clawboo Native](/runtimes/native): the other non-OpenClaw runtimes
-- [OpenClaw](/runtimes/openclaw): the connected-substrate runtime (different model)
-- [The board](/concepts/the-board): `taskId`, atomic claim, the 409-no-retry contract
+<Accordion title="Claude Code reads Needs key, but my claude CLI is signed in">
+
+Clawboo needs an Anthropic API key for Claude Code; the CLI's own sign-in does not count. Connect a key on the row, or save one under **Settings** > **Providers**. An `ANTHROPIC_API_KEY` set in the environment Clawboo runs with also counts.
+
+</Accordion>
+
+<Accordion title="Claude Code is greyed out in Customize team (Connect in Runtimes)">
+
+The runtime is not connected. Finish [Set up Claude Code](#set-up-claude-code) until the row reads **Connected**, then open **Customize team** again.
+
+</Accordion>
+
+<Accordion title="Invalid API key.">
+
+Anthropic rejected the key. Copy it again from [console.anthropic.com](https://console.anthropic.com/settings/keys), or create a new one, and connect it.
+
+</Accordion>
+
+<Accordion title="Could not reach anthropic (timed out).">
+
+The key check could not reach Anthropic from this computer. Check your network or proxy. If you are sure the key is right, click **Connect anyway** to save it without the check.
+
+</Accordion>
+
+<Accordion title="Permission denied. A global install may require elevated permissions.">
+
+npm could not write to its global folder. The message suggests `sudo npm install -g @anthropic-ai/claude-code@2`. A Node version manager such as nvm or fnm avoids the problem without `sudo`; install Node through one, then click **Install** again.
+
+</Accordion>
+
+<Accordion title="npm not found. Install Node.js (which bundles npm) and retry.">
+
+The Clawboo server cannot find npm. Install Node.js 22.12 or newer, restart Clawboo with `clawboo restart`, then click **Install** again.
+
+</Accordion>
+
+</AccordionGroup>
+
+## Check that it works
+
+1. In **Settings** > **Runtimes**, the **Claude Code** row reads **Connected**.
+2. Open the team chat of a team with a Claude Code member. Type `@`, pick that agent, and ask: "Say hello in one sentence."
+3. You should see a reply under the agent's name. If the run fails, the chat shows "The run failed:" and the reason; look it up in [Troubleshooting](#troubleshooting).
+
+<Accordion title="Under the hood">
+
+- Clawboo calls the SDK's `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. It also passes the run's working folder (the worktree, when there is one), the model when a run names one, a session to resume, Clawboo's four MCP servers over HTTP, and the scrubbed environment plus the connected key. It does not set `settingSources`, so the SDK loads user, project and local settings.
+- The SDK starts Claude Code from its own platform package. The `claude` command that **Install** adds is what the Runtimes row checks for. A source build of Clawboo uses SDK version 0.3.268.
+- Run a board task on Claude Code directly with `POST /api/runtimes/claude-code/run`; see the [Runtimes API](/reference/rest-api/runtimes). Such a run falls back to the `claude` CLI's own sign-in when no Anthropic key is available.
+- A run that hits Claude Code's turn limit ends cleanly, and the task runner continues the task in a fresh session with a handoff note.
+
+</Accordion>
+
+## Related
+
+- [Choose a runtime](/runtimes/index): how Claude Code compares with the other runtimes.
+- [Connect AI providers and runtimes](/using/providers-and-runtimes): keys, sign-ins and what Disconnect removes.
+- [What agents can do](/concepts/permissions): permissions and safety for every runtime.
+- [Budgets and spend](/using/budgets-and-spend): how cost reaches your budgets.
+- [Worktrees and handoff](/concepts/worktrees-and-handoff): when a run gets its own git worktree.

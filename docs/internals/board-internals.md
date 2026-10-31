@@ -1,27 +1,34 @@
 ---
-title: Board internals
-description: 'The board data-access layer: the atomic claim, the transactional state machine, the SQLite contention recipe, recursive CTEs, and crash recovery.'
+title: 'Board internals'
+description: 'The board data-access layer: the atomic claim, the transactional state machine, rooms, dependencies, the fire policy, SQLite contention and crash recovery.'
+keywords:
+  ['board', 'repository', 'claimTask', 'updateStatus', 'contention', 'reconcileOrphans', 'WAL']
 ---
 
-[The board](/concepts/the-board) is Clawboo's durable task-coordination substrate. This page is the implementation deep-dive for people working _on_ it: the single data-access layer that owns every board write, the conditional-UPDATE claim that makes single-assignee work race-free, the state machine that enforces legal transitions inside a write transaction, the SQLite contention recipe that keeps many concurrent writers honest, the recursive CTEs that walk the dependency and parent graphs, and the two reconciliation passes that recover stuck work.
+[The board](/concepts/the-board) is where Clawboo keeps task state. This page is for people working on its data-access layer: the module that owns every board write, the conditional `UPDATE` that makes single-assignee work race-free, the state machine enforced inside a write transaction, the SQLite recipe that keeps many concurrent writers safe, the recursive queries over dependencies and parents, and the passes that recover stuck work.
 
-Everything here lives in `packages/db/src/board/`. The core is four modules: `repository.ts` (the data access), `contention.ts` (the write recipe), `schemas.ts` (the zod shapes for REST bodies and raw-CTE results), and `verification.ts` (verdict persistence through `setTaskVerification`, feeding the intrinsic `→ done` gate). Beside them sit `events.ts` (the in-process lifecycle bus every repository write publishes to after commit) and the read helpers the board REST routes attach to each task: `attention.ts` (why a task needs a person), `runCost.ts` (what its runs cost) and `runningSince.ts` (when its current run started). The pure transition rules sit one package over, in [`@clawboo/board-core`](/reference/packages/board-core), and are re-exported through `@clawboo/db` unchanged. The connection-level pragmas they depend on are set in `packages/db/src/db.ts`. If you want the _why_ behind the board's existence, narration-vs-authority, the worktree linkage, read [the concept page](/concepts/the-board) first; this page assumes it.
+## The modules
 
-## What it is, and what it isn't
+Everything lives in `packages/db/src/board/`:
 
-The board data-access layer is **the only place in the codebase that touches the board tables**. `apps/web` never reaches a board table with raw Drizzle; it calls a repository function. That is deliberate: it keeps query construction out of the app, and it is the single seam a future SQLite→Postgres or multi-tenant swap would target. Every read that could be tenant-scoped takes an optional `scope` argument carrying a `tenantId`; the column exists on every board table but no filtering is active in v0.5.0.
+| Module                                          | Holds                                                                                                                            |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `repository.ts`                                 | Every board read and write: create, claim, status changes, dependencies, comments, workspaces, execution rows, reconciliation.   |
+| `contention.ts`                                 | `withWriteRetry` and `immediateWrite`, the write recipe.                                                                         |
+| `schemas.ts`                                    | Zod shapes for REST bodies and for the ancestor walk's raw rows.                                                                 |
+| `verification.ts`                               | `setTaskVerification`, which persists a verdict for the `done` gate.                                                             |
+| `events.ts`                                     | The in-process lifecycle bus every write publishes to after it commits.                                                          |
+| `rooms.ts`                                      | Chat rooms: the `rooms` and `room_members` tables.                                                                               |
+| `attempts.ts`                                   | `classifyAttempts`, which reads a task's execution ledger as crash, error, success or cancelled attempts.                        |
+| `attention.ts`, `runCost.ts`, `runningSince.ts` | Read helpers the board REST routes attach to each task: why it needs a person, what its runs cost, when its current run started. |
 
-It is **not** an ORM-over-everything layer. It is a hand-written set of typed functions over five tables (`tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`), each function doing exactly one board operation. The pure transition rules live apart from the data access so they are unit-testable without a database; the contention helpers live apart so the rest of the repository reads as plain Drizzle.
+The pure rules sit one package over in [`@clawboo/board-core`](/reference/packages/board-core): `state-machine.ts` (the transition table), `dispatch.ts` (the fire policy), `attention.ts` (why a task needs a person) and `runCost.ts`. `@clawboo/db` re-exports the transition helpers, `TASK_STATUSES` and `summarizeRunCost` unchanged, and wraps the fire policy and the attention rule in its own repository and read helpers. `board-core` imports nothing outside its own files, which is what lets the dashboard bundle the same rules the server enforces. The repository takes the transition table and fire policy from `board-core`, and the creation caps plus the shared verdict rule `isVerdictPromotable` from `@clawboo/governance`. The connection pragmas are set in `packages/db/src/db.ts`.
 
-<Note>
-The repository imports one cross-package symbol: `isVerdictPromotable` from `@clawboo/governance`. That is the shared builder-≠-judge rule, kept in one place so the board state machine and the worktree completion path enforce "done means verified" identically. See [Verification](/concepts/verification).
-</Note>
+The layer is the only code that touches the board tables: `tasks`, `task_deps`, `task_comments`, `workspaces` and `execution_processes`, plus the chat-room tables in `rooms.ts`. `apps/web` never reaches them with raw Drizzle; it calls a repository function. Reads that could be tenant-scoped take an optional `scope` with a `tenantId`, but nothing passes one: every row has `tenant_id` null.
 
 ## The state machine
 
-`@clawboo/board-core`'s `state-machine.ts` is pure: a `TaskStatus` union of seven values, a `LEGAL` transition map, and the accessors over it. There is no I/O here — and no imports at all, which is what lets the browser bundle the same file the server enforces.
-
-It lives outside `@clawboo/db` deliberately. Three layers need these rules and only one of them can touch a database: the repository enforces them inside the write transaction, `@clawboo/team-orchestration` types its `BoardClient` with `TaskStatus`, and the board UI derives its columns and its status editor from `TASK_STATUSES` + `legalTargets`. When each declared its own copy they agreed, but nothing linked them: a newly-legal transition on the server would have left the UI hiding a move it now accepts, with green CI.
+`@clawboo/board-core`'s `state-machine.ts` holds a `TaskStatus` union of seven values and one transition table:
 
 ```ts
 const LEGAL: Record<TaskStatus, readonly TaskStatus[]> = {
@@ -35,39 +42,38 @@ const LEGAL: Record<TaskStatus, readonly TaskStatus[]> = {
 }
 ```
 
-`canTransition(from, to)` returns `true` when `from === to` (same-status is an idempotent no-op, so re-emitting a transition is harmless) and otherwise checks membership in `LEGAL[from]`. `legalTargets(from)` returns that row as a fresh array, which is how a UI enumerates the moves it may offer without copying the table. `done` and `cancelled` have empty target lists; they are terminal (a test pins `isTerminal(s)` ⇔ `legalTargets(s).length === 0`, so the two can never disagree). `isLocked(status)` returns `true` for `in_progress` and `in_review` (a locked task is actively owned and must not have its assignee reassigned). `isTerminal(status)` returns `true` for `done` and `cancelled`.
+`canTransition(from, to)` is `true` when `from === to` (re-emitting a transition is harmless) and otherwise checks `LEGAL[from]`. `legalTargets(from)` returns that row as a fresh array, which is how the dashboard's status editor offers only legal moves. `isTerminal(status)` is true for `done` and `cancelled` (a test pins it to an empty `legalTargets`), and `isLocked(status)` is true for `in_progress` and `in_review`, where a task is owned and its assignee must not change. One table serves three consumers: the repository enforces it, `@clawboo/team-orchestration` types its board client with `TaskStatus`, and the board UI derives its columns and editor from `TASK_STATUSES` and `legalTargets`.
 
-The enforcement happens in `updateStatus` in the repository, not in the REST layer:
+`updateStatus` in the repository enforces the table inside the write:
 
 ```mermaid
 flowchart TD
-    A[updateStatus taskId, to, opts] --> B[immediateWrite: BEGIN IMMEDIATE]
-    B --> C[read row inside the txn]
-    C --> D{row exists?}
-    D -->|no| RNF[reason: not_found]
-    D -->|yes| E{canTransition from → to?}
-    E -->|no| RIL[reason: illegal_transition]
-    E -->|yes| F{to === done<br/>and verdict non-promotable<br/>and not humanOverride?}
-    F -->|yes| RVR[reason: verification_required]
-    F -->|no| CA{first reach of a terminal status<br/>with opts.completedAt outside<br/>createdAt .. now + 5 min?}
-    CA -->|yes| RCA[reason: invalid_completed_at]
-    CA -->|no| G[UPDATE status, updatedAt<br/>+ completedAt on first reaching a terminal status<br/>+ clear assignee/verdict if → todo]
-    G --> H[ok: task]
-    H --> EV[after commit: emit status_changed<br/>with actor when given]
+    A["updateStatus(taskId, to, opts)"] --> B["BEGIN IMMEDIATE, read the row"]
+    B --> D{row exists?}
+    D -->|no| RNF[not_found]
+    D -->|yes| E{"canTransition(from, to)?"}
+    E -->|no| RIL[illegal_transition]
+    E -->|yes| F{"to done, verdict not promotable, no humanOverride?"}
+    F -->|yes| RVR[verification_required]
+    F -->|no| CA{"completedAt outside createdAt to now + 5 min?"}
+    CA -->|yes| RCA[invalid_completed_at]
+    CA -->|no| G["UPDATE; after commit emit status_changed"]
 ```
 
-The row is read **inside** the `BEGIN IMMEDIATE` transaction, so the transition is checked against the freshly read status; two concurrent callers cannot both pass a stale pre-check. Any pre-check the REST layer does first is purely fast-fail ergonomics; the transactional check is the real gate. An illegal transition surfaces as `409` from the REST handler.
+The row is read inside the `BEGIN IMMEDIATE` transaction, so two concurrent callers cannot both pass a stale check; a REST-layer pre-check is only fast-fail ergonomics. `PATCH /api/board/:taskId` maps `not_found` to `404`, `invalid_completed_at` to `400` and the rest to `409`.
 
-Two side effects fire inside that same write:
+Two side effects ride the same write:
 
-- **Reaching a terminal state sets `completedAt`, once.** The first move to `done` or `cancelled` stamps the completion timestamp. Writing the same terminal status again (a run's late result after a person already marked the task done) leaves it alone. `opts.completedAt` back-dates the stamp, for a person marking work done on the day it was really done: it must fall between the task's `createdAt` and now plus five minutes of clock skew (a time inside that skew is recorded as now), else the move is refused with `invalid_completed_at`. It is ignored for any other status.
-- **`→ todo` is the release path, and it unassigns.** Moving a task back to `todo` clears `assigneeAgentId`, `assigneeRuntime`, **and** the stored `verification` verdict. The assignee clear is what lets the [atomic claim](#the-atomic-claim) re-acquire the task (the claim guards on `assignee IS NULL`); without it, every re-fire of a released task would `409`. The verdict clear is the cross-runtime rebind boundary: a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. `releaseTask` performs the same three-field clear directly for the `in_progress → todo` case.
+- **The first move to `done` or `cancelled` stamps `completedAt`, once.** Writing the same terminal status again (a run's late result after a person marked the task done) leaves it alone. `opts.completedAt` back-dates the stamp for a person marking work done on the day it was really done; it must fall between the task's `createdAt` and now plus five minutes of clock skew (a time inside the skew is recorded as now), or the move is refused with `invalid_completed_at`.
+- **Any move to `todo` releases the task.** It clears `assigneeAgentId`, `assigneeRuntime` and the stored `verification` verdict, from any source status. Clearing the assignee lets the [claim](#the-atomic-claim) re-acquire the task (its guard requires a null assignee); clearing the verdict means a previous runtime's failing verdict cannot block a fresh runtime's completion. `releaseTask` does the same three-field clear directly, for a task still `in_progress`, and publishes `task_released`.
 
-After the transaction commits, `updateStatus` publishes a `status_changed` event on the lifecycle bus (`events.ts`), so no subscriber can act on an uncommitted transition. `opts.actor: 'person'` rides on that event when a human made the move; every other writer (the engine, an agent's tool call, a sweep, verification) leaves it absent. The board's `PATCH` route is the one caller that sets it, and subscribers use it to leave a person's move to that route: it stops the run working on the task and tells the delegator (see [`PATCH /api/board/:taskId`](/reference/rest-api/board)). A person's move back to `todo` also wakes the team's dispatch pump.
+The two recovery passes write outside the table on purpose: they release stuck `in_progress` and `in_review` work straight to `todo`, and `in_review` to `todo` is not a legal transition. See [Orphan and stale reconciliation](#orphan-and-stale-reconciliation).
 
-### The intrinsic verification gate
+After the transaction commits, `updateStatus` publishes `status_changed` on the lifecycle bus, so no subscriber can act on an uncommitted change. `opts.actor: 'person'` rides on the event when a person made the move; only the board's `PATCH` route sets it, and subscribers leave a person's move to that route, which stops the run working on the task and tells the delegator (see [`PATCH /api/board/:taskId`](/reference/rest-api/board)). A person's move back to `todo` also wakes the team's dispatch pump (the loop that starts the next ready task, described under [The fire policy](#the-fire-policy)).
 
-The `→ done` gate is the board enforcing builder-≠-judge in the substrate itself, not in a caller:
+### The `done` gate
+
+The move to `done` is gated inside the board itself:
 
 ```ts
 if (to === 'done' && !opts.humanOverride && !verdictCellPromotable(row.verification)) {
@@ -75,200 +81,203 @@ if (to === 'done' && !opts.humanOverride && !verdictCellPromotable(row.verificat
 }
 ```
 
-`verdictCellPromotable` is a lightweight read of the persisted JSON cell. A full zod parse happens on _write_ (`setTaskVerification` in `verification.ts`); here a tiny inline `JSON.parse` plus the shared `isVerdictPromotable` rule avoids importing `board/verification.ts`, which would create an import cycle with `getTask`. The semantics:
+`verdictCellPromotable` is a light read of the stored JSON cell. The full zod parse happens on write (`setTaskVerification`); here an inline `JSON.parse` plus the shared `isVerdictPromotable` rule avoids importing `verification.ts`, which would create an import cycle with `getTask`.
 
-| Stored cell                                             | `verdictCellPromotable` | Why                                                                                                                                                                          |
-| ------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `null` / absent                                         | `true`                  | An unverified task is _not_ failing; the gate only blocks a verdict that **exists and is non-promotable**. Manually completing unverified work is an intentional human call. |
-| unparseable                                             | `true`                  | Cannot determine ⇒ don't block (lenient).                                                                                                                                    |
-| `pass`                                                  | `true`                  | Verified.                                                                                                                                                                    |
-| `completed_with_debt` over a _green_ deterministic gate | `true`                  | Debt covers unresolved critic findings, never a red build/test gate.                                                                                                         |
-| `completed_with_debt` over a _red_ deterministic gate   | `false`                 | A red gate is the canonical crash/blocking case, routes to a human, not silently `done`.                                                                                     |
-| `fail`                                                  | `false`                 | Known-failing.                                                                                                                                                               |
+| Stored cell                                        | Promotable | Why                                                                                      |
+| -------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `null` or absent                                   | yes        | An unverified task is not failing. The gate blocks only a verdict that exists and fails. |
+| unparseable                                        | yes        | Cannot tell, so do not block.                                                            |
+| `pass`                                             | yes        | Verified.                                                                                |
+| `completed_with_debt` over a passing command check | yes        | Debt covers open critic findings, never a failing build or test command.                 |
+| `completed_with_debt` over a failing command check | no         | A red command check routes to a person.                                                  |
+| `fail`                                             | no         | Known to fail.                                                                           |
 
-<Info>
-The gate is un-bypassable by any caller except an explicit `opts.humanOverride: true`. The REST `PATCH /api/board/:taskId` handler accepts `humanOverride` in the request body and records the bypass in the governance audit log; the override is auditable, never silent. The autonomous path always writes a verdict via `verifyTask` *before* this transition, so the gate is exercised on genuine completions, not as a routine bypass.
-</Info>
+Only an explicit `opts.humanOverride: true` bypasses the gate. `PATCH /api/board/:taskId` accepts `humanOverride` and records the bypass in the governance audit log; the Tasks MCP `update_task_status` tool and the team engine cannot pass it. Two server paths set it too: an empty-diff worktree completion (`apps/web/server/lib/worktrees.ts`), which has nothing to verify, and the OpenClaw Routine dispatcher (`routines/openclawDispatch.ts`), which records the run as unverified first.
 
 <Note>
-A subtlety for contributors: `isVerdictPromotable(null)` in `@clawboo/governance` returns `false`, but `verdictCellPromotable(null)` in the repository returns `true`. They are not contradictory; `verdictCellPromotable` only *calls* `isVerdictPromotable` when a cell exists. A null cell short-circuits to "promotable" because a missing verdict means "unverified," which the gate deliberately does not block. Do not "fix" this by passing the null straight through.
+
+`isVerdictPromotable(null)` in `@clawboo/governance` returns `false`, while `verdictCellPromotable(null)` returns `true`. They do not contradict each other: the repository calls the shared rule only when a cell exists, because a missing verdict means unverified, which the gate deliberately allows. Do not pass the null straight through.
+
 </Note>
 
 ## The atomic claim
 
-A task is worked by exactly one assignee. The board guarantees that with a single conditional UPDATE, not a read-then-write:
-
-```ts
-db.update(tasks)
-  .set({
-    assigneeAgentId,
-    assigneeRuntime: assigneeRuntime ?? null,
-    status: 'in_progress',
-    updatedAt: now,
-  })
-  .where(
-    and(
-      eq(tasks.id, taskId),
-      eq(tasks.status, 'todo'),
-      isNull(tasks.assigneeAgentId),
-      eq(tasks.dropped, 0),
-    ),
-  )
-  .returning()
-  .all()
-```
-
-Because the guard (`status='todo' AND assignee IS NULL AND dropped=0`) is part of the same atomic statement that performs the write, at most one concurrent caller can win. The winner gets the updated row back via `RETURNING`; every loser gets a zero-row result.
-
-That zero-row result is **data, not an error**. `claimTask` distinguishes the two failure modes with a follow-up existence check and returns `{ ok: false, reason: 'conflict' }` when the row exists (someone else claimed it) or `{ ok: false, reason: 'not_found' }` when it does not. The REST layer maps `conflict → 409` and `not_found → 404`. The rule the whole system follows is **never retry a 409**; a conflict means someone legitimately owns the work, so a retry would either no-op or fight for a task already taken.
-
-<Tip>
-"Never retry a 409" is structural, not a convention. The contention layer that wraps the claim retries *only* transient SQLite lock errors and returns a 0-row result to the caller **unretried**; so application-level conflicts and database-level lock contention go through completely different mechanisms. See [the contention recipe](#the-contention-recipe).
-</Tip>
-
-Stale re-claim of a dead, abandoned `in_progress` task is deliberately **not** the claim's job. The claim's `WHERE` only matches `todo`, so an abandoned `in_progress` task is invisible to it. Liveness lives in one place; [reconciliation](#orphan-and-stale-reconciliation) releases such a task back to `todo`, after which an ordinary claim re-acquires it. Keeping the claim a pure mutex and liveness a separate pass is what makes both correct.
-
-Reconciliation only reaps work that has a `running` execution. An `in_progress` task with **no** assignee and no running execution was moved there by hand, which starts nothing, so no pass will ever move it. `isStrandedInProgress` recognizes it, the needs-you rule reports it as `unstarted`, and a person hands it back: `assignTaskDelegation` (re-bind to an agent and release to `todo`, in one `BEGIN IMMEDIATE` transaction) and the retry route both accept it as they accept a `todo`, `backlog` or `blocked` task.
-
-## Dependencies and the recursive CTEs
-
-Tasks form a blocks / blocked-by graph in `task_deps`, with a composite primary key on `(task_id, depends_on_task_id)` that prevents duplicate edges. `linkDep` writes the whole edge inside `immediateWrite`: it rejects a self-link outright, then probes reachability with a recursive CTE and throws `TaskDependencyCycleError` when `taskId` is already upstream of `dependsOnTaskId` — that is, when the new edge would close a direct or transitive cycle. Only after the probe does it insert, still with `onConflictDoNothing`, so re-linking an existing edge remains a harmless no-op. Probe and insert share one `BEGIN IMMEDIATE` transaction, so two concurrent links cannot race a cycle into the graph.
-
-```ts
-sql`
-  WITH RECURSIVE dependencies(id) AS (
-    SELECT depends_on_task_id FROM task_deps WHERE task_id = ${dependsOnTaskId}
-    UNION
-    SELECT td.depends_on_task_id FROM task_deps td
-    JOIN dependencies dep ON td.task_id = dep.id
-  )
-  SELECT id FROM dependencies WHERE id = ${taskId} LIMIT 1
-`
-```
-
-<Note>
-A cycle is refused at write time because nothing downstream can recover from one: `getReadyTasks` requires every dependency to be `done`, so every task in a cycle is permanently un-ready and no error surfaces anywhere — the ready-pump simply has nothing to fire. `TaskDependencyCycleError` carries `code: 'task_dependency_cycle'`; the `link_task` MCP tool maps it to a tool-error, and the REST dependency route maps it to a `409` with that code in `error` — a client mistake, not a server fault.
-</Note>
-
-A task is **ready** when it is `todo`, not dropped, and _every_ one of its dependencies is `done`. `getReadyTasks` expresses that with a `NOT EXISTS` subquery and orders the results by priority descending, then `updatedAt` descending:
+A task is worked by one assignee at a time. `claimTask` guarantees it with one conditional statement rather than a read followed by a write:
 
 ```sql
-NOT EXISTS (
-  SELECT 1 FROM task_deps d
-  JOIN tasks dt ON dt.id = d.depends_on_task_id
-  WHERE d.task_id = tasks.id AND dt.status != 'done'
+UPDATE tasks
+   SET assignee_agent_id = ?, assignee_runtime = ?, status = 'in_progress', updated_at = ?
+ WHERE id = ?
+   AND status = 'todo'
+   AND assignee_agent_id IS NULL
+   AND dropped = 0
+RETURNING *
+```
+
+Because the guard is part of the statement that writes, at most one concurrent caller wins. The winner gets the row back through `RETURNING` and a `task_claimed` lifecycle event fires; every loser gets zero rows.
+
+A zero-row result is data, not an error. `claimTask` checks whether the row exists and returns `{ ok: false, reason: 'conflict' }` (someone else owns it) or `{ ok: false, reason: 'not_found' }`, which REST maps to `409` and `404`. The rule the whole system follows is never retry a `409`: a retry would either do nothing or fight for work that is already taken.
+
+<Tip>
+
+The never-retry rule is structural. The claim runs inside `withWriteRetry`, which retries only transient SQLite lock errors and returns a zero-row result unretried, so an application conflict and database lock contention travel through different mechanisms. See [the contention recipe](#the-contention-recipe).
+
+</Tip>
+
+Re-claiming an abandoned `in_progress` task is not the claim's job: its `WHERE` matches only `todo`. Liveness lives in one place; [reconciliation](#orphan-and-stale-reconciliation) releases such a task to `todo`, and an ordinary claim re-acquires it.
+
+Reconciliation reaps only work that has a `running` execution. An `in_progress` task with no assignee and no running execution was dragged there by hand, which starts nothing, so no pass will move it. `isStrandedInProgress` recognizes it, the Needs you rule reports it as `unstarted`, and a person hands it back: `assignTaskDelegation` (re-bind to an agent and release to `todo` in one `BEGIN IMMEDIATE` transaction) and the retry route both accept it, as they accept a `todo`, `backlog` or `blocked` task.
+
+## Rooms
+
+Every task carries a `room_id`. Null means the team's General chat; a string names a room. That chat's engine runs the task, and a task whose room was archived falls back to General (`roomIdForTask` in `apps/web/server/lib/teamChat/roomRoster.ts`). Repository reads that take a room filter (`listTasks`, `getReadyTasks`) read `undefined` as every room, `null` as General only, and a string as that room only.
+
+`rooms.ts` stores a team's extra conversations in `rooms` and `room_members`. General has no row. A room's live roster is its stored members intersected with the team's active agents, so an agent that is archived or moves to another team drops out of every room without a sweep. Names are whitespace-collapsed and capped at `ROOM_NAME_MAX` (80) characters; deleting a room archives it and keeps its conversation.
+
+## Dependencies and the recursive queries
+
+Tasks form a blocks and blocked-by graph in `task_deps`, with a composite primary key on `(task_id, depends_on_task_id)` that prevents duplicate edges. `linkDep` writes an edge inside `immediateWrite`: it refuses a self-link, then probes reachability with a recursive query and throws `TaskDependencyCycleError` when the new edge would close a direct or transitive cycle. Only then does it insert, with `onConflictDoNothing`, so re-linking an existing edge stays harmless. Probe and insert share one transaction, so two concurrent links cannot race a cycle into the graph.
+
+```sql
+WITH RECURSIVE dependencies(id) AS (
+  SELECT depends_on_task_id FROM task_deps WHERE task_id = :dependsOnTaskId
+  UNION
+  SELECT td.depends_on_task_id FROM task_deps td
+  JOIN dependencies dep ON td.task_id = dep.id
 )
+SELECT id FROM dependencies WHERE id = :taskId LIMIT 1
 ```
 
-Two recursive common-table-expression reads walk the graph in both directions. Both validate their raw SQL output with a zod schema at runtime; the codebase rule is to never trust the type system over an untyped raw query.
+A cycle is refused at write time because nothing downstream can recover from one: every task in it would stay un-ready forever and nothing would report it. `TaskDependencyCycleError` carries `code: 'task_dependency_cycle'`; the `link_task` MCP tool returns it as a tool error, and the REST dependency route answers `409` with that code.
 
-**`getDependents`** walks the dependency graph _downstream_, every task transitively blocked by a given task:
+A task is **ready** when it is `todo`, not dropped, and every dependency is `done`. `getReadyTasks` expresses the last part with `NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks dt ON dt.id = d.depends_on_task_id WHERE d.task_id = tasks.id AND dt.status != 'done')` and orders by priority, then `updatedAt`, both descending. It accepts a team and a room filter.
 
-```ts
-sql`
-  WITH RECURSIVE dependents(id) AS (
-    SELECT task_id FROM task_deps WHERE depends_on_task_id = ${taskId}
-    UNION
-    SELECT td.task_id FROM task_deps td
-    JOIN dependents dep ON td.depends_on_task_id = dep.id
-  )
-  SELECT * FROM tasks WHERE id IN (SELECT id FROM dependents)
-`
-```
+Two recursive reads walk the graph:
 
-This drives failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit forever as ghost `todo` cards. `cancelDependents` walks `getDependents`, cancels only the still-pending (`todo` / `backlog`) members via `updateStatus`, and returns the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched.
+- **`getDependents`** walks downstream: every task transitively blocked by a given one. It returns raw rows (the caller filters by status). `cancelDependents` uses it to cancel only the still-pending (`todo` or `backlog`) members when a blocker fails or a person cancels it, and returns them so the engine can report the stalled plan; tasks already running, done or cancelled are untouched.
+- **`getAncestors`** walks the parent chain through `parent_task_id` and returns `{ id, parent_task_id, title, status }` per ancestor, parsed with `ancestorRowsSchema` (the codebase's rule is not to trust a type over raw query output). It uses `UNION`, not `UNION ALL`, so the walk terminates even on a corrupt parent cycle.
 
-**`getAncestors`** walks the _parent_ chain via the self-referential `parent_task_id`, returning a minimal `{ id, parent_task_id, title, status }` row per ancestor. Its raw rows are parsed with `ancestorRowsSchema` from `schemas.ts` before being returned. It is the depth cap's counter at two call sites, both reading the same `DEFAULT_MAX_DEPTH`: the team orchestrator refuses to spawn when the SOURCE task is already at the ceiling (`ancestors.length >= max`, so the child would be one past it), and the executor runner refuses to dispatch a task that is itself past it (`ancestors.length > max`). The `>=`/`>` split is what makes the deepest creatable task also dispatchable. The creation-time cap enforces the orchestrator's rule but does not use this helper — see `createCappedSubtask` below.
+`getAncestors` counts depth at two call sites that read the same `DEFAULT_MAX_DEPTH` (2): the team engine refuses to delegate from a task already at the cap (`ancestors.length >= max`, since the child would be one past it), and the executor runner refuses to dispatch a task past it (`ancestors.length > max`). The split is what makes the deepest creatable task also runnable.
 
-**`createCappedSubtask`** is the board's own bounded create, and the one the Tasks MCP create tools call. It does the parent lookup, an indexed `COUNT(*)` of the parent's non-dropped children, a step-bounded parent-chain walk, and the insert inside a single `BEGIN IMMEDIATE` transaction, returning `{ ok: false, reason: 'parent_not_found' | 'child_cap' | 'depth_cap' }` rather than throwing. The transaction is the point: the Tasks MCP ships as a stdio bin, one OS process per attached runtime on the shared database file, so a count-then-insert window would let two agents both land the N+1th child. It walks the chain itself instead of calling `getAncestors` because that helper takes a `ClawbooDb` rather than a transaction handle, and because a hard step bound cannot spin on corrupt data while a write lock is held. `createCappedRootTask` is its parentless sibling: same one-transaction shape, but the guard is a rolling-window RATE on root creation rather than a total, because a per-parent ceiling has no subject on a root and a lifetime ceiling would eventually jam a long-lived board. `createSubtask` remains the uncapped primitive for the orchestrator, the REST board, and the evals harness. Every count comes from durable board state, never from the model.
+### Capped creation
 
-## Worktree linkage and execution rows
+The Tasks MCP create tools call the repository's bounded creates, which return a result rather than throwing (a throw would reach the model as a protocol error instead of a tool result):
 
-The board owns _pointers_ into the worktree subsystem, not the worktree itself. `setTaskWorkspaceRefs` records `worktreeRef` and `branchRef` on the task; `createWorkspace` / `updateWorkspaceStatus` track a `workspaces` row through `active → archived` (cleanup) or `active → stale` (garbage collection). Provisioning a worktree for a read-only or research task is refused by the REST layer with `422 no_isolation`; the worktree is only for the concurrency boundary that file-mutating work needs. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
+- **`createCappedSubtask`** does the parent lookup, an indexed count of the parent's live children, a step-bounded parent-chain walk and the insert in one `BEGIN IMMEDIATE` transaction. It refuses with `parent_not_found`, `child_cap` (24 live children, `DEFAULT_MAX_CHILDREN`) or `depth_cap` (`DEFAULT_MAX_DEPTH`, 2). One transaction matters because the Tasks MCP runs as a stdio process per attached runtime on the shared file, so a count-then-insert gap would let two agents both add the 25th child. It walks the chain itself because `getAncestors` takes a connection rather than a transaction handle, and a hard step bound cannot spin on corrupt data while holding the write lock.
+- **`createCappedRootTask`** guards parentless tasks with a rolling-window rate instead: 30 live roots per 5 minutes (`DEFAULT_MAX_ROOT_CREATES`, `DEFAULT_ROOT_CREATE_WINDOW_MS`), refused with `root_rate_cap`. Rows created through REST or Routines count too, so an agent cannot launder rows through another surface; dropping rows frees quota early.
 
-Each spawned run is an `execution_processes` row, a per-run ledger for any executor. `createExecutionProcess` opens it (started `running`); `completeExecutionProcess` closes it with an outcome (`succeeded`, `failed`, `timed_out`, or `cancelled`) plus an optional token/cost ledger and git before/after commit checkpoints. The close is guarded on `status = 'running'`, so a terminal row is immutable: the first terminal wins, and a losing writer gets `null` back and appends no second `execution_completed`. That guard is load-bearing because the ledger is the dispatch pump's fire-policy input, where `cancelled` means user Stop; a late abort overwriting an already-swept `timed_out` row would reclassify infra death as user intent and park refireable work for good. By convention an exec row is opened only _after_ a successful claim, because this ledger is exactly what crash recovery reads on restart.
+The team engine, the REST board and the evals harness create their tasks, parented ones included, with the uncapped `createTask`. `createSubtask` is a thin uncapped wrapper over it that inherits the parent's team and room; only tests call it. Every count comes from board state, never from the model.
 
-Each run also records what it cost on its own row: `costUsd`, its tokens, and a `costSource` (`reported` when the runtime priced the run, `token-estimate` or `char-estimate` when Clawboo did). The team orchestrator's drain writes them at the run's end through `recordExecutionUsage`, which matches the row whatever its status, because a Stop or the idle watchdog closes the row before the run's own terminal arrives. It touches only the cost, token and `runtime` columns and never the status, completion time, summary or error, so the first-terminal-wins rule above still holds. `tasks.cost_usd` is the sum of the task's rows, recomputed in the same transaction as each cost write rather than added to, so rewriting a run's cost never counts it twice. The board reads each task's total and whether any of it is estimated (`runCostForTasks`, one ledger read per board) with the pure `summarizeRunCost` from `@clawboo/board-core`. `runningSinceForTasks` reads when each task's newest `running` execution started (its `startedAt`, else `claimedAt`, else `createdAt`) with one read of the running rows, which is how an In progress card shows how long its run has been going.
+## The fire policy
+
+The dispatch pump starts ready tasks and re-fires released work, and `ledgerAllowsAutoFire` in `@clawboo/board-core` (`dispatch.ts`) decides whether a ready task may fire, from its execution ledger:
+
+| Last runs in the ledger                                       | Fires? | Why                                                  |
+| ------------------------------------------------------------- | ------ | ---------------------------------------------------- |
+| none                                                          | yes    | Never delivered (fresh, deferred or newly assigned). |
+| last run `running`                                            | no     | Something owns it.                                   |
+| last run `cancelled`                                          | no     | A person stopped it; only a person re-queues it.     |
+| `MAX_AUTO_FIRES` (3) unsuccessful runs in a row at the end    | no     | Parked in Needs you instead of being fed forever.    |
+| otherwise (`failed`, `timed_out`, an orphan reaped as failed) | yes    | Infrastructure death, not intent.                    |
+
+A success or a `cancelled` run resets the streak (`trailingFailedRuns`). The ledger is the counter, so the cap survives a restart. The repository re-exports the rule as `isLedgerAutoFireable`, and `listRoomsWithFireableDelegations` (with `listTeamsWithFireableDelegations` on top) tells the server's dispatch pump which (team, room) engines have a ready task bound to an agent whose ledger allows a fire. A task's bound agent is the `:agent:<id>` segment of its `sourceDelegationId` (`delegationTargetOf`), written by every engine delegation and by a person assigning a task on the board.
+
+`attempts.ts` reads the same ledger differently: `classifyAttempts` separates a process that keeps dying (an orphan reap or a stale sweep) from a run that keeps failing, and the executor runner turns the result into the interrupted-work note it adds to the next attempt's prompt.
+
+## Worktree pointers and execution rows
+
+The board owns pointers into the worktree subsystem, not the worktree. `setTaskWorkspaceRefs` records `worktreeRef` and `branchRef` on the task, and a `workspaces` row tracks the checkout from `active` to `archived` (cleanup) or `stale` (garbage collection). `POST /api/board/:taskId/workspace` refuses to provision a worktree for a `research` or `review` task with `422 no_isolation`. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
+
+Each run is an `execution_processes` row, a per-run ledger for any executor. `createExecutionProcess` opens it as `running` (optionally with the git commit before the run); `completeExecutionProcess` closes it with an outcome (`succeeded`, `failed`, `timed_out` or `cancelled`), optional token and cost figures, and the git commit after the run. The close is guarded on `status = 'running'`, so the first terminal wins and a losing writer gets `null` back and must not emit a second `execution_completed`. That guard matters because the ledger feeds the fire policy, where `cancelled` means a person's Stop: a late abort overwriting a swept `timed_out` row would turn an infrastructure death into a Stop and park re-fireable work for good. By convention a row is opened only after a successful claim, because crash recovery reads this ledger on restart.
+
+Each row also records its run's cost: `costUsd`, its tokens, and a `costSource` of `reported` (the runtime priced the run), `token-estimate` or `char-estimate` (Clawboo estimated it).
+
+- The team engine's drain writes them at the end of a run through `recordExecutionUsage`, which matches the row whatever its status, because a Stop or the idle watchdog can close the row before the run's own terminal arrives. It touches only the cost, token and `runtime` columns, never the status, completion time, summary or error, so first-terminal-wins still holds.
+- `tasks.cost_usd` is the sum of the task's rows, recomputed from the ledger after each cost write (in the same transaction for `recordExecutionUsage`) rather than added to, so rewriting a run's cost never counts it twice.
+- The board reads each task's total, and whether any of it is estimated, with `runCostForTasks` (one ledger read per board) and the pure `summarizeRunCost`. `runningSinceForTasks` reads when each task's newest running execution started, which is how an In progress card shows how long its run has gone.
 
 ## The contention recipe
 
-Clawboo is team-first: many agents may write one SQLite file, and out-of-process consumers (the MCP stdio bins an external runtime spawns) open the _same_ file the Express server serves. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: connection-level pragmas plus two application-level pieces.
+Many agents may write one SQLite file, and processes outside the server (the MCP stdio servers a runtime spawns) open the same file the server uses. Without care, concurrent writers pile up behind SQLite's single-writer lock. The answer is five connection pragmas plus two application-level pieces.
 
-Every connection sets these pragmas at open (`openDb`, `packages/db/src/db.ts`). The Express server opens exactly one, at boot; each out-of-process MCP stdio bin opens one of its own:
+Every connection sets these pragmas when it opens (`openDb` in `packages/db/src/db.ts`). The server opens exactly one connection at boot; each MCP stdio server opens its own:
 
-| Pragma               | Value        | Why                                                                                                                               |
-| -------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a single writer proceed concurrently.                                                        |
-| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                                                                |
-| `synchronous`        | `NORMAL`     | The standard WAL durability/performance balance.                                                                                  |
-| `busy_timeout`       | `250` (ms)   | Wait a quarter-second for the write lock, then hand off to the jittered app-level retry, which is the real anti-convoy mechanism. |
-| `wal_autocheckpoint` | `50` (pages) | A native PASSIVE checkpoint keeps the WAL lean without an app-level write counter.                                                |
+| Pragma               | Value        | Why                                                                                             |
+| -------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| `journal_mode`       | `WAL`        | Readers and one writer proceed concurrently.                                                    |
+| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                              |
+| `synchronous`        | `NORMAL`     | The usual WAL balance of durability and speed.                                                  |
+| `busy_timeout`       | `250` (ms)   | Wait a quarter-second for the write lock, then hand over to the jittered retry below.           |
+| `wal_autocheckpoint` | `50` (pages) | SQLite's own passive checkpoint keeps the WAL small without an application-level write counter. |
 
-On top of those, `contention.ts` adds two application-level mechanisms:
+`contention.ts` adds:
 
-- **`withWriteRetry(fn)`** runs a synchronous write and retries **only** transient lock errors, `SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED` (the set `isBusyError` recognizes), with a jittered backoff (`20–150` ms) until a **wall-clock budget** expires (`1500` ms by default, tunable with `CLAWBOO_DB_WRITE_BUDGET_MS`, with a `24`-attempt backstop). The budget is a deadline rather than an attempt count because the retry sleep blocks the calling thread, which in the server is the event loop: an attempt count does not bound how long one contended write can freeze the server, a deadline does. Worst case is the budget plus one final `busy_timeout`, about `1.75` s. On exhaustion it throws `WriteBudgetExhaustedError`, which keeps `code = 'SQLITE_BUSY'` so `isBusyError` still recognizes it and existing callers are unaffected. A 0-row result, like a lost claim race, is not an exception; it is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any non-lock error propagates immediately.
-- **`immediateWrite(db, cb)`** runs `cb` inside a `db.transaction(cb, { behavior: 'immediate' })`; `BEGIN IMMEDIATE` acquires the write lock up front rather than escalating mid-transaction, avoiding lock-escalation deadlocks. The whole transaction re-runs from scratch on a transient lock error because `immediateWrite` itself is wrapped in `withWriteRetry`. `updateStatus`, `reconcileOrphans`, and `reconcileStaleInProgress` all run through it.
+- **`withWriteRetry(fn)`** runs a synchronous write and retries only transient lock errors (`SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED`, as `isBusyError` recognizes them) with a jittered backoff of 20 to 150 ms, until a wall-clock budget runs out: 1,500 ms by default (`CLAWBOO_DB_WRITE_BUDGET_MS`), with a 24-attempt backstop. The budget is a deadline rather than a count because the retry sleep blocks the calling thread, which in the server is the event loop; worst case is the budget plus one `busy_timeout`, about 1.75 s. On exhaustion it throws `WriteBudgetExhaustedError`, which keeps `code = 'SQLITE_BUSY'` so existing callers still recognize it. A zero-row result is returned unretried, which is what lets callers honour never-retry-a-409; any other error propagates at once.
+- **`immediateWrite(db, cb)`** runs `cb` in `db.transaction(cb, { behavior: 'immediate' })`. `BEGIN IMMEDIATE` takes the write lock up front instead of upgrading mid-transaction, which avoids lock-upgrade deadlocks. It is itself wrapped in `withWriteRetry`, so the whole transaction re-runs on a transient lock error. `updateStatus`, `assignTaskDelegation`, `linkDep`, the capped creates and both reconciliation passes run through it.
 
 <Warning>
-The budget is per **outermost** write, not per request: a handler doing three writes can block for three times the worst case. It also assumes the repository invariant that an `immediateWrite` body uses the `tx` handle directly and never calls a `withWriteRetry`-wrapped function (every call site complies today) — nest them and the budgets multiply.
+
+The budget applies per outermost write, not per request: a handler doing three writes can block for three times the worst case. It also relies on the rule that an `immediateWrite` body uses its `tx` handle directly and never calls a `withWriteRetry`-wrapped function. Nest them and the budgets multiply.
+
 </Warning>
 
-<Note>
-The retry sleep is synchronous and non-busy-spinning: it uses `Atomics.wait` on a throwaway `SharedArrayBuffer`. `better-sqlite3` is fully synchronous, so making every repository method `async` just to `await` a backoff would be a needless cost; the synchronous block on a transient lock is the correct shape.
-</Note>
-
-The deviation from the literal plan is documented in the module header: instead of an app-level write-counter to trigger checkpoints, the recipe relies on SQLite's native `wal_autocheckpoint=50` PASSIVE checkpoint. It is the SQLite-blessed mechanism and needs no access to the raw handle.
+The retry sleep is synchronous and does not spin: it uses `Atomics.wait` on a throwaway `SharedArrayBuffer`. `better-sqlite3` is fully synchronous, so making every repository method `async` just to await a backoff would cost more than it gives. The recipe is exercised by `packages/db/src/board/__tests__/board.contention.test.ts`, which runs 20 worker threads against one database file when `CLAWBOO_CONCURRENCY_TEST=1` (CI's `test` job sets it).
 
 ## Orphan and stale reconciliation
 
-Two recovery passes keep the board from accumulating stuck work, one for crashes, one for abandonment. Both run in a single `immediateWrite` transaction and never block boot.
+Two recovery passes keep stuck work from piling up: one for crashes, one for abandonment. Each runs in a single `immediateWrite` transaction, publishes its `task_released` events only after commit, and never blocks boot. Both release work straight to `todo`, bypassing the transition table.
 
-**`reconcileOrphans` runs once at startup, gated on the heartbeat.** It takes `opts.staleAfterMs` (default `6 * TASK_HEARTBEAT_MS`, and the server passes the same `CLAWBOO_BOARD_STALE_TTL_MS` the sweep uses) and reaps a `running`, un-tombstoned `execution_processes` row only when its task row is missing or its `updatedAt` predates that cutoff. A row whose task is still beating belongs to a live process and must survive boot. Each reaped execution is marked `failed`, gets `recovery_tombstone=1` so a second pass is a no-op (no infinite auto-resume), and its task is released back to `todo` if the task is currently `in_progress` or `in_review`. The release clears the assignee, the assignee runtime, and the verification verdict, the same unassign-on-release discipline as `updateStatus(→todo)`. The server's boot sequence calls it best-effort, logging and continuing on failure.
+**`reconcileOrphans` runs once at startup and is liveness-aware.** It reaps a `running`, un-tombstoned execution row only when its task row is missing or the task's `updatedAt` is older than `opts.staleAfterMs` (the package default is `6 * TASK_HEARTBEAT_MS`; the server passes the same `CLAWBOO_BOARD_STALE_TTL_MS` the sweep uses). A row whose task still beats belongs to a live process, such as a second Clawboo on the same state directory or the previous server's drains during a fast restart, and must survive boot. Each reaped execution is marked `failed` with `orphaned: process not alive on restart` and `recovery_tombstone = 1`, so a second pass is a no-op, and its task is released to `todo` if it is `in_progress` or `in_review`, clearing the assignee, the assignee runtime and the verdict. A run that died but is not yet stale at boot keeps missing beats, and the interval sweep releases it once the TTL passes.
 
-**`reconcileStaleInProgress` runs at boot and on an interval.** It releases an `in_progress` task whose owner has stopped proving it is alive, whether that owner died with the server or wedged inside a live one. The release publishes a `task_released` lifecycle event, which detaches the task from any resident orchestrator still mapping it to a session and wakes that team's dispatch pump. A task that is `in_progress`, not dropped, whose `updatedAt` predates a TTL cutoff, **and** whose execution is still `running` is timed out (the exec → `timed_out`) and released to `todo`. The server wires it as one immediate sweep plus a `setInterval(...).unref()` loop.
+**`reconcileStaleInProgress` runs at boot and then on an interval.** It releases an `in_progress` task whose owner has stopped proving it is alive, whether that owner died with a previous server or wedged inside the current one. A task that is `in_progress`, not dropped, last updated before the TTL cutoff, and has a `running` execution is timed out (the execution becomes `timed_out` with `stale: no heartbeat within the watchdog window`) and released to `todo`. A task with no running execution has nothing beating it and is skipped. The `task_released` event detaches the task from any team engine still mapping it to a session and wakes that team's dispatch pump. The server wires it as one immediate sweep plus a `setInterval(...).unref()` loop.
 
 <Info>
-`tasks.updatedAt` **is** a liveness signal. Every drain that claims a task also beats it: `startTaskHeartbeat` bumps `updatedAt` every `TASK_HEARTBEAT_MS` (30 seconds) for as long as the run owns the task, and the beat is a timer, not a side effect of events, so a silent-but-alive run keeps beating. That turns the sweep from an hour-scale guess into a minutes-scale fact, so the TTL is `3` minutes by default (six missed beats), tunable via `CLAWBOO_BOARD_STALE_TTL_MS`; the sweep interval is `CLAWBOO_BOARD_STALE_SWEEP_MS`, default `60` seconds.
 
-The beat is what makes the short TTL safe, so **a drain that claims a task without beating it will have its live work swept**. There are three: the executor runner, the team orchestrator's `serverDeliver`, and the routines dispatcher. Any new one must beat too.
+`tasks.updatedAt` is a liveness signal. Every drain that claims a task also beats it: `startTaskHeartbeat` bumps `updatedAt` every `TASK_HEARTBEAT_MS` on a timer, not on events, so a run that is working silently keeps beating. The beat is what makes a short TTL safe, so a drain that claims a task without beating it will have its live work swept. There are three: the executor runner, the team engine's `serverDeliver`, and the OpenClaw routine dispatcher. Any new one must beat too.
 
-The orchestrator's own idle watchdog is still the first responder for a delegate that goes quiet: the per-team server orchestrator sweeps every 30 seconds and fails any delegate silent past `DELEGATION_IDLE_TIMEOUT_MS` (8 minutes), or past `OPEN_TOOL_CALL_TIMEOUT_MS` (24 minutes) while the delegate is still inside an unresolved tool call, since a build or a test run is legitimately silent. A delegation whose run has not started yet, because it is waiting behind another run on the same agent's home or connection lock, gets the pending-start allowance, `PENDING_START_TIMEOUT_MS` (the same 24 minutes). That wait is bounded underneath by `HOME_MUTEX_ACQUIRE_MS` (10 minutes by default, `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`): past it the delivery rejects and the task fails at once, so the allowance only catches a start that never settles. The idle window restarts when the run starts, so time spent waiting never counts against the 8 minutes. Because that watchdog is server-side, it keeps running whether or not a browser is open. The board's stale TTL plus its sweep interval must stay under that 8-minute window: the sweep is what publishes `task_released`, and that release is what detaches a stale session before the watchdog can reach it.
 </Info>
 
-## The no-migration-ladder model
+The timers that interact with these passes:
 
-There is no migration ladder. The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`) is the **sole** schema-creation source: it declares every table and column on a fresh database outright. The codebase carries no hand-written forward-only `ALTER`s either; the one in-place upgrade step, `reconcileSchema`, is _derived_ from that same DDL, adding whatever columns an existing database is missing (see [Database schema](/reference/database-schema#upgrading-an-existing-database)). A change that rewrites or removes an existing column is still a hard reset of the local DB. The package no longer ships `db:migrate` or `db:generate` scripts; only `db:studio` remains, and there is no `drizzle/` directory on disk.
+| Timer                        | Default | Override                        | What it bounds                                                            |
+| ---------------------------- | ------- | ------------------------------- | ------------------------------------------------------------------------- |
+| `TASK_HEARTBEAT_MS`          | 30 s    | none                            | How often a drain beats its task.                                         |
+| Stale TTL                    | 3 min   | `CLAWBOO_BOARD_STALE_TTL_MS`    | Missed beats before the sweep (and the boot reap) treats a run as dead.   |
+| Stale sweep interval         | 60 s    | `CLAWBOO_BOARD_STALE_SWEEP_MS`  | How often `reconcileStaleInProgress` runs.                                |
+| Engine watchdog sweep        | 30 s    | none                            | How often each chat's engine checks its delegations.                      |
+| `DELEGATION_IDLE_TIMEOUT_MS` | 8 min   | none                            | A delegate silent this long is failed by its engine.                      |
+| `OPEN_TOOL_CALL_TIMEOUT_MS`  | 24 min  | none                            | The allowance while a delegate is inside an unresolved tool call.         |
+| `PENDING_START_TIMEOUT_MS`   | 24 min  | none                            | The allowance for a delegation still waiting to start behind another run. |
+| `HOME_MUTEX_ACQUIRE_MS`      | 10 min  | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS` | The wait for a persistent-home agent's run lock before the start fails.   |
 
-`schema.ts` is the Drizzle **type layer** over the same tables, used for typed queries and `$inferSelect` / `$inferInsert` types, never to apply migrations. Because nothing keeps the two descriptions in sync automatically, `schemaSource.test.ts` is the guard: it builds a database via the real `createDb()`, reads the live `{ table → column-name set }` via `PRAGMA table_info`, and asserts it matches the same map derived from the `schema.ts` type layer (and vice versa). It also pins the posture, asserting the npm `files` array excludes `drizzle`, that no `db:migrate` / `db:generate` scripts exist, and that no migration-ladder directory is present.
+The engine's idle watchdog is the first responder for a delegate that goes quiet, and it runs on the server whether or not a browser is open. Its idle window restarts when the run starts, so time spent waiting for a lock never counts against the 8 minutes. The stale TTL plus the sweep interval must stay under that 8-minute window: the sweep's `task_released` is what detaches a stale session before the watchdog reaches it.
 
-<Note>
-`schemaSource.test.ts` compares **column names only**; column type, `NOT NULL`, `DEFAULT`, primary key, foreign key, and index drift are *not* checked, because the Drizzle-column → SQLite-PRAGMA mapping is lossy and would produce false drift. The test catches the drift that matters most (a column or table added to one source but not the other); deeper shape verification is deferred until a real schema change. The FTS5 virtual table and its shadow tables are excluded; they are raw DDL in `schemaBootstrap.ts` that Drizzle cannot model.
-</Note>
+## Board changes in the peer room
 
-## Design rationale and trade-offs
+After a board REST route writes a change, `reflectToRoom` (`apps/web/server/lib/teamChat/reflect.ts`) posts a `kind: 'system'` line authored by `clawboo` into the team's agent peer room (the `team_chat` table, read by the TeamChat MCP tools). That room is not the General chat a person sees. The post runs after the write, best-effort, and is never a way back into the board: the board is the authority and the room line is narration. See [Peer chat](/concepts/peer-chat).
 
-The board is a hand-written repository, not a generic ORM facade, for the same reason the claim is a conditional UPDATE rather than a transaction-wrapped read-modify-write: the correctness properties (single-assignee, legal transitions, crash recovery) are easier to _see_ and to test as explicit, single-purpose functions over five tables than as generated query plans. The pure state machine and the contention helpers are split out precisely so each can be reasoned about in isolation, transition legality with no database, lock handling with no business logic.
+## Schema: no migration ladder
 
-SQLite with the WAL recipe is the deliberate concurrency choice: it ships in-process, needs no server, and tolerates the team-scale write contention Clawboo needs without a database to administer. The single data-access layer is the seam where a future SQLite→Postgres or multi-tenant move would land; the dormant `tenant_id` column on every board table is the placeholder for it.
+The `CREATE TABLE IF NOT EXISTS` block in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`) is the only schema source: it declares every table and column on a fresh database. Upgrading an existing file is `reconcileSchema`, which is derived from the same DDL and only adds: it `ALTER TABLE ... ADD COLUMN`s whatever an existing database is missing and leaves extra columns alone, so an older file keeps a removed column harmlessly. Changing a column's type or constraints is not an in-place upgrade. A new column must be addable to a table that already has rows; the rules are on [Database schema](/reference/database-schema#upgrading-an-existing-database). The package ships no `db:migrate` or `db:generate` script (only `db:studio`) and no `drizzle/` directory.
 
-The cost is a second persistence layer beside each runtime's own session state, and a recovery surface (the two reconciliation passes plus the stale-sweep TTL) whose correctness rests on every claiming drain beating its task row. The board buys durability, race-freedom, and recoverability; the bill is that liveness is only as good as the beat, so a drain that claims without beating has its live work swept.
+`schema.ts` is the Drizzle type layer over the same tables, used for typed queries and `$inferSelect` / `$inferInsert`, never to migrate. `schemaSource.test.ts` keeps the two in step: it builds a database through `createDb()`, reads each table's columns with `PRAGMA table_info`, and asserts they match the type layer both ways. It compares column names only (type, `NOT NULL`, `DEFAULT`, keys and indexes are not checked, because the Drizzle-to-PRAGMA mapping is lossy), excludes the FTS5 tables, and also pins that no migration runner ships. `schemaReconcile.test.ts` guards the upgrade path: it holds every column added after the snapshot in `schemaBaseline.ts` to the addability rule. Re-snapshot that file only to record a deliberate exception, never to make a failing test pass.
 
-## Boundaries and non-goals
+## Design rationale
 
-- **Not the agent or session registry.** The board references agents, runtimes, and sessions by id (soft refs, no foreign key) and owns no agent identity, agent files, or live session state. Those belong to the [registry of record](/appendices/glossary) and the [runtime](/appendices/glossary). Only the internal `parent_task_id` self-reference is FK-enforced.
-- **Not a general-purpose tracker.** The statuses, transitions, and recovery passes are tuned for runtime-driven agent execution, not for a human-facing issue tracker.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.5.0. Multi-tenant scoping is a future seam, not a shipped feature.
+The board is a hand-written repository rather than a generic ORM facade, for the same reason the claim is a conditional `UPDATE` rather than a read-modify-write: the properties that matter (one assignee, legal transitions, crash recovery) are easier to see and to test as explicit single-purpose functions. The pure state machine and the contention helpers are split out so each can be reasoned about alone: transition legality with no database, lock handling with no business logic.
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+SQLite with the WAL recipe is a deliberate choice: it runs in-process, needs no database server, and handles team-scale write contention. The cost is a second persistence layer beside each runtime's own session state, and a recovery story (the two passes and the stale TTL) that holds only as long as every claiming drain beats its task.
 
-## See also
+## Boundaries
 
-- [The board](/concepts/the-board), the concept-level model this page implements
-- [The executor runner](/internals/executor-runner), the consumer that drives claim → run → verify → handoff
-- [Verification](/concepts/verification), the builder-≠-judge gate the `→ done` rule enforces
-- [Worktrees and handoff](/concepts/worktrees-and-handoff), the isolated world a task's work happens in
-- [Database schema](/reference/database-schema), the full table and column definitions
-- [Board API](/reference/rest-api/board), the REST surface over these primitives
-- [Glossary](/appendices/glossary), canonical term definitions
+- **Not the agent or session registry.** The board references agents, runtimes and sessions by id, with no foreign key, and owns no agent identity, agent files or live session state. Its foreign keys all point inside the board: `parent_task_id` at the parent task, each `task_deps`, `task_comments`, `workspaces` and `execution_processes` row at its task, and an execution row at its workspace. See [AgentSource](/internals/agent-source).
+- **Not a general-purpose tracker.** The statuses, transitions and recovery passes are tuned for runtime-driven work.
+- **Single tenant.** Every board table has a `tenant_id` column, always null; no read filters by it.
+
+## Related
+
+- [The board](/concepts/the-board): the user-level model this layer implements
+- [The executor runner](/internals/executor-runner): the consumer that claims, runs, verifies and releases
+- [Verification](/concepts/verification): the gate behind `verification_required`
+- [Database schema](/reference/database-schema): every table and column
+- [Board API](/reference/rest-api/board): the REST surface over these functions

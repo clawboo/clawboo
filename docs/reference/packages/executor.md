@@ -1,143 +1,222 @@
 ---
-title: '@clawboo/executor'
-description: The RuntimeAdapter trait, the normalized RuntimeEvent lifecycle union, the adapter contract suite, and KV-cache prompt-tier primitives.
+title: 'Write a runtime adapter'
+sidebarTitle: 'Write an adapter'
+description: 'Build a runtime adapter on @clawboo/executor: declare honest capabilities, map native frames to RuntimeEvent, and pass the shared contract suite.'
+keywords:
+  [
+    '@clawboo/executor',
+    'executor',
+    'RuntimeAdapter',
+    'RuntimeEvent',
+    'runAdapterContract',
+    'contract suite',
+    'tiers',
+    'add a runtime',
+  ]
 ---
 
-|                    |                                                                                                                                                                                               |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Version**        | `0.1.0`                                                                                                                                                                                       |
-| **Purity**         | pure zero-dep (browser-safe; no `node:*`, no workspace deps)                                                                                                                                  |
-| **Purpose**        | The runtime-adapter trait + the normalized lifecycle-event union every heterogeneous agent runtime emits, plus the contract suite adapters must pass and the KV-cache prompt-tier primitives. |
-| **Workspace deps** | none                                                                                                                                                                                          |
-| **External deps**  | none at runtime. `./contract` imports `vitest` (kept `external` so it binds to the consumer's instance).                                                                                      |
+`@clawboo/executor` is the package every runtime adapter builds on. An adapter starts a run on one runtime (a
+coding CLI, an SDK, a long-lived connection) and turns that runtime's own output into the shared `RuntimeEvent`
+stream that the task runner, the team engine and the dashboard read.
 
-This is the substrate the whole multi-runtime executor is built on: a single `RuntimeAdapter` interface over every runtime (OpenClaw, clawboo-native, Claude Code, Codex, Hermes), a 7-variant `RuntimeEvent` union the orchestrator/board/UI consume so they stay decoupled from per-runtime quirks, a `runAdapterContract` suite every adapter must pass, and cache-discipline helpers for prompt assembly.
+Use this page when you write the adapter package for a new runtime or change an existing one. The interface is
+explained member by member in [The RuntimeAdapter trait](/internals/runtime-adapter). Wiring a finished adapter
+into the server is the [Add a runtime](/internals/runtime-adapter#add-a-runtime) checklist.
 
-Three barrels, each its own subpath in `package.json` `exports`:
+## What you import
 
-- `.` → `src/index.ts`: the app-safe barrel (trait, event union, registry, async queue, session rotation, integration plan, steering helpers). No test deps.
-- `./contract` → `src/contract.ts`: the adapter contract test suite. Imports `vitest`; never pulled through `.`.
-- `./tiers` → `src/tiers/index.ts`: KV-/prompt-cache discipline primitives.
+| Entry point                  | What an adapter author uses from it                                                                                                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@clawboo/executor`          | `RuntimeAdapter`, `Capabilities` and the run types; the `RuntimeEvent` union; `createAsyncQueue`; `steerThroughDriver`; `withIdleTimeout`; the session-rotation helpers; `resolveRuntimeIntegration` |
+| `@clawboo/executor/contract` | `runAdapterContract` and the `AdapterTestHarness` type. It imports vitest, so use it from tests only.                                                                                                |
+| `@clawboo/executor/tiers`    | `assembleTiers`, `sortToolDefs` and `dateStamp`, which keep a prompt in cache-friendly order                                                                                                         |
 
-## Public API
+The package has no dependencies and imports nothing from `node:*`. Keep your adapter the same way: it never spawns
+a process or opens a socket. A driver on the server does that, and the adapter receives it as an injected factory,
+or as a connected client in OpenClaw's case.
 
-### `.`, main barrel (`src/index.ts`)
+## Before you begin
 
-#### Functions
+- Know how the runtime runs without a person at the keyboard (an SDK call, a CLI with machine-readable output, a
+  long-lived connection) and what it reports: text deltas, tool calls, token usage, cost.
+- Read [Runtime adapters](/reference/packages/adapters) to see how the six existing adapters differ, and pick the
+  closest one to copy. For a CLI or an SDK that runs once per task, that is Claude Code, Codex or Hermes.
 
-| Export                      | Signature                                               | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `assertExhaustive`          | `(x: never) => never`                                   | Compile-time exhaustiveness guard for a `switch` over `RuntimeEvent`; throws at runtime if reached.                                                                                                                                                                                                                                                                                                                                                              |
-| `resolveRuntimeIntegration` | `(caps: Capabilities) => RuntimeIntegrationPlan`        | Pure: turns a runtime's declared capabilities into the integration plan the host branches on (never on a runtime id). Conservative default: an absent claim resolves to the one-shot path.                                                                                                                                                                                                                                                                       |
-| `createAsyncQueue`          | `<T>(opts?: { max?: number }) => AsyncQueue<T>`         | Single-consumer push/pull queue that bridges a callback event source into an `AsyncIterable`. Drop-oldest backpressure at `max` (default 1000).                                                                                                                                                                                                                                                                                                                  |
-| `shouldRotate`              | `(t: RotationTrigger) => boolean`                       | True when the session has consumed `thresholdPct` of its context window. A non-positive `contextWindow` or `thresholdPct` disables the watermark.                                                                                                                                                                                                                                                                                                                |
-| `buildRotationHandoffNote`  | `(h: RotationHandoff) => string`                        | Renders the short structured handoff note threaded into a successor session's prompt (data, not transcript).                                                                                                                                                                                                                                                                                                                                                     |
-| `rotateSession`             | `(opts: RotateSessionOpts) => Promise<RunHandle>`       | Rotates to a fresh successor session at the run boundary: serialize (best-effort), render the note, `restart`, then `recordRotation` (best-effort). Returns the successor handle.                                                                                                                                                                                                                                                                                |
-| `steeringOf`                | `(caps: Capabilities) => SteeringMode`                  | The steering mode a capability set declares, an omitted `steering` read as `'none'`.                                                                                                                                                                                                                                                                                                                                                                             |
-| `steerThroughDriver`        | `(driver, text, mode, opts?) => Promise<SteerResult>`   | The shared `steer()` body for adapters that hold one driver per run: a missing driver is `no-run`, a driver without `steer` is `unsupported`, a passive steer on an `'interrupt-resume'` adapter is `unsupported`, a driver answering `false` is `run-ended`, and a throw becomes `rejected` with its message. Never throws.                                                                                                                                     |
-| `withIdleTimeout`           | `<T>(src: AsyncIterable<T>, opts) => AsyncGenerator<T>` | Bounds a drain against an adapter iterator that hangs. Silence past `idleMs` fires `onIdle` (the caller aborts there), then a grace window lets the adapter surface its own terminal so normal teardown still runs. The timer is **idle-reset, not a total budget**: every event re-arms it, so a long streaming run never trips. Distinct from the engine's 8-minute delegate watchdog, which fails the TASK; this frees the process-side resources beneath it. |
+## Write the adapter
 
-#### Types & interfaces
+<Steps>
 
-| Export                   | Kind       | Contract                                                                                                                                                                                                                                                                                                 |
-| ------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RuntimeEvent`           | union type | The normalized 7-variant lifecycle union: `text-delta`, `tool-call`, `tool-result`, `status`, `cost`, `done`, `error` over `RuntimeEventBase`.                                                                                                                                                           |
-| `RuntimeEventKind`       | union type | The seven event-kind string literals.                                                                                                                                                                                                                                                                    |
-| `RuntimeEventBase`       | interface  | Common envelope: `{ runId, sessionId, ts, seq }`. `seq` is a strictly increasing per-stream tiebreaker.                                                                                                                                                                                                  |
-| `Usage`                  | interface  | `{ inputTokens, outputTokens, cachedInputTokens? }` token usage for a run.                                                                                                                                                                                                                               |
-| `RuntimeAdapter`         | interface  | One interface over every runtime: `id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`, optional `steer()`/`sessionCodec`/`dispose()`.                                                                                                |
-| `RuntimeId`              | type       | Known runtime ids (`openclaw`/`claude-code`/`codex`/`hermes`) as autocomplete hints over an open `string` set.                                                                                                                                                                                           |
-| `ParticipantKind`        | type       | `'agent' \| 'human'`, reserved seam; nothing branches on `'human'` yet.                                                                                                                                                                                                                                  |
-| `Capabilities`           | interface  | What a runtime can do: `streaming`, `mcp`, `worktrees`, `resume`, `toolApproval`, `models[]`, optional `contextWindowTokens`, optional `steering` (how `steer()` reaches a run that is already working; absent means `'none'`, so a host asks rather than hoping) + the native-preservation seam fields. |
-| `SteeringMode`           | type       | `'live' \| 'interrupt-resume' \| 'none'`: `live` takes a message into the turn in progress; `interrupt-resume` stops the run and resumes its session with it, inside the same run; `none` has no mid-run channel.                                                                                        |
-| `SteerResult`            | union type | `{ delivered: true; mode: 'live' \| 'interrupt-resume' }` or `{ delivered: false; reason: 'no-run' \| 'run-ended' \| 'unsupported' \| 'rejected'; detail? }`.                                                                                                                                            |
-| `SteerOptions`           | interface  | `{ passive?: boolean }`: an ambient FYI that may ride along but never keeps a finishing run going and never stops a run.                                                                                                                                                                                 |
-| `SteerableDriver`        | interface  | `{ steer?(text, opts?): Promise<boolean> }`, the per-run driver slice `steerThroughDriver` drives (`true` taken, `false` run ended, throw refused).                                                                                                                                                      |
-| `RuntimeClass`           | type       | `'wrapped-oneshot' \| 'connected-substrate' \| 'native'`: how a runtime composes with the host.                                                                                                                                                                                                          |
-| `NativeHomeClaim`        | interface  | A runtime's CLAIM about its state home: `{ scope: 'per-identity' \| 'per-run'; persist: boolean }`. The host materializes the path.                                                                                                                                                                      |
-| `HealthResult`           | interface  | `{ ok: boolean; message?: string }`.                                                                                                                                                                                                                                                                     |
-| `TaskHandle`             | interface  | `{ taskId?, teamId? }`, board references for a run (both optional for ad-hoc runs).                                                                                                                                                                                                                      |
-| `StartOpts`              | interface  | `{ agentId, sessionKey, message, model?, context?, childToolBlocklist? }`, inputs to `start()`.                                                                                                                                                                                                          |
-| `RunHandle`              | interface  | `{ adapterId, sessionKey, runId }`. `runId` is late-bound (null until the first lifecycle frame).                                                                                                                                                                                                        |
-| `SessionCodec`           | interface  | Optional `serialize(run)` / `restore(blob)` for session resume.                                                                                                                                                                                                                                          |
-| `IntegrationHome`        | union type | `{ kind: 'persistent'; scope: 'per-identity' } \| { kind: 'ephemeral' } \| { kind: 'connected' }`.                                                                                                                                                                                                       |
-| `RuntimeIntegrationPlan` | interface  | The normalized plan `resolveRuntimeIntegration` returns: `{ home, preserveSkills, preserveMemory, useGatewayChannels, coRunScheduler: false }`.                                                                                                                                                          |
-| `AsyncQueue<T>`          | interface  | `AsyncIterable<T>` with `push(value)`, `close()`, `readonly closed`.                                                                                                                                                                                                                                     |
-| `RotationTrigger`        | interface  | `{ tokensUsed, contextWindow, thresholdPct }`, the watermark input.                                                                                                                                                                                                                                      |
-| `RotationHandoff`        | interface  | The structured rotation handoff: `{ taskId, predecessorSessionKey, predecessorSessionId, reason, lastSummary, tokensUsed, rotationIndex }`.                                                                                                                                                              |
-| `RotateSessionOpts`      | interface  | Injected side-effects: `{ adapter, current, handoff, restart, recordRotation? }`, keeps `rotateSession` DB-free + runtime-agnostic.                                                                                                                                                                      |
+<Step title="Create the package">
 
-#### Classes
+Make `packages/adapters/<id>/` with `@clawboo/executor` as its only workspace dependency and vitest as a dev
+dependency (the [Packages](/reference/packages/index) page has the full recipe). Export the adapter class, a type
+for the runtime's native frames, and a pure function that maps one native frame to `RuntimeEvent[]`.
 
-| Export            | Signature | Contract                                                                                                          |
-| ----------------- | --------- | ----------------------------------------------------------------------------------------------------------------- |
-| `RuntimeRegistry` | `class`   | Open set of adapters keyed by id: `register(adapter)`, `unregister(id)`, `get(id)`, `has(id)`, `ids()`, `list()`. |
+The per-run pattern keeps the adapter small. The constructor takes `(driverFactory, healthCheck?)`. `start()` calls
+the factory once per run, the driver exposes `start()`, `onEvent(handler)` (returning an unsubscribe function),
+`abort()`, `setModel()`, `writeContext()` and an optional `steer()`, and the adapter delegates to it.
 
-#### Constants
+</Step>
 
-| Export             | Value                                              | Contract                                                                            |
-| ------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `DEFAULT_ROTATION` | `{ thresholdPct: 0.85, maxRotations: 3 } as const` | Conservative rotation defaults; `maxRotations` bounds the successor chain per task. |
+<Step title="Declare only true capabilities">
 
-### `./tiers`, prompt-cache discipline (`src/tiers/index.ts`)
+`capabilities()` tells the host what the runtime can do: `streaming`, `mcp`, `worktrees`, `resume`, `toolApproval`,
+`models`, and optionally `steering`, `contextWindowTokens` and the integration fields (`runtimeClass`,
+`nativeHome`, `nativeSkills`, `nativeMemory`, `nativeChannels`, `nativeScheduler`). The host routes on these through
+`resolveRuntimeIntegration` and never on the runtime id. A missing claim is read conservatively: no `steering`
+means `none`, and no `runtimeClass` means a one-shot run.
 
-KV-/prompt-cache primitives: stable → context → volatile tier ordering, deterministically-sorted tool definitions, date-only timestamps. Pure + browser-safe.
+<Warning>
 
-#### Functions
+`toolApproval: true` says the runtime can ask before it uses a tool. It does not mean Clawboo's runs are gated:
+Clawboo drives Claude Code, Codex and Hermes with their own approval prompts and sandboxes turned off. See
+[What agents can do](/concepts/permissions) before you describe a runtime's safety anywhere.
 
-| Export          | Signature                                        | Contract                                                                                                                                                                                         |
-| --------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `assembleTiers` | `(tiers: PromptTiers) => AssembledPrompt`        | Joins `stable → context → volatile` so the frozen content is the cacheable head; reports `stablePrefix`, `stablePrefixBytes` (UTF-8), and suggested `cacheBreakpoints`. Empty tiers are skipped. |
-| `dateStamp`     | `(d: Date) => string`                            | UTC `YYYY-MM-DD` only, never minute/second precision (fine-grained timestamps bust the KV prefix cache).                                                                                         |
-| `sortToolDefs`  | `<T extends ToolDef>(defs: readonly T[]) => T[]` | Non-mutating sort by `name`. Tool-array order is a cache key; an unsorted list busts the tool-definitions prefix.                                                                                |
+</Warning>
 
-#### Types & interfaces
+</Step>
 
-| Export            | Kind      | Contract                                                                                           |
-| ----------------- | --------- | -------------------------------------------------------------------------------------------------- |
-| `ToolDef`         | interface | `{ name: string; [k: string]: unknown }`, a tool definition with the cache-stable `name` sort key. |
-| `PromptTiers`     | interface | `{ stable, context, volatile }`, the three tiers ordered by change frequency.                      |
-| `CacheBreakpoint` | interface | `{ offset: number; label: 'stable' \| 'context' }`, a suggested `cache_control` byte offset.       |
-| `AssembledPrompt` | interface | `{ prompt, stablePrefix, stablePrefixBytes, cacheBreakpoints }`.                                   |
+<Step title="Map native frames to RuntimeEvent">
 
-<Note>
-`cacheBreakpoints` are suggestions for an Anthropic-style consumer. OpenAI auto-prefix-caches and ignores them; OpenClaw's Gateway owns caching and ignores them too.
-</Note>
+There are seven event kinds: `text-delta` (with `channel` set to `assistant` or `reasoning`), `tool-call`,
+`tool-result`, `status`, `cost`, `done` (reason `success`, `max_turns`, `aborted` or `error`) and `error` (with a
+`fatal` flag). Every event carries `runId`, `sessionId`, `ts` and a strictly increasing `seq`. Follow these rules:
 
-### `./contract`, adapter contract suite (`src/contract.ts`)
+- `start()` returns `runId: null`. Bind the run id from the first native frame that carries one, and fall back to
+  the session key.
+- A runtime with no incremental text emits one `text-delta` that carries the whole message.
+- Put provider USD in `costUsd` only when the runtime reports it. If it reports tokens but no price, send
+  `costUsd: null`, `estimated: true` and the usage. If it reports neither, emit no `cost` event.
+- Drop frames you do not recognise instead of throwing.
+- End every run with `done`, or with an `error` whose `fatal` is `true`.
 
-The suite every `RuntimeAdapter` must pass. Imports `vitest`, so it lives only under this subpath and is never re-exported from the main barrel.
+`createAsyncQueue` turns the driver's callback into the async iterable `events()` returns. It drops the oldest
+event when full, and closing the iterator closes the queue, which is how `events()` releases its subscription.
 
-#### Functions
+</Step>
 
-| Export               | Signature                               | Contract                                                                                                                                                                                                                                                 |
-| -------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runAdapterContract` | `(harness: AdapterTestHarness) => void` | Drives a runtime-agnostic scenario through the adapter and asserts the normalized output (stable id, well-formed capabilities, health < 2s, late-bound runId, monotonic `seq`, `done:success`/`done:aborted`, abort/setModel/writeContext side-effects). |
+<Step title="Implement the control members">
 
-#### Types & interfaces
+- `abort()` cancels the run. The stream must still end with `done` (reason `aborted`); the contract suite checks
+  it, and the host treats that event as the end of the run.
+- `setModel()` and `writeContext()` reach the driver. A runtime that fixes its model at launch may treat
+  `setModel()` as a no-op, as the Claude Code, Codex and Hermes drivers do.
+- If you declare `steering`, implement `steer()` with `steerThroughDriver(driver, text, mode, opts)`. It returns
+  `no-run` with no driver, `unsupported` when the driver has no `steer` or a passive message meets an
+  `interrupt-resume` runtime, `run-ended` when the driver answers `false`, and `rejected` when it throws.
+- If the runtime can resume a session, expose a `sessionCodec` that serializes the session id.
 
-| Export               | Kind      | Contract                                                                                                                            |
-| -------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `RecordedCall`       | interface | `{ method: string; params: unknown }`, a side-effect (setModel/abort/writeContext) the adapter issued, for assertions.              |
-| `ContractFrames`     | interface | Abstract native-frame builders the harness supplies: `delta`, `toolCall`, `final`, `aborted`, `error`.                              |
-| `AdapterTestHarness` | interface | The runtime-specific glue the suite drives: `label`, `makeAdapter()`, `start(adapter)`, `emit(frame)`, `frames`, `recordedCalls()`. |
+</Step>
 
-## Used by
+<Step title="Pass the contract suite">
 
-- **`@clawboo/adapter-openclaw`, `-native`, `-claude-code`, `-codex`, `-hermes`**, implement `RuntimeAdapter`, emit `RuntimeEvent`, declare `Capabilities`, and run the `./contract` suite (`RecordedCall` imported in each adapter's `testing/fake*Driver.ts`).
-- **`apps/web`**, `executorRunner.ts` imports `assembleTiers` from `./tiers` and drives the trait + rotation; `runtimes/native/conversation.ts` imports `dateStamp`. The runner uses `RuntimeRegistry`, `shouldRotate`/`rotateSession`/`DEFAULT_ROTATION`, and `resolveRuntimeIntegration`.
-- **`@clawboo/evals`**, depends on the executor surface for its harness.
+In the adapter's tests, build an `AdapterTestHarness` over a fake driver and call `runAdapterContract`. The harness
+says how to make the adapter, start a run, emit a native frame, and list the side effects the adapter issued.
 
-## Source
+```ts
+import { runAdapterContract, type AdapterTestHarness } from '@clawboo/executor/contract'
 
-- Main barrel: [`packages/executor/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/executor/src/index.ts)
-- Contract barrel: `packages/executor/src/contract.ts`
-- Tiers barrel: `packages/executor/src/tiers/index.ts`
-- Subpath mapping: `packages/executor/package.json` `exports` + `packages/executor/tsup.config.ts`
+function makeHarness(): AdapterTestHarness {
+  let driver = new FakeDriver()
+  return {
+    label: 'my-runtime',
+    makeAdapter: () => {
+      driver = new FakeDriver()
+      return new MyRuntimeAdapter(() => driver)
+    },
+    start: (adapter) =>
+      adapter.start({}, { agentId: 'a1', sessionKey: 'agent:a1:main', message: 'hi' }),
+    emit: (frame) => driver.emit(frame as MyNativeFrame),
+    frames: {
+      delta: (text) => ({ type: 'text', text }),
+      toolCall: (name, input) => ({ type: 'tool-call', id: 'tc-1', name, input }),
+      final: (summary) => ({ type: 'result', ok: true, summary }),
+      aborted: () => ({ type: 'result', ok: false, aborted: true, summary: '' }),
+      error: (message) => ({ type: 'result', ok: false, errorMessage: message, summary: '' }),
+    },
+    recordedCalls: () => driver.calls,
+  }
+}
 
-## See also
+runAdapterContract(makeHarness())
+```
 
-- [RuntimeAdapter trait (internals)](/internals/runtime-adapter)
-- [Executor runner (internals)](/internals/executor-runner)
-- [Runtimes overview](/runtimes/index)
-- [Package overview](/reference/packages/index)
+The suite checks a stable id, a well-formed `capabilities()`, a `health()` that answers within two seconds, a
+late-bound `runId`, increasing `seq`, a run that ends in `done: success` or `done: aborted`, and that `abort`,
+`setModel` and `writeContext` reach the driver. Run it with `pnpm --filter @clawboo/adapter-<id> test`; you should
+see a `RuntimeAdapter contract` block pass. Put runtime-specific tests in the same file.
+
+</Step>
+
+<Step title="Wire it into the server">
+
+Follow the [Add a runtime](/internals/runtime-adapter#add-a-runtime) checklist. In short: a driver under
+`apps/web/server/lib/runtimes/`, a descriptor entry, a case in `adapterFactoryFor()` with a health check, a
+capability source, an agent source, an `AGENT_FILE_RUNTIME_SUPPORT` row, and the dashboard's runtime catalog.
+
+</Step>
+
+<Step title="Check it end to end">
+
+Run `pnpm build` and `pnpm test`, start the dev server, and connect the runtime from the Runtimes panel. Create a
+board task, then run it with `POST /api/runtimes/<id>/run` and a body of `taskId` plus `"kind": "research"`. A
+`code` task (the default kind) also needs a `repoPath` for its worktree, or the run is refused with
+`workspace_unavailable`. The request stays open until the run ends (see [Runtimes API](/reference/rest-api/runtimes)).
+You should get a `200` response with `"ok": true` and a `doneReason`.
+
+</Step>
+
+</Steps>
+
+## How the host treats your adapter
+
+- **A fresh adapter per run.** The server builds one through `adapterFactoryFor(id)` for each run, so keep no
+  cross-run state in the adapter. `RuntimeRegistry` is exported but the server does not use it.
+- **Silence ends a run.** The task runner and the team engine wrap your stream in `withIdleTimeout`. Past the
+  silence ceiling (`CLAWBOO_RUN_SILENT_TIMEOUT_MS`) the host calls `abort()` and waits a short grace period for
+  your terminal event, then ends the stream itself.
+- **Rotation needs a window.** With `contextWindowTokens` set, the task runner starts a successor session before
+  the window fills. A `done` with reason `max_turns` triggers rotation too.
+- **Missing cost is estimated or skipped.** A `cost` event with `costUsd: null` and usage is priced from the
+  tokens and marked as an estimate. A runtime that reports no usage records no spend on task-runner runs; team
+  chat estimates it from characters. See [Budgets and spend](/using/budgets-and-spend) for what users see.
+- **Some claims change the path.** A runtime that declares `runtimeClass: 'connected-substrate'` is refused by the
+  task runner, and one that declares `worktrees: false` gets no task worktree.
+- **Prompt order.** The task runner builds every prompt with `assembleTiers`, frozen content first. No Clawboo
+  code reads the `cacheBreakpoints` it returns.
+
+## Troubleshooting
+
+<AccordionGroup>
+
+<Accordion title="The contract block does not appear in the test output">
+
+The suite registers its tests on the vitest the adapter package resolves, because the package keeps vitest
+external. Add `vitest` to the adapter's `devDependencies`, run `pnpm install`, and call `runAdapterContract` from a
+file that vitest collects (`src/__tests__/*.test.ts`).
+
+</Accordion>
+
+<Accordion title="A stopped run takes a long time to end">
+
+After `abort()`, the stream must still yield `done` with reason `aborted`. Without it, the run ends only when the
+silence ceiling closes the stream. If the driver drops its listeners on abort, synthesize that event in the
+adapter.
+
+</Accordion>
+
+<Accordion title="Spend shows nothing for the new runtime">
+
+The mapper emitted no `cost` event. Emit one with the token usage, even when the runtime reports no price.
+
+</Accordion>
+
+</AccordionGroup>
+
+## Related
+
+- [The RuntimeAdapter trait](/internals/runtime-adapter): every member and event kind explained.
+- [Runtime adapters](/reference/packages/adapters): how the six existing adapters differ.
+- [The executor runner](/internals/executor-runner): how a task run claims, isolates, drives and verifies.
+- [What agents can do](/concepts/permissions): the safety posture of each runtime.
+- [Choose a runtime](/runtimes/index): the runtimes as users see them.

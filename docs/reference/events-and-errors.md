@@ -1,123 +1,181 @@
 ---
-title: Orchestration events and error taxonomy
-description: Reference for the append-only orchestration event kinds and the runtime error classification used across observability.
+title: 'Events and errors reference'
+sidebarTitle: 'Events and errors'
+description: 'The 25 orchestration event kinds and their data, the classes Clawboo sorts failures into, the codes in the log, and where each one appears.'
+keywords:
+  [
+    'event log',
+    'orchestration events',
+    'error taxonomy',
+    'harness bug',
+    'PolicyDenied',
+    'grant_decision',
+    'connector_health',
+    'traces',
+    'fleet health',
+  ]
 ---
 
-The orchestration **event log** is the append-only stream every observability surface reads. It is simultaneously the always-on local trace store (a trace is all events sharing a `traceId`, ordered by `seq`), the graph-projection source (delegation / status / cost), and the metric + error-taxonomy source. This page is the reference for the two typed contracts that define it: the **event kinds** (the discriminated union in `@clawboo/obs`) and the **runtime error classes** (the Cursor-model classifier).
+Clawboo records what its agents do in an append-only event log inside its SQLite database (the `orchestration_events` table). The **Observability** and **Fleet** panels and the **Activity** feeds on tasks, agents and teams all read it. This page lists every event kind with its data, the classes Clawboo sorts failures into, and the codes you may find in the log.
 
-Both contracts live in `@clawboo/obs`, pure, browser-safe, zero runtime dependency on the OTel SDK. Events are persisted insert-only with secrets scrubbed; one trace per board task, spans per run / tool.
+These are the orchestration events defined in `@clawboo/obs`. The OpenClaw Gateway's own events, which the dashboard handles in the browser, are a separate stream (see [Event pipeline](/internals/event-pipeline)).
 
-## At a glance
+## Event kinds
 
-| Contract              | Export                                 | Count                    | Source                                |
-| --------------------- | -------------------------------------- | ------------------------ | ------------------------------------- |
-| Event kinds           | `ORCHESTRATION_EVENT_KINDS` (`z.enum`) | 23 kinds                 | `packages/obs/src/events/schema.ts`   |
-| Correlation envelope  | `orchestrationEventSchema` (Zod)       | 13 fields                | `packages/obs/src/events/schema.ts`   |
-| Error classes         | `RUNTIME_ERROR_CLASSES`                | 8 classes                | `packages/obs/src/taxonomy/errors.ts` |
-| Classifier            | `classifyError(code, message)`         | regex rules, first-match | `packages/obs/src/taxonomy/errors.ts` |
-| Harness-bug predicate | `isHarnessBug(cls)`                    | `Unknown` ⇒ `true`       | `packages/obs/src/taxonomy/errors.ts` |
+There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 
-<Note>
-The kinds are an **append-only enum**; kinds are added (e.g. `session_rotated`, the `routine_*` family, the `team_chat_post` family), never renamed or removed, so old traces keep parsing. Each addition lands in `@clawboo/obs` before any emit site.
-</Note>
+| Kind                                          | Group      | Records                                                        | Written by                                                  | Activity badge     |
+| --------------------------------------------- | ---------- | -------------------------------------------------------------- | ----------------------------------------------------------- | ------------------ |
+| [`task_created`](#task_created)               | Board      | A task was created                                             | Board API, team engine                                      | task               |
+| [`task_claimed`](#task_claimed)               | Board      | An agent was given a task                                      | Board API, team engine                                      | claim              |
+| [`status_changed`](#status_changed)           | Board      | A task moved to another status                                 | Board API, team engine                                      | status             |
+| [`comment_added`](#comment_added)             | Board      | A comment landed on a task                                     | Board API, team engine                                      | note               |
+| [`dep_linked`](#dep_linked)                   | Board      | A task was made to wait for another                            | Board API, team engine                                      | (hidden)           |
+| [`execution_started`](#execution_started)     | Runs       | A run of a task started                                        | Task runner, team engine, board API, OpenClaw routine fires | run                |
+| [`execution_completed`](#execution_completed) | Runs       | A run finished                                                 | Task runner, team engine, board API, OpenClaw routine fires | run                |
+| [`tool_call`](#tool_call)                     | Runs       | An agent called a tool                                         | Task runner, team engine, OpenClaw session watcher          | tool               |
+| [`tool_result`](#tool_result)                 | Runs       | A tool returned                                                | Task runner, team engine, OpenClaw session watcher          | result             |
+| [`cost`](#cost)                               | Runs       | Spend and tokens reported during a run                         | Task runner, OpenClaw routine fires                         | cost               |
+| [`session_rotated`](#session_rotated)         | Runs       | A run moved to a fresh session                                 | Task runner                                                 | session rotated    |
+| [`approval_requested`](#approval_requested)   | Approvals  | Declared; nothing writes it                                    | None                                                        | approval           |
+| [`approval_resolved`](#approval_resolved)     | Approvals  | An abandoned approval expired                                  | Approval reaper                                             | approval           |
+| [`error`](#error)                             | Errors     | A failure, sorted into an [error class](#error-classes)        | Task runner, team engine                                    | error              |
+| [`span_start`](#span_start)                   | Traces     | A task-runner run span opened                                  | Task runner                                                 | (hidden)           |
+| [`span_end`](#span_end)                       | Traces     | A run span closed                                              | Task runner                                                 | (hidden)           |
+| [`routine_fired`](#routine_fired)             | Routines   | A due routine was picked up                                    | Routines engine                                             | routine fired      |
+| [`routine_dispatched`](#routine_dispatched)   | Routines   | A routine's work was handed to its target                      | Routines engine                                             | routine dispatched |
+| [`routine_completed`](#routine_completed)     | Routines   | A routine fire succeeded and the routine re-armed              | Routines engine                                             | routine completed  |
+| [`routine_error`](#routine_error)             | Routines   | A routine fire failed                                          | Routines engine                                             | routine error      |
+| [`team_chat_post`](#team_chat_post)           | Peer room  | An agent posted through the TeamChat MCP server                | TeamChat MCP over HTTP                                      | team chat post     |
+| [`speaker_selected`](#speaker_selected)       | Peer room  | The agents' exchange picked the next speaker                   | Team exchange API                                           | speaker selected   |
+| [`turn_bound_hit`](#turn_bound_hit)           | Peer room  | An agents' exchange ended                                      | Team exchange API                                           | turn bound hit     |
+| [`grant_decision`](#grant_decision)           | Connectors | A grant check allowed, paused or refused a connector tool call | Tool broker                                                 | grant              |
+| [`connector_health`](#connector_health)       | Connectors | A connector's health changed                                   | Connector supervisor                                        | connector          |
 
----
+- **Board API** means the board routes the dashboard calls. Board changes made through the [Tasks MCP tools](/reference/mcp-tools) or by the task runner itself update the live board views but are not written to the log as board events.
+- **Task runner** runs serve `POST /api/runtimes/:id/run` and agent routine fires on runtimes other than OpenClaw. **Team engine** runs serve team chat and the tasks it delegates. See [How a team works](/intro/how-it-works) for the two paths.
+- **Peer room** events concern the agents' peer room behind the [TeamChat server](/reference/mcp-tools#teamchat-server), not the team chat you use in the dashboard.
+- A runtime mirror can also push `tool_call`, `tool_result`, `error`, `grant_decision` and `connector_health` through `POST /api/obs/ingest` (see [Writing events from outside](#writing-events-from-outside)).
 
-## The correlation envelope
+## Error classes
 
-Every event, regardless of kind, validates against `orchestrationEventSchema`. The runtime schema validates the envelope **strictly** but treats `data` as an open object (`z.record`), so an emit site can never drop an event on a minor data-shape drift. Observability captures best-effort; the kind → `data` shapes below are TypeScript interfaces (a discriminated union) that keep producers and projection reducers typed without risking event loss at the wire.
+Every failure an `error` event records is sorted into one class by matching its code and message. Anything that matches no class is `Unknown`, which Clawboo treats as a **harness bug**: a failure its run machinery could not explain, worth a look rather than routine noise.
+
+| Class             | Meaning                                   | Matches, for example (case-insensitive)                                                                                   | Harness bug |
+| ----------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `RateLimited`     | The provider throttled the request        | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`                                                   | No          |
+| `UserAborted`     | A person or Clawboo stopped the run       | `abort`, `aborted`, `cancel`, `cancelled`, `sigint`, `sigterm`                                                            | No          |
+| `Timeout`         | Something took too long                   | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                  | No          |
+| `UnexpectedEnv`   | The machine was missing something         | `enoent`, `eacces`, `eperm`, `command not found`, `permission denied`, `not installed`, `cannot find module`              | No          |
+| `ContextOverflow` | The prompt was too long for the model     | `context length`, `context window`, `prompt is too long`, `maximum context`, `too many tokens`                            | No          |
+| `InvalidArgs`     | The request was malformed                 | `400`, `422`, `invalid argument`, `bad request`, `validation`, `missing required`, `schema`, `malformed`                  | No          |
+| `ProviderError`   | The provider failed                       | `500`, `502`, `503`, `504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `api error` | No          |
+| `Unknown`         | Nothing matched, or the error had no text | Anything else                                                                                                             | Yes         |
+| `PolicyDenied`    | A guardrail refused a call (expected)     | Task-runner runs only; see [PolicyDenied](#policydenied)                                                                  | No          |
+
+### PolicyDenied
+
+In a task-runner run, an `error` whose code is `policy_denied`, `permission_denied`, `denied`, `forbidden`, `unauthorized`, `eperm` or `eacces` (in any case) is recorded with `errorClass: 'PolicyDenied'` and `harnessBug: false`. That is how a Clawboo Native agent's refused tool call (a broker denial, or a [Tasks creation cap](/reference/mcp-tools#creation-caps)) is logged. Two such denials in a row in one run trip the circuit breaker (`repeat-policy-denied`).
+
+The team engine does not have this rule: it runs every error through the classifier. A tool denial in team chat therefore gets whichever class its message matches, often `Unknown`, and is then counted as a harness bug.
+
+### Where errors show up
+
+| Place                                                       | What you see                                                                                                                                 |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Settings > Insights > Observability**, **Error taxonomy** | Recent errors grouped by class with a count each; an `Unknown` row carries a **harness bug** label. "No errors" means none in the latest 500 |
+| **Observability** trace timeline                            | Each error as `[<class>] <message>`                                                                                                          |
+| **Settings > Insights > Fleet**, **Recent issues**          | Class, runtime and message per error; "All clear" when there are none                                                                        |
+| A runtime's diagnostics drawer in **Runtimes**              | **Recent errors** with class and message                                                                                                     |
+| **Activity** on a task, agent or team                       | An **error** badge with the message                                                                                                          |
+
+The error lists read the latest 500 `error` events, and the harness-bug count covers those 500 only.
+
+<Tip>
+
+A harness bug is not something your agent did wrong. It usually means a runtime returned an error message Clawboo does not recognize. If one keeps appearing, note the message (task-runner runs also write an error-level server log line with `"action": "harness_bug"`) and [open an issue](https://github.com/clawboo/clawboo/issues).
+
+</Tip>
+
+## The event envelope
+
+Every event has the same envelope, whatever its kind:
 
 ```ts
 {
-  id: string
-  seq?: number            // assigned atomically by SQLite on insert (cross-process monotonic)
-  ts: number              // emit timestamp (epoch ms)
-  kind: OrchestrationEventKind
+  id: string // a UUID
+  seq?: number // assigned by SQLite when the row is written
+  ts: number // when the event happened, epoch milliseconds
+  kind: OrchestrationEventKind // one of the 25 kinds
   teamId?: string | null
   taskId?: string | null
   agentId?: string | null
   runtime?: string | null
-  traceId?: string | null      // ties every span/event of one board task together
-  spanId?: string | null       // forms the span tree (run span, tool sub-spans)
+  traceId?: string | null
+  spanId?: string | null
   parentSpanId?: string | null
   correlationId?: string | null
-  tenantId?: string | null     // future seam: dormant multi-tenant scoping
-  data: Record<string, unknown>  // open by design; defaults to {}
+  tenantId?: string | null
+  data: Record<string, unknown> // kind-specific; defaults to {}
 }
 ```
 
-| Field                                 | Role                                                                                                                 |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `id`                                  | Stable event id (filled by the emit helper).                                                                         |
-| `seq`                                 | Cross-process monotonic, never reused. Assigned by SQLite, optional on the producer side. Traces order by `seq ASC`. |
-| `ts`                                  | Emit timestamp (epoch ms).                                                                                           |
-| `kind`                                | The discriminant, one of the 23 [event kinds](#event-kinds).                                                         |
-| `traceId` / `spanId` / `parentSpanId` | The trace + span tree. One trace per board task; a run is a span, tool calls are sub-spans.                          |
-| `correlationId`                       | Free-form correlation key (e.g. an execution id) for non-trace grouping.                                             |
-| `tenantId`                            | Dormant multi-tenant seam, currently null (single implicit tenant).                                                  |
-| `data`                                | Kind-specific payload; open at the wire, typed per kind below.                                                       |
+| Field                                    | Meaning                                                                                                                             |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `seq`                                    | Increases with every row and is never reused, across every process writing the file. Order the log by `seq`.                        |
+| `ts`                                     | When the writer says the event happened. The table also stores `created_at`, the insert time.                                       |
+| `teamId`, `taskId`, `agentId`, `runtime` | What the event concerns. Any of them can be null.                                                                                   |
+| `traceId`, `spanId`, `parentSpanId`      | Only on task-runner runs. Every run under one root task shares a trace, whose `traceId` is that root task's id; each run is a span. |
+| `correlationId`                          | An optional grouping key; most events leave it empty.                                                                               |
+| `tenantId`                               | Unused; always null.                                                                                                                |
+| `data`                                   | The kind's payload, described below. It is an open object: readers must tolerate missing or extra fields.                           |
 
-`parseOrchestrationEvent(value)` validates and defaults `data` before persistence.
+That is 13 fields plus `data`. Before a row is stored, secrets in `data` are scrubbed, and an unrecognized `kind` is stored as `error`. Writing an event never fails the work that produced it: a failed write is dropped. Nothing deletes rows from the log, so it grows until you reset or trim the database (see [Data and state](/operating/data-and-state)).
 
----
+## Board events
 
-## Event kinds
+Board events carry the task in `taskId` and its team in `teamId`.
 
-The 23 members of `ORCHESTRATION_EVENT_KINDS`, grouped by concern. Each `data` shape is the TypeScript interface from `KindToData`. Fields without `?` are always present at the producer; `?` fields are optional. `data` is open at the wire, so any consumer must tolerate missing fields.
+### task_created
 
-### Board lifecycle
-
-#### `task_created`
-
-A board task was created.
+A task was created.
 
 ```ts
-{
-  title?: string | null
-  status?: string
-  parentTaskId?: string | null
-  priority?: string | null
-}
+{ title?: string | null; status?: string; parentTaskId?: string | null; priority?: string | null }
 ```
 
-#### `task_claimed`
+### task_claimed
 
-A task was atomically claimed by an assignee.
+An agent was given a task, by a claim or an assignment.
 
 ```ts
-{
-  assigneeAgentId?: string | null
-  assigneeRuntime?: string | null
-}
+{ assigneeAgentId?: string | null; assigneeRuntime?: string | null }
 ```
 
-#### `status_changed`
+### status_changed
 
-A task transitioned state. `to` is always present; `from` may be null (first transition). `by: 'person'` marks a move a person made through the board's `PATCH` route. `reason` says why the server moved it: `retry` and `assigned` for a person's Retry or Assign, and `blocker_failed` for a dependent cancelled because a task it waited on failed or was cancelled.
+A task moved to another status. `to` is always present.
 
 ```ts
-{
-  from?: string | null
-  to: string
-  by?: 'person'
-  reason?: 'retry' | 'assigned' | 'blocker_failed'
-}
+{ from?: string | null; to: string }
 ```
 
-#### `comment_added`
+Some writers add fields the typed shape does not declare:
 
-A comment / system note landed on a task.
+- `by: 'person'` marks a move a person made on the board.
+- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), or `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too).
+
+### comment_added
+
+A comment or system note landed on a task.
 
 ```ts
-{
-  authorType?: string
-  body?: string
-}
+{ authorType?: string; body?: string }
 ```
 
-#### `dep_linked`
+### dep_linked
 
-A dependency edge (`blocks` / `blocked-by`) was added.
+A task was made to wait for another. The task that waits is `taskId`.
 
 ```ts
 {
@@ -125,28 +183,24 @@ A dependency edge (`blocks` / `blocked-by`) was added.
 }
 ```
 
-### Execution
+## Run events
 
-#### `execution_started`
+### execution_started
 
-An execution process opened for a task run.
+A run of a task started. `execId` is the row in the `execution_processes` table.
 
 ```ts
-{
-  execId: string
-  executorType?: string
-  runReason?: string | null
-}
+{ execId: string; executorType?: string; runReason?: string | null }
 ```
 
-#### `execution_completed`
+### execution_completed
 
-An execution closed with its outcome. The `costUsd` / token fields carry the run's **final total** (authoritative for the run, see [cost reconciliation](#cost-reconciliation)).
+A run finished. The cost and token fields carry the run's final totals (see [Cost totals](#cost-totals)).
 
 ```ts
 {
   execId: string
-  status: string
+  status: string // the run's final status, such as 'succeeded', 'failed' or 'cancelled'
   costUsd?: number | null
   inputTokens?: number
   outputTokens?: number
@@ -154,295 +208,343 @@ An execution closed with its outcome. The `costUsd` / token fields carry the run
 }
 ```
 
-#### `tool_call`
+On task-runner runs, `error` holds a code when Clawboo stopped or refused the run:
 
-A runtime invoked a tool. `toolCallId` correlates with the matching `tool_result`.
+| `error`                   | `status`                | Meaning                                                                                                              |
+| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `workspace_unavailable`   | `failed`                | A file-changing task had no repository, or its git worktree could not be created, so the run was refused             |
+| `budget_paused:<scope>`   | `cancelled`             | A hard-cap budget stopped the run; `<scope>` is `agent`, `mission`, `team`, or `node` (a routine's per-run cost cap) |
+| `circuit_broken:<reason>` | `cancelled`             | A circuit breaker stopped the run; see the reasons below                                                             |
+| Anything else             | `failed` or `cancelled` | The run's own error summary                                                                                          |
+
+Breaker reasons, also posted on the task as a comment that begins `[stopped: <reason>]`:
+
+| Reason                 | Trips when                                                |
+| ---------------------- | --------------------------------------------------------- |
+| `iteration-cap`        | The run made too many tool calls                          |
+| `repeat-failure`       | The same tool call failed several times in a row          |
+| `no-progress`          | Tool calls kept failing without any new successful result |
+| `token-velocity`       | Tokens per minute (input plus output) passed the ceiling  |
+| `repeat-policy-denied` | Guardrails refused the run's calls twice in a row         |
+
+Budgets and breakers are explained in [Governance](/concepts/governance); their defaults are in [Limits and defaults](/reference/limits-and-defaults).
+
+### tool_call
+
+An agent called a tool. `toolCallId` matches the call's `tool_result`. Secrets in `input` are scrubbed.
+
+```ts
+{ toolCallId: string; name: string; input?: unknown; grantId?: string | null; connectorId?: string | null }
+```
+
+`grantId` and `connectorId` are declared for attribution, but Clawboo's own writers leave them out. Grant attribution for connector calls is in [`grant_decision`](#grant_decision) events and the tool audit.
+
+### tool_result
+
+A tool returned. `isError` feeds the tool error rate in the trace metrics.
+
+```ts
+{ toolCallId: string; name: string; isError: boolean; output?: string }
+```
+
+### cost
+
+Spend and tokens reported during a run. Several can arrive for one run; see [Cost totals](#cost-totals).
+
+```ts
+{ costUsd?: number | null; inputTokens?: number; outputTokens?: number; model?: string | null }
+```
+
+Team chat runs write no `cost` events; their spend is charged to budgets directly. See [Budgets and spend](/using/budgets-and-spend) for which runtimes report real cost and which are estimated.
+
+### session_rotated
+
+A task-runner run reached its turn limit or filled its context, and continued in a fresh session. The new session starts from a short handoff note, not the old transcript.
 
 ```ts
 {
-  toolCallId: string
-  name: string
-  input?: unknown
+  from: string // the previous session's key
+  to: string // the new session's key
+  reason: 'max_turns' | 'context_watermark'
+  tokensUsed?: number // tokens the previous session used
+  rotationIndex?: number // 1 for the first rotation in the task's run chain
 }
 ```
 
-#### `tool_result`
+## Approval events
 
-A tool returned. `isError` drives the tool-error-rate metric.
+### approval_requested
+
+Declared, but nothing writes it. Pending tool approvals live in the `tool_call_approvals` table and appear under **Needs you** on the Board (see [Approvals](/using/approvals)).
 
 ```ts
-{
-  toolCallId: string
-  name: string
-  isError: boolean
-  output?: string
-}
+{ approvalId?: string; scopeKey?: string; kind?: string }
 ```
 
-#### `cost`
+### approval_resolved
 
-An incremental cost/token tick during a run. These accumulate per run; see [cost reconciliation](#cost-reconciliation).
+Written only when the approval reaper expires an approval nobody answered. The reaper runs hourly and expires pending approvals older than 24 hours (`CLAWBOO_APPROVAL_TTL_MS`). A person's decision is stored on the approval row itself, not as an event.
 
 ```ts
-{
-  costUsd?: number | null
-  inputTokens?: number
-  outputTokens?: number
-  model?: string | null
-}
+{ approvalId?: string; decision?: string } // decision is 'expired'
 ```
 
-### Approvals
+## Error events
 
-#### `approval_requested`
+### error
 
-A tool / delegation approval was requested.
-
-```ts
-{
-  approvalId?: string
-  scopeKey?: string
-  kind?: string
-}
-```
-
-#### `approval_resolved`
-
-An approval was resolved (allow / deny / expire).
-
-```ts
-{
-  approvalId?: string
-  decision?: string
-}
-```
-
-### Errors
-
-#### `error`
-
-A runtime / tool failure. The `errorClass` and `harnessBug` fields are filled at the emit site by running the failure through [`classifyError`](#error-taxonomy) and [`isHarnessBug`](#error-taxonomy). A `harnessBug: true` event additionally fires a structured harness-bug alert.
+A failure during a run, with its [error class](#error-classes).
 
 ```ts
 {
   code?: string | null
   message: string
-  errorClass: string   // a RuntimeErrorClass, or 'PolicyDenied' for a non-error policy denial
-  harnessBug: boolean  // classifyError(...) === 'Unknown'
+  errorClass: string // an error class, or 'PolicyDenied'
+  harnessBug: boolean // true when errorClass is 'Unknown'
   fatal?: boolean
 }
 ```
 
-<Note>
-`errorClass` is typed `string` (not the `RuntimeErrorClass` union) because the executor runner also emits `PolicyDenied` for a brokered-tool denial, a non-fatal denial path that is not a runtime failure. Every other value is one of the eight [error classes](#error-taxonomy).
-</Note>
+- The task runner writes one for each error a runtime reports, and one more (with `code: null` and `fatal: true`) when a run ends in an error.
+- The team engine writes one for each error a runtime reports during team chat.
+- Classification joins `code` and `message`, and the rules are tried in the order of the [classes table](#error-classes), first match wins. `ContextOverflow` is tried before `InvalidArgs`, so an oversized prompt that a provider rejects with a 400 counts as a context overflow.
 
-### Spans
+## Trace events
 
-#### `span_start`
+### span_start
 
-Opens a span in the trace tree.
-
-```ts
-{
-  name: string
-  spanKind?: 'task' | 'tool' | 'run'
-}
-```
-
-#### `span_end`
-
-Closes a span.
+The task runner opens one span per run, named `run:<taskId>`, with `spanKind: 'task'`. A child task's run nests under its parent task's run.
 
 ```ts
-{
-  name: string
-  status?: 'ok' | 'error'
-  durationMs?: number
-}
+{ name: string; spanKind?: 'task' | 'tool' | 'run' }
 ```
 
-### Session rotation
+### span_end
 
-#### `session_rotated`
-
-A run rotated to a fresh successor session (context exhaustion / max-turns). Continuity rides a short handoff note, not the transcript.
+The run's span closed.
 
 ```ts
-{
-  from: string          // predecessor session stream key
-  to: string            // successor session stream key
-  reason: 'max_turns' | 'context_watermark'
-  tokensUsed?: number   // tokens the predecessor consumed before rotating
-  rotationIndex?: number // 1-based rotation index within the task's run chain
-}
+{ name: string; status?: 'ok' | 'error'; durationMs?: number }
 ```
 
-### Routines (scheduler)
+Team chat runs, OpenClaw routine fires and board API events carry no trace, so they never appear in the **Traces** list. When OpenTelemetry export is set up, task-runner spans also go to your collector; see [Observability](/concepts/observability).
 
-#### `routine_fired`
+## Routine events
 
-A `scheduled_runs` ledger row fired.
+Routine events carry the routine's ledger row in `data.scheduledRunId` (a `scheduled_runs` row). See [Routines](/using/routines).
+
+### routine_fired
+
+A due routine was picked up for firing.
 
 ```ts
 {
   scheduledRunId: string
   cronSpec: string
-  scheduledBy: string // the firing owner of record ('clawboo' for the Routines engine)
-}
+  scheduledBy: string
+} // scheduledBy is 'clawboo' for the Routines engine
 ```
 
-#### `routine_dispatched`
+### routine_dispatched
 
-A fire was handed to its target. An agent routine materialized (or bound to) a board task and dispatched it; a team routine posted its message into the team chat and names the lead it went to. `dispatchPath` records the wake-bridge branch.
+The fire was handed to its target.
 
 ```ts
 {
   scheduledRunId: string
-  taskId: string | null // null for a team routine, which files no task
+  taskId: string | null // null for a team routine, which creates no task
   runtime: string | null
   dispatchPath: 'one-shot' | 'connected' | 'human' | 'team-chat'
-  targetAgentId?: string | null // team routines: the lead the message went to
+  targetAgentId?: string | null // team routines: the agent the message went to
 }
 ```
 
-#### `routine_completed`
+`dispatchPath` is `one-shot` when the task runner ran it, `connected` when it went to the OpenClaw Gateway, and `team-chat` when a team routine posted its message to the team chat. The type also allows `human`, which nothing writes.
 
-A fire's dispatch reached a successful outcome and the routine re-armed. `nextRunAt` is null when nothing is left to fire (a spent `once@`).
+### routine_completed
+
+The fire succeeded and the routine re-armed.
 
 ```ts
-{
-  scheduledRunId: string
-  taskId?: string | null
-  status: string
-  nextRunAt?: number | null
-}
+{ scheduledRunId: string; taskId?: string | null; status: string; nextRunAt?: number | null }
 ```
 
-#### `routine_error`
+`status` is `idle`. `nextRunAt` is the next fire time, or `null` when nothing is left to fire (a spent one-time routine).
 
-A fire failed (the routine is parked / disarmed until a human resumes).
+### routine_error
+
+The fire failed. The routine stops in an error state until someone resumes it.
 
 ```ts
-{
-  scheduledRunId: string
-  code?: string | null
-  message: string
-}
+{ scheduledRunId: string; code?: string | null; message: string } // code is declared but not written
 ```
 
-### Peer chat
+| `message`, for example                             | Meaning                                                                                                                     |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch refused: <reason>`                       | The task runner refused the run: `workspace_unavailable`, `budget_paused`, `too_deep`, `connected_substrate` or `not_found` |
+| `run <reason>: <summary>`                          | The run ended without success; `<reason>` is `max_turns`, `aborted` or `error`                                              |
+| `The agent "<name>" was removed.`                  | The routine's agent is archived                                                                                             |
+| `agent <id> not found`                             | The routine's agent no longer exists                                                                                        |
+| `The team "<name>" is archived.`                   | A team routine's team is archived                                                                                           |
+| `The team this routine posts to no longer exists.` | A team routine's team was deleted                                                                                           |
+| `invalid task template`                            | The stored routine could not be read                                                                                        |
+| `dispatch failed`                                  | The dispatch failed without a message                                                                                       |
 
-#### `team_chat_post`
+## Peer room events
 
-A post landed in a team room. `authorAgentId` is resolved from the MCP connection binding, never from tool args (anti-spoof).
+These concern the agents' peer room (the `team_chat` table), which the dashboard does not show. See [Peer chat](/concepts/peer-chat).
+
+### team_chat_post
+
+A bound agent posted through the [TeamChat MCP server](/reference/mcp-tools#teamchat-server) over HTTP, so this covers Claude Code, Codex and Hermes agents. Posts that Clawboo Native agents make in-process are not logged.
 
 ```ts
 {
   roomId: string
-  seq: number // per-room monotonic ordering key assigned at write time
+  seq: number
   authorAgentId: string
-  postKind: 'peer' | 'system' | 'user' // peer = teammate post; system = board-mutation narration
+  postKind: 'peer' | 'system' | 'user'
 }
 ```
 
-#### `speaker_selected`
+`seq` is the post's position in its room. `authorAgentId` comes from the session's signed binding, never from tool arguments.
 
-The speaker-selection policy nominated the next agent to talk in a bounded exchange.
+### speaker_selected
+
+The agents' exchange (`POST /api/team-chat/exchange`) picked the next agent to speak.
 
 ```ts
 {
   roomId: string
   speakerAgentId: string
   policy: 'leader-nominated' | 'round-robin'
-  exchangeTurn: number // 1-based turn index within the current bounded exchange
-}
+  exchangeTurn: number
+} // exchangeTurn starts at 1
 ```
 
-#### `turn_bound_hit`
+### turn_bound_hit
 
-A bounded peer-chat exchange ended (the chatter-forever guard).
+An agents' exchange ended.
 
 ```ts
 {
   roomId: string
-  reason: 'max_turns' | 'no_pending_obligation'
-  maxExchangeTurns: number // the cap that bounded the exchange
-  turnsTaken: number // how many peer turns the exchange actually ran
+  reason: string
+  maxExchangeTurns: number
+  turnsTaken: number
 }
 ```
 
----
+`reason` is `max_turns` (the turn cap was reached with replies still owed), `no_pending_obligation` (nobody owed a reply), `budget_paused` (a hard-cap budget stopped a turn) or `aborted` (the caller disconnected). The typed shape lists only the first two.
 
-## Cost reconciliation
+## Connector events
 
-`cost` events are incremental and `execution_completed` carries the run's **final total**. A runtime that reports cost only at completion (no mid-run `cost` events) would otherwise read `$0` / `0` tokens in the metrics while the graph showed the real total. Both the metrics fold (`summarizeMetrics`) and the graph projection (`projectGraph`) reconcile **per run** (keyed by `taskId`): they take `max(sum of cost events, execution_completed total)`, so the two code paths converge regardless of how a runtime reports cost, no double counting, and the completion total supplies the value when there were no `cost` events at all.
+### grant_decision
 
----
-
-## Error taxonomy
-
-Every runtime / tool failure is classified: a failure is mapped to a baseline of **expected** classes; anything that doesn't match is `Unknown`, and an `Unknown` is treated as a **harness bug**, surfaced as an alert (a flagged `error` event plus an error-level structured log) rather than silently swallowed. Expected classes get baselined per runtime so anomalies in their **rate** can be alerted on later; an `Unknown` alerts immediately.
-
-### Classes
-
-`RUNTIME_ERROR_CLASSES`, the eight members of `RuntimeErrorClass`:
-
-| Class             | Matches (case-insensitive)                                                                                                                                                     | Harness bug? |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
-| `RateLimited`     | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`                                                                                                        | No           |
-| `UserAborted`     | `abort`, `aborted`, `cancel(led)`, `sigint`, `sigterm`, `user aborted/cancel`                                                                                                  | No           |
-| `Timeout`         | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                                                                       | No           |
-| `UnexpectedEnv`   | `enoent`, `eacces`, `eperm`, `einval`, `espawn`, `command not found`, `no such file`, `permission denied`, `not installed`, `spawn `, `module not found`, `cannot find module` | No           |
-| `ContextOverflow` | `context overflow/length/window/limit`, `prompt`/`input` `(is) too large/long`, `maximum context`, `too many tokens`                                                           | No           |
-| `InvalidArgs`     | `400`, `422`, `invalid argument/param/input/request`, `bad request`, `validation`, `unprocessable`, `missing required`, `schema`, `malformed`                                  | No           |
-| `ProviderError`   | `500`/`502`/`503`/`504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `internal server error`, `api error`, `model error`                 | No           |
-| `Unknown`         | nothing matched (or an empty error string)                                                                                                                                     | **Yes**      |
-
-### `classifyError(code, message)`
+The tool broker checked a connector tool call against the caller's grants. Builtin tools are not governed by grants and write none. It is its own kind because a refused call produces no `tool_call`.
 
 ```ts
-function classifyError(code?: string | null, message?: string | null): RuntimeErrorClass
+{
+  decision: string // 'allow' | 'require_approval' | 'deny'
+  reason?: string | null // null when allowed
+  grantId?: string | null
+  connectorId?: string | null
+  toolName: string
+  ruleId?: string | null // set when a remembered decision ("Always") decided it
+}
 ```
 
-Joins `code` and `message` into one haystack (`` `${code ?? ''} ${message ?? ''}` ``, trimmed). An empty haystack returns `Unknown`. Otherwise the rules are tried **in order, first match wins** (the order is `RateLimited` → `UserAborted` → `Timeout` → `UnexpectedEnv` → `ContextOverflow` → `InvalidArgs` → `ProviderError`), so the more specific / overloaded signals (rate-limit, abort) are checked before the broader provider / env buckets. `ContextOverflow` sits deliberately before `InvalidArgs`: an oversized-input `400` is a context overflow, not a generic bad request. No match returns `Unknown`.
+The **Activity** feed shows it as `<decision>: <reason>` under a **grant** badge. Reasons, in the order the check applies them:
 
-### `isHarnessBug(cls)`
+| `reason`            | `decision`         | Meaning                                                                                       |
+| ------------------- | ------------------ | --------------------------------------------------------------------------------------------- |
+| `no-grant`          | `deny`             | No grant gives this agent, its team, or every agent the connector                             |
+| `grant-revoked`     | `deny`             | The grant was revoked                                                                         |
+| `grant-suspended`   | `deny`             | The grant is suspended                                                                        |
+| `grant-proposed`    | `deny`             | The grant was proposed but not approved                                                       |
+| `grant-expired`     | `deny`             | The grant has expired                                                                         |
+| `spec-drift`        | `deny`             | The connector's definition or tool list changed since the grant was made                      |
+| `tool-not-in-scope` | `deny`             | The grant's tool allow and deny lists exclude this tool                                       |
+| `mode-insufficient` | `deny`             | The tool needs a higher grant mode (`read`, then `write`, then `admin` for destructive tools) |
+| `rate-limited`      | `deny`             | The grant's hourly call limit was reached                                                     |
+| `lethal-trifecta`   | `require_approval` | The tool can read private data, take in untrusted content and send data out. Never remembered |
+| `tainted-run`       | `require_approval` | Defined, but nothing marks a run tainted, so it does not occur                                |
+| `standing-deny`     | `deny`             | A remembered "deny" rule matched                                                              |
+| `never-remembered`  | `require_approval` | This tool always asks, even with a remembered "Always" on file                                |
+| `policy-always`     | `require_approval` | The grant asks for approval on every call                                                     |
+| `policy-writes`     | `require_approval` | The grant asks for approval on every call that changes something                              |
+| `risk-destructive`  | `require_approval` | The tool is destructive                                                                       |
+| `risk-external`     | `require_approval` | The tool acts outside Clawboo and changes something                                           |
+
+A call the grant check allows can still ask for approval later in the broker, for example a destructive tool. See [Connectors](/using/connectors) and [Approvals](/using/approvals).
+
+### connector_health
+
+A connector's health changed.
 
 ```ts
-function isHarnessBug(cls: RuntimeErrorClass): boolean
+{ connectorId: string; health: string; detail?: string | null; failures?: number }
 ```
 
-Returns `true` only for `Unknown`. An unknown class is, by definition, a defect in the harness itself, so it alerts immediately rather than being absorbed as expected noise.
+`health` is one of `unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`. The server writes this event with `health: 'error'` and `detail: 'the connector process exited'` when a connector's process stops. The other values can arrive through `POST /api/obs/ingest`. `drift` means the connector's tools no longer match what was approved, so review what changed before trusting it again.
 
-### Per-runtime baselines
+## Cost totals
 
-`BASELINE_EXPECTED_CLASSES` maps a runtime id to the classes whose mere occurrence is not an alert (only a spike in their rate would be). The baseline for `openclaw`, `claude-code`, `codex`, and `hermes` is identical, six classes (`InvalidArgs`, `Timeout`, `ProviderError`, `RateLimited`, `UserAborted`, `UnexpectedEnv`). Any runtime not in the map (including `clawboo-native`) falls back to `GENERIC_BASELINE`, which is those six **plus `ContextOverflow`** (seven). `Unknown` is never in any baseline; it always alerts.
+`cost` events add up during a run, and `execution_completed` carries the run's total. Some runtimes report cost only when the run ends. So the trace metrics and the graph take, for each run (keyed by `taskId`), the larger of the summed `cost` events and the completed total. Nothing is counted twice, and a run with no `cost` events still shows its total.
+
+## Fleet health
+
+The **Fleet health** list in the **Observability** panel gives each agent a status from its recent events:
+
+| Status    | Rule                                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------- |
+| `working` | Has an open run (an `execution_started` without its `execution_completed`) and an event in the last 5 minutes |
+| `stalled` | Has an open run and no event for 5 minutes                                                                    |
+| `zombie`  | Has an open run and no event for 30 minutes; its process is probably gone                                     |
+| `idle`    | Has no open run                                                                                               |
+
+The panel reads the latest 5,000 events, and a single trace returns at most 5,000 events.
+
+## Writing events from outside
+
+`POST /api/obs/ingest` lets a process on this machine mirror runtime events into the log. The body is `{ "events": [ ... ] }`, and each event may set `kind`, `ts`, `teamId`, `taskId`, `agentId`, `runtime` and `data`.
+
+- Only `tool_call`, `tool_result`, `error`, `grant_decision` and `connector_health` are accepted, so board, cost, approval and routine events cannot be forged this way. Other kinds are skipped.
+- At most 200 events per request are read. The answer is `{ "ok": true, "count": <stored> }`.
+- A `ts` more than 60 seconds ahead of the server's clock, or more than 24 hours behind it, is replaced with the server's time. A missing `runtime` is stored as `openclaw`.
+- For `grant_decision` and `connector_health`, unknown fields are dropped, text is redacted and cut to 200 characters (ids to 120), an unknown `health` becomes `unknown`, and an unknown `decision` becomes `deny`.
+
+The route sits behind the access gate like every `/api/` route. See the [Observability API](/reference/rest-api/observability).
+
+## Structured log lines
+
+Alerts such as the harness-bug alert are written to the server log as structured entries in this shape, with secrets scrubbed:
 
 ```ts
-function isUnexpectedFor(runtime: string | null | undefined, cls: RuntimeErrorClass): boolean
+{
+  ts: number
+  level: 'debug' | 'info' | 'warn' | 'error'
+  component: string
+  action: string
+  durationMs?: number
+  input?: unknown
+  output?: unknown
+  error?: string
+  correlationId: string
+  traceId?: string | null
+  spanId?: string | null
+  taskId?: string | null
+  agentId?: string | null
+  runtime?: string | null
+}
 ```
 
-`true` when `cls` is unexpected for the runtime: always `true` for `Unknown`, otherwise `true` when `cls` is not in that runtime's baseline.
+The harness-bug alert is an `error` entry with `component: 'runtime'`, `action: 'harness_bug'`, `error: '[<class>] <message>'` and the run's execution id in `correlationId`. Only task-runner runs write it. Where the server log lives is in the [CLI reference](/reference/cli).
 
-<Tip>
-`Unknown` is not the only class outside a baseline. `ContextOverflow` is absent from all four named-runtime baselines but present in `GENERIC_BASELINE`, so `isUnexpectedFor('openclaw', 'ContextOverflow')` is `true` today while `isUnexpectedFor('clawboo-native', 'ContextOverflow')` is `false`. The other six non-`Unknown` classes are in every baseline, so they are never unexpected. The per-runtime map has already diverged once; it exists so further divergence (a runtime that genuinely never rate-limits, say) can flag a class as anomalous without code changes.
-</Tip>
+## Related
 
----
-
-## How the taxonomy feeds the surfaces
-
-- The executor runner classifies each failure as it drains a run's events, fills `errorClass` + `harnessBug` into the emitted `error` event, and fires a harness-bug alert when the class is `Unknown` (a brokered-tool denial is emitted with `errorClass: 'PolicyDenied'` and `harnessBug: false`, never alerting).
-- The observability **error-taxonomy** view breaks `error` events down by class and surfaces the `Unknown`/harness-bug count.
-- The **fleet-health** view (`projectFleetHealth`) folds the same log into the fleet-health triage taxonomy `AgentHealthStatus`: `working` / `idle` / `stalled` / `zombie`, by how long an agent has been quiet while an execution is open (`idle` = no open execution; `working`/`stalled`/`zombie` by quiet-time thresholds).
-- The **graph projection** (`projectGraph`) folds the log into the task-delegation and agent graphs, applying the same per-run cost reconciliation as the metrics.
-
-See the [observability dashboard](/using/observability-dashboard) for how these render in the UI, and the [observability REST API](/reference/rest-api/observability) for the `/api/obs/*` endpoints that serve the event log, traces, errors, graph, and fleet health.
-
-## See also
-
-- [Observability dashboard](/using/observability-dashboard), traces, errors, fleet health, evals
-- [Observability REST API](/reference/rest-api/observability), `/api/obs/*` (events, traces, errors, graph, health, SSE stream)
-- [Glossary](/appendices/glossary), builder≠judge, harness bug, trace, span
-- [@clawboo/obs](/reference/packages/obs), the package these contracts live in
+- [Observability](/concepts/observability): what Clawboo records and how to read it.
+- [Observability API](/reference/rest-api/observability): the routes that serve the log, traces, errors and fleet health.
+- [Governance](/concepts/governance): budgets, caps and circuit breakers.
+- [MCP tools](/reference/mcp-tools): the tools whose calls and refusals appear here.
+- [Database schema](/reference/database-schema#orchestration_events): the table that stores the log.

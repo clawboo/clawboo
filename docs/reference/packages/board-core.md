@@ -1,50 +1,47 @@
 ---
 title: '@clawboo/board-core'
-description: 'The pure task rules: the seven board statuses, the legal-transition table, the dispatch rules, the needs-you classification, and the run-cost sum every layer shares.'
+sidebarTitle: 'board-core'
+description: "The task rules every layer shares: the seven statuses and their legal moves, the auto-fire policy, the Needs you reasons, and a task's run cost."
+keywords:
+  [
+    '@clawboo/board-core',
+    'board-core',
+    'task statuses',
+    'transition table',
+    'canTransition',
+    'legalTargets',
+    'Needs you',
+    'taskAttention',
+    'MAX_AUTO_FIRES',
+    'summarizeRunCost',
+  ]
 ---
 
-- **Version** `0.1.0`
-- **Purity** pure zero-dep (browser-safe; no workspace or external deps, no `node:*`, no I/O)
-- **Purpose** Declare the seven task statuses and the legal-transition table **once**, so the durable board, the orchestration engine, and the browser board UI all read the same rulebook instead of hand-maintained copies that can silently drift.
-- **Workspace deps** none
-- **External deps** none
+`@clawboo/board-core` declares the board's rules once: which statuses a task can have, which moves between them are
+legal, when the board fires a task again on its own, why a task is waiting for a person, and what its runs cost.
+Every layer imports this one copy, so a newly legal move reaches the server, the team engine and the board view
+together, and a mismatch is a compile error.
 
-Three layers need these rules and only one of them can touch a database:
+Use this page when you change a task rule. How the database enforces the rules is on
+[Board internals](/internals/board-internals), and the board as users see it is on [The board](/concepts/the-board).
 
-- [`@clawboo/db`](/reference/packages/db) re-exports the module and enforces `canTransition` **inside** the write transaction, against the freshly-read row.
-- [`@clawboo/team-orchestration`](/reference/packages/team-orchestration) types its `BoardClient` surface with `TaskStatus`.
-- The board UI (`apps/web/src/features/board`) derives its columns and its manual status editor from `TASK_STATUSES` + `legalTargets`, so it only ever offers moves the server will accept.
+## Who uses it
 
-Before this package existed, each of those declared its own copy. They agreed, but nothing linked them: a newly-legal transition on the server would have left the UI hiding a move it now accepts, with green CI. Extracting the rules made drift a compile error rather than something a test has to notice.
+- **`@clawboo/db`** enforces the transition table inside `updateStatus` and wraps the other rules for whole boards
+  (`attentionForTasks`, `runCostForTasks`, `isLedgerAutoFireable`).
+- **`@clawboo/team-orchestration`** uses the fire policy and the person-assignment markers when it dispatches work.
+- **The server** attaches `attention` and `runCost` to every task the board API returns.
+- **The SPA** builds the status editor from `legalTargets`, routes tasks into the **Needs you** column, and shows
+  run cost on cards.
 
-<Note>
-The module is **import-free**, and that is load-bearing rather than incidental: it is what lets the same file ship into the Vite SPA without dragging the sqlite/server graph along. Two tests pin it — a source guard in this package asserts `state-machine.ts` declares no import at all, and `apps/web/src/__tests__/browserBundlePurity.test.ts` asserts the built artifact declares zero bare specifiers in either module format.
-</Note>
+The package has no dependencies at all and imports nothing outside its own files, so it can ship to the browser.
+`apps/web/src/__tests__/browserBundlePurity.test.ts` checks that the built files declare no bare import and that
+`state-machine.ts` imports nothing; the package's own tsconfig pins `types: []`, so a Node global fails the
+type check.
 
-The server stays the authority. Any UI or REST-layer pre-check is fast-fail ergonomics; the transactional check in [`updateStatus`](/internals/board-internals) is the real gate, and an illegal transition surfaces as a `409`.
+## Statuses and legal moves
 
-## Public API
-
-### Functions
-
-| Signature                                                  | Contract                                                                                                                                                                                   |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `canTransition(from: TaskStatus, to: TaskStatus): boolean` | Whether the move is legal. Same-status returns `true` (an idempotent no-op, so re-emitting a transition is harmless).                                                                      |
-| `legalTargets(from: TaskStatus): TaskStatus[]`             | Every status `from` can legally move to, in table order. Excludes the same-status no-op; empty for a terminal status. Returns a fresh array, so a caller cannot mutate the internal table. |
-| `isLocked(status: TaskStatus): boolean`                    | `true` for `in_progress` / `in_review` — a locked task is actively owned and must not have its assignee reassigned.                                                                        |
-| `isTerminal(status: TaskStatus): boolean`                  | `true` for `done` / `cancelled`. Equivalent to "has no legal targets", and a test pins the equivalence.                                                                                    |
-| `isTaskStatus(value: unknown): value is TaskStatus`        | Type guard for untyped input (an API response, a drop target, a CLI argument).                                                                                                             |
-
-### Types & constants
-
-| Name            | Shape / contract                                                                                                                                                                  |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TaskStatus`    | `'backlog' \| 'todo' \| 'in_progress' \| 'in_review' \| 'blocked' \| 'done' \| 'cancelled'`.                                                                                      |
-| `TASK_STATUSES` | `readonly TaskStatus[]`: the seven statuses in **lifecycle order**. The Board's columns follow it but fold two away: `in_review` shows in In progress and `blocked` in Needs you. |
-
-## The transition table
-
-`done` and `cancelled` are terminal. `in_progress → todo` is the "release" path orphan reconciliation uses.
+`TASK_STATUSES` lists the seven statuses in lifecycle order. `done` and `cancelled` are terminal.
 
 | From          | Legal targets                                       |
 | ------------- | --------------------------------------------------- |
@@ -53,45 +50,76 @@ The server stays the authority. Any UI or REST-layer pre-check is fast-fail ergo
 | `in_progress` | `in_review`, `done`, `blocked`, `todo`, `cancelled` |
 | `in_review`   | `done`, `in_progress`, `blocked`, `cancelled`       |
 | `blocked`     | `todo`, `in_progress`, `backlog`, `cancelled`       |
-| `done`        | — (terminal)                                        |
-| `cancelled`   | — (terminal)                                        |
+| `done`        | none                                                |
+| `cancelled`   | none                                                |
 
-## Dispatch rules
+- `canTransition(from, to)` answers one move; a move to the same status is a harmless no-op and returns `true`.
+- `legalTargets(from)` returns the targets in table order as a fresh array, empty for a terminal status.
+- `isLocked(status)` is `true` for `in_progress` and `in_review`: a task someone is working on keeps its assignee.
+- `isTerminal(status)` is `true` for `done` and `cancelled`.
 
-Whether a `todo` task will ever be picked up on its own, from two durable facts the board already stores. The engine's ready-pump (`@clawboo/team-orchestration`) and the server's pump scan (`@clawboo/db` `isLedgerAutoFireable`) both call these, so they cannot disagree about what will run.
+The server is the authority: `updateStatus` re-checks the table against the freshly read row, and an illegal move
+through the board API returns `409`. The one writer outside the table is the orphan reaper (`reconcileOrphans`),
+which releases a stale `in_progress` or `in_review` task straight to `todo`.
 
-| Name                                       | Contract                                                                                                                                                                                                                |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_AUTO_FIRES`                           | `3`. The ready-pump re-fires a released task until this many consecutive unsuccessful runs sit at the end of its ledger.                                                                                                |
-| `ledgerAllowsAutoFire(execs): boolean`     | The fire policy over a ledger (oldest run first): fire an empty ledger; leave a `running` last run alone; never re-fire a `cancelled` last run (a user Stop); park at `MAX_AUTO_FIRES` trailing failures; else re-fire. |
-| `trailingFailedRuns(execs): number`        | How many runs at the end of the ledger ended neither `succeeded` nor `cancelled`.                                                                                                                                       |
-| `delegationTargetOf(sdid): string \| null` | The agent a task is bound to: the `:agent:<id>` segment of its `sourceDelegationId`.                                                                                                                                    |
-| `isHumanAssignment(sdid): boolean`         | Whether a person (not an agent) bound the task to its agent. A person-assigned task reports its result on its card, not to the team lead.                                                                               |
-| `encodeHumanAssignment(agentId, nonce)`    | The `sourceDelegationId` for a task a person assigned: an `:agent:` segment, an `:origin:human` marker, and deliberately no `:reflectTo:`.                                                                              |
+The board view shows **Needs you** and then five status columns (**Backlog**, **To do**, **In progress**,
+**Done**, **Cancelled**). An `in_review` task sits in **In progress** under a **Verifying** badge, and every
+`blocked` task appears in **Needs you**.
 
-## Needs-you classification
+## When a task fires again on its own
 
-`taskAttention({ status, sourceDelegationId, execs, verificationBlocked, assigneeAgentId }): TaskAttention | null` says why a task is waiting on a person, or `null` when the board will move it on its own. `assigneeAgentId` is the agent working on the task, read only for an `in_progress` one. The server attaches the result to every task it returns (the `attention` field), and the board UI routes every task that has one into its **Needs you** column.
+`ledgerAllowsAutoFire(execs)` reads a task's run ledger, oldest run first, and decides whether the ready-pump may
+start it again. The team engine's pump and the server's scan both call it, so they agree on what will run.
 
-| Status        | Result                                                                                                                                                               |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `blocked`     | Always one: `needs_review` when the verdict blocks, else `timed_out` or `failed` from the last run (with that run's error as `detail`), else `blocked`.              |
-| `todo`        | `unassigned` with no bound agent; `stopped` when the last run was cancelled; `failed` / `timed_out` once parked at `MAX_AUTO_FIRES`; otherwise `null` (queued work). |
-| `in_progress` | `unstarted` when no agent is assigned and the last run is not `running`: the card was moved there by hand, which starts nothing. Otherwise `null`.                   |
-| any other     | `null`.                                                                                                                                                              |
+| The ledger                                             | Result                      |
+| ------------------------------------------------------ | --------------------------- |
+| empty (never delivered)                                | fire                        |
+| last run still `running`                               | leave it, someone owns it   |
+| last run `cancelled` (a person pressed Stop)           | never fire again on its own |
+| `MAX_AUTO_FIRES` unsuccessful runs in a row at the end | park it for a person        |
+| anything else (timed out, failed, orphaned)            | fire again                  |
 
-`TaskAttention` is `{ reason, failedRuns, detail? }`, where `reason` is an `AttentionReason`: `failed`, `timed_out`, `stopped`, `needs_review`, `blocked`, `unassigned` or `unstarted`.
+`trailingFailedRuns` counts the runs at the end of the ledger that ended neither `succeeded` nor `cancelled`. A
+task's `sourceDelegationId` records who it is bound to: `delegationTargetOf` reads the agent out of it, and
+`encodeHumanAssignment` writes the marker for a task a person assigned, which `isHumanAssignment` detects. A
+person-assigned task reports its result on its card instead of to the team's leader.
+
+## Why a task needs a person
+
+`taskAttention` returns the reason a task waits on a person, or `null` when the board will move it on its own. The
+board view puts every task with a reason in **Needs you**.
+
+| Status        | Reason                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `blocked`     | always one: `needs_review` when the verdict blocks, else `timed_out` or `failed` from the last run, else `blocked` |
+| `todo`        | `unassigned` with no bound agent, `stopped` when the last run was cancelled, `failed` or `timed_out` once parked   |
+| `in_progress` | `unstarted` when no agent is assigned and nothing is running (a card moved there by hand starts nothing)           |
+| any other     | none                                                                                                               |
+
+The result carries the reason, the number of trailing failed runs, and a `detail` taken from the last run's error
+(trimmed to a short excerpt).
 
 ## Run cost
 
-`summarizeRunCost(runs, taskCostUsd?): TaskRunCost` adds up what a task's runs cost. The server applies it to each task's execution rows (the `runCost` field on every task it returns), and the board UI renders the result on the card and in the drawer.
+`summarizeRunCost(runs, taskCostUsd)` adds up what a task's runs cost, for the card and the drawer:
 
-- A run counts only when its `costUsd` is a finite number, so a run stopped before it priced itself adds nothing.
-- The total is an estimate (`estimated: true`) unless every counted run has `costSource: 'reported'`. A null or unknown source counts as an estimate.
-- With no counted run, a positive `taskCostUsd` (the task's own column, which predates per-run costs) is returned as an estimate; otherwise `usd` is `null`.
+- A run counts only when its `costUsd` is a number, so a run stopped before it priced itself adds nothing.
+- The total is marked as an estimate unless every counted run's `costSource` is `reported`; a missing or unknown
+  source counts as an estimate.
+- With no counted run, a positive cost stored on the task row itself is returned as an estimate; otherwise the
+  cost is `null`.
 
-`TaskRunCost` is `{ usd: number | null, estimated: boolean }`. `RUN_COST_SOURCES` is `['reported', 'token-estimate', 'char-estimate']`, most trustworthy first, and `RunCostSource` is its union.
+`RUN_COST_SOURCES` lists `reported`, `token-estimate` and `char-estimate`, most trustworthy first.
 
-## Source
+## Test it
 
-`packages/board-core/src/state-machine.ts`, `dispatch.ts`, `attention.ts` and `runCost.ts`, plus a barrel. See [Board internals](/internals/board-internals) for how the repository enforces the transitions and [The board](/concepts/the-board) for the concepts.
+Run `pnpm --filter @clawboo/board-core test`, and `pnpm --filter @clawboo/board-core typecheck`, which checks the
+source and the tests against separate tsconfigs. A rule change usually needs a matching case in the board tests of
+`@clawboo/db` and in the cascade contract of [@clawboo/team-orchestration](/reference/packages/team-orchestration).
+
+## Related
+
+- [Board internals](/internals/board-internals): how the database enforces these rules, claims and reconciles.
+- [The board](/concepts/the-board): statuses and columns as users see them.
+- [Track work on the board](/using/board): working the board day to day.
+- [@clawboo/db](/reference/packages/db): the repository that applies the rules.

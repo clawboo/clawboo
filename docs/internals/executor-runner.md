@@ -1,245 +1,221 @@
 ---
-title: The executor runner
-description: 'How the server drives one board task through a runtime end-to-end: claim, worktree, prompt assembly, governance, rotation, verify, and handoff.'
+title: 'The executor runner'
+sidebarTitle: 'Executor runner'
+description: 'How runTaskOnRuntime drives one board task on a non-OpenClaw runtime: refusals, claim, workspace, prompt, spend and breakers, rotation and verification.'
+keywords:
+  [
+    'runTaskOnRuntime',
+    'executorRunner',
+    'task runner',
+    'workspace_unavailable',
+    'circuit breaker',
+    'session rotation',
+  ]
 ---
 
-The executor runner is the server-side integration glue that drives a single board task through a runtime, from claim to terminal. It lives in `apps/web/server/lib/executorRunner.ts`, and it is the un-flagged graduation of the idea that **a teammate is a [`RuntimeAdapter`](/internals/runtime-adapter)**: given a task id, an assignee, and an adapter factory, it atomically claims the task, opens an execution row, acquires an isolated [worktree](/concepts/worktrees-and-handoff) when the runtime can use one, assembles a tiered prompt, drives the adapter's normalized event stream, enforces [governance](/concepts/governance) on every cost event, rotates the session when it runs out of room, runs the [verification](/concepts/verification) gate, and writes a cross-runtime handoff.
+The executor runner, `runTaskOnRuntime` in `apps/web/server/lib/executorRunner.ts`, drives one existing board task through one runtime from claim to finish. Given a task id, an assignee and an adapter factory, it claims the task, opens an execution row, sets up a worktree when the task changes files, assembles a tiered prompt, drains the adapter's event stream while recording spend and running the circuit breakers, rotates the session when it runs out of room, runs the verification gate, and writes a handoff for the next runtime.
 
-The whole thing talks **only** through the `RuntimeAdapter` trait and an injected adapter factory. It never assumes "a runtime is a spawned process," so a future non-subprocess participant, a human, UI-driven, slots in behind the same seam without touching the runner.
+It is one of two execution paths, and not the default one:
 
-This page walks the lifecycle in order: the pre-claim refusals, the atomic claim, worktree acquisition, prompt assembly with memory auto-injection, the event-drain loop with its budget kill-switch and circuit breakers, session rotation, the terminal branches (report-up, verify gate routing, handoff), and capability-driven degradation.
+- **The executor runner** serves `POST /api/runtimes/:id/run` and agent Routine fires on Clawboo Native, Claude Code, Codex and Hermes. With `CLAWBOO_ENABLE_MOCK_RUNTIME=1`, Routine fires on `clawboo-mock` use it too; the run route accepts only the four real runtimes.
+- **The team engine** (`serverDeliver`, driven by the team orchestrator) runs every team-chat turn, every delegation, and every board task a person starts. It provisions no worktree, passes no working directory, and has no verification, memory auto-injection or circuit breakers. See [How a team works](/intro/how-it-works).
 
-## What it is, and what it isn't
+Use this page when you change how a task runs on a spawned runtime, or need to know what a run through the runtime run API does.
 
-The runner is the **dispatcher for one task on one non-OpenClaw runtime**. It is the consumer side of the executor seam: the trait knows nothing about the board, and the runner knows nothing about how any individual runtime maps its native frames; it sees only `RuntimeEvent`s.
+## Where it sits
 
-What it is _not_:
+The runner talks to a runtime only through the [`RuntimeAdapter`](/internals/runtime-adapter) trait and an injected adapter factory (`adapterFactoryFor(runtimeId)` in production). It is not:
 
-- **Not the team orchestrator.** Deciding _which_ tasks to spawn from a delegation lives in [delegation and orchestration](/concepts/delegation-and-orchestration). The runner runs _one_ task that already exists on [the board](/concepts/the-board).
-- **Not the OpenClaw path.** OpenClaw is a _connected substrate_; it executes over its live Gateway connection, not as a one-shot spawn. The runner refuses a connected-substrate runtime before it claims anything (see [pre-claim refusals](#pre-claim-refusals)). The four wrapped/native runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) go through here.
-- **Not the verification critic.** The runner _triggers_ verification on completion, but the builder-≠-judge gate is its own subsystem; the runner reuses its own adapter factory to drive the independent reviewer.
+- **the team engine**, which decides what to delegate and runs team chat;
+- **the OpenClaw path**: OpenClaw runs over its live Gateway connection, so the runner refuses it before claiming anything, and OpenClaw routine fires use a separate dispatcher (see [How a Routine fire picks its path](/internals/seams#how-a-routine-fire-picks-its-path));
+- **the verification critic**: it triggers the verification gate, which reuses the runner's adapter factory to drive an independent reviewer.
 
-The public entry point is `runTaskOnRuntime(input)`, which returns a structured `RunTaskResult` and never throws for the expected board outcomes; a `404`, `409`, too-deep, connected-substrate, or budget-paused result is data, not an exception. The REST surface over it is `POST /api/runtimes/:id/run` (`runtimesRunPOST`), which maps the structured reasons onto HTTP status codes.
+`runTaskOnRuntime(input)` returns a `RunTaskResult` and never throws for an expected board outcome. A refusal is `{ ok: false, reason }`; `runtimesRunPOST` maps it to an HTTP status:
+
+| `reason`                | Meaning                                                                 | REST status |
+| ----------------------- | ----------------------------------------------------------------------- | ----------- |
+| `not_found`             | The task does not exist.                                                | `404`       |
+| `conflict`              | The claim was lost, the caller went away, or a fix cycle lost the task. | `409`       |
+| `too_deep`              | The task sits deeper than the depth cap.                                | `422`       |
+| `connected_substrate`   | The runtime runs over a live connection (OpenClaw).                     | `422`       |
+| `budget_paused`         | A cap-mode budget on the agent, mission or team is paused.              | `422`       |
+| `workspace_unavailable` | The task changes files but no worktree could be provided.               | `422`       |
+
+A completed run answers `200` with the result (`doneReason`, final `status`, `summary`, `costUsd`, `usedWorktree`, `degradations`). An unexpected throw answers `500`. The request blocks for the whole run, and the handler aborts the run if the client disconnects.
 
 ## The lifecycle
 
 ```mermaid
 flowchart TD
-    A[runTaskOnRuntime] --> B{home is persistent?}
-    B -->|yes| C[serialize on home mutex]
-    B -->|no| D[run unserialized]
-    C --> E[runTaskInner inside withTaskSpan]
-    D --> E
-
-    E --> F{abortSignal already fired?}
-    F -->|yes| RC[return conflict]
-    F -->|no| G{task exists?}
-    G -->|no| RNF[return not_found]
-    G -->|yes| H{ancestor depth > MAX_SPAWN_DEPTH?}
-    H -->|yes| RTD[return too_deep]
-    H -->|no| I{connected substrate?}
-    I -->|yes| RCS[return connected_substrate]
-    I -->|no| J{cap budget paused?}
-    J -->|yes| RBP[return budget_paused]
-    J -->|no| K[atomic claim]
-
-    K -->|conflict| RC2[return conflict — never retried]
-    K -->|won| L[createExecutionProcess + emit execution_started]
-    L --> M[acquire worktree if capable]
-    M --> N[memory auto-injection → volatile tier]
-    N --> O[assembleTiers: stable / context / volatile]
-    O --> P[adapter.start]
-
-    P --> Q[drain adapter.events]
-    Q -->|cost| R[recordSpend — budget kill-switch + breaker]
-    Q -->|tool-call / tool-result / error| S[emit + step breaker]
-    Q -->|done| T[capture summary]
-    R -->|cap paused / breaker trip / cancel| U[abort run, break]
-
-    T --> V{exhausted room AND rotations left?}
-    V -->|yes| W[rotateSession → fresh successor, re-drive]
-    W --> Q
-    V -->|no| X[terminal handling]
-    U --> X
-
-    X --> Y{stop reason?}
-    Y -->|budget paused| Z1[audit + cancel exec + release to todo]
-    Y -->|breaker trip| Z2[audit + cancel exec + release to todo]
-    Y -->|success + worktree| Z3[report-up + writeHandoff + verify gate → done/in_review/blocked]
-    Y -->|success, no worktree| Z4[updateStatus done]
-    Y -->|non-success| Z5[fail exec + release to todo]
+    A[runTaskOnRuntime] --> R{"refused before the claim?"}
+    R -->|"not_found, too_deep, connected_substrate, budget_paused"| X[return the reason]
+    R -->|no| C{atomic claim}
+    C -->|lost| X2[return conflict]
+    C -->|won| W{workspace}
+    W -->|"changes files, no repo or provision failed"| U["fail the execution, release, workspace_unavailable"]
+    W -->|ok| P[assemble prompt and start the run]
+    P --> D["drain events: spend, breakers, idle guard"]
+    D -->|"out of room, rotations left"| P
+    D --> T["terminal: budget pause, breaker trip, success, or failure"]
 ```
 
-## How it works
+## Before the claim
 
-### Pre-claim refusals
+Everything that can refuse a run without changing the board runs before the claim, so a misrouted or over-budget call never opens an execution row or spawns a process. In order:
 
-Everything that can refuse the dispatch without mutating the board runs _before_ the claim, so a misrouted or over-budget call never opens an execution row or spawns a process. In order:
+1. **Aborted waiter.** A run for a persistent-home runtime waits its turn on a per-agent lock (`homeDispatchMutex`, below). The wait is bounded by `HOME_MUTEX_ACQUIRE_MS` (10 minutes, `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`); past it the run rejects with `MutexAcquireTimeoutError`. If the caller disconnected or a person moved the card while it waited, the runner returns `conflict` without touching the board.
+2. **Task exists**, else `not_found`.
+3. **Depth.** A task with more than `MAX_SPAWN_DEPTH` (2) ancestors is refused with `too_deep`. Creation and dispatch read the same `DEFAULT_MAX_DEPTH` from `@clawboo/governance` but compare differently: a create is refused when the parent is already at the cap, a dispatch only when the task itself is past it. So anything that can be created can also run.
+4. **Connected runtime.** `resolveRuntimeIntegration(caps)` gives OpenClaw a `connected` home, and the runner returns `connected_substrate`.
+5. **Budget preflight.** A paused budget in `cap` mode on the agent, the mission (the root task of the delegation tree) or the team returns `budget_paused`. Budgets in `warn` mode, the default, never read paused and never block.
 
-1. **Aborted waiter.** A run can sit queued behind a same-identity dispatch in the home mutex for up to `CLAWBOO_HOME_MUTEX_ACQUIRE_MS` (10 minutes by default); a waiter still stuck past that is behind a wedged holder and rejects with a typed `MutexAcquireTimeoutError` instead of queueing forever. If the caller disconnected meanwhile (its `AbortController` fired), or a person moved the task's card (see [stopped by a person](#stopped-by-a-person)), the runner bails and returns `conflict` before the claim, so a dead waiter never mutates the board.
-2. **Task existence** → `not_found`.
-3. **Depth bound.** Recursion is bounded via the board's ancestor chain: a task whose ancestor count is **past** `MAX_SPAWN_DEPTH` (2) is refused with `too_deep`. This is the single-reduce-point invariant; children never fan out past the depth ceiling.
+The integration plan also decides serialization. A persistent home (Clawboo Native, Codex, Hermes) is one state directory per (runtime, agent), so two concurrent runs of the same agent wait for each other on `homeDispatchMutex`, keyed on the home path. The team engine and 1:1 chat take the same lock for their own runs of that agent. An ephemeral home (Claude Code) is never keyed.
 
-   The comparison here is `>`, while the creation-side caps use `>=` on the **parent's** depth, and the asymmetry is deliberate: a create is refused when the parent already sits at the max (the child would be `max + 1`), so the deepest task that can exist is exactly `max` — and this gate must therefore admit it. Both sides read the same `DEFAULT_MAX_DEPTH` from `@clawboo/governance`, so they cannot drift to different numbers. They previously both used `>=`, which meant the orchestrator created depth-2 tasks this runner then refused forever: cards that looked workable and could never run. The invariant is now that anything creatable is dispatchable.
+## The claim
 
-4. **Connected-substrate refusal.** The integration class comes from `capabilities()`, never from a runtime-id switch. `resolveRuntimeIntegration(caps)` resolves a `connected-substrate` runtime (OpenClaw) to a `connected` home, and the runner refuses it with `connected_substrate`; this one-shot runner must never spawn it.
-5. **Budget preflight.** A _cap-mode_ paused budget on the agent, mission, or team scope blocks the dispatch with `budget_paused`. This is the only enforceable cap for a connected substrate that reports no incremental cost (its spend lands only on the terminal); a warn-mode budget is clamped to never read `paused`, so it never blocks here.
+The claim is one conditional `UPDATE` through the board's `claimTask` (see [the atomic claim](/internals/board-internals#the-atomic-claim)). A lost claim returns `conflict` and is never retried: another runner legitimately owns the task. A verification fix cycle is the one dispatch that does not claim; it checks that the task is still `in_progress` and still assigned to this agent, and returns `conflict` otherwise.
 
-<Note>
-The runtime class drives integration depth *by construction*. The runner branches only on `resolveRuntimeIntegration(caps).home.kind`, never on a runtime id. A persistent home (native, Hermes) serializes its dispatch on a per-identity home path so two concurrent runs of the same `(runtime, agent)` never spawn two writers against one `state.db`; an ephemeral or connected home is never keyed. See [the seams](/internals/seams) for the same construction applied to schedules and capabilities.
-</Note>
+Right after the claim the runner opens an `execution_processes` row and emits `execution_started`. The row's run reason is `verify-fix` on a fix cycle, `resume-via-handoff` when the runtime cannot resume natively, and `run` otherwise. A liveness heartbeat (`startTaskHeartbeat`, every 30 seconds) starts before the mutex wait and stops in a `finally`, so it spans the wait, the run and every fix cycle; that beat is what keeps the stale sweep from releasing a live run.
 
-### The atomic claim
+## The workspace
 
-The claim is a single conditional UPDATE through the board's `claimTask`. A lost claim returns `{ ok: false }` and the runner returns `conflict`, **never retried**. A conflict means another runtime legitimately owns the task; a retry would either no-op or fight for taken work. This is the same never-retry-a-409 rule the board itself enforces; see [the board](/concepts/the-board#the-atomic-claim). A verification fix cycle is the one dispatch that does not claim: it re-dispatches a task this runner already owns, so it verifies ownership instead (still `in_progress`, still this assignee) and returns `conflict` when anything else has moved the task.
+`acquireWorkspace` sets up a workspace only when the adapter declares `capabilities().worktrees`. Clawboo Native, Claude Code, Codex and Hermes all do; the test-only `clawboo-mock` does not, so its runs get no working directory. Whether a task needs a worktree comes from its kind (`isolationForTask` in `@clawboo/worktrees`): `research` and `review` need none; `code`, the default, and any unknown kind need one. There are four outcomes:
 
-Immediately after a successful claim the runner opens an `execution_processes` row (the per-run ledger crash recovery reads on restart) and emits an `execution_started` observability event. The run reason on the exec row is `verify-fix` on a verification fix cycle, `resume-via-handoff` when the runtime can't resume natively, otherwise `run`.
+- **Reuse.** The task already has a worktree, which is the cross-runtime continuation path. If garbage collection reaped it (the row is `stale`, the directory is missing, or git does not list it as a worktree), the runner rebuilds it from the retained branch with `resumeTaskWorkspace`.
+- **Provision.** A file-changing task with a `repoPath` gets a fresh checkout on a `clawboo/task-<id>` branch from `provisionTaskWorkspace`, with the handoff scaffold files.
+- **None.** A `research` or `review` task runs with `cwd: null`.
+- **Refused.** A file-changing task with no `repoPath`, or one whose worktree cannot be provisioned, does not run. The runner adds a `[blocked: no isolation] <reason>` system comment, closes the execution as `failed` with `workspace_unavailable: <reason>`, releases the task to `todo`, and returns `workspace_unavailable`.
 
-### Worktree acquisition
+The refusal happens after the claim, so a refused task shows one failed execution on its ledger. Two callers set the kind: `POST /api/runtimes/:id/run` defaults it to `code`, so a request without `repoPath` is refused; the Routines wake bridge runs an agent Routine that has no `repoPath` as `research`, so it runs without a worktree instead.
 
-A worktree is acquired only when the adapter declares `capabilities().worktrees`. `acquireWorkspace` has three paths:
+<Warning>
 
-- **Reuse.** An existing active worktree for the task is reused as-is; this is the cross-runtime continuation path. If a reuse target was reaped by a garbage-collection sweep (the row is `stale`, the directory is gone, or it's no longer git-registered), the runner rebuilds it from the retained branch via `resumeTaskWorkspace`.
-- **Provision.** No existing worktree and the task's kind isolates to `worktree` → `provisionTaskWorkspace` branches a fresh isolated checkout with the system-of-record scaffold.
-- **None.** A read-only / research task, or no `repoPath`, gets `cwd: null`, no worktree cost.
+The refusal exists because of how the drivers run. Claude Code runs with `permissionMode: 'bypassPermissions'`, Codex with `--dangerously-bypass-approvals-and-sandbox` (app-server: approval policy `never`, sandbox `danger-full-access`), and Hermes with `--yolo` and `--accept-hooks`. A run with no working directory would start in the server's own working directory, which for an npm install is the Clawboo state directory holding the database and the secrets vault. The worktree keeps a task's file changes on its own branch; it is not a sandbox, and the process still has every permission of the user who started Clawboo. Team-engine runs get no working directory at all. See [What agents can do](/concepts/permissions).
 
-Either way, the runner reconstructs the cold-resume `ResumeState` from the worktree's [`AGENT_HANDOFF.json`](/concepts/worktrees-and-handoff) and the system-of-record files, so a fresh runtime picks the task up from where the last one left it.
+</Warning>
 
-### Prompt assembly
+When a worktree exists, the runner reconstructs a `ResumeState` from its `AGENT_HANDOFF.json` and scaffold files, so a different runtime picks the task up where the last one left it. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
 
-The prompt is assembled with `assembleTiers` from `@clawboo/executor/tiers` into three tiers, ordered so the frozen content forms the cacheable prefix and only the volatile tail changes per turn:
+## Prompt assembly
 
-| Tier       | Content                                                                                                                                                                                                                            | Why this tier                                       |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `stable`   | The task title + description (`# Task: …`)                                                                                                                                                                                         | The cacheable head, identical across rotations.     |
-| `context`  | The resume handoff + an MCP-availability note + memory guidance + degradation notes (+ the critic's `{what, why, howToFix}` note on a fix cycle, a rotation handoff note on a successor, and the since-you-were-away inbox digest) | Per-run but stable across turns.                    |
-| `volatile` | The auto-injected memory block                                                                                                                                                                                                     | The only tail that varies; never the cached prefix. |
+The prompt goes through `assembleTiers` from `@clawboo/executor/tiers`, in three tiers ordered so the frozen part forms the cacheable prefix:
 
-**Memory auto-injection** (`buildMemoryInjection`) seeds the most-relevant team facts for the task into the volatile tier so a runtime begins with the team's accumulated knowledge without having to call the [Memory MCP](/concepts/memory) tool (it still can, for more). It reuses the exact `SqliteMemoryStore` + embedding-provider stack the `/api/memory` REST surface uses, is bounded by a character budget (so the seed never crowds out the real instruction), is recall-sanitized (a candidate fact that trips the injection scanner is dropped, so a poisoned "fact" can't smuggle instructions) and scrubbed of secrets, and is a no-op when memory is empty; a fresh install injects nothing. It's computed once and reused across rotations. A task can opt out via `disableMemoryAutoInject` (eval runs set this so seeded facts don't perturb deterministic baselines).
+| Tier       | Content                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `stable`   | The persona block, then `# Task: <title>` and the description. A board run skips the team-chat preamble, so for Claude Code, Codex and Hermes the runner injects the agent's `SOUL.md` itself as a `[Your persona]` block.                                                                                                                                                           |
+| `context`  | The resume handoff; the MCP note (it names `team_chat_post` only for a team task, because an unscoped run gets no TeamChat tools); memory guidance; `Degradations applied: ...`; the interrupted-work note built from earlier attempts' ledger rows (`classifyAttempts`, `buildResumeNote`); the fix note on a fix cycle; the rotation handoff on a successor; and the inbox digest. |
+| `volatile` | The auto-injected memory block.                                                                                                                                                                                                                                                                                                                                                      |
 
-A persistent-home runtime also gets a stable per-identity `homeDir` under Clawboo's state dir, materialized owner-only (`0700`) before the driver touches it. The runner only _computes_ the path; the driver provisions it. The run context (`RuntimeRunContext`) carries the `cwd`, model, the native resume id (only for a same-runtime continuation), the MCP base URL, the authoritative memory scope, the home dir, and any provider keys.
+The inbox digest packs up to 20 undelivered mailbox rows for the assignee into an addressed section and an ambient section, the same split the team-chat path renders, and marks only the rendered rows delivered once the run has started.
 
-### The event-drain loop
+**Memory auto-injection** (`buildMemoryInjection`) seeds the most relevant team facts for the task into the volatile tier, so the runtime starts with the team's knowledge without calling the Memory MCP tools (it still can). It searches the same memory store the `/api/memory` routes use, keeps the top 5 facts within 1,500 characters, drops any candidate the injection scanner flags, scrubs secrets, and injects nothing when memory is empty. It runs once per task and is reused across rotations. `disableMemoryAutoInject` turns it off (eval runs set it). See [Memory](/concepts/memory).
 
-`adapter.start` returns a `RunHandle`; the runner then drains `adapter.events(run)` to a terminal `done`. Each event variant drives a side effect:
+A persistent-home runtime also gets `homeDir`, `<Clawboo state dir>/runtimes/<runtime>/<agent>`, created owner-only (`0700`) before the driver touches it; the critic's own run gets none, so the reviewer never shares the builder's memory. The run context (`RuntimeRunContext`) carries the `cwd`, the model, the native resume id (only when the last runtime on this worktree was the same one), the MCP base URL, the memory scope (team, agent, the attach secret, and provenance stamps), the home directory and any provider keys. The run starts with session key `runtime:<runtime>:task:<taskId>`, the task title as its message, and `childToolBlocklist: ['sessions_send']`.
 
-- **`text-delta`**; accumulated into `lastText` (the reasoning channel is skipped: the feed shows what the agent is doing, not its private reasoning).
-- **`cost`**: the governance hot path (below).
-- **`tool-call`** (settled, not each streaming-input delta) / **`tool-result`** / **`error`**: emitted as observability events and fed to the circuit breaker. An `error` is run through the [error taxonomy](/concepts/observability): an unknown class is a _harness bug_ and alerts; a recognized policy denial (a broker `Deny` surfaced by the runtime) is expected governance, not a bug.
-- **`done`**: captures the reason and summary, then breaks the inner loop.
+## The event drain
 
-An injected `abortSignal` (the REST handler wires it to `res.on('close')`) aborts the live run if the dispatch client disconnects, so a hung CLI doesn't keep burning with no operator-facing kill. The handle is re-read each time the listener fires, so it aborts the _current_ run even across a rotation.
+`adapter.start` returns a `RunHandle`, and the runner drains `adapter.events(run)` through `withIdleTimeout` until a terminal `done`:
 
-#### Stopped by a person
+- **`text-delta`**: accumulated into the run's text. The `reasoning` channel is skipped, so the summary shows what the agent did, not its private reasoning.
+- **`cost`**: recorded against budgets (below) and emitted as a `cost` event.
+- **`tool-call`** (settled calls only, not each streaming-input delta), **`tool-result`** and **`error`**: emitted as observability events and fed to the circuit breaker. An `error` goes through the error taxonomy: an unknown class is a harness bug and raises an alert; a recognized policy denial is expected governance, not a bug.
+- **`done`**: captures the reason and summary and ends the pass.
 
-A person moving the task's card on the board stops the run too. `runTaskOnRuntime` folds the caller's `abortSignal` and a person's stop into one `AbortController`, and registers the run with the per-task run-stop registry (`registerRunStop` in `apps/web/server/lib/runStops.ts`) for as long as it lives, fix cycles included. After the board `PATCH` writes the move, `noteHumanMove` calls `stopTaskRuns(taskId, note)` (for every move except into `in_progress` or `in_review`), which aborts the controller and leaves the note, for example `Stopped: a person moved the card to Done.` The run then takes the non-success terminal below. The OpenClaw routine dispatcher registers with the same registry; the team engine stops the runs it started itself (`personMovedTask`).
+The idle guard aborts a run that is silent for 30 minutes (`CLAWBOO_RUN_SILENT_TIMEOUT_MS`), then allows 5 seconds for the adapter's own terminal. A silent timeout is recorded as a failure with the cause stated ("runtime silent: no events for N minutes"), never as a clean abort and never as a reason to rotate. A pass that finishes without reporting any usage logs a `spend_unreported` warning, because budgets then under-count that run.
 
-#### The budget kill-switch
+An external `abortSignal` (the REST handler wires it to the response's `close`) aborts the current run, even across a rotation, and forces the aborted terminal.
 
-On **every** `cost` event, the runner records spend against the agent, mission (the root of the delegation tree), and team budgets atomically via `recordSpend`. A runtime that reports usage but no USD (Codex, Hermes, unpinned-native) has its spend estimated from the exact token usage × the model rate so the cap still engages; a real `costUsd` is used as-is. The per-node ceiling accumulates rounded integer cents while the budget ledger takes fractional cents so sub-cent events aren't lost.
+### Stopped by a person
 
-The default posture is **track-and-warn**: budgets are null/uncapped until a user sets a limit, and a warn-mode budget records spend and emits a governance warning at its 80% / 100% crossings (fired once per crossing) but never auto-pauses. Only a _cap-mode_ scope that crosses 100%, or the per-node `maxNodeCents` ceiling, aborts the live run; the explicit `mode === 'cap'` check is belt-and-suspenders so a warn budget can never pause even if the DB-layer clamp regressed.
+`runTaskOnRuntime` folds the caller's signal and a person's stop into one `AbortController` and registers the run with the per-task stop registry (`registerRunStop`, `apps/web/server/lib/runStops.ts`) for its whole life, fix cycles included. After a board `PATCH` writes a move, `noteHumanMove` calls `stopTaskRuns(taskId, note)` for every move except into `in_progress` or `in_review`. That aborts the run and leaves a note such as `Stopped: a person moved the card to Done.`, which becomes the run's system comment. The result carries `stoppedByPerson: true`, so a caller treats the move as the outcome rather than a failure (a Routine fire stopped this way stays armed). The OpenClaw routine dispatcher registers with the same registry; the team engine stops the runs it started itself.
 
-#### Circuit breakers
+### Steering
 
-The circuit breaker is a deterministic backstop that halts a run making no progress, repeating a failing tool, or burning tokens, _before_ the dollar ceiling, and on a cross-runtime basis the runtime's own `max_turns` doesn't cover. It's fed typed `RuntimeEvent` signals, never rendered prose: token counts on `cost`, a tool signature on `tool-call`/`tool-result` (correlated by `toolCallId`), and the typed error _code_ on a policy-denied error. The five trip reasons and their conservative defaults (`BREAKER_DEFAULTS`):
+The live run is also registered with the per-task steer registry (`registerRunSteer`, `runSteers.ts`), re-pointed on every rotation and fix cycle. A person's comment on the task reaches it through `steerTaskRun` after the comment is written to the agent's mailbox. How each runtime takes a steer is described on [the RuntimeAdapter trait](/internals/runtime-adapter) page.
 
-| Reason                 | Default                               | Signal                                            |
-| ---------------------- | ------------------------------------- | ------------------------------------------------- |
-| `iteration-cap`        | 30 tool iterations                    | settled tool calls per run                        |
-| `repeat-failure`       | 3                                     | consecutive identical-tool failures               |
-| `no-progress`          | 6                                     | consecutive results with no new successful output |
-| `token-velocity`       | 200,000 tok/min (after a 15 s window) | tokens per minute                                 |
-| `repeat-policy-denied` | 2                                     | identical typed denial codes                      |
+### Spend and budgets
 
-The breaker feed is gated on `!stopForBudget`, and its teardown sits _after_ the budget teardown, so the budget wins ties and at most one `adapter.abort` runs per run. No double-abort.
+On every `cost` event the runner records spend against the agent, mission and team budgets with `recordSpend`. A runtime that reports usage but no USD (`costUsd: null`) is priced from its exact token counts with `estimateRunCostUsdFromUsage`, which falls back to the shared default rate for an unpriced model; a reported `costUsd` is used as is. The per-run ceiling accumulates whole cents while the budget ledger takes fractional cents, so sub-cent events are carried, not lost. The execution row records the run's cost with `costSource` `reported` or `token-estimate`.
 
-### Session rotation
+Budgets default to warn mode. A warn budget records spend and writes a `budget` audit row when it crosses 80% and 100%, but never pauses. Only a `cap` budget that crosses 100%, or the per-run `maxNodeCents` ceiling (set only by a Routine template through the API), aborts the live run; the explicit `mode === 'cap'` check backs up the database layer's rule that a warn budget never reads paused. See [Governance](/concepts/governance).
 
-The runner's unit of context assembly is the **run boundary**: Clawboo doesn't own a per-model-turn loop; the runtime owns its inner loop, so the runner assembles context once, calls `adapter.start`, and drains to a terminal `done`. Rotation happens _between_ runs, never mid-generation.
+### Circuit breakers
 
-When a run exhausts its room, an explicit `done{reason: 'max_turns'}`, or a non-success done that crossed the context-window watermark (`shouldRotate`: `tokensUsed / contextWindow ≥ thresholdPct`, default 0.85), and the chain cap isn't reached (`maxRotations`, default 3), the runner rotates: `rotateSession` serializes the predecessor (best-effort), synthesizes a short structured handoff note (decisions + last summary, never the raw transcript), starts a **fresh** successor session carrying that note, and re-drives the loop.
+The circuit breaker halts a run that makes no progress, repeats a failing tool or burns tokens, before the dollar ceiling. It reads typed signals only: token counts on `cost`, a tool signature on `tool-call` and `tool-result` (correlated by `toolCallId`), and the typed code of a policy-denied `error`. The defaults (`BREAKER_DEFAULTS` in `@clawboo/governance`):
 
-A runtime that reports no context window and never emits `max_turns` never rotates, byte-identical to pre-rotation behavior. Successors always start fresh (`ctx.resume = null`): resuming the exhausted session would re-exhaust it instantly, so continuity rides the handoff note. Budget and breaker state are **cumulative across rotations** (declared above the loop); only the per-run accumulators reset each pass. Each rotation records session lineage (`recordRotation`) and emits a `session_rotated` event.
+| Reason                 | Trips when                                          |
+| ---------------------- | --------------------------------------------------- |
+| `iteration-cap`        | more than 30 settled tool calls in the run          |
+| `repeat-failure`       | 3 consecutive failures of the same tool call        |
+| `no-progress`          | 6 consecutive results with no new successful output |
+| `token-velocity`       | over 200,000 tokens a minute, after 15 seconds      |
+| `repeat-policy-denied` | 2 identical typed denials                           |
 
-<Info>
-Rotation composes with, never fights; the budget kill-switch and the breaker. A budget / breaker / cancel trip breaks to the terminal handling and never rotates over a stop. The cumulative state above the loop is what makes "exactly one teardown per run" hold across a multi-rotation chain.
-</Info>
+`POST /api/runtimes/:id/run` accepts a partial `breakerConfig` to override them. The breaker is fed only while no budget stop is pending, and its teardown runs after the budget teardown, so the budget wins a tie and a run gets at most one `adapter.abort`.
 
-### Terminal handling
+## Session rotation
 
-After the loop, exactly one terminal branch runs.
+The runner's unit of context is the run, not the model turn: the runtime owns its inner loop. When a pass ends out of room (an explicit `done` with reason `max_turns`, or a non-success `done` whose input tokens crossed 85% of the declared context window) and rotations are left (`maxRotations`, default 3), the runner calls `rotateSession`. That serializes the predecessor best-effort, builds a short handoff note (the last summary, never the transcript), and starts a fresh successor session (`<sessionKey>:r<n>`) whose prompt carries the note in its context tier.
 
-**Budget pause** (`stopForBudget`): audit a `budget` event, drop a system comment, complete the execution as `cancelled` with `budget_paused:<scope>`, emit `execution_completed`, and `releaseTask` to `todo` (retryable once a human raises the cap).
+The watermark reads input tokens alone, because the prompt is what occupies the window. A runtime that declares no context window and never emits `max_turns` never rotates. Successors always start fresh (`ctx.resume = null`): resuming the exhausted session would exhaust it again. Budget and breaker state are cumulative across rotations; only the per-pass counters reset. Each rotation records session lineage and emits `session_rotated`. A budget, breaker, cancel or silent-timeout stop ends the run and never rotates.
 
-**Breaker trip** (`stopForBreaker`, mutually exclusive with the budget pause): mirror the budget teardown exactly: audit a `circuit_break` event, drop a `[stopped: <reason>]` comment for the leader to re-plan, complete the execution as `cancelled` with `circuit_broken:<reason>`, and release to `todo`. The worktree is left intact so the handoff stays writable and a retry resumes from clean state.
+## Terminal handling
 
-**Success.** The model summary is scrubbed of secrets _before_ it lands in a durable board comment, the execution row, the handoff, or the HTTP response (a failed CLI that dumps its env to stderr would otherwise persist a credential verbatim; `compact()` does not scrub). Then:
+After the loop exactly one terminal branch runs. Every branch closes the execution row only if it is still `running` (a stale sweep may have closed it first), and emits `execution_completed` only when its close landed.
 
-- The agent comment + `succeeded` execution row are written and `execution_completed` emitted.
-- **With a worktree:** the native session id is persisted into `AGENT_HANDOFF.json` (best-effort, filtering the late-bind fallback so a `--resume` isn't poisoned). If `keepForResume`, the task is released to `todo` (a pause; another runtime resumes from the handoff). Otherwise `actOnTaskWorkspace(taskId, 'complete')` runs the **verification gate**, which routes the terminal status:
+**Budget pause.** Audit a `budget` row with reason `auto_pause`, add the comment `Auto-paused: <scope> budget reached. Raise the cap (or resume) to continue.`, close the execution `cancelled` with `budget_paused:<scope>`, and release the task to `todo`, ready to retry once someone raises the cap.
 
-  | Verdict                                             | Terminal status                                                                                              |
-  | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-  | empty diff                                          | `done` (no deliverable to verify)                                                                            |
-  | `pass`                                              | `done`                                                                                                       |
-  | `completed_with_debt` (produced only at exhaustion) | `blocked` (routed to a human with a system comment and a delegator notice; only a clean `pass` lands `done`) |
-  | `fail` with attempts left                           | `in_progress` (reverted with a structured `{what, why, howToFix}` fix note, re-dispatched as a fix cycle)    |
-  | `fail` at the attempt budget                        | `blocked` (the fix loop is exhausted; the budget is `CLAWBOO_MAX_FIX_CYCLES` + 1, default 2)                 |
+**Breaker trip.** Audit a `circuit_break` row, add `[stopped: <reason>] <detail> Released to todo for re-planning.`, close the execution `cancelled` with `circuit_broken:<reason>`, and release to `todo`. The worktree stays intact, so a retry resumes from it.
 
-  If a person moved the task to `done` or `cancelled` while the check ran, their move stands: the verdict stays on the task as a record, but nothing moves the task and no one is told it was routed for review.
+**Success.** The summary is scrubbed of secrets before it lands in a board comment, the execution row, the handoff or the HTTP response. The runner then writes the agent's comment, closes the execution `succeeded`, and:
 
-  The critic that produces the verdict reuses _this run's adapter factory_ on a detached, push-less checkout with a fresh session and **no builder `homeDir`**; builder ≠ judge at the run level. An operator can also make the judge a different model via `CLAWBOO_REVIEWER_MODEL`. See [Verification](/concepts/verification).
+- **With a worktree:** persists the native session id into `AGENT_HANDOFF.json` (best-effort) and, if a previous attempt crashed, records that its outcome is unknown. With `keepForResume` it releases the task to `todo` for another runtime to pick up. Otherwise it calls `actOnTaskWorkspace(taskId, 'complete')`, which runs the verification gate and routes the status:
 
-- **Without a worktree** (a research/conversational success): `updateStatus(db, taskId, 'done')`.
+  | Outcome                                    | Status                                                                                                 |
+  | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+  | empty diff                                 | `done`, without running the gate (nothing to check)                                                    |
+  | `pass`                                     | `done`                                                                                                 |
+  | `fail` with attempts left                  | `in_progress`; the runner re-dispatches a fix cycle with the structured `{ what, why, howToFix }` note |
+  | `fail` with the attempts spent             | `blocked`, with a system comment and a notice to the delegator (or the team leader)                    |
+  | `completed_with_debt` (only at exhaustion) | `blocked`                                                                                              |
 
-**Non-success.** A system comment records the outcome (for a run a person stopped, the comment is their stop note instead of the usual `Run aborted: …`); the execution is closed `cancelled` (aborted) or `failed` with the scrubbed summary. A terminal `done{reason: 'error'}` is classified through the taxonomy and alerts on an unknown (harness-bug) class. A run that _attempted_ a native resume and failed clears the persisted session id (keyed structurally on the attempt, never on an error string), so the next dispatch falls back to the prose handoff instead of retrying into the same stale id forever. Finally `releaseTask` returns a task still `in_progress` to `todo`, retryable. A task a person already moved stays where they put it, and the result reports its real status; a run a person stopped also returns `stoppedByPerson: true` on its `RunTaskResult`, so a caller treats the move as the outcome rather than a failure (a routine fire stopped this way stays armed).
+  The attempt budget is `CLAWBOO_MAX_FIX_CYCLES` plus one, 2 by default. Fix cycles run outside the home mutex, each taking it fresh, because the mutex is not re-entrant. The gate reads its command from `VERIFY_CMD` in the worktree's `init.sh` (or the `- Verify:` line in `VERIFICATION.md`). The scaffold writes a placeholder there, so a task whose agent never sets a real command fails verification. If a person moved the task to `done` or `cancelled` while the check ran, their move stands and the verdict stays only as a record. The critic reuses this run's adapter factory on a detached checkout with a fresh session and no builder `homeDir`; `CLAWBOO_REVIEWER_MODEL` can make it a different model. See [Verification](/concepts/verification).
 
-### Degradation planning
+- **Without a worktree** (a `research` or `review` task): `updateStatus(db, taskId, 'done')`. If the board refuses (the task was released, the verification gate holds a non-promotable verdict, or the row is gone), the runner keeps the result as a `[late result ...]` system comment that says which.
 
-A runtime advertises what it can do via `capabilities()`; the runner fills the gaps **in code**, never by assuming. `planDegradations(caps)` produces three flags consumed at run start:
+**Failure.** A system comment records the outcome (a person's stop note, or `Run <reason>: <summary>`), the execution closes `cancelled` for an abort or `failed` otherwise, and a `done` with reason `error` is classified through the taxonomy and alerts on an unknown class. A run that attempted a native resume and failed clears the stored session id, so the next dispatch falls back to the prose handoff instead of retrying a stale id. Finally `releaseTask` returns a task still `in_progress` to `todo`; a task a person already moved stays where they put it, and the result reports its real status.
 
-| Flag                           | Triggered by         | Effect                                                                                              |
-| ------------------------------ | -------------------- | --------------------------------------------------------------------------------------------------- |
-| `resumeViaHandoff`             | `!caps.resume`       | Carry state across runs via the worktree handoff; the exec run reason becomes `resume-via-handoff`. |
-| `routeApprovalsThroughClawboo` | `!caps.toolApproval` | Risky tools are gated through Clawboo's own approval queue.                                         |
-| `coarseStreaming`              | `!caps.streaming`    | Expect block-level, not token-level, progress.                                                      |
+## Degradation notes
 
-`describeDegradations` renders human-readable notes that go into the prompt's context tier and the structured result, so the gap-filling is visible rather than silent.
+`planDegradations(caps)` (`apps/web/server/lib/degradation.ts`) derives three flags from the adapter's capabilities:
 
-## Tracing and observability
+| Flag                           | Set when             | Effect                                                                       |
+| ------------------------------ | -------------------- | ---------------------------------------------------------------------------- |
+| `resumeViaHandoff`             | `!caps.resume`       | A note, and the execution's run reason becomes `resume-via-handoff`.         |
+| `routeApprovalsThroughClawboo` | `!caps.toolApproval` | A note (`approvals-via-clawboo (no native tool approval)`) and nothing else. |
+| `coarseStreaming`              | `!caps.streaming`    | A note that progress arrives in blocks, not tokens (Hermes).                 |
 
-Every dispatch runs inside `withTaskSpan`. The **trace id is the mission root**, the root of the delegation tree, so a multi-agent task renders as one trace. The run's `spanId` is derived deterministically from its task id, and its parent span is either an explicit cross-process `parentTraceparent` or the board parent task's span (the ancestor chain _is_ the trace hierarchy). Every lifecycle event (`execution_started`, `cost`, `tool_call`, `tool_result`, `error`, `session_rotated`, `execution_completed`) is emitted under this span via `emitEvent`, which self-gates and is best-effort. The result is that the Ghost-Graph live overlay and the trace view are projections of this same event log; see [Observability](/concepts/observability).
+`describeDegradations` renders the notes into the prompt's context tier and the result's `degradations`, so a gap is visible. The flags do not change tool handling: Clawboo adds no approval gate for a runtime that lacks one. Every real adapter declares `resume` and `toolApproval`, so in practice only Hermes gets a note.
 
-## Design rationale and trade-offs
+## Tracing
 
-The runner exists so that "drive one runtime through one task" is a single, testable function with one set of invariants, instead of being scattered across the orchestrator, the worktree subsystem, and each adapter. Pushing claim/worktree/verify/handoff behind this seam buys three things:
+Every dispatch runs inside `withTaskSpan`. The trace id is the mission root, so a multi-agent task renders as one trace. The run's span id is derived from its task id, and its parent span is either an explicit cross-process `parentTraceparent` or the parent task's span. Lifecycle events (`execution_started`, `cost`, `tool_call`, `tool_result`, `error`, `session_rotated`, `execution_completed`) go through `emitEvent`, which is best-effort. The Org chart's live overlay and the trace view read this same event log. See [Observability](/concepts/observability).
 
-- **Heterogeneity by construction.** The runner branches only on capabilities, so a new runtime is a new adapter + driver, never a change to the runner. The connected-substrate refusal, persistent-home serialization, degradation plan, and rotation watermark are all capability-driven.
-- **A single teardown discipline.** Cumulative budget/breaker state above the rotation loop, the `!stopForBudget` gating, and the "break-never-rotate-over-a-stop" rule together guarantee exactly one `adapter.abort` and one terminal per run, even across a rotation chain.
-- **Recoverability.** Every terminal closes the execution row and either drives a real status or releases the task; orphan and stale reconciliation on [the board](/concepts/the-board#orphan-and-stale-reconciliation) clean up anything a crash leaves behind.
+## Design rationale
 
-The cost is a second concurrency boundary (the per-identity home mutex) layered on top of the board's atomic claim, necessary because the claim dedupes a _task_, not a per-home writer.
+"Drive one runtime through one task" is one testable function with one set of invariants, instead of being spread across the team engine, the worktree code and each adapter. It buys three things:
 
-## Boundaries and non-goals
+- **Capability-driven routing.** The connected-runtime refusal, home serialization, degradation notes and the rotation watermark all come from declared capabilities, so a new runtime is a new adapter and driver, not a runner change.
+- **One teardown per run.** Cumulative budget and breaker state above the rotation loop, the breaker yielding to a budget stop, and never rotating over a stop guarantee one `adapter.abort` and one terminal, even across a rotation chain.
+- **Recoverability.** Every terminal closes the execution row and either sets a real status or releases the task; the board's orphan and stale passes clean up after a crash (see [Orphan and stale reconciliation](/internals/board-internals#orphan-and-stale-reconciliation)).
 
-- **One task, one runtime.** The runner does not orchestrate a team or decide what to delegate. That's the team orchestrator's job.
-- **Never the OpenClaw path.** A `connected-substrate` runtime is refused before the claim. OpenClaw runs over its live connection through a different dispatcher.
-- **No mid-generation control.** The runtime owns its inner turn loop; the runner's unit of intervention is the run boundary. Rotation, budget aborts, and breaker trips all act at event granularity, but a fresh context is only assembled between runs.
-- **Best-effort lineage and handoff.** Session-codec serialization, rotation lineage, and the native-session-id persistence never fail a completed run; losing native resume degrades gracefully to the prose handoff, which is the designed cross-runtime path anyway.
+The cost is a second concurrency boundary, the per-agent home lock, on top of the board's claim: the claim de-duplicates a task, not a writer to one runtime's state directory.
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+## Related
 
-## See also
-
-- [The RuntimeAdapter trait](/internals/runtime-adapter), the seam the runner consumes
-- [The seams](/internals/seams), the same capability-driven multiplexer pattern for schedules and capabilities
-- [The board](/concepts/the-board), atomic claim, status transitions, reconciliation
-- [Verification](/concepts/verification), the builder-≠-judge gate the runner triggers on completion
-- [Governance](/concepts/governance), budgets, the kill-switch, and circuit breakers
-- [Worktrees and handoff](/concepts/worktrees-and-handoff), the isolated world and the cross-runtime `AGENT_HANDOFF.json`
-- [Observability](/concepts/observability), the event log the runner emits into
-- [Runtimes API](/reference/rest-api/runtimes), `POST /api/runtimes/:id/run`, the REST entry point
-- [Glossary](/appendices/glossary), canonical term definitions
+- [The RuntimeAdapter trait](/internals/runtime-adapter): the interface the runner consumes
+- [Board internals](/internals/board-internals): the claim, the transitions and the recovery passes
+- [How a team works](/intro/how-it-works): team chat versus the task runner
+- [What agents can do](/concepts/permissions): the coding runtimes' safety posture
+- [Verification](/concepts/verification) and [Governance](/concepts/governance): the gate and the budgets this runner enforces
+- [Runtimes API](/reference/rest-api/runtimes): `POST /api/runtimes/:id/run`

@@ -1,142 +1,377 @@
 ---
-title: Known issues & limitations
-description: Code-verified list of Clawboo's genuine current limitations, deferrals, and dormant seams, not fixed bugs.
+title: 'Known issues and limitations'
+sidebarTitle: 'Known issues'
+description: "What doesn't work yet in Clawboo, or works with a catch: what you see, what it affects, what to do, and whether a fix is waiting for a release."
+keywords:
+  [
+    'known issues',
+    'limitations',
+    'bugs',
+    'workarounds',
+    'security advisory',
+    'Tokens Used',
+    'cost estimate',
+    'OTLP',
+    'archived team',
+  ]
 ---
 
-This page lists the **genuine current limitations** of Clawboo v0.5.0. Every item is confirmed against current source; these are deliberate deferrals, dormant seams, and runtime-imposed constraints, **not** bugs awaiting a fix. Each entry states the impact and a workaround where one exists.
+This page lists what does not work yet in Clawboo, or works with a catch. Each entry says what you see, what it affects, what to do about it, and its status:
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+- **Open**: no fix exists yet.
+- **Fixed on main**: the fix is in the source code but not in an npm release yet. It ships with the next release.
 
-## Not on this list (already fixed)
+The latest npm release is 0.5.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
 
-Four things you may have read about in older notes are **fixed in current code**; do not treat them as open:
+## Security and access
 
-- **Access-gate case bypass: fixed.** The gate lower-cases the request path before its `/api/` prefix test, so an uppercased route like `/API/settings` can no longer evade the token check. See [Security](/operating/security).
-- **Access-gate reverse-proxy bypass: fixed.** The gate used to skip the cookie for any `/api/mcp/*` request from a loopback TCP peer. A same-host reverse proxy delivers every remote request from loopback, so behind nginx, Caddy or a Cloudflare Tunnel connector anyone who could reach the proxy could call the MCP servers and have `/api/mcp/config` sign them an agent identity. A cookieless MCP request now needs the `attachToken` the server writes into its runtimes' attach URLs, and is refused from another host or through a proxy even with one; `/api/mcp/config` always needs the cookie. An attach URL copied before the fix carries no token; re-copy it from `/api/mcp/config`. See [Self-host securely](/guides/self-host-securely).
-- **Connected coding-agent reload trap: fixed.** A user who finishes onboarding with a _connected_ non-OpenClaw runtime (a key in the vault) lands back in the dashboard on reload, not the wizard. The fix keys on `onboarded && hasConnectedRuntime`. (The *un*connected SKIP path is a separate, still-open deferral: see [item 5](#5-coding-agent-skip-path-re-onboards-on-reload).)
-- **Budget hard-cap stop: fixed.** A cap-mode budget that crosses 100% aborts the live run, and a paused cap blocks the next dispatch pre-flight (before the claim). Budgets are uncapped by default, so this enforces nothing until you set a limit. See [Governance](/concepts/governance).
+### A reverse proxy on the same machine exposes the MCP servers (0.5.0 and older)
 
----
+<Warning>
 
-## 1. Local-first / single-tenant: the `tenant_id` columns are a dormant seam
+**What you see:** nothing. Behind nginx, Caddy or a Cloudflare Tunnel connector on the same machine, requests to `/api/mcp/` succeed without the access cookie, even with `STUDIO_ACCESS_TOKEN` set.
 
-Clawboo is a local-first, single-user tool. Many tables carry a `tenant_id` column (and the budget table reserves a `scope: 'tenant'`), but **no per-tenant scoping is active**. Every row is written with `tenantId: null`, and every read that _could_ be tenant-scoped accepts an optional `scope` that no caller populates; so reads always return the single implicit tenant.
+**What it affects:** a same-host proxy delivers every request from `127.0.0.1`, and these releases let any request from `127.0.0.1` reach every `/api/mcp/` path without the cookie. Anyone who can reach your proxy can use Clawboo's MCP servers (your boards, memory, team chat and tools). They can also ask `/api/mcp/config` for an attach URL signed as any of your agents, with that agent's connector grants.
 
-- **Impact**: there is no multi-tenant isolation. All teams, agents, board tasks, memory facts, budgets, and audit rows share one global namespace. Do not run Clawboo as a shared multi-user service expecting per-user data boundaries.
-- **Workaround**: run one Clawboo instance per user/tenant (each gets its own `~/.clawboo` state directory via `CLAWBOO_HOME`). See [Data & state](/operating/data-and-state) and [Architecture invariants](/concepts/architecture-invariants).
+**What to do:** deny all of `/api/mcp/` at the proxy, not only the four MCP server routes, because `/api/mcp/config` is the one that signs attach URLs. [Security model](/operating/security) has the nginx, Caddy and Cloudflare Tunnel rules. Or upgrade once the next release is out.
 
-<Note>
-This is a deliberate **future seam, not built**. The `tenant_id` columns and the `scope: 'tenant'` budget value exist so a future multi-tenant / Postgres swap is a column-population change, not a rewrite. They are inert today.
-</Note>
+**Status:** fixed on main. From the next release, a request without the cookie reaches an MCP server only with an attach token, only on a direct connection to `127.0.0.1`, and never through a proxy. `/api/mcp/config` always needs the cookie.
 
-## 2. Scheduled-routine spend is estimated (the Tokens Used dashboard is not)
+</Warning>
 
-This entry used to say OpenClaw spend was an approximation everywhere. Half of that is no longer
-true, and the two halves are worth keeping apart.
+### An access token with an unsupported character turns the access check off
 
-**The [Tokens Used dashboard](/using/cost-and-budgets) is metered for OpenClaw.** Clawboo's server
-now bills each OpenClaw turn from the session snapshot, with the real model name and the real input
-and output counts, and writes one `cost_records` row per turn. The browser's older character-count
-estimator is skipped entirely for that runtime, so a webchat turn is not charged twice.
+**What you see:** the dashboard opens without asking for your token, and the server log says `STUDIO_ACCESS_TOKEN contains an unsupported character` and that the access gate is disabled.
 
-**The scheduled-routine budget ledger still estimates.** When a scheduled OpenClaw fire completes
-and its terminal event carries no `costUsd`, the dispatcher approximates token counts from the
-input-prompt and output-summary character lengths (the roughly 4-characters-per-token heuristic) and
-prices them from the shared model table. The OpenClaw [RuntimeAdapter](/appendices/glossary) emits
-no `cost` events and no terminal USD, so there is nothing exact to read at that point.
+**What it affects:** Clawboo accepts only letters, digits, `.`, `_`, `~` and `-` in the token. Any other character switches the token check off. With Clawboo on `127.0.0.1` behind a reverse proxy on the same machine, the dashboard and every `/api/` route are then open to anyone who can reach the proxy. A bind to other machines (`HOST=0.0.0.0`) refuses to start instead.
 
-- **Impact**: budget and cap decisions for scheduled OpenClaw work run on an estimate, and it is a
-  char-derived one, so it diverges from real token accounting most for tool-heavy turns whose tool
-  traffic never appears in the dispatch prompt or the summary. The dashboard's per-turn figures and
-  the budget ledger's figures come from different code paths and will not agree.
-- **Impact**: a turn is billed only when Clawboo's server both sees it and can attribute it. A turn
-  committed while the server is disconnected from the Gateway, one whose session key does not
-  resolve to an agent in your fleet, and one whose snapshot carries no model name are all dropped
-  without an error, and nothing is backfilled.
-- **Impact**: a `clawboo-native` agent writes nothing to `cost_records` at all, so it contributes
-  zero to the Tokens Used panel. Its spend is priced separately.
-- **Impact**: there is no cached-token accounting on either path. Cached prompt tokens are counted
-  and priced as full input.
-- **Workaround**: treat the scheduled-routine ledger as a lower-bound signal and cross-check against
-  your provider's own billing. The estimate is forward-safe: a future cost-bearing Gateway that
-  emits a real `costUsd` is used as-is and the estimate is skipped.
+**What to do:** make a token from the allowed characters, for example with `openssl rand -hex 24`. Restart Clawboo and check that the dashboard asks for the token. See [Reach Clawboo from another machine](/guides/self-host-securely).
 
-See [Governance](/concepts/governance) and [Cost & budgets](/using/cost-and-budgets).
+**Status:** open.
 
-## 3. OpenClaw shared-memory scope is global
+### Keys saved under Providers are also stored unencrypted for OpenClaw
 
-The four executor-driven runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) attach the Memory MCP with a **per-run team scope** carried on the attach URL. OpenClaw is different: its agents are cross-team, and its MCP servers are registered into the Gateway's **process-wide** config (`mcp.servers`), which cannot carry a per-run team binding. So OpenClaw memory reads and writes use a **global** fact scope.
+**What you see:** your provider keys appear in plain text in `~/.openclaw/.env`, even if you never installed OpenClaw, and in each OpenClaw agent's `auth-profiles.json`.
 
-- **Impact**: a fact an OpenClaw agent saves is visible to every OpenClaw agent regardless of team. There is no per-team memory boundary for OpenClaw the way there is for the other runtimes. For the local-first single-user model this is an _organizational_, not a security, boundary.
-- **Workaround**: none at the runtime level; this follows from the Gateway's process-wide config. If you need strict per-team memory isolation, drive the work through a non-OpenClaw runtime, whose attach URL carries the team scope.
+**What it affects:** Clawboo copies every key you save on **Settings** > **Providers** into OpenClaw's files so an OpenClaw Gateway can use it. Anything that runs as your user account can read those files, including the coding agents. Deleting `~/.clawboo` removes the encrypted vault but not these copies.
 
-<Note>
-The multi-tenant horizon (a per-run scoped OpenClaw attach) is parked. TeamChat is *deliberately not* registered for OpenClaw at all for a related reason; a process-wide static URL can't carry a per-run author binding, which would break the peer-chat anti-spoof property. See [Memory](/concepts/memory) and [Peer chat](/concepts/peer-chat).
-</Note>
+**What to do:** if you do not use OpenClaw, connect keys on the runtime's row in **Settings** > **Runtimes** instead: keys entered there stay in the encrypted vault. To remove a copied key, click **Disconnect** on its row under **Settings** > **Providers**. See [Where keys are stored](/using/providers-and-runtimes#where-keys-are-stored).
 
-## 4. Codex requires an interactive `codex login` (no API-key connection)
+**Status:** open. The copy is how the OpenClaw Gateway gets your keys.
 
-Codex authenticates through an interactive ChatGPT OAuth login. Its runtime descriptor declares `authKind: 'oauth'` with `envVar: null` and `headlessAuth: false`; it **cannot be connected head-less with a pasted API key** on current versions.
+### Disconnecting a runtime deletes keys other runtimes use
 
-- **Impact**: you cannot paste a key for Codex in the Runtimes panel. The connect call is a key-less no-op that returns the terminal login command (`codex login`); the card stays in `needs-login` until you complete the OAuth flow in a terminal.
-- **Workaround**: install Codex, then run `codex login` in a terminal and re-check the card. See [Codex runtime](/runtimes/codex) and [Connecting runtimes](/runtimes/connecting-runtimes).
+**What you see:** after you click **Disconnect** on a runtime in **Settings** > **Runtimes**, another runtime can read **Needs key**.
 
-## 5. Coding-agent SKIP path re-onboards on reload
+**What it affects:** a runtime's **Disconnect** deletes every key that runtime reads from the vault, and the vault keeps one copy of each key for all runtimes. Disconnecting Hermes, for example, also deletes the Anthropic and OpenAI keys that Clawboo Native or Claude Code run on. The confirmation mentions only one key.
 
-The onboarding wizard lets you pick a coding-agent runtime (`claude-code`, `codex`, `hermes`) and then **skip connecting it**, finishing onboarding with no runtime credential, no native agent, and no team. The completion sets the `onboarded` flag, but on the next reload the bootstrap's onboarding decision only treats a coding-agent user as "returning" when `onboarded && hasConnectedRuntime` is true (a key actually in the vault). A user who skipped has `onboarded: true` but `hasConnectedRuntime: false`, so the decision **does not** route them to the dashboard; they re-enter the wizard.
+**What to do:** to remove a single key, use **Disconnect** on its row under **Settings** > **Providers**. To undo a runtime's disconnect, connect the keys again. See [Disconnect a key or a runtime](/using/providers-and-runtimes#disconnect-a-key-or-a-runtime).
 
-- **Impact**: picking a coding agent and connecting nothing means a reload drops you back into onboarding instead of the dashboard.
-- **Workaround**: actually connect a runtime during onboarding (paste a key for `claude-code`/`hermes`, or complete `codex login`), or connect one from the **Runtimes** panel afterward. Once a credential is in the vault, `hasConnectedRuntime` is true and reloads land on the dashboard. See [Connecting runtimes](/runtimes/connecting-runtimes).
+**Status:** open.
 
-<Note>
-This is a documented sub-decision of the onboarding bootstrap, not an accident; the `onboarded &&` guard is load-bearing so that merely *having a provider env var* (without finishing onboarding) doesn't skip the wizard. The trade-off is that the connect-nothing path has no durable "returning user" marker.
-</Note>
+## What agents can reach
 
-## 6. No per-process cap on concurrent `/api/obs/stream` subscriptions
+### Claude Code, Codex and Hermes run with their own sandboxes off
 
-The observability live-tail (`GET /api/obs/stream`) is a Server-Sent Events stream. Each subscription holds two timers (a 750 ms DB-tail poll and a 20 s keep-alive) over the shared process-wide SQLite connection. There is **no global counter or per-process limit** on how many of these streams can be open at once; every stream is independent and clears its own timers only when the client disconnects.
+**What you see:** coding agents run commands, edit and delete files, and reach the network without asking you.
 
-- **Impact**: a client (or many tabs) opening many concurrent obs streams holds two timers each, with nothing throttling the total. (Each stream used to hold its own better-sqlite3 handle as well; that half is fixed — all streams now read through the one shared connection.) On the local-first single-user model this is fine, but it is an unbounded resource-exhaustion risk if Clawboo is exposed to many clients.
-- **Workaround**: this is a local-first deferral; behind a wider bind, front Clawboo with a reverse proxy that limits concurrent connections, and keep the [access gate](/operating/security) enabled. See [Observability dashboard](/using/observability-dashboard) and the [Observability API](/reference/rest-api/observability).
+**What it affects:** these runtimes start with their own permission prompts and sandboxes turned off, so they can work unattended. They run as your user account and can read and change any file it can. Without a worktree, as in team chat and in agent Routines you create in the app, they start in the folder the Clawboo server runs in: on an npm install, your Clawboo folder (`~/.clawboo`), next to Clawboo's database and saved keys. A git worktree keeps one task's file changes apart from another's; it is not a sandbox.
 
-## 7. The native shell is one command at a time, and remembers nothing
+**What to do:** give coding agents only work you would let them do unattended. For work you do not fully trust, run Clawboo under a separate user account or in a virtual machine. See [What agents can do](/concepts/permissions).
 
-The `run_command` tool a [Clawboo Native](/runtimes/native) Boo can be given is deliberately the
-smallest version that is honest about what it does. It is off until you switch it on per Boo, and
-even then it only appears when the run has a working folder (in practice a board task with a
-worktree) and the host is not Windows.
+**Status:** open, by design.
 
-- **Impact**: one program per call, as an argument list. No pipes, no redirects, no shell operators,
-  no chained commands. A Boo that needs two steps asks twice.
-- **Impact**: every command is put in front of a person, and nothing is remembered. There is no
-  allowlist at this tier, so **Always** is never offered and a command you allowed this morning asks
-  again this afternoon.
-- **Impact**: the approval card shows the command and the folder. The Boo supplies a one-sentence
-  reason and Clawboo stores it, but the card does not display it, so you are deciding on the command
-  text alone.
-- **Impact**: declining does not just stop the command. It latches the tool off for the rest of the
-  run, and a second attempt trips the circuit breaker, which aborts the board task.
-- **Impact**: a card nobody answers blocks the run for its full ten minutes, and the run makes no
-  other progress while it waits. The per-run ceiling is ten commands.
-- **Impact**: no audit row is written for a `run_command` execution, so it does not appear in the
-  tool audit log.
-- **Impact**: the list of programs Clawboo refuses to launch is a speed bump, not a sandbox. Several
-  ordinary programs reach a shell without appearing on it. The person answering the card is the
-  boundary. See [Security](/operating/security).
-- **Workaround**: none, by design. Shell strings, a real **Always**, background execution and
-  Windows support are all deferred rather than partially shipped, because each needs a way to decide
-  what counts as "the same command" next time and asking every time needs none of it.
+### Claude Code agents follow your own Claude Code settings
 
-See [Clawboo Native](/runtimes/native) and [Review and resolve approvals](/using/approvals).
+**What you see:** a Claude Code agent behaves as if it had your personal Claude Code setup, for example following instructions from your `CLAUDE.md`.
 
-## See also
+**What it affects:** Clawboo does not limit which settings files Claude Code loads. Every Claude Code agent reads what your own `claude` command reads: your user settings and memory in `~/.claude`, plus any `.claude` settings and `CLAUDE.md` in the folder it works in. All Claude Code agents share them.
 
-- [Glossary](/appendices/glossary), runtime, RuntimeAdapter, the board, tenant seam
-- [Security](/operating/security), access gate, loopback bind, the `/api/mcp/*` attach token
-- [Governance](/concepts/governance), budgets, the kill-switch, cap-mode auto-pause
-- [Memory](/concepts/memory), shared MCP tier vs per-runtime private tier; OpenClaw global scope
-- [Architecture invariants](/concepts/architecture-invariants), local-first, registry of record
-- [Data & state](/operating/data-and-state), `CLAWBOO_HOME`, one instance per user
-- [Changelog](/appendices/changelog), release history (0.1.x → 0.5.0)
+**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. See [Claude Code](/runtimes/claude-code).
+
+**Status:** open.
+
+### Clawboo Native shell commands are one approved command at a time
+
+**What you see:** an agent with shell commands turned on asks you before every command, and never offers **Always**.
+
+**What it affects:**
+
+- Each command is one program and its arguments, with no pipes, redirects or chained commands.
+- Commands are offered only on runs that have a working folder, and never on Windows.
+- One run can ask about at most 10 commands. A card waits 10 minutes for your answer, and the run waits with it.
+- Once you decline a command, or let a card expire, the agent cannot ask again in that run.
+
+**What to do:** turn shell commands on only for agents that need them, and answer cards promptly. See [What agents can do](/concepts/permissions) and [Approvals](/using/approvals).
+
+**Status:** open, by design.
+
+## Costs and budgets
+
+### Tokens Used shows OpenClaw spend only
+
+**What you see:** **Settings** > **Insights** > **Tokens Used** stays empty, or lists only OpenClaw agents, while your other agents work.
+
+**What it affects:** Tokens Used counts OpenClaw turns only. Spend by Clawboo Native, Claude Code, Codex and Hermes agents never appears there. It still counts toward your budgets, and each task's card and drawer show what its runs cost.
+
+**What to do:** read task costs on the [Board](/using/board), and budgets in **Settings** > **Insights** > **Governance**. See [Budgets and spend](/using/budgets-and-spend).
+
+**Status:** open.
+
+### Models without a known price are estimated at $3 and $15 per million tokens
+
+**What you see:** a run on a local Ollama model, which costs you nothing, shows a cost such as `~$0.02 est.` on its task card.
+
+**What it affects:** Clawboo's price table lists Claude models and two GPT-4o models. Any other model, including every local Ollama model, is priced at a default rate of $3 per million input tokens and $15 per million output tokens. The run is marked **est.**, and the estimate counts toward your budgets, so a free local model can push a budget into a warning or a hard cap.
+
+**What to do:** treat **est.** figures as rough. For local or flat-rate models, set budgets with the placeholder rate in mind; your provider's bill is the real number.
+
+**Status:** open.
+
+### Hermes reports no usage
+
+**What you see:** a Hermes agent's routine run, or a run started through the API, records no cost.
+
+**What it affects:** Hermes tells Clawboo nothing about the tokens it used. In team chat, Clawboo estimates a Hermes turn from the length of its prompt and reply. On the task runner (agent routines and API runs) it records nothing, so budgets under-count Hermes work.
+
+**What to do:** check Hermes spend in your provider's own dashboard (OpenRouter, Anthropic or OpenAI).
+
+**Status:** open.
+
+### A hard cap does not reliably stop team chat
+
+**What you see:** a budget in **hard cap** mode reads paused at 100%, but the team keeps working.
+
+**What it affects:** nothing checks a budget before a team chat turn starts. A Clawboo Native run on a model Clawboo prices stops after its next model turn. Every other run is charged when it finishes, so the next turn still runs. On the task runner and for OpenClaw agent routines, a paused hard cap does refuse the next run.
+
+**What to do:** to halt a team that is over budget, press **Stop** in the chat. See [What a hard cap stops](/concepts/governance#what-a-hard-cap-stops).
+
+**Status:** open.
+
+### Saving a budget again can switch a hard cap to warn only
+
+**What you see:** a budget you set to **hard cap** reads **warn only** after you change it.
+
+**What it affects:** every save sets the mode. Saving the same scope from the create form with **warn only** selected (the form's default) switches the budget to warn only, and so does an API call that sends no mode.
+
+**What to do:** to raise a hard cap's limit, use **Set cap** on its row, which keeps the mode. See [Budgets and guardrails](/concepts/governance).
+
+**Status:** open.
+
+### A tenant budget never warns or pauses
+
+**What you see:** the Governance panel offers **tenant** as a budget scope, but a tenant budget stays at $0 spent.
+
+**What it affects:** nothing charges a tenant budget, so there is no budget for the whole install.
+
+**What to do:** set budgets per team or per agent instead.
+
+**Status:** open.
+
+## Checks on finished work
+
+### Most work is never checked
+
+**What you see:** tasks reach **Done** without a check result.
+
+**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files. Team chat, Routines created in the app and OpenClaw work are never checked. When a check does run, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure, so the first check fails unless the agent sets a real command.
+
+**What to do:** review results yourself. For runs that are checked, name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
+
+**Status:** open.
+
+## OpenClaw agents
+
+### OpenClaw agents share one memory across teams
+
+**What you see:** a fact an OpenClaw agent saves shows up for OpenClaw agents on other teams.
+
+**What it affects:** OpenClaw agents read and save only global facts, because one Gateway setting serves all of them and Clawboo cannot tell which OpenClaw agent is asking. Agents on other runtimes read their own team's facts and global ones.
+
+**What to do:** for work that needs memory kept per team, use another runtime. See [Memory](/using/memory).
+
+**Status:** open.
+
+### Connectors you share with an OpenClaw agent do not reach it
+
+**What you see:** an OpenClaw agent says it has no tool for a connector you drew to it on the graph, the browser connectors included.
+
+**What it affects:** OpenClaw agents call Clawboo's tools without an agent identity, so connectors shared with a specific agent do not reach them. They can use apps reached through Composio, and every action in those apps asks you first.
+
+**What to do:** give connector work to an agent on another runtime. See [OpenClaw agents and connectors](/using/connectors#openclaw-agents-and-connectors).
+
+**Status:** open.
+
+### OpenClaw ignores TOOLS.md
+
+**What you see:** an OpenClaw agent's **Agent Files** include a **TOOLS** tab, but what you write there changes nothing.
+
+**What it affects:** OpenClaw 2026.9 and later, the line Clawboo installs, does not load TOOLS.md.
+
+**What to do:** put tool guidance in the agent's AGENTS.md. See [Agents](/using/agents).
+
+**Status:** open.
+
+## Teams and Boo Zero
+
+### Archived teams cannot be restored from the dashboard
+
+**What you see:** an archived team disappears from the team rail and every other view, and no screen lists archived teams.
+
+**What it affects:** the team's agents, chats and tasks are kept, but the dashboard offers no way back to them.
+
+**What to do:** restore the team through the API, then reload the dashboard. Find its id, then clear the archive flag (use your port if it is not 18790):
+
+```bash
+curl 'http://localhost:18790/api/teams?includeArchived=true'
+curl -X PATCH 'http://localhost:18790/api/teams/TEAM_ID' -H 'Content-Type: application/json' -d '{"isArchived": 0}'
+```
+
+With an access token set, send your access cookie too. See [Teams](/using/teams).
+
+**Status:** open.
+
+### Boo Zero's Global Brief is not used
+
+**What you see:** what you write in **Details** > **Brief** on Boo Zero's page has no effect on what Boo Zero does.
+
+**What it affects:** Clawboo saves the Global Brief, but no chat or task sends it to Boo Zero, whatever the description above the box says.
+
+**What to do:** for guidance Boo Zero must follow in a team, add a [team rule](/using/teams). In Boo Zero's own chat, start a message with @ and a team's name to bring that team's brief into the message. See [What Boo Zero reads](/using/boo-zero).
+
+**Status:** open.
+
+### Saving SOUL.md can overwrite custom personality instructions
+
+**What you see:** after you edit and save SOUL.md under **Agent Files**, your custom personality instructions are gone from the file the agent follows.
+
+**What it affects:** while custom instructions are on, the SOUL tab shows the slider personality instead of your text. Saving that tab writes the slider text over your custom instructions.
+
+**What to do:** while custom instructions are on, change the personality only in the **Personality** section. If it happens, click in your custom instructions and press `Cmd/Ctrl+S` to write them back. See [Agents](/using/agents).
+
+**Status:** open.
+
+### Two team actions need an OpenClaw Gateway, even without OpenClaw agents
+
+**What you see:** **Refresh Protocol** on a team reports **Not connected to Gateway**, and **Remove Connection** on a route on the Org chart does nothing.
+
+**What it affects:** both actions run only while the dashboard is connected to an OpenClaw Gateway, even for teams with no OpenClaw members. Adding a route works without one.
+
+**What to do:** connect a Gateway, or remove the route line from the agent's AGENTS.md on its page. See [Org chart and team graphs](/using/org-chart) and [Teams](/using/teams).
+
+**Status:** open.
+
+## Memory and observability
+
+### Memory similarity search looks for Ollama on this computer only
+
+**What you see:** with Ollama on another machine and `OLLAMA_BASE_URL` pointing at it, your agents chat on that Ollama, but Memory does not use it for similarity search.
+
+**What it affects:** Memory always looks for Ollama at `http://localhost:11434` and ignores `OLLAMA_BASE_URL`. Without an Ollama there, Memory uses an OpenAI key if you connected one, which sends fact text to OpenAI, or keyword search only.
+
+**What to do:** run Ollama with the `nomic-embed-text` model on the computer that runs Clawboo. See [Turn on similarity search](/using/memory#turn-on-similarity-search).
+
+**Status:** open.
+
+### OpenTelemetry export does nothing on an npm install
+
+**What you see:** with `OTEL_EXPORTER_OTLP_ENDPOINT` set, no traces reach your collector, and **System Health** shows the **OTel exporter** check as **Degraded**, even though its observability line reads **OTel exporter active**.
+
+**What it affects:** the npm package does not include the OpenTelemetry SDK, so the exporter cannot load. Traces stay in Clawboo's own event log, where the Observability panel shows them.
+
+**What to do:** if you need export, run Clawboo from a source checkout of the repository, which installs the SDK. See [Observability](/concepts/observability).
+
+**Status:** open.
+
+## Setup and platform
+
+### Runtime requirements that catch people out
+
+| Runtime     | Limit                                                                                                                                                                                                       | What to do                                                                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | Needs an Anthropic API key: a `claude` CLI signed in with a Claude subscription is not enough. On an npm install it also needs the Claude Agent SDK next to Clawboo, which a one-off `npx` run cannot load. | Run `npm install -g clawboo @anthropic-ai/claude-agent-sdk`, then `clawboo restart`. See [Claude Code](/runtimes/claude-code).               |
+| Codex       | Connects only with **Sign in with ChatGPT**, never an API key. A Codex too old to have `codex app-server` runs without live steering: a comment waits for its next run.                                     | Update Codex with `npm install -g @openai/codex@0`. See [Codex](/runtimes/codex).                                                            |
+| Hermes      | Installs only on Python 3.11 to 3.13. The in-app install picks the newest Python 3.11 or later it finds, so it fails when that one is 3.14 or newer.                                                        | Install it yourself with a supported Python: `pipx install --python python3.13 'hermes-agent[anthropic]<1'`. See [Hermes](/runtimes/hermes). |
+| OpenClaw    | On Windows, the dashboard cannot run OpenClaw's own **Sign in with ChatGPT**.                                                                                                                               | Run the command the setup panel shows in your own terminal. See [OpenClaw](/runtimes/openclaw).                                              |
+
+### The full Marketplace needs an internet connection
+
+**What you see:** the Marketplace shows only 5 teams and 15 agents.
+
+**What it affects:** Clawboo's server downloads the full catalog from the Clawboo repository on GitHub, and refreshes it at most every 6 hours. Offline, or until the download lands, you see only the built-in pack.
+
+**What to do:** check that the computer running Clawboo can reach GitHub, then wait for the next refresh. See [Marketplace](/using/marketplace).
+
+**Status:** open, by design.
+
+## Self-hosting
+
+### Binding to one network address cuts agents off from Clawboo's tools
+
+**What you see:** with `HOST` set to the computer's own network address, other machines reach the dashboard, but agents lose their Clawboo tools, such as the board and memory.
+
+**What it affects:** Clawboo's agents and background jobs connect to `127.0.0.1`, and a bind to one address does not listen there.
+
+**What to do:** use `HOST=0.0.0.0` with an access token, `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`, or keep the default and reach Clawboo through an SSH tunnel or a reverse proxy. See [Reach Clawboo from another machine](/guides/self-host-securely).
+
+**Status:** open.
+
+### The clawboo command cannot manage a server that uses an access token
+
+**What you see:** `clawboo`, `clawboo stop` or `clawboo restart` prints `A Clawboo server is running on port 18790, but it requires an access token.` and exits.
+
+**What it affects:** the launcher cannot check a token-protected server, so it will not start a second one, stop it or restart it. `clawboo stop` and `clawboo restart` print a command to stop the server by hand. Starting a new server with `STUDIO_ACCESS_TOKEN` set also confuses it: after about 45 seconds it prints `Dashboard is taking too long to start.` and exits, while the server keeps running.
+
+**What to do:** stop and start that server the way you started it, for example with `Ctrl+C` in its terminal or through your service manager. To open a server you just started, visit `http://localhost:18790/?access_token=<token>` (use your port if it is not 18790). See [Run the Clawboo server](/operating/deployment) and [CLI reference](/reference/cli).
+
+**Status:** open.
+
+### One install serves one person
+
+**What you see:** everyone who can open the dashboard sees every team, agent, task and memory fact.
+
+**What it affects:** Clawboo has no user accounts and keeps no data apart per person. Anyone with the access token gets the whole install.
+
+**What to do:** run one install per person, each with its own data folder (`CLAWBOO_HOME`). See [Data and state](/operating/data-and-state).
+
+**Status:** open, by design.
+
+### Live event streams have no limit
+
+**What you see:** nothing in normal use.
+
+**What it affects:** each open live event stream (`GET /api/obs/stream`) keeps polling the database until its client disconnects, and nothing limits how many can be open. This matters only when many clients can reach the server.
+
+**What to do:** behind a reverse proxy, limit concurrent connections there, and keep the access token on. See the [Observability API](/reference/rest-api/observability).
+
+**Status:** open.
+
+## Issues in 0.5.0 that are fixed on main
+
+These problems affect the 0.5.0 release. They are fixed on main and ship with the next release, which the [changelog](/appendices/changelog) describes under **Unreleased**.
+
+| What you see on 0.5.0                                                                                                                                                                                 | Area      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Requests to `/api/mcp/` through a reverse proxy on the same machine skip the access token (see the [first entry on this page](#security-and-access))                                                  | Security  |
+| Over HTTP, a TeamChat MCP session with no signed identity can read and post in any team's [peer chat](/concepts/peer-chat) as any agent, and `create_subtask` can file work under another team's task | Security  |
+| Picking **Ollama** during setup records nothing: a new team runs on Anthropic, and its first message says Clawboo Native has no provider key                                                          | Ollama    |
+| Setup accepts an Ollama with no model pulled, then every run fails with "model not found"                                                                                                             | Ollama    |
+| Agents run on Anthropic when an `ANTHROPIC_API_KEY` is in your shell or in `~/.openclaw/.env`, even after you picked another default provider                                                         | Providers |
+| **Set up OpenClaw** asks for an Anthropic, OpenAI or OpenRouter key even when Ollama is your provider                                                                                                 | OpenClaw  |
+| After you change OpenClaw's Gateway port, **Set up OpenClaw** still points Clawboo at port 18789                                                                                                      | OpenClaw  |
+| Without an OpenClaw Gateway, **Create Boo** is missing, the graph's **New agent** fails with `gateway_disconnected`, and deleting agents does not work                                                | Agents    |
+| An OpenClaw agent deleted while the Gateway is down comes back on the next connect                                                                                                                    | OpenClaw  |
+| Approving this device during OpenClaw setup can stick on "Approved. Reconnecting…" with only **Cancel**                                                                                               | OpenClaw  |
+| The Gateway will not start after an OpenClaw upgrade until you run `openclaw doctor --fix`                                                                                                            | OpenClaw  |
+| A second update from the dashboard's update chip fails with "exit code 7"                                                                                                                             | Updates   |
+| The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server    |
+| With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart |
+| With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display   |
+
+## Related
+
+- [Troubleshooting](/help/troubleshooting): error messages and their fixes.
+- [Changelog](/appendices/changelog): what each release changed, and what is waiting for the next one.
+- [What agents can do](/concepts/permissions): what each runtime can reach on your computer.
+- [Budgets and spend](/using/budgets-and-spend): where spend shows and which costs are estimates.
+- [Security model](/operating/security): what protects an install, and the proxy rules for 0.5.0.

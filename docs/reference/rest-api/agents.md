@@ -1,82 +1,88 @@
 ---
-title: Agents API
-description: 'REST reference for the agent registry-of-record: list, create, sync, per-agent reads, files, sessions, delete, ghost cleanup, and the native shell switch.'
+title: 'Agents API'
+sidebarTitle: 'Agents'
+description: 'REST reference for agents: list, create, sync, delete, agent files, sessions, model, workspaces, browser screenshots, the native shell switch and 1:1 chat.'
+keywords: ['agents', 'boo', 'agent files', 'screenshot', 'browser', 'shell', 'registry']
 ---
 
-REST surface for the [agent registry-of-record](/appendices/glossary). SQLite is the source of truth for who exists; an `AgentSource` syncs each upstream (the OpenClaw Gateway, the in-process native runtime) INTO SQLite. Reads serve SQLite, so the agent list, an agent record, and an agent's files keep answering even when the Gateway connection is down; a `stale` flag marks that case. Writes (create), file PUTs, and live session lists delegate to the owning source and return **503** when the source needs a live upstream that is disconnected.
+These routes manage agents (each one appears as a Boo in the dashboard). SQLite is the source of truth for which agents exist. Every agent belongs to one source, named by its `sourceId`: `openclaw` agents mirror agents in the OpenClaw Gateway, while `clawboo-native`, `claude-code`, `codex` and `hermes` agents live only in SQLite.
+
+The agent list and single-agent reads serve SQLite, so they answer with the Gateway down (the list then reports `stale: true`). For an OpenClaw agent, creating it, a sync without a body, reading or writing its files, and listing its sessions need the Gateway, and answer `503 { "error": "gateway_disconnected" }` without it. Agents on the other runtimes need no Gateway.
 
 <Note>
-These routes return clawboo-native `AgentRecord` shapes, not OpenClaw protocol shapes. The `OpenClawAgentSource` adapts the Gateway in both directions; a native (`clawboo-native`) agent is owned by a peer source whose reads and writes are pure SQLite and always work offline. See [agent-source internals](/internals/agent-source) for the sync discipline and [agent model](/concepts/agent-model) for the registry concept.
+
+These routes return Clawboo's `AgentRecord` shape, not OpenClaw protocol shapes. See [Agent model](/concepts/agent-model) for the concept and [Agent sources](/internals/agent-source) for how the Gateway is synced in.
+
 </Note>
 
-Per-agent routes are multi-source: each operation routes to the source that OWNS the row (its `sourceId`); an unknown id falls back to the default (OpenClaw) source so its 404 semantics hold. All POST/PUT routes read a JSON body parsed by `express.json({ limit: '2mb' })`. Static paths (`sync`, `registry/health`, `cleanup-ghosts`) are registered BEFORE `/:agentId` so the param does not swallow them.
+A per-agent route goes to the source that owns the agent; an unknown id goes to the OpenClaw source, which answers its usual `404`. Every route here is on the general rate tier except `POST /api/agents/:agentId/shell`, which is on the sensitive tier (see [rate limits](/reference/rest-api/index#rate-limits)).
 
 ## Routes
 
-| Method | Path                               | Summary                                                    | Stream? |
-| ------ | ---------------------------------- | ---------------------------------------------------------- | ------- |
-| GET    | `/api/agents`                      | Aggregate every source's agent list from SQLite            | No      |
-| POST   | `/api/agents`                      | Create an agent through its source                         | No      |
-| POST   | `/api/agents/sync`                 | Manual / browser-fallback sync of the OpenClaw source      | No      |
-| GET    | `/api/agents/registry/health`      | Server-side OpenClaw connection state (always 200)         | No      |
-| POST   | `/api/agents/cleanup-ghosts`       | Sweep stale local OpenClaw rows not in the live set        | No      |
-| GET    | `/api/agents/:agentId`             | One agent record from its source                           | No      |
-| DELETE | `/api/agents/:agentId`             | Archive upstream + clean local rows                        | No      |
-| GET    | `/api/agents/:agentId/files/:name` | Read one agent file                                        | No      |
-| PUT    | `/api/agents/:agentId/files/:name` | Write one agent file                                       | No      |
-| GET    | `/api/agents/:agentId/sessions`    | List the agent's live sessions                             | No      |
-| GET    | `/api/agents/:agentId/workspaces`  | The task worktrees assigned to this agent                  | No      |
-| GET    | `/api/agents/:agentId/shell`       | Whether a native Boo may ask to run commands               | No      |
-| POST   | `/api/agents/:agentId/shell`       | Turn that switch on or off (native only)                   | No      |
-| PATCH  | `/api/agents/:agentId/model`       | Change a native/hermes agent's model + provider (404 else) | No      |
-| POST   | `/api/agents/:agentId/chat`        | Drive one 1:1 turn on a native agent (detached, 202)       | No      |
-| POST   | `/api/agents/:agentId/chat/stop`   | Abort the agent's in-flight 1:1 turn                       | No      |
-| GET    | `/api/agents/:agentId/chat/stream` | SSE live-tail of the agent's 1:1 chat session              | SSE     |
+| Method | Path                                      | Summary                                                       | Stream? |
+| ------ | ----------------------------------------- | ------------------------------------------------------------- | ------- |
+| GET    | `/api/agents`                             | List every agent from SQLite                                  | No      |
+| POST   | `/api/agents`                             | Create an agent through its source                            | No      |
+| POST   | `/api/agents/sync`                        | Sync OpenClaw agents into SQLite (server-side or from a list) | No      |
+| GET    | `/api/agents/registry/health`             | The server's OpenClaw Gateway connection state                | No      |
+| POST   | `/api/agents/cleanup-ghosts`              | Delete local OpenClaw rows the Gateway no longer has          | No      |
+| GET    | `/api/agents/:agentId`                    | One agent record                                              | No      |
+| DELETE | `/api/agents/:agentId`                    | Delete an agent and its local rows                            | No      |
+| GET    | `/api/agents/:agentId/files/:name`        | Read one agent file                                           | No      |
+| PUT    | `/api/agents/:agentId/files/:name`        | Write one agent file                                          | No      |
+| GET    | `/api/agents/:agentId/sessions`           | List the agent's sessions                                     | No      |
+| GET    | `/api/agents/:agentId/workspaces`         | The task worktrees of this agent's assigned tasks             | No      |
+| GET    | `/api/agents/:agentId/screenshot`         | The newest browser screenshot for this agent                  | No      |
+| POST   | `/api/agents/:agentId/screenshot/capture` | Take a fresh screenshot of a browser already open for it      | No      |
+| PATCH  | `/api/agents/:agentId/model`              | Change a native or Hermes agent's model (and provider)        | No      |
+| POST   | `/api/agents/:agentId/chat`               | Start one 1:1 chat turn with a native agent (`202`)           | No      |
+| POST   | `/api/agents/:agentId/chat/stop`          | Stop the agent's running 1:1 turn                             | No      |
+| GET    | `/api/agents/:agentId/chat/stream`        | Live tail of the agent's 1:1 chat                             | SSE     |
+| GET    | `/api/agents/:agentId/shell`              | Whether a native agent may ask to run commands                | No      |
+| POST   | `/api/agents/:agentId/shell`              | Turn that switch on or off (sensitive tier)                   | No      |
 
 The `AgentRecord` shape (returned by `GET /api/agents`, `GET /api/agents/:agentId`, and inside the create `201`):
 
 ```ts
 interface AgentRecord {
   // Identity
-  id: string // clawboo PK (SQLite-native)
-  sourceId: 'openclaw' | 'claude-code' | 'codex' | 'hermes' | string // owning source
-  sourceAgentId: string // upstream id (Gateway-synced)
+  id: string // Clawboo's id for the agent
+  sourceId: 'openclaw' | 'clawboo-native' | 'claude-code' | 'codex' | 'hermes' // owning source
+  sourceAgentId: string // the id inside the source (the OpenClaw agent id for OpenClaw)
   // Display (merged)
   displayName: string // Boo-Zero override ▸ identity.name ▸ name ▸ id
   emoji: string | null
   avatarUrl: string | null
   avatarSeed: string | null
-  // Live runtime state (Gateway-synced; may be stale when disconnected)
+  // Live state (for OpenClaw agents, synced from the Gateway; may be stale while it is down)
   status: 'idle' | 'running' | 'error' | 'sleeping' | 'archived'
   sessionKey: string | null
-  isDefault: boolean // true when sourceAgentId === the source's defaultId (Boo Zero)
-  // clawboo-native config (SQLite-native; preserved across re-sync)
+  isDefault: boolean // true for the source's default agent
+  // Clawboo's own settings for the agent (kept across re-syncs)
   teamId: string | null
   personalityConfig: unknown | null
   execConfig: unknown | null
-  model?: string | null // native: the AgentConfig primaryModel; absent for sources whose model lives elsewhere
-  providerReady?: boolean | null // native: this agent has a runnable candidate (a key in its envVar slot, one of its fallbacks, or keyless Ollama not removed by the user); null/absent = not applicable
-  // Classification (dormant seams)
+  model?: string | null // native agents: the configured model; absent where the model lives elsewhere
+  providerReady?: boolean | null // native agents: a provider key (or keyless Ollama) can run it; absent otherwise
+  // Classification
   participantKind: 'agent' | 'human'
-  runtime: 'openclaw' | 'claude-code' | 'codex' | 'hermes' | string
+  runtime: 'openclaw' | 'clawboo-native' | 'claude-code' | 'codex' | 'hermes'
   capabilities: unknown | null
-  tenantId: string | null // multi-tenant seam — null = single implicit tenant
+  tenantId: string | null
   // Lifecycle
-  archivedAt: number | null // soft-delete tombstone (epoch ms); null = live
-  createdAt: number
-  updatedAt: number
+  archivedAt: number | null // epoch ms when the agent was archived; null = live
+  createdAt: number // epoch ms
+  updatedAt: number // epoch ms
 }
 ```
 
-<Note>
-`participantKind: 'human'`, `runtime` values beyond `openclaw`, and `tenantId` are documented future seams. Today every Gateway-synced record is `participantKind: 'agent'`, `runtime: 'openclaw'`, `tenantId: null`.
-</Note>
+`runtime` matches `sourceId` for every agent. `participantKind` and `tenantId` are reserved: agents Clawboo creates carry `'agent'` and `null`.
 
 ---
 
 ## `GET /api/agents`
 
-The primary fleet read. Aggregates `listAgents()` across EVERY registered source (OpenClaw + native), all SQLite-backed, so the list answers even when the Gateway connection is down. `defaultId` is the runtime-neutral Boo Zero (`resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), so a native-first install identifies its native Boo Zero. `mainKey`, `stale`, and `lastSyncedAt` stay OpenClaw-derived; `stale` is `true` whenever the server-side OpenClaw connection is not `connected`.
+Lists the agents of all five sources from SQLite, so the list answers even when the Gateway connection is down. `defaultId` is Boo Zero, resolved in this order: the override set with `POST /api/boo-zero/override`, then the native Boo Zero Clawboo creates, then the OpenClaw default agent. `mainKey`, `stale` and `lastSyncedAt` describe the OpenClaw connection; `stale` is `true` whenever the server's OpenClaw connection is not `connected`.
 
 - **Path params**: none.
 - **Query params**:
@@ -122,9 +128,9 @@ curl 'http://localhost:18790/api/agents?teamId=<team-uuid>&includeArchived=true'
 
 ## `POST /api/agents`
 
-Creates an agent through a source. The default source is OpenClaw (Gateway create + agent-file writes + SQLite mirror), which returns **503** when the server-side connection is down. An optional `sourceId` routes the create to a peer source; `clawboo-native` writes are pure SQLite and always succeed.
+Creates an agent through a source. `sourceId` picks it: `openclaw` (the default), `clawboo-native`, `claude-code`, `codex` or `hermes`. An OpenClaw create makes the agent in the Gateway, writes its files there and mirrors it into SQLite, so it answers **503** while the Gateway connection is down. The other four write only to SQLite and work offline.
 
-`name` and every entry in `files` are injection-scanned **before** the source write, on the `prompt` surface: instruction-override phrasing and invisible-Unicode smuggling refuse the create with **422** and write a blocked audit row, while a machine-directed string (a `DROP TABLE` inside a code reviewer's worked example) passes and is reported as a review finding. The asymmetry is deliberate: this route is the one every marketplace deploy travels, and first-run onboarding hard-requires deploying a builtin team.
+`name` and every entry in `files` are scanned for prompt injection before anything is written. Instruction-override phrasing and hidden Unicode characters block the create with **422** and an `install` audit row. Text aimed at machines rather than the model (a `DROP TABLE` inside a code reviewer's worked example) passes and comes back as `findings`.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -134,12 +140,19 @@ Creates an agent through a source. The default source is OpenClaw (Gateway creat
   name: string                  // required; trimmed; must be non-empty
   teamId?: string | null
   personalityConfig?: unknown
-  execConfig?: unknown
+  execConfig?: unknown          // for native agents: the agent's config (model, provider, tools, budgetUsd, ...)
   avatarSeed?: string | null
-  files?: Record<string, string>  // agent files written at create (e.g. SOUL.md, IDENTITY.md)
-  sourceId?: string             // default 'openclaw'; route to a peer source (e.g. 'clawboo-native')
+  files?: Record<string, string>  // agent files written at create (e.g. SOUL.md, AGENTS.md)
+  sourceId?: 'openclaw' | 'clawboo-native' | 'claude-code' | 'codex' | 'hermes' // default 'openclaw'
 }
 ```
+
+Side effects of a successful create:
+
+- The new agent gets its own grants to the browser connectors.
+- Creating a `clawboo-native` agent in a team also creates the native Boo Zero, when none exists yet and a native provider is connected (best-effort).
+- A `clawboo-native` agent whose `execConfig.budgetUsd` is above 0 gets an agent budget in `cap` mode (a hard cap; see [Governance](/reference/rest-api/governance)).
+- An OpenClaw agent's `AGENTS.md` gets a short section on how to open web pages, added once.
 
 ### Responses
 
@@ -173,7 +186,7 @@ Creates an agent through a source. The default source is OpenClaw (Gateway creat
 { "error": "unknown sourceId '<sourceId>'" }
 ```
 
-**`503 Service Unavailable`**: the source needs a live Gateway connection that is down:
+**`503 Service Unavailable`**: an OpenClaw create while the Gateway connection is down:
 
 ```json
 { "error": "gateway_disconnected" }
@@ -188,12 +201,12 @@ Creates an agent through a source. The default source is OpenClaw (Gateway creat
 ### Example
 
 ```bash
-# OpenClaw agent (default source) — needs a live Gateway
+# OpenClaw agent (the default source): needs a live Gateway
 curl -X POST http://localhost:18790/api/agents \
   -H 'Content-Type: application/json' \
   -d '{"name":"Research Boo","teamId":"<team-uuid>"}'
 
-# Native agent — pure SQLite, works offline
+# Native agent: SQLite only, works offline
 curl -X POST http://localhost:18790/api/agents \
   -H 'Content-Type: application/json' \
   -d '{"name":"Native Boo","sourceId":"clawboo-native"}'
@@ -203,10 +216,10 @@ curl -X POST http://localhost:18790/api/agents \
 
 ## `POST /api/agents/sync`
 
-Reconciles the OpenClaw source's upstream into SQLite. With a body it runs the **browser-fallback** path: the browser, connected through the proxy, pushes its own `agents.list` result so SQLite warms WITHOUT the server's own connection. With no body it runs the **server-side** `sync()`, which needs the connection and returns **503** when down.
+Brings the OpenClaw agent list into SQLite. With a body that carries an `agents` array, it stores that list (the browser's own `agents.list` result, sent while the server has no Gateway connection of its own). With no body, the server reads the list from the Gateway itself, which needs the connection and answers **503** while it is down.
 
 - **Path/query params**: none.
-- **Request body** (optional: present ⇒ browser-fallback upsert):
+- **Request body** (optional; a body with an `agents` array stores that list):
 
 ```ts
 {
@@ -217,11 +230,11 @@ Reconciles the OpenClaw source's upstream into SQLite. With a body it runs the *
 }
 ```
 
-The fallback path triggers only when `agents` is an array. The upsert touches Gateway-owned columns only; SQLite-native columns (`teamId`, `personalityConfig`, `execConfig`, `avatarSeed`, etc.) are preserved.
+Without an `agents` array the body is ignored and the server syncs from the Gateway. Storing a list touches only the fields that come from the Gateway; Clawboo's own fields (`teamId`, `personalityConfig`, `execConfig`, `avatarSeed` and so on) are kept.
 
 ### Responses
 
-**`200 OK`**: browser-fallback upsert (body with an `agents` array):
+**`200 OK`**: a list was stored (body with an `agents` array):
 
 ```ts
 { result: { upserted: number, archived: number, durationMs: 0, at: number } }
@@ -235,7 +248,7 @@ The fallback path triggers only when `agents` is an array. The upsert touches Ga
 
 `archived` counts agents present in SQLite but gone upstream (their `archivedAt` is set; the tombstone is reversible and cleared if the agent reappears).
 
-**`503 Service Unavailable`**: the server-side sync needs a live connection that is down:
+**`503 Service Unavailable`**: a sync without a list while the Gateway connection is down:
 
 ```json
 { "error": "gateway_disconnected" }
@@ -263,7 +276,7 @@ curl -X POST http://localhost:18790/api/agents/sync \
 
 ## `GET /api/agents/registry/health`
 
-Reports the server-side OpenClaw connection state. Always returns **200** (it is a liveness surface, not gated by the connection). Registered before `/:agentId` so the param does not swallow `registry`.
+Reports the state of the server's own OpenClaw Gateway connection. It answers **200** whether or not the Gateway is connected.
 
 - **Path/query params**: none.
 - **Request body**: none.
@@ -297,14 +310,14 @@ curl http://localhost:18790/api/agents/registry/health
 
 ## `POST /api/agents/cleanup-ghosts`
 
-A one-shot sweep the client invokes after hydrating from the Gateway. The caller passes the IDs of all agents currently alive in the Gateway; the endpoint deletes every local OpenClaw-owned SQLite row NOT in that list, plus its FK-referenced cost / approval rows and its per-agent settings keys. Idempotent. The sweep is scoped to `sourceId = 'openclaw'`; the live-id list comes from the Gateway, so native (and any future peer-source) agents are never ghosts of it.
+A one-shot cleanup the dashboard runs after it loads the Gateway's agent list. Send the ids of every agent the Gateway has; the route deletes each local OpenClaw agent row that is not in the list, with its cost and approval-history rows and its per-agent settings. Running it again changes nothing. Only rows with `sourceId = 'openclaw'` are compared, so agents on other runtimes are never removed.
 
 - **Path params**: none.
 - **Query params**:
 
-| Param        | Type     | Effect                                                                                      |
-| ------------ | -------- | ------------------------------------------------------------------------------------------- |
-| `allowEmpty` | `'true'` | Permit an empty `liveAgentIds` (guards against a transient Gateway hiccup nuking every row) |
+| Param        | Type     | Effect                                                                                   |
+| ------------ | -------- | ---------------------------------------------------------------------------------------- |
+| `allowEmpty` | `'true'` | Permit an empty `liveAgentIds` (a guard against wiping every row after a Gateway hiccup) |
 
 - **Request body**:
 
@@ -320,10 +333,10 @@ A one-shot sweep the client invokes after hydrating from the Gateway. The caller
 { "error": "liveAgentIds array required" }
 ```
 
-**`400 Bad Request`**: `liveAgentIds` is empty and `?allowEmpty=true` was not passed:
+**`400 Bad Request`**: `liveAgentIds` is empty and `?allowEmpty=true` was not passed (the message contains an em dash, written here as its JSON escape):
 
 ```json
-{ "error": "empty liveAgentIds list — pass ?allowEmpty=true to confirm" }
+{ "error": "empty liveAgentIds list \u2014 pass ?allowEmpty=true to confirm" }
 ```
 
 **`200 OK`**: no local rows were stale:
@@ -399,10 +412,12 @@ curl http://localhost:18790/api/agents/<agent-id>
 
 ## `DELETE /api/agents/:agentId`
 
-Archives the agent. The owning source's `archiveAgent` deletes the upstream record THEN cleans the local SQLite row plus its FK-referenced children (`cost_records`, `approval_history`) and per-agent settings keys. If the server-side Gateway connection is down, it falls back to a SQLite-only cleanup so the local row never rots, disconnect tolerance.
+Deletes the agent. The owning source deletes it upstream first (for OpenClaw, the Gateway's `agents.delete`), then removes the local agent row along with the `cost_records` and `approval_history` rows that reference it. If the Gateway connection is down, the local rows are removed anyway.
 
 <Note>
+
 An OpenClaw agent deleted while the Gateway is down is recorded as a pending delete. On the next sync the server sends the Gateway's `agents.delete` before it reads the list, and until that lands no sync re-creates the agent's row. If the Gateway refuses the delete outright (it will not delete its only agent, or one that owns shared credentials), the pending delete is dropped and the agent comes back on that same sync. A connection failure is retried on the next sync.
+
 </Note>
 
 - **Path params**: `agentId`.
@@ -410,7 +425,7 @@ An OpenClaw agent deleted while the Gateway is down is recorded as a pending del
 
 ### Responses
 
-**`200 OK`**: archived upstream and locally:
+**`200 OK`**: deleted upstream and locally. Agents on runtimes other than OpenClaw have nothing upstream, and also answer `upstreamDeleted: true`:
 
 ```json
 { "ok": true, "upstreamDeleted": true }
@@ -428,7 +443,7 @@ An OpenClaw agent deleted while the Gateway is down is recorded as a pending del
 { "error": "agentId required" }
 ```
 
-**`500 Internal Server Error`**: a non-disconnect failure during archive:
+**`500 Internal Server Error`**: any failure other than a lost Gateway connection:
 
 ```json
 { "error": "<message>" }
@@ -444,11 +459,11 @@ curl -X DELETE http://localhost:18790/api/agents/<agent-id>
 
 ## `GET /api/agents/:agentId/files/:name`
 
-Reads one agent file through the owning source. The `:name` segment must be one of the seven canonical agent file names; any other name is rejected before the read.
+Reads one agent file through the owning source. An OpenClaw agent's files are read live from the Gateway (**503** while it is down); the other runtimes keep their files in SQLite. The `:name` segment must be one of the seven agent file names; any other name is rejected before the read.
 
 - **Path params**: `agentId`, `name`.
 
-`:name` ∈ `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`.
+`:name` is one of `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`. The route stores any of them on any agent, but which files actually shape an agent depends on its runtime: see [Agents](/using/agents). OpenClaw 2026.9 and later does not load `TOOLS.md`, so put tool guidance in `AGENTS.md`.
 
 - **Request body**: none.
 
@@ -472,7 +487,7 @@ Reads one agent file through the owning source. The `:name` segment must be one 
 { "error": "invalid file name" }
 ```
 
-**`503 Service Unavailable`**: the owning source needs a live Gateway that is down:
+**`503 Service Unavailable`**: an OpenClaw agent, and the Gateway connection is down:
 
 ```json
 { "error": "gateway_disconnected" }
@@ -496,7 +511,7 @@ curl http://localhost:18790/api/agents/<agent-id>/files/SOUL.md
 
 Writes one agent file through the owning source. Same `:name` allowlist as the read; the body must carry a string `content`.
 
-`content` is injection-scanned on the `prompt` surface before the write, exactly as `POST /api/agents` scans its `files`. A blocking finding refuses the write with **422** plus a blocked audit row, and review findings ride along on the 200.
+`content` is scanned for prompt injection before the write, exactly as `POST /api/agents` scans its `files`. A blocking finding refuses the write with **422** and an `install` audit row; review-level findings come back on the `200`.
 
 - **Path params**: `agentId`, `name` (same allowlist as the GET).
 - **Request body**:
@@ -542,7 +557,7 @@ Writes one agent file through the owning source. Same `:name` allowlist as the r
 { "error": "content (string) required" }
 ```
 
-**`503 Service Unavailable`**: the owning source needs a live Gateway that is down:
+**`503 Service Unavailable`**: an OpenClaw agent, and the Gateway connection is down:
 
 ```json
 { "error": "gateway_disconnected" }
@@ -557,16 +572,16 @@ Writes one agent file through the owning source. Same `:name` allowlist as the r
 ### Example
 
 ```bash
-curl -X PUT http://localhost:18790/api/agents/<agent-id>/files/TOOLS.md \
+curl -X PUT http://localhost:18790/api/agents/<agent-id>/files/AGENTS.md \
   -H 'Content-Type: application/json' \
-  -d '{"content":"# Tools\n\n- read_file\n"}'
+  -d '{"content":"# How you work\n\n- Reply in short bullet points.\n"}'
 ```
 
 ---
 
 ## `GET /api/agents/:agentId/sessions`
 
-Lists the agent's live sessions. The OpenClaw source delegates LIVE to the Gateway (sessions are runtime-volatile), so this route returns **503** when the connection is down.
+Lists the agent's sessions. For an OpenClaw agent the list is read live from the Gateway, so the route answers **503** while the connection is down. The other runtimes list the sessions stored in SQLite.
 
 - **Path params**: `agentId`.
 - **Request body**: none.
@@ -579,8 +594,8 @@ Lists the agent's live sessions. The OpenClaw source delegates LIVE to the Gatew
 {
   sessions: Array<{
     id: string
-    sourceId: 'openclaw' | 'claude-code' | 'codex' | 'hermes' | string
-    sourceSessionId: string // the upstream session key
+    sourceId: 'openclaw' | 'clawboo-native' | 'claude-code' | 'codex' | 'hermes'
+    sourceSessionId: string // the session key inside the source
     agentId: string
     teamId: string | null
     status: 'active' | 'idle' | 'closed'
@@ -596,7 +611,7 @@ Lists the agent's live sessions. The OpenClaw source delegates LIVE to the Gatew
 { "error": "agentId required" }
 ```
 
-**`503 Service Unavailable`**: the source needs a live Gateway that is down:
+**`503 Service Unavailable`**: an OpenClaw agent, and the Gateway connection is down:
 
 ```json
 { "error": "gateway_disconnected" }
@@ -616,32 +631,173 @@ curl http://localhost:18790/api/agents/<agent-id>/sessions
 
 ---
 
-## `PATCH /api/agents/:agentId/model`
+## `GET /api/agents/:agentId/workspaces`
 
-Changes a **native** or **hermes** agent's model, and optionally its provider. For a native agent it rewrites the stored `AgentConfig` (the next run reads it), so it needs no Gateway. With a `provider` in the body, `primaryProvider`, `primaryModel`, and `envVar` move **atomically**: the model picker offers every provider's models, and a cross-provider model left on the old provider would post to the wrong endpoint and fail auth. Without a `provider`, only `primaryModel` changes; that is the back-compat contract, and also how a custom model id for the agent's current provider is set. The server has no model-to-provider catalog (custom ids are supported), so it validates the provider name against the known set and trusts the model string; the dashboard sends the pair its catalog derived. A hermes agent routes every model through OpenRouter, so its execConfig is stored as `{ provider: 'openrouter', model }`; an explicit `provider` other than `openrouter` is a **400**. An OpenClaw agent changes its model through the OpenClaw config path (`PATCH /api/system/openclaw-config` `{ agentModel }`), so this route returns **404** for other runtimes.
+The task worktrees of this agent's assigned tasks, newest first. The agent's **Workspace** tab uses it to pick which worktree to show, and to say so when the agent has none.
+
+Archived workspaces are left out. `onDisk: false` marks a checkout that was paused or cleaned up: the row and the branch remain, but the files are gone, and the tab says so rather than showing an empty tree. The files themselves come from the `/api/board/:taskId/workspace/*` routes on the [Board API](/reference/rest-api/board).
 
 - **Path params**: `agentId`.
-- **Request body**: `{ model: string, provider?: string }` (`model` is a native-catalog or custom model id, e.g. `claude-sonnet-4-6`; `provider` is one of the known native providers, e.g. `openrouter`).
+- **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: the model (and, when supplied, the provider) was saved. The `provider` field is echoed back only when the request carried one:
+**`200 OK`**:
+
+```json
+{
+  "ok": true,
+  "workspaces": [
+    {
+      "taskId": "t_8f2c",
+      "title": "Fix the flaky board round-trip test",
+      "taskStatus": "in_progress",
+      "branch": "clawboo/task-t_8f2c",
+      "repoPath": "/Users/you/code/clawboo",
+      "worktreePath": "/Users/you/.clawboo/worktrees/ab12cd34ef56/t_8f2c",
+      "workspaceStatus": "active",
+      "onDisk": true,
+      "updatedAt": 1756000000000
+    }
+  ]
+}
+```
+
+An agent with no worktree-backed tasks returns `{ "ok": true, "workspaces": [] }`.
+
+**`500 Internal Server Error`**:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl http://localhost:18790/api/agents/<agent-id>/workspaces
+```
+
+---
+
+## `GET /api/agents/:agentId/screenshot`
+
+The newest browser screenshot for this agent, shown on its **Browser** card. A frame is kept whenever one of the agent's browser tools returns an image, and when `POST /api/agents/:agentId/screenshot/capture` takes one. The route serves only this agent's own frame, never another agent's.
+
+Frames are held in memory, one per agent: a new frame replaces the old one, and past 24 MB in total the oldest frames are dropped. They are also saved under `<clawboo home>/frames/`, so a restart brings them back, marked `restored: true`. A restored frame can be hours old.
+
+- **Path params**: `agentId`.
+- **Query params**: `meta` (any value) returns the frame's details as JSON instead of the image.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`** with `?meta`: the frame's details. `restored` is present only for a frame reloaded from disk:
+
+```json
+{
+  "ok": true,
+  "mimeType": "image/png",
+  "toolName": "mcp__playwright__browser_take_screenshot",
+  "ts": 1756000000000,
+  "restored": true
+}
+```
+
+**`200 OK`** without `?meta`: the image bytes. `Content-Type` is `image/png`, `image/jpeg`, `image/gif` or `image/webp` (a frame that states any other type is served as `image/png`), with `Content-Length`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+
+**`404 Not Found`**: this agent has no frame:
+
+```json
+{ "ok": false, "error": "no screenshot for this agent" }
+```
+
+**`500 Internal Server Error`**: the stored frame could not be decoded:
+
+```json
+{ "ok": false, "error": "frame is not decodable" }
+```
+
+### Example
+
+```bash
+curl 'http://localhost:18790/api/agents/<agent-id>/screenshot?meta=1'
+curl -o frame.png http://localhost:18790/api/agents/<agent-id>/screenshot
+```
+
+---
+
+## `POST /api/agents/:agentId/screenshot/capture`
+
+Takes a fresh screenshot of a browser that is already open for this agent, so the **Browser** card can refresh without waiting for the agent's next browser action. It never opens a browser and never navigates: with no browser open it fails, and the card stays as it was.
+
+The route tries each browser connector Clawboo runs (Playwright's `browser_take_screenshot`, Chrome DevTools' `take_screenshot`), and only where this agent's own grant allows that tool and the agent's browser is running. If none of those has a browser open and the agent runs on OpenClaw, it captures the newest browser tab OpenClaw tracks for that agent's session (stored with `toolName: "openclaw__browser"`). Read the new frame with `GET /api/agents/:agentId/screenshot`.
+
+- **Path params**: `agentId`.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: a new frame was stored:
+
+```json
+{ "ok": true, "ts": 1756000000000 }
+```
+
+**`409 Conflict`**: no browser is open for this agent:
+
+```json
+{ "ok": false, "error": "this Boo has no browser open right now" }
+```
+
+**`400 Bad Request`**: missing `agentId` segment:
+
+```json
+{ "ok": false, "error": "agentId is required" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/agents/<agent-id>/screenshot/capture
+```
+
+---
+
+## `PATCH /api/agents/:agentId/model`
+
+Changes the model of a `clawboo-native` or `hermes` agent, and optionally its provider. It needs no Gateway.
+
+- **Native agent:** the stored agent config is rewritten, and the next run uses it. With a `provider`, the provider, model and the key variable it reads (`envVar`) change together, so a model picked from another provider's list never runs against the old provider. Without a `provider`, only the model changes, which is also how you set a custom model id for the current provider. The server checks the provider name but not the model string, so custom ids work.
+- **Hermes agent:** Hermes reaches every model through OpenRouter, so the model is stored as `{ provider: 'openrouter', model }` and any other `provider` is a `400`.
+- **Other runtimes** answer `404`. An OpenClaw agent's model is set through `PATCH /api/system/openclaw-config` (see [System API](/reference/rest-api/system)).
+
+- **Path params**: `agentId`.
+- **Request body**: `{ model: string, provider?: string }`. `provider` must be one of `anthropic`, `openai`, `openrouter`, `ollama`, `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`. With `ollama`, which needs no key, the stored `envVar` is `OLLAMA_BASE_URL`.
+
+### Responses
+
+**`200 OK`**: the model (and the provider, when sent) was saved. `provider` is echoed only when the request carried one:
 
 ```json
 { "ok": true, "model": "anthropic/claude-haiku-4.5", "provider": "openrouter" }
 ```
 
-**`400 Bad Request`**: missing `agentId` segment, an empty `model`, an unknown `provider`, or a non-`openrouter` provider on a hermes agent:
+**`400 Bad Request`**: one of these messages:
 
-```json
-{ "error": "unknown provider '<provider>'" }
-```
+| `error`                                                                              | Cause                                |
+| ------------------------------------------------------------------------------------ | ------------------------------------ |
+| `model (non-empty string) required`                                                  | `model` is missing or blank          |
+| `unknown provider '<provider>'`                                                      | `provider` is not in the list above  |
+| `hermes routes every model via OpenRouter; provider must be 'openrouter' or omitted` | A Hermes agent with another provider |
+| `agentId required`                                                                   | Missing `agentId` segment            |
 
-**`404 Not Found`**: unknown agent, or an agent on a runtime this route does not edit:
+**`404 Not Found`**: one of these messages:
 
-```json
-{ "error": "model change via this route is native/hermes-only" }
-```
+| `error`                                             | Cause                                |
+| --------------------------------------------------- | ------------------------------------ |
+| `agent not found`                                   | No agent with that id                |
+| `native agent config not found`                     | A native agent with no stored config |
+| `model change via this route is native/hermes-only` | An agent on any other runtime        |
 
 **`500 Internal Server Error`**: any other failure:
 
@@ -653,7 +809,7 @@ Changes a **native** or **hermes** agent's model, and optionally its provider. F
 
 ```bash
 curl -X PATCH http://localhost:18790/api/agents/<agent-id>/model \
-  -H 'content-type: application/json' \
+  -H 'Content-Type: application/json' \
   -d '{ "model": "anthropic/claude-haiku-4.5", "provider": "openrouter" }'
 ```
 
@@ -661,7 +817,7 @@ curl -X PATCH http://localhost:18790/api/agents/<agent-id>/model \
 
 ## `POST /api/agents/:agentId/chat`
 
-Drives ONE conversational turn on a **clawboo-native** agent's 1:1 personal chat (the Boo Zero personal chat, and any native agent's chat). The handler persists the user turn under the session key `agent:<agentId>:native`, then starts the run **detached** and returns **202** immediately: the reply streams over the SSE route below and is persisted by the native driver, so it is not aborted when the client disconnects. OpenClaw agents keep the Gateway 1:1 path, so this route returns **404** for a non-native agent.
+Starts one turn of a `clawboo-native` agent's 1:1 chat (Boo Zero's personal chat, or any native agent's). The route stores your message under the session key `agent:<agentId>:native`, starts the reply in the background and answers **202** at once. The reply streams over `GET /api/agents/:agentId/chat/stream` and is saved by the server, so closing the connection does not stop it. Agents on other runtimes answer **404**; an OpenClaw agent's 1:1 chat goes through the Gateway connection instead.
 
 - **Path params**: `agentId`.
 - **Request body**:
@@ -722,7 +878,7 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/chat \
 
 ## `POST /api/agents/:agentId/chat/stop`
 
-Aborts the agent's in-flight 1:1 turn (the composer's Stop button). A native agent has at most one live 1:1 run, tracked by its session key; with nothing in flight the call is a no-op that still returns **200**.
+Stops the agent's running 1:1 turn (the composer's **Stop** button). A native agent has at most one running 1:1 turn; with none running the call changes nothing and still answers **200**.
 
 - **Path params**: `agentId`.
 - **Request body**: none.
@@ -757,19 +913,23 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/chat/stop
 
 ## `GET /api/agents/:agentId/chat/stream`
 
-Server-Sent Events live-tail of the agent's 1:1 session (`agent:<agentId>:native`). A pure reader: it never drives a turn. Two tiers: **committed** `chat_messages` rows polled every 750 ms past an `id` cursor (durable, carry an `id:` line, replayed on resume), and **ephemeral** in-memory bus frames for live tokens and run state (no `id:` line, never replayed). Resume from a known position via the standard `EventSource` `Last-Event-ID` header or the `?since=<id>` query param.
+A Server-Sent Events tail of the agent's 1:1 chat (`agent:<agentId>:native`). It only reads; it never starts a turn. It sends two kinds of frame: stored `chat_messages` rows, polled every 750 ms past a row-id cursor (each with an `id:` line, so they replay on resume), and live frames for streaming text and run state (no `id:` line, never replayed).
+
+**Where it starts.** With no `Last-Event-ID` header and no `since`, the stream starts at the newest stored message and sends only what follows. Load the history first with `GET /api/chat-history` (see [Chat history API](/reference/rest-api/chat-history)). A supplied cursor resumes after that row id; `Last-Event-ID` wins over `since`, and an invalid or negative value resumes from `0` (the whole chat).
 
 - **Path params**: `agentId`.
 - **Query params**:
 
-| Param   | Type   | Notes                                                                                      |
-| ------- | ------ | ------------------------------------------------------------------------------------------ |
-| `since` | number | Resume cursor (a `chat_messages` row id). Negative/non-finite → `0`. `Last-Event-ID` wins. |
+| Param   | Type   | Notes                                                                     |
+| ------- | ------ | ------------------------------------------------------------------------- |
+| `since` | number | Resume after this `chat_messages` row id. `Last-Event-ID` takes priority. |
 
 - **Request body**: none.
 
 <Note>
-This is an SSE route, not request/response. There is no JSON response body; the catalog below describes the wire frames. A missing `agentId` ends the response with a bare **400** and no `{ error }` envelope. Each polled batch reads up to 500 rows past the cursor. The stream is cleaned up on `req`/`res` close and closes no database handle (the tail reads through the process-wide shared connection).
+
+This is an SSE route: there is no JSON response body, and the catalog below describes the frames. A missing `agentId` ends the response with a bare **400** and no body. Each poll reads up to 500 rows past the cursor.
+
 </Note>
 
 ### Connection
@@ -783,19 +943,19 @@ Connection: keep-alive
 X-Accel-Buffering: no
 ```
 
-then emits a `: connected` comment frame, flushes any rows already past the cursor, and replays the session's last-published `status` per agent so a reconnecting client reconciles a badge left stale by a run that ended while no stream was open.
+then sends a `: connected` comment, any stored rows already past the cursor, and the last `status` published for the chat, so a client that reconnects learns about a turn that ended while no stream was open.
 
 ### Event catalog
 
-| Frame           | When                                 | Shape                                                                 |
-| --------------- | ------------------------------------ | --------------------------------------------------------------------- |
-| `: connected`   | Immediately on open                  | SSE comment (ignored by `EventSource`)                                |
-| entry data      | Per new committed row (every 750 ms) | `id: <row id>` line + `data: <json>` line (the stored chat entry)     |
-| `event: delta`  | Per live assistant-text delta        | `{ sessionKey, runId, text }`; `text` is the FULL running text so far |
-| `event: status` | At each run boundary, plus on open   | `{ agentId, status: 'running' \| 'idle' \| 'error' }`                 |
-| `: keepalive`   | Every 20 s while open                | SSE comment (keeps the connection warm)                               |
+| Frame           | When                                    | Shape                                                             |
+| --------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| `: connected`   | Immediately on open                     | SSE comment (ignored by `EventSource`)                            |
+| entry data      | Per new stored row (every 750 ms)       | `id: <row id>` line + `data: <json>` line (the stored chat entry) |
+| `event: delta`  | Per streamed piece of the reply         | `{ sessionKey, runId, text }`; `text` is the whole reply so far   |
+| `event: status` | When a turn starts or ends, and on open | `{ agentId, status: 'running' \| 'idle' \| 'error' }`             |
+| `: keepalive`   | Every 20 s while open                   | SSE comment (keeps the connection warm)                           |
 
-`delta` and `status` frames carry no `id:` line, so they never move the resume cursor: the committed rows are the source of truth, and the deltas only make a turn type out live.
+`delta` and `status` frames carry no `id:` line, so they never move the resume cursor. The stored rows are the record; the deltas only let a reply appear as it is written.
 
 ### Example
 
@@ -808,11 +968,11 @@ curl -N 'http://localhost:18790/api/agents/<agent-id>/chat/stream?since=4187'
 
 ## `GET /api/agents/:agentId/shell`
 
-Reports whether a **clawboo-native** Boo may ask to run commands. The value is the `tools.shell` field of that Boo's stored `AgentConfig`, and it decides whether the `run_command` tool is offered to the model at all. It does not decide whether a command may run: `run_command` puts every single command in front of a person, remembers nothing, and has no allowlist, so a command allowed once asks again the next time.
+Reports whether a `clawboo-native` agent may ask to run commands. The value is the `tools.shell` field of the agent's stored config, and it decides whether the `run_command` tool is offered to the model at all. It does not let a command run on its own: `run_command` puts every command in front of a person, remembers nothing and has no allowlist, so a command allowed once asks again the next time.
 
-Absent reads as off. The field is optional and is deliberately not in the native defaults, so a Boo never arrives with a shell already switched on.
+A missing field reads as off, and the native defaults leave it out, so a new native agent starts with the shell off.
 
-This switch is separate from [`/api/exec-settings`](/reference/rest-api/misc), which writes OpenClaw's Gateway policy. Nothing consults that policy for a native Boo, so the two are not interchangeable and this route refuses any other runtime by name.
+This switch is separate from `/api/exec-settings` (see [Agent settings API](/reference/rest-api/agent-settings)), which writes the OpenClaw Gateway's exec policy. Nothing reads that policy for a native agent, so this route refuses every other runtime by name.
 
 - **Path params**: `agentId`.
 - **Request body**: none.
@@ -857,9 +1017,11 @@ curl http://localhost:18790/api/agents/<agent-id>/shell
 
 ## `POST /api/agents/:agentId/shell`
 
-Turns the switch on or off. Changing what a Boo may ask to run is a permissions change, so this route sits on the **sensitive** rate-limit tier, 60 requests a minute per client address, rather than the router-wide general one.
+Turns the switch on or off.
 
-The handler writes the whole `tools` record back with `shell` replaced, so the Boo's other tool flags (memory, tasks, teamchat, and the reserved custom list) survive the write. It then **reads the config back** and answers with what is stored rather than echoing what you sent.
+**Rate tier: sensitive.** Changing what an agent may ask to run is a permissions change, so this route shares the 60-requests-a-minute sensitive budget (see [rate limits](/reference/rest-api/index#rate-limits)).
+
+The route writes the whole `tools` record back with only `shell` changed, so the agent's other tool flags (memory, tasks, teamchat and the reserved custom list) are kept. It then reads the config back and answers with what is stored, not with what you sent.
 
 - **Path params**: `agentId`.
 - **Request body**:
@@ -871,12 +1033,12 @@ The handler writes the whole `tools` record back with `shell` replaced, so the B
 ```
 
 <Note>
-The confirmation dialog the dashboard shows before switching this on is browser-side only. This route accepts `{ "enabled": true }` directly, and `POST /api/agents` with `sourceId: 'clawboo-native'` can carry `execConfig.tools.shell` at creation time. What holds is that every native Boo created through clawboo's own screens starts with the shell off, not that one cannot be created with it on.
+
+The confirmation the dashboard shows before switching this on exists only in the browser. This route accepts `{ "enabled": true }` directly, and `POST /api/agents` with `sourceId: 'clawboo-native'` can set `execConfig.tools.shell` at creation. Native agents created from the dashboard start with the shell off.
+
 </Note>
 
-<Warning>
-Switching this on is necessary for `run_command` to exist, and not sufficient. The tool is also absent unless the run has a working directory, which in practice means a board task with a provisioned worktree (a 1:1 chat, a team-room turn and a dispatch turn all carry none), and it is absent on Windows, where launching a shim would require the shell this tier refuses to start.
-</Warning>
+Switching this on is necessary for `run_command` to exist, but not enough. The tool is also left out of any run without a working directory, which in practice means every run except a task run in a git worktree: 1:1 chat, team chat and delegated turns carry none. It is never offered on Windows.
 
 ### Responses
 
@@ -928,49 +1090,20 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/shell \
 
 ## Error envelope
 
-Every error response on these routes is the standard `{ error: string }` envelope, except the SSE route (`GET /api/agents/:agentId/chat/stream`), whose only pre-stream failure is a bare **400** with no body. The disconnect case is a **503** with the literal `{ "error": "gateway_disconnected" }` on the write/file/session routes; the read routes (`GET /api/agents`, `GET /api/agents/:agentId`) keep serving SQLite instead. The two `/api/agents/:agentId/shell` routes add one field to the envelope on their wrong-runtime **400**, `runtime`, so a caller can say which runtime it actually found.
+Most error bodies are `{ "error": "<message>" }`. The exceptions:
 
-## See also
+- The two `422` responses (create, and the file `PUT`) add `findings`, the injection findings that blocked the write: each has `pattern`, `severity`, `intent`, `message`, `line`, `excerpt` and `fingerprint`.
+- The two screenshot routes answer `{ "ok": false, "error": "..." }`.
+- The two shell routes add `runtime` to their wrong-runtime `400`, naming the runtime they found.
+- `GET /api/agents/:agentId/chat/stream` has no JSON error: its only failure before the stream opens is a bare `400` with no body.
 
-- [Agent model](/concepts/agent-model), Boo, Boo Zero, the registry of record
-- [Agent-source internals](/internals/agent-source), the sync discipline + idempotency rules
-- [Teams API](/reference/rest-api/teams), assign an agent to a team
-- [Runtimes API](/reference/rest-api/runtimes), drive a board task on a runtime; `sourceId` peer creates
-- [@clawboo/agent-registry](/reference/packages/agent-registry), `AgentSource`, `AgentRecord`, `AGENT_FILE_NAMES`
-- [REST API overview](/reference/rest-api/index)
+A `503 { "error": "gateway_disconnected" }` means the route needed the OpenClaw Gateway for an OpenClaw agent and the server's connection is down. The list and single-agent reads never answer it: they serve SQLite.
 
----
+## Related
 
-## `GET /api/agents/:agentId/workspaces`
-
-The task worktrees belonging to this agent's assigned tasks, newest first. Backs the agent-detail **Workspace** tab: it picks which worktree to show and drives the honest empty state when the agent has none.
-
-Archived workspaces are omitted. `onDisk: false` marks a checkout that was paused or reaped, where the row and the branch survive but the files are not there; the tab reports that state rather than an empty tree. The worktree contents themselves come from the [`/api/board/:taskId/workspace/*`](/reference/rest-api/board) routes.
-
-- **Path params**: `agentId`.
-- **Request body**: none.
-
-### Responses
-
-**`200 OK`**:
-
-```json
-{
-  "ok": true,
-  "workspaces": [
-    {
-      "taskId": "t_8f2c",
-      "title": "Fix the flaky board round-trip test",
-      "taskStatus": "in_progress",
-      "branch": "clawboo/task-t_8f2c",
-      "repoPath": "/Users/you/code/clawboo",
-      "worktreePath": "/Users/you/.clawboo/worktrees/ab12cd34ef56/t_8f2c",
-      "workspaceStatus": "active",
-      "onDisk": true,
-      "updatedAt": 1756000000000
-    }
-  ]
-}
-```
-
-An agent with no worktree-backed tasks returns `{ "ok": true, "workspaces": [] }`.
+- [Agent model](/concepts/agent-model): what an agent is, Boo Zero, and how agents relate to teams.
+- [Agents](/using/agents): the agent files each runtime reads, and the dashboard screens behind these routes.
+- [Agent settings API](/reference/rest-api/agent-settings): personality, OpenClaw exec settings and skills.
+- [Teams API](/reference/rest-api/teams): add an agent to a team, and team chat.
+- [Runtimes API](/reference/rest-api/runtimes): run a board task on a runtime.
+- [Agent sources](/internals/agent-source): how OpenClaw agents are synced into SQLite.

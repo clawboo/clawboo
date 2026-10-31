@@ -1,160 +1,165 @@
 ---
-title: Memory
-description: "Clawboo's two memory tiers: one shared Memory-MCP store every runtime reads and writes, plus each runtime's preserved private native memory."
+title: 'Memory'
+sidebarTitle: 'Memory'
+description: "How shared team memory works, how it differs from each runtime's own memory, how it learns from use, and when facts are recalled automatically."
+keywords:
+  [
+    'memory',
+    'shared memory',
+    'memory tiers',
+    'facts',
+    'procedures',
+    'memory_save',
+    'memory_search',
+    'memory_feedback',
+    'learning layer',
+    'memory graph',
+    'embeddings',
+    'Ollama',
+    'nomic-embed-text',
+    'auto-memory',
+    'CLAUDE.md',
+  ]
 ---
 
-Clawboo gives a team two kinds of memory. There is **one shared store**: declarative facts and versioned procedures in SQLite, served over a Memory [MCP](/appendices/glossary) server, that every [runtime](/appendices/glossary) reads and writes. And there is **each runtime's own private native memory**: Hermes's `MEMORY.md`, Claude Code's project memory, clawboo-native's session store, which Clawboo preserves but never touches and never syncs.
+Clawboo gives each team a **shared memory**: facts and how-tos that any teammate can save and recall, whatever runtime it uses. Separately, some runtimes keep **their own memory**, such as Hermes's `MEMORY.md`. Clawboo leaves that alone and never shares it. Shared memory also learns from use: agents report which facts helped, and the facts the team trusts rise to the top.
 
-The shared store is the team's collective knowledge: a fact saved by one runtime's agent is recalled by _any_ runtime's agent on the same team. The private store is each runtime's scratch space, invisible to teammates. This page explains both tiers, how scope-tagging keeps the shared store team-aware, the security disciplines on the write and read paths (scrub-on-write, sanitize-before-inject), and how the most-relevant facts are auto-injected into a run's prompt at start.
+Use this page to understand what shared memory holds, who can see a fact, when agents recall facts without asking, and how search and embeddings work.
 
-## What it is, and what it isn't
+## The mental model
 
-The shared tier is **`SqliteMemoryStore`**: a local-first store backed by two SQLite tables (`memory_facts` and `memory_procedures`) plus an FTS5 (full-text search) virtual table. It is a single write choke point and a single read surface, exposed three ways: the Memory MCP server (`memory_save` / `memory_search` / `memory_browse`), the `/api/memory` REST routes, and the run-start auto-injection hook. All three go through the same store, so there is one source of truth for "what the team knows."
-
-A **fact** is declarative: "the user prefers concise responses", "the staging deploy command is `pnpm deploy:staging`". A **procedure** is a versioned how-to kept out of facts. Both carry a scope (team and/or agent) and are persisted; the store is not a transcript or a cache.
-
-The shared store is **not** each runtime's private memory, and it deliberately does **not** sync the two. A runtime's native memory accrues inside its own per-identity home directory and stays there. Clawboo observes that a runtime _has_ private memory and preserves it across runs (see [the private tier](#the-private-tier-each-runtimes-native-memory)); it never copies private memory into the shared store or vice versa. Auto-syncing the two would re-create the two-sources-of-truth problem the board architecture exists to avoid; so the model _chooses_ what to promote to a shared fact by calling `memory_save`.
-
-## The model
+Shared memory is the team's notebook. When an agent learns something the team should keep, such as the staging deploy command or the tone you prefer, it writes it down. Any teammate can look it up later. A runtime's own memory is usually that agent's private diary; Claude Code is the exception, described under "Each runtime's own memory" below. Clawboo never copies between the two: an agent chooses what to write in the shared notebook.
 
 ```mermaid
-flowchart TB
-    subgraph shared["Shared tier — one SqliteMemoryStore"]
-        store[("memory_facts + memory_procedures<br/>FTS5 + optional vector index<br/>scope-tagged team / agent / global")]
-    end
-
-    subgraph runtimes["The five runtimes"]
-        oc["OpenClaw"]
-        nat["clawboo-native"]
-        cc["Claude Code"]
-        cx["Codex"]
-        hm["Hermes"]
-    end
-
-    subgraph private["Private tier — preserved, never synced"]
-        p1["Hermes MEMORY.md"]
-        p2["Claude project memory"]
-        p3["native session store"]
-    end
-
-    oc -- "MCP attach (global scope)" --> store
-    nat -- "in-process bridge (team/agent scope)" --> store
-    cc -- "MCP attach (team/agent scope)" --> store
-    cx -- "MCP attach (team/agent scope)" --> store
-    hm -- "MCP attach (team/agent scope)" --> store
-
-    store -. "run-start auto-injection<br/>(volatile prompt tier)" .-> runtimes
-
-    hm -.-> p1
-    cc -.-> p2
-    nat -.-> p3
+flowchart LR
+    A["Agent on any runtime"] -->|memory_save| M[("Shared memory")]
+    M -->|memory_search| B["Teammate on any runtime"]
+    A -.-> D["Its runtime's own memory<br/>(not shared)"]
 ```
 
-Every runtime reaches the shared store through MCP. The four executor-driven runtimes (native, Claude Code, Codex, Hermes) get a **per-run scope** bound to the attach connection; OpenClaw gets a **global scope** because its agents are cross-team and the Gateway's process-wide config can't carry a per-run binding. The private tier hangs off the side: each runtime owns its native memory and Clawboo never crosses that line.
+## What shared memory holds
 
-## The shared tier: scope-tagged facts
+- **Facts.** A short statement with a title, content and optional tags, for example "Staging deploys run `pnpm deploy:staging`".
+- **Procedures.** A named how-to. Saving one under the same name again adds a new version.
 
-Every fact carries an optional `scope_team_id` and `scope_agent_id`. Reads use **inclusive visibility**: a scoped query also sees globally-scoped (null) rows. A query bound to team T and agent A returns facts tagged with team T, facts tagged with agent A, _and_ untagged global facts, but never another team's or another agent's private facts.
+Before anything is stored, Clawboo masks values that look like secrets, such as API keys, in a fact's title and content and in a procedure's content. An agent's save whose content is nothing but a secret is refused. Masking catches credential-shaped values only, so it is not a guarantee that no sensitive text is ever saved.
 
-Auto-saved team facts drop the `agentId` on purpose. The save is tagged with the **team only** (agent left null = shared across all teammates), so a teammate on _any_ runtime recalls it. Tagging an auto-save with an agent id would hide it from teammates and defeat the entire point of a shared tier.
+Agents work with four Memory tools: `memory_save`, `memory_search`, `memory_browse` and `memory_feedback`. You browse, search and add facts in the **Memory** panel (**Settings**, then **Workspace**, then **Memory**); see [Memory](/using/memory).
 
-The scope binding is **authoritative when the run is bound**; the model can neither widen its visibility nor mis-tag a save:
+## Who can see a fact
 
-- **Save** tags the fact with the bound team only.
-- **Search / browse** filter by the full bound scope (team + agent inclusive + global).
+| Saved by                                                                          | Filed under | Readable by                       |
+| --------------------------------------------------------------------------------- | ----------- | --------------------------------- |
+| An agent on Clawboo Native, Claude Code, Codex or Hermes, during a run for a team | That team   | Every member of the team, and you |
+| The same agents, during a run with no team                                        | Global      | Everyone                          |
+| An OpenClaw agent                                                                 | Global      | Everyone                          |
+| You, in the Memory panel                                                          | Global      | Everyone                          |
 
-This binding rides the MCP attach URL, not the tool arguments. For the four executor-driven runtimes, the Memory attach URL carries `scopeTeamId` / `scopeAgentId` query params; the server reads them off the request and binds the MCP session. A runtime may pass whatever `scopeTeamId` it likes in a tool call; it is ignored when the run is bound. The unbound case splits by transport. The raw stdio bin falls back to the model's scope args, the legacy behavior, because there the operator is the caller. An unbound **HTTP** attach is different: it means an attach URL that carried no signed scope, so the caller is unidentified and its scope args are ignored entirely. Saves land on the global tier and reads see the global tier only, which is what stops one agent saving a fact tagged as another team and reading every team's facts back. Every OpenClaw agent currently attaches this way.
+The panel labels each fact **Team-shared**, **Agent-scoped** or **Global**. When an agent searches, it sees its team's facts, facts filed for that agent, and global facts, never another team's.
 
-<Info>
-A team-less bound run (no team id) reads **global facts only**, never every team's shared facts. The store treats an empty-string team tag as a global-only sentinel; passing `null` instead would skip the team filter entirely, leaking cross-team facts. The injection hook and the MCP server both normalize a null team to `''` for exactly this reason.
-</Info>
+OpenClaw agents see global facts only: one Gateway configuration serves all of them, so Clawboo cannot tell which team an OpenClaw agent works for. The scope comes from the agent's connection, not from what the model asks for, so an agent cannot widen what it sees or file a fact under another team.
 
-### Search: FTS5, vector, and hybrid
+## Memory learns from use
 
-Search runs in one of three modes. **FTS** (the default with no embedding provider) tokenizes the query and matches against the FTS5 table, ranking by BM25. **Vector** mode embeds the query and the candidate facts and ranks by cosine similarity over a stored Float32 BLOB. **Hybrid** (the default when an embedding provider is available) blends the two: 60% vector, 40% an FTS-membership signal.
+When an agent uses a fact, it can report how it went with `memory_feedback`. The outcomes are **useful**, **dead end** (it misled or wasted effort) and **corrected** (it was wrong, and the note holds the correction). In the Memory panel's graph you can do the same: click a fact, then **Helpful** or **Outdated**.
 
-Embedding is best-effort and pluggable behind an `EmbeddingProvider` seam. The resolver prefers a local Ollama that has the embedding model installed, falls back to OpenAI when a key is present, and otherwise returns nothing, in which case vector and hybrid modes degrade gracefully to FTS. A running Ollama without the model is not a provider: with no OpenAI key it is reported as missing the model, and with one OpenAI serves while the local install is offered. Once any fact has been indexed locally, OpenAI is never chosen automatically, so an Ollama outage cannot move the team's memory to a cloud provider. The user can choose OpenAI for an outage; the choice lapses the next time Clawboo finds Ollama serving, when the OpenAI key is disconnected, or when no OpenAI key is available any more, and Memory says so while it holds. The dashboard server re-checks the choice on its own timer and indexes facts saved without a vector in the background once a provider can serve, so setting one up later needs no restart of the dashboard and loses nothing. A Memory session attached over HTTP asks for the current provider on every call, so it follows a provider that appears, rides out an Ollama restart, and stops using a disconnected key at once. The stdio Memory bin re-resolves once a minute and applies the same local-first rule. Facts saved without a vector are indexed by the dashboard server when the saver shares its database (`CLAWBOO_DB_PATH`). A fresh install with no embedding provider still gets working full-text recall. Vector scores only compare facts produced by the _current_ embedding model; a fact embedded by a different model scores 0 on the vector axis (cross-model cosine is meaningless) but stays findable via FTS in hybrid mode.
+Clawboo turns these reports into a status on each fact:
 
-<Note>
-The `MemoryStore` and `EmbeddingProvider` interfaces are the swap points for a future hosted backend (Postgres, a dedicated vector DB, a knowledge graph) and a different embedding source. The default `SqliteMemoryStore` (FTS5 + brute-force cosine over a BLOB column) is the local-first implementation that ships.
-</Note>
+| Status    | When                                                                           |
+| --------- | ------------------------------------------------------------------------------ |
+| preferred | Two or more different reporters found it useful, and none reported against it. |
+| tentative | One reporter found it useful, and none reported against it.                    |
+| contested | Reports disagree. The panel shows it as "contested · verify".                  |
+| dead end  | Only negative reports.                                                         |
 
-## The private tier: each runtime's native memory
+A "different reporter" is a different agent, or the same agent on a different task, so your own clicks alone cannot make a fact preferred. Older reports count for less: a report's weight halves every 30 days. Search results show each fact's status and id, so an agent can report on the fact it used.
 
-The four non-OpenClaw runtimes, and OpenClaw itself, each keep their own native memory, and Clawboo's job is to **preserve it, not replace it**.
+## The memory graph
 
-A runtime declares whether its native memory should be preserved via its capabilities (`nativeMemory: 'preserve' | 'none'`). Hermes, clawboo-native, and OpenClaw declare `'preserve'`; Claude Code and Codex declare `'none'` (they run against the host's own state, or an ephemeral home). The runner turns that declaration into an integration plan: a runtime whose native memory is preserved gets a **stable per-identity home directory** under Clawboo's state dir, materialized owner-only (`0700`) before the driver touches it, where its native skills and memory accrue across runs. A runtime without a persistent home gets an ephemeral one.
+The Memory panel draws your facts as a graph. Facts that share tags are linked, versions of a procedure are linked, and, when embeddings are on, facts with a similar meaning are linked too. Clusters of related facts are grouped and coloured together. Click a fact to read it, see its history, and mark it **Helpful** or **Outdated**.
 
-The preservation rule is enforced _by construction_, not by name: the runner branches only on the resolved integration plan, never on a runtime id, and a misdeclared adapter degrades to the safe ephemeral default rather than producing a contradictory plan. Preserve flags are clamped to a persistent home; preserving state inside a throwaway home is incoherent.
+## When facts are recalled without asking
 
-The split between the two tiers is communicated to the agent in the prompt. A short guidance block tells each runtime that durable team knowledge belongs in the shared Memory tool, while its native memory (Hermes `MEMORY.md`, Claude project memory, the native store) is private scratch teammates cannot see. The guidance never tells a runtime to stop using its native memory.
+Whether an agent starts with facts already in hand depends on how the run started:
 
-## Scrub-on-write
+| How the run started                                                                                       | Facts added at the start                                                                                                                                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Team chat: your messages, every hand-off and every task you start from the board                          | None. The agent searches memory with `memory_search` when it needs to.                                                                                                                                                                                            |
+| A one-to-one chat with a Clawboo Native agent                                                             | Up to 8 of the agent's own and global notes, on the first turn of a conversation and again after `/reset`. Team facts are left out.                                                                                                                               |
+| The task runner: an agent Routine on Clawboo Native, Claude Code, Codex or Hermes, or the runtime run API | An `<auto-memory>` block with up to 5 facts that best match the task's title and description, within 1,500 characters, plus up to 2 closely related facts. The run is also told how shared memory differs from its own, and asked to report on the facts it used. |
 
-The shared store is the single write choke point for the team's memory, so it is the one place a secret is removed before it can ever become durable, searchable, or injectable. `saveFact` and `saveProcedure` both scrub the title and content through a secret-redactor _before_ embedding and insertion. A credential that an agent tries to memorialize is stored as `[REDACTED]`, never as the live value, regardless of which surface (MCP, REST, a future writer) made the call.
+Most work runs through team chat, so most runs start with no facts and rely on the agent to search. A direct run through the runtime run API can turn the block off with `disableMemoryAutoInject: true`. [How a team works](/intro/how-it-works) explains the two paths.
 
-The MCP layer adds one refinement on top. If a fact's _content_ reduces entirely to redaction sentinels after scrubbing, the save is declined outright: a fact like `{ title: 'Token', content: 'sk-…' }` would store only a useless `Token: [REDACTED]` breadcrumb with the actual token gone, so there is nothing worth recalling. This check is deliberately content-only; a fact's recallable value lives in its content, not its title.
+The block ranks preferred facts higher, flags contested ones, and leaves dead-end facts out; they can still be found with a search. Before a fact enters another agent's prompt, Clawboo drops it if it contains instructions aimed at the agent, such as "ignore your previous instructions", and masks secrets again.
 
-## Sanitize-before-inject
+## How search works
 
-The write path scrubs secrets; the read path that feeds a prompt adds two more guards, because a fact written by one agent may later be injected into a _different_ agent's run.
+Keyword search always works, with no setup. When embeddings are on, a search is **hybrid**: it weighs meaning (60%) and keyword match (40%), so a search for "deploy steps" can find a fact that says "release process". A fact embedded by a different model matches on keywords only.
 
-- **Injection sanitize.** A poisoned "fact" must not smuggle instructions into a teammate's run. The auto-injection hook runs each candidate fact through an injection scanner and drops any that trips it. A memory entry saying "ignore your previous instructions and …" never reaches another agent's prompt.
-- **Defense-in-depth scrub.** Facts are scrubbed on write, but a fact that predates the scrubber, or that some external writer inserted, must never re-surface a secret into context. The injection hook re-scrubs each fact's title and content before rendering it into the prompt.
+## Embeddings: local first
 
-Both guards are belt-and-suspenders: the store already scrubs on write, but the read-into-prompt path is the last line before a fact lands in front of a model, so it re-checks rather than trusting upstream.
+Embeddings are what let memory match on meaning. Clawboo picks a provider in this order:
 
-## Run-start auto-injection
+| Order | Provider                                                     | When Clawboo uses it                                                                                                                                                                                                                | What leaves your machine                 |
+| ----- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 1     | Ollama at `http://localhost:11434`, model `nomic-embed-text` | Whenever it answers with that model installed                                                                                                                                                                                       | Nothing                                  |
+| 2     | OpenAI, model `text-embedding-3-small`                       | When Ollama cannot serve and you have connected an OpenAI key. Once any fact has been indexed by Ollama, only after you choose **Use OpenAI instead** during an Ollama outage, and only until Ollama is back or the key is removed. | Fact text and memory searches, to OpenAI |
+| 3     | None                                                         | Otherwise                                                                                                                                                                                                                           | Nothing; keyword search only             |
 
-A runtime can call `memory_search` whenever it wants. But to start with the team's accumulated knowledge already in hand, the executor runner seeds the most-relevant facts into the prompt at run start, no tool call required.
+- To turn on local embeddings, run `ollama pull nomic-embed-text`, or press **Install model** in the Memory panel.
+- Memory always looks for Ollama at `http://localhost:11434`. `OLLAMA_BASE_URL` does not change it.
+- The OpenAI key counts when you connected it in Clawboo or exported `OPENAI_API_KEY`. A key that only OpenClaw holds is never used for memory.
+- Set `CLAWBOO_DISABLE_EMBEDDINGS=1` to stay on keyword search.
+- No restart is needed. Clawboo re-checks every 10 minutes while Ollama serves and every 30 seconds otherwise, and indexes facts saved without an embedding in the background.
 
-When a task run begins, the runner builds a memory block by searching the shared store with the task's title and description as the query, scoped to the task's team and assignee, in hybrid mode. The top-ranked facts (5 by default) that fit within a character budget (1500 chars by default, a few hundred tokens) are rendered as a bounded `<auto-memory>` block. The block lands in the prompt's **volatile tier only**, never the cache-stable prefix, so seeding it never busts the KV-cache prefix the rest of the prompt relies on.
+## Each runtime's own memory
 
-The hook is **default-on and a no-op when it can't help**: it returns an empty string when memory is empty (a fresh install has no facts), when the query is blank, when no fact matches, or when the char budget is non-positive. A task can opt out entirely with `disableMemoryAutoInject`. And it is best-effort; any failure returns an empty string rather than failing the run.
+| Runtime        | Its own memory                                                                                                | Shared with teammates?                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Clawboo Native | Its saved conversations, in its own folder under `~/.clawboo/runtimes/clawboo-native/`                        | No                                                             |
+| Hermes         | `MEMORY.md`, `state.db` and the skills it creates, in its own Hermes home under `~/.clawboo/runtimes/hermes/` | No. Clawboo never edits them.                                  |
+| Codex          | None that Clawboo keeps. Its folder under `~/.clawboo/runtimes/codex/` holds its login and session files.     | Not applicable                                                 |
+| OpenClaw       | Kept in your OpenClaw Gateway's own state                                                                     | No                                                             |
+| Claude Code    | Your own `~/.claude` settings and memory, and the `CLAUDE.md` of the folder it runs in                        | Yes, with every Claude Code agent and your own Claude Code use |
 
-```ts
-// apps/web/server/lib/executorRunner.ts (run-start)
-const memoryBlock = input.disableMemoryAutoInject
-  ? ''
-  : await buildMemoryInjection({
-      db,
-      query: `${task.title}\n${task.description ?? ''}`,
-      scope: { teamId: task.teamId, agentId: assigneeAgentId },
-      maxChars: DEFAULTS.memoryAutoInjectMaxChars, // 1500
-      topK: DEFAULTS.memoryAutoInjectTopK, // 5
-    })
-```
+<Warning>
 
-The injection hook reuses the exact `SqliteMemoryStore` + `EmbeddingProvider` stack the `/api/memory` REST surface uses, so a run sees the same store, the same scope rules, and the same search behavior as a manual `memory_search`.
+Claude Code agents run with your own Claude Code setup: your `~/.claude` settings and memory, and the `CLAUDE.md` files of the folder they run in. Every Claude Code agent loads them, and so do your own Claude Code sessions. Do not keep anything there that you would not hand to the team.
 
-## Design rationale and trade-offs
+</Warning>
 
-The two-tier split exists because a mixed-runtime team has two genuinely different needs. Coordination, "what did the team learn, what does the user want", must be _shared_: a fact one agent records has to be recallable by a teammate running on a different runtime, or the team isn't really collaborating. But each runtime's _cognitive_ memory (Hermes's self-improving `MEMORY.md`, Claude's project memory) is part of how that runtime works, and stripping or rewriting it every run would degrade the runtime. So the shared tier is the common spine, the private tier is preserved untouched, and the model decides what to promote across the boundary.
+Clawboo never copies a runtime's own memory into shared memory, or the other way round. In task-runner runs, each agent is told that its own memory is private to it and that knowledge the team needs belongs in shared memory. See [Teams, rooms and runtimes](/concepts/teams-and-planes) for where each runtime keeps its state.
 
-<Note>
-Keeping the two tiers separate, with the model choosing what to share, is the deliberate counter to the two-sources-of-truth failure mode: an automatic private→shared sync would re-introduce drift and double-bookkeeping.
-</Note>
+## What you control
 
-Making the SQLite store the single scrub choke point, rather than scrubbing at each call site, means there is exactly one place a secret can be redacted before durability, and no second path that could diverge. The cost is that scrubbing is a heuristic: a redactor masks credential-shaped values, not arbitrary sensitive prose. The injection-scan and re-scrub on the read path are the deliberate second and third lines for the case that matters most: a fact about to enter another agent's prompt.
+- **See and add facts**: in the Memory panel, which also shows the graph and each fact's status. See [Memory](/using/memory).
+- **Correct the team's memory**: mark a fact **Helpful** or **Outdated** in the graph.
+- **Turn on matching by meaning**: install `nomic-embed-text` in Ollama, or press **Install model**.
+- **Decide about OpenAI**: choose **Use OpenAI instead** during an Ollama outage, or set `CLAWBOO_DISABLE_EMBEDDINGS=1` so memory never calls an embedding provider.
 
-## Boundaries and non-goals
+## Limits
 
-- **Not a per-runtime memory sync.** Clawboo preserves each runtime's private native memory and never copies it into the shared store. Cross-runtime knowledge sharing happens only through facts the model explicitly saves.
-- **OpenClaw's shared facts are global, not team-scoped.** OpenClaw agents are cross-team and the Gateway's config is process-wide, so the OpenClaw MCP attach can't carry a per-run team scope. This is an organizational boundary for the local-first single-user model, not a security one; a per-runtime team binding for OpenClaw is a future seam.
-- **Single implicit tenant today.** `memory_facts` and `memory_procedures` carry a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.5.0. The store's tenant scoping path exists; it is not wired to a tenant boundary yet.
-- **Scrub is heuristic, not exhaustive.** The redactor masks credential-shaped values; it is not a guarantee against every form of sensitive content reaching the store.
+- Team chat runs, which are most runs, get no facts added automatically. Agents have to search.
+- OpenClaw agents read and save global facts only.
+- Masking secrets is a pattern match on credential-shaped values, not a guarantee.
+- With OpenAI as the embedding provider, fact text and searches are sent to OpenAI.
+- The Memory panel saves facts as global; it does not file them under a team.
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+<Accordion title="Under the hood">
 
-## See also
+- **Storage.** Facts and procedures live in `memory_facts` and `memory_procedures`, with an FTS5 table for keyword search and a stored vector per fact. Feedback lives in `memory_outcomes`. Tables: [Database schema](/reference/database-schema).
+- **Tools.** `memory_save` saves a fact, or a versioned procedure when `procedureName` is set. `memory_search` takes `mode` (`fts`, `vector` or `hybrid`; hybrid when embeddings are available, otherwise `fts`) and `limit` (1 to 100). `memory_browse` takes `limit` (1 to 200). `memory_feedback` takes a fact id, or an id prefix of at least 8 characters, an `outcome`, and a note, which `corrected` requires. See [MCP tools](/reference/mcp-tools).
+- **Scope binding.** Clawboo binds each run's Memory connection to its team and agent: in process for Clawboo Native, and in a signed URL for the other runtimes. A bound save is filed under the team only. A run with no team reads global facts only, and so does an HTTP connection without a valid signature, which also saves to global. The `clawboo-mcp-memory` stdio program, which you run yourself, takes its scope from the tool arguments and defaults to `~/.openclaw/clawboo/clawboo.db`, not the server's database, unless you set `CLAWBOO_DB_PATH`; see [MCP servers](/operating/mcp-servers).
+- **Automatic recall.** The task runner searches in hybrid mode with the task's title and description, scoped to the task's team and agent. Each line in the block starts with an 8-character `(id …)` so the agent can cite it, and each fact shown is recorded as cited once per task. The block goes into the part of the prompt that is rebuilt every run.
+- **Learning.** Status rules: mixed signals give `contested`, negatives only give `dead_end`, two or more distinct `(agent, task)` reporters of `useful` give `preferred`, one gives `tentative`. Weights decay with a 30-day half-life.
+- **REST.** `GET` and `POST /api/memory`, `GET /api/memory/browse`, `/graph`, `/outcomes` and `/provider`, `POST /api/memory/feedback`, `/embedding/reindex` and `/embedding/install`. See the [Memory API](/reference/rest-api/memory).
 
-- [Capabilities](/concepts/capabilities): the manageability tiers that govern what Clawboo reads vs. manages across runtimes
-- [Teams and planes](/concepts/teams-and-planes): the shared-plane / private-plane split that memory tiering implements
-- [Observability](/concepts/observability): the event log and traces that record runtime activity
-- [MCP tools reference](/reference/mcp-tools): the `memory_save` / `memory_search` / `memory_browse` input shapes
-- [Database schema](/reference/database-schema): the `memory_facts` and `memory_procedures` tables
-- [MCP servers (operating)](/operating/mcp-servers): attaching Clawboo's MCP servers, transports, and scoping
-- [Memory browser](/using/memory-browser): the UI over the shared store
-- [Glossary](/appendices/glossary): canonical term definitions
+</Accordion>
+
+## Related
+
+- [Memory](/using/memory): the Memory panel, step by step.
+- [Teams, rooms and runtimes](/concepts/teams-and-planes): what a team shares and where each runtime keeps its state.
+- [What an agent sees](/concepts/agent-context): everything that goes into an agent's turn.
+- [Claude Code](/runtimes/claude-code): running Claude Code agents, and the setup they share with you.
+- [MCP tools](/reference/mcp-tools): the Memory tools' inputs and outputs.

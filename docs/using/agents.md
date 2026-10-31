@@ -1,244 +1,262 @@
 ---
-title: Working with agents
-description: Open an agent's page, use its cards (graph, tasks and routines, browser, activity, details), edit the agent files, tune its personality, and create or delete a Boo.
+title: 'Create and edit agents'
+sidebarTitle: 'Agents'
+description: 'Create an agent, open its page, change its model and personality, edit the files it follows on each runtime, and delete it.'
+icon: 'bot'
+keywords:
+  [
+    'Boo',
+    'agent page',
+    'Create Boo',
+    'personality',
+    'custom instructions',
+    'SOUL.md',
+    'IDENTITY.md',
+    'AGENTS.md',
+    'TOOLS.md',
+    'agent files',
+    'delete agent',
+    'model',
+  ]
 ---
 
-Use this page when you want to work with one agent (a [Boo](/appendices/glossary)) directly: chat with it, edit its config files, tune its personality, or create and remove it. Every Boo is a real agent record backed by an [AgentSource](/appendices/glossary); its config lives in seven Markdown files that the runtime reads on each turn.
+Each agent in Clawboo appears as a Boo, a small mascot with its own name and color. Use this page to add an agent, open its page, change the model it runs on, tune how it sounds, edit the files it follows, and delete it.
 
-The whole surface is the **agent's page** (`AgentDetailView`): its 1:1 chat on the left and a stack of cards on the right, backed by `/api/agents/:agentId/files/:name` for file I/O and `/api/personality` for the personality. This page documents what each card does, how the four core files map to behavior, and where edits persist.
+## Create an agent
 
-## Prerequisites
+<Steps>
 
-<Note>
-Agent file reads and writes go through the connected runtime. The editor and personality sliders are no-ops while the connection is down (`saving` never fires; the file PUT returns `503 gateway_disconnected`).
-</Note>
+<Step title="Pick the team">
 
-- A connected runtime (OpenClaw Gateway, or a non-OpenClaw runtime, see [Connecting runtimes](/runtimes/connecting-runtimes)).
-- At least one Boo. If you have none, create one (see [Create a Boo](#create-a-boo)).
+In the team rail, click the team the agent should join. With no team selected, the new agent belongs to no team.
+
+</Step>
+
+<Step title="Open Create Boo">
+
+In the agent column, below the team's chats, click **Create Boo**.
+
+</Step>
+
+<Step title="Describe the agent">
+
+Enter a **Name** and, if you like, a **Role**: a few sentences on what the agent does and how. The role becomes the start of the agent's SOUL.md. Leave it empty for a general helpful assistant.
+
+</Step>
+
+<Step title="Check the runtime and create">
+
+The line under the fields says where the agent will run: **Runs on OpenClaw, through your Gateway.** or **Runs on Clawboo Native: no OpenClaw Gateway is connected.** Click **Create Boo**.
+
+You should see the agent's Boo tile in the team's agent column.
+
+</Step>
+
+</Steps>
+
+**Create Boo** needs no OpenClaw Gateway. It creates the agent on OpenClaw while Clawboo is connected to an OpenClaw Gateway, and on Clawboo Native otherwise. A Clawboo Native agent needs a connected provider (an API key or a local Ollama) to answer. To put an agent on Claude Code, Codex or Hermes, deploy it from the [Marketplace](/using/marketplace) or as part of a [team](/using/teams), and pick its runtime on the customize step.
+
+### What a new agent starts with
+
+- The **House Style** personality (see [Tune the personality](#tune-the-personality)).
+- The browser connectors, Playwright and Chrome DevTools. Chrome DevTools asks you before each action; with the access a new agent gets, Playwright offers only its reading tools. See [Connectors](/using/connectors) for how to let an agent act through Playwright.
+- On OpenClaw: **Ask for Unknown** for commands, so it asks your approval before running a command that is not on its list. Clawboo sets this at the Gateway, and if the Gateway refuses the setting, the agent is not created.
+- On Clawboo Native: no commands at all until you turn on **Let this Boo ask to run commands** (see [Permissions](#permissions)).
 
 ## Open an agent's page
 
-Two entry points open an agent's page (both call `openAgent(agentId)`):
+- **From the sidebar:** click the agent's Boo tile in the agent column. To list every agent, right-click Boo Zero's mascot at the top of the team rail and choose **Show all agents**.
+- **From the Org chart or a team graph:** right-click the agent's Boo, then **Open agent**.
 
-- **The sidebar**: click the agent's tile in the team's mascot grid. With no team selected, the agent column lists every agent as a row instead; click the row.
-- **Any graph**: right-click a Boo → **Open agent**. See [Ghost Graph](/using/ghost-graph).
+[Boo Zero](/using/boo-zero) has its own way in: click its mascot at the top of the team rail.
 
-[Boo Zero](/using/boo-zero) has its own way in: the mascot at the top of the team rail.
+![Ada's agent page: her chat on the left; on the right, the Graph card with her skills, connectors and the Claude Sonnet 5 model control, above the Details card open on Personality](/images/agent-detail.png)
 
-The chat sits on the left, under a 44 px header with the agent's avatar, name and connection state, the card toggles, and the GitHub Star pill. The cards stack on the right, top to bottom in the order of their toggles. A fresh install opens **Graph** and **Details**:
+The chat sits on the left and cards stack on the right. The buttons in the page header show or hide each card. Each card has **Maximize** and close buttons, and you can drag the gaps between the chat and the cards to resize them. A fresh install opens **Graph** and **Details**, and this browser remembers your layout.
 
-```
-┌───────────────────────────────┬────────────────────────┐
-│ agent · status   toggles   ★  │ ╭ Graph ─────────────╮ │
-├───────────────────────────────┤ │                    │ │
-│                               │ ╰────────────────────╯ │
-│             Chat              │ ╭ Details ───────────╮ │
-│                               │ │                    │ │
-└───────────────────────────────┴─╰────────────────────╯─┘
-```
+| Card                 | What it shows                                                                                                                                                                     |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Graph**            | The agent with its skills and connectors. Drag from the agent's port onto empty space, or use **+**, to add a skill or connector. The model control sits in the top-right corner. |
+| **Tasks & Routines** | The agent's tasks in **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**, then the routines that send it work, with **New routine**.                            |
+| **Browser**          | The latest screenshot from the agent's web browser.                                                                                                                               |
+| **Activity**         | The agent's tool calls, results and errors as they happen.                                                                                                                        |
+| **Details**          | **Workspace**, **Personality**, **Permissions**, **Brief** (Boo Zero only) and **Agent Files**.                                                                                   |
 
-| Card                 | Toggle         | What it holds                                                                                                                                                                                                                                        |
-| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Graph**            | Network icon   | The agent's mini graph: this Boo plus its skills and connectors, with drag-to-install. Hover the Boo for its port and pull a thread onto empty space to add a skill or connector, or place one first with the **+** button and drag it onto the Boo. |
-| **Tasks & Routines** | Checklist icon | The agent's tasks, then the routines that send it work. See [Tasks and routines](#tasks-and-routines).                                                                                                                                               |
-| **Browser**          | Globe icon     | The newest screenshot this Boo captured, re-fetched on a short interval. With no frame yet, the empty state says whether nothing has been captured or no browser connector is granted to this Boo.                                                   |
-| **Activity**         | Terminal icon  | The live observability terminal scoped to this agent: tool calls, results, and errors as they stream.                                                                                                                                                |
-| **Details**          | Folder icon    | Workspace, Personality, Permissions, Brief (Boo Zero only) and the Agent Files. See [The Details card](#the-details-card).                                                                                                                           |
+In **Tasks & Routines**, click a task to read its output and progress. The comment box at the bottom (**Comment or steer this task…**) sends your comment to the agent the task belongs to, and the line beside **Send** says what sending does. On a running task, the agent gets it during the run. A task that waits on you, or waits in **To do**, starts again for it. A finished task cannot run again, so the note under your comment offers **Send as a follow-up task** instead. Each comment you send shows where it went. See [Steer a running task](/using/board#steer-a-running-task) for every case. **Open on Board** opens the task on the board.
 
-Each card has a slim header with its title, **Maximize** and close. **Details** has no title row: its section pills are its top row and carry those two buttons. **Maximize** fills the page with that card until you press **Restore**. A header toggle shows or hides its card (tooltip **Show graph**, **Hide graph**, and so on), and a card's close button does the same. With every card closed, the chat takes the full width. Drag the gap between the chat and the cards, or between two cards, to resize. Which cards are open is remembered in your browser (`clawboo.panes`) for every agent's page, and the sizes are remembered for each combination of open cards.
+**Workspace** under **Details** is a read-only view of the files in the agent's task worktree, when the agent has taken a board task that changes files. OpenClaw agents keep their files in the OpenClaw Gateway's workspace instead.
 
-The chat renders its most recent ~150 messages, with **Load earlier messages** at the top for the rest.
+## Chat with an agent
 
-In the **Graph** card's top-right corner, beside the **+** button, the agent's **runtime icon** is fused with a **model selector** for changing this agent's model. A native (`clawboo-native`) agent picks from the native model catalog and the change is saved to its `AgentConfig` via `PATCH /api/agents/:agentId/model` (no Gateway needed); an OpenClaw agent picks from the OpenClaw catalog and the change is written as a per-agent override in `openclaw.json`; a **Hermes** agent picks from the live OpenRouter catalog (stored in `execConfig`, routed through OpenRouter). **Codex** and **Claude Code** run their account/SDK default, so they show a "runtime-managed model" note instead of a picker. The agent's live activity has a card of its own, so the Graph card carries no Activity button.
+The chat on an agent's page is a one-to-one conversation with that agent. It works with Clawboo Native agents, and with OpenClaw agents while the OpenClaw Gateway is connected. On a Claude Code, Codex or Hermes agent's page, the message box also goes through the OpenClaw Gateway connection, which does not run these agents. Without that connection it reads **Gateway not connected…**. Give these agents work in [team chat](/using/team-chat) and on the [board](/using/board) instead.
 
-![An agent's page: the 1:1 chat with Ada on the left, and on the right the Graph card, with her skills, connectors and Claude Sonnet 5 model chip, above the Details card open on Personality.](/images/agent-detail.png)
+- The chat shows the latest 150 messages. **Load earlier messages** at the top brings in older ones.
+- While the agent works, the send button turns into **Stop**.
+- Type `/reset` (or `/new`) and send it to start fresh. Every message stays on screen, a divider marks the point, and the agent stops carrying the conversation from before it. With your next message, a Clawboo Native agent gets back up to eight recent notes from its own memory and the global memory (not a team's), as background. See [Team chat](/using/team-chat) for how a reset works in a team.
 
-## Tasks and routines
+Only deleting the agent removes its chat history.
 
-The **Tasks & Routines** card lists the tasks assigned to this agent, from its team's board (every team's board for an agent on no team, such as Boo Zero), in sections, most recently updated first: **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**. Done and Cancelled start folded. **Needs you** always shows, even when empty, and also holds any approvals waiting on this agent. With no tasks yet, the card reads **No tasks assigned to this agent yet.**
+## Change the model
 
-Click a task to open its detail in the card: its title and description, status, assignee, runtime and cost, its output (or its latest report), **Progress** (the live activity for that task), and **Comments**. **All tasks** at the top, or `Escape`, takes you back to the list, and **Open on Board** (the kanban icon) opens the task in the [Board](/using/board)'s drawer.
+The model control sits in the top-right corner of the **Graph** card, beside the agent's runtime icon.
 
-At the bottom of an open task, the comment box (**Comment or steer this task…**) saves your comment on the task and passes it to the agent working on it. The line under the box says what will happen. While the task is in progress, a native agent, Claude Code, Codex or OpenClaw takes the comment at the run's next step without stopping, and Hermes pauses its run to read it, then carries on in the same session. A task that waits on you after a failure or a stop, or waits in To do, starts again for your comment, and the agent reads it as the run begins. A task in review keeps it for the agent to read after the check. A finished or cancelled task cannot run again, so the comment is not sent; the note under it offers **Send as a follow-up task**, a new task for the same agent with your comment as its brief. Each comment you send shows where it went underneath it. See [Steering a running task](/runtimes/index#steering-a-running-task).
+| Runtime        | What you can change                                                                                                                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Clawboo Native | Pick a model. It saves at once and needs no Gateway.                                                                                                                                                                                             |
+| OpenClaw       | Pick a model. Clawboo saves the choice in OpenClaw's own config for this agent.                                                                                                                                                                  |
+| Hermes         | Pick an OpenRouter model. The agent then runs it through OpenRouter, even if it ran on a ChatGPT subscription model before. A **ChatGPT subscription** model can be picked only when you deploy the team, once Hermes is signed in with ChatGPT. |
+| Claude Code    | Nothing: the control reads **Claude Code default**, the model Claude Code picks.                                                                                                                                                                 |
+| Codex          | Nothing: the control reads **Codex default**, the model of your Codex account. Change it with the Codex CLI.                                                                                                                                     |
 
-Below the tasks, **Routines** lists the agent routines aimed at this agent, with the same rows as the [Routines](/using/routines) view: open a routine, pause or resume it, run it now, or delete it. **New routine** opens the routine dialog already set up as an agent task for this agent. With none yet, it reads **No routines send this agent work yet.**
-
-## The Details card
-
-The **Details** card has no title row. Its top row is a set of section pills, which also carry the card's maximize and close buttons. It opens on **Personality**.
-
-| Pill            | What it shows                                                                                                                                                                                                                                                                                                           |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Workspace**   | A read-only view of this Boo's task worktree: the file tree with change badges, the now line (the file or command it most recently touched), and the selected file's diff or content.                                                                                                                                   |
-| **Personality** | The presets and sliders; see [Tune the personality](#tune-the-personality).                                                                                                                                                                                                                                             |
-| **Permissions** | `openclaw` and `clawboo-native` Boos only. An OpenClaw Boo gets **Execution Permissions** (the **Command Execution** posture, applied at the Gateway) plus **Commands this Boo can run without asking**, its standing permissions and their revoke controls. A native Boo gets the **Running commands** switch instead. |
-| **Brief**       | Boo Zero only. Holds Boo Zero's display name override and Global Brief (its load-bearing identity surface). The pill is hidden for every other agent.                                                                                                                                                                   |
-| **Agent Files** | The agent's Markdown files, each in its own tab; see [Edit the agent files](#edit-the-agent-files).                                                                                                                                                                                                                     |
-
-The card's footer names the section you are in and reads **Saved**, or **Unsaved** while any agent file has changes you have not saved.
-
-<Note>
-**Permissions** is runtime-gated, and the two runtimes that get it get different controls, because the thing that enforces them is different. An OpenClaw Boo's **Command Execution** posture is written to the Gateway, which is what actually gates its commands, and the standing-permission list below it is read from OpenClaw's own stored policy rather than from clawboo's records, so it shows what is in force. A native Boo has no Gateway, so it gets the **Running commands** switch: with that on you are asked before every command and nothing is remembered. The pill is not offered on `claude-code`, `codex`, or `hermes`, where neither control would be read by anything. A Boo created through clawboo's screens already carries a posture of its own; see [What a new Boo is allowed to run](/runtimes/openclaw#what-a-new-boo-is-allowed-to-run).
-</Note>
-
-## Edit the agent files
-
-**Agent Files** adds a second row of file tabs, one for each file this agent's runtime reads, with **Save** at its right end. Coming back to Agent Files reopens the file you last had open. The file tabs share a single CodeMirror 6 instance (Markdown highlighting, line wrapping).
-
-**The seven agent files are OpenClaw's agent-file set, and which tabs you see depends on the agent's runtime.** An OpenClaw agent shows the four clawboo creates for it: SOUL, IDENTITY, TOOLS and AGENTS. A `clawboo-native` agent shows SOUL and AGENTS; a `claude-code`, `codex` or `hermes` agent shows SOUL and AGENTS. Those drivers read no agent file directly, so clawboo delivers SOUL.md to them itself: it is injected as a persona block at the top of the run's context, ahead of the team rules and the roster.
-
-USER, HEARTBEAT and MEMORY get no tab by default on any runtime. They belong to OpenClaw's file set, but clawboo never creates one and never reads one back, so an always-on editor for them would be a control wired to nothing. Any file that already has content stays visible whatever the runtime, so nothing you previously wrote disappears and a file your Gateway wrote is never hidden.
-
-Two name collisions are worth knowing about. `hermes` keeps its own compounding `MEMORY.md` in its per-identity home, and clawboo never writes that file: the MEMORY tab here is a different file with different behavior. `codex` reads an `AGENTS.md` from the working tree, which is your repo's file, not this one.
-
-| File           | Tab       | What you can write there                                                                                                                                                                           |
-| -------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SOUL.md`      | SOUL      | Persona, tone, and boundaries. Also holds the merged personality block (see below). On `clawboo-native` this **is** the agent's system prompt: editing it re-derives the prompt the runtime reads. |
-| `IDENTITY.md`  | IDENTITY  | Name, vibe, and emoji.                                                                                                                                                                             |
-| `TOOLS.md`     | TOOLS     | Tool notes for the agent to read. Does not configure tools (the graph's skill nodes come from `/api/capabilities`).                                                                                |
-| `AGENTS.md`    | AGENTS    | Operating instructions, priorities, and routing rules. Drives the dependency edges on the graph.                                                                                                   |
-| `USER.md`      | USER      | Notes about you. Nothing in Clawboo uses this file; only your Gateway might. Tab appears once the file has content.                                                                                |
-| `HEARTBEAT.md` | HEARTBEAT | Checklist an OpenClaw heartbeat can be pointed at. Nothing in Clawboo acts on it. Tab appears once the file has content.                                                                           |
-| `MEMORY.md`    | MEMORY    | Notes for OpenClaw agents. Not the Hermes memory file, and not clawboo memory. Tab appears once the file has content.                                                                              |
-
-### Steps
-
-1. **Pick a file tab.** The active tab gets an accent underline; the CodeMirror document swaps to that file's content. All seven files are loaded in parallel when the Details card opens.
-2. **Edit.** A modified tab shows an amber dot, and so does the **Agent Files** pill. The card's footer reads **Unsaved** while any file is dirty.
-3. **Save.** Click **Save** (it stays disabled until the open file has changes), or press `Cmd/Ctrl+S`. The write goes through a per-agent mutation queue (serialized so concurrent writes never race) to `PUT /api/agents/:agentId/files/:name`, and a toast confirms `Saved <file>`.
-4. **Saving AGENTS.md** also triggers a Ghost Graph refresh, so new routing edges appear without a manual reload. No other file affects the graph.
-
-<Tip>
-You don't have to save before switching agents, leaving the page, or closing the Details card; the editor saves all dirty files automatically when it closes (best-effort). Saving explicitly is still safer when the connection is flaky.
-</Tip>
+For a team's members, you can also pick models when you deploy the team. See [Choose a runtime and model for each member](/using/teams#choose-a-runtime-and-model-for-each-member).
 
 ## Tune the personality
 
-The **Personality** section opens with seven one-click **presets**: **House Style**, **Ghost**, **Tired Senior**, **Glass Skull**, **The Blocker**, **The Rival** and **Feral**. Hover one for its tagline. A preset sets all six sliders at once, through the same save a drag uses, and the preset that matches the current values is highlighted.
+Open **Details > Personality**.
 
-Below the presets are six sliders, each from 0 to 100, with a one-line description, the current value, and a name at each end of the track. Moving a slider does not save; the save fires on pointer-up (the commit).
+- **Presets** are seven one-click styles: **House Style**, **Ghost**, **Tired Senior**, **Glass Skull**, **The Blocker**, **The Rival** and **Feral**. Hover one to read what it is like. A new agent starts on **House Style**.
+- **Sliders** are six dials from 0 to 100. A change saves when you let go of the slider: you see **Saving…**, then **Saved**.
 
-| Dimension  | What it sets                                             | 0 (left)      | 100 (right)                |
-| ---------- | -------------------------------------------------------- | ------------- | -------------------------- |
-| Bite       | How hard it hits the work, never the person who wrote it | House Style   | Feral                      |
-| Spine      | Whether it actually does what it is told                 | Just Do It    | Blocks the Board           |
-| Glass Box  | How much of its thinking you get to watch                | Result Only   | Full Stream                |
-| Elbows     | How it treats the other agents in the room               | Stays In Lane | Picks Fights               |
-| Receipts   | How much it admits about its own run                     | Ships Clean   | Full Confession            |
-| Hobbyhorse | The one issue it keeps raising, and how often            | No Crusade    | It's The Whole Personality |
+| Slider         | What it sets                                              | At 0          | At 100                     |
+| -------------- | --------------------------------------------------------- | ------------- | -------------------------- |
+| **Bite**       | How hard you hit the work. Never the person who wrote it. | House Style   | Feral                      |
+| **Spine**      | Whether you actually do what you're told.                 | Just Do It    | Blocks the Board           |
+| **Glass Box**  | How much of the thinking the room gets to watch.          | Result Only   | Full Stream                |
+| **Elbows**     | How you treat the other agents in the room.               | Stays In Lane | Picks Fights               |
+| **Receipts**   | How much you admit about your own run.                    | Ships Clean   | Full Confession            |
+| **Hobbyhorse** | The one hill you die on, and how often you climb it.      | No Crusade    | It's The Whole Personality |
 
-Each slider has five written stops, one for each fifth of its range. Turn on **Show prompts** (next to the **Presets** label, off by default) to see the exact text each slider adds at its current value; your browser remembers the choice. Whatever the values, the generated block ends with a **Limits** section that no slider removes: criticism attaches to the work, never to a person, and the voice never changes the verdict.
+Each slider adds one of five passages, depending on its value. Turn on **Show prompts** to read the exact text at the current values. Whatever you choose, the text ends with a **Limits** section that no slider removes. It keeps criticism on the work, never on a person, and the style never changes what the agent reports.
 
-A new Boo starts on **House Style**. An agent whose personality was saved before these six dimensions existed opens on its nearest equivalent.
+Clawboo writes the personality into the agent's SOUL.md, below the role text. Every runtime follows SOUL.md (see [Edit the agent files](#edit-the-agent-files)), so the personality reaches the agent on any runtime. **Preview SOUL.md** shows the result.
 
-### Where values persist
+### Use your own instructions instead
 
-A commit writes to **two** places:
+Click **Use Custom Instructions** to write the personality yourself. Your text replaces the slider text, **Limits** included. It saves when you click away from the box or press `Cmd/Ctrl+S`. **Switch to Sliders** clears your text and goes back to the sliders.
 
-1. **SQLite** (`POST /api/personality`): the source of truth for the slider values. The handler stores a `{ values, customText }` JSON wrapper in the agent's `personality_config` column (upserting the agent row if it doesn't exist yet).
-2. **`SOUL.md`** (best-effort): each slider's stop is rendered as a Markdown section and merged into `SOUL.md` below a `---` separator and a `clawboo:personality` marker comment. The merge reads the current `SOUL.md`, strips any old personality block, preserves the role description above the separator, and writes the result back.
+<Warning>
 
-Because SQLite is authoritative, the slider positions survive even if the `SOUL.md` write fails. When the Details card loads `SOUL.md`, it strips the stale personality block and re-merges the SQLite values, so the SOUL file tab always reflects the current sliders.
+While custom instructions are on, the SOUL tab under **Agent Files** still shows the slider personality, not your text. If you edit and save SOUL.md there, the slider text replaces your custom instructions in the file the agent follows. While custom instructions are on, change the personality only here. If it happens, click in your custom instructions and press `Cmd/Ctrl+S` to write them back.
 
-<Note>
-Writes through the Gateway's agent-file API are best-effort and may not persist, so the slider values live in SQLite as the source of truth. Treat the `SOUL.md` block as a generated projection of the SQLite source, not the other way around.
-</Note>
+</Warning>
 
-### Custom instructions instead of sliders
+## Edit the agent files
 
-Click **Use Custom Instructions** to switch to a free-text override. The textarea content saves on blur or `Cmd/Ctrl+S` (`POST /api/personality` with `customText`), and is merged into `SOUL.md` under a `clawboo:personality-custom` marker comment; it **overrides** the slider-generated block, **Limits** section included. **Switch to Sliders** clears the custom text and restores the slider personality.
+Open **Details > Agent Files**. Each file has a tab. Which tabs you see, and what each file does, depends on the agent's runtime.
 
-The **Preview SOUL.md** toggle at the bottom of the section shows the merged result (role description plus the active personality block). On `clawboo-native` that merged text becomes the agent's system prompt; on OpenClaw the Gateway decides how it is used.
+| Runtime                    | Tabs                          | What the agent follows                                                                                                                              |
+| -------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenClaw                   | SOUL, IDENTITY, TOOLS, AGENTS | The OpenClaw Gateway loads SOUL.md, IDENTITY.md and AGENTS.md. OpenClaw 2026.9 and later does not load TOOLS.md, so put tool guidance in AGENTS.md. |
+| Clawboo Native             | SOUL, AGENTS                  | SOUL.md is the agent's whole set of instructions. Saving it changes what the agent runs on.                                                         |
+| Claude Code, Codex, Hermes | SOUL, AGENTS                  | Clawboo adds the first 4,000 characters of SOUL.md to each turn as the agent's persona.                                                             |
 
-## Start a fresh conversation
+- On every runtime, the @mentions in AGENTS.md draw the agent's links on the Org chart and team graphs. Only OpenClaw also reads AGENTS.md as instructions.
+- A file that already has text keeps its tab on any runtime. That is why agents made with **Create Boo** or from the Marketplace also show IDENTITY and TOOLS: those files are saved, but only OpenClaw reads them.
+- Clawboo never creates or reads USER.md, HEARTBEAT.md or MEMORY.md. Their tabs appear only when the file already has text, for example one your OpenClaw Gateway wrote.
 
-Type `/reset` (or `/new`) in the chat composer and send. In Clawboo the two words do the same thing. That is a deliberate simplification of OpenClaw underneath, where the reply engine treats them as one trigger (both archive the transcript, keep the session key, and mint a new session id behind it) but the Control UI routes them apart: `/reset` goes through as a message, while `/new` calls `sessions.create` and switches to a brand new `agent:<id>:dashboard:<uuid>` key.
+On Clawboo Native, an agent from a team template has Clawboo's team-lead or specialist instructions at the end of its SOUL.md. They tell the agent how to hand off or report work, so keep them unless you mean to change how it works with its team. An empty SOUL.md falls back to Clawboo's default instructions.
 
-**Your conversation stays on screen.** Starting fresh ends what the boo is carrying, not what you can see. Every message stays exactly where it is, in the same chat, and a divider marks the point past which the boo is no longer holding the thread. Scroll up and it is all still there.
+<Steps>
 
-What happens:
+<Step title="Pick a file">
 
-1. the resume pointer is dropped (native) or the command is forwarded to the runtime (OpenClaw), so the next turn starts with no memory of what came before the divider;
-2. a divider is written into the transcript and kept there, so it is still in place after a reload;
-3. no message is moved, re-keyed, or deleted.
+Open **Details > Agent Files** and click a file's tab.
 
-In a team chat (General or a room), every teammate's own conversation in that chat is reset, and the chat shows one divider, because you are looking at a single merged timeline. To set a team chat's messages aside as well, use **Clear chat** in the **...** menu on that chat's row in the sidebar; see [Group chat](/using/group-chat).
+</Step>
 
-### What the boo still knows
+<Step title="Edit it">
 
-Its **character comes back in full**. The system prompt is rebuilt from the agent's own files on every single run, so personality, role and custom instructions are untouched by a reset.
+A changed file shows an amber dot, and the card's footer reads **Unsaved**.
 
-**Its notes come back too.** On the first turn after a reset the boo is handed its own saved memory: up to eight of the most recent facts it recorded, capped so the reminder never crowds out the conversation. That is what keeps a reset feeling like "let's start this topic fresh" rather than talking to someone with amnesia. The block rides the first turn only, so it never repeats.
+</Step>
 
-Two limits worth knowing. Only the boo's **own** notes and globally-scoped ones are included; facts belonging to a team room stay in that room. And the notes are delivered as background to consult, explicitly not as instructions to follow, because their content was written by whoever talked to the boo.
+<Step title="Save it">
 
-If nothing was ever saved, nothing is injected and the boo genuinely starts blank. Memory is filled by the `memory_save` tool, so a boo that never chose to save anything has nothing to recall.
+Click **Save** or press `Cmd/Ctrl+S`. You should see **Saved** with the file's name, for example **Saved SOUL.md**.
 
-<Note>
-Deleting the agent still deletes its conversation. That is the only thing that removes messages.
-</Note>
+</Step>
 
-## Create a Boo
+</Steps>
 
-Click **Create Boo** in the sidebar's agent column, below the rooms list, to open `CreateBooModal`.
+Changed files also save when you leave the page or switch to another agent. Saving AGENTS.md redraws the agent's links on the graphs.
 
-1. Enter a **Name** (required) and an optional **Role** (free text that becomes the base `SOUL.md`).
-2. Click **Create Boo** (or press Enter). The modal:
-   - merges the default personality (the **House Style** preset) into the role text and creates the agent via `POST /api/agents`, on OpenClaw while an OpenClaw Gateway is connected and on Clawboo Native otherwise; the server writes `SOUL.md`, `IDENTITY.md`, and `TOOLS.md`;
-   - persists the default personality to SQLite (`POST /api/personality`);
-   - assigns the new Boo to the currently selected team (best-effort) via `POST /api/teams/:id/agents`.
+Clawboo keeps the files of Clawboo Native, Claude Code, Codex and Hermes agents itself, so editing them never needs the OpenClaw Gateway. An OpenClaw agent's files live in the OpenClaw Gateway. While Clawboo's server is not connected to the Gateway, that agent's tabs open empty and **Save** fails. Do not type into those empty tabs: if the connection comes back before you save, your text replaces the real file.
 
-<Note>
-**Create Boo** needs no Gateway. The Boo runs on OpenClaw while the server is connected to an OpenClaw Gateway, and on Clawboo Native when it is not; the dialog says which before you create. A native Boo runs on its `SOUL.md` as its system prompt and needs a connected provider to answer. For an OpenClaw Boo, a name collision with an existing agent surfaces as a create error.
-</Note>
+## Permissions
 
-## Delete a Boo
+**Details > Permissions** sets what an agent may run, for two runtimes:
 
-Two places delete an agent:
+- **OpenClaw:** **Execution Permissions** sets the agent's **Command Execution** to **Run Freely**, **Ask for Unknown** or **Always Ask**, and the Gateway enforces it. Below it, **Commands this Boo can run without asking** lists the commands it may run without asking, so you can revoke them.
+- **Clawboo Native:** the **Running commands** switch, **Let this Boo ask to run commands**. With it on, the agent asks you before every command, and nothing is remembered.
 
-- **Any graph**: right-click the Boo, then **Delete**. It deletes at once, with no confirmation, and works without a Gateway.
-- **The all-agents list**: right-click the Boo Zero mascot at the top of the team rail and pick **Show all agents**; the agent column then lists every agent as a row. Hover a row, click its trash icon, and confirm. Like the graph's **Delete**, it works without a Gateway.
+See [Command permissions](/using/command-permissions) for the details.
 
-Either way, `deleteAgentOperation`:
+Claude Code, Codex and Hermes agents have no **Permissions** section. Clawboo runs them with their own approval prompts and sandboxes turned off, so they can read and change any file your user account can. See [What agents can do](/concepts/permissions).
 
-1. archives the agent via `DELETE /api/agents/:agentId`; the server archives it through its runtime (an OpenClaw agent is deleted from the Gateway) and removes the SQLite row plus its FK-referenced cost/approval rows. If an OpenClaw agent's Gateway is down, the server removes its own records at once and deletes the agent from the Gateway the next time it connects, answering `{ ok: true, upstreamDeleted: false, upstreamDeletePending: true }`;
-2. removes it from the in-memory fleet store;
-3. re-identifies [Boo Zero](/appendices/glossary) from the remaining agents (in case the deleted Boo was the leader);
-4. clears its transcript and deletes its chat history.
+## Delete an agent
 
-<Danger>
-Deletion is not reversible. The agent's files and config are removed from both the runtime and SQLite. There is no undo.
-</Danger>
+- **On the Org chart or a team graph:** right-click the agent's Boo, then **Delete**. It deletes at once, with no confirmation.
+- **In the all-agents list:** right-click Boo Zero's mascot and choose **Show all agents**. Hover the agent's row, click the trash icon, then confirm. The prompt warns **This cannot be undone.**
 
-<Note>
-An OpenClaw agent deleted while its Gateway is down leaves clawboo at once and leaves the Gateway the next time the server connects to it; the delete answers `upstreamDeletePending: true`. Until then the Gateway still lists the agent, but clawboo keeps it out of the sidebar and the graphs and never puts it back in a team. `GET /api/agents` lists such agents in `pendingDeleteIds`. If the Gateway refuses the delete (it will not delete its only agent, or one that owns shared credentials), the agent comes back.
-</Note>
-
-## Verify it worked
-
-- **File save**: re-open the file tab (or reload the page) and confirm the saved content is loaded back from `GET /api/agents/:agentId/files/:name`. The footer reads **Saved**.
-- **Personality**: reload the page; the sliders should restore their saved positions (read from `GET /api/personality?agentId=...`), and **Preview SOUL.md** should show the matching personality block.
-- **Create / delete**: the agent appears in (or disappears from) the sidebar. After a create, `GET /api/agents` includes the new record.
+Deleting removes the agent, its files, its personality and its own chat history. It works without the OpenClaw Gateway. An OpenClaw agent leaves Clawboo at once, and leaves the Gateway at once too, or the next time Clawboo connects if the Gateway is offline. If the Gateway refuses the delete (it will not delete its only agent), the agent comes back.
 
 ## Troubleshooting
 
-<Warning>
-**Edits don't save.** The editor and sliders write through the connected runtime. If the connection dot in the header is amber, file writes return `503` and slider commits silently fail. Reconnect the runtime, then retry the save.
-</Warning>
+<AccordionGroup>
 
-<Warning>
-**Personality slider moved back after I switched agents.** A slider commit fires on pointer-up; a drag with no release doesn't save. Release the thumb (or use a keyboard arrow + release) to commit, and watch for the **Saved** indicator.
-</Warning>
+<Accordion title="Save fails with gateway_disconnected">
 
-<Note>
-**An invalid file name returns 400.** The file routes validate `:name` against the seven known agent files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`). Any other name is rejected with `{ error: "invalid file name" }`.
-</Note>
+The message reads `Failed to save SOUL.md: Write SOUL.md failed (503): gateway_disconnected` (with the file you saved).
 
-## See also
+**What it means:** this is an OpenClaw agent, and Clawboo's server is not connected to the OpenClaw Gateway, where the agent's files live.
 
-- [Ghost Graph](/using/ghost-graph), the mini graph in the Graph card, a team's graph, and the Org chart
-- [Group chat](/using/group-chat), work with a whole team at once, in General or a room
-- [Routines](/using/routines), the routines the Tasks & Routines card lists
-- [Boo Zero](/using/boo-zero), the universal team leader's Brief and rules
-- [`/api/agents` reference](/reference/rest-api/agents), full request/response shapes for the registry, files, and sessions
-- [Glossary](/appendices/glossary), Boo, Boo Zero, AgentSource, registry of record
+**Fix:** reconnect OpenClaw in **Settings > Runtimes** (or check **System Health**), then reopen the agent's page so its files load before you edit.
+
+</Accordion>
+
+<Accordion title="Save fails with a prompt-injection finding">
+
+The message ends with `(422): agent content blocked: prompt-injection finding`.
+
+**What it means:** the text matches a known prompt-injection pattern, so Clawboo refused it and recorded the refusal in the Governance audit log.
+
+**Fix:** remove or reword the flagged text, then save again.
+
+</Accordion>
+
+<Accordion title="The message box says Gateway not connected">
+
+This agent's chat goes through the OpenClaw Gateway. For an OpenClaw agent, connect the Gateway in **Settings > Runtimes**. For a Claude Code, Codex or Hermes agent, give it work in [team chat](/using/team-chat) or on the [board](/using/board) instead.
+
+</Accordion>
+
+<Accordion title="A Clawboo Native agent does not answer">
+
+The page header reads **Disconnected** or **No provider key**: Clawboo Native has no provider it can use for this agent. Click **Set up in Runtimes** in the header and connect an API key or a local Ollama.
+
+</Accordion>
+
+<Accordion title="The SOUL tab does not show my custom instructions">
+
+This is expected while **Use Custom Instructions** is on. See the warning under [Use your own instructions instead](#use-your-own-instructions-instead).
+
+</Accordion>
+
+</AccordionGroup>
+
+<Accordion title="Under the hood">
+
+- Clawboo stores the slider values and any custom instructions in its database, and writes the generated text into SOUL.md below a `---` line and a `clawboo:personality` marker comment. When **Agent Files** loads, it rebuilds that block from the saved slider values.
+- File routes: `GET` and `PUT /api/agents/:agentId/files/:name`, where the name is one of the seven agent files (any other name returns 400 `invalid file name`). Personality: `POST /api/personality`. Model: `PATCH /api/agents/:agentId/model`.
+- `DELETE /api/agents/:agentId` answers `upstreamDeletePending: true` when an OpenClaw agent's Gateway is offline. Until the Gateway confirms, `GET /api/agents` lists that agent in `pendingDeleteIds`.
+- See the [Agents API reference](/reference/rest-api/agents) for every field.
+
+</Accordion>
+
+## Next steps
+
+- [Teams](/using/teams): put agents together and set rules they all follow.
+- [Team chat](/using/team-chat): give your agents work as a team.
+- [Command permissions](/using/command-permissions): decide what each agent may run.
+- [What an agent sees](/concepts/agent-context): everything that goes into an agent's turn.
+- [Agents API reference](/reference/rest-api/agents): the routes behind this page.

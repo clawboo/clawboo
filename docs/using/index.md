@@ -1,76 +1,146 @@
 ---
-title: 'Using Clawboo: the feature map'
-description: A navigation index to every Clawboo dashboard feature, grouped by where it lives in the UI.
+title: 'Use Clawboo'
+sidebarTitle: 'Overview'
+description: 'Find the how-to for what you want to do, and where each part of the dashboard lives: the sidebar, team chats, the board and Settings.'
+icon: 'layout-dashboard'
+keywords: ['feature map', 'navigation', 'sidebar', 'settings', 'where is', 'dashboard', 'nav']
 ---
 
-Clawboo's dashboard is a single window: a sidebar on the left (the team rail and an agent column you can resize or collapse) and the main content area. The main area is a [discriminated `ViewMode`](/appendices/glossary): clicking a team icon opens the team's **Home**, its rooms open a **team chat**, clicking an agent opens its **agent page**, and the sidebar's nav buttons and the Settings modal switch the main area to one of fifteen full-screen **nav panels** (`NAV_VIEWS` in `stores/view.ts`, each mapped to a lazily-loaded feature component by `NavPanel` in `features/layout/navPanels.tsx`, which also wraps each panel in its own error boundary). A few surfaces, Teams, Group chat, Agents, Boo Zero, Home, and Theming, are reached through the team rail, the agent column's mascot grid and rooms list, the Home row, or the theme toggle rather than a nav button. This page is mostly navigation; each linked how-to grounds itself in its own feature module and backing API route(s).
+Use this page to find the how-to for what you want to do, and to learn where things are in the dashboard. Each how-to is a short set of steps that uses the labels you see on screen.
 
-## Team-scoped surfaces
+## Find what you want to do
 
-These live in the sidebar and follow the currently selected team. The team rail (`TeamSidebar`) and the agent column (`AgentListColumn`) drive them.
+### Build your team
 
-- **[Teams](/using/teams)**: Create and manage teams, set the team leader, capture per-team rules, and pick a color collection. Reached from the team rail's **+** (Create a team) button and right-click context menu.
-- **[Group chat](/using/group-chat)**: The team's collaboration room, opened from **General** in the agent column's rooms list. A team can add more **rooms**, each a subset of its members with its own conversation, and any chat can be cleared from its row's **"..."** menu. Gated once per team by the "Know Your Team" onboarding flow before the composer unlocks.
-- **[Ghost Graph & Org chart](/using/ghost-graph)**: The team's agent topology (the **Team graph** card beside a team's chat) and the all-teams **Org chart** (formerly Atlas; the `graph` nav slot). Halos, team badges, peacock expand/collapse, the Boo port and the + button for building on the canvas, and the Org chart's activity and browser docks live here.
-- **[Agents](/using/agents)**: Click any tile in the mascot grid to open that agent's page: its chat, with cards beside it for its graph, tasks and routines, browser, activity, and details (the personality sliders and the agent-file editors).
-- **[Boo Zero](/using/boo-zero)**: The universal team leader. Its standalone view (opened from the mascot icon) hosts the display name and global brief; per-team briefs and rules live behind the gear in a team chat's header.
-- **[Home](/getting-started/dashboard-tour#home)**: Each team's Home, opened from its icon in the team rail or the **Home** row at the top of the nav. For now it is a placeholder for the team's dashboards and the artifacts its agents make.
+| I want to...                                                         | Go to                                 |
+| -------------------------------------------------------------------- | ------------------------------------- |
+| Start a team from a ready-made template, or from scratch             | [Teams](/using/teams)                 |
+| Look through ready-made teams, agents and skills before I deploy one | [Marketplace](/using/marketplace)     |
+| Add one agent, or change an agent's model, personality or files      | [Agents](/using/agents)               |
+| Set rules that every member of a team follows                        | [Team rules](/using/teams#team-rules) |
+| Understand how Boo Zero, my team leader, coordinates every team      | [Boo Zero](/using/boo-zero)           |
 
-## Org-wide nav panels
+### Work with your team
 
-These open from the nav buttons at the bottom of `AgentListColumn` or from the Settings modal (`Cmd/Ctrl+,`); [Where things live](#where-things-live-nav-slots) says which. Each switches the main content area to a full-screen panel; all are always available (no feature gates).
+| I want to...                                                  | Go to                         |
+| ------------------------------------------------------------- | ----------------------------- |
+| Ask a team for something and follow the conversation          | [Team chat](/using/team-chat) |
+| Work with part of a team in its own room                      | [Team chat](/using/team-chat) |
+| See every task, what needs me, and what got done              | [Board](/using/board)         |
+| Comment on a running task to steer it                         | [Board](/using/board)         |
+| See how my agents are organized, and attach tools by dragging | [Org chart](/using/org-chart) |
 
-- **[Board](/using/board)**: The durable kanban board, fused with chat, laid out as a calendar: status columns across the top, days down the side, upcoming routine runs on their days, and a **Needs you** column for approvals and stuck tasks. Cards show the agent, the runtime, and a verification mark or the cost.
-- **[Marketplace](/using/marketplace)**: Browse and deploy the 436 first-class agents and 85 workflow teams across a Skills / Agents / Teams tab strip.
-- **[Connectors](/using/connectors)**: Connect MCP servers and apps for your agents to use, and see the grants that govern their tools.
-- **[Cost & budgets](/using/cost-and-budgets)**: The **Tokens Used** dashboard: per-agent and per-team token usage and trends, plus USD budgets via the Governance surface.
-- **[Routines](/using/routines)**: Recurring work for a team or one agent, plus the OpenClaw Gateway's own cron jobs.
-- **[Memory](/using/memory-browser)**: Search, save, and browse the shared Memory-MCP tier (facts and procedures).
-- **[Capabilities](/using/capabilities-dashboard)**: The unified capability inventory across all runtimes, grouped by runtime and kind, with manageability-derived actions.
-- **[Observability](/using/observability-dashboard)**: Traces, the error taxonomy, fleet health, the delegation-graph projection, and the eval scorecard.
-- **[Governance](/using/governance-dashboard)**: Budgets, caps, the audit log, and the shared tool-approval queue.
-- **[System](/using/system-maintenance)**: Gateway control, default model, API keys, agent coordination, and system info.
-- **[System health](/using/system-health)**: The boot-probe checklist and resolved runtime state, the one liveness surface that answers with the Gateway down.
+### Connect AI and tools
 
-## App-wide
+| I want to...                                                         | Go to                                                   |
+| -------------------------------------------------------------------- | ------------------------------------------------------- |
+| Add an API key, sign in with ChatGPT, or use a local model on Ollama | [Providers and runtimes](/using/providers-and-runtimes) |
+| Add a runtime such as Claude Code, Codex, Hermes or OpenClaw         | [Providers and runtimes](/using/providers-and-runtimes) |
+| Pick the right runtime for a job                                     | [Choose a runtime](/runtimes/index)                     |
+| Give agents apps and tools, such as GitHub or a web browser          | [Connectors](/using/connectors)                         |
+| See every tool and skill each agent can use                          | [Capabilities](/using/capabilities)                     |
+| See or add what my team remembers                                    | [Memory](/using/memory)                                 |
 
-- **[Approvals](/using/approvals)**: The pending-approval queue (Gateway exec approvals, native `run_command` requests, and the brokered tool-approval queue). Not a nav panel: it renders in the Board's **Needs you** column and as an inline tray above the group-chat composer.
-- **[Theming](/using/theming)**: The light/dark/system theme toggle in the bottom-left of the sidebar (`ThemeToggle`); fresh installs default to light.
+### Automate
 
-## Where things live (nav slots)
+| I want to...                                       | Go to                       |
+| -------------------------------------------------- | --------------------------- |
+| Have a team or an agent do something on a schedule | [Routines](/using/routines) |
 
-The fifteen nav panels map one-to-one to `NavView` ids. The table is the same wiring `ContentArea` uses, so it doubles as a reference for the `navigateTo(view)` action. Five panels live in the sidebar nav, in this order: Org chart, Board, Connectors, Memory, Marketplace. The first four have a number shortcut, `Cmd/Ctrl+1` to `Cmd/Ctrl+4`, in that order. The Settings modal (`Cmd/Ctrl+,`) holds the other ten, Fleet among them, plus Memory, which is in both places on purpose: the sidebar opens it full-screen with its graph, and Settings shows the list. A team's **Home** row sits above the nav when a team is selected, but Home is a view of its own, not a nav panel. `Cmd/Ctrl+\` collapses or expands the sidebar.
+### Stay in control
 
-| Nav id (`NavView`) | Label         | Lives in                                        | Page                                                      |
-| ------------------ | ------------- | ----------------------------------------------- | --------------------------------------------------------- |
-| `graph`            | Org chart     | Sidebar, `Cmd/Ctrl+1`                           | [Ghost Graph & Org chart](/using/ghost-graph)             |
-| `board`            | Board         | Sidebar, `Cmd/Ctrl+2`                           | [Board](/using/board)                                     |
-| `connectors`       | Connectors    | Sidebar, `Cmd/Ctrl+3`                           | [Connectors](/using/connectors)                           |
-| `memory`           | Memory        | Sidebar (`Cmd/Ctrl+4`) and Settings (Workspace) | [Memory browser](/using/memory-browser)                   |
-| `marketplace`      | Marketplace   | Sidebar                                         | [Marketplace](/using/marketplace)                         |
-| `providers`        | Providers     | Settings (Workspace)                            | [Connecting runtimes](/runtimes/connecting-runtimes)      |
-| `runtimes`         | Runtimes      | Settings (Workspace)                            | [Connecting runtimes](/runtimes/connecting-runtimes)      |
-| `capabilities`     | Capabilities  | Settings (Workspace)                            | [Capabilities dashboard](/using/capabilities-dashboard)   |
-| `routines`         | Routines      | Settings (Workspace)                            | [Routines](/using/routines)                               |
-| `fleet`            | Fleet         | Settings (Insights)                             | [Dashboard tour](/getting-started/dashboard-tour)         |
-| `cost`             | Tokens Used   | Settings (Insights)                             | [Cost & budgets](/using/cost-and-budgets)                 |
-| `obs`              | Observability | Settings (Insights)                             | [Observability dashboard](/using/observability-dashboard) |
-| `governance`       | Governance    | Settings (Insights)                             | [Governance dashboard](/using/governance-dashboard)       |
-| `system`           | System        | Settings (System)                               | [System & maintenance](/using/system-maintenance)         |
-| `health`           | System Health | Settings (System)                               | [System health](/using/system-health)                     |
+| I want to...                                             | Go to                                             |
+| -------------------------------------------------------- | ------------------------------------------------- |
+| Answer an agent that asks to run a command or use a tool | [Approvals](/using/approvals)                     |
+| Decide which commands an agent may run without asking    | [Command permissions](/using/command-permissions) |
+| See what I am spending, and set a budget                 | [Budgets and spend](/using/budgets-and-spend)     |
+| Understand what agents can do on my computer             | [What agents can do](/concepts/permissions)       |
 
-<Note>
-The `fleet` panel (a read-only overview, in the Settings modal under Insights) does not have its own how-to; it is covered in the [dashboard tour](/getting-started/dashboard-tour).
+### Monitor and maintain
 
-**Approvals is not a nav slot.** It has a how-to page ([Approvals](/using/approvals)) but no `NavView` id: approvals render in the [board](/using/board)'s **Needs you** column and in an inline tray above the [group-chat](/using/group-chat) composer.
-</Note>
+| I want to...                                          | Go to                                    |
+| ----------------------------------------------------- | ---------------------------------------- |
+| See how my agents and runs are doing, and find errors | [Observability](/using/observability)    |
+| Find out why part of Clawboo is not working           | [System Health](/using/system-health)    |
+| Update OpenClaw, or set its default command approval  | [System](/using/system)                  |
+| Switch between light and dark mode                    | [Theming](/using/theming)                |
+| Fix something that went wrong                         | [Troubleshooting](/help/troubleshooting) |
 
-![A selected team's General chat, with its Team graph and Tasks cards open beside it](/images/team-space.png)
+### Go further
 
-## See also
+| I want to...                                                                  | Go to                            |
+| ----------------------------------------------------------------------------- | -------------------------------- |
+| Follow a worked example, such as a content team or running without an API key | [Recipes](/guides/index)         |
+| Run Clawboo for my team, or on another machine                                | [Self-hosting](/operating/index) |
 
-- [Dashboard tour](/getting-started/dashboard-tour): the sidebar, the Org chart, and the view modes, end to end
-- [First team](/getting-started/first-team): deploy a team and watch it collaborate
-- [Concepts](/concepts/index): the models behind these features (the board, peer chat, verification, governance)
-- [Runtimes overview](/runtimes/index): the five runtime classes and the capability matrix
-- [REST API reference](/reference/rest-api/index): every backing route
+## Where things live
+
+The dashboard has a sidebar on the left and a main area beside it. Everything opens from the sidebar.
+
+![A team's General chat: the sidebar on the left, the chat in the middle, and the Team graph and Tasks cards on the right](/images/team-space.png)
+
+### The sidebar
+
+The sidebar has two columns.
+
+The **team rail** is the narrow column on the far left:
+
+- Boo Zero's red mascot sits at the top. Click it to open [Boo Zero](/using/boo-zero)'s page. Right-click it and choose **Show all agents** to list every agent.
+- Each team has an icon. Click one to open that team. Right-click it to archive the team, refresh its protocol, or delete it (see [Teams](/using/teams)).
+- The dashed **+** at the bottom (**Create a team**) opens the [Marketplace](/using/marketplace) on its **Teams** tab.
+
+The **agent column** sits next to it. From top to bottom:
+
+- The team's name, with a search icon that filters its agents.
+- The team's agents, one Boo tile each, with Boo Zero last. Click a tile to open that [agent's page](/using/agents).
+- **New room**, then **General (Main Room)** and your rooms: the team's chats.
+- **Create Boo**, which adds an agent to this team.
+- The nav rows (below), then the theme switch.
+
+**Home** and the team's chats appear once the team has at least one agent. Press `Cmd/Ctrl+\` to hide or show the sidebar, and drag its edge to resize it.
+
+### The nav
+
+| Row             | What it opens                                                 | Shortcut     |
+| --------------- | ------------------------------------------------------------- | ------------ |
+| **Home**        | The team's home page, which holds only a placeholder          |              |
+| **Org chart**   | Every team and agent in one chart, led by Boo Zero            | `Cmd/Ctrl+1` |
+| **Board**       | Every task, by status and by day, with a **Needs you** column | `Cmd/Ctrl+2` |
+| **Connectors**  | Apps and tools you connect for your agents                    | `Cmd/Ctrl+3` |
+| **Memory**      | What your agents have saved, as a graph or a list             | `Cmd/Ctrl+4` |
+| **Marketplace** | Ready-made teams, agents and skills                           |              |
+| **Settings**    | Setup, insights and system panels, in three groups (below)    | `Cmd/Ctrl+,` |
+
+### A team's chats
+
+Click **General** or a room in the agent column. The chat fills the main area. Its header has a gear for the team's brief and rules. It also has buttons that show or hide four cards beside the chat: **Browser**, **Team graph** (**Room graph** in a room), **Tasks** and **Activity**. See [Team chat](/using/team-chat).
+
+### Settings
+
+Open **Settings** from the sidebar, or press `Cmd/Ctrl+,`. It opens on **Runtimes**. Type in **Search settings** to find a panel by what it does, for example "api key" or "cron".
+
+| Group         | Panel             | What it is for                                                          | How-to                                                  |
+| ------------- | ----------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
+| **Workspace** | **Providers**     | API keys and the ChatGPT sign-in                                        | [Providers and runtimes](/using/providers-and-runtimes) |
+|               | **Runtimes**      | Connect, install and manage the five runtimes                           | [Providers and runtimes](/using/providers-and-runtimes) |
+|               | **Memory**        | The memory list (the sidebar's **Memory** adds the graph)               | [Memory](/using/memory)                                 |
+|               | **Capabilities**  | Every tool, skill and connector, grouped by runtime                     | [Capabilities](/using/capabilities)                     |
+|               | **Routines**      | Scheduled work for teams and agents                                     | [Routines](/using/routines)                             |
+| **Insights**  | **Fleet**         | An overview of your agents, recent runs and spend                       | [Observability](/using/observability)                   |
+|               | **Tokens Used**   | Token use by team and agent                                             | [Budgets and spend](/using/budgets-and-spend)           |
+|               | **Observability** | Traces, errors and fleet health                                         | [Observability](/using/observability)                   |
+|               | **Governance**    | Budgets, the audit log and the approval queue                           | [Budgets and spend](/using/budgets-and-spend)           |
+| **System**    | **System**        | OpenClaw's default command approval, versions and **Check for Updates** | [System](/using/system)                                 |
+|               | **System Health** | Start-up checks for Clawboo's own parts                                 | [System Health](/using/system-health)                   |
+
+### Approvals
+
+Approvals have no panel of their own. They appear where you are working: in the board's **Needs you** column, above the message box in a chat, and in the **Tasks** cards. The **Governance** and **Capabilities** panels list them too. See [Approvals](/using/approvals).
+
+## Next steps
+
+- [Deploy your first team](/getting-started/first-team): go from a template to a finished task.
+- [Dashboard tour](/getting-started/dashboard-tour): a guided look at each part of the screen.
+- [Key concepts](/concepts/index): how teams, the board and runtimes fit together.
+- [Keyboard shortcuts](/reference/keyboard-shortcuts): every shortcut in one place.
+- [Glossary](/appendices/glossary): the names you see in the app, and what they mean.
