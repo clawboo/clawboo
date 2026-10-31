@@ -216,7 +216,7 @@ The folder for everything Clawboo stores.
 - Default: `~/.clawboo`
 - Example: `CLAWBOO_HOME=/srv/clawboo`
 
-It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, worktrees, agent browser profiles and per-agent runtime homes. The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
+It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, worktrees, team folders, agent browser profiles and per-agent runtime homes. The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
 
 ### OPENCLAW_STATE_DIR
 

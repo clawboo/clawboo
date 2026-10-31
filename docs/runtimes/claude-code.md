@@ -96,7 +96,7 @@ Clawboo starts Claude Code with its permission prompts turned off (`permissionMo
 
 </Warning>
 
-- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, and on research and review runs (which includes every agent Routine you create in the app), Claude Code starts in the folder the Clawboo server runs from. When you start Clawboo with the `clawboo` command, that is your Clawboo data folder (`~/.clawboo`), which holds Clawboo's database and key vault.
+- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, and on research and review runs (which includes every agent Routine you create in the app), Claude Code starts in its team's folder, `~/.clawboo/workspaces/<team id>`, which every member of the team shares (a task with no team uses `workspaces/_no-team`). That folder only sets where it starts: Claude Code can still read and change any file your user account can, including Clawboo's database and key vault.
 - **Clawboo's approvals do not cover Claude Code's own tools.** Calls the agent makes through Clawboo's Tools server (connectors, for example) go through Clawboo's checks and can ask you first. Claude Code's built-in shell, file and web tools never do.
 - **Clawboo hides some secrets from it, by name only.** Before a run, Clawboo removes its own secrets (the OpenClaw Gateway token, the dashboard access token and the vault master key) from the environment Claude Code inherits. It also removes a fixed list of common credentials, such as GitHub, npm, cloud, Stripe, Slack and database variables. Other variables pass through, and credential files on disk stay readable.
 
@@ -177,7 +177,7 @@ The Clawboo server cannot find npm. Install Node.js 22.12 or newer, restart Claw
 
 <Accordion title="Under the hood">
 
-- Clawboo calls the SDK's `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. It also passes the run's working folder (the worktree, when there is one), the model when a run names one, a session to resume, Clawboo's four MCP servers over HTTP, and the scrubbed environment plus the connected key. It does not set `settingSources`, so the SDK loads user, project and local settings.
+- Clawboo calls the SDK's `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. It also passes the run's working folder (the task's worktree, or else the team's folder), the model when a run names one, a session to resume, Clawboo's four MCP servers over HTTP, and the scrubbed environment plus the connected key. It does not set `settingSources`, so the SDK loads user, project and local settings.
 - The SDK starts Claude Code from its own platform package. The `claude` command that **Install** adds is what the Runtimes row checks for. A source build of Clawboo uses SDK version 0.3.268.
 - Run a board task on Claude Code directly with `POST /api/runtimes/claude-code/run`; see the [Runtimes API](/reference/rest-api/runtimes). Such a run falls back to the `claude` CLI's own sign-in when no Anthropic key is available.
 - A run that hits Claude Code's turn limit ends cleanly, and the task runner continues the task in a fresh session with a handoff note.

@@ -116,7 +116,7 @@ Times follow the clock and time zone of the machine that runs Clawboo. If Clawbo
 
 Budgets apply to routine runs like any other work, and an agent task is refused before it starts when a hard-cap budget it falls under is already paused; see [Budgets and spend](/using/budgets-and-spend). [How routines run](/concepts/scheduling) lists the other guardrails each kind gets.
 
-A routine made in the dashboard has no repository, so its agent tasks run without a git worktree. Claude Code, Codex and Hermes run with their own permission prompts turned off and can read and change any file your user account can; see [What agents can do](/concepts/permissions).
+A routine made in the dashboard has no repository, so its agent tasks run without a git worktree, in the team's folder. Claude Code, Codex and Hermes run with their own permission prompts turned off and can read and change any file your user account can; see [What agents can do](/concepts/permissions).
 
 Agents may also need your approval mid-run, for example for a connector call. A routine runs while you may be away, and a call nobody approves in time is refused, so prefer tools that do not ask for routine work.
 

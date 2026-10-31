@@ -84,7 +84,7 @@ The chat sits on the left and cards stack on the right. The buttons in the page 
 
 In **Tasks & Routines**, click a task to read its output and progress. The comment box at the bottom (**Comment or steer this task…**) sends your comment to the agent the task belongs to, and the line beside **Send** says what sending does. On a running task, the agent gets it during the run. A task that waits on you, or waits in **To do**, starts again for it. A finished task cannot run again, so the note under your comment offers **Send as a follow-up task** instead. Each comment you send shows where it went. See [Steer a running task](/using/board#steer-a-running-task) for every case. **Open on Board** opens the task on the board.
 
-**Workspace** under **Details** is a read-only view of the files in the agent's task worktree, when the agent has taken a board task that changes files. OpenClaw agents keep their files in the OpenClaw Gateway's workspace instead.
+**Workspace** under **Details** is a read-only view of the agent's files. It shows the worktree of each board task the agent took that changes files. For a Claude Code, Codex, Hermes or Clawboo Native agent it also shows the folder its runs start in when there is no worktree, as in team chat: **Team folder**, or **Shared folder (no team)** for an agent with no team. When there is more than one, pick it from the list at the top. The team folder is not a git checkout, so its files carry no change badges, and until the agent's first run there it reads "No files yet." OpenClaw agents keep their files in the OpenClaw Gateway's workspace instead.
 
 ## Chat with an agent
 

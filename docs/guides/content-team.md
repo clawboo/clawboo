@@ -28,7 +28,7 @@ The same steps work for a research team. Pick **Research Lab** instead of **Mark
 
 Read this before you rely on the team. What an agent can do depends on its runtime, the engine it runs on:
 
-- **Clawboo Native** runs a marketplace team when no OpenClaw Gateway is connected. Its agents plan, write and review using the model's own knowledge and whatever you give them. They read the team's board and share a team memory. In team chat they cannot browse the web, open your files, or send and post anything. [Connectors](/using/connectors) add those abilities.
+- **Clawboo Native** runs a marketplace team when no OpenClaw Gateway is connected. Its agents plan, write and review using the model's own knowledge and whatever you give them. They read the team's board and share a team memory. In team chat they can read and write files only in the team's own folder, and they cannot browse the web, open your other files, or send and post anything. [Connectors](/using/connectors) add those abilities.
 - **OpenClaw** agents use the tools your OpenClaw Gateway gives them.
 - **Claude Code, Codex and Hermes** agents bring their own tools for commands and files, and run with their own approval prompts turned off. Read [What agents can do](/concepts/permissions) before you put one on a team.
 
@@ -165,7 +165,7 @@ To copy a result, select the text and copy it (`Cmd/Ctrl + C`). There is no expo
 
 | You want                                | Do this                                                                                                                                                                                                         |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A research team                         | Deploy **Research Lab** (Paper Reader Boo, Data Analyst Boo, Summarizer Boo). Paste the text you want read: on Clawboo Native the team cannot open links or files.                                              |
+| A research team                         | Deploy **Research Lab** (Paper Reader Boo, Data Analyst Boo, Summarizer Boo). Paste the text you want read: on Clawboo Native the team cannot open links, or files outside its team folder.                     |
 | A bigger catalog                        | Online, the marketplace adds teams such as **SEO Content Studio**, **Writing Room** and **Market Intelligence Unit**. Offline it shows only the five built-in teams.                                            |
 | Web search or your own apps             | On the **Connectors** page, connect a tool such as **Exa Search** (web search, needs an Exa API key) or **Composio** (Gmail, Slack and more), and give your agents access. See [Connectors](/using/connectors). |
 | No API key                              | Run the team on a local Ollama model or on your ChatGPT plan. See [Run Clawboo without an API key](/guides/no-api-key).                                                                                         |
