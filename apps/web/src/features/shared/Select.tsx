@@ -64,6 +64,9 @@ export interface SelectProps {
   searchable?: boolean
   /** Placeholder for the search box (when `searchable`). */
   searchPlaceholder?: string
+  /** Muted trigger text while `value` matches no option. Without it the trigger
+   *  shows the first option, like a native `<select>`. */
+  placeholder?: string
   /** Raw `<option>` elements (labels may be any ReactNode). */
   children?: ReactNode
   className?: string
@@ -126,6 +129,7 @@ export function Select({
   menuWidth,
   searchable = false,
   searchPlaceholder = 'Search…',
+  placeholder,
   children,
   className,
   style,
@@ -171,8 +175,10 @@ export function Select({
   const selected = selectedIndex >= 0 ? normalized[selectedIndex] : undefined
   // Mirror the native <select>, which shows the first option when the value
   // matches none — never a blank trigger. (Always from the FULL list, so the
-  // trigger keeps showing the selection even while the list is filtered.)
-  const displayLabel = selected?.label ?? normalized[0]?.label ?? ''
+  // trigger keeps showing the selection even while the list is filtered.) A
+  // `placeholder` replaces that fallback.
+  const showPlaceholder = !selected && placeholder !== undefined
+  const displayLabel = selected?.label ?? placeholder ?? normalized[0]?.label ?? ''
 
   const computePosition = useCallback(() => {
     const el = triggerRef.current
@@ -399,6 +405,7 @@ export function Select({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            ...(showPlaceholder ? { color: 'rgb(var(--foreground-rgb) / 0.4)' } : {}),
           }}
         >
           {displayLabel}

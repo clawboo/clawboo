@@ -149,3 +149,36 @@ describe('Select menu width', () => {
     expect(screen.getByRole('listbox').style.width).toBe('180px')
   })
 })
+
+describe('Select placeholder', () => {
+  it('shows the placeholder, not the first option, while nothing matches the value', () => {
+    const { rerender } = render(
+      <Select
+        aria-label="pick"
+        value=""
+        onChange={vi.fn()}
+        options={OPTIONS}
+        placeholder="Choose one"
+      />,
+    )
+    const trigger = screen.getByRole('button', { name: 'pick' })
+    expect(trigger).toHaveTextContent('Choose one')
+    expect(trigger).not.toHaveTextContent('Alpha')
+
+    rerender(
+      <Select
+        aria-label="pick"
+        value="b"
+        onChange={vi.fn()}
+        options={OPTIONS}
+        placeholder="Choose one"
+      />,
+    )
+    expect(trigger).toHaveTextContent('Beta')
+  })
+
+  it('still falls back to the first option without a placeholder', () => {
+    render(<Select aria-label="pick" value="" onChange={vi.fn()} options={OPTIONS} />)
+    expect(screen.getByRole('button', { name: 'pick' })).toHaveTextContent('Alpha')
+  })
+})
