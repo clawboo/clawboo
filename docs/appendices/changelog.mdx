@@ -94,6 +94,7 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 - A Boo no longer loses its body when another copy of it is hidden.
 - An agent can no longer put a card back after you moved it: its own status changes are refused, with a message telling it not to try again, until the task runs again.
 - The Kanban lanes run unbroken to the bottom, and dropdown menus are as wide as their longest option.
+- Team chat runs, and task runs that only read (routines made in the dashboard included), start in a folder of their team, `~/.clawboo/workspaces/<team id>`, instead of the folder that holds Clawboo's database and keys. The folder only sets where Claude Code, Codex and Hermes start: they keep full access to your files. Clawboo Native agents get their file tools there, kept inside the folder. An agent's **Workspace** tab shows the folder, and deleting a team deletes it with its files. See [What agents can do](/concepts/permissions).
 
 </Update>
 

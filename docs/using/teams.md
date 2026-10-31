@@ -170,7 +170,7 @@ Refresh Protocol needs the OpenClaw Gateway connected, even for a team with no O
 
 ## Archive a team
 
-Right-click the team's icon in the team rail and choose **Archive**. The team leaves the team rail, which also puts its chats and its Home out of reach. Nothing is deleted: its agents, chats and tasks stay in Clawboo.
+Right-click the team's icon in the team rail and choose **Archive**. The team leaves the team rail, which also puts its chats and its Home out of reach. Nothing is deleted: its agents, chats, tasks and the files in its team folder stay in Clawboo.
 
 **You cannot undo this from the dashboard.** **Unarchive** appears only on an archived team's icon, and the team rail does not show archived teams. To bring a team back, use the API call under **Under the hood** at the end of this page.
 
@@ -183,13 +183,13 @@ Right-click the team's icon in the team rail and choose how much to delete.
 | **Delete team only**   | The team. Its agents stay in Clawboo, with no team.                     | **Delete team**       |
 | **Delete with agents** | Every agent on the team, with their files and own chats, then the team. | **Delete everything** |
 
-Both choices also delete the team's rules, its brief, its rooms and your introduction to the team.
+Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/.clawboo/workspaces/<team id>`) with every file its agents saved there. The confirmation says so: "The team's folder and the files its agents saved there are deleted too." If the folder cannot be removed, the team is still deleted, and a message says its team folder could not be removed.
 
 **Delete with agents** works without the OpenClaw Gateway. An OpenClaw member leaves the Gateway at once if it is connected, otherwise the next time Clawboo connects to it. If some agents cannot be deleted, the team is still deleted, and a message says how many agents were removed.
 
 <Warning>
 
-Deleting a team cannot be undone. **Delete with agents** removes the agents for good, along with their files and their own chats.
+Deleting a team cannot be undone, and the files in its folder go with it. **Delete with agents** removes the agents for good, along with their files and their own chats.
 
 </Warning>
 

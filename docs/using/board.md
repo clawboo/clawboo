@@ -286,7 +286,7 @@ Cards in **Needs you** move with their own buttons instead of by dragging. With 
 
 ### Review what an agent built
 
-The **Workspace** section shows only for a task that ran in its own git worktree: a separate checkout of a repository, made for that task. That happens for runs started through the API with a repository path, such as an agent routine created through the API. Work handed out in team chat, tasks you give from the board, and routines you create in the dashboard have no worktree, so their drawer has no **Workspace** section. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
+The **Workspace** section shows only for a task that ran in its own git worktree: a separate checkout of a repository, made for that task. That happens for runs started through the API with a repository path, such as an agent routine created through the API. Work handed out in team chat, tasks you give from the board, and routines you create in the dashboard have no worktree, so their drawer has no **Workspace** section. Those runs start in the team's folder instead, which the agent's own **Workspace** tab shows under **Details** on its page. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
 
 For a task with a worktree, the section shows:
 

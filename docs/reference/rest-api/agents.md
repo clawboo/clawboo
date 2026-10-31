@@ -31,7 +31,9 @@ A per-agent route goes to the source that owns the agent; an unknown id goes to 
 | GET    | `/api/agents/:agentId/files/:name`        | Read one agent file                                           | No      |
 | PUT    | `/api/agents/:agentId/files/:name`        | Write one agent file                                          | No      |
 | GET    | `/api/agents/:agentId/sessions`           | List the agent's sessions                                     | No      |
-| GET    | `/api/agents/:agentId/workspaces`         | The task worktrees of this agent's assigned tasks             | No      |
+| GET    | `/api/agents/:agentId/workspaces`         | The agent's task worktrees and its team folder                | No      |
+| GET    | `/api/agents/:agentId/team-folder/tree`   | One directory level of the agent's team folder                | No      |
+| GET    | `/api/agents/:agentId/team-folder/file`   | One file from the agent's team folder                         | No      |
 | GET    | `/api/agents/:agentId/screenshot`         | The newest browser screenshot for this agent                  | No      |
 | POST   | `/api/agents/:agentId/screenshot/capture` | Take a fresh screenshot of a browser already open for it      | No      |
 | PATCH  | `/api/agents/:agentId/model`              | Change a native or Hermes agent's model (and provider)        | No      |
@@ -633,7 +635,7 @@ curl http://localhost:18790/api/agents/<agent-id>/sessions
 
 ## `GET /api/agents/:agentId/workspaces`
 
-The task worktrees of this agent's assigned tasks, newest first. The agent's **Workspace** tab uses it to pick which worktree to show, and to say so when the agent has none.
+The task worktrees of this agent's assigned tasks, newest first, and the agent's team folder. The agent's **Workspace** tab uses it to pick what to show, and to say so when the agent has nothing.
 
 Archived workspaces are left out. `onDisk: false` marks a checkout that was paused or cleaned up: the row and the branch remain, but the files are gone, and the tab says so rather than showing an empty tree. The files themselves come from the `/api/board/:taskId/workspace/*` routes on the [Board API](/reference/rest-api/board).
 
@@ -659,11 +661,16 @@ Archived workspaces are left out. `onDisk: false` marks a checkout that was paus
       "onDisk": true,
       "updatedAt": 1756000000000
     }
-  ]
+  ],
+  "teamFolder": {
+    "teamId": "4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b",
+    "path": "/Users/you/.clawboo/workspaces/4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b",
+    "onDisk": true
+  }
 }
 ```
 
-An agent with no worktree-backed tasks returns `{ "ok": true, "workspaces": [] }`.
+`teamFolder` is the folder the agent's runs start in when they have no worktree: its team's folder, or `workspaces/_no-team` with `teamId: null` for an agent with no team. `onDisk` is `false` until a run creates it. It is `null` for an OpenClaw agent. An agent with no worktree-backed tasks returns an empty `workspaces` list.
 
 **`500 Internal Server Error`**:
 
@@ -675,6 +682,23 @@ An agent with no worktree-backed tasks returns `{ "ok": true, "workspaces": [] }
 
 ```bash
 curl http://localhost:18790/api/agents/<agent-id>/workspaces
+```
+
+---
+
+## `GET /api/agents/:agentId/team-folder/tree` and `GET /api/agents/:agentId/team-folder/file`
+
+Read-only views of the agent's team folder, behind the **Team folder** choice on its **Workspace** tab. The folder comes from the agent's row, never from the request. Both routes take the same `dir` and `path` query values, keep every path inside the folder the same way, and answer with the same shapes as the task worktree routes in [The workspace file view](/reference/rest-api/board#the-workspace-file-view). There is no diff or git status, because the folder is not a git checkout.
+
+- **Path params**: `agentId`.
+- **`404`** `{ "ok": false, "error": "workspace not found", "reason": "not_found" }`: an unknown agent, or one whose runtime gets no team folder (OpenClaw).
+- **`404`** with `"reason": "gone"`: the folder does not exist yet, because no run has created it.
+
+### Example
+
+```bash
+curl 'http://localhost:18790/api/agents/<agent-id>/team-folder/tree?dir='
+curl 'http://localhost:18790/api/agents/<agent-id>/team-folder/file?path=notes.md'
 ```
 
 ---
@@ -1038,7 +1062,7 @@ The confirmation the dashboard shows before switching this on exists only in the
 
 </Note>
 
-Switching this on is necessary for `run_command` to exist, but not enough. The tool is also left out of any run without a working directory, which in practice means every run except a task run in a git worktree: 1:1 chat, team chat and delegated turns carry none. It is never offered on Windows.
+Switching this on is necessary for `run_command` to exist, but not enough. The tool is also left out of any run without a working directory, which in practice means 1:1 chat. Team chat, delegated turns and task runs all carry one: the team's folder, or the task's worktree. It is never offered on Windows.
 
 ### Responses
 

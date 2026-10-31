@@ -48,7 +48,7 @@ A task-runner run of a kind that needs a worktree, with no repository path, is r
 
 <Warning>
 
-**Without a worktree, coding agents start in your Clawboo folder.** In team chat, and in any other run without a worktree, Claude Code, Codex and Hermes start in the Clawboo server's working folder. When you run the `clawboo` command, that is your Clawboo folder (`~/.clawboo`, or `CLAWBOO_HOME` if you set it), which holds Clawboo's database and saved keys. These runtimes also run with their own approval prompts turned off, so they can read and change any file your user account can. See [What agents can do](/concepts/permissions).
+**Without a worktree, coding agents start in their team's folder.** In team chat, and in any other run without a worktree, Claude Code, Codex, Hermes and Clawboo Native start in `workspaces/<team id>` inside your Clawboo folder (`~/.clawboo`, or `CLAWBOO_HOME` if you set it). Every member of the team shares it, and a task with no team uses `workspaces/_no-team`. The folder only sets where Claude Code, Codex and Hermes start: they run with their own approval prompts turned off, so they can read and change any file your user account can, Clawboo's database and saved keys included. See [What agents can do](/concepts/permissions).
 
 </Warning>
 

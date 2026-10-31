@@ -68,7 +68,10 @@ import {
   writeTaskHandoff,
 } from '../lib/worktrees'
 import {
+  agentTeamFolder,
+  listTeamFolderDir,
   listWorkspaceDir,
+  readTeamFolderFile,
   readWorkspaceFile,
   workspaceFileDiff,
   workspaceGitStatus,
@@ -1003,7 +1006,9 @@ export async function boardWorkspaceFileDiffGET(req: Request, res: Response): Pr
 // The task workspaces belonging to one agent's assigned tasks, newest first.
 // `onDisk: false` marks a paused/reaped checkout (row + branch survive). The
 // Workspace tab uses this to pick what to show and to render an honest empty
-// state when the agent has no local workspace at all.
+// state when the agent has no local workspace at all. `teamFolder` is the folder
+// the agent starts in when it has no worktree (team chat, read-only tasks), or
+// null for a runtime that gets none (OpenClaw).
 export function agentWorkspacesGET(req: Request, res: Response): void {
   try {
     const agentId = (req.params['agentId'] as string | undefined) ?? ''
@@ -1026,8 +1031,50 @@ export function agentWorkspacesGET(req: Request, res: Response): void {
         },
       ]
     })
-    res.json({ ok: true, workspaces })
+    res.json({ ok: true, workspaces, teamFolder: agentTeamFolder(agentId) })
   } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/agents/:agentId/team-folder/tree?dir=<rel> ─────────────────────
+// One directory level of the agent's team folder. Read-only, and the root comes
+// from the agent's row, never the request.
+export async function agentTeamFolderTreeGET(req: Request, res: Response): Promise<void> {
+  try {
+    const agentId = (req.params['agentId'] as string | undefined) ?? ''
+    const result = await listTeamFolderDir(agentId, relParam(req, 'dir'))
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    if (err instanceof WorkspacePathError) {
+      res.status(400).json({ ok: false, error: err.message })
+      return
+    }
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── GET /api/agents/:agentId/team-folder/file?path=<rel> ────────────────────
+// Bounded read-only file content from the agent's team folder, same shape as
+// the task workspace file route.
+export async function agentTeamFolderFileGET(req: Request, res: Response): Promise<void> {
+  try {
+    const agentId = (req.params['agentId'] as string | undefined) ?? ''
+    const result = await readTeamFolderFile(agentId, relParam(req, 'path'))
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    if (err instanceof WorkspacePathError) {
+      res.status(400).json({ ok: false, error: err.message })
+      return
+    }
     res.status(500).json({ error: String(err) })
   }
 }

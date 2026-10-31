@@ -77,7 +77,7 @@ The [Board](/using/board) holds every task from every team, by status and by day
 
 - **Boo Zero's answer.** When the teammates finish, Boo Zero posts one summary in the chat.
 - **Each teammate's answer** is saved on its task. Open **Comments & activity** on the task card in the chat, or open the task on the Board, and read the teammate's comment.
-- **Files.** Agents return their results as text. Claude Code, Codex, Hermes and OpenClaw agents can also write files. In team chat, Claude Code, Codex and Hermes start in Clawboo's own data folder (`~/.clawboo`), so name the full folder path you want when you ask for files. OpenClaw agents work in their own OpenClaw workspace. [What agents can do](/concepts/permissions) explains what each runtime may touch.
+- **Files.** Agents return their results as text. Claude Code, Codex, Hermes, Clawboo Native and OpenClaw agents can also write files. In team chat, Claude Code, Codex, Hermes and Clawboo Native start in a folder the whole team shares (`~/.clawboo/workspaces/<team id>`), which each agent's **Workspace** tab shows. Claude Code, Codex and Hermes can write outside it too, so name the full folder path you want when you ask for files somewhere else. OpenClaw agents work in their own OpenClaw workspace. [What agents can do](/concepts/permissions) explains what each runtime may touch.
 
 ![Boo Zero's summary in a team chat: it reports what three teammates produced for a pricing page and what is still open, with the Team graph and Tasks cards on the right](/images/leader-synthesis.png)
 

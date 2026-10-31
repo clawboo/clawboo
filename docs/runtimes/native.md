@@ -135,10 +135,10 @@ A native agent acts only through the tools Clawboo gives it. Which tools it has 
 | Board                                   | Reads tasks on the board. Clawboo itself makes the board changes.                                               | Every run                                                    |
 | Connectors                              | Uses the [connectors](/using/connectors) you grant it                                                           | Every run                                                    |
 | `delegate`                              | Hands a task to a teammate by name. Clawboo turns each call into a board task.                                  | Team chat                                                    |
-| `read_file`, `write_file`, `list_files` | Reads and writes files inside the task's worktree, and nowhere else                                             | Task runs with their own worktree                            |
-| `run_command`                           | Runs one program after you approve it                                                                           | Task runs with a worktree, once you allow it, not on Windows |
+| `read_file`, `write_file`, `list_files` | Reads and writes files inside the run's folder, and nowhere else, not even through a symlink                    | Every run except 1:1 chat                                    |
+| `run_command`                           | Runs one program after you approve it                                                                           | Every run except 1:1 chat, once you allow it, not on Windows |
 
-Team chat, 1:1 chat and the tasks agents delegate in team chat run without a worktree. There, a native agent has no file tools and can't run commands. Only a task run that names a git repository gets a worktree; see [Worktrees and handoff](/concepts/worktrees-and-handoff). For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
+The run's folder is the task's own git worktree when the task run has one; see [Worktrees and handoff](/concepts/worktrees-and-handoff). Everywhere else except 1:1 chat it is the team's folder, `~/.clawboo/workspaces/<team id>`, shared with every teammate: in team chat, on the tasks agents delegate there, and on research and review task runs. A 1:1 chat has no folder, so there a native agent has no file tools and can't run commands. For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
 
 ### Running commands
 
@@ -146,7 +146,7 @@ Team chat, 1:1 chat and the tasks agents delegate in team chat run without a wor
 
 - **You approve every command, and nothing is remembered.** Each one raises a card that reads "_agent_ wants to run a command on this computer." with the command and the folder. **Run it** approves it. There is no **Always** option.
 - **One program, no shell.** The agent can't use pipes, redirects or shell operators. Programs that run other programs (shells, interpreters, package runners and similar) are refused before you're asked.
-- **It runs as you.** The command runs in the task's worktree, under your user account, with network access. Your API keys are not passed to it.
+- **It runs as you.** The command runs in the run's folder (the team's folder or the task's worktree), under your user account, with network access. Your API keys are not passed to it.
 - **Limits per run:** the agent can ask about 10 commands. Each card waits 10 minutes for an answer, a command is stopped after 5 minutes, and output is cut at 64 KiB.
 - **A refusal ends it.** If you decline, or nobody answers in time, the agent can't ask again in that run.
 
@@ -184,7 +184,7 @@ The bottom **Disconnect** deletes all ten provider keys from Clawboo's vault, no
 
 ## Limits
 
-- **No files or commands outside a task run with its own worktree.** In team chat and 1:1 chat, a native agent has no file or command tools of its own.
+- **Files only in the run's folder.** File tools work only inside the team's folder or the task's worktree. In 1:1 chat a native agent has no file or command tools of its own.
 - **No commands on Windows.** `run_command` is never offered there.
 - **16 turns per run.** A run ends after 16 turns (model calls).
 - **No ChatGPT plan.** A ChatGPT subscription runs agents on [Codex](/runtimes/codex), not on Clawboo Native.
@@ -228,7 +228,7 @@ When you save a key, Clawboo checks it with the provider. `Invalid API key.` mea
 </Accordion>
 <Accordion title="The agent never offers to run a command">
 
-`run_command` exists only when all of these hold: **Let this Boo ask to run commands** is on for that agent; the run is a task run with its own worktree, never team chat or a 1:1 chat; and the server is not on Windows. If the agent says a command was refused, the program was on the refused list, or a command was already declined in that run.
+`run_command` exists only when all of these hold: **Let this Boo ask to run commands** is on for that agent; the run is not a 1:1 chat; and the server is not on Windows. If the agent says a command was refused, the program was on the refused list, or a command was already declined in that run.
 
 </Accordion>
 <Accordion title="Clawboo Native reads Connected though you never connected it">
