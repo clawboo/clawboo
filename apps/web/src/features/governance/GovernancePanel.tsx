@@ -197,6 +197,12 @@ function BudgetTargetPicker({
     () => targetOptions(scope, { agents, teams, tasks }),
     [scope, agents, teams, tasks],
   )
+  // A picked target that has left the list (deleted, archived, no longer a
+  // top-level task) is cleared, so Set budget cannot save a budget for something
+  // the form no longer shows.
+  useEffect(() => {
+    if (value && !options.some((o) => o.value === value)) onChange('')
+  }, [value, options, onChange])
   const copy = PICKER_COPY[scope]
   let placeholder = copy.choose
   if (options.length === 0) {

@@ -337,6 +337,32 @@ describe('GovernancePanel', () => {
     )
   })
 
+  it('clears a picked agent that leaves the list, and then submits nothing', async () => {
+    seedDirectory()
+    stubEmptyLists()
+    const posted = capturePosts()
+    const user = userEvent.setup()
+    render(<GovernancePanel />)
+
+    const picker = await screen.findByRole('button', { name: 'Agent' })
+    await user.click(picker)
+    await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+    expect(picker).toHaveTextContent('Solo · no team')
+
+    // The agent is deleted while the form holds it.
+    act(() =>
+      useFleetStore.setState((s) => ({ agents: s.agents.filter((a) => a.name !== 'Solo') })),
+    )
+    await waitFor(() => expect(picker).toHaveTextContent('Choose an agent'))
+
+    await user.type(screen.getByPlaceholderText('warn at $'), '5')
+    await user.click(screen.getByTestId('budget-create'))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(posted).not.toHaveBeenCalled()
+  })
+
   it('submits nothing until an agent is picked', async () => {
     seedDirectory()
     stubEmptyLists()

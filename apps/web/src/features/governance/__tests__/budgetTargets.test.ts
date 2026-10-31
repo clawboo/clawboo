@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CREATABLE_SCOPES,
-  MAX_MISSION_OPTIONS,
   agentOptions,
   budgetTargetName,
   missionOptions,
@@ -69,16 +68,18 @@ describe('missionOptions', () => {
     ])
   })
 
-  it('stops at the newest MAX_MISSION_OPTIONS tasks', () => {
-    const many: BudgetTask[] = Array.from({ length: MAX_MISSION_OPTIONS + 5 }, (_, i) => ({
+  it('lists every top-level task, however many, newest first', () => {
+    // The picker searches what it is given, so an old mission must stay findable.
+    const many: BudgetTask[] = Array.from({ length: 500 }, (_, i) => ({
       id: `t${i}`,
       title: `Task ${i}`,
       parentTaskId: null,
       updatedAt: i,
     }))
     const options = missionOptions(many, TEAMS)
-    expect(options).toHaveLength(MAX_MISSION_OPTIONS)
-    expect(options[0]?.value).toBe(`t${MAX_MISSION_OPTIONS + 4}`)
+    expect(options).toHaveLength(500)
+    expect(options[0]?.value).toBe('t499')
+    expect(options.at(-1)?.value).toBe('t0')
   })
 
   it('does not reorder the list it was given', () => {

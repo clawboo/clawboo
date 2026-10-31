@@ -17,9 +17,6 @@ export const CREATABLE_SCOPES = [
 ] as const satisfies readonly BudgetScope[]
 export type CreatableScope = (typeof CREATABLE_SCOPES)[number]
 
-/** The mission picker lists the most recently updated top-level tasks, up to this many. */
-export const MAX_MISSION_OPTIONS = 200
-
 export type BudgetAgent = Pick<AgentState, 'id' | 'name' | 'teamId'>
 export type BudgetTeam = Pick<Team, 'id' | 'name' | 'icon' | 'isArchived'>
 export type BudgetTask = Pick<BoardTask, 'id' | 'title' | 'teamId' | 'parentTaskId' | 'updatedAt'>
@@ -66,7 +63,6 @@ export function missionOptions(tasks: BudgetTask[], teams: BudgetTeam[]): Select
   return tasks
     .filter((t) => !t.parentTaskId)
     .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    .slice(0, MAX_MISSION_OPTIONS)
     .map((t) => {
       const team = teamNameOf(teams, t.teamId)
       const title = t.title?.trim() || UNTITLED
