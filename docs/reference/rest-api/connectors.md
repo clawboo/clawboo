@@ -714,7 +714,7 @@ interface GrantRow {
 | `risk` (default) | Calls to destructive tools, and to outside tools that change something |
 | `never`          | The policy never asks                                                  |
 
-Some calls ask whatever the policy says, for example in a run that combines private data, untrusted content and a way to send data out. A standing rule from an **Always** answer is checked before the policy, so a tool remembered that way runs without asking even under `always`; revoking the grant deletes those rules. A tool whose required mode ranks above the grant's `mode` is denied. A stored value that cannot be read falls back to its safest reading: `mode` reads as `read`, `state` as `suspended`, `approvalPolicy` as `always`, an unreadable `toolAllow` as `[]` and an unreadable `toolDeny` as `['*']`.
+Some calls ask whatever the policy says, for example in a run that combines private data, untrusted content and a way to send data out. Under `always`, a standing rule from an earlier **Always** answer does not skip the prompt, and the prompt cannot be remembered (`neverRemember`). Under the other policies a standing allow rule runs the tool without asking; revoking the grant deletes those rules. A tool whose required mode ranks above the grant's `mode` is denied. A stored value that cannot be read falls back to its safest reading: `mode` reads as `read`, `state` as `suspended`, `approvalPolicy` as `always`, an unreadable `toolAllow` as `[]` and an unreadable `toolDeny` as `['*']`.
 
 ### `GET /api/grants`
 

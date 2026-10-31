@@ -66,7 +66,7 @@ Each team has an `id`. Each agent has an `id`, a `displayName` and a `teamId`. W
 </Step>
 <Step title="Get a signed attach URL">
 
-Ask Clawboo for the snippet. Clawboo signs whatever ids you pass and does not check them, so copy them exactly.
+Ask Clawboo for the snippet. The team must exist, and an id that belongs to a Clawboo agent must be on that team. An id that no Clawboo agent uses is signed as you typed it, so copy it exactly.
 
 ```bash
 curl -s 'http://127.0.0.1:18790/api/mcp/config?runtime=claude-code&server=tasks&scopeTeamId=<team-id>&scopeAgentId=<agent-id>'
@@ -96,8 +96,8 @@ curl -s 'http://127.0.0.1:18790/api/mcp/config?runtime=claude-code&server=tasks&
 | `server`       | `tasks`       | `tasks`, `memory`, `tools`, `teamchat`. Anything else returns `400` with `unknown server: <x>`.      |
 | `runtime`      | `claude-code` | `claude-code`, `codex` or `openclaw` sets the snippet's format. Any other value returns no `config`. |
 | `transport`    | `http`        | `http`. Any other value returns a stdio snippet.                                                     |
-| `scopeTeamId`  | none          | The team the agent works for.                                                                        |
-| `scopeAgentId` | none          | The agent id it acts as. TeamChat needs both ids.                                                    |
+| `scopeTeamId`  | none          | The team the agent works for. An unknown team returns `400` with `unknown team: <id>`.               |
+| `scopeAgentId` | none          | The agent id it acts as. TeamChat needs both ids. A Clawboo agent from another team returns `400`.   |
 
 </Step>
 <Step title="Add it to your agent">
@@ -142,7 +142,7 @@ A stdio bin is different: it runs as you, the operator. Tasks, Memory and TeamCh
 Every URL from `GET /api/mcp/config` carries an `attachToken`, the same value for every URL on an install. It matters once you set `STUDIO_ACCESS_TOKEN`:
 
 - A request to one of the four server paths without the access cookie is let in only when its token is valid and it came straight to the server's loopback port: from `127.0.0.1` or `::1`, with none of the headers a proxy adds (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`).
-- `/api/mcp/config` always needs the cookie, because it signs any identity you ask for.
+- `/api/mcp/config` always needs the cookie, because it signs the identity you ask for. So does `POST /api/mcp/attach-secret/rotate`.
 - Treat an attach URL like a password. Anyone who has it and can reach the loopback port can use the servers as the identity it carries.
 
 With no access token set, the bind is the only boundary: anything that can reach the server's port can use these servers and `/api/mcp/config`.
@@ -155,17 +155,13 @@ The attach token, and the rule that an unsigned TeamChat session gets no tools, 
 
 <Accordion title="If an attach URL leaks">
 
-The token and the signatures never change on their own. To replace them, stop the server, delete the install's signing secret, and start it again. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo`:
+The token and the signatures never change on their own. To replace them, ask Clawboo to make a new signing secret. The server keeps running. With an access token set, add `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"`:
 
 ```bash
-clawboo stop
-sqlite3 ~/.clawboo/clawboo.db "DELETE FROM settings WHERE key = 'mcp-attach-scope-secret'"
-clawboo
+curl -s -X POST http://127.0.0.1:18790/api/mcp/attach-secret/rotate
 ```
 
-With `STUDIO_ACCESS_TOKEN` set, `clawboo stop` and `clawboo` cannot manage the server, so stop and start it directly or with your service manager instead ([Run the Clawboo server](/operating/deployment)).
-
-Clawboo makes a new secret. Every URL you copied stops working, so get new ones from `/api/mcp/config`. Clawboo's own runtimes and a local OpenClaw Gateway get new URLs on their next run or connection.
+You should see `"ok":true` and a `gateway` value. Every URL you copied stops working at once, so get new ones from `/api/mcp/config`. Clawboo's own runtimes get new URLs on their next run. `gateway` says what happened to a local OpenClaw Gateway's URLs: `updated` means it has the new ones; `retrying` means it did not take them yet and Clawboo asks again over the next few minutes; `not-connected` means it gets them the next time Clawboo connects to it. If it still has the old ones after that, restart the Clawboo server so it connects again. A run already in progress keeps its old URLs: for the rest of that run Clawboo's servers treat it as an unsigned caller, or refuse it when an access token is set.
 
 </Accordion>
 
@@ -280,6 +276,13 @@ This URL carries no scope, so the list has no `claim_task` or `assign_task`.
 **Fix:** set `CLAWBOO_DB_PATH` to the server's `clawboo.db`, or use the stdio snippet, which sets it.
 
 </Accordion>
+<Accordion title="400 unknown team, or agent is not on team, from the config call">
+
+**What it means:** `scopeTeamId` names no team, or `scopeAgentId` is a Clawboo agent that belongs to another team.
+
+**Fix:** copy the team's `id` from `GET /api/teams`. For an outside agent, choose an id no Clawboo agent uses; for one of your agents, pass its own team.
+
+</Accordion>
 <Accordion title="The config call returns ok but no config">
 
 **What it means:** `runtime` is not `claude-code`, `codex` or `openclaw`.
@@ -300,8 +303,8 @@ This URL carries no scope, so the list has no `claim_task` or `assign_task`.
 
 - Every URL starts with the server's own loopback address and port, never the request's `Host` header, so a forged `Host` cannot point an agent somewhere else.
 - Tasks, Memory and Tools URLs carry `scopeTeamId`, `scopeAgentId` and `scopeSig`. TeamChat URLs carry `roomTeamId`, `postAuthorAgentId` and `scopeSig`; for its own orchestrated runs Clawboo adds `delegate=1` inside the signature, which unlocks `team_delegate`. Memory URLs can also carry run details (`provRuntime`, `provTaskId`, `provSessionKey`) signed by `provSig`; they never widen what the agent can read.
-- `/api/mcp/config` never writes `scopeTenantId`, and adding one by hand breaks the signature.
-- The signing secret lives in the database, so a data reset or a database from another install changes every token and signature.
+- `/api/mcp/config` never writes `scopeTenantId`, and adding one by hand breaks the signature. It checks the team against the `teams` table and an agent id against the `agents` table.
+- The signing secret lives in the database (`settings` key `mcp-attach-scope-secret`), so a data reset or a database from another install changes every token and signature, and so does `POST /api/mcp/attach-secret/rotate`.
 - The request log masks `attachToken`, `scopeSig` and `provSig`.
 
 </Accordion>

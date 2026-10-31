@@ -463,25 +463,25 @@ The tool broker checked a connector tool call against the caller's grants. Built
 
 The **Activity** feed shows it as `<decision>: <reason>` under a **grant** badge. Reasons, in the order the check applies them:
 
-| `reason`            | `decision`         | Meaning                                                                                       |
-| ------------------- | ------------------ | --------------------------------------------------------------------------------------------- |
-| `no-grant`          | `deny`             | No grant gives this agent, its team, or every agent the connector                             |
-| `grant-revoked`     | `deny`             | The grant was revoked                                                                         |
-| `grant-suspended`   | `deny`             | The grant is suspended                                                                        |
-| `grant-proposed`    | `deny`             | The grant was proposed but not approved                                                       |
-| `grant-expired`     | `deny`             | The grant has expired                                                                         |
-| `spec-drift`        | `deny`             | The connector's definition or tool list changed since the grant was made                      |
-| `tool-not-in-scope` | `deny`             | The grant's tool allow and deny lists exclude this tool                                       |
-| `mode-insufficient` | `deny`             | The tool needs a higher grant mode (`read`, then `write`, then `admin` for destructive tools) |
-| `rate-limited`      | `deny`             | The grant's hourly call limit was reached                                                     |
-| `lethal-trifecta`   | `require_approval` | The tool can read private data, take in untrusted content and send data out. Never remembered |
-| `tainted-run`       | `require_approval` | Defined, but nothing marks a run tainted, so it does not occur                                |
-| `standing-deny`     | `deny`             | A remembered "deny" rule matched                                                              |
-| `never-remembered`  | `require_approval` | This tool always asks, even with a remembered "Always" on file                                |
-| `policy-always`     | `require_approval` | The grant asks for approval on every call                                                     |
-| `policy-writes`     | `require_approval` | The grant asks for approval on every call that changes something                              |
-| `risk-destructive`  | `require_approval` | The tool is destructive                                                                       |
-| `risk-external`     | `require_approval` | The tool acts outside Clawboo and changes something                                           |
+| `reason`            | `decision`         | Meaning                                                                                              |
+| ------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- |
+| `no-grant`          | `deny`             | No grant gives this agent, its team, or every agent the connector                                    |
+| `grant-revoked`     | `deny`             | The grant was revoked                                                                                |
+| `grant-suspended`   | `deny`             | The grant is suspended                                                                               |
+| `grant-proposed`    | `deny`             | The grant was proposed but not approved                                                              |
+| `grant-expired`     | `deny`             | The grant has expired                                                                                |
+| `spec-drift`        | `deny`             | The connector's definition or tool list changed since the grant was made                             |
+| `tool-not-in-scope` | `deny`             | The grant's tool allow and deny lists exclude this tool                                              |
+| `mode-insufficient` | `deny`             | The tool needs a higher grant mode (`read`, then `write`, then `admin` for destructive tools)        |
+| `rate-limited`      | `deny`             | The grant's hourly call limit was reached                                                            |
+| `lethal-trifecta`   | `require_approval` | The tool can read private data, take in untrusted content and send data out. Never remembered        |
+| `tainted-run`       | `require_approval` | Defined, but nothing marks a run tainted, so it does not occur                                       |
+| `standing-deny`     | `deny`             | A remembered "deny" rule matched                                                                     |
+| `never-remembered`  | `require_approval` | This tool always asks, even with a remembered "Always" on file                                       |
+| `policy-always`     | `require_approval` | The grant asks for approval on every call, even with a remembered "Always" on file. Never remembered |
+| `policy-writes`     | `require_approval` | The grant asks for approval on every call that changes something                                     |
+| `risk-destructive`  | `require_approval` | The tool is destructive                                                                              |
+| `risk-external`     | `require_approval` | The tool acts outside Clawboo and changes something                                                  |
 
 A call the grant check allows can still ask for approval later in the broker, for example a destructive tool. See [Connectors](/using/connectors) and [Approvals](/using/approvals).
 

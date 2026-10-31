@@ -139,6 +139,7 @@ import {
 import { grantsCreatePOST, grantsListGET, grantsResumePOST, grantsRevokePOST } from './grants'
 import { toolsListGET, toolsApprovalsGET, toolsApprovalResolvePOST, toolsAuditGET } from './tools'
 import {
+  mcpAttachSecretRotatePOST,
   mcpConfigGET,
   mcpTasksPost,
   mcpTasksSession,
@@ -487,6 +488,7 @@ router.post('/api/grants', grantsCreatePOST)
 router.post('/api/grants/:id/revoke', grantsRevokePOST)
 router.post('/api/grants/:id/resume', grantsResumePOST)
 router.get('/api/mcp/config', mcpConfigGET)
+router.post('/api/mcp/attach-secret/rotate', mcpAttachSecretRotatePOST)
 router.post('/api/mcp/tasks', mcpTasksPost)
 router.get('/api/mcp/tasks', mcpTasksSession)
 router.delete('/api/mcp/tasks', mcpTasksSession)

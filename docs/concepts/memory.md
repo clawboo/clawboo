@@ -114,19 +114,19 @@ Embeddings are what let memory match on meaning. Clawboo picks a provider in thi
 
 ## Each runtime's own memory
 
-| Runtime        | Its own memory                                                                                                | Shared with teammates?                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Clawboo Native | Its saved conversations, in its own folder under `~/.clawboo/runtimes/clawboo-native/`                        | No                                                             |
-| Hermes         | `MEMORY.md`, `state.db` and the skills it creates, in its own Hermes home under `~/.clawboo/runtimes/hermes/` | No. Clawboo never edits them.                                  |
-| Codex          | None that Clawboo keeps. Its folder under `~/.clawboo/runtimes/codex/` holds its login and session files.     | Not applicable                                                 |
-| OpenClaw       | Kept in your OpenClaw Gateway's own state                                                                     | No                                                             |
-| Claude Code    | Your own `~/.claude` settings and memory, and the `CLAUDE.md` of the folder it runs in                        | Yes, with every Claude Code agent and your own Claude Code use |
+| Runtime        | Its own memory                                                                                                | Shared with teammates?        |
+| -------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Clawboo Native | Its saved conversations, in its own folder under `~/.clawboo/runtimes/clawboo-native/`                        | No                            |
+| Hermes         | `MEMORY.md`, `state.db` and the skills it creates, in its own Hermes home under `~/.clawboo/runtimes/hermes/` | No. Clawboo never edits them. |
+| Codex          | None that Clawboo keeps. Its folder under `~/.clawboo/runtimes/codex/` holds its login and session files.     | Not applicable                |
+| OpenClaw       | Kept in your OpenClaw Gateway's own state                                                                     | No                            |
+| Claude Code    | None of yours: Claude Code's auto memory is off. It reads the `CLAUDE.md` of the folder it works in           | Only through that folder      |
 
-<Warning>
+<Note>
 
-Claude Code agents run with your own Claude Code setup: your `~/.claude` settings and memory, and the `CLAUDE.md` files of the folder they run in. Every Claude Code agent loads them, and so do your own Claude Code sessions. Do not keep anything there that you would not hand to the team.
+Claude Code agents do not load your own Claude Code memory: not your `~/.claude/CLAUDE.md` or rules, not a `CLAUDE.md` in any folder above the one they work in, and not Claude Code's auto memory. They do read the `CLAUDE.md` of the folder they work in, such as a repository's, so a `CLAUDE.md` in a team's folder reaches every Claude Code agent of that team. See [Claude Code](/runtimes/claude-code#your-own-claude-code-setup-stays-out).
 
-</Warning>
+</Note>
 
 Clawboo never copies a runtime's own memory into shared memory, or the other way round. In task-runner runs, each agent is told that its own memory is private to it and that knowledge the team needs belongs in shared memory. See [Teams, rooms and runtimes](/concepts/teams-and-planes) for where each runtime keeps its state.
 

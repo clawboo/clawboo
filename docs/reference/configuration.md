@@ -144,7 +144,7 @@ Resetting `~/.clawboo` leaves all of these in place, so provider keys saved this
 
 - `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`): to see whether you signed in with `codex login`. Each Codex agent then runs with its own home under `~/.clawboo/runtimes/`.
 - `~/.hermes/auth.json` (or `$HERMES_HOME/auth.json`): to see whether you signed in to Hermes.
-- `~/.claude`: Claude Code agents run with your real home folder, so the Claude Code SDK loads your own Claude Code settings from there.
+- `~/.claude`: Claude Code agents run with your real home folder and save their session files under `~/.claude/projects`. Clawboo starts them without your own settings, MCP servers and memory files from there.
 
 <Accordion title="Under the hood">
 

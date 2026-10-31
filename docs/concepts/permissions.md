@@ -81,7 +81,7 @@ Clawboo creates the team's folder the first time a run needs it, readable only b
 
 Before starting them, Clawboo removes its own secrets from the environment it passes on: the dashboard access token, the OpenClaw Gateway token and the key that unlocks Clawboo's saved keys. It also removes a list of common cloud and code-hosting tokens. This works by name and is best effort. A runtime can still read credential files on disk, such as `~/.openclaw/.env`, where keys saved on the **Providers** page are copied in plain text.
 
-Claude Code also loads your own Claude Code setup, as the Claude Code CLI does: your `~/.claude` settings and memory, and any `CLAUDE.md` in the folder it starts in. Every Claude Code agent shares them.
+Claude Code starts without your own Claude Code setup: your `~/.claude` settings, plugins, hooks, MCP servers and memory do not apply. It still loads the Claude Code files of the folder it starts in, such as a repository's `CLAUDE.md` and `.claude/settings.json`. Leaving your setup out is not a sandbox: Claude Code can still read any file your user account can, `~/.claude` included.
 
 ## OpenClaw
 
@@ -129,7 +129,7 @@ When an agent in team chat hands off a task whose text contains a risky word, th
 
 Other forms do not trigger it: "deleted", "deployment" and "secrets" pass, and so do "API key" and "force push" written with a space. The steps of a multi-step plan are not checked at all. If you choose **Don't allow**, or nobody answers within 5 minutes, the hand-off is skipped and the agent that handed it off is told.
 
-The card in the dashboard offers only a one-time allow and **Don't allow**. The request is filed under the chat's leader. An `allow_always` answer sent through the API stops risky hand-offs in that leader's chats from asking again, with no expiry. [Budgets and guardrails](/concepts/governance) has the full rules.
+The card in the dashboard offers only a one-time allow and **Don't allow**. The request is filed under the chat's leader. Nothing is remembered: an `allow_always` answer sent through the API allows that one hand-off, and the next risky hand-off asks again. [Budgets and guardrails](/concepts/governance) has the full rules.
 
 ### Budgets
 
@@ -162,13 +162,13 @@ An image in an agent's markdown never loads on its own. In chat, a task's report
 
 <Accordion title="Under the hood">
 
-- **Driver settings.** Claude Code runs through the Agent SDK `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`, and sets no `settingSources`, so the SDK loads every settings source (`apps/web/server/lib/runtimes/claudeCodeDriver.ts`). Codex runs `codex app-server` with `approvalPolicy: 'never'` and `sandbox: 'danger-full-access'`; its `codex exec` fallback passes `--dangerously-bypass-approvals-and-sandbox` (`codexAppServerDriver.ts`, `codexDriver.ts`). Hermes runs `hermes chat` with `--yolo --accept-hooks` (`hermesDriver.ts`).
+- **Driver settings.** Claude Code runs through the Agent SDK `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. It loads only the project settings source (`settingSources: ['project']`), with auto memory off and every `CLAUDE.md` above the working folder excluded (`apps/web/server/lib/runtimes/claudeCodeIsolation.ts`). Codex runs `codex app-server` with `approvalPolicy: 'never'` and `sandbox: 'danger-full-access'`; its `codex exec` fallback passes `--dangerously-bypass-approvals-and-sandbox` (`codexAppServerDriver.ts`, `codexDriver.ts`). Hermes runs `hermes chat` with `--yolo --accept-hooks` (`hermesDriver.ts`).
 - **Working folder.** Team-chat runs (`serverDeliver.ts` and `runTeamExchange.ts` in `apps/web/server/lib/teamChat/`) and task-runner runs without a worktree set `cwd` to `<CLAWBOO_HOME>/workspaces/<teamId>`, or `workspaces/_no-team` for a task with no team, for Claude Code, Codex, Hermes and Clawboo Native (`apps/web/server/lib/runtimes/teamWorkdir.ts`). The folder is created with mode `0700` before the run starts, and a run whose folder cannot be created fails instead of starting in the server's working directory. One-to-one chat (`apps/web/server/lib/agentChat/driveAgentChat.ts`) sets the same `cwd` for those four runtimes, with `_no-team` for an agent on no team.
 - **Task-runner isolation.** Task kinds `research` and `review` get no worktree. Any other kind needs a `repoPath`, or the run fails with `workspace_unavailable` (`apps/web/server/lib/executorRunner.ts`, `packages/worktrees/src/isolation.ts`).
 - **Native tools.** `buildFileTools` and `buildExecTool` return no tools when the run has no `cwd` (`apps/web/server/lib/runtimes/native/`). The file tools refuse a path that is a symlink, or that resolves outside the `cwd` once every symlink above it is followed (`resolveJailedOnDisk` in `fileTools.ts`).
 - **Environment scrubbing.** `apps/web/server/lib/runtimes/childEnv.ts` lists the removed variables.
 - **Connector decisions.** `decideGrant` in `packages/governance/src/grants/decide.ts`; a new grant's approval policy defaults to `risk`.
-- **Risky hand-offs.** The word list is in `apps/web/server/lib/teamChat/riskyDelegation.ts`. An `allow_always` answer is stored per leader under the scope `delegate:code` (`apps/web/server/api/delegationApproval.ts`).
+- **Risky hand-offs.** The word list is in `apps/web/server/lib/teamChat/riskyDelegation.ts`. Each risky hand-off opens its own approval under the scope `delegate:code`, marked never-remember (`apps/web/server/api/delegationApproval.ts`).
 - **No hidden approval layer.** The task runner's `routeApprovalsThroughClawboo` flag only adds a note to the prompt (`apps/web/server/lib/degradation.ts`).
 
 </Accordion>

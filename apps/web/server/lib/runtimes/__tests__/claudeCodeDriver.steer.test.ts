@@ -5,6 +5,8 @@
 // side of that contract: one terminal per run, whether the CLI folds the steer
 // into the running turn or gives it a turn of its own.
 
+import os from 'node:os'
+
 import type { ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
 import type { StartOpts } from '@clawboo/executor'
 import { describe, expect, it } from 'vitest'
@@ -261,5 +263,50 @@ describe('createClaudeCodeDriver: steering through streaming input', () => {
     const driver = createClaudeCodeDriver(OPTS, CTX, { loadSdk: async () => sdk })
     await driver.start()
     expect((await options)['permissionMode']).toBe('bypassPermissions')
+  })
+
+  it('forces auto memory off in the child env, over an inherited or passed-in 0', async () => {
+    const prev = process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']
+    process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '0'
+    try {
+      const { sdk, options } = scriptedSdk(async function* (input) {
+        const first = (await input.next()).value as SdkUserMessage
+        yield { type: 'result', subtype: 'success', result: 'ok', user_message_uuids: [first.uuid] }
+      })
+      const driver = createClaudeCodeDriver(
+        OPTS,
+        {
+          ...CTX,
+          apiKeyEnv: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0' },
+        } as unknown as RuntimeRunContext,
+        { loadSdk: async () => sdk },
+      )
+      await driver.start()
+      const env = (await options)['env'] as Record<string, string>
+      expect(env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']).toBe('1')
+    } finally {
+      if (prev === undefined) delete process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']
+      else process.env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = prev
+    }
+  })
+
+  it("keeps the run off the operator's own Claude Code settings and memory", async () => {
+    const { sdk, options } = scriptedSdk(async function* (input) {
+      const first = (await input.next()).value as SdkUserMessage
+      yield { type: 'result', subtype: 'success', result: 'ok', user_message_uuids: [first.uuid] }
+    })
+    const driver = createClaudeCodeDriver(
+      OPTS,
+      { ...CTX, cwd: '/work/team' } as unknown as RuntimeRunContext,
+      { loadSdk: async () => sdk },
+    )
+    await driver.start()
+    const o = await options
+    expect(o['settingSources']).toEqual(['project'])
+    const settings = o['settings'] as { claudeMdExcludes: string[]; autoMemoryEnabled: boolean }
+    expect(settings.autoMemoryEnabled).toBe(false)
+    expect(settings.claudeMdExcludes).toContain(
+      `${os.homedir().replaceAll('\\', '/')}/.claude/CLAUDE.md`,
+    )
   })
 })

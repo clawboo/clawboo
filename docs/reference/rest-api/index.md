@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 199 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 200 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -76,7 +76,7 @@ Keep the token out of API URLs: any request whose URL carries `access_token` get
 
 The token may contain only `A-Z a-z 0-9 . _ ~ -`. With any other character the server does not start: it logs `SECURITY: refusing to start` and exits with code 1 on every bind, even with `CLAWBOO_ALLOW_INSECURE=1`. `openssl rand -hex 24` makes a suitable token. The comparison is constant-time, and the `/api/` prefix test ignores letter case.
 
-**Agent MCP connections.** An agent runtime that Clawboo starts reaches the four MCP endpoints (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`) without a cookie. It passes only with the `attachToken` Clawboo put in its attach URL, and only when it connects straight to the loopback port with no proxy forwarding headers. `/api/mcp/config` always needs the cookie. See [Tools and MCP](/reference/rest-api/tools-and-mcp).
+**Agent MCP connections.** An agent runtime that Clawboo starts reaches the four MCP endpoints (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`) without a cookie. It passes only with the `attachToken` Clawboo put in its attach URL, and only when it connects straight to the loopback port with no proxy forwarding headers. `/api/mcp/config` and `POST /api/mcp/attach-secret/rotate` always need the cookie. See [Tools and MCP](/reference/rest-api/tools-and-mcp).
 
 ## Same-origin guard
 
@@ -170,7 +170,7 @@ The same-origin guard runs on the upgrade first (`403 Forbidden` on failure), th
 
 ## Route index
 
-The router registers 199 routes: 89 `GET`, 79 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
+The router registers 200 routes: 89 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                      |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -186,7 +186,7 @@ The router registers 199 routes: 89 `GET`, 79 `POST`, 15 `DELETE`, 9 `PATCH`, 7 
 | [Governance](/reference/rest-api/governance)         | 7      | `/api/governance/*` (budgets, audit log, delegation approval), `/api/approvals`                                                                     |
 | [Costs](/reference/rest-api/costs)                   | 4      | `/api/cost-records*`, `/api/fleet/summary`                                                                                                          |
 | [Observability](/reference/rest-api/observability)   | 8      | `/api/obs/*`, `/api/eval/smoke`                                                                                                                     |
-| [Tools and MCP](/reference/rest-api/tools-and-mcp)   | 17     | `/api/tools*`, `/api/mcp/config`, the four MCP transports under `/api/mcp/*`                                                                        |
+| [Tools and MCP](/reference/rest-api/tools-and-mcp)   | 18     | `/api/tools*`, `/api/mcp/config`, `/api/mcp/attach-secret/rotate`, the four MCP transports under `/api/mcp/*`                                       |
 | [Agent settings](/reference/rest-api/agent-settings) | 10     | `/api/personality`, `/api/exec-settings*`, `/api/exec-allowlist*`, `/api/skills`                                                                    |
 | [Chat history](/reference/rest-api/chat-history)     | 4      | `/api/chat-history*`                                                                                                                                |
 | [Settings and health](/reference/rest-api/settings)  | 6      | `/api/settings`, `/api/health*`, `/api/graph-layout`                                                                                                |

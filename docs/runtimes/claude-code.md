@@ -75,18 +75,29 @@ Create a team, and in **Customize team** set a member's runtime to **Claude Code
 | Persona           | The agent's `SOUL.md` (which the Personality sliders write into) is added to every prompt as a persona block, up to 4,000 characters.                                                             |
 | `AGENTS.md`       | Draws the agent's links on the team graph. Claude Code never reads it.                                                                                                                            |
 | Other agent files | Not used. `IDENTITY.md`, `TOOLS.md` and the rest are OpenClaw files; see [Agents](/using/agents).                                                                                                 |
-| Model             | Team setup has no model picker for Claude Code. It runs the model its own Claude Code settings choose.                                                                                            |
+| Model             | Team setup has no model picker for Claude Code. A run that names no model gets Claude Code's default, or `ANTHROPIC_MODEL` when it is set in the environment Clawboo runs with.                   |
 | Clawboo tools     | Every run gets Clawboo's Tasks, Memory, Tools and TeamChat servers (MCP), so the agent can read the board, use shared memory and connectors, and talk to its team.                                |
 | Leading a team    | A Claude Code leader hands work to teammates with the `team_delegate` tool.                                                                                                                       |
 | Worktree          | Only a task-runner run that names a repository gets its own git worktree. Team chat and the tasks a team hands out run without one. See [Worktrees and handoff](/concepts/worktrees-and-handoff). |
 | Steering          | Live. A comment on a running task joins the run at its next step, after the tool call in progress. See [Board](/using/board).                                                                     |
 | Sessions          | Each team chat turn starts fresh from the context Clawboo builds. Its one-to-one chat resumes one session until `/reset`. See [What an agent sees](/concepts/agent-context).                      |
-| Memory            | Clawboo's shared memory, through the Memory tools. Claude Code also loads your own Claude Code settings and memory files (below).                                                                 |
+| Memory            | Clawboo's shared memory, through the Memory tools, and the `CLAUDE.md` of the folder it works in. Your own Claude Code memory is left out (below).                                                |
 | Cost              | The real cost each run reports. See [Costs](#costs).                                                                                                                                              |
 
-### Your own Claude Code settings apply
+### Your own Claude Code setup stays out
 
-Clawboo does not limit which settings files the Agent SDK loads. A Claude Code agent therefore reads the files your `claude` command reads: your user settings and memory in `~/.claude`, and any `.claude` settings and `CLAUDE.md` in the folder it works in. Every Claude Code agent shares them. Keep anything you do not want your agents to follow out of `~/.claude`, or run Clawboo under a separate user account.
+Clawboo starts Claude Code without your own Claude Code setup. A Claude Code agent does not load:
+
+- your user settings in `~/.claude/settings.json`: plugins, hooks, `env`, permissions, model and effort level
+- the MCP servers you added to your own Claude Code
+- your `~/.claude/CLAUDE.md` and `~/.claude/rules`, or a `CLAUDE.md` in any folder above the one it works in
+- Claude Code's auto memory, so it neither reads nor writes the notes Claude Code keeps for a repository
+
+It still loads the Claude Code files of the folder it works in. In a task's worktree that is the repository's `CLAUDE.md`, `.claude/settings.json` (hooks included) and `.mcp.json`, as anyone who clones the repository gets them.
+
+This does not change how Claude Code signs in. Clawboo passes your Anthropic key in Claude Code's environment, and the `claude` command's own sign-in is not kept in a settings file. If your Claude Code reaches Anthropic through `~/.claude/settings.json`, for example an `env` block that sets `ANTHROPIC_BASE_URL` or an `apiKeyHelper`, that no longer applies to agents: set the same variables in the environment you start Clawboo with.
+
+Leaving your setup out is not a sandbox. Claude Code can still read any file your user account can, `~/.claude` included.
 
 ## Permissions and safety
 
@@ -177,7 +188,7 @@ The Clawboo server cannot find npm. Install Node.js 22.12 or newer, restart Claw
 
 <Accordion title="Under the hood">
 
-- Clawboo calls the SDK's `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. It also passes the run's working folder (the task's worktree, or else the team's folder), the model when a run names one, a session to resume, Clawboo's four MCP servers over HTTP, and the scrubbed environment plus the connected key. It does not set `settingSources`, so the SDK loads user, project and local settings.
+- Clawboo calls the SDK's `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. It also passes the run's working folder (the task's worktree, or else the team's folder), the model when a run names one, a session to resume, Clawboo's four MCP servers over HTTP, and the scrubbed environment plus the connected key. It sets `settingSources: ['project']`, passes `settings` with `autoMemoryEnabled: false` and a `claudeMdExcludes` list that covers every folder above the working folder and your home folder, and sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the environment, over any value Clawboo itself runs with.
 - The SDK starts Claude Code from its own platform package. The `claude` command that **Install** adds is what the Runtimes row checks for. A source build of Clawboo uses SDK version 0.3.268.
 - Run a board task on Claude Code directly with `POST /api/runtimes/claude-code/run`; see the [Runtimes API](/reference/rest-api/runtimes). Such a run falls back to the `claude` CLI's own sign-in when no Anthropic key is available.
 - A run that hits Claude Code's turn limit ends cleanly, and the task runner continues the task in a fresh session with a handoff note.
