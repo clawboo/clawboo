@@ -28,7 +28,7 @@ Want Claude Code teammates? Install globally with the Claude Agent SDK, which th
 
 ## Requirements
 
-- Node.js **22.12** or newer. OpenClaw teammates need 22.22.3+, 24.15+ or 25.9+.
+- Node.js **22.12** or newer. OpenClaw teammates need 24.22.1+ on the 24 line, or 26.12.1+.
 - A way to reach a model: an API key, a local Ollama, or a ChatGPT subscription. The setup wizard asks.
 
 ## Where state lives

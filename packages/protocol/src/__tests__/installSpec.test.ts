@@ -21,6 +21,7 @@ import {
   BROWSING_GUIDANCE_HEADING,
   OPENCLAW_INSTALL_COMMAND_SUDO,
   OPENCLAW_INSTALL_SPEC,
+  OPENCLAW_NODE_RANGES,
   OPENCLAW_NODE_REQUIREMENT,
   isNodeVersionSupportedByOpenclaw,
   withBrowsingGuidance,
@@ -178,77 +179,83 @@ describe('docs agree with OPENCLAW_INSTALL_SPEC', () => {
 
 // ─── The Node floor the pin drags with it ────────────────────────────────────
 //
-// clawboo asked `major >= 22` and called that sufficient. OpenClaw's engines are
-// `>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`, so that answer was wrong in both
-// directions: it passes a Node 22.12 that cannot run OpenClaw, and it passes a
-// Node 23 that is excluded outright. Either way the user is told the machine is
-// ready and then watches `npm install -g` refuse.
+// The newest 2026.9 OpenClaw declares `>=24.22.1 <25 || >=26.12.1`. A
+// major-only check gets that wrong in both directions: it passes a Node 24.16
+// that is too old, and a Node 25 that is excluded outright. Earlier 2026.9
+// patches also admitted Node 22 and 25, and npm quietly falls back to one of
+// them on such a Node, so those versions must read as unsupported too.
 
 describe('isNodeVersionSupportedByOpenclaw', () => {
   it('accepts the floor of each supported line, exactly', () => {
-    for (const v of ['22.22.3', '24.15.0', '25.9.0']) {
+    for (const v of ['24.22.1', '26.12.1']) {
       expect(isNodeVersionSupportedByOpenclaw(v)).toBe(true)
     }
   })
 
   it('rejects one patch below a floor', () => {
-    // The machine this upgrade was done on ran 22.22.0.
-    for (const v of ['22.22.2', '24.14.9', '25.8.9']) {
+    for (const v of ['24.22.0', '26.12.0']) {
       expect(isNodeVersionSupportedByOpenclaw(v)).toBe(false)
     }
   })
 
   it('rejects a right-major, too-old Node', () => {
-    // The whole reason a major-only check is not enough.
-    expect(isNodeVersionSupportedByOpenclaw('22.12.0')).toBe(false)
+    // The whole reason a major-only check is not enough. 24.16.0 was the floor
+    // for 2026.9.3 to 2026.9.33.
+    expect(isNodeVersionSupportedByOpenclaw('24.16.0')).toBe(false)
+    expect(isNodeVersionSupportedByOpenclaw('26.1.0')).toBe(false)
+  })
+
+  it('rejects Node 22 and Node 25, which only older 2026.9 patches accepted', () => {
+    for (const v of ['22.22.3', '22.23.2', '25.9.0', '25.99.0']) {
+      expect(isNodeVersionSupportedByOpenclaw(v)).toBe(false)
+    }
   })
 
   it('rejects a HIGHER major that the range excludes', () => {
-    // `major >= 22` said yes to both of these.
     expect(isNodeVersionSupportedByOpenclaw('23.11.0')).toBe(false)
     expect(isNodeVersionSupportedByOpenclaw('25.0.0')).toBe(false)
   })
 
   it('accepts anything at or above the open-ended top range', () => {
-    expect(isNodeVersionSupportedByOpenclaw('26.0.0')).toBe(true)
+    expect(isNodeVersionSupportedByOpenclaw('27.0.0')).toBe(true)
     expect(isNodeVersionSupportedByOpenclaw('99.0.0')).toBe(true)
   })
 
   it('accepts the `v` prefix Node itself reports', () => {
-    // process.version is `v22.23.2`, not `22.23.2`.
-    expect(isNodeVersionSupportedByOpenclaw('v22.23.2')).toBe(true)
+    // process.version is `v24.22.1`, not `24.22.1`.
+    expect(isNodeVersionSupportedByOpenclaw('v24.22.1')).toBe(true)
   })
 
   it('rejects a prerelease, because npm does', () => {
     // node-semver excludes prereleases from a range whose comparators carry none,
-    // so `>=24.15.0 <25` does NOT admit `24.15.0-nightly`. A numeric compare would
-    // have said yes and handed the user back the original bug: told it was fine,
-    // then refused by `npm install -g`.
-    expect(isNodeVersionSupportedByOpenclaw('v24.15.0-nightly')).toBe(false)
-    expect(isNodeVersionSupportedByOpenclaw('22.23.0-rc.1')).toBe(false)
+    // so `>=24.22.1 <25` does NOT admit `24.22.1-nightly`. A numeric compare would
+    // say yes, and the user would be told the machine is ready when it is not.
+    expect(isNodeVersionSupportedByOpenclaw('v24.22.1-nightly')).toBe(false)
+    expect(isNodeVersionSupportedByOpenclaw('26.13.0-rc.1')).toBe(false)
   })
 
   it('accepts build metadata, even when it contains a hyphen', () => {
     // `+build-nightly` is BUILD METADATA on a release, not a prerelease. Testing
     // for `-` before stripping everything after `+` rejected a perfectly good
     // version. Build metadata does not affect precedence at all.
-    expect(isNodeVersionSupportedByOpenclaw('22.23.2+build-nightly')).toBe(true)
-    expect(isNodeVersionSupportedByOpenclaw('v24.15.0+abc')).toBe(true)
+    expect(isNodeVersionSupportedByOpenclaw('24.23.0+build-nightly')).toBe(true)
+    expect(isNodeVersionSupportedByOpenclaw('v26.12.1+abc')).toBe(true)
   })
 
   it('still rejects a real prerelease that also carries build metadata', () => {
     // Here the hyphen precedes the `+`, so it IS a prerelease.
-    expect(isNodeVersionSupportedByOpenclaw('22.23.2-rc.1+build')).toBe(false)
+    expect(isNodeVersionSupportedByOpenclaw('24.23.0-rc.1+build')).toBe(false)
   })
 
   it('still accepts ordinary release versions', () => {
-    expect(isNodeVersionSupportedByOpenclaw('v22.23.2')).toBe(true)
+    expect(isNodeVersionSupportedByOpenclaw('v24.23.0')).toBe(true)
+    expect(isNodeVersionSupportedByOpenclaw('v26.13.0')).toBe(true)
   })
 
   it('treats an unreadable version as UNSUPPORTED, not as fine', () => {
     // A version we cannot parse is not evidence that it works, and guessing
     // "yes" sends the user into an install that fails with a worse message.
-    for (const v of ['', '   ', 'banana', 'v22', null, undefined]) {
+    for (const v of ['', '   ', 'banana', 'v24', null, undefined]) {
       expect(isNodeVersionSupportedByOpenclaw(v)).toBe(false)
     }
   })
@@ -256,6 +263,14 @@ describe('isNodeVersionSupportedByOpenclaw', () => {
   it('states the requirement in the form OpenClaw itself uses', () => {
     // This string is rendered to the user, and is what they will paste into a
     // search box when the install fails.
-    expect(OPENCLAW_NODE_REQUIREMENT).toBe('>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0')
+    expect(OPENCLAW_NODE_REQUIREMENT).toBe('>=24.22.1 <25 || >=26.12.1')
+  })
+
+  it('states the same ranges the check enforces', () => {
+    // The string and the tuples are two copies of one fact; this keeps them one.
+    const spelled = OPENCLAW_NODE_RANGES.map(
+      (r) => `>=${r.min.join('.')}${r.ltMajor === undefined ? '' : ` <${r.ltMajor}`}`,
+    ).join(' || ')
+    expect(spelled).toBe(OPENCLAW_NODE_REQUIREMENT)
   })
 })

@@ -21,7 +21,7 @@ npx clawboo@latest
 ```
 
 <p align="center">
-  <sub>Needs Node.js 22.12 or newer (OpenClaw teammates need 22.22.3+, 24.15+ or 25.9+). Clawboo opens in your browser and walks you through setup.<br/>
+  <sub>Needs Node.js 22.12 or newer (OpenClaw teammates need 24.22.1+ on the 24 line, or 26.12.1+). Clawboo opens in your browser and walks you through setup.<br/>
   Want Claude Code teammates? Install globally instead: <code>npm install -g clawboo @anthropic-ai/claude-agent-sdk</code>, then run <code>clawboo</code>.</sub>
 </p>
 

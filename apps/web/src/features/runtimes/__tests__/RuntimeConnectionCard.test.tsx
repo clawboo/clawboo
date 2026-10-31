@@ -3,7 +3,7 @@
 // the server's connectionState; there is no flag-flip "available → Add" step.
 
 import { useState } from 'react'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -223,6 +223,30 @@ describe('RuntimeConnectionCard', () => {
     expect(screen.queryByTestId('runtime-codex-key')).not.toBeInTheDocument() // no key field for oauth
     await userEvent.click(screen.getByTestId('runtime-codex-recheck'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('Re-check leaves no timer behind when the card unmounts', () => {
+    // The busy-clear timer must not fire into a torn-down component (or a
+    // torn-down jsdom).
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const status: RuntimeStatus = { id: 'claude-code', connectionState: 'ready' }
+      const { unmount } = render(
+        <RuntimeConnectionCard
+          entry={RUNTIME_CATALOG['claude-code']}
+          status={status}
+          variant="panel"
+          onChanged={vi.fn()}
+        />,
+      )
+      fireEvent.click(screen.getByTestId('runtime-claude-code-recheck'))
+      expect(screen.getByText(/Working/)).toBeInTheDocument()
+      expect(vi.getTimerCount()).toBe(1)
+      unmount()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('ready (panel): Disconnect confirms, POSTs, then onChanged', async () => {

@@ -410,11 +410,10 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
       node: {
         version: nodeVersion,
         major,
-        // NOT `major >= 22`. OpenClaw's engines are
-        // `>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`, so Node 22.12 has the
-        // right major and still cannot run it, and Node 23 has a higher major
-        // and is excluded. A major-only check reports "sufficient" right up
-        // until `npm install -g` refuses the install.
+        // Not a major-version check. The current OpenClaw release's engines are
+        // OPENCLAW_NODE_REQUIREMENT (`>=24.22.1 <25 || >=26.12.1`), so Node
+        // 24.16 has the right major and is still too old, and Node 25 is
+        // excluded outright.
         sufficient: isNodeVersionSupportedByOpenclaw(nodeVersion),
         required: OPENCLAW_NODE_REQUIREMENT,
         path: process.execPath,
