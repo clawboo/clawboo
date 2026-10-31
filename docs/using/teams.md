@@ -183,7 +183,7 @@ Right-click the team's icon in the team rail and choose how much to delete.
 | **Delete team only**   | The team. Its agents stay in Clawboo, with no team.                     | **Delete team**       |
 | **Delete with agents** | Every agent on the team, with their files and own chats, then the team. | **Delete everything** |
 
-Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/.clawboo/workspaces/<team id>`) with every file its agents saved there. When the team has a Claude Code, Codex, Hermes or Clawboo Native member, the confirmation says so: "The team's folder and the files its agents saved there are deleted too."
+Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/.clawboo/workspaces/<team id>`) with every file its agents saved there. The confirmation says so: "The team's folder and the files its agents saved there are deleted too." If the folder cannot be removed, the team is still deleted, and a message says its team folder could not be removed.
 
 **Delete with agents** works without the OpenClaw Gateway. An OpenClaw member leaves the Gateway at once if it is connected, otherwise the next time Clawboo connects to it. If some agents cannot be deleted, the team is still deleted, and a message says how many agents were removed.
 

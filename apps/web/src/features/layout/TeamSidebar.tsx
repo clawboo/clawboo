@@ -158,31 +158,34 @@ function TeamIcon({
 
 // ─── TeamSidebar ─────────────────────────────────────────────────────────────
 
+/** Deleting a team removes its folder on disk and the files its agents saved
+ *  there. Said for every team: an agent that has since left the team, or was
+ *  deleted, may have saved files in it. */
+const TEAM_FOLDER_NOTE = "The team's folder and the files its agents saved there are deleted too."
+
+const DELETE_TEAM_MESSAGE = `Agents will be kept but unassigned from this team. ${TEAM_FOLDER_NOTE}`
+
 /** The confirm copy for Delete with agents. Only an OpenClaw agent lives in a
  *  Gateway, so only a team with one is told about removing it from there
  *  (`runtime` null is a legacy OpenClaw row). */
-/** Every agent but an OpenClaw one works in the team's folder on disk, which
- *  deleting the team removes along with its files. */
-const TEAM_FOLDER_RUNTIMES = new Set(['claude-code', 'codex', 'hermes', 'clawboo-native'])
-const TEAM_FOLDER_NOTE = "The team's folder and the files its agents saved there are deleted too."
-
-function usesTeamFolder(agents: readonly AgentState[]): boolean {
-  return agents.some((a) => a.runtime != null && TEAM_FOLDER_RUNTIMES.has(a.runtime))
-}
-
-function deleteTeamMessage(agents: readonly AgentState[]): string {
-  const base = 'Agents will be kept but unassigned from this team.'
-  return usesTeamFolder(agents) ? `${base} ${TEAM_FOLDER_NOTE}` : base
-}
-
 function deleteWithAgentsMessage(agents: readonly AgentState[]): string {
   const onGateway = agents.some((a) => a.runtime == null || a.runtime === 'openclaw')
   const what = onGateway
     ? 'This deletes the agents and their chats, and removes the OpenClaw agents from the Gateway.'
     : 'This deletes the agents and their chats.'
-  const folder = usesTeamFolder(agents) ? ` ${TEAM_FOLDER_NOTE}` : ''
-  return `${what}${folder} It cannot be undone.`
+  return `${what} ${TEAM_FOLDER_NOTE} It cannot be undone.`
 }
+
+/** Whether `DELETE /api/teams/:id` reported that the team's folder stayed on
+ *  disk. The team itself is gone either way, and a second delete cannot reach
+ *  the folder, so the person is told rather than shown a plain success. */
+async function folderLeftBehind(res: Response): Promise<boolean> {
+  const body = (await res.json().catch(() => null)) as { folderRemoved?: boolean } | null
+  return body?.folderRemoved === false
+}
+
+const folderLeftMessage = (name: string) =>
+  `"${name}" deleted, but its team folder could not be removed`
 
 /** The sidebar toggle normally sits in the agent column's top row. The rail shows
  *  its own only when there is no agent column (Boo Zero's view), and in the
@@ -245,14 +248,13 @@ export function TeamSidebar({
   const handleDeleteTeam = useCallback(async () => {
     if (!contextMenu) return
     const { team } = contextMenu
-    const teamAgents = useFleetStore.getState().agents.filter((a) => a.teamId === team.id)
 
     setContextMenu(null)
 
     if (
       !(await confirm({
         title: `Delete "${team.name}"?`,
-        message: deleteTeamMessage(teamAgents),
+        message: DELETE_TEAM_MESSAGE,
         confirmLabel: 'Delete team',
         tone: 'danger',
       }))
@@ -261,7 +263,8 @@ export function TeamSidebar({
     }
 
     try {
-      await apiFetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      const folderLeft = await folderLeftBehind(res)
       useTeamStore.getState().removeTeam(team.id)
 
       useFleetStore.setState((s) => ({
@@ -272,10 +275,13 @@ export function TeamSidebar({
         useViewStore.getState().openBooZero()
       }
 
-      useToastStore.getState().addToast({
-        type: 'success',
-        message: `"${team.name}" deleted`,
-      })
+      useToastStore
+        .getState()
+        .addToast(
+          folderLeft
+            ? { type: 'error', message: folderLeftMessage(team.name) }
+            : { type: 'success', message: `"${team.name}" deleted` },
+        )
     } catch {
       useToastStore.getState().addToast({
         type: 'error',
@@ -316,14 +322,17 @@ export function TeamSidebar({
         }
       }
 
-      await apiFetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/teams/${team.id}`, { method: 'DELETE' })
+      const folderLeft = await folderLeftBehind(res)
       useTeamStore.getState().removeTeam(team.id)
 
       if (useTeamStore.getState().selectedTeamId === null) {
         useViewStore.getState().openBooZero()
       }
 
-      if (deletedCount === teamAgents.length) {
+      if (folderLeft) {
+        useToastStore.getState().addToast({ type: 'error', message: folderLeftMessage(team.name) })
+      } else if (deletedCount === teamAgents.length) {
         useToastStore.getState().addToast({
           type: 'success',
           message: `"${team.name}" and ${agentCountText} deleted`,
