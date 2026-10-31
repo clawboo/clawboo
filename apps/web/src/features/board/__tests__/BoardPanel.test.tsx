@@ -42,8 +42,8 @@ function seedTeamWithAgents(): void {
   })
 }
 
-/** Fill in the New task dialog: the team is preselected (the only one), then the
- *  agent, then the task. */
+/** Fill in the New task dialog: pick the agent (its team follows), then write the
+ *  task in the one field. */
 async function fillNewTask(
   user: ReturnType<typeof userEvent.setup>,
   dialog: HTMLElement,
@@ -51,7 +51,7 @@ async function fillNewTask(
 ): Promise<void> {
   await user.click(within(dialog).getByLabelText('Agent'))
   await user.click(await screen.findByRole('option', { name: 'Coder' }))
-  await user.type(within(dialog).getByLabelText('Task'), title)
+  await user.type(within(dialog).getByLabelText('What should get done?'), title)
 }
 
 // dnd-kit's real pointer drag can't run in jsdom (no layout/rects), so we capture
@@ -224,8 +224,8 @@ describe('BoardPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
-    // Nothing can be sent until an agent is picked.
-    expect(within(dialog).getByRole('button', { name: /Create task/i })).toBeDisabled()
+    // An agent is suggested, but nothing can be sent until the task is written.
+    expect(within(dialog).getByRole('button', { name: /Send to Coder/i })).toBeDisabled()
     await fillNewTask(user, dialog, 'Draft the changelog')
     await user.click(within(dialog).getByRole('button', { name: /Send to Coder/i }))
 
@@ -239,7 +239,7 @@ describe('BoardPanel', () => {
     await waitFor(() => expect(screen.queryByTestId('new-task-dialog')).toBeNull())
   })
 
-  it('lists only the chosen team’s agents, and asks for the team first', async () => {
+  it('suggests across teams, and More options lists only the chosen team’s agents', async () => {
     useTeamStore.setState({
       teams: [ALPHA, { ...ALPHA, id: 'team-2', name: 'Beta' }],
       selectedTeamId: null,
@@ -261,8 +261,10 @@ describe('BoardPanel', () => {
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
 
-    // Two teams, none filtered: no agent can be picked yet.
-    expect(within(dialog).getByLabelText('Agent')).toHaveTextContent(/Pick a team first/)
+    // Two teams, none filtered: the suggestion names the agent and its team.
+    expect(within(dialog).getByLabelText('Agent')).toHaveTextContent('Coder, Alpha')
+    await user.click(within(dialog).getByRole('button', { name: 'More options' }))
+    expect(within(dialog).getByLabelText('Team')).toHaveTextContent('Alpha')
     await user.click(within(dialog).getByLabelText('Team'))
     await user.click(await screen.findByRole('option', { name: /Beta/ }))
     // A one-agent team has nothing to choose: its agent is picked for you.
@@ -271,7 +273,7 @@ describe('BoardPanel', () => {
     expect(screen.queryByRole('option', { name: 'Coder' })).toBeNull()
   })
 
-  it('moves focus into the composer (its first field, the team) when it opens', async () => {
+  it('moves focus into the composer (its one field) when it opens', async () => {
     seedTeamWithAgents()
     server.use(
       http.get('/api/board', () =>
@@ -284,8 +286,10 @@ describe('BoardPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
-    // useFocusTrap moves focus to the first focusable: the team picker.
-    await waitFor(() => expect(within(dialog).getByLabelText('Team')).toHaveFocus())
+    // useFocusTrap moves focus to the first focusable: what should get done.
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('What should get done?')).toHaveFocus(),
+    )
   })
 
   it('Escape dismisses an open field dropdown without closing the composer', async () => {
@@ -303,7 +307,7 @@ describe('BoardPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
     const dialog = await screen.findByTestId('new-task-dialog')
-    await user.type(within(dialog).getByLabelText('Task'), 'Keep me')
+    await user.type(within(dialog).getByLabelText('What should get done?'), 'Keep me')
 
     // Open the Agent dropdown, then press Escape to dismiss it.
     await user.click(within(dialog).getByLabelText('Agent'))
@@ -313,7 +317,7 @@ describe('BoardPanel', () => {
     // The menu closes, but the dialog and the typed task survive.
     await waitFor(() => expect(screen.queryByRole('option', { name: 'Writer' })).toBeNull())
     expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Task')).toHaveValue('Keep me')
+    expect(within(dialog).getByLabelText('What should get done?')).toHaveValue('Keep me')
   })
 
   it('shows a skeleton on first mount, before the board fetch resolves', () => {

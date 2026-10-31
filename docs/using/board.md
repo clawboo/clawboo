@@ -149,11 +149,15 @@ A genuinely empty board (loaded fine, zero tasks, and no routine runs in the ran
 
 ## Giving an agent a task
 
-The header's **New task** button hands one agent a task, the human counterpart to Boo Zero delegating. It asks, in order:
+The header's **New task** button (or **C**, or the **+** on **To do**) hands one agent a task, the human counterpart to Boo Zero delegating. It leads with one field, **What should get done?**, and suggests who should do it:
 
-1. **Team**, prefilled from the active team filter (or the only team, when there is one).
-2. **Agent**, a member of that team. A team with one agent picks it for you; otherwise you choose.
-3. **Task**, a short title, and optional **Details**: context, constraints, what done looks like.
+- The words of your sentence are matched against each agent's name and the one-line role in its SOUL.md. A word in the name counts more than a word in the role, and forms of a word count as one (_draft_, _drafts_, _drafting_). OpenClaw agents have no role there, so they match by name only.
+- With no match, it suggests the agent you last gave a task to in this browser, then the team lead, then the team's first agent.
+- A note beside the agent says why: **Fits the task**, **Last used** or **Team lead**.
+
+The agent picker lists the agents of the board's team filter, or every team's agents, each with its team's name, when the board shows all teams. Picking an agent also picks its team, and a picked agent stays picked while you keep typing. **Enter** sends it.
+
+**More options** opens the full form: **Team**, **Agent** (that team's members) and optional **Details**: context, constraints, what done looks like.
 
 **Send to _agent_** writes it through `POST /api/board` with an `assigneeAgentId`. The server binds the task to that agent and starts it right away, so the card appears in **To do** and moves to **In progress** as soon as the agent picks it up. If the agent is busy with another task or still replying in chat, the task waits in **To do** and runs the moment the agent is free. The agent receives the title and the details together.
 
@@ -316,7 +320,7 @@ The chat-fused board cards and the standalone Board panel read the same canonica
 
 - Open **Board**. The header shows `{N} tasks`, and tasks sit in the column matching their status (a failed or stopped task sits in **Needs you**). Click a card and confirm the drawer's **Overview** status matches the card's column.
 - In **Week** view, today's date has the red circle, a task you added today sits on today's row, and a routine's next runs appear in **To do** on their days with a **Routine** tag. Pause the routine and its runs leave the calendar.
-- Click **New task**, pick a team and an agent, and send it. The card appears in **To do**, moves to **In progress** when the agent starts, and shows up in that team's group chat.
+- Click **New task**, write what should get done, check the suggested agent (or pick another), and press **Enter**. The card appears in **To do**, moves to **In progress** when the agent starts, and shows up in that team's group chat.
 - In a team's group chat, delegate a piece of work and watch a `BoardTaskCard` appear inline with a **Working** pill, then flip to **Done** with a summary when the run completes.
 - Refresh the page; the inline cards reload from `GET /api/board?teamId=…` (refresh-survival), and the panel re-polls. Both show the same task state.
 - For the raw data, fetch it directly:
