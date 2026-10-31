@@ -84,8 +84,8 @@ import { advanceChatLeaderSeq, loadChatLeaderState } from './leaderState'
 
 const log = createLogger('server-deliver')
 
-/** clawboo's own in-process runtime — the only one that uses the native leader
- *  session-resume pointer (mirrors driveAgentChat's native-only 1:1 continuity). */
+/** clawboo's own in-process runtime. Its agents read their own config, so the
+ *  coding-runtime model override below skips them. */
 const NATIVE_RUNTIME = 'clawboo-native'
 
 /** A live run tracked for Stop / wedge — keyed by sessionKey in the abort map. */
@@ -190,7 +190,9 @@ function buildApiKeyEnv(runtime: string): Record<string, string> {
 /** Parse a coding-runtime agent's execConfig for an optional per-agent model +
  *  provider (the Hermes model picker stores `{ model, provider }`). Never throws;
  *  returns null when absent so the driver keeps its key-derived default. */
-function parseCodingModelConfig(raw: string | null): { model?: string; provider?: string } | null {
+export function parseCodingModelConfig(
+  raw: string | null,
+): { model?: string; provider?: string } | null {
   if (!raw) return null
   try {
     const o = JSON.parse(raw) as Record<string, unknown>

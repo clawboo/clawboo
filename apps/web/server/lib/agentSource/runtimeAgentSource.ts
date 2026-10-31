@@ -37,6 +37,7 @@ import {
 } from '@clawboo/db'
 import { and, eq, isNull, like, sql } from 'drizzle-orm'
 
+import { directChatSessionKey } from '../agentChat/directChatSessionKey'
 import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
 import {
   readRuntimeAgentFile,
@@ -99,7 +100,8 @@ export class RuntimeAgentSource implements AgentSource {
       avatarUrl: null,
       avatarSeed: row.avatarSeed ?? null,
       status: row.status as AgentRecordStatus,
-      sessionKey: `agent:${row.id}:${this.id}`,
+      // The 1:1 chat key, shared with the server-side 1:1 drain that writes it.
+      sessionKey: directChatSessionKey(row.id, this.id),
       isDefault: false,
       teamId: row.teamId ?? null,
       personalityConfig: parseJson(row.personalityConfig),

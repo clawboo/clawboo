@@ -12,7 +12,7 @@ Hermes is an open-source agent, published as the `hermes-agent` Python package. 
 | Best for        | An agent that builds up its own memory and skills over time; many models through one OpenRouter key                |
 | You need        | Python 3.11, 3.12 or 3.13, and one credential: an OpenRouter key, an Anthropic or OpenAI key, or a ChatGPT sign-in |
 | Who bills you   | The provider it runs on (OpenRouter, Anthropic, OpenAI), or your ChatGPT plan                                      |
-| Cost in Clawboo | Hermes reports none; team chat records an estimate                                                                 |
+| Cost in Clawboo | Hermes reports none; team chat and the agent's own chat record an estimate                                         |
 | Steering        | A comment stops the run and resumes it with your comment                                                           |
 
 To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
@@ -110,7 +110,7 @@ For each run, Clawboo works down this list and uses the first match:
 6. **A ChatGPT sign-in**: `--provider openai-codex`, model `gpt-5.5`.
 7. **Nothing**: Hermes uses its own default.
 
-The pick in rule 1 applies when the agent works in its team. A run started over the REST API has no pick; a model named in that request replaces the default models in rules 3 to 6.
+The pick in rule 1 applies when the agent works in its team or in its own chat. A run started over the REST API has no pick; a model named in that request replaces the default models in rules 3 to 6.
 
 Clawboo hands Hermes only its OpenRouter, Anthropic and OpenAI keys. If your Hermes config names another provider (Gemini, say), set that provider's key in the environment you start Clawboo from.
 
@@ -132,7 +132,7 @@ Clawboo runs Hermes with `--yolo`, which approves every Hermes tool call without
 
 </Warning>
 
-- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, and on research and review runs (which includes every agent Routine you create in the app), Hermes starts in its team's folder, `~/.clawboo/workspaces/<team id>`, which every member of the team shares (a task with no team uses `workspaces/_no-team`). That folder only sets where it starts: Hermes can still read and change any file your user account can, including Clawboo's database and key vault.
+- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, in the agent's own chat, and on research and review runs (which includes every agent Routine you create in the app), Hermes starts in its team's folder, `~/.clawboo/workspaces/<team id>`, which every member of the team shares (a task or an agent with no team uses `workspaces/_no-team`). That folder only sets where it starts: Hermes can still read and change any file your user account can, including Clawboo's database and key vault.
 - **Clawboo's approvals do not cover Hermes's own tools.** Calls the agent makes through Clawboo's Tools server (connectors, for example) go through Clawboo's checks and can ask you first. Hermes's built-in tools never do.
 - **Clawboo hides some secrets from it, by name only.** Before a run, Clawboo removes its own secrets and a fixed list of common credentials (GitHub, npm, cloud, Stripe, Slack and database variables) from the environment Hermes inherits. Other variables pass through, and credential files on disk stay readable.
 
@@ -140,7 +140,7 @@ For work you do not trust, run Clawboo under a separate user account or in a vir
 
 ## Costs
 
-Hermes reports neither tokens nor dollars to Clawboo. In team chat, Clawboo estimates each run's cost from the length of the prompt and the reply, at about four characters per token. It prices those tokens at the model's rate when Clawboo knows it, and otherwise at $3 per million input and $15 per million output tokens. That estimate counts toward your budgets. A run started over the REST API, or by an agent Routine, records no cost at all.
+Hermes reports neither tokens nor dollars to Clawboo. In team chat and in the agent's own chat, Clawboo estimates each run's cost from the length of the prompt and the reply, at about four characters per token. It prices those tokens at the model's rate when Clawboo knows it, and otherwise at $3 per million input and $15 per million output tokens. That estimate counts toward your budgets. A run started over the REST API, or by an agent Routine, records no cost at all.
 
 Your provider bills the real usage: OpenRouter, Anthropic or OpenAI per token, or your ChatGPT plan. See [Budgets and spend](/using/budgets-and-spend) for how each runtime's cost reaches your budgets.
 
@@ -153,7 +153,7 @@ To remove a single key instead, open **Manage**, click that provider's row, and 
 ## Limits
 
 - No live text: a Hermes reply appears when its run finishes.
-- Hermes reports no cost, so Clawboo's figures for it are estimates, or nothing outside team chat.
+- Hermes reports no cost, so Clawboo's figures for it are estimates, or nothing outside team chat and the agent's own chat.
 - A comment stops the run; the tool call in progress at that moment is lost, and finished work is kept.
 - The agent's `config.yaml` is a one-time copy of yours.
 - Python 3.11 to 3.13 only.

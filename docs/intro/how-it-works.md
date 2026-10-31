@@ -141,7 +141,7 @@ Several rows have their own page: [What agents can do](/concepts/permissions) co
 ### OpenClaw and one-to-one chat
 
 - **OpenClaw agents never use the task runner.** In team chat they run over the Clawboo server's own connection to the OpenClaw Gateway, so they keep working with the tab closed. An OpenClaw agent Routine goes through a separate dispatcher, with no worktree, no checks and no circuit breakers, and it is stopped after 10 minutes by default.
-- **A one-to-one chat** on an agent's page is a plain conversation, outside both paths. A Clawboo Native agent's chat runs on the server. An OpenClaw agent's chat goes over the Gateway connection your browser holds.
+- **A one-to-one chat** on an agent's page is a plain conversation, outside both paths. A Clawboo Native, Claude Code, Codex or Hermes agent's chat runs on the server and starts in the agent's team folder. An OpenClaw agent's chat goes over the Gateway connection your browser holds.
 
 ### The team's own limits
 

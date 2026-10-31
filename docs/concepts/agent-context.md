@@ -70,13 +70,13 @@ The message is the task's title. The task runner adds no team rules, teammate li
 - **The global brief.** The brief under **Details** > **Brief** on Boo Zero's page is saved but not sent to any agent.
 - **Memory, on team-chat turns.** Nothing is added for them; agents look facts up with their memory tools. Only task-runner runs get facts added.
 - **The time of day.** Clawboo Native's setup carries today's date (in UTC), not the time.
-- **Tools a run cannot use.** A tool that is off is left out rather than refused. A Clawboo Native agent in a one-to-one chat, for example, sees no file or shell tools at all.
+- **Tools a run cannot use.** A tool that is off is left out rather than refused. A Clawboo Native agent whose shell commands are off, for example, sees no command tool at all.
 
 ## Conversation history
 
 - **A leader in team chat.** A Clawboo Native or Codex leader continues the same conversation, separately in General and in each room. A Claude Code or Hermes leader starts each turn without the earlier conversation. OpenClaw keeps the conversation in its own Gateway session.
 - **A teammate on a handed-off task.** Clawboo Native, Claude Code, Codex and Hermes teammates start each task without earlier conversation. An OpenClaw teammate's Gateway session can still hold its earlier turns.
-- **A one-to-one chat with a Clawboo Native agent** continues the conversation. On its first turn, and after `/reset`, the agent also gets up to 8 of its own saved notes, without the team's notes.
+- **A one-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent** continues the conversation: each message resumes the session the one before it saved. On its first turn, and after `/reset`, the agent also gets up to 8 of its own saved notes, without the team's notes. Claude Code, Codex and Hermes also get their persona with every message.
 - **Boo Zero's one-to-one chat** adds Boo Zero's rules to every message. Mention a team with `@TeamName` and the message also carries that team's brief, board, saved memory and recent chat.
 - **Starting fresh.** `/reset` (or `/new`) in a chat ends what the agents carry from it, and the messages stay on screen. See [Team chat](/using/team-chat).
 
@@ -104,7 +104,7 @@ The dashboard does not show the assembled context itself. The lists on this page
 - **Delivery.** Every runtime gets Clawboo's context in front of the message, separated by a blank line, in the run's first user message.
 - **Persona.** `apps/web/server/lib/runtimes/personaBlock.ts`.
 - **Restarts and limits.** `DEFAULT_ROTATION` in `packages/executor/src/session-rotation.ts`; `DEFAULT_MAX_TURNS` in `packages/adapters/native/src/agentConfig.ts`; the 240,000-character bound in `apps/web/server/lib/runtimes/native/conversation.ts`.
-- **Conversation pointers.** `apps/web/server/lib/teamChat/nativeTeamSession.ts` keeps them for Clawboo Native and Codex leaders. The one-to-one notes come from `apps/web/server/lib/agentChat/memoryRecall.ts`.
+- **Conversation pointers.** `apps/web/server/lib/teamChat/nativeTeamSession.ts` keeps them for Clawboo Native and Codex leaders. A one-to-one chat keeps one pointer per agent, whatever its runtime (`nativeChatSessionSettingKey` in `apps/web/server/lib/agentChat/driveAgentChat.ts`). The one-to-one notes come from `apps/web/server/lib/agentChat/memoryRecall.ts`.
 
 </Accordion>
 

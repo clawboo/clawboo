@@ -163,8 +163,7 @@ corrupt value falls back to `DEFAULT_AGENT_CONFIG` instead of crashing a run.
   first connected provider in `KNOWN_PROVIDERS` order. `DEFAULT_AGENT_CONFIG` (Anthropic, `claude-haiku-4-5`,
   read-only Tasks, no shell) only fills in for an agent with no stored config.
 - **Cost.** Each provider response produces a `turn` frame with that response's token delta. Clawboo prices it
-  from a short list of pinned model ids; any other model gets `costUsd: null` and is estimated by the host. A 1:1
-  chat with a native agent records spend only for priced turns.
+  from a short list of pinned model ids; any other model gets `costUsd: null` and is estimated by the host.
 - **Context window.** `contextWindowTokens` is a deliberate over-estimate, because one number cannot fit every
   provider. A run that overflows a smaller window ends with a typed error instead.
 

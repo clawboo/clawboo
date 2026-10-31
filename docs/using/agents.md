@@ -84,15 +84,18 @@ The chat sits on the left and cards stack on the right. The buttons in the page 
 
 In **Tasks & Routines**, click a task to read its output and progress. The comment box at the bottom (**Comment or steer this task…**) sends your comment to the agent the task belongs to, and the line beside **Send** says what sending does. On a running task, the agent gets it during the run. A task that waits on you, or waits in **To do**, starts again for it. A finished task cannot run again, so the note under your comment offers **Send as a follow-up task** instead. Each comment you send shows where it went. See [Steer a running task](/using/board#steer-a-running-task) for every case. **Open on Board** opens the task on the board.
 
-**Workspace** under **Details** is a read-only view of the agent's files. It shows the worktree of each board task the agent took that changes files. For a Claude Code, Codex, Hermes or Clawboo Native agent it also shows the folder its runs start in when there is no worktree, as in team chat: **Team folder**, or **Shared folder (no team)** for an agent with no team. When there is more than one, pick it from the list at the top. The team folder is not a git checkout, so its files carry no change badges, and until the agent's first run there it reads "No files yet." OpenClaw agents keep their files in the OpenClaw Gateway's workspace instead.
+**Workspace** under **Details** is a read-only view of the agent's files. It shows the worktree of each board task the agent took that changes files. For a Claude Code, Codex, Hermes or Clawboo Native agent it also shows the folder its runs start in when there is no worktree, as in team chat and in its own chat: **Team folder**, or **Shared folder (no team)** for an agent with no team. When there is more than one, pick it from the list at the top. The team folder is not a git checkout, so its files carry no change badges, and until the agent's first run there it reads "No files yet." OpenClaw agents keep their files in the OpenClaw Gateway's workspace instead.
 
 ## Chat with an agent
 
-The chat on an agent's page is a one-to-one conversation with that agent. It works with Clawboo Native agents, and with OpenClaw agents while the OpenClaw Gateway is connected. On a Claude Code, Codex or Hermes agent's page, the message box also goes through the OpenClaw Gateway connection, which does not run these agents. Without that connection it reads **Gateway not connected…**. Give these agents work in [team chat](/using/team-chat) and on the [board](/using/board) instead.
+The chat on an agent's page is a one-to-one conversation with that agent. For a Clawboo Native, Claude Code, Codex or Hermes agent, the Clawboo server runs the chat, so it needs no OpenClaw Gateway. The reply appears as the agent writes it, except on Hermes, whose reply appears in one piece when it finishes. An OpenClaw agent's chat goes through the OpenClaw Gateway, so it works while the Gateway is connected.
 
 - The chat shows the latest 150 messages. **Load earlier messages** at the top brings in older ones.
-- While the agent works, the send button turns into **Stop**.
-- Type `/reset` (or `/new`) and send it to start fresh. Every message stays on screen, a divider marks the point, and the agent stops carrying the conversation from before it. With your next message, a Clawboo Native agent gets back up to eight recent notes from its own memory and the global memory (not a team's), as background. See [Team chat](/using/team-chat) for how a reset works in a team.
+- While the agent works, the send button turns into **Stop**, and it stays that way until the turn ends.
+- The agent remembers the conversation from one message to the next. Claude Code, Codex and Hermes agents also get their SOUL.md with every message, as in team chat.
+- On Clawboo Native, Claude Code, Codex and Hermes, the chat starts in the agent's team folder, `~/.clawboo/workspaces/<team id>`, or `~/.clawboo/workspaces/_no-team` for an agent on no team, such as Boo Zero. Claude Code, Codex and Hermes only start there: they can still read and change any file your user account can. A Clawboo Native agent can read and write files only inside that folder. With **Let this Boo ask to run commands** switched on, it can also ask to run a command there, and the request waits for your answer above the message box. See [What agents can do](/concepts/permissions).
+- A turn that fails before the agent writes anything leaves a notice in the chat with the reason, such as a runtime with no key, or "the run went quiet for too long and was ended" when nothing happened for 30 minutes. A turn that fails partway keeps what the agent had written.
+- Type `/reset` (or `/new`) and send it to start fresh. Every message stays on screen, a divider marks the point, and the agent stops carrying the conversation from before it. With your next message, a Clawboo Native, Claude Code, Codex or Hermes agent gets back up to eight recent notes from its own memory and the global memory (not a team's), as background. See [Team chat](/using/team-chat) for how a reset works in a team.
 
 Only deleting the agent removes its chat history.
 
@@ -226,7 +229,7 @@ The message ends with `(422): agent content blocked: prompt-injection finding`.
 
 <Accordion title="The message box says Gateway not connected">
 
-This agent's chat goes through the OpenClaw Gateway. For an OpenClaw agent, connect the Gateway in **Settings > Runtimes**. For a Claude Code, Codex or Hermes agent, give it work in [team chat](/using/team-chat) or on the [board](/using/board) instead.
+This is an OpenClaw agent, and its chat goes through the OpenClaw Gateway. Connect the Gateway in **Settings > Runtimes**. Clawboo Native, Claude Code, Codex and Hermes agents chat through the Clawboo server, so their chat never shows this.
 
 </Accordion>
 

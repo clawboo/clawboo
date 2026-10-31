@@ -25,6 +25,7 @@ Each stored row belongs to one **session key**. The keys the server reads for it
 | Session key                                   | Conversation                                    |
 | --------------------------------------------- | ----------------------------------------------- |
 | `agent:<agentId>:native`                      | A Clawboo Native agent's 1:1 chat               |
+| `agent:<agentId>:<runtime>`                   | A Claude Code, Codex or Hermes agent's 1:1 chat |
 | `agent:<agentId>:team:<teamId>`               | One teammate's session in a team's General chat |
 | `agent:<agentId>:team:<teamId>:room:<roomId>` | The same, in one of the team's rooms            |
 
@@ -57,7 +58,7 @@ interface TranscriptEntry {
 | **Clear chat** in a team's chat                | `POST /api/teams/:id/chat/clear`       | Set aside: re-keyed with a `#cleared:<ts>` suffix, so no read here returns them |
 | **Delete** (when an agent is deleted)          | `DELETE /api/chat-history`             | Deleted                                                                         |
 
-All three also clear the saved resume points of the sessions involved. A resume point is the saved session an agent continues from on its next turn. Clawboo Native agents keep one for a 1:1 chat, and Clawboo Native and Codex team leaders keep one per team chat. Clear chat is documented in the [Teams API](/reference/rest-api/teams).
+All three also clear the saved resume points of the sessions involved. A resume point is the saved session an agent continues from on its next turn. Clawboo Native, Claude Code, Codex and Hermes agents keep one for a 1:1 chat, and Clawboo Native and Codex team leaders keep one per team chat. Clear chat is documented in the [Teams API](/reference/rest-api/teams).
 
 ## `GET /api/chat-history`
 
@@ -222,5 +223,5 @@ curl -X DELETE "http://localhost:18790/api/chat-history?sessionKey=agent:my-boo:
 
 - [Team chat](/using/team-chat): General, rooms, Clear chat and `/reset` in the dashboard
 - [Teams API](/reference/rest-api/teams): Clear chat, stop, and the team chat stream
-- [Agents API](/reference/rest-api/agents): 1:1 chat with a Clawboo Native agent and its live stream
+- [Agents API](/reference/rest-api/agents): 1:1 chat with a Clawboo Native, Claude Code, Codex or Hermes agent and its live stream
 - [Database schema](/reference/database-schema): the `chat_messages` table

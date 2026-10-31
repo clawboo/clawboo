@@ -129,11 +129,11 @@ The graph shows the newest 500 facts and 200 procedure rows. When the store hold
 
 ## Who can see a fact
 
-| Scope label      | Who can read it     | How a fact gets it                                                                                                                                 |
-| ---------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Team-shared**  | Agents on that team | An agent saved it while working for the team                                                                                                       |
-| **Global**       | Every agent         | You added it here, or an agent saved it outside a team: in a 1:1 chat with a Clawboo Native agent, as an agent on no team, or as an OpenClaw agent |
-| **Agent-scoped** | That one agent      | Saved with an agent scope through the API                                                                                                          |
+| Scope label      | Who can read it     | How a fact gets it                                                                                                                                                               |
+| ---------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Team-shared**  | Agents on that team | An agent saved it while working for the team                                                                                                                                     |
+| **Global**       | Every agent         | You added it here, or an agent saved it outside a team: in a 1:1 chat with a Clawboo Native, Claude Code, Codex or Hermes agent, as an agent on no team, or as an OpenClaw agent |
+| **Agent-scoped** | That one agent      | Saved with an agent scope through the API                                                                                                                                        |
 
 An agent on a team reads its team's facts, its own and the global ones, never another team's. OpenClaw agents read and save global facts only, because Clawboo cannot tell which OpenClaw agent is asking.
 
@@ -144,7 +144,7 @@ Nothing is saved automatically: an agent saves a fact when it decides to, with t
 | How the agent is working                                                                                          | What it gets from Memory automatically                                                                                                                                    |
 | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A routine runs it (Clawboo Native, Claude Code, Codex or Hermes agent), or a script starts it through the run API | At the start of the run, up to five facts most relevant to the task plus up to two closely related ones, 1,500 characters at most, with a note on saving and rating facts |
-| A 1:1 chat with a Clawboo Native agent                                                                            | Up to eight of its most recent notes (its own and global ones) on the first turn of a conversation, and again after `/reset`                                              |
+| A 1:1 chat with a Clawboo Native, Claude Code, Codex or Hermes agent                                              | Up to eight of its most recent notes (its own and global ones) on the first turn of a conversation, and again after `/reset`                                              |
 | Team chat, delegated work, and board tasks you start                                                              | Nothing: agents search memory with the tool when they choose to                                                                                                           |
 | An OpenClaw agent                                                                                                 | Nothing: it can search the global facts with the tool                                                                                                                     |
 

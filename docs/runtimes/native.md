@@ -128,17 +128,17 @@ Changing the default model later also moves a native Boo Zero onto it. Other age
 
 A native agent acts only through the tools Clawboo gives it. Which tools it has depends on where it runs.
 
-| Tool                                    | What it does                                                                                                    | When the agent has it                                        |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Peer room                               | Posts and reads notes in its team's [peer room](/concepts/peer-chat), as itself. The dashboard doesn't show it. | Team chat and team tasks                                     |
-| Memory                                  | Reads and saves shared [memory](/concepts/memory): its team's in team runs, the global memory in 1:1 chat       | Every run                                                    |
-| Board                                   | Reads tasks on the board. Clawboo itself makes the board changes.                                               | Every run                                                    |
-| Connectors                              | Uses the [connectors](/using/connectors) you grant it                                                           | Every run                                                    |
-| `delegate`                              | Hands a task to a teammate by name. Clawboo turns each call into a board task.                                  | Team chat                                                    |
-| `read_file`, `write_file`, `list_files` | Reads and writes files inside the run's folder, and nowhere else, not even through a symlink                    | Every run except 1:1 chat                                    |
-| `run_command`                           | Runs one program after you approve it                                                                           | Every run except 1:1 chat, once you allow it, not on Windows |
+| Tool                                    | What it does                                                                                                    | When the agent has it                        |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Peer room                               | Posts and reads notes in its team's [peer room](/concepts/peer-chat), as itself. The dashboard doesn't show it. | Team chat and team tasks                     |
+| Memory                                  | Reads and saves shared [memory](/concepts/memory): its team's in team runs, the global memory in 1:1 chat       | Every run                                    |
+| Board                                   | Reads tasks on the board. Clawboo itself makes the board changes.                                               | Every run                                    |
+| Connectors                              | Uses the [connectors](/using/connectors) you grant it                                                           | Every run                                    |
+| `delegate`                              | Hands a task to a teammate by name. Clawboo turns each call into a board task.                                  | Team chat                                    |
+| `read_file`, `write_file`, `list_files` | Reads and writes files inside the run's folder, and nowhere else, not even through a symlink                    | Every run                                    |
+| `run_command`                           | Runs one program after you approve it                                                                           | Every run, once you allow it, not on Windows |
 
-The run's folder is the task's own git worktree when the task run has one; see [Worktrees and handoff](/concepts/worktrees-and-handoff). Everywhere else except 1:1 chat it is the team's folder, `~/.clawboo/workspaces/<team id>`, shared with every teammate: in team chat, on the tasks agents delegate there, and on research and review task runs. A 1:1 chat has no folder, so there a native agent has no file tools and can't run commands. For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
+The run's folder is the task's own git worktree when the task run has one; see [Worktrees and handoff](/concepts/worktrees-and-handoff). Everywhere else it is the team's folder, `~/.clawboo/workspaces/<team id>`, shared with every teammate: in team chat, on the tasks agents delegate there, on research and review task runs, and in the agent's 1:1 chat. In its 1:1 chat, an agent on no team, such as Boo Zero, uses `~/.clawboo/workspaces/_no-team`. For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
 
 ### Running commands
 
@@ -166,7 +166,7 @@ Clawboo Native reports the cost of every turn:
 - **Every other model is estimated**, including the default leader models `claude-sonnet-5` and `gpt-5.4`. Clawboo prices the turn's token counts from its rate table and records the result as an estimate. A model missing from the table is priced at USD 3 per million input tokens and USD 15 per million output tokens.
 - **Local Ollama models are estimated too**, so Ollama runs show spend even though they cost you nothing.
 
-Estimates count toward your budgets. Budgets only warn you unless you set a hard cap. Turns with an exact price are charged as they happen, so a hard cap can stop a native run partway through. In team chat, estimated turns are charged when the run ends; in a 1:1 chat, only turns with an exact price are charged. See [Budgets and spend](/using/budgets-and-spend).
+Estimates count toward your budgets. Budgets only warn you unless you set a hard cap. Turns with an exact price are charged as they happen, so a hard cap can stop a native run partway through. Estimated turns are charged when the run ends, in team chat and in 1:1 chat alike. See [Budgets and spend](/using/budgets-and-spend).
 
 ## Disconnect
 
@@ -184,7 +184,7 @@ The bottom **Disconnect** deletes all ten provider keys from Clawboo's vault, no
 
 ## Limits
 
-- **Files only in the run's folder.** File tools work only inside the team's folder or the task's worktree. In 1:1 chat a native agent has no file or command tools of its own.
+- **Files only in the run's folder.** File tools work only inside the team's folder, where a 1:1 chat also starts, or the task's worktree.
 - **No commands on Windows.** `run_command` is never offered there.
 - **16 turns per run.** A run ends after 16 turns (model calls).
 - **No ChatGPT plan.** A ChatGPT subscription runs agents on [Codex](/runtimes/codex), not on Clawboo Native.
@@ -228,7 +228,7 @@ When you save a key, Clawboo checks it with the provider. `Invalid API key.` mea
 </Accordion>
 <Accordion title="The agent never offers to run a command">
 
-`run_command` exists only when all of these hold: **Let this Boo ask to run commands** is on for that agent; the run is not a 1:1 chat; and the server is not on Windows. If the agent says a command was refused, the program was on the refused list, or a command was already declined in that run.
+`run_command` exists only when both of these hold: **Let this Boo ask to run commands** is on for that agent, and the server is not on Windows. A run that started before you switched it on doesn't have it. If the agent says a command was refused, the program was on the refused list, or a command was already declined in that run.
 
 </Accordion>
 <Accordion title="Clawboo Native reads Connected though you never connected it">

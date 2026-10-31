@@ -11,7 +11,11 @@ import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
 import { isResetCommand, resetConversationContext, RESET_FAILED_NOTICE } from './resetConversation'
 import { stopAgentRun } from './stopChatOperation'
-import { sendNativeAgentMessage, stopNativeAgentChat } from './nativeAgentChatSend'
+import {
+  runsChatOnServer,
+  sendNativeAgentMessage,
+  stopNativeAgentChat,
+} from './nativeAgentChatSend'
 import { useNativeAgentChatStream } from './useNativeAgentChatStream'
 import { useNativeRuntimeState } from '@/features/runtimes/useNativeRuntimeState'
 import {
@@ -30,8 +34,10 @@ import { nextSeq } from '@/lib/sequenceKey'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
 import { TeamChips } from './TeamChips'
 
-// A native 1:1 chat has no Gateway 'running' status pushed, so "busy" is an activity
-// window: busy while the SSE streams a reply + a short grace after the last frame.
+// A server-run 1:1 chat has no Gateway 'running' status pushed, so "busy" is the
+// turn's own status frames plus an activity window: busy while the SSE streams a
+// reply + a short grace after the last frame (which also covers the gap between the
+// send and the run's first frame).
 const NATIVE_BUSY_GRACE_MS = 6000
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -138,14 +144,20 @@ export function ChatPanel({
       })
   }, [sessionKey, hasMoreEarlier, earlierCursor])
 
-  // ── Native 1:1 chat (the Boo-Zero personal chat + any clawboo-native agent) ──
-  // A native agent is NOT an OpenClaw Gateway agent, so its 1:1 chat is driven
+  // ── Server-run 1:1 chat (Clawboo Native incl. Boo Zero, Claude Code, Codex, Hermes) ──
+  // These agents are NOT OpenClaw Gateway agents, so their 1:1 chat is driven
   // server-side (POST /api/agents/:id/chat) + streamed back over SSE, NOT via
   // `client.chat.send` (which errors "agent no longer exists in configuration").
-  const isNativeChat = agent?.runtime === 'clawboo-native'
-  // Busy signal for the native chat (no Gateway 'running' status): busy while SSE
-  // frames stream + a grace, refreshed on every frame + on send.
+  const isServerChat = runsChatOnServer(agent?.runtime)
+  // Credential gating below reads Clawboo Native's own provider state only.
+  const isNativeAgent = agent?.runtime === 'clawboo-native'
+  // Busy signal for the server-run chat (no Gateway 'running' status): busy while
+  // SSE frames stream + a grace, refreshed on every frame + on send.
   const [nativeBusy, setNativeBusy] = useState(false)
+  // ...and for the whole run, from its own start/terminal status frames. A Hermes
+  // reply arrives in one piece and a Claude Code tool call can run for minutes with
+  // no text, so the activity window alone would reopen the composer mid-turn.
+  const [nativeTurnLive, setNativeTurnLive] = useState(false)
   const nativeActivityRef = useRef(0)
   const bumpNativeActivity = useCallback(() => {
     nativeActivityRef.current = Date.now()
@@ -161,42 +173,43 @@ export function ChatPanel({
     }, 1000)
     return () => clearInterval(id)
   }, [nativeBusy])
-  // Feed the native chat's SSE (committed turns + live token deltas) into the store.
-  // Inert for a non-native agent (enabled=false) — the Gateway path is unchanged.
+  // Feed the server-run chat's SSE (committed turns + live token deltas) into the
+  // store. Inert for an OpenClaw agent (enabled=false): the Gateway path is unchanged.
   useNativeAgentChatStream({
     agentId: agent?.id ?? '',
-    enabled: isNativeChat && Boolean(agent),
+    enabled: isServerChat && Boolean(agent),
     onActivity: bumpNativeActivity,
+    onTurnLive: setNativeTurnLive,
   })
 
-  const isRunning = isNativeChat ? nativeBusy : agent?.status === 'running'
+  const isRunning = isServerChat ? nativeBusy || nativeTurnLive : agent?.status === 'running'
   // Truthful native credential state: 'needs-auth' = the runtime has NO provider
   // key, so a send cannot possibly succeed — gate the composer + badge on it
   // instead of showing green "Connected" over a silent non-responder. Fail-safe:
   // null (probe pending/failed) never degrades the UI.
-  const nativeState = useNativeRuntimeState(isNativeChat)
-  const nativeKeyless = isNativeChat && nativeState === 'needs-auth'
+  const nativeState = useNativeRuntimeState(isNativeAgent)
+  const nativeKeyless = isNativeAgent && nativeState === 'needs-auth'
   // A per-agent mismatch: the runtime has SOME provider connected (so it is not
   // 'needs-auth'), but this agent's own configured slot has no key. It BADGES but
   // deliberately does not gate the composer: the flag is only refreshed on a
   // registry read, so gating on it would leave the composer dead after the user
   // fixes the key, whereas a send that still fails now surfaces the reason in the
   // transcript. `nativeKeyless` self-heals through the runtime-state poll.
-  const providerUnready = isNativeChat && agent?.providerReady === false
+  const providerUnready = isNativeAgent && agent?.providerReady === false
   const showDisconnected = nativeKeyless || providerUnready
-  // A native chat rides the SERVER's SSE — no Gateway client, and a dropped
+  // A server-run chat rides the SERVER's SSE: no Gateway client, and a dropped
   // Gateway socket is irrelevant to it, so `reconnecting` must not gate it off
   // (mixed fleets are real: `hydrateFleetFromClient` merges non-OpenClaw agents
   // into a Gateway-connected fleet). An OpenClaw chat needs BOTH a live client
   // and a live socket, so a mid-session drop gates its composer until the WS is
   // back — the send could not land anyway.
-  const transportReady = isNativeChat
+  const transportReady = isServerChat
     ? isSessionLive(connectionStatus)
     : Boolean(client) && connectionStatus === 'connected'
   const canSend = Boolean(transportReady && agent && sessionKey && !isRunning && !nativeKeyless)
   // The composer is live but the socket is not: say so, rather than leaving a
   // silently-dead "Message…" box.
-  const gatewayReconnecting = !isNativeChat && connectionStatus === 'reconnecting'
+  const gatewayReconnecting = !isServerChat && connectionStatus === 'reconnecting'
   const connectionTone = connectionStatusTone(connectionStatus)
 
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
@@ -240,18 +253,18 @@ export function ChatPanel({
   const handleSend = useCallback(
     async (message: string) => {
       if (!agent || !sessionKey) return
-      // A native chat drives the run server-side (no Gateway client); an OpenClaw
-      // chat requires a live client.
-      if (!isNativeChat && !client) return
+      // A server-run chat drives the run server-side (no Gateway client); an
+      // OpenClaw chat requires a live client.
+      if (!isServerChat && !client) return
 
-      // Start fresh. A native chat has no runtime session to command: its
+      // Start fresh. A server-run chat has no runtime session to command: its
       // continuity is a stored resume pointer, which the route drops. The
       // transcript is deliberately NOT cleared, so the person keeps every message
       // and gains a divider marking where the boo stopped carrying them. The
       // Gateway path handles the same command inside `sendChatMessage`, where the
       // command also has to reach the runtime.
       const trimmed = message.trim()
-      if (isNativeChat && isResetCommand(trimmed)) {
+      if (isServerChat && isResetCommand(trimmed)) {
         const divider = await resetConversationContext([sessionKey])
         useChatStore.getState().appendTranscript(sessionKey, [
           divider ?? {
@@ -271,11 +284,11 @@ export function ChatPanel({
         return
       }
 
-      // Transport: native agents run server-side + stream over SSE; OpenClaw agents
+      // Transport: server-run agents run server-side + stream over SSE; OpenClaw agents
       // ride the Gateway. `outbound` is the (context-injected) text delivered to the
       // model; `display` is what shows in the transcript (undefined = same as outbound).
       const deliver = async (outbound: string, display: string | undefined): Promise<void> => {
-        if (isNativeChat) {
+        if (isServerChat) {
           bumpNativeActivity()
           await sendNativeAgentMessage({
             agentId: agent.id,
@@ -349,7 +362,7 @@ export function ChatPanel({
 
       await deliver(message, undefined)
     },
-    [client, agent, sessionKey, isBooZeroChat, isNativeChat, teams, bumpNativeActivity],
+    [client, agent, sessionKey, isBooZeroChat, isServerChat, teams, bumpNativeActivity],
   )
 
   // ── No agent selected ───────────────────────────────────────────────────────
@@ -458,14 +471,14 @@ export function ChatPanel({
         // dropdown opens on `@` and filters as the user types. Empty array
         // outside Boo Zero's chat → no autocomplete (regular 1:1 behavior).
         mentionAgents={mentionTargets}
-        // Stop button — replaces Send while the agent is running. Native chats
+        // Stop button: replaces Send while the agent is running. Server-run chats
         // abort the server-side run (`/chat/stop`); OpenClaw chats pull the plug on
         // the in-flight LLM call via `chat.abort`. Both optimistically clear local
         // streaming state so the UI flips to idle within one render.
         isActive={isRunning}
         onStop={() => {
-          if (isNativeChat) {
-            void stopNativeAgentChat(agent.id)
+          if (isServerChat) {
+            if (sessionKey) void stopNativeAgentChat(agent.id, sessionKey)
           } else {
             void stopAgentRun({
               client,
@@ -478,14 +491,14 @@ export function ChatPanel({
         placeholder={
           nativeKeyless
             ? 'Clawboo Native is disconnected — set it up in Settings → Runtimes…'
-            : !isNativeChat && !client
+            : !isServerChat && !client
               ? 'Gateway not connected…'
               : gatewayReconnecting
                 ? 'Reconnecting to Gateway…'
                 : !sessionKey
                   ? 'No active session…'
                   : isRunning
-                    ? isNativeChat
+                    ? isServerChat
                       ? 'Thinking…'
                       : 'Agent is working…'
                     : isBooZeroChat

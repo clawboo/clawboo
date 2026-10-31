@@ -80,7 +80,7 @@ Create a team, and in **Customize team** set a member's runtime to **Claude Code
 | Leading a team    | A Claude Code leader hands work to teammates with the `team_delegate` tool.                                                                                                                       |
 | Worktree          | Only a task-runner run that names a repository gets its own git worktree. Team chat and the tasks a team hands out run without one. See [Worktrees and handoff](/concepts/worktrees-and-handoff). |
 | Steering          | Live. A comment on a running task joins the run at its next step, after the tool call in progress. See [Board](/using/board).                                                                     |
-| Sessions          | No session carries over from one team chat turn to the next; each turn starts from the context Clawboo builds. See [What an agent sees](/concepts/agent-context).                                 |
+| Sessions          | Each team chat turn starts fresh from the context Clawboo builds. Its one-to-one chat resumes one session until `/reset`. See [What an agent sees](/concepts/agent-context).                      |
 | Memory            | Clawboo's shared memory, through the Memory tools. Claude Code also loads your own Claude Code settings and memory files (below).                                                                 |
 | Cost              | The real cost each run reports. See [Costs](#costs).                                                                                                                                              |
 
@@ -96,7 +96,7 @@ Clawboo starts Claude Code with its permission prompts turned off (`permissionMo
 
 </Warning>
 
-- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, and on research and review runs (which includes every agent Routine you create in the app), Claude Code starts in its team's folder, `~/.clawboo/workspaces/<team id>`, which every member of the team shares (a task with no team uses `workspaces/_no-team`). That folder only sets where it starts: Claude Code can still read and change any file your user account can, including Clawboo's database and key vault.
+- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, in the agent's own chat, and on research and review runs (which includes every agent Routine you create in the app), Claude Code starts in its team's folder, `~/.clawboo/workspaces/<team id>`, which every member of the team shares (a task or an agent with no team uses `workspaces/_no-team`). That folder only sets where it starts: Claude Code can still read and change any file your user account can, including Clawboo's database and key vault.
 - **Clawboo's approvals do not cover Claude Code's own tools.** Calls the agent makes through Clawboo's Tools server (connectors, for example) go through Clawboo's checks and can ask you first. Claude Code's built-in shell, file and web tools never do.
 - **Clawboo hides some secrets from it, by name only.** Before a run, Clawboo removes its own secrets (the OpenClaw Gateway token, the dashboard access token and the vault master key) from the environment Claude Code inherits. It also removes a fixed list of common credentials, such as GitHub, npm, cloud, Stripe, Slack and database variables. Other variables pass through, and credential files on disk stay readable.
 
@@ -104,7 +104,7 @@ For work you do not trust, run Clawboo under a separate user account or in a vir
 
 ## Costs
 
-Claude Code reports the dollar cost of each run, and Clawboo records that figure as reported, not as an estimate. It counts toward your budgets, and Anthropic bills the same usage to your API key. If a team chat run ends without reporting a cost (it failed early, say), Clawboo records an estimate from the length of the prompt and reply instead.
+Claude Code reports the dollar cost of each run, and Clawboo records that figure as reported, not as an estimate. It counts toward your budgets, and Anthropic bills the same usage to your API key. If a run in team chat or in the agent's own chat ends without reporting a cost (it failed early, say), Clawboo records an estimate from the length of the prompt and reply instead.
 
 The cost arrives when a run finishes, so a hard cap cannot stop a Claude Code run partway through. See [Budgets and spend](/using/budgets-and-spend) for how each runtime's cost reaches your budgets.
 

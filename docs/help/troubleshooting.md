@@ -428,7 +428,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 **Fix:**
 
 - **Agent files.** Only OpenClaw reads AGENTS.md, IDENTITY.md and TOOLS.md as instructions, and OpenClaw 2026.9 and later skips TOOLS.md, so put tool notes in AGENTS.md. On the other runtimes the agent follows SOUL.md: all of it on Clawboo Native, the first 4,000 characters on Claude Code, Codex and Hermes. See [Edit the agent files](/using/agents#edit-the-agent-files).
-- **Files on your computer.** In team chat, a Clawboo Native agent can open files only in its team's folder (`~/.clawboo/workspaces/<team id>`). Claude Code, Codex and Hermes agents start in that folder too, so give them the file's full path. They can reach any file your user account can; see [What agents can do](/concepts/permissions).
+- **Files on your computer.** In team chat and in an agent's own chat, a Clawboo Native agent can open files only in its team's folder (`~/.clawboo/workspaces/<team id>`). Claude Code, Codex and Hermes agents start in that folder too, so give them the file's full path. They can reach any file your user account can; see [What agents can do](/concepts/permissions).
 
 ### More chat messages
 
@@ -468,9 +468,9 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 <Accordion title="Gateway not connected… in an agent's own chat">
 
-**What it means:** the chat on an agent's page works with Clawboo Native agents, and with OpenClaw agents while the Gateway is connected. Claude Code, Codex and Hermes agents take their work from team chat and the board.
+**What it means:** this is an OpenClaw agent, and its chat goes through the OpenClaw Gateway, which is not connected. Clawboo Native, Claude Code, Codex and Hermes agents chat through the Clawboo server and never show this.
 
-**Fix:** for an OpenClaw agent, connect the Gateway in **Settings > Runtimes**. For the other runtimes, give the agent work in its team's chat or on the **Board**.
+**Fix:** connect the Gateway in **Settings > Runtimes**.
 
 </Accordion>
 

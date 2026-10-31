@@ -232,7 +232,7 @@ Adapters bridge a callback source (a WebSocket `onEvent`, a subprocess stdout re
 
 `withIdleTimeout(source, { idleMs, onIdle, graceMs? })` re-yields an event stream and bounds the silence between events. The timer resets on every event, so a long run that keeps streaming never trips it. When silence passes `idleMs`, `onIdle()` fires (the caller aborts the run there), then a grace window (`IDLE_ABORT_GRACE_MS`, 5 seconds) lets the adapter surface its own terminal before the stream ends.
 
-The executor runner and the team engine's `serverDeliver` drain their runs through it; the other `events()` loops do not. Their ceiling is `DEFAULT_RUN_SILENT_TIMEOUT_MS` (30 minutes), overridable with `CLAWBOO_RUN_SILENT_TIMEOUT_MS`. The runner reports a silent timeout as a failed run with the cause stated.
+The executor runner, the team engine's `serverDeliver` and the 1:1 chat's `driveAgentChat` drain their runs through it; the other `events()` loops do not. Their ceiling is `DEFAULT_RUN_SILENT_TIMEOUT_MS` (30 minutes), overridable with `CLAWBOO_RUN_SILENT_TIMEOUT_MS`. The runner reports a silent timeout as a failed run with the cause stated, and a 1:1 chat that has not replied yet gets a notice that the run went quiet for too long.
 
 ## The contract suite
 

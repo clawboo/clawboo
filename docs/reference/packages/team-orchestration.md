@@ -84,8 +84,9 @@ would lose to its own claim, and one that completed the task would complete it t
 A team session key is `agent:<agentId>:team:<teamId>`, with `:room:<roomId>` appended for a room other than the
 team's own chat. `buildTeamSessionKey(agentId, teamId, roomId?)` writes one, and `parseTeamSessionKey`,
 `agentIdFromSessionKey`, `teamIdFromSessionKey` and `roomIdFromSessionKey` read one back; `isTeamSessionKey` is true
-with or without a room. A person's 1:1 chat with an agent uses `nativeChatSessionKey(agentId)`, which is
-`agent:<agentId>:native`. Build and parse keys only through these helpers, so the room suffix stays readable.
+with or without a room. A person's 1:1 chat with a Clawboo Native agent uses `nativeChatSessionKey(agentId)`, which
+is `agent:<agentId>:native`; the web server keys a Claude Code, Codex or Hermes agent's 1:1 chat
+`agent:<agentId>:<runtime>`. Build and parse keys only through these helpers, so the room suffix stays readable.
 
 ## Turn origins
 
