@@ -25,6 +25,7 @@ import fs from 'fs'
 
 import { resolveBasePathOrRoot, resolveClawbooDir } from '@clawboo/config'
 
+import { writeDatabaseBackup } from './backup'
 import { VERSION } from './version'
 import { nodeVersionError } from './node-version'
 import { tailServerLog } from './server-log'
@@ -550,19 +551,15 @@ async function runBackup(destArg: string | undefined, opts: { force: boolean }):
     fs.unlinkSync(dest)
   }
 
-  // Open the source read-only so a backup can run while the server is live
-  // without taking a write lock. better-sqlite3's online `.backup()` reads
-  // pages via the shared WAL and produces a single checkpoint-consistent file
-  // with no `-wal`/`-shm` sidecars — the documented "one-file" backup recipe.
-  const Database = (await import('better-sqlite3')).default as typeof import('better-sqlite3')
-  const src = new Database(source, { readonly: true, fileMustExist: true })
+  // Owner-only (0600) from the first byte, online and read-only against the live DB.
+  const spinner = ora({ text: `Backing up ${source} → ${dest}`, color: 'cyan' }).start()
   try {
-    const spinner = ora({ text: `Backing up ${source} → ${dest}`, color: 'cyan' }).start()
-    await src.backup(dest)
-    spinner.succeed(chalk.green('Backup complete'))
-  } finally {
-    src.close()
+    await writeDatabaseBackup(source, dest)
+  } catch (err) {
+    spinner.fail(chalk.red('Backup failed'))
+    throw err
   }
+  spinner.succeed(chalk.green('Backup complete'))
 
   const bytes = fs.statSync(dest).size
   const kb = (bytes / 1024).toFixed(1)

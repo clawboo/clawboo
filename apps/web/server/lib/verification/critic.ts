@@ -127,6 +127,6 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
       reviewedSha: input.reviewSha,
     }
   } finally {
-    await removeReviewWorktree(input.repoPath, review).catch(() => {})
+    await removeReviewWorktree(input.repoPath, review, input.reviewRootDir).catch(() => {})
   }
 }

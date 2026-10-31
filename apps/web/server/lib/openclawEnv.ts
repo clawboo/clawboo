@@ -8,6 +8,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { mkdirPrivateSync, writePrivateFileSync } from '@clawboo/config'
+
 /** Provider id → the env-var name OpenClaw expects in `~/.openclaw/.env`. */
 export const ENV_KEY_MAP: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -90,8 +92,9 @@ export function detectOauthProfileProviders(stateDir: string): Set<string> {
 }
 
 /** Upsert provider keys into `~/.openclaw/.env` + every existing agent's
- *  `auth-profiles.json`. Creates the state dir if missing. Mirrors what OpenClaw's
- *  own config write does. Non-string entries are skipped. */
+ *  `auth-profiles.json`. Creates the state dir (0700) if missing; both files are
+ *  written owner-only (0600). Mirrors what OpenClaw's own config write does.
+ *  Non-string entries are skipped. */
 export function writeOpenclawProviderKeys(stateDir: string, apiKeys: readonly unknown[]): void {
   const entries: { provider: string; key: string }[] = []
   for (const raw of apiKeys) {
@@ -102,7 +105,7 @@ export function writeOpenclawProviderKeys(stateDir: string, apiKeys: readonly un
     }
   }
   if (entries.length === 0) return
-  fs.mkdirSync(stateDir, { recursive: true })
+  mkdirPrivateSync(stateDir)
 
   // 1) .env upsert.
   const envPath = path.join(stateDir, '.env')
@@ -120,7 +123,7 @@ export function writeOpenclawProviderKeys(stateDir: string, apiKeys: readonly un
     else envLines.push(newLine)
   }
   while (envLines.length > 0 && envLines[envLines.length - 1] === '') envLines.pop()
-  fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8')
+  writePrivateFileSync(envPath, envLines.join('\n') + '\n')
 
   // 2) auth-profiles.json for every existing agent.
   const profilePaths = getAgentAuthProfilePaths(stateDir)
@@ -150,7 +153,7 @@ export function writeOpenclawProviderKeys(stateDir: string, apiKeys: readonly un
         }
         if (!data['lastGood'] || typeof data['lastGood'] !== 'object') data['lastGood'] = {}
         ;(data['lastGood'] as Record<string, unknown>)[provider] = profileName
-        fs.writeFileSync(profilePath, JSON.stringify(data, null, 2) + '\n', 'utf8')
+        writePrivateFileSync(profilePath, JSON.stringify(data, null, 2) + '\n')
       } catch {
         // Best-effort per agent
       }
@@ -166,7 +169,7 @@ export function removeOpenclawProviderKey(stateDir: string, provider: string): v
     const lines = fs.readFileSync(envPath, 'utf8').split('\n')
     const filtered = lines.filter((l) => !l.trim().startsWith(`${envVarName}=`))
     while (filtered.length > 0 && filtered[filtered.length - 1] === '') filtered.pop()
-    fs.writeFileSync(envPath, filtered.length ? filtered.join('\n') + '\n' : '', 'utf8')
+    writePrivateFileSync(envPath, filtered.length ? filtered.join('\n') + '\n' : '')
   } catch {
     // No .env → nothing to remove
   }
@@ -188,7 +191,7 @@ export function removeOpenclawProviderKey(stateDir: string, provider: string): v
       ) {
         delete (lastGood as Record<string, unknown>)[provider]
       }
-      fs.writeFileSync(profilePath, JSON.stringify(data, null, 2) + '\n', 'utf8')
+      writePrivateFileSync(profilePath, JSON.stringify(data, null, 2) + '\n')
     } catch {
       // Best-effort
     }

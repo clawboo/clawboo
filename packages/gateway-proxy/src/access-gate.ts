@@ -5,7 +5,10 @@ import { URL } from 'node:url'
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface AccessGateOptions {
-  /** Value of the STUDIO_ACCESS_TOKEN env var (blank/undefined = gate disabled). */
+  /**
+   * Value of the STUDIO_ACCESS_TOKEN env var (blank/undefined = gate disabled).
+   * A token with a character outside `ACCESS_TOKEN_CHARSET` throws.
+   */
   token?: string
   /** Cookie name to set. Defaults to 'clawboo_access'. */
   cookieName?: string
@@ -133,28 +136,42 @@ export function isForwardedRequest(req: IncomingMessage): boolean {
 
 /** Header-safe token charset: cookie-value safe + identical between the cookie read
  *  and the percent-decoded query-param read (no '%'/'+'/';'/',' / whitespace). */
+export const ACCESS_TOKEN_CHARSET = 'A-Za-z0-9._~-'
 const SAFE_TOKEN_RE = /^[A-Za-z0-9._~-]+$/
 
+/**
+ * The first character of `token` the gate cannot use, or null when the token is
+ * usable. A blank or unset token is null too: no token means no gate, which is a
+ * choice, not an error. Trims first, exactly as `createAccessGate` does.
+ */
+export function findUnsupportedTokenChar(token: string | undefined): string | null {
+  const trimmed = String(token ?? '').trim()
+  if (!trimmed || SAFE_TOKEN_RE.test(trimmed)) return null
+  return [...trimmed].find((c) => !SAFE_TOKEN_RE.test(c)) ?? null
+}
+
 export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
-  let token = String(options.token ?? '').trim()
+  const token = String(options.token ?? '').trim()
   const cookieName = String(options.cookieName ?? 'clawboo_access').trim() || 'clawboo_access'
   const queryParam = String(options.queryParam ?? 'access_token').trim() || 'access_token'
   // '' at the origin root, else '/mount'. The cookie needs a non-empty Path.
   const basePath = String(options.basePath ?? '').trim()
   const cookiePath = basePath || '/'
   const authorizeRuntime = options.authorizeRuntime
-  // The gate is the ONLY auth for a non-loopback bind, and the token is written raw
-  // into the Set-Cookie value + compared raw against the cookie but percent-decoded in
-  // the query path. A token with a cookie-delimiter / non-token char would corrupt the
-  // cookie and silently lock the operator out of every /api/* route (a permanent 401
-  // with no hint). Fail LOUD and DISABLE the gate rather than ship that lockout.
-  if (token && !SAFE_TOKEN_RE.test(token)) {
-    const bad = [...token].find((c) => !SAFE_TOKEN_RE.test(c))
-    console.warn(
-      `[clawboo] STUDIO_ACCESS_TOKEN contains an unsupported character (${JSON.stringify(bad)}); ` +
-        'the access gate is DISABLED. Use only [A-Za-z0-9._~-].',
+  // The token is written raw into the Set-Cookie value and compared raw against the
+  // cookie, but percent-decoded on the query path. A token with a cookie delimiter
+  // or other non-token character would corrupt the cookie and lock the operator out
+  // of every /api/* route. Dropping the gate instead would serve those routes with
+  // no auth at all, which a loopback bind behind a same-host reverse proxy does not
+  // catch. So an unusable token is an error: the operator asked for a gate, and
+  // gets one or nothing starts. The server checks first and exits with a SECURITY
+  // message; this throw is the backstop for any other caller.
+  const unsupported = findUnsupportedTokenChar(token)
+  if (unsupported !== null) {
+    throw new Error(
+      `STUDIO_ACCESS_TOKEN contains an unsupported character (${JSON.stringify(unsupported)}); ` +
+        `use only [${ACCESS_TOKEN_CHARSET}].`,
     )
-    token = ''
   }
   const enabled = Boolean(token)
 

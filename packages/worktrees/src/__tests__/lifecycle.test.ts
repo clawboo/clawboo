@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { utimes, writeFile } from 'node:fs/promises'
+import { mkdir, utimes, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -213,6 +213,49 @@ describe('worktree lifecycle', () => {
     expect(await isDetached(review.worktreePath)).toBe(true)
     await removeReviewWorktree(repo, review)
     expect(existsSync(review.worktreePath)).toBe(false)
+  })
+
+  it('refuses to tear down a review worktree path that is not directly under the review root', async () => {
+    const victim = path.join(repo, 'victim')
+    await mkdir(victim)
+    await writeFile(path.join(victim, 'keep.txt'), 'keep')
+    const sha = await resolveBaseSha(repo, 'HEAD')
+    const review = await provisionReviewWorktree({ repoPath: repo, sha })
+    const reviewRoot = path.dirname(review.worktreePath)
+
+    for (const doctored of [
+      victim, // outside the root
+      path.join(reviewRoot, '..', '..', 'victim'), // a traversal out of it
+      reviewRoot, // the root itself, which holds every review
+      path.join(review.worktreePath, 'nested'), // deeper than a review directory
+      path.join(`${reviewRoot}-old`, 'x'), // a sibling that shares the root's spelling
+    ]) {
+      await expect(
+        removeReviewWorktree(repo, { ...review, worktreePath: doctored }),
+        doctored,
+      ).rejects.toThrow(/not inside/)
+    }
+    expect(existsSync(path.join(victim, 'keep.txt'))).toBe(true)
+    expect(existsSync(review.worktreePath)).toBe(true)
+
+    await removeReviewWorktree(repo, review)
+    expect(existsSync(review.worktreePath)).toBe(false)
+  })
+
+  it('tears down a review worktree under a custom root only when given that root', async () => {
+    const sha = await resolveBaseSha(repo, 'HEAD')
+    const rootDir = path.join(repo, 'custom-reviews')
+    const review = await provisionReviewWorktree({ repoPath: repo, sha, rootDir })
+    await expect(removeReviewWorktree(repo, review)).rejects.toThrow(/not inside/)
+    expect(existsSync(review.worktreePath)).toBe(true)
+    await removeReviewWorktree(repo, review, rootDir)
+    expect(existsSync(review.worktreePath)).toBe(false)
+  })
+
+  it('refuses to provision a review worktree whose sha would leave the review root', async () => {
+    await expect(provisionReviewWorktree({ repoPath: repo, sha: '../../escape' })).rejects.toThrow(
+      /not inside/,
+    )
   })
 
   it('cross-runtime cold handoff: a DIFFERENT runtime reconstructs state from the worktree alone', async () => {
