@@ -33,7 +33,7 @@ Servers are built with the low-level MCP SDK `Server` + `setRequestHandler` API,
 
 `createTasksServer(db, opts?)` → `clawboo-tasks`. A protocol façade over the durable board so any runtime can coordinate on the same kanban board. The atomic claim surfaces a conflict as a tool-error the model must not retry (the "never retry a 409" rule). `opts.readOnly` serves only `list_tasks` and `get_task`, which is how a team agent gets board visibility without racing the engine's claims.
 
-A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown, the parent is already at its child-count or depth ceiling, or the root-creation rate is exhausted.
+A few tools return a tool-error (`isError: true`) rather than throwing: `get_task` on an unknown id, `claim_task` / `assign_task` on a conflict, `update_task_status` / `block_task` / `unblock_task` on an illegal state-machine transition or a card a person moved after the task's latest run started, `link_task` on a dependency cycle, and `create_task` / `create_subtask` when the parent is unknown, the parent is already at its child-count or depth ceiling, or the root-creation rate is exhausted.
 
 ### `list_tasks`
 
@@ -125,7 +125,7 @@ Release an `in_progress` task back to `todo`.
 
 ### `update_task_status`
 
-Transition a task status. State-machine enforced; an illegal transition returns a tool-error `status change failed: <reason>`.
+Transition a task status. State-machine enforced; an illegal transition returns a tool-error `status change failed: <reason>`. When a person moved the card after the task's latest run started, the run was overruled: the call returns a tool-error that names the column the person chose and says not to retry, and the status stays as the person left it. A run started after the move writes as usual.
 
 ```ts
 {
@@ -136,7 +136,7 @@ Transition a task status. State-machine enforced; an illegal transition returns 
 
 ### `block_task`
 
-Mark a task blocked. Tool-error `block failed: <reason>` on an illegal transition.
+Mark a task blocked. Tool-error `block failed: <reason>` on an illegal transition; refused the same way as `update_task_status` after a person moved the card.
 
 ```ts
 {
@@ -146,7 +146,7 @@ Mark a task blocked. Tool-error `block failed: <reason>` on an illegal transitio
 
 ### `unblock_task`
 
-Unblock a task (back to `todo`). Tool-error `unblock failed: <reason>` on an illegal transition.
+Unblock a task (back to `todo`). Tool-error `unblock failed: <reason>` on an illegal transition; refused the same way as `update_task_status` after a person moved the card.
 
 ```ts
 {
