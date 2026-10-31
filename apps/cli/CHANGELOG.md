@@ -1,5 +1,123 @@
 # clawboo
 
+## 0.6.0
+
+### Minor Changes
+
+- 6ce571a: The Board is calmer and easier to read. It opens on Kanban, a dense status board with Needs you first, and keeps Today, Week and Month as its calendar views; a view you already picked is kept. Cards and lanes are neutral, with colour only in each column's status mark and amber for what needs you. Titles are 14px, times and costs use plain figures, and cards no longer tint, clip, lift on hover or roll their counts. The header is one bar: the title, the team, the Star and New task (C). The toolbar holds Find (/ or Cmd+K), Filter (by agent, tasks nobody has, or what is running now), Display (routine runs, the Cancelled column, cost and time on cards) and the view menu. A Needs you card shows why it waits and one action, with the rest in its menu. The task drawer reads like a document: the agent's report once, as markdown, then the brief, the properties, verification, the workspace, run history, comments and activity, each folding from its heading, and J and K step through the column. Loading, empty and filtered states match the board.
+- 9bbe4f9: New task on the board now starts with one field: write what should get done and press Enter. It suggests who should do it by matching your words to each agent's name and the role in its SOUL.md, and otherwise suggests the agent you last gave a task to, then the team lead. A note beside the agent says why, and you can pick someone else; picking an agent also picks its team, so with the board showing all teams you no longer choose a team first. More options opens the full form with Team, Agent and Details.
+- a9dddb7: Your reply on a task now reaches its agent whatever the task's status, and you can see where it went. A reply to a task that is waiting on you, or waiting in To do, starts the agent on it again, so answering a blocker no longer needs a second click on Retry; quick replies start one run between them. A reply to a running task goes into the run, and one to a task in review waits for the agent to read after the check. A task moved back to To do still reaches the agent it belongs to. A finished task cannot run again, so the reply is not sent and the note under it offers to send it as a follow-up task for the same agent. The board's task drawer now has a reply box, and both the drawer and the chat's task card show under each reply where it went. The chat card's Send and retry button is gone, since a reply now does both.
+- 5e10613: A team now has chat rooms, a comment on a running task reaches the agent while it works, and the workspace around a team is rebuilt: a sidebar you can resize and hide, and cards beside every chat for its graph, tasks, browser and activity.
+
+  **Steer a running task.** Comment on a task from a team chat's Tasks card, or from Tasks & Routines on the agent's page, and the agent working on it reads the comment during the run, instead of only at its next one. Native agents, Claude Code, Codex and OpenClaw take it at the run's next step without stopping anything; Hermes pauses the run and resumes the same session with your comment. The comment always lands in the agent's mailbox as well, so a task that isn't running yet still gets it. Codex runs are now hosted in `codex app-server`, which is what lets them be steered; an older Codex without it falls back to `codex exec`, where a comment waits for the next run.
+
+  **Rooms.** Next to the team's own chat, now called General, a team can have rooms, each with a subset of its members. A room is its own conversation: its own transcript, its own task cards and its own graph, while Boo Zero still leads every room and the team's rules, brief, memory and board stay team-wide. Create a room from the sidebar's New room, then pin, rename or delete it from its menu. Deleting a room archives it: its conversation is kept and whatever it was working on stops.
+
+  **Clear chat.** Every chat's menu, General's included, can clear it. The messages are set aside rather than deleted, the agents start that conversation fresh (OpenClaw agents are sent `/reset`, as typing it does), and the chat's timeline stops showing the task cards made before the clear; they stay on the board and in the Tasks card.
+
+  **Sidebar.** Drag the agent column's edge to resize it (double-click resets it); drag it narrow enough, click its toggle or press Cmd+\ and it hides completely. While it is hidden, a toggle at the start of each page's header brings it back, and hovering that toggle shows the sidebar over the page without docking it. The top of the column shows the team's name, a search, and a grid of the team's agents with a dot on the ones working. Below them are the rooms, and the nav: Home, Org chart (the new name for Atlas), Board, Connectors, Memory, Marketplace and Settings. Fleet now lives in Settings, under Insights. Cmd+1 to Cmd+4 open Org chart, Board, Connectors and Memory.
+
+  **Cards beside the chat.** An agent's page puts its chat on the left and cards on the right, each toggled from the chat's header: Graph, Tasks & Routines, Browser, Activity and Details (its workspace, personality, permissions and files). Tasks & Routines shows the agent's tasks and the routines that send it work, with New routine set up for that agent. A team chat stacks a Browser window, the team's (or room's) graph, a Tasks card and Activity: the Tasks card sorts the team's work into Needs you, In progress, To do, Done and Cancelled, and opening a task shows its progress and comments, with the comment box that steers its agent and a button to open it on the Board.
+
+  **Home.** Each team has a Home page, the place its dashboards and its agents' artifacts will live.
+
+  **Org chart.** With the browser panel open, the radial org chart turns around Boo Zero to bring the team you pick next to the panel, and picking an agent steps it forward while its teammates make room. Closing the panel or switching team settles the team back. The turn is remembered; the focus is not.
+
+### Patch Changes
+
+- 56216ee: Creating and deleting agents now works without an OpenClaw Gateway, and a new agent made on the Org chart always joins a team.
+
+  **Create.** Create Boo shows on every install. A new Boo runs on OpenClaw while the server is connected to an OpenClaw Gateway and on Clawboo Native otherwise, and the dialog says which. It still joins the team selected in the sidebar. The graph's New agent, from a thread or the + button, follows the same rule; without a Gateway it used to fail with `gateway_disconnected`, and a new native agent now appears on the canvas at once instead of after a reload.
+
+  **Delete.** The trash icon in the all-agents list and a team's Delete with agents no longer need a Gateway. Delete with agents removes the team's agents instead of leaving them behind, and its confirm mentions the Gateway only when the team has an OpenClaw agent.
+
+  **Org chart.** A thread pulled off Boo Zero and let go on empty canvas gives the new agent the team selected in the sidebar, or the first team when none is, and the picker's New agent row names it. The agent used to be made with no team, and the Org chart did not draw it.
+
+  **Select in sidebar** is gone from the graph's right-click menu. It never marked anything in the sidebar; Open agent does.
+
+- 3c9e64b: An agent can no longer move a card back after you moved it. When you move a task on the board while an agent is still working on it, the run is stopped, but a coding agent could still call its task tools before the stop landed and put the card back where you took it from. Those status changes are now refused, with a message telling the agent the task's status is yours to set and not to try again. Once the task runs again, the agent's status changes work as usual.
+- f272bc0: Loading the dashboard no longer counts against the API's request limit. The dashboard's script files, fonts and page shell were counted twice, once under their own limit and once under the API's, so a run of page loads could make the API answer "Too many requests" while API traffic itself was far below the limit. Those files now count only under their own limit, and both limits are unchanged.
+- f272bc0: An agent's Boo no longer loses its body when another copy of it is mounted but hidden. With the sidebar hidden, its agent grid stays in the page for the peek panel, and a Codex Boo elsewhere (a card on the Board, for one) took its colours and outline from that hidden copy and drew only its eyes and paws. Every Boo now draws from its own copy, Codex, Claude Code and Hermes Boos and the generated mascot alike, wherever the others are and whether or not they are shown.
+- 72882bd: The Kanban board's lanes run unbroken to the bottom again. On a board with few cards, a faint line crossed every lane where its cards ended, left over from the rule that separates days in the Today, Week and Month views; those views keep it. Dropdown menus now fit their longest option, so the board's team picker reads "Growth" in full instead of "Gro..." when that team is checked, and the same holds for every other dropdown that was as narrow as its button, such as the Marketplace's sort.
+- 6e612b1: Clawboo Native now runs on a local Ollama with no API key and no environment variable, as onboarding has always promised.
+
+  Picking **Ollama** on the onboarding connect step used to record nothing. Without `OLLAMA_BASE_URL` set, the team you deployed next landed on Anthropic, no Boo Zero was created, and the first team message answered "Clawboo Native has no provider key connected". Even with the variable set, every deploy row read "Clawboo Native unavailable" and the 1:1 chat stayed disabled with a "Disconnected" badge while team chat worked.
+
+  Clawboo now records the Ollama choice itself, and that choice counts as a connected provider everywhere: the runtime reads Connected, agents deployed without a model pick run on Ollama, Boo Zero is created on it, and both team chat and 1:1 chat work. Ollama is reached at `http://localhost:11434/v1`, or at `OLLAMA_BASE_URL` when you set one. Pull the model first (`ollama pull llama3.2`, the default).
+
+  You can also turn Ollama on or off later from **Settings → Runtimes → Clawboo Native → Manage**, which now lists it beside your provider keys, with its default model and a **Disconnect Ollama** that leaves your keys alone.
+
+- 6ce571a: Images in an agent's markdown no longer load on their own. An image in chat, a task's report or its comments used to load from wherever its address pointed as soon as it was shown, so an agent steered by something it read could send data out in that address. It now shows as a link named after its alt text that opens only when you click it; an address that is not a web or same-site one is only named.
+- 282b7c1: Close an access-gate bypass on installs behind a reverse proxy on the same machine. With `STUDIO_ACCESS_TOKEN` set, the gate skipped the cookie for any `/api/mcp/*` request from a loopback address, so that Clawboo's own runtimes could reach their MCP servers. A proxy such as nginx, Caddy or a Cloudflare Tunnel connector forwards every request from `127.0.0.1`, so anyone who could reach the proxy could use the Tasks, Memory, Tools and TeamChat MCP servers without the token, and could ask `/api/mcp/config` to sign them an attach URL for any agent, and with it that agent's connector grants.
+
+  A loopback address no longer admits anything on its own. Every MCP attach URL Clawboo writes now carries an `attachToken`, derived from the install's attach-signing secret, and a cookieless request to an MCP server needs it. The token only counts on a request that dialed the loopback port directly: it is refused from another host and on any request that came through a proxy. `/api/mcp/config` always needs the cookie. The runtimes Clawboo spawns, the verification critic included, get the token automatically, and keep loopback off any HTTP proxy configured in the server's environment (`NO_PROXY`). A local OpenClaw Gateway is re-registered with the token on the next connect; a remote one is never handed it.
+
+  If you attached an agent yourself by URL on an install with the gate on, copy the URL again from `GET /api/mcp/config` (sending the access cookie): the old one carries no token and now gets a `401`. The Claude Code snippet now quotes the URL so its query survives the shell, and the request log masks the token and the attach signatures. The self-host guide now says a reverse proxy needs the access token unless it authenticates requests itself, and shows how to deny the four MCP server routes at nginx, Caddy and a Cloudflare Tunnel.
+
+- 282b7c1: Close two identity gaps in the MCP servers and harden the server's HTTP edge.
+
+  **TeamChat no longer takes an author from tool arguments over HTTP.** A TeamChat session without a signed room-and-author binding used to accept `authorAgentId`, `teamId` and `roomId` from the model, so it could read any team's room and post into it as any agent. The verification critic and any run for a task without a team attach exactly that way. Such a session is now served no TeamChat tools, the same rule Tasks and Memory already apply to an unidentified caller. Runs with a team keep their bound tools, and the TeamChat stdio bin, where the operator is the caller, still takes identity from its arguments.
+
+  **`create_subtask` checks the team.** On a session bound to a team, a parent task from another team is now refused with the same "not found" a read gets. Before, the new subtask inherited the other team, the cross-team write that `create_task` already refused.
+
+  **The API routes match case exactly.** `/API/settings` and other case variants no longer reach the lowercase routes. The access gate already folded case, so nothing got past it, but the router now agrees with it.
+
+  **A warning for a proxy with no token.** With `STUDIO_ACCESS_TOKEN` unset, the server now logs a one-time `SECURITY:` warning when a request arrives through a reverse proxy, since everything behind that proxy is then reachable without a credential. It never blocks a request.
+
+- 6e612b1: Clawboo Native agents now run on the provider you picked as your default.
+
+  A team deployed without a per-agent model pick used to take the first provider with a key in a fixed order (Anthropic, then OpenAI, then OpenRouter, then Ollama). An `ANTHROPIC_API_KEY` in your shell or in OpenClaw's `~/.openclaw/.env` therefore put every agent on Anthropic, a billed provider, even after you picked another provider as your default, while the deploy dialog still read "Default · <your model>".
+
+  Agents now use your default provider whenever it is set up. The leader runs your default model and the specialists run that provider's faster, cheaper model. On Ollama every agent runs the model you picked, as long as Ollama still has it pulled. The fixed order only applies when you have no default, or its provider is no longer set up. Each row of the deploy dialog now names the model that row will actually get, so the leader and the specialists can read differently.
+
+- 6e612b1: Clawboo Native now lists the models your local Ollama has actually pulled, instead of always offering `llama3.2`.
+
+  Onboarding used to check only that Ollama answered. With Ollama running but `llama3.2` never pulled, you got through onboarding and then every run failed with "model not found".
+
+  The onboarding model dropdown and the Ollama row in **Settings → Runtimes → Clawboo Native → Manage** now list the chat models your Ollama has pulled. Embedding models such as `nomic-embed-text` are left out, because they can't run an agent, and a model that can't use tools is marked. If Ollama is running with no chat model, both places say so and show `ollama pull llama3.2` with a **Check again** button. Continue on the connect step now also checks that the model you picked is pulled, and gives the `ollama pull` command when it isn't.
+
+  Agents created without a model pick on Ollama start from your default Ollama model, or from `llama3.2` when none is recorded, and keep it when it's pulled. Otherwise they get the most recently pulled model that can use tools, the same one for the lead and the specialists, so Ollama doesn't swap models in memory between turns. The model the pickers preselect is a fallback recommendation worked out the same way from `llama3.2`. A run that still reaches a missing model, or one without tool support, now says which model and how to fix it instead of showing Ollama's raw error.
+
+- 6e612b1: Setting up OpenClaw now works on a local Ollama. If Ollama is the provider you connected for Clawboo Native, **Set up OpenClaw** configures OpenClaw on it instead of asking for an Anthropic, OpenAI or OpenRouter key.
+
+  `POST /api/system/auto-configure-openclaw` has a new Ollama step, the last one before the key prompt: a connected key, OpenClaw's own ChatGPT sign-in and the offer of that sign-in to a signed-in `codex` CLI all come first. It writes `OLLAMA_API_KEY=ollama-local` to OpenClaw's `.env` and a default model your Ollama has pulled, and points OpenClaw at `OLLAMA_BASE_URL` when you set one. Like the rest of the route it never replaces a default model you already set, and it keeps an `OLLAMA_API_KEY` that already has a value.
+
+  The response also says whether Ollama has that default model. When it doesn't (or Ollama isn't running), the setup stops before starting the Gateway and shows the `ollama pull` command, instead of reporting a success whose first message would fail.
+
+  `POST /api/system/configure-openclaw` now returns the `model` it wrote, which for Ollama can differ from the one requested.
+
+- 6e612b1: Setting up or reconnecting OpenClaw now connects to the Gateway port in your OpenClaw config. `POST /api/system/auto-configure-openclaw` kept a `gateway.port` you had changed, but it always saved `ws://localhost:18789` as Clawboo's Gateway URL, so the Gateway started on your port while Clawboo tried to connect on 18789. The saved URL now uses the same port the Gateway route starts on.
+- 56216ee: An OpenClaw agent deleted while its Gateway is down no longer comes back. Before, only Clawboo's copy was removed: the next time the Gateway connected, the agent reappeared without its team and was then put into the first team. Clawboo now remembers the delete, sends it to the Gateway on the next connection, and keeps the agent out of the sidebar and the graphs until then. If the Gateway refuses the delete, for example because it is its only agent, the agent comes back.
+- 6e612b1: `POST /api/system/configure-openclaw` with the `ollama` provider now writes a config OpenClaw can run. Before, every OpenClaw run on that config failed with "Unknown model: ollama/llama3.2", whether or not the model was pulled.
+
+  OpenClaw only runs Ollama models once it has an Ollama credential, and Clawboo wrote none. It now writes `OLLAMA_API_KEY=ollama-local`, the local marker OpenClaw accepts, which isn't a secret.
+
+  The default model is now one your Ollama has actually pulled: the requested model (or `llama3.2`) when it's pulled, otherwise the most recently pulled model that can use tools, the same pick a new Clawboo Native agent gets.
+
+  If you set `OLLAMA_BASE_URL`, OpenClaw now uses that Ollama too. OpenClaw doesn't read the variable itself, so Clawboo writes it into OpenClaw's config.
+
+- 8ef5824: Approving this device during OpenClaw setup no longer leaves the setup stuck. When the reconnect after approval failed, or OpenClaw still reported the device as unapproved, the approval card stayed on "Approved. Reconnecting…" with only Cancel to press. The setup now shows what went wrong with a Retry button, and Retry brings back a fresh approval card if the device still needs approving.
+
+  In onboarding, pressing Escape on the team step to go back to Add runtimes no longer disconnects an OpenClaw Gateway you just set up there.
+
+- 0f6724e: The Org chart's Radial layout no longer piles each team's Boos on top of each other.
+
+  **Radial spacing.** Each team's Boos used to fan out so close together that they overlapped, and only the graph's settling animation pushed them apart. With "reduce motion" turned on in the operating system that animation never ran, so the Org chart, the screen the app opens on, showed every team as one stacked pile with the names printed over each other. The fans are now spaced so that no Boo, name or thought bubble lands on a neighbour: a big team's fan opens wider and reaches further out, and the ring of teams grows when their fans would meet. An Org chart already saved in Radial keeps its positions, which now settle apart instead of staying piled up; press Re-layout to move it onto the new spacing.
+
+  **Reduced motion.** With reduce motion on, the graph now lands straight on the positions its animation would have reached instead of skipping that step, so Boos dropped onto each other, or drawn in by the agent browser, still end up apart. The camera's fit after a layout or a resize no longer glides either.
+
+  **Zoom controls.** The Org chart and the Team graph beside a team chat now frame their Boos above the zoom and fit controls in the bottom-right corner, when they first lay out, when they are resized and when you press Fit to view, so the last Boo in that corner is no longer hidden under them.
+
+- 3cd660b: Updating from the dashboard keeps working after the first update, and the OpenClaw Gateway starts again after an OpenClaw upgrade without a trip to the terminal.
+
+  **Updates.** The dashboard server used to run inside Clawboo's own install folder, which `npm install -g clawboo@latest` replaces. After one update from the "Click to update" chip, the server and everything it started sat in a folder that no longer existed: the next update failed with "exit code 7", the OpenClaw Gateway could not be started, and the restart into the new version never came up. The server now runs in `~/.clawboo`, and a server that does start in a deleted folder moves to a valid one before it loads anything else, so the restart after an update comes up on the new version. Updating from 0.5.0 benefits too: the old version's update starts the new one, which recovers by itself.
+
+  When an update fails, the chip now shows npm's own reason (a missing version, a network failure, a permission problem, a package whose install script failed) instead of only an exit code.
+
+  **OpenClaw Gateway.** A newer OpenClaw can refuse to start until `openclaw doctor --fix` migrates data an older version wrote. When Clawboo starts the Gateway and OpenClaw asks for that, Clawboo runs `openclaw doctor --fix --non-interactive` once and starts the Gateway again, leaving any launchd or systemd Gateway service alone. A Gateway that fails to start for another stated reason now reports that reason at once instead of after a 60-second wait.
+
+  **Board.** While one of a routine's runs is still going, the calendar marks the right next run: a later run the same day can be the next one, and a run is only shown as possibly skipped while it is the first still on the calendar.
+
 ## 0.5.0
 
 ### Minor Changes
