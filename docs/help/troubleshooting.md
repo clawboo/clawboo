@@ -638,7 +638,10 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 **What it means:** the server exits with code 1 rather than leave the API open. Either `HOST` makes it listen on a network address and it has no access token, or `STUDIO_ACCESS_TOKEN` has a character other than letters, digits, `.`, `_`, `~` and `-`, which stops it on any address (the message names the character).
 
-**Fix:** set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on this computer only. To create a token, run `openssl rand -hex 24`; output from `openssl rand -base64` can contain `+`, `/` or `=`.
+**Fix:** the message says which case it is.
+
+- **A character the token cannot use:** replace the token with one made by `openssl rand -hex 24` (output from `openssl rand -base64` can contain `+`, `/` or `=`), or unset `STUDIO_ACCESS_TOKEN`. Unsetting `HOST` does not help here.
+- **A network address with no token:** set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on this computer only.
 
 ### Agents lost their Clawboo tools after setting HOST
 

@@ -23,17 +23,30 @@ export function mkdirPrivateSync(dir: string): void {
  * Write `data` to a file only its owner can read. A new file is created 0600. An
  * existing file is narrowed to 0600 BEFORE the new contents land, since
  * `writeFileSync`'s `mode` applies only on create, so a secret is never written
- * into a file other users can read. A chmod that fails on an existing file (one
- * owned by another user, an unusual filesystem) is reported and the write still
- * goes ahead, as it did before this helper existed.
+ * into a file other users can read. When that chmod fails (a file owned by another
+ * user, an unusual filesystem), the write goes ahead only if the file is already
+ * closed to group and others; otherwise it throws and the file keeps its old
+ * contents.
  */
 export function writePrivateFileSync(file: string, data: string): void {
   try {
     fs.chmodSync(file, PRIVATE_FILE_MODE)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.warn(`clawboo: could not restrict permissions on ${file}:`, err)
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT' && process.platform !== 'win32' && !closedToOthers(file)) {
+      throw new Error(
+        `refusing to write ${file}: it is readable by other users and its permissions could not be restricted (${code ?? String(err)})`,
+      )
     }
   }
   fs.writeFileSync(file, data, { encoding: 'utf8', mode: PRIVATE_FILE_MODE })
+}
+
+/** True when the file has no group or other permission bits. */
+function closedToOthers(file: string): boolean {
+  try {
+    return (fs.statSync(file).mode & 0o077) === 0
+  } catch {
+    return false
+  }
 }

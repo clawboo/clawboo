@@ -11,10 +11,11 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
+import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { loadSettings, mkdirPrivateSync, saveSettings, writePrivateFileSync } from '../index'
 
@@ -26,8 +27,16 @@ beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'clawboo-private-'))
 })
 afterEach(() => {
+  vi.restoreAllMocks()
   rmSync(tmp, { recursive: true, force: true })
 })
+
+/** Make every chmod fail, as it does on a file another user owns. */
+function failChmod(): void {
+  vi.spyOn(fs, 'chmodSync').mockImplementation(() => {
+    throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+  })
+}
 
 describe('writePrivateFileSync', () => {
   it('writes the contents', () => {
@@ -49,6 +58,24 @@ describe('writePrivateFileSync', () => {
     chmodSync(file, 0o644)
     writePrivateFileSync(file, 'KEY=secret\n')
     expect(modeOf(file)).toBe(0o600)
+    expect(readFileSync(file, 'utf8')).toBe('KEY=secret\n')
+  })
+
+  posixOnly('refuses to write a file others can read when its mode cannot be narrowed', () => {
+    const file = path.join(tmp, '.env')
+    writeFileSync(file, 'OLD=1\n')
+    chmodSync(file, 0o644)
+    failChmod()
+    expect(() => writePrivateFileSync(file, 'KEY=secret\n')).toThrow(/refusing to write/)
+    expect(readFileSync(file, 'utf8')).toBe('OLD=1\n')
+  })
+
+  posixOnly('still writes when the chmod fails on a file that is already owner-only', () => {
+    const file = path.join(tmp, '.env')
+    writeFileSync(file, 'OLD=1\n')
+    chmodSync(file, 0o600)
+    failChmod()
+    writePrivateFileSync(file, 'KEY=secret\n')
     expect(readFileSync(file, 'utf8')).toBe('KEY=secret\n')
   })
 })

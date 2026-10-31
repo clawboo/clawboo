@@ -53,7 +53,7 @@ How the token is resolved:
 2. With no usable token, Clawboo falls back to OpenClaw's `openclaw.json` (`gateway.auth.token` and `gateway.port`). It uses that token and, when `settings.json` has no URL, connects to `ws://localhost:<port>`.
 3. Otherwise the literal value is used.
 
-The file is plain JSON, readable only by you (mode 0600), in a folder Clawboo keeps owner-only (mode 0700). Saving a setting narrows an older file to 0600 first.
+The file is plain JSON, readable only by you (mode 0600). A folder Clawboo creates for it is owner-only (mode 0700); a folder that already exists keeps its mode. Saving a setting narrows an older file to 0600 first, and refuses to save when it cannot and the file is readable by others.
 
 <Warning>
 A `studioAccessToken` key in settings.json does nothing. The access gate reads only the `STUDIO_ACCESS_TOKEN` environment variable, so a token written here leaves the dashboard open. See [Environment variables](/reference/environment-variables) for the variable and its rules.
