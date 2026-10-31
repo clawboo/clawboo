@@ -450,6 +450,35 @@ describe('the All view', () => {
     expect(columnHead('todo')).toHaveTextContent(/^To do2$/)
   })
 
+  it('draws no rule under its one row, where a week rules each day off', async () => {
+    serve([
+      { id: 'f1', title: 'Broken run', status: 'blocked', createdAt: earlierToday() },
+      { id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() },
+    ])
+    const user = userEvent.setup()
+    renderBoard()
+    await screen.findByTestId('board-calendar')
+
+    await pickView(user, 'Week')
+    const today = dayKey(Date.now())
+    for (const cell of [
+      screen.getByTestId(`calendar-cell-todo-${today}`),
+      screen.getByTestId('calendar-needs-you-today'),
+    ]) {
+      expect(cell.style.backgroundImage).toContain('linear-gradient')
+    }
+
+    // The rule would cross every lane where its cards end and the space below begins.
+    await pickView(user, 'Kanban')
+    for (const cell of [
+      screen.getByTestId('calendar-cell-todo-all'),
+      screen.getByTestId('calendar-needs-you-today'),
+    ]) {
+      expect(cell.style.backgroundImage).toBe('')
+      expect(cell.style.borderBottomWidth).toBe('')
+    }
+  })
+
   it('stacks the cards in a cell newest first, as calendar chips', async () => {
     const now = Date.now()
     const titles = ['Newest', 'Middle', 'Oldest'] as const
