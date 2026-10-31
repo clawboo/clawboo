@@ -1,18 +1,21 @@
-// driveAgentChat test — the 1:1 native conversational runner. Uses the `makeAdapter`
-// seam (a scripted fake adapter; the real driver factory + home mutex are bypassed).
-// Asserts: a native agent streams its text deltas to the per-session chatDeltaBus and
-// terminates on `done`; `isNativeChatAgent` gates by runtime; `stopAgentChat` aborts
-// the in-flight run; and a non-native agent (no injected adapter) never runs.
+// driveAgentChat test: the 1:1 conversational runner for server-run agents. Uses
+// the `makeAdapter` seam (a scripted fake adapter; the real driver factory is
+// bypassed). Asserts: a native agent streams its text deltas to the per-session
+// chatDeltaBus and terminates on `done`; `isServerChatAgent` gates by runtime;
+// `stopAgentChat` aborts the in-flight run; an OpenClaw agent (no injected adapter)
+// never runs; and a Claude Code / Codex / Hermes agent chats under its own 1:1 key,
+// gets its reply committed, keeps its session across turns and carries its persona.
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   agents,
   chatMessages,
+  teams,
   getSetting,
   setSetting,
   SqliteMemoryStore,
@@ -29,13 +32,18 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
+import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
 import { getDb, resetDb } from '../../db'
 import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
+import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
+import type { RuntimeRunContext } from '../../runtimes/types'
+import { subscribeAgentStatus } from '../../teamChat/agentStatusBus'
 import { subscribeChatDelta } from '../../teamChat/chatDeltaBus'
-import { chatHistoryDELETE } from '../../../api/chatHistory'
+import { chatHistoryDELETE, chatHistoryRESETCONTEXT } from '../../../api/chatHistory'
 import {
+  directChatSessionKey,
   driveAgentChat,
-  isNativeChatAgent,
+  isServerChatAgent,
   nativeChatSessionKey,
   nativeChatSessionSettingKey,
   stopAgentChat,
@@ -65,6 +73,8 @@ class FakeAdapter implements RuntimeAdapter {
   aborted = 0
   /** Every StartOpts this adapter was handed, so a test can read what was injected. */
   starts: StartOpts[] = []
+  /** Fired on abort, so a scripted stream can end the way a real one does. */
+  onAbort: (() => void) | null = null
   constructor(private readonly gen: (run: RunHandle) => AsyncIterable<RuntimeEvent>) {}
   capabilities(): Capabilities {
     return CAPS
@@ -82,9 +92,36 @@ class FakeAdapter implements RuntimeAdapter {
   }
   async abort(): Promise<void> {
     this.aborted += 1
+    this.onAbort?.()
   }
   async setModel(): Promise<void> {}
   async writeContext(): Promise<void> {}
+}
+
+/** A fake that resumes, like Claude Code, Codex, Hermes and native: its codec hands
+ *  back the session id the run "saved". */
+class ResumableFakeAdapter extends FakeAdapter {
+  constructor(
+    gen: (run: RunHandle) => AsyncIterable<RuntimeEvent>,
+    private readonly savedSessionId: string,
+  ) {
+    super(gen)
+  }
+  override capabilities(): Capabilities {
+    return { ...CAPS, resume: true }
+  }
+  readonly sessionCodec = {
+    serialize: async (run: RunHandle): Promise<string> =>
+      JSON.stringify({ sessionKey: run.sessionKey, sessionId: this.savedSessionId }),
+    restore: async (): Promise<RunHandle> => ({ adapterId: 'fake', sessionKey: '', runId: null }),
+  }
+}
+
+/** Wait until the drain has started the run and registered it for Stop. A turn
+ *  creates its working folder first, so a single tick is not enough under load. */
+async function untilRunning(adapter: FakeAdapter): Promise<void> {
+  await vi.waitFor(() => expect(adapter.startCalls).toBe(1))
+  await tick()
 }
 
 describe('driveAgentChat (1:1 native conversational runner)', () => {
@@ -107,8 +144,13 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     await rm(home, { recursive: true, force: true })
   })
 
-  function seedAgent(id: string, runtime: string): void {
+  function seedAgent(id: string, runtime: string, teamId: string | null = null): void {
     const now = Date.now()
+    if (teamId)
+      db.insert(teams)
+        .values({ id: teamId, name: teamId, icon: 'T', color: '#fff', createdAt: 0, updatedAt: 0 })
+        .onConflictDoNothing()
+        .run()
     db.insert(agents)
       .values({
         id,
@@ -118,19 +160,25 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
         sourceAgentId: id,
         runtime,
         status: 'idle',
-        teamId: null,
+        teamId,
         createdAt: now,
         updatedAt: now,
       })
       .run()
   }
 
-  it('isNativeChatAgent gates by runtime', () => {
+  it('isServerChatAgent gates by runtime: every server-run runtime, never OpenClaw', () => {
     seedAgent('native-x', 'clawboo-native')
+    seedAgent('cc-x', 'claude-code')
+    seedAgent('codex-x', 'codex')
+    seedAgent('hermes-x', 'hermes')
     seedAgent('oc-x', 'openclaw')
-    expect(isNativeChatAgent(db, 'native-x')).toBe(true)
-    expect(isNativeChatAgent(db, 'oc-x')).toBe(false)
-    expect(isNativeChatAgent(db, 'missing')).toBe(false)
+    expect(isServerChatAgent(db, 'native-x')).toBe(true)
+    expect(isServerChatAgent(db, 'cc-x')).toBe(true)
+    expect(isServerChatAgent(db, 'codex-x')).toBe(true)
+    expect(isServerChatAgent(db, 'hermes-x')).toBe(true)
+    expect(isServerChatAgent(db, 'oc-x')).toBe(false)
+    expect(isServerChatAgent(db, 'missing')).toBe(false)
   })
 
   it('streams text deltas to the per-session bus + terminates on done', async () => {
@@ -216,11 +264,16 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
       mcpBaseUrl: null,
       makeAdapter: () => adapter,
     })
-    await tick() // let start populate the abort map
-    await stopAgentChat('native-x')
-    expect(adapter.aborted).toBe(1)
-    gate.resolve()
-    await running
+    // The gate opens whatever happens, so a failure here cannot leave the run
+    // holding this agent's lock for the tests after it.
+    try {
+      await untilRunning(adapter)
+      await stopAgentChat('native-x')
+      expect(adapter.aborted).toBe(1)
+    } finally {
+      gate.resolve()
+      await running
+    }
   })
 
   it('a run that fails BEFORE any text (no provider key) persists a VISIBLE meta with the reason', async () => {
@@ -463,5 +516,347 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
       makeAdapter: () => adapter,
     })
     expect(adapter.starts[0]?.context).toBeUndefined()
+  })
+  // ── Claude Code, Codex and Hermes: the 1:1 chat that used to need a Gateway ──
+
+  function rowsFor(sk: string): Array<{ kind: string; role: string; text: string }> {
+    return db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionKey, sk))
+      .all()
+      .map((r) => JSON.parse(r.data as string) as { kind: string; role: string; text: string })
+  }
+
+  it('a Claude Code turn streams under its own 1:1 key and the drain commits the reply', async () => {
+    seedAgent('cc-x', 'claude-code')
+    const sk = directChatSessionKey('cc-x', 'claude-code')
+    expect(sk).toBe('agent:cc-x:claude-code')
+    const deltas: string[] = []
+    const statuses: string[] = []
+    const unsubDelta = subscribeChatDelta(sk, (d) => deltas.push(d.text))
+    const unsubStatus = subscribeAgentStatus(sk, (u) => statuses.push(u.status))
+
+    // Cumulative deltas, the way a coding runtime reports its running text.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'text-delta', text: 'Hel', channel: 'assistant' }
+        yield {
+          ...base(run.sessionKey, 2),
+          kind: 'text-delta',
+          text: 'Hello there',
+          channel: 'assistant',
+        }
+        yield { ...base(run.sessionKey, 3), kind: 'done', reason: 'success', summary: 'there' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'cc-x',
+      message: 'hi',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
+
+    expect(adapter.starts[0]?.sessionKey).toBe(sk)
+    expect(deltas).toEqual(['Hel', 'Hello there'])
+    // The streamed text is what is committed, not the last turn's summary.
+    expect(rowsFor(sk).map((r) => [r.kind, r.text])).toEqual([['assistant', 'Hello there']])
+    expect(rowsFor(nativeChatSessionKey('cc-x'))).toEqual([])
+    expect(statuses).toEqual(['running', 'idle'])
+    unsubDelta()
+    unsubStatus()
+  })
+
+  it('a Hermes reply that arrives in one piece is committed from its summary', async () => {
+    seedAgent('hermes-x', 'hermes')
+    const sk = directChatSessionKey('hermes-x', 'hermes')
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'All done.' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'hermes-x',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
+    expect(rowsFor(sk).map((r) => r.text)).toEqual(['All done.'])
+  })
+
+  it('a queued turn resumes the session the turn ahead of it just saved', async () => {
+    // The pointer is read under the per-agent lock, so the second message does not
+    // resume (or re-fetch memory for) the stale session both saw when they were sent.
+    seedAgent('codex-x', 'codex')
+    await new SqliteMemoryStore(db).saveFact({
+      title: 'The user',
+      content: 'Their name is Sanju.',
+      scope: { agentId: 'codex-x' },
+    })
+    const order: string[] = []
+    const gate = deferred()
+    const first = new ResumableFakeAdapter(
+      (run) =>
+        (async function* () {
+          order.push('first:start')
+          await gate.promise
+          // Before the yield: the drain stops pulling once it sees the terminal.
+          order.push('first:done')
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'one' }
+        })(),
+      'thread-1',
+    )
+    const second = new ResumableFakeAdapter(
+      (run) =>
+        (async function* () {
+          order.push('second:start')
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'two' }
+        })(),
+      'thread-2',
+    )
+    const adapters = [first, second]
+    const make = (): RuntimeAdapter => adapters.shift()!
+    const one = driveAgentChat({
+      db,
+      agentId: 'codex-x',
+      message: 'a',
+      mcpBaseUrl: null,
+      makeAdapter: make,
+    })
+    let two: Promise<void> = Promise.resolve()
+    try {
+      await vi.waitFor(() => expect(order).toEqual(['first:start']))
+      two = driveAgentChat({
+        db,
+        agentId: 'codex-x',
+        message: 'b',
+        mcpBaseUrl: null,
+        makeAdapter: make,
+      })
+      await tick()
+      expect(order).toEqual(['first:start'])
+    } finally {
+      gate.resolve()
+    }
+    await Promise.all([one, two])
+
+    expect(order[0]).toBe('first:start')
+    expect(order).toContain('second:start')
+    expect(order.indexOf('second:start')).toBeGreaterThan(order.indexOf('first:done'))
+    expect(first.starts[0]?.context).toContain('Their name is Sanju')
+    expect(second.starts[0]?.context).toBeUndefined()
+    expect(getSetting(db, nativeChatSessionSettingKey('codex-x'))).toBe('thread-2')
+  })
+
+  it("a coding runtime's persona rides every turn, resumed or not", async () => {
+    seedAgent('cc-p', 'claude-code')
+    writeRuntimeAgentFile(db, 'cc-p', 'SOUL.md', 'Speak plainly and briefly.')
+    const turn = (): FakeAdapter =>
+      new ResumableFakeAdapter(
+        (run) =>
+          (async function* () {
+            yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+          })(),
+        'session-cc',
+      )
+    const a = turn()
+    await driveAgentChat({
+      db,
+      agentId: 'cc-p',
+      message: 'a',
+      mcpBaseUrl: null,
+      makeAdapter: () => a,
+    })
+    const b = turn()
+    await driveAgentChat({
+      db,
+      agentId: 'cc-p',
+      message: 'b',
+      mcpBaseUrl: null,
+      makeAdapter: () => b,
+    })
+    expect(a.starts[0]?.context).toContain('Speak plainly and briefly.')
+    expect(b.starts[0]?.context).toContain('Speak plainly and briefly.')
+  })
+
+  it('a failed resumed turn on a coding runtime drops its pointer; native keeps continuity', async () => {
+    const failing = (): FakeAdapter =>
+      new ResumableFakeAdapter(
+        (run) =>
+          (async function* () {
+            yield {
+              ...base(run.sessionKey, 1),
+              kind: 'error',
+              code: null,
+              message: 'No conversation found with session ID: dead-id',
+              fatal: true,
+            }
+          })(),
+        'dead-id',
+      )
+    seedAgent('cc-f', 'claude-code')
+    setSetting(db, nativeChatSessionSettingKey('cc-f'), 'dead-id')
+    const cc = failing()
+    await driveAgentChat({
+      db,
+      agentId: 'cc-f',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => cc,
+    })
+    expect(getSetting(db, nativeChatSessionSettingKey('cc-f'))).toBe('')
+    // The user still learns why the turn failed.
+    expect(rowsFor(directChatSessionKey('cc-f', 'claude-code'))[0]?.text).toMatch(/No conversation/)
+
+    seedAgent('native-f', 'clawboo-native')
+    setSetting(db, nativeChatSessionSettingKey('native-f'), 'dead-id')
+    const nat = failing()
+    await driveAgentChat({
+      db,
+      agentId: 'native-f',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => nat,
+    })
+    expect(getSetting(db, nativeChatSessionSettingKey('native-f'))).toBe('dead-id')
+  })
+
+  it('Stop aborts a coding-runtime turn and stays silent', async () => {
+    seedAgent('codex-s', 'codex')
+    const gate = deferred()
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        await gate.promise
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+      })(),
+    )
+    adapter.onAbort = () => gate.resolve()
+    const running = driveAgentChat({
+      db,
+      agentId: 'codex-s',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
+    try {
+      await untilRunning(adapter)
+      await stopAgentChat('codex-s')
+    } finally {
+      gate.resolve()
+    }
+    await running
+    expect(adapter.aborted).toBe(1)
+    expect(rowsFor(directChatSessionKey('codex-s', 'codex'))).toEqual([])
+  })
+
+  it('a run the server ends for going quiet is reported, not mistaken for a Stop', async () => {
+    seedAgent('hermes-q', 'hermes')
+    const prev = process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+    process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = '20'
+    try {
+      const gate = deferred()
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          await gate.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+        })(),
+      )
+      adapter.onAbort = () => gate.resolve()
+      await driveAgentChat({
+        db,
+        agentId: 'hermes-q',
+        message: 'q',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      expect(adapter.aborted).toBe(1)
+      const meta = rowsFor(directChatSessionKey('hermes-q', 'hermes'))
+      expect(meta.map((r) => r.kind)).toEqual(['meta'])
+      expect(meta[0]?.text).toMatch(/went quiet/)
+    } finally {
+      if (prev === undefined) delete process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+      else process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = prev
+    }
+  })
+
+  it("/reset drops a coding-runtime agent's resume pointer", async () => {
+    const key = nativeChatSessionSettingKey('cc-r')
+    setSetting(db, key, 'session-abc')
+    const req = {
+      body: { sessionKeys: [directChatSessionKey('cc-r', 'claude-code')] },
+    } as unknown as Parameters<typeof chatHistoryRESETCONTEXT>[0]
+    const res = { json: () => res, status: () => res } as unknown as Parameters<
+      typeof chatHistoryRESETCONTEXT
+    >[1]
+    await chatHistoryRESETCONTEXT(req, res)
+    expect(getSetting(db, key)).toBe('')
+  })
+  // ── Where a 1:1 turn starts ──
+
+  const quickDone = (): FakeAdapter =>
+    new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+
+  async function contextFor(agentId: string): Promise<RuntimeRunContext | null> {
+    let seen: RuntimeRunContext | null = null
+    const adapter = quickDone()
+    await driveAgentChat({
+      db,
+      agentId,
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: (_id, ctx) => {
+        seen = ctx
+        return adapter
+      },
+    })
+    return seen
+  }
+
+  it("a coding runtime starts in its team's folder, created owner-only", async () => {
+    seedAgent('cc-w', 'claude-code', 'team-w')
+    const ctx = await contextFor('cc-w')
+    const dir = teamWorkdirPath('team-w')
+    expect(ctx?.cwd).toBe(dir)
+    const info = await stat(dir)
+    expect(info.isDirectory()).toBe(true)
+    if (process.platform !== 'win32') expect(info.mode & 0o777).toBe(0o700)
+  })
+
+  it('a coding-runtime agent on no team starts in the shared no-team folder', async () => {
+    seedAgent('hermes-w', 'hermes')
+    expect((await contextFor('hermes-w'))?.cwd).toBe(teamWorkdirPath('_no-team'))
+  })
+
+  it('a native agent gets its team folder too, and a teamless one (Boo Zero) the no-team folder', async () => {
+    seedAgent('native-w', 'clawboo-native', 'team-w')
+    expect((await contextFor('native-w'))?.cwd).toBe(teamWorkdirPath('team-w'))
+    seedAgent('native-zero', 'clawboo-native')
+    expect((await contextFor('native-zero'))?.cwd).toBe(teamWorkdirPath('_no-team'))
+  })
+
+  it('refuses to run, rather than fall back to the server folder, when the folder cannot be made', async () => {
+    seedAgent('codex-w', 'codex', 'team-blocked')
+    // A file where the workspaces root should be makes the folder impossible to create.
+    const root = path.dirname(teamWorkdirPath('team-blocked'))
+    await mkdir(path.dirname(root), { recursive: true })
+    await writeFile(root, 'not a folder')
+    const adapter = quickDone()
+    await driveAgentChat({
+      db,
+      agentId: 'codex-w',
+      message: 'q',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
+    expect(adapter.startCalls).toBe(0)
+    const notice = rowsFor(directChatSessionKey('codex-w', 'codex'))
+    expect(notice.map((r) => r.kind)).toEqual(['meta'])
+    expect(notice[0]?.text).toMatch(/could not create the working folder/)
   })
 })

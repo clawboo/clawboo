@@ -1,14 +1,30 @@
-// Thin-client send for a clawboo-native agent's 1:1 chat (the Boo-Zero personal
-// chat). The analog of the group chat's serverTeamChatSend: append an optimistic
-// user bubble + POST to the native chat ingest; the reply streams back via
-// useNativeAgentChatStream. NO Gateway client — this is the native path that
-// replaces `client.chat.send` (which only knows OpenClaw agents).
+// Thin-client send for a 1:1 chat the SERVER runs: a Clawboo Native agent (and the
+// Boo-Zero personal chat), and a Claude Code, Codex or Hermes agent. The analog of
+// the group chat's serverTeamChatSend: append an optimistic user bubble + POST to
+// the 1:1 ingest; the reply streams back via useNativeAgentChatStream. NO Gateway
+// client: `client.chat.send` only knows OpenClaw agents.
 
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { apiFetch } from '@clawboo/control-client'
 
 import { nextSeq } from '@/lib/sequenceKey'
 import { useChatStore } from '@/stores/chat'
+
+/** Runtimes whose 1:1 chat the server drives (`POST /api/agents/:id/chat`). Every
+ *  other agent (OpenClaw) chats over the Gateway. `clawboo-mock` is the flagged test
+ *  harness, which the server only runs when its env flag is set. */
+const SERVER_CHAT_RUNTIMES = new Set([
+  'clawboo-native',
+  'claude-code',
+  'codex',
+  'hermes',
+  'clawboo-mock',
+])
+
+/** Whether an agent on `runtime` chats 1:1 through the server rather than the Gateway. */
+export function runsChatOnServer(runtime: string | null | undefined): boolean {
+  return !!runtime && SERVER_CHAT_RUNTIMES.has(runtime)
+}
 
 export interface SendNativeAgentParams {
   agentId: string
@@ -37,7 +53,7 @@ function makeUserEntry(sessionKey: string, text: string, entryId: string): Trans
   }
 }
 
-/** Send a message to a native agent's 1:1 chat. Optimistically appends the user
+/** Send a message to a server-run agent's 1:1 chat. Optimistically appends the user
  *  bubble (entryId shared with the server's persisted copy so the SSE replay dedups),
  *  then POSTs the ingest. The streamed reply arrives via the SSE. */
 export async function sendNativeAgentMessage({
@@ -75,12 +91,12 @@ export async function sendNativeAgentMessage({
 }
 
 /** Abort the in-flight conversational turn (the composer's Stop button). */
-export async function stopNativeAgentChat(agentId: string): Promise<void> {
+export async function stopNativeAgentChat(agentId: string, sessionKey: string): Promise<void> {
   try {
     await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/chat/stop`, { method: 'POST' })
   } catch {
     // best-effort
   }
   // Optimistically clear local streaming so the UI flips to idle immediately.
-  useChatStore.getState().setStreamingText(`agent:${agentId}:native`, null)
+  useChatStore.getState().setStreamingText(sessionKey, null)
 }

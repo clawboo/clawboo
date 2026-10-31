@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { eq, and, desc, lt } from 'drizzle-orm'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import { getDb } from '../lib/db'
+import { agentIdFromDirectChatKey } from '../lib/agentChat/directChatSessionKey'
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { nativeTeamSessionSettingKey } from '../lib/teamChat/nativeTeamSession'
 
@@ -183,10 +184,11 @@ export function parseTeamSessionKey(
 
 /** Forget the harness sessions that would otherwise carry old turns forward. */
 function dropResumePointers(db: ReturnType<typeof getDb>, sessionKey: string): void {
-  // A native 1:1 chat carries conversation continuity in a resumable harness session
-  // (see driveAgentChat). Starting fresh means the next turn must not resume it.
-  const nativeMatch = sessionKey.match(/^agent:(.+):native$/)
-  if (nativeMatch) setSetting(db, nativeChatSessionSettingKey(nativeMatch[1]!), '')
+  // A server-run 1:1 chat (native, Claude Code, Codex, Hermes) carries conversation
+  // continuity in a resumable harness session (see driveAgentChat). Starting fresh
+  // means the next turn must not resume it.
+  const directAgentId = agentIdFromDirectChatKey(sessionKey)
+  if (directAgentId) setSetting(db, nativeChatSessionSettingKey(directAgentId), '')
   // A native TEAM session (`agent:<id>:team:<teamId>`, or a chat room's
   // `...:room:<roomId>`) carries the same resumable continuity for the
   // leader/user-facing turn, under a per-(agent, team, room) pointer.

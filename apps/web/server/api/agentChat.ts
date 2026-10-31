@@ -1,8 +1,9 @@
-// REST for a clawboo-native agent's 1:1 PERSONAL chat (the Boo-Zero personal chat +
-// any native agent). Mirrors the team-chat thin-client surface: POST ingest
-// (persist the user turn + drive ONE conversational turn detached → 202) + a GET SSE
-// stream (a pure DB-tail of `agent:<id>:native` + the live delta bus). OpenClaw
-// agents keep the Gateway 1:1 path; these routes 404 a non-native agent.
+// REST for an agent's 1:1 PERSONAL chat, for every agent the server runs: Clawboo
+// Native (including the Boo-Zero personal chat), Claude Code, Codex and Hermes.
+// Mirrors the team-chat thin-client surface: POST ingest (persist the user turn +
+// drive ONE conversational turn detached → 202) + a GET SSE stream (a pure DB-tail
+// of the agent's 1:1 key + the live delta bus). OpenClaw agents keep the Gateway
+// 1:1 path; the ingest 404s them.
 
 import {
   chatMessages,
@@ -13,9 +14,9 @@ import {
 import type { Request, Response } from 'express'
 
 import {
+  agentChatSessionKey,
   driveAgentChat,
-  isNativeChatAgent,
-  nativeChatSessionKey,
+  isServerChatAgent,
   stopAgentChat,
 } from '../lib/agentChat/driveAgentChat'
 import { getDb } from '../lib/db'
@@ -26,11 +27,10 @@ import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
 const STREAM_POLL_MS = 750
 const STREAM_KEEPALIVE_MS = 20_000
 
-/** Persist the user's message under the native 1:1 session so the SSE tail replays
+/** Persist the user's message under the agent's 1:1 session so the SSE tail replays
  *  it AND it's durable. Idempotent on entryId (the optimistic client bubble + this
  *  replay share the id → the client dedups). */
-function persistUserEntry(db: ClawbooDb, agentId: string, text: string, entryId: string): void {
-  const sessionKey = nativeChatSessionKey(agentId)
+function persistUserEntry(db: ClawbooDb, sessionKey: string, text: string, entryId: string): void {
   const now = Date.now()
   try {
     db.insert(chatMessages)
@@ -84,14 +84,14 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
   const entryId = typeof body?.entryId === 'string' ? body.entryId : `user-${Date.now()}`
   try {
     const db = getDb()
-    if (!isNativeChatAgent(db, agentId)) {
-      res.status(404).json({ error: 'agent is not a native conversational agent' })
+    if (!isServerChatAgent(db, agentId)) {
+      res.status(404).json({ error: 'agent does not chat through the server' })
       return
     }
-    persistUserEntry(db, agentId, displayText, entryId)
+    persistUserEntry(db, agentChatSessionKey(db, agentId), displayText, entryId)
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
-    // Detached (the 202 returns now): the reply streams via the SSE + is persisted by
-    // the native driver. Not aborted on client disconnect (a slow reply survives).
+    // Detached (the 202 returns now): the reply streams via the SSE + is persisted
+    // server-side. Not aborted on client disconnect (a slow reply survives).
     void driveAgentChat({ db, agentId, message, mcpBaseUrl })
     res.status(202).json({ ok: true })
   } catch (err) {
@@ -114,7 +114,8 @@ export async function agentChatStopPOST(req: Request, res: Response): Promise<vo
   }
 }
 
-// GET /api/agents/:agentId/chat/stream — SSE live-tail of `agent:<id>:native`.
+// GET /api/agents/:agentId/chat/stream: SSE live-tail of the agent's 1:1 key
+// (`agent:<id>:native`, or `agent:<id>:<runtime>` for Claude Code / Codex / Hermes).
 // A pure reader (mirrors teamChatStream): Tier 1 = committed rows past an `id`
 // cursor, Tier 2 = the in-memory delta bus for live tokens (no `id:`, ephemeral).
 export function agentChatStreamGET(req: Request, res: Response): void {
@@ -123,7 +124,6 @@ export function agentChatStreamGET(req: Request, res: Response): void {
     res.status(400).end()
     return
   }
-  const sessionKey = nativeChatSessionKey(agentId)
   const lastEventId =
     typeof req.headers['last-event-id'] === 'string' ? req.headers['last-event-id'] : undefined
   const sinceParam = typeof req.query['since'] === 'string' ? req.query['since'] : undefined
@@ -131,6 +131,7 @@ export function agentChatStreamGET(req: Request, res: Response): void {
   // must surface as a real error response, not a 200 plus a ': connected'
   // marker the client has already been told to trust.
   const db = getDb()
+  const sessionKey = agentChatSessionKey(db, agentId)
 
   // A RESUMING client says where it got to and gets everything after that. A FRESH
   // client starts at the head, because it has already loaded the recent page over
@@ -181,7 +182,7 @@ export function agentChatStreamGET(req: Request, res: Response): void {
     res.write(`data: ${JSON.stringify(delta)}\n\n`)
   })
 
-  // Live working/idle signal for THIS agent's native turn — a named `status` event
+  // Live working/idle signal for THIS agent's 1:1 turn: a named `status` event
   // with NO `id:` line (ephemeral, off the resume cursor); the client patches the
   // fleet store so the left-pane badge tracks the turn. The connect-time snapshot
   // replay reconciles a badge left stale by a terminal that published while no

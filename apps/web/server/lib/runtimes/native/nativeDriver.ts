@@ -38,19 +38,21 @@ export interface NativeDriverDeps {
  *  shows in the UI chat panel (sessionKey `agent:<id>:native`). Best-effort —
  *  narrative, never load-bearing. `opts` lets a caller persist a user-facing
  *  META notice instead (e.g. driveAgentChat surfacing a failed run's reason —
- *  a keyless/errored turn must never just silently not respond). */
+ *  a keyless/errored turn must never just silently not respond), or write into
+ *  another runtime's 1:1 key (`opts.sessionKey`, see directChatSessionKey). */
 export function persistNativeChatEntry(
   db: ClawbooDb,
   agentId: string,
   text: string,
-  opts?: { kind?: 'assistant' | 'meta'; role?: 'assistant' | 'system' },
+  opts?: { kind?: 'assistant' | 'meta'; role?: 'assistant' | 'system'; sessionKey?: string },
 ): void {
   try {
     if (!text.trim()) return
     const now = Date.now()
+    const sessionKey = opts?.sessionKey ?? nativeChatSessionKey(agentId)
     db.insert(chatMessages)
       .values({
-        sessionKey: `agent:${agentId}:native`,
+        sessionKey,
         gatewayUrl: 'native',
         entryId: `native-${randomUUID()}`,
         timestampMs: now,
@@ -59,7 +61,7 @@ export function persistNativeChatEntry(
           role: opts?.role ?? 'assistant',
           kind: opts?.kind ?? 'assistant',
           text,
-          sessionKey: `agent:${agentId}:native`,
+          sessionKey,
           runId: null,
           source: 'runtime-agent',
           timestampMs: now,
