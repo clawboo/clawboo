@@ -140,7 +140,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 ### A tenant budget never warns or pauses
 
-**What you see:** the Governance panel offers **tenant** as a budget scope, but a tenant budget stays at $0 spent.
+**What you see:** a tenant budget, made before the Governance form stopped offering **tenant** or through the API, stays at $0 spent.
 
 **What it affects:** nothing charges a tenant budget, so there is no budget for the whole install.
 
