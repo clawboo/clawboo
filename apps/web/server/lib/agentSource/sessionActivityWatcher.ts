@@ -202,7 +202,14 @@ export function startSessionActivityWatcher(
               model: turn.model,
               inputTokens: turn.inputTokens,
               outputTokens: turn.outputTokens,
-              costUsd: calculateCostUsd(turn.model, turn.inputTokens, turn.outputTokens),
+              // Priced with the provider beside the model, so a turn a local
+              // Ollama served is recorded at $0 rather than the default rate.
+              costUsd: calculateCostUsd(
+                turn.model,
+                turn.inputTokens,
+                turn.outputTokens,
+                payload.modelProvider,
+              ),
               runId: payload.runId ?? null,
               sessionKey: payload.sessionKey,
               createdAt: Date.now(),

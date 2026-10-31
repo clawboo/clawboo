@@ -13,11 +13,13 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { encodeHumanAssignment } from '@clawboo/board-core'
 import {
   agents,
+  costRecords,
   createTask,
   getTask,
   listExecutions,
@@ -265,6 +267,11 @@ describe('team run cost (real engine + real drain + real board)', () => {
     expect(row!.runtime).toBe('codex')
     expect(getTask(db, id)!.costUsd).toBeCloseTo(expected, 12)
     expect(runCostForTask(db, id)).toEqual({ usd: row!.costUsd, estimated: true })
+    // Tokens Used lists the run too, not only OpenClaw's turns.
+    const listed = db.select().from(costRecords).where(eq(costRecords.agentId, WORKER)).all()
+    expect(listed).toHaveLength(1)
+    expect(listed[0]).toMatchObject({ model: 'gpt-4o', inputTokens: 24_000, outputTokens: 4_000 })
+    expect(listed[0]!.costUsd).toBeCloseTo(expected, 12)
   })
 
   it('a fatal error leaves a failed run that still records what it cost', async () => {

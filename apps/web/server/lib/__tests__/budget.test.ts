@@ -54,12 +54,16 @@ const FULL_CAPS: Capabilities = {
   models: [],
 }
 
-/** Fake adapter that emits one big `cost` event, then done — and records abort. */
+/** Fake adapter that emits one big `cost` event, then done, and records abort. With
+ *  `keepsWorking` it streams more text after the cost, so a cap it crossed stops it. */
 class FakeCostAdapter implements RuntimeAdapter {
   readonly id = 'fake-cost'
   readonly participantKind = 'agent' as const
   aborted = false
-  constructor(private readonly costUsd: number) {}
+  constructor(
+    private readonly costUsd: number,
+    private readonly keepsWorking = false,
+  ) {}
   capabilities(): Capabilities {
     return FULL_CAPS
   }
@@ -71,6 +75,7 @@ class FakeCostAdapter implements RuntimeAdapter {
   }
   events(run: RunHandle): AsyncIterable<RuntimeEvent> {
     const costUsd = this.costUsd
+    const keepsWorking = this.keepsWorking
     let seq = 0
     const base = () => ({
       runId: run.sessionKey,
@@ -87,6 +92,8 @@ class FakeCostAdapter implements RuntimeAdapter {
         model: 'm',
         estimated: false,
       } as RuntimeEvent
+      if (keepsWorking)
+        yield { ...base(), kind: 'text-delta', text: 'more', channel: 'assistant' } as RuntimeEvent
       yield { ...base(), kind: 'done', reason: 'success', summary: 'done' } as RuntimeEvent
     })()
   }
@@ -127,7 +134,7 @@ describe('budget kill-switch (real board + real git worktree)', () => {
     const db = getDb()
     setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 10, mode: 'cap' }) // $0.10 hard cap
     const taskId = newTask()
-    const fake = new FakeCostAdapter(0.5) // 50¢ ≫ 10¢
+    const fake = new FakeCostAdapter(0.5, true) // 50¢ ≫ 10¢, and it keeps working
 
     const result = await runTaskOnRuntime({
       db,
@@ -178,7 +185,7 @@ describe('budget kill-switch (real board + real git worktree)', () => {
     const taskId = newTask()
     await runTaskOnRuntime({
       db,
-      makeAdapter: () => new FakeCostAdapter(0.5),
+      makeAdapter: () => new FakeCostAdapter(0.5, true),
       taskId,
       assigneeAgentId: 'a1',
       repoPath: repo,

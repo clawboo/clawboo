@@ -391,7 +391,7 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
           {runtime && <span>{resolveRuntimeMark(runtime).label}</span>}
           {cost?.usd != null && (
             <span className="font-data tabular-nums">
-              {formatRunCost(cost.usd, cost.estimated)}
+              {formatRunCost(cost.usd, cost.estimated, { local: cost.local })}
             </span>
           )}
         </div>

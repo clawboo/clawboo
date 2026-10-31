@@ -4,7 +4,8 @@
 // character length (the ~4-chars/token heuristic the dashboard already uses for
 // its display) and priced via the shared model table. The result is an ESTIMATE
 // used only to keep a budget ledger moving and a cap engaged where the runtime
-// gives us nothing real — it is never presented as an exact charge.
+// gives us nothing real; it is never presented as an exact charge. A model a
+// local Ollama serves prices at $0 (see `isLocalModel`), so it is never charged.
 
 import { calculateCostUsd } from '../costUtils'
 

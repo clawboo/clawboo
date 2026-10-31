@@ -13,7 +13,16 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createTask, listExecutions } from '@clawboo/db'
+import {
+  agents,
+  costRecords,
+  createTask,
+  getBudget,
+  getComments,
+  listExecutions,
+  setBudgetLimit,
+} from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type {
   Capabilities,
   RunHandle,
@@ -91,6 +100,7 @@ class SpendAdapter implements RuntimeAdapter {
 class ScriptAdapter implements RuntimeAdapter {
   readonly participantKind = 'agent' as const
   readonly id = 'claude-code'
+  aborts = 0
   constructor(private readonly script: Array<Record<string, unknown>>) {}
   capabilities(): Capabilities {
     return CAPS
@@ -117,7 +127,50 @@ class ScriptAdapter implements RuntimeAdapter {
       }
     })()
   }
-  async abort() {}
+  async abort() {
+    this.aborts += 1
+  }
+  async setModel() {}
+  async writeContext() {}
+}
+
+/** Reports a cost, then goes quiet until it is aborted, then ends on `done: aborted`. */
+class QuietAfterCostAdapter implements RuntimeAdapter {
+  readonly participantKind = 'agent' as const
+  readonly id = 'codex'
+  aborts = 0
+  private wake: () => void = () => {}
+  private readonly aborted = new Promise<void>((resolve) => {
+    this.wake = resolve
+  })
+  capabilities(): Capabilities {
+    return CAPS
+  }
+  async health() {
+    return { ok: true }
+  }
+  async start(_t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
+    return { adapterId: this.id, sessionKey: opts.sessionKey, runId: 'rid-0' }
+  }
+  events(run: RunHandle): AsyncIterable<RuntimeEvent> {
+    const aborted = this.aborted
+    const base = (seq: number) => ({ runId: 'rid-0', sessionId: run.sessionKey, ts: 1, seq })
+    return (async function* () {
+      yield {
+        ...base(1),
+        kind: 'cost',
+        costUsd: 0.5,
+        usage: { inputTokens: 10, outputTokens: 5 },
+        model: 'm',
+      } as RuntimeEvent
+      await aborted
+      yield { ...base(2), kind: 'done', reason: 'aborted', summary: '' } as RuntimeEvent
+    })()
+  }
+  async abort() {
+    this.aborts += 1
+    this.wake()
+  }
   async setModel() {}
   async writeContext() {}
 }
@@ -261,5 +314,192 @@ describe('executor runner: what the run cost, on its ledger row', () => {
     expect(row.outputTokens).toBe(20)
     expect(row.costUsd).toBeCloseTo(0.02, 12)
     expect(row.costSource).toBe('reported')
+  })
+})
+
+describe('executor runner: what a run is charged, and when a cap stops it', () => {
+  let home: string
+  let prevHome: string | undefined
+
+  beforeEach(async () => {
+    home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-charge-home-'))
+    await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
+    prevHome = process.env['HOME']
+    process.env['HOME'] = home
+  })
+  afterEach(async () => {
+    // Close BEFORE removing the dir: Windows refuses to remove a directory
+    // that still holds an open file. (#140)
+    resetDb()
+    if (prevHome === undefined) delete process.env['HOME']
+    else process.env['HOME'] = prevHome
+    await rm(home, { recursive: true, force: true })
+  })
+
+  function newTask(title = 'Look something up'): string {
+    return createTask(getDb(), {
+      title,
+      description: 'read-only',
+      status: 'todo',
+      teamId: 'team-1',
+    }).id
+  }
+
+  function capAgent(agentId: string): void {
+    setBudgetLimit(getDb(), { scope: 'agent', scopeId: agentId, limitUsdCents: 1, mode: 'cap' })
+  }
+
+  function run(taskId: string, adapter: RuntimeAdapter, agentId = 'cc-1', model?: string) {
+    return runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: agentId,
+      disableMemoryAutoInject: true,
+      kind: 'research',
+      budgetStopGraceMs: 20,
+      ...(model ? { model } : {}),
+    })
+  }
+
+  it('estimates a run that reported no cost from its text, like team chat does', async () => {
+    setBudgetLimit(getDb(), {
+      scope: 'agent',
+      scopeId: 'cc-1',
+      limitUsdCents: 100_000,
+      mode: 'warn',
+    })
+    const taskId = newTask()
+    // 40,000 characters of answer is about 10,000 tokens: 15 cents at the default rate.
+    const answer = 'x'.repeat(40_000)
+    const result = await run(
+      taskId,
+      new ScriptAdapter([{ kind: 'done', reason: 'success', summary: answer }]),
+    )
+    expect(result.ok).toBe(true)
+    const [row] = listExecutions(getDb(), taskId)
+    expect(row?.costSource).toBe('char-estimate')
+    expect(row?.costUsd ?? 0).toBeGreaterThan(0.15)
+    // The same estimate reached the budget, so a cap would engage on it.
+    expect(getBudget(getDb(), 'agent', 'cc-1')?.spentUsdCents ?? 0).toBeGreaterThanOrEqual(15)
+  })
+
+  it('charges nothing for a run on a local Ollama model, and records it as local', async () => {
+    capAgent('cc-1')
+    const taskId = newTask()
+    const adapter = new ScriptAdapter([
+      {
+        kind: 'cost',
+        costUsd: 0,
+        local: true,
+        usage: { inputTokens: 40_000, outputTokens: 2_000 },
+        model: 'llama3.2',
+      },
+      { kind: 'done', reason: 'success', summary: 'done locally' },
+    ])
+    await run(taskId, adapter)
+    const [row] = listExecutions(getDb(), taskId)
+    expect(row?.status).toBe('succeeded')
+    expect(row?.costUsd).toBe(0)
+    expect(row?.costSource).toBe('local')
+    expect(getBudget(getDb(), 'agent', 'cc-1')?.status).not.toBe('paused')
+  })
+
+  it('does not charge the default rate when a run with no cost report was on an Ollama model', async () => {
+    capAgent('codex-1')
+    const taskId = newTask()
+    await run(taskId, new SpendAdapter('codex', false), 'codex-1', 'ollama/llama3.2')
+    const [row] = listExecutions(getDb(), taskId)
+    expect(row?.costSource).toBe('local')
+    expect(row?.costUsd).toBe(0)
+    expect(getBudget(getDb(), 'agent', 'codex-1')?.spentUsdCents ?? 0).toBe(0)
+  })
+
+  it('keeps a finished result whose final cost report crossed the cap, and refuses the next run', async () => {
+    capAgent('cc-1')
+    const taskId = newTask()
+    const adapter = new ScriptAdapter([
+      { kind: 'cost', costUsd: 0.5, usage: { inputTokens: 10, outputTokens: 5 }, model: 'm' },
+      { kind: 'done', reason: 'success', summary: 'the finished answer' },
+    ])
+    const result = await run(taskId, adapter)
+    expect(result.ok && result.doneReason).toBe('success')
+    expect(adapter.aborts).toBe(0)
+    const [row] = listExecutions(getDb(), taskId)
+    expect(row?.status).toBe('succeeded')
+    expect(row?.costUsd).toBeCloseTo(0.5, 12)
+    const comments = getComments(getDb(), taskId).map((c) => c.body)
+    expect(comments).toContain('the finished answer')
+    expect(comments.some((c) => c.startsWith('Budget cap reached (agent)'))).toBe(true)
+    expect(getBudget(getDb(), 'agent', 'cc-1')?.status).toBe('paused')
+
+    const next = await run(
+      newTask('next'),
+      new ScriptAdapter([{ kind: 'done', reason: 'success', summary: 'x' }]),
+    )
+    expect(next.ok).toBe(false)
+    if (next.ok) return
+    expect(next.reason).toBe('budget_paused')
+  })
+
+  it('still stops a run whose cost report crossed the cap when it keeps working', async () => {
+    capAgent('cc-1')
+    const taskId = newTask()
+    const adapter = new ScriptAdapter([
+      { kind: 'cost', costUsd: 0.5, usage: { inputTokens: 10, outputTokens: 5 }, model: 'm' },
+      { kind: 'tool-call', toolCallId: 't1', name: 'read', input: {}, partial: false },
+      { kind: 'done', reason: 'success', summary: 'should not be kept' },
+    ])
+    const result = await run(taskId, adapter)
+    expect(result.ok && result.summary).toBe('auto-paused (budget)')
+    expect(adapter.aborts).toBe(1)
+    expect(listExecutions(getDb(), taskId)[0]?.status).toBe('cancelled')
+    expect(getComments(getDb(), taskId).map((c) => c.body)).not.toContain('should not be kept')
+  })
+
+  it('aborts a run that goes quiet after its cost report crossed the cap', async () => {
+    capAgent('codex-1')
+    const taskId = newTask()
+    const adapter = new QuietAfterCostAdapter()
+    const result = await run(taskId, adapter, 'codex-1')
+    expect(result.ok && result.summary).toBe('auto-paused (budget)')
+    expect(adapter.aborts).toBeGreaterThanOrEqual(1)
+    expect(listExecutions(getDb(), taskId)[0]?.status).toBe('cancelled')
+  })
+
+  it('lists the run in Tokens Used', async () => {
+    const now = Date.now()
+    getDb()
+      .insert(agents)
+      .values({
+        id: 'cc-1',
+        name: 'Coder',
+        gatewayId: 'cc-1',
+        runtime: 'claude-code',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    const taskId = newTask()
+    await run(
+      taskId,
+      new ScriptAdapter([
+        {
+          kind: 'cost',
+          costUsd: 0.25,
+          usage: { inputTokens: 1_200, outputTokens: 300 },
+          model: 'claude-sonnet-4-6',
+        },
+        { kind: 'done', reason: 'success', summary: 'ok' },
+      ]),
+    )
+    const rows = getDb().select().from(costRecords).where(eq(costRecords.agentId, 'cc-1')).all()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      model: 'claude-sonnet-4-6',
+      inputTokens: 1_200,
+      outputTokens: 300,
+      costUsd: 0.25,
+    })
   })
 })

@@ -4,9 +4,12 @@
 // `../costUtils.calculateCostUsd`: its `default` fallback prices unknown models
 // as Sonnet, which would report fabricated USD into the budget ledger. A
 // trailing date suffix (`-YYYYMMDD`) is normalized before lookup — that is a
-// deterministic alias, not fuzzy matching.
+// deterministic alias, not fuzzy matching. A turn a local Ollama served costs
+// nothing, so it is priced at an exact $0 and flagged `local`.
 
 import type { Usage } from '@clawboo/executor'
+
+import { isLocalModel } from '../../costUtils'
 
 interface ModelPrice {
   /** USD per million input tokens. */
@@ -36,9 +39,12 @@ function normalizeModelId(model: string): string {
 export interface PricedTurn {
   costUsd: number | null
   estimated: boolean
+  /** The turn ran on a local Ollama, so its $0 is exact rather than unknown. */
+  local?: boolean
 }
 
-export function priceTurn(model: string, usage: Usage): PricedTurn {
+export function priceTurn(model: string, usage: Usage, provider?: string | null): PricedTurn {
+  if (isLocalModel(model, provider)) return { costUsd: 0, estimated: false, local: true }
   const price = PRICES[normalizeModelId(model)]
   if (!price) return { costUsd: null, estimated: true }
   const usd =

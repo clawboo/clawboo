@@ -72,6 +72,8 @@ export type SessionMessagePayload = {
    * are what is actually on offer.
    */
   model?: string
+  /** The provider that served `model` (`ollama` for a local model, which costs nothing). */
+  modelProvider?: string
   inputTokens?: number
   outputTokens?: number
 }

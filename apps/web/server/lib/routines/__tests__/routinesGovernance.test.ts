@@ -66,9 +66,17 @@ class CostlyFakeAdapter implements RuntimeAdapter {
       yield {
         ...base(),
         kind: 'cost',
-        costUsd: 0.5, // 50¢ against a 40¢ cap → immediate auto-pause
+        costUsd: 0.5, // 50¢ against a 40¢ cap → auto-pause at the next step
         usage: { inputTokens: 100, outputTokens: 100 },
         model: 'fake',
+      } as RuntimeEvent
+      // The run keeps working past the cap, so the kill-switch stops it here. (A
+      // report that is the run's last keeps the finished result instead.)
+      yield {
+        ...base(),
+        kind: 'text-delta',
+        text: 'more work',
+        channel: 'assistant',
       } as RuntimeEvent
       yield {
         ...base(),

@@ -173,18 +173,23 @@ function chipStatusMark(
 function CostLabel({
   usd,
   estimated,
+  local = false,
   subtask = false,
 }: {
   usd: number
   estimated: boolean
+  /** The work only ran on a local model, so it cost nothing. */
+  local?: boolean | undefined
   /** The card is a subtask: its cost names that too, so the row needs no arrow. */
   subtask?: boolean
 }) {
-  const exact = formatCostUsd(usd)
-  const shown = usd > 0 && usd < 0.01 ? '<$0.01' : `${estimated ? '~' : ''}${exact}`
-  const detail = estimated
-    ? 'estimated, not a charge the runtime reported'
-    : 'the cost the runtime reported'
+  const exact = local ? 'free' : formatCostUsd(usd)
+  const shown = !local && usd > 0 && usd < 0.01 ? '<$0.01' : `${estimated ? '~' : ''}${exact}`
+  const detail = local
+    ? 'ran on a local model, which costs nothing'
+    : estimated
+      ? 'estimated, not a charge the runtime reported'
+      : 'the cost the runtime reported'
   return (
     <span
       data-testid="board-card-cost"
@@ -243,7 +248,12 @@ function ChipMeta({
       ) : null}
       {mark ??
         (costShown && cost.usd !== null ? (
-          <CostLabel usd={cost.usd} estimated={cost.estimated} subtask={subtask} />
+          <CostLabel
+            usd={cost.usd}
+            estimated={cost.estimated}
+            local={cost.local}
+            subtask={subtask}
+          />
         ) : null)}
       {subtask && mark == null && !costShown ? (
         <IconMark label="Subtask" className="text-muted-foreground">
@@ -373,7 +383,9 @@ export function TaskCard({
   // A card shows one mark; when that mark takes the cost's place, the cost moves
   // into the card's tooltip.
   const costTip =
-    mark != null && cost.usd !== null ? `Cost: ${formatRunCost(cost.usd, cost.estimated)}` : null
+    mark != null && cost.usd !== null
+      ? `Cost: ${formatRunCost(cost.usd, cost.estimated, { local: cost.local })}`
+      : null
   const title = task.title ?? '(untitled)'
   const clamped = stamped && !!clamp
   // A title cut to one line is whole in the tooltip.

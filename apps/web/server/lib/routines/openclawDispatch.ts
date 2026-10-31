@@ -29,7 +29,6 @@ import {
   type CompleteExecOutcome,
   type DbAgent,
   type DbScheduledRun,
-  type RunCostSource,
 } from '@clawboo/db'
 import type { RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
@@ -37,10 +36,11 @@ import type { TaskTemplate } from '@clawboo/scheduler'
 import { KeyedMutex } from '@clawboo/worktrees'
 
 import { budgetPreflight } from '../budgetPreflight'
+import { openclawAgentModel } from '../openclawAgentModel'
 import { registerRunStop, type RunStopHandle } from '../runStops'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
-import { estimateRunCostUsd } from '../runtimes/estimateCost'
+import { createRunCostTally, type SettledRunCost } from '../runtimes/runCostTally'
 import type { RoutineDispatchOutcome } from './wakeBridge'
 
 const DEFAULT_WATCHDOG_MS = 10 * 60_000 // 10 min
@@ -251,6 +251,84 @@ async function drainClaimedRoutineRun(
   // Char budget of what we sent (message + context) — the input side of the spend
   // estimate when the Gateway reports no usage.
   const dispatchPromptChars = template.title.length + contextBlock.length
+  // What the run cost, priced once on whichever path ends it, the way a team-chat
+  // run is: USD the Gateway reported, then usage tokens, then an estimate from the
+  // text, since the live Gateway reports neither. A failed, timed-out or stopped
+  // run spent tokens too, so every ending is charged, not only a success. The
+  // estimate is priced at the routine's model, else the agent's in openclaw.json,
+  // so an agent on a local Ollama is charged nothing.
+  const costTally = createRunCostTally()
+  const pricedModel = template.model ?? openclawAgentModel(gatewayAgentId)
+  let outputText = ''
+  let costSettled: SettledRunCost | null = null
+  /** Charge the budgets what no cost event already did; returns the cap it paused, if any. */
+  const settleSpend = (output: string): BudgetScope | null => {
+    if (costSettled) return null
+    const cost = costTally.settle({
+      model: pricedModel,
+      inputChars: dispatchPromptChars,
+      outputChars: output.length,
+    })
+    costSettled = cost
+    if (cost.unbilledUsd <= 0) return null
+    const estimated = cost.costSource !== 'reported'
+    const cents = usdToFractionalCents(cost.unbilledUsd)
+    const scopes: [BudgetScope, string | null][] = [
+      ['agent', run.agentId],
+      ['mission', missionId],
+      ['team', run.teamId],
+    ]
+    let pausedScope: BudgetScope | null = null
+    for (const [scope, scopeId] of scopes) {
+      if (!scopeId) continue
+      const r = recordSpend(db, scope, scopeId, cents)
+      if (!r) continue
+      if (r.crossed !== 'none') {
+        appendAudit(db, {
+          eventType: 'budget',
+          taskId,
+          teamId: run.teamId,
+          agentId: run.agentId,
+          tenantId: run.tenantId,
+          summary: {
+            scope,
+            scopeId,
+            crossed: r.crossed,
+            status: r.status,
+            mode: r.mode,
+            runtime: 'openclaw',
+            estimated,
+          },
+        })
+      }
+      if (r.status === 'paused' && r.mode === 'cap' && !pausedScope) pausedScope = scope
+    }
+    return pausedScope
+  }
+  /** The settled cost as the run's ledger row records it. */
+  const ledgerCost = (): Pick<
+    CompleteExecOutcome,
+    'costUsd' | 'costSource' | 'inputTokens' | 'outputTokens'
+  > =>
+    costSettled
+      ? {
+          costUsd: costSettled.costUsd,
+          costSource: costSettled.costSource,
+          inputTokens: costSettled.inputTokens,
+          outputTokens: costSettled.outputTokens,
+        }
+      : {}
+  // The work already happened (it cannot be un-spent), so a cap this run crossed
+  // is enforced by the pre-flight gate blocking the NEXT fire. Say so on the task.
+  const noteCapReached = (pausedScope: BudgetScope | null): void => {
+    if (!pausedScope) return
+    addComment(
+      db,
+      taskId,
+      `Budget cap reached (${pausedScope}). This run is recorded; the next scheduled fire is blocked until you raise the cap or resume.`,
+      'system',
+    )
+  }
 
   let runHandle
   try {
@@ -281,11 +359,6 @@ async function drainClaimedRoutineRun(
   let lastError: string | null = null
   let stopForBudget: string | null = null
   let timedOut = false
-  // The live Gateway emits no incremental `cost` events yet, so a successful run's
-  // spend arrives ONLY on the terminal `done.costUsd`. Track whether any `cost`
-  // event already recorded spend so the terminal fallback can't double-count if a
-  // future Gateway starts streaming cost.
-  let recordedAnyCost = false
   // A stream that throws (the operator connection dropped mid-run) ends the run
   // as surely as a `done` does.
   let streamError: string | null = null
@@ -318,6 +391,8 @@ async function drainClaimedRoutineRun(
       }
       if (raced.done) break
       const ev = raced.value
+      costTally.observe(ev)
+      if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') outputText += ev.text
       if (ev.kind === 'cost') {
         emitEvent(db, {
           kind: 'cost',
@@ -334,13 +409,9 @@ async function drainClaimedRoutineRun(
           },
         })
         // The same budget kill-switch as any executor run: record spend on
-        // every scope, abort on the first cap-mode pause.
+        // every scope, abort on the first cap-mode pause. A usage-only event
+        // (null USD) records $0 here; the tally prices it when the run settles.
         const cents = usdToFractionalCents(ev.costUsd ?? 0)
-        // Only flag `recordedAnyCost` when the event actually carried a cost. A future
-        // usage-but-null-cost event records $0 here; setting the flag unconditionally
-        // would then suppress the terminal text-estimate (gated on `!recordedAnyCost`)
-        // and zero out the run's spend. Mirrors drainTurn's `costUsd != null` guard.
-        if (ev.costUsd != null) recordedAnyCost = true
         const a = recordSpend(db, 'agent', run.agentId, cents)
         const m = recordSpend(db, 'mission', missionId, cents)
         const t = run.teamId ? recordSpend(db, 'team', run.teamId, cents) : null
@@ -369,7 +440,11 @@ async function drainClaimedRoutineRun(
   // same moment is kept as a comment.
   if (stop.note !== null) {
     await adapter.abort(runHandle).catch(() => undefined)
-    settleExec({ status: 'cancelled', error: stop.note }, { status: 'cancelled', error: stop.note })
+    noteCapReached(settleSpend(terminal?.summary || outputText))
+    settleExec(
+      { status: 'cancelled', error: stop.note, ...ledgerCost() },
+      { status: 'cancelled', error: stop.note },
+    )
     if (terminal?.reason === 'success' && terminal.summary)
       addComment(
         db,
@@ -386,13 +461,16 @@ async function drainClaimedRoutineRun(
   if (streamError !== null) {
     await adapter.abort(runHandle).catch(() => undefined)
     const error = `run failed: ${streamError}`
-    settleExec({ status: 'failed', error }, { status: 'failed', error })
+    noteCapReached(settleSpend(outputText))
+    settleExec({ status: 'failed', error, ...ledgerCost() }, { status: 'failed', error })
     releaseTask(db, taskId)
     return { ok: false, taskId, error }
   }
 
   if (stopForBudget) {
     await adapter.abort(runHandle).catch(() => undefined)
+    // Already paused, so the auto-pause comment below covers any cap this crosses.
+    settleSpend(outputText)
     addComment(
       db,
       taskId,
@@ -400,7 +478,7 @@ async function drainClaimedRoutineRun(
       'system',
     )
     settleExec(
-      { status: 'cancelled', error: `budget_paused:${stopForBudget}` },
+      { status: 'cancelled', error: `budget_paused:${stopForBudget}`, ...ledgerCost() },
       { status: 'cancelled', error: `budget_paused:${stopForBudget}` },
     )
     releaseTask(db, taskId)
@@ -412,8 +490,9 @@ async function drainClaimedRoutineRun(
     const error = timedOut
       ? 'watchdog timeout — no terminal event from the Gateway'
       : (lastError ?? 'event stream ended without a terminal')
+    noteCapReached(settleSpend(outputText))
     settleExec(
-      { status: timedOut ? 'timed_out' : 'failed', error },
+      { status: timedOut ? 'timed_out' : 'failed', error, ...ledgerCost() },
       { status: timedOut ? 'timed_out' : 'failed', error },
     )
     releaseTask(db, taskId)
@@ -423,80 +502,17 @@ async function drainClaimedRoutineRun(
   if (terminal.reason === 'success') {
     const summary = terminal.summary || '(no output)'
     addComment(db, taskId, summary, 'agent', run.agentId)
-    // Budget coverage for the connected substrate: the live Gateway emits no
-    // incremental `cost` events AND no terminal usage, so a successful run's spend
-    // is ESTIMATED from the produced text (input prompt + output summary) when the
-    // terminal carries no `costUsd` — so a cap can still engage. A future cost-
-    // bearing Gateway's real `costUsd` is used as-is. Skipped if a `cost` event
-    // already recorded spend this run (forward-safe against a future Gateway).
-    // The run's ledger row records the same figure the budgets were charged.
-    let ledgerCostUsd: number | null = terminal.costUsd ?? null
-    let ledgerCostSource: RunCostSource | null = terminal.costUsd != null ? 'reported' : null
-    if (!recordedAnyCost) {
-      const estimated = terminal.costUsd == null
-      const usd = estimated
-        ? estimateRunCostUsd({
-            model: template.model ?? null,
-            inputChars: dispatchPromptChars,
-            outputChars: summary.length,
-          })
-        : terminal.costUsd!
-      if (estimated) {
-        ledgerCostUsd = usd
-        ledgerCostSource = 'char-estimate'
-      }
-      const cents = usdToFractionalCents(usd)
-      const scopes: [BudgetScope, string | null][] = [
-        ['agent', run.agentId],
-        ['mission', missionId],
-        ['team', run.teamId],
-      ]
-      let pausedScope: string | null = null
-      for (const [scope, scopeId] of scopes) {
-        if (!scopeId) continue
-        const r = recordSpend(db, scope, scopeId, cents)
-        if (!r) continue
-        if (r.crossed !== 'none') {
-          appendAudit(db, {
-            eventType: 'budget',
-            taskId,
-            teamId: run.teamId,
-            agentId: run.agentId,
-            tenantId: run.tenantId,
-            summary: {
-              scope,
-              scopeId,
-              crossed: r.crossed,
-              status: r.status,
-              mode: r.mode,
-              runtime: 'openclaw',
-              estimated,
-            },
-          })
-        }
-        if (r.status === 'paused' && r.mode === 'cap' && !pausedScope) pausedScope = scope
-      }
-      if (pausedScope) {
-        // The work already happened (we cannot un-spend it); the cap's enforcement
-        // is the pre-flight gate blocking the NEXT fire. Surface it to the operator.
-        addComment(
-          db,
-          taskId,
-          `Budget cap reached (${pausedScope}). This run is recorded; the next scheduled fire is blocked until you raise the cap or resume.`,
-          'system',
-        )
-      }
-    }
+    noteCapReached(settleSpend(terminal.summary || outputText))
     // Not `settleExec` here: the obs completion has to stay BELOW the audit and
     // the status write, so the close and its emit are split. `closed` carries
     // whether this run actually won the ledger row through to both.
+    const settled = ledgerCost()
     const closed = completeExecutionProcess(db, exec.id, {
       status: 'succeeded',
       summary,
-      costUsd: ledgerCostUsd,
-      costSource: ledgerCostSource,
-      inputTokens: terminal.usage?.inputTokens ?? null,
-      outputTokens: terminal.usage?.outputTokens ?? null,
+      ...settled,
+      inputTokens: settled.inputTokens ?? terminal.usage?.inputTokens ?? null,
+      outputTokens: settled.outputTokens ?? terminal.usage?.outputTokens ?? null,
     })
     // The connected substrate has no worktree/diff to verify, so this `done` is
     // NOT gated. Surface that explicitly (comment + audit) so the node is not
@@ -542,9 +558,9 @@ async function drainClaimedRoutineRun(
         data: {
           execId: exec.id,
           status: 'succeeded',
-          costUsd: terminal.costUsd ?? null,
-          inputTokens: terminal.usage?.inputTokens,
-          outputTokens: terminal.usage?.outputTokens,
+          costUsd: settled.costUsd ?? null,
+          inputTokens: settled.inputTokens ?? terminal.usage?.inputTokens,
+          outputTokens: settled.outputTokens ?? terminal.usage?.outputTokens,
         },
       })
     }
@@ -552,7 +568,8 @@ async function drainClaimedRoutineRun(
   }
 
   const error = `run ${terminal.reason}: ${terminal.summary || lastError || '(no output)'}`
-  settleExec({ status: 'failed', error }, { status: 'failed', error })
+  noteCapReached(settleSpend(terminal.summary || outputText))
+  settleExec({ status: 'failed', error, ...ledgerCost() }, { status: 'failed', error })
   releaseTask(db, taskId)
   return { ok: false, taskId, error }
 }
