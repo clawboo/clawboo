@@ -636,9 +636,9 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 ### SECURITY: refusing to start
 
-**What it means:** `HOST` makes the server listen on a network address, and it has no working access token, so it exits rather than serve everyone on your network.
+**What it means:** the server exits with code 1 rather than leave the API open. Either `HOST` makes it listen on a network address and it has no access token, or `STUDIO_ACCESS_TOKEN` has a character other than letters, digits, `.`, `_`, `~` and `-`, which stops it on any address (the message names the character).
 
-**Fix:** set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on this computer only. To create a token, run `openssl rand -hex 24`.
+**Fix:** set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on this computer only. To create a token, run `openssl rand -hex 24`; output from `openssl rand -base64` can contain `+`, `/` or `=`.
 
 ### Agents lost their Clawboo tools after setting HOST
 
@@ -652,7 +652,7 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 <Accordion title="STUDIO_ACCESS_TOKEN contains an unsupported character">
 
-**What it means:** the token uses a character other than letters, digits, `.`, `_`, `~` and `-`, so the server turned the token check off. On a network address the server refuses to start; behind a reverse proxy on the same machine, everything is open.
+**What it means:** the token uses a character other than letters, digits, `.`, `_`, `~` and `-`, so the server refuses to start, on any address and even with `CLAWBOO_ALLOW_INSECURE=1`. The message starts with `SECURITY: refusing to start` and names the character. On 0.5.0 and older the server turned the token check off instead and kept running.
 
 **Fix:** make a new token with `openssl rand -hex 24`, restart the server with it, and sign in again.
 

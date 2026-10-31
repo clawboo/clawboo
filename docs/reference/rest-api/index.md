@@ -74,7 +74,7 @@ Keep the token out of API URLs: any request whose URL carries `access_token` get
 | `/api/*` without a valid cookie          | `401`  | `{ "error": "Clawboo access token required. Open /?access_token=<token> once to set a cookie." }` |
 | WebSocket upgrade without a valid cookie | none   | The socket is closed                                                                              |
 
-The token may contain only `A-Z a-z 0-9 . _ ~ -`. A token with any other character turns the gate off, and the server only logs a warning. A non-loopback bind then refuses to start (unless `CLAWBOO_ALLOW_INSECURE=1`), but a loopback bind behind a reverse proxy on the same machine serves every route with no token, so check the startup log. `openssl rand -hex 24` makes a suitable token. The comparison is constant-time, and the `/api/` prefix test ignores letter case.
+The token may contain only `A-Z a-z 0-9 . _ ~ -`. With any other character the server does not start: it logs `SECURITY: refusing to start` and exits with code 1 on every bind, even with `CLAWBOO_ALLOW_INSECURE=1`. `openssl rand -hex 24` makes a suitable token. The comparison is constant-time, and the `/api/` prefix test ignores letter case.
 
 **Agent MCP connections.** An agent runtime that Clawboo starts reaches the four MCP endpoints (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`) without a cookie. It passes only with the `attachToken` Clawboo put in its attach URL, and only when it connects straight to the loopback port with no proxy forwarding headers. `/api/mcp/config` always needs the cookie. See [Tools and MCP](/reference/rest-api/tools-and-mcp).
 

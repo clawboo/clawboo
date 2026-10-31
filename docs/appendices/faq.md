@@ -111,7 +111,7 @@ A git worktree keeps a task's file changes apart from your other files, but it i
 
 Clawboo is built for one person on one computer, with no user accounts or roles. Out of the box it listens only on that computer. To open it from somewhere else, follow [Reach Clawboo from another machine](/guides/self-host-securely). An SSH tunnel is the simplest way. Anything wider needs an access token (`STUDIO_ACCESS_TOKEN`), and anyone who has the token can do everything you can.
 
-Use only letters, digits, `.`, `_`, `~` and `-` in the token: any other character switches the token check off. If you make the server listen on a network address with no working token, it refuses to start.
+Use only letters, digits, `.`, `_`, `~` and `-` in the token: with any other character the server refuses to start. It also refuses to start on a network address with no token.
 
 <Warning>
 

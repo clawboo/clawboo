@@ -53,7 +53,7 @@ How the token is resolved:
 2. With no usable token, Clawboo falls back to OpenClaw's `openclaw.json` (`gateway.auth.token` and `gateway.port`). It uses that token and, when `settings.json` has no URL, connects to `ws://localhost:<port>`.
 3. Otherwise the literal value is used.
 
-The file is plain JSON, written with your default file permissions, so the Gateway token in it is protected only by the folder: Clawboo keeps `~/.clawboo` owner-only (mode 0700).
+The file is plain JSON, readable only by you (mode 0600), in a folder Clawboo keeps owner-only (mode 0700). Saving a setting narrows an older file to 0600 first.
 
 <Warning>
 A `studioAccessToken` key in settings.json does nothing. The access gate reads only the `STUDIO_ACCESS_TOKEN` environment variable, so a token written here leaves the dashboard open. See [Environment variables](/reference/environment-variables) for the variable and its rules.
@@ -106,7 +106,7 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | `worktrees/`, `reviews/`             | Per-task git worktrees and review checkouts                                                   | No                              |
 | `runtimes/<runtime>/<agent>/`        | Each Clawboo Native, Codex or Hermes agent's own runtime home                                 | May hold runtime sign-in copies |
 
-The database files and secrets are owner-only (mode 0600) in an owner-only folder (0700).
+The database files, `settings.json` and secrets are owner-only (mode 0600) in an owner-only folder (0700).
 
 ## Saved keys
 
@@ -135,6 +135,8 @@ It writes:
 - **When you change OpenClaw settings from the dashboard**: `openclaw.json`, and any keys you enter. That covers the **System** panel, OpenClaw's default model, an OpenClaw agent's model, and drawing a routing link on the Org chart, which turns on agent-to-agent messaging.
 - **Each time it connects to the Gateway**: through the Gateway, it registers Clawboo's Memory, Tasks and Tools servers under `mcp.servers` and adds OpenClaw's sub-agent tools (`sessions_spawn`, `sessions_yield`) to `tools.deny`, alongside your own entries.
 - **When the Gateway refuses to start** and asks for a repair: it runs `openclaw doctor --fix --non-interactive` once, then tries again.
+
+Clawboo writes `.env` and each `auth-profiles.json` owner-only (mode 0600), narrowing an existing file first, and creates OpenClaw's folder owner-only (0700) when it does not exist.
 
 Resetting `~/.clawboo` leaves all of these in place, so provider keys saved this way keep working for OpenClaw. `OPENCLAW_CONFIG_PATH` is not read; the config is always `openclaw.json` inside that folder.
 

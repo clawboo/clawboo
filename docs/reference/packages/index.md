@@ -239,7 +239,9 @@ runner, the team orchestrator and the Clawboo Native conversation loop.
 `resolveClawbooDir()` returns Clawboo's own state folder (`CLAWBOO_HOME`, else `~/.clawboo`), and
 `resolveStateDir()` returns OpenClaw's (`OPENCLAW_STATE_DIR`, else the first existing folder among `~/.openclaw`,
 `~/.clawdbot` and `~/.moltbot`, falling back to `~/.openclaw`). `loadSettings()` and
-`saveSettings()` read and write `settings.json` in Clawboo's folder. `resolveBasePath()` validates
+`saveSettings()` read and write `settings.json` in Clawboo's folder. `writePrivateFileSync()` writes a file
+owner-only (`0600`), narrowing an existing file first, and `mkdirPrivateSync()` creates missing folders `0700`;
+`saveSettings()` and the server's OpenClaw `.env` and `auth-profiles.json` writers use them. `resolveBasePath()` validates
 `CLAWBOO_BASE_PATH`: it accepts `/clawboo`-style paths and rejects whitespace, `%`, `?`, `#`, backslashes, empty or
 dot segments and a first segment of `api`, and the server exits on an invalid value. The CLI uses
 `resolveBasePathOrRoot()`, which falls back to the root. See [Configuration](/reference/configuration).

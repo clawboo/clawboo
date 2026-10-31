@@ -156,7 +156,7 @@ This route replaces `~/.openclaw/openclaw.json` and `~/.openclaw/.env` entirely,
 
 </Warning>
 
-The written `openclaw.json` holds only: `gateway` (`mode: 'local'`, the port, token auth read from `GATEWAY_AUTH_TOKEN`), the default model under `agents.defaults.model.primary`, agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and for Ollama an optional `models.providers.ollama` entry. The written `.env` holds `GATEWAY_AUTH_TOKEN=<64 hex characters>` plus one key line. The route also creates `~/.openclaw/workspace`. The token is kept on the server and never returned.
+The written `openclaw.json` holds only: `gateway` (`mode: 'local'`, the port, token auth read from `GATEWAY_AUTH_TOKEN`), the default model under `agents.defaults.model.primary`, agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and for Ollama an optional `models.providers.ollama` entry. The written `.env` holds `GATEWAY_AUTH_TOKEN=<64 hex characters>` plus one key line, and only its owner can read it (mode `0600`). The route also creates `~/.openclaw/workspace`. The token is kept on the server and never returned.
 
 - **Path/query params**: none.
 - **Request body**:

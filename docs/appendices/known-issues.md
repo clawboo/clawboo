@@ -47,7 +47,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What to do:** make a token from the allowed characters, for example with `openssl rand -hex 24`. Restart Clawboo and check that the dashboard asks for the token. See [Reach Clawboo from another machine](/guides/self-host-securely).
 
-**Status:** open.
+**Status:** fixed on main. From the next release, such a token stops the server at startup on every bind, with a `SECURITY: refusing to start` error that names the character. `CLAWBOO_ALLOW_INSECURE=1` does not skip it.
 
 ### Keys saved under Providers are also stored unencrypted for OpenClaw
 
@@ -333,6 +333,8 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | What you see on 0.5.0                                                                                                                                                                                 | Area      |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | Requests to `/api/mcp/` through a reverse proxy on the same machine skip the access token (see the [first entry on this page](#security-and-access))                                                  | Security  |
+| A `STUDIO_ACCESS_TOKEN` with an unsupported character turns the access check off (see [the entry above](#an-access-token-with-an-unsupported-character-turns-the-access-check-off))                   | Security  |
+| Clawboo writes `~/.openclaw/.env`, OpenClaw agents' `auth-profiles.json`, `settings.json` and `clawboo backup` files with your default permissions                                                    | Security  |
 | Over HTTP, a TeamChat MCP session with no signed identity can read and post in any team's [peer chat](/concepts/peer-chat) as any agent, and `create_subtask` can file work under another team's task | Security  |
 | Picking **Ollama** during setup records nothing: a new team runs on Anthropic, and its first message says Clawboo Native has no provider key                                                          | Ollama    |
 | Setup accepts an Ollama with no model pulled, then every run fails with "model not found"                                                                                                             | Ollama    |

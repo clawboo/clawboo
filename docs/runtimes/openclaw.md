@@ -182,7 +182,7 @@ Clawboo changes OpenClaw's files in these places. `~/.openclaw` is OpenClaw's st
 
 <Warning>
 
-Provider keys in `~/.openclaw/.env` and in each agent's `auth-profiles.json` are stored in plain text, because that is where OpenClaw reads them. Anyone who can read those files can read the keys. Clawboo's own copy stays in its encrypted vault.
+Provider keys in `~/.openclaw/.env` and in each agent's `auth-profiles.json` are stored in plain text, because that is where OpenClaw reads them. Clawboo writes both files readable only by your user account (mode `0600`), but anything that runs as you can read the keys. Clawboo's own copy stays in its encrypted vault.
 
 </Warning>
 

@@ -107,9 +107,10 @@ connect frame with it. The server's own Gateway connection reuses the same ident
   `isForwardedRequest` looks for `Forwarded`, `X-Forwarded-*` and `X-Real-IP`, and those headers can only take
   access away.
 
-A token with a character outside `A-Z a-z 0-9 . _ ~ -` turns the gate off with a console warning instead of
-breaking the cookie. A non-loopback bind still refuses to start without a working gate, unless
-`CLAWBOO_ALLOW_INSECURE=1`, but a loopback server behind a same-host reverse proxy would then be open. Generate the
+A token with a character outside `A-Z a-z 0-9 . _ ~ -` would break the cookie, so `createAccessGate` throws on one.
+The server checks first with `findUnsupportedTokenChar` (the allowed set is `ACCESS_TOKEN_CHARSET`): it logs
+`SECURITY: refusing to start` and exits 1 on every bind, and `CLAWBOO_ALLOW_INSECURE=1` does not skip it. A
+non-loopback bind with no token also refuses to start, unless `CLAWBOO_ALLOW_INSECURE=1`. Generate the
 token with `openssl rand -hex 24`. When a forwarded request reaches a server with no token, the server logs a
 one-time warning (`proxyExposureWarning.ts`).
 

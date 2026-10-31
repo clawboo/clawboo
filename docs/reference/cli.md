@@ -177,7 +177,7 @@ Copies the database to a single file. It opens `<CLAWBOO_HOME>/clawboo.db` (defa
 
 It prints the file's path and size. With no database yet it prints "No Clawboo database found at" the path, "Start the server once to create it, or set CLAWBOO_HOME.", and exits 1.
 
-To restore, stop the server (`clawboo stop`) and copy the backup over `clawboo.db`. A database backup does not include `~/.clawboo/secrets/`, where your saved provider keys and the key that decrypts them live. The copy keeps your default file permissions (the live database is owner-only) and holds your chats and settings, so keep it private. [Data and state](/operating/data-and-state) covers what a full backup needs.
+To restore, stop the server (`clawboo stop`) and copy the backup over `clawboo.db`. A database backup does not include `~/.clawboo/secrets/`, where your saved provider keys and the key that decrypts them live. The copy is owner-only (mode `0600`, like the live database) before anything is written to it, and a failed backup removes its partial file. It holds your chats and settings, so keep it private. [Data and state](/operating/data-and-state) covers what a full backup needs.
 
 ## Exit codes
 

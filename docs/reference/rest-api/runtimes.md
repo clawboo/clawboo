@@ -678,7 +678,7 @@ The first-run signals in one call, so a client can decide between the setup wiza
 The `/api/providers*` routes back **Settings > Providers**. A provider is a model vendor (`anthropic`, `openai`, ...), not a runtime: one Anthropic key can serve Clawboo Native, Claude Code, Hermes and OpenClaw at once. These routes keep the key in two places, so that every runtime finds it:
 
 - Clawboo's encrypted vault (read by Clawboo Native, Claude Code and Hermes).
-- OpenClaw's own key files, in plain text: `~/.openclaw/.env` and every existing OpenClaw agent's `auth-profiles.json` (as the `<provider>:default` profile). The folder is created if it does not exist, even when you do not use OpenClaw.
+- OpenClaw's own key files, in plain text and owner-only (mode `0600`): `~/.openclaw/.env` and every existing OpenClaw agent's `auth-profiles.json` (as the `<provider>:default` profile). The folder is created (mode `0700`) if it does not exist, even when you do not use OpenClaw.
 
 For where keys are stored and how to connect them in the dashboard, see [Providers and runtimes](/using/providers-and-runtimes).
 
