@@ -1,10 +1,11 @@
 // ─── Delegation approval ───────────────────────────────
 // Plumbs a delegated child's risky action back to the LEADER's approval queue.
-// Reuses the existing DB-mediated `tool_call_approvals` handshake: a sticky
-// `allow_always` for the (leader, scope) skips the prompt; otherwise it opens a
-// pending approval (visible in the existing Approvals UI) and blocks until the
-// leader resolves it OR the TTL/poll-deadline expires — so a forgotten approval
-// TIMES OUT, never deadlocks.
+// Reuses the existing DB-mediated `tool_call_approvals` handshake: every risky
+// hand-off opens a pending approval (visible in the existing Approvals UI) and
+// blocks until the leader resolves it OR the TTL/poll-deadline expires, so a
+// forgotten approval TIMES OUT, never deadlocks. Nothing is remembered: an
+// `allow_always` answer covers that one hand-off, exactly like `allow_once`,
+// because nothing in the dashboard could list or revoke a remembered one.
 //
 // `resolveDelegationApproval` is the reusable core: the REST handler below AND the
 // server team orchestrator (`teamOrchestrator.ts`, wired as the engine's
@@ -14,13 +15,7 @@
 
 import type { Request, Response } from 'express'
 
-import {
-  appendAudit,
-  createApproval,
-  priorAllowAlways,
-  waitForApproval,
-  type ClawbooDb,
-} from '@clawboo/db'
+import { appendAudit, createApproval, waitForApproval, type ClawbooDb } from '@clawboo/db'
 
 import { getDb } from '../lib/db'
 
@@ -39,8 +34,8 @@ export interface ResolveDelegationApprovalInput {
   taskId?: string | null
 }
 
-/** Resolve a delegation approval (sticky-scope → else open + await). FAIL-CLOSED:
- *  any thrown error resolves to `'timeout'` (the engine skips + reflects). */
+/** Resolve a delegation approval (open + await). FAIL-CLOSED: any thrown error
+ *  resolves to `'timeout'` (the engine skips + reflects). */
 export async function resolveDelegationApproval(
   db: ClawbooDb,
   input: ResolveDelegationApprovalInput,
@@ -53,22 +48,13 @@ export async function resolveDelegationApproval(
     const targetAgentName = input.targetAgentName
     const taskId = input.taskId ?? null
 
-    // Sticky scope: a prior `allow_always` from this leader skips the prompt.
-    if (priorAllowAlways(db, { agentId: leaderAgentId, scopeKey })) {
-      appendAudit(db, {
-        eventType: 'approval',
-        agentId: leaderAgentId,
-        summary: { scopeKey, resolution: 'allow_always', sticky: true },
-      })
-      return 'allow_always'
-    }
-
     const approval = createApproval(db, {
       toolName: scopeKey,
       agentId: leaderAgentId,
       args: { task, targetAgentName },
       reason: `Delegation${targetAgentName ? ` to ${targetAgentName}` : ''}`,
       taskId,
+      neverRemember: true,
     })
     const resolution = (await waitForApproval(db, approval.id)) as DelegationApprovalResolution
     appendAudit(db, {

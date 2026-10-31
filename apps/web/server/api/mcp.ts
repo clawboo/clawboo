@@ -8,7 +8,9 @@ import { putScreenshot } from '../lib/screenshotBus'
 import path from 'node:path'
 
 import {
+  agents,
   resolveRoomForTeam,
+  teams,
   type DbTeamChat,
   type MemoryProvenance,
   type MemoryScope,
@@ -31,6 +33,7 @@ import {
   verifyAttachScope,
   type SignableScope,
 } from '@clawboo/mcp'
+import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { connectorToolsForServer, onConnectorsChanged } from '../lib/connectors/supervisor'
@@ -41,7 +44,7 @@ import {
   warmEmbedProvider,
 } from '../lib/memoryEmbedding'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
-import { getMcpAttachSecret } from '../lib/mcpAttachSecret'
+import { getMcpAttachSecret, rotateMcpAttachSecret } from '../lib/mcpAttachSecret'
 import { createLogger, REDACTION_MASK } from '@clawboo/logger'
 
 const log = createLogger('mcp-attach')
@@ -377,6 +380,28 @@ export const mcpToolsSession = makeSession('tools')
 export const mcpTeamchatPost = makePost('teamchat')
 export const mcpTeamchatSession = makeSession('teamchat')
 
+/**
+ * Why the ids a signed attach URL would carry make no identity, or null when
+ * they do. The team must exist. The agent id is free, because an outside agent
+ * attaches under an id of its own that no Clawboo agent uses; but an id that
+ * IS a Clawboo agent must be on the team it is signed with, or the URL would
+ * pair one team's board with another team's agent.
+ */
+function attachScopeError(teamId: string, agentId: string): string | null {
+  const db = getDb()
+  if (teamId && !db.select({ id: teams.id }).from(teams).where(eq(teams.id, teamId)).get())
+    return `unknown team: ${teamId}`
+  if (teamId && agentId) {
+    const agent = db
+      .select({ teamId: agents.teamId })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get()
+    if (agent && agent.teamId !== teamId) return `agent ${agentId} is not on team ${teamId}`
+  }
+  return null
+}
+
 // GET /api/mcp/config?runtime=&server=&transport= — emit the attach snippet.
 export function mcpConfigGET(req: Request, res: Response): void {
   try {
@@ -417,6 +442,11 @@ export function mcpConfigGET(req: Request, res: Response): void {
     const scopeTeamId = typeof req.query['scopeTeamId'] === 'string' ? req.query['scopeTeamId'] : ''
     const scopeAgentId =
       typeof req.query['scopeAgentId'] === 'string' ? req.query['scopeAgentId'] : ''
+    const scopeError = attachScopeError(scopeTeamId, scopeAgentId)
+    if (scopeError) {
+      res.status(400).json({ error: scopeError })
+      return
+    }
     const scope = {
       ...(scopeTeamId ? { teamId: scopeTeamId } : {}),
       ...(scopeAgentId ? { agentId: scopeAgentId } : {}),
@@ -435,6 +465,21 @@ export function mcpConfigGET(req: Request, res: Response): void {
         scope,
       }),
     })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// POST /api/mcp/attach-secret/rotate: replace the attach-signing secret, so
+// every attach token and signed scope minted before stops working. Operator-only
+// like /api/mcp/config: the gate's attach-token exemption covers only the
+// transport mounts. `gateway` says what became of a connected OpenClaw
+// Gateway's registered URLs (see GatewayAttachRefresh).
+export async function mcpAttachSecretRotatePOST(_req: Request, res: Response): Promise<void> {
+  try {
+    const gateway = await rotateMcpAttachSecret(getDb())
+    log.info({ gateway }, 'mcp attach secret rotated')
+    res.json({ ok: true, gateway })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

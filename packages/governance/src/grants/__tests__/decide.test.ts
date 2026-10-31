@@ -309,6 +309,34 @@ describe('standing rules', () => {
     expect(d.kind).toBe('require_approval')
     if (d.kind === 'require_approval') expect(d.reason).toBe('never-remembered')
   })
+
+  it('still asks under approvalPolicy always, with an allow rule on file', () => {
+    const d = decide({ grants: [grant({ approvalPolicy: 'always' })], standingRules: [rule()] })
+    expect(d).toEqual({
+      kind: 'require_approval',
+      grantId: 'grant_1',
+      reason: 'policy-always',
+      neverRemember: true,
+    })
+  })
+
+  it('still honours a deny rule under approvalPolicy always', () => {
+    const d = decide({
+      grants: [grant({ approvalPolicy: 'always' })],
+      standingRules: [rule({ decision: 'deny' })],
+    })
+    expect(d.kind).toBe('deny')
+    if (d.kind === 'deny') expect(d.reason).toBe('standing-deny')
+  })
+
+  it('lets an allow rule skip the writes policy, as before', () => {
+    const d = decide({
+      grants: [grant({ approvalPolicy: 'writes' })],
+      tool: tool({ readOnly: false }),
+      standingRules: [rule()],
+    })
+    expect(d.kind).toBe('allow')
+  })
 })
 
 describe('the approval-fatigue carve-out', () => {

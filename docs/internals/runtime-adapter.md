@@ -112,14 +112,14 @@ A second group of optional fields tells the host how deeply to integrate the run
 
 What each adapter declares (`packages/adapters/*/src/adapter.ts`):
 
-| Runtime          | Class                 | `nativeHome`                         | Streaming | MCP | Worktrees | Steering           | Preserves      |
-| ---------------- | --------------------- | ------------------------------------ | --------- | --- | --------- | ------------------ | -------------- |
-| `clawboo-native` | `native`              | per-identity, persist                | yes       | yes | yes       | `live`             | memory         |
-| `claude-code`    | `wrapped-oneshot`     | none (the user's `~/.claude`)        | yes       | yes | yes       | `live`             | nothing        |
-| `codex`          | `wrapped-oneshot`     | per-identity, persist (`CODEX_HOME`) | yes       | yes | yes       | `live`             | nothing        |
-| `hermes`         | `wrapped-oneshot`     | per-identity, persist                | no        | yes | yes       | `interrupt-resume` | skills, memory |
-| `openclaw`       | `connected-substrate` | none (the Gateway owns it)           | yes       | no  | no        | `live`             | skills, memory |
-| `clawboo-mock`   | omitted               | none                                 | yes       | no  | no        | `none`             | nothing        |
+| Runtime          | Class                 | `nativeHome`                              | Streaming | MCP | Worktrees | Steering           | Preserves      |
+| ---------------- | --------------------- | ----------------------------------------- | --------- | --- | --------- | ------------------ | -------------- |
+| `clawboo-native` | `native`              | per-identity, persist                     | yes       | yes | yes       | `live`             | memory         |
+| `claude-code`    | `wrapped-oneshot`     | none (sessions in the user's `~/.claude`) | yes       | yes | yes       | `live`             | nothing        |
+| `codex`          | `wrapped-oneshot`     | per-identity, persist (`CODEX_HOME`)      | yes       | yes | yes       | `live`             | nothing        |
+| `hermes`         | `wrapped-oneshot`     | per-identity, persist                     | no        | yes | yes       | `interrupt-resume` | skills, memory |
+| `openclaw`       | `connected-substrate` | none (the Gateway owns it)                | yes       | no  | no        | `live`             | skills, memory |
+| `clawboo-mock`   | omitted               | none                                      | yes       | no  | no        | `none`             | nothing        |
 
 Every real adapter declares `resume: true` and `toolApproval: true`; the mock declares both false. Native and Claude Code declare a 200,000-token context window; the others declare none, so the rotation watermark stays off for them.
 

@@ -105,8 +105,8 @@ function findStandingRule(
 /**
  * Evaluation order is deliberate and must not be reshuffled:
  *
- *   resolve grant → state → DRIFT → scope → mode → rate → standing rule
- *                 → trifecta/taint → policy → risk
+ *   resolve grant → state → DRIFT → scope → mode → rate → trifecta/taint
+ *                 → standing deny → policy `always` → standing allow → policy → risk
  *
  * Two orderings carry real weight:
  *
@@ -195,8 +195,6 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
   // silently authorize the same tool once the run has been tainted.
   const rule = findStandingRule(input.standingRules, grant.id, tool.name, input.argsShape, now)
   if (rule?.decision === 'deny') return { kind: 'deny', grantId: grant.id, reason: 'standing-deny' }
-  if (rule?.decision === 'allow' && !neverRemember)
-    return { kind: 'allow', grantId: grant.id, ruleId: rule.id }
 
   // A never-remembered tool always prompts, even with a rule on file: the rule
   // should never have been minted, and honouring it would make the class a lie.
@@ -209,8 +207,16 @@ export function decideGrant(input: GrantDecisionInput): GrantDecision {
     }
 
   // ── policy ───────────────────────────────────────────────────────────────
+  // `always` means every call asks, so it outranks a remembered allow (one
+  // minted before the policy changed, for example) and offers no "Always".
   if (grant.approvalPolicy === 'always')
-    return { kind: 'require_approval', grantId: grant.id, reason: 'policy-always', neverRemember }
+    return {
+      kind: 'require_approval',
+      grantId: grant.id,
+      reason: 'policy-always',
+      neverRemember: true,
+    }
+  if (rule?.decision === 'allow') return { kind: 'allow', grantId: grant.id, ruleId: rule.id }
   if (grant.approvalPolicy === 'writes' && isMutating(tool))
     return { kind: 'require_approval', grantId: grant.id, reason: 'policy-writes', neverRemember }
   if (grant.approvalPolicy === 'never') return { kind: 'allow', grantId: grant.id }

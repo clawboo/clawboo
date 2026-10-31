@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { carriesAttachToken } from '../../../api/mcp'
 import { getDb, resetDb } from '../../db'
+import { rotateMcpAttachSecret } from '../../mcpAttachSecret'
 import {
   OpenClawAgentSource,
   pendingUpstreamDeletes,
@@ -503,6 +504,7 @@ describe('OpenClawAgentSource', () => {
     fake: FakeGateway,
     baseUrl: string | null,
     gatewayUrl = 'ws://test:18789',
+    mcpRefreshRetryMs?: readonly number[],
   ): OpenClawAgentSource {
     return new OpenClawAgentSource({
       getDb,
@@ -510,6 +512,7 @@ describe('OpenClawAgentSource', () => {
       makeClient: () => fake,
       connectOptions: () => ({}),
       mcpBaseUrl: () => baseUrl,
+      ...(mcpRefreshRetryMs ? { mcpRefreshRetryMs } : {}),
     })
   }
 
@@ -620,6 +623,107 @@ describe('OpenClawAgentSource', () => {
       expect(registered(fake)[name]?.url, name).toContain('attachToken=')
     }
     await src.stop()
+  })
+
+  it('re-registers fresh URLs after the attach secret is rotated', async () => {
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'ws://127.0.0.1:18789')
+    await src.start()
+    await flush()
+    const before = registered(fake)['clawboo-tasks']!.url
+
+    await rotateMcpAttachSecret(getDb())
+    expect(await src.refreshMcpServers()).toBe('updated')
+    const after = new URL(registered(fake)['clawboo-tasks']!.url)
+    expect(after.toString()).not.toBe(before)
+    expect(carriesAttachToken({ url: after.pathname + after.search } as IncomingMessage)).toBe(true)
+    const stale = new URL(before)
+    expect(carriesAttachToken({ url: stale.pathname + stale.search } as IncomingMessage)).toBe(
+      false,
+    )
+    await src.stop()
+  })
+
+  describe('when the Gateway refuses the new URLs after a rotation', () => {
+    /** Make the next `failures` config writes fail; counts every write attempt. */
+    function refuseWrites(fake: FakeGateway, failures: number): { attempts: () => number } {
+      const realPatch = fake.config.patch
+      let attempts = 0
+      fake.config.patch = (updates: Record<string, unknown>) => {
+        attempts += 1
+        if (failures > 0) {
+          failures -= 1
+          return Promise.reject(new Error('rate limited'))
+        }
+        return realPatch(updates)
+      }
+      return { attempts: () => attempts }
+    }
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+    it('answers retrying, then lands the new URLs on a retry', async () => {
+      const fake = new FakeGateway()
+      fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+      const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'ws://127.0.0.1:18789', [5, 5])
+      await src.start()
+      await flush()
+      const before = registered(fake)['clawboo-tasks']!.url
+      refuseWrites(fake, 1)
+
+      await rotateMcpAttachSecret(getDb())
+      expect(await src.refreshMcpServers()).toBe('retrying')
+      expect(registered(fake)['clawboo-tasks']!.url).toBe(before)
+
+      for (let i = 0; i < 100 && registered(fake)['clawboo-tasks']!.url === before; i++)
+        await sleep(5)
+      const after = new URL(registered(fake)['clawboo-tasks']!.url)
+      expect(carriesAttachToken({ url: after.pathname + after.search } as IncomingMessage)).toBe(
+        true,
+      )
+      await src.stop()
+    })
+
+    it('stops after the retry schedule runs out', async () => {
+      const fake = new FakeGateway()
+      fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+      const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'ws://127.0.0.1:18789', [5, 5])
+      await src.start()
+      await flush()
+      const writes = refuseWrites(fake, Number.POSITIVE_INFINITY)
+
+      await rotateMcpAttachSecret(getDb())
+      expect(await src.refreshMcpServers()).toBe('retrying')
+      await sleep(80)
+      // The first write and one per scheduled retry, then nothing more.
+      expect(writes.attempts()).toBe(3)
+      await src.stop()
+    })
+
+    it('stop() cancels a pending retry', async () => {
+      const fake = new FakeGateway()
+      fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+      const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'ws://127.0.0.1:18789', [20])
+      await src.start()
+      await flush()
+      refuseWrites(fake, Number.POSITIVE_INFINITY)
+      const register = vi.spyOn(
+        src as unknown as { registerSharedMcpServers: () => Promise<unknown> },
+        'registerSharedMcpServers',
+      )
+
+      await rotateMcpAttachSecret(getDb())
+      expect(await src.refreshMcpServers()).toBe('retrying')
+      await src.stop()
+      await sleep(60)
+      expect(register).toHaveBeenCalledTimes(1)
+    })
+
+    it('answers not-connected without a Gateway connection', async () => {
+      const fake = new FakeGateway()
+      const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'ws://127.0.0.1:18789')
+      expect(await src.refreshMcpServers()).toBe('not-connected')
+    })
   })
 
   it('is a no-op when no base URL is known (registration deferred, never throws)', async () => {

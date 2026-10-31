@@ -735,9 +735,8 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_grants_expires    ON capability_grants (expires_at);
 
     -- ── approval_rules: durable allow_always, BOUND to a grant ──────────────
-    -- priorAllowAlways (src/governance/approvalScope.ts) already ships a durable
-    -- remembered-approval reader, so this table has to justify itself by what it
-    -- ADDS: an args-shape binding, a cascade-revoke with its grant, and an expiry.
+    -- The only durable remembered approval. Each rule carries an args-shape
+    -- binding, a cascade-revoke with its grant, and an expiry.
     --
     -- expires_at is NOT NULL on purpose. The rule matcher treats a NULL expiry
     -- as an IMMORTAL rule, so "every remembered approval expires" is a policy the

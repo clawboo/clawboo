@@ -129,6 +129,15 @@ export function RuntimeConnectionCard({
   const [verifyFailed, setVerifyFailed] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
+  const recheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // A Re-check's busy-clear timer must not fire after the card unmounts.
+  useEffect(
+    () => () => {
+      if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
+    },
+    [],
+  )
 
   // The native runtime is multi-provider — its whole connect body is the
   // RuntimeProvidersBody provider manager (connected keys, one-click reuse,
@@ -228,8 +237,12 @@ export function RuntimeConnectionCard({
     setBusy(true)
     setError(null)
     onChanged?.()
-    // The host refetch is async; clear busy on the next tick.
-    setTimeout(() => setBusy(false), 400)
+    // The host refetch is async; clear busy shortly after.
+    if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
+    recheckTimerRef.current = setTimeout(() => {
+      recheckTimerRef.current = null
+      setBusy(false)
+    }, 400)
   }
 
   async function handleDisconnect(): Promise<void> {

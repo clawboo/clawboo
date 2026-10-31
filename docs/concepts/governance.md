@@ -130,7 +130,7 @@ Because it matches whole words only, "deleted", "deployment" or "secrets" do not
 
 The request waits up to 5 minutes. If you allow it, the hand-off goes ahead. If you choose **Don't allow**, or nobody answers in time, the hand-off is skipped and the agent that handed it off is told it was not approved. If Clawboo cannot record the request, the hand-off is skipped too.
 
-The approval card in the dashboard offers only a one-time allow and **Don't allow**. An approval resolved as `allow_always` through the API (`POST /api/tools/approvals/:id/resolve`) is permanent: Clawboo stops asking about that leader's risky hand-offs, with no expiry, and the dashboard has no control to take it back. When you have Boo Zero, it leads every team, so one such answer covers all of them.
+The approval card in the dashboard offers only a one-time allow and **Don't allow**. Nothing is remembered: an approval resolved as `allow_always` through the API (`POST /api/tools/approvals/:id/resolve`) allows that one hand-off, and the leader's next risky hand-off asks again.
 
 ## Running commands and using apps
 
@@ -156,7 +156,7 @@ Claude Code, Codex and Hermes run with their own approval prompts turned off, so
 - Budget statuses are `active`, `soft_capped` (from 80%) and `paused` (a hard cap at 100%). A warn-only budget never reads `paused`. The modes are stored as `warn` and `cap`, and spend is kept in fractions of a cent so tiny costs add up.
 - Each recorded amount is charged to every scope that has a budget: the agent, the team and, when the run works a task, the mission. Each scope is updated in its own write.
 - The audit log's event types are `budget` (warnings and auto-pauses), `circuit_break`, `cap_hit`, `approval`, `verification`, `tool_call` and `install`.
-- A risky-delegation approval is a row in the tool-call approvals table with the scope key `delegate:code`. A past `allow_always` row for the same leader and key skips the prompt.
+- A risky-delegation approval is a row in the tool-call approvals table with the scope key `delegate:code` and `neverRemember` set. Every risky hand-off opens a new row; an earlier `allow_always` row skips nothing.
 - Budgets over REST: `GET` and `POST /api/governance/budgets`, `POST /api/governance/budgets/:scope/:scopeId/resume` (an optional `graceUsdCents` raises the limit to current spend plus the grace and keeps the mode) and `GET /api/governance/audit`. See the [Governance API](/reference/rest-api/governance).
 - The run loop that applies budgets and breakers is described in [Executor runner](/internals/executor-runner).
 

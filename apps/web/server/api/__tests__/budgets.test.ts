@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createApproval, recordSpend, resolveApproval } from '@clawboo/db'
+import { createApproval, listPendingApprovals, recordSpend, resolveApproval } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -126,22 +126,26 @@ describe('governance REST', () => {
     expect((switched.body() as { budget: { mode: string } }).budget.mode).toBe('warn')
   })
 
-  it('delegation-approval: 400 without leader, sticky allow_always fast-path', async () => {
+  it('delegation-approval: 400 without leader; an earlier allow_always skips nothing', async () => {
     const bad = mockRes()
     await delegationApprovalPOST(req({ body: {} }), bad.res)
     expect(bad.statusCode()).toBe(400)
 
-    // A prior allow_always for (leader, delegate:code) makes the gate resolve
-    // immediately — no blocking wait (proves the sticky-scope short-circuit).
+    // A prior allow_always for (leader, delegate:code) no longer resolves the
+    // gate at once: the request opens its own approval and waits for an answer.
     const db = getDb()
     const a = createApproval(db, { toolName: 'delegate:code', agentId: 'leader1', args: {} })
     resolveApproval(db, a.id, 'allow_always')
-    const sticky = mockRes()
-    await delegationApprovalPOST(
+    const next = mockRes()
+    const pending = delegationApprovalPOST(
       req({ body: { leaderAgentId: 'leader1', kind: 'code', task: 'deploy' } }),
-      sticky.res,
+      next.res,
     )
-    expect(sticky.statusCode()).toBe(200)
-    expect((sticky.body() as { resolution: string }).resolution).toBe('allow_always')
+    const open = listPendingApprovals(db)
+    expect(open).toHaveLength(1)
+    resolveApproval(db, open[0]!.id, 'deny')
+    await pending
+    expect(next.statusCode()).toBe(200)
+    expect((next.body() as { resolution: string }).resolution).toBe('deny')
   })
 })

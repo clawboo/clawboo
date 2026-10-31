@@ -128,29 +128,31 @@ export function withBrowsingGuidance(existing: string | undefined | null): strin
 export const OPENCLAW_INSTALL_SPEC = 'openclaw@~2026.9'
 
 /**
- * The Node.js versions the pinned OpenClaw will actually run on, as its own
- * package `engines` field states them:
+ * The Node.js versions the newest release in the OPENCLAW_INSTALL_SPEC line
+ * runs on, as its package `engines` field states them (2026.9.34 and later):
  *
- *   >=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0
+ *   >=24.22.1 <25 || >=26.12.1
  *
- * This is a real gate, not advice: npm refuses the global install on an
- * unsupported Node, and the Gateway will not boot. It is also NOT a plain
- * "major >= 22" question, which is what clawboo used to ask. Node 22.12 has the
- * right major and is still too old, and Node 23 has a higher major and is
- * excluded outright, so a major-only check tells a user everything is fine right
- * up until the install fails.
+ * It follows the NEWEST patch because that is what a supported machine
+ * installs. On a Node outside this range npm does not refuse the install: it
+ * quietly picks the newest patch in the line whose engines still admit that
+ * Node (2026.9.2 on Node 22), which is an older Gateway than the one clawboo
+ * targets. So "supported" here means "gets the current release".
  *
- * Keep this in step with OPENCLAW_INSTALL_SPEC. Moving the pin without moving
- * these is how the check goes quietly stale.
+ * Nor is it a "major >= N" question. Node 24.16 has the right major and is
+ * still too old, and Node 25 has a higher major and is excluded outright.
+ *
+ * Keep this in step with OPENCLAW_INSTALL_SPEC, and re-check it when the line
+ * gets a new patch: `npm view 'openclaw@~2026.9' engines --json`.
  */
 export const OPENCLAW_NODE_RANGES: readonly { min: [number, number, number]; ltMajor?: number }[] =
-  [{ min: [22, 22, 3], ltMajor: 23 }, { min: [24, 15, 0], ltMajor: 25 }, { min: [25, 9, 0] }]
+  [{ min: [24, 22, 1], ltMajor: 25 }, { min: [26, 12, 1] }]
 
 /** Human-readable form of {@link OPENCLAW_NODE_RANGES}, for error text and docs. */
-export const OPENCLAW_NODE_REQUIREMENT = '>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0'
+export const OPENCLAW_NODE_REQUIREMENT = '>=24.22.1 <25 || >=26.12.1'
 
 /**
- * Whether a Node version string (`v22.23.2` or `22.23.2`) satisfies OpenClaw.
+ * Whether a Node version string (`v24.22.1` or `24.22.1`) satisfies OpenClaw.
  *
  * Unparseable input is reported as UNSUPPORTED: a version we cannot read is not
  * evidence that it works, and claiming otherwise sends the user into an install
@@ -160,7 +162,7 @@ export const OPENCLAW_NODE_REQUIREMENT = '>=22.22.3 <23 || >=24.15.0 <25 || >=25
  * would be and is the point. This predicate exists to answer "will
  * `npm install -g` accept this Node", and npm resolves engines through
  * node-semver, which excludes prereleases from any range whose comparators carry
- * none: `24.15.0-nightly` does NOT satisfy `>=24.15.0 <25`. Accepting it here
+ * none: `24.22.1-nightly` does NOT satisfy `>=24.22.1 <25`. Accepting it here
  * would put us back where we started, telling the user the machine is ready and
  * letting npm be the one to disagree.
  */

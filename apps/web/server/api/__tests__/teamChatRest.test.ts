@@ -15,7 +15,7 @@ import { getDb, resetDb } from '../../lib/db'
 import { releaseRoom, tryAcquireRoom } from '../../lib/teamChat/roomLock'
 import { mcpHttpUrl } from '@clawboo/mcp'
 
-import { getMcpAttachSecret, resetMcpAttachSecretCache } from '../../lib/mcpAttachSecret'
+import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
 import { parseTeamChatBinding } from '../mcp'
 import { teamChatExchangePOST, teamChatGET } from '../teamChat'
 
@@ -28,11 +28,9 @@ describe('parseTeamChatBinding (anti-spoof URL binding, now SIGNED)', () => {
     prevHome = process.env['CLAWBOO_HOME']
     dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-tcbind-'))
     process.env['CLAWBOO_HOME'] = dir
-    resetMcpAttachSecretCache()
   })
   afterAll(() => {
     resetDb()
-    resetMcpAttachSecretCache()
     if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
     else process.env['CLAWBOO_HOME'] = prevHome
     rmSync(dir, { recursive: true, force: true })

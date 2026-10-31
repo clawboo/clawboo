@@ -9,7 +9,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import { createDb, type ClawbooDb } from '../../db'
-import { upsertGrant, revokeGrant } from '../../grants/repository'
+import {
+  listStandingRules,
+  mintStandingRule,
+  revokeGrant,
+  upsertGrant,
+} from '../../grants/repository'
 import { listPendingApprovals, resolveApproval } from '../persistence'
 import { callsInWindow, chargeCall, resetRateWindows } from '../../grants/rateWindow'
 import { defaultAvailabilityContext } from '../availability'
@@ -226,6 +231,47 @@ describe('the grant gate', () => {
     const res = await inflight
     expect(res.ok).toBe(false)
     expect(res.denied).toBe('grant:grant-revoked')
+  })
+
+  it('still asks under an always-ask grant that has a remembered Always, and remembers nothing', async () => {
+    const grant = upsertGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+      mode: 'admin',
+      approvalPolicy: 'always',
+    })
+    // Minted while the grant was on another policy.
+    mintStandingRule(db, {
+      grantId: grant.id,
+      toolName: 'gh_read',
+      argsShape: null,
+      decision: 'allow',
+      expiresAt: Date.now() + 60_000,
+    })
+    const registry = new ToolRegistry()
+    registry.register(connectorTool())
+
+    const inflight = executeBrokeredCall(
+      db,
+      { name: 'gh_read', args: {} },
+      ctx({ agentId: 'a1', connectorId: CONNECTOR }),
+      { registry, approvalPollMs: 5, approvalTimeoutMs: 5_000 },
+    )
+    for (let i = 0; i < 200 && listPendingApprovals(db).length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const pending = listPendingApprovals(db)
+    expect(pending).toHaveLength(1)
+    expect(pending[0]!.neverRemember).toBe(1)
+    resolveApproval(db, pending[0]!.id, 'allow_always')
+
+    const res = await inflight
+    expect(res.ok).toBe(true)
+    // Only the rule minted above: an Always answered here adds none.
+    expect(listStandingRules(db, grant.id)).toHaveLength(1)
   })
 
   it('an inspector-forced approval does not make a ceiling deny its own call', async () => {

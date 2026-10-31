@@ -89,7 +89,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. See [Claude Code](/runtimes/claude-code).
 
-**Status:** open.
+**Status:** fixed on main. From the next release, Claude Code agents load only the Claude Code files of the folder they work in, such as a repository's `CLAUDE.md`. Your `~/.claude` settings, plugins, MCP servers and memory files, and Claude Code's auto memory, are left out.
 
 ### Clawboo Native shell commands are one approved command at a time
 
@@ -326,6 +326,10 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | A `STUDIO_ACCESS_TOKEN` with an unsupported character turns the access check off (see [the entry above](#an-access-token-with-an-unsupported-character-turns-the-access-check-off))                   | Security  |
 | Clawboo writes `~/.openclaw/.env`, OpenClaw agents' `auth-profiles.json`, `settings.json` and `clawboo backup` files with your default permissions                                                    | Security  |
 | Over HTTP, a TeamChat MCP session with no signed identity can read and post in any team's [peer chat](/concepts/peer-chat) as any agent, and `create_subtask` can file work under another team's task | Security  |
+| Claude Code agents load your own `~/.claude` settings, plugins, MCP servers and memory (see [the entry above](#claude-code-agents-follow-your-own-claude-code-settings))                              | Security  |
+| A remembered **Always** on a connector tool skips the prompt even under access set to ask every time (`approvalPolicy: always`)                                                                       | Security  |
+| An `allow_always` answer to a risky hand-off, sent through the API, stops that leader's risky hand-offs from asking again, with no end date                                                           | Security  |
+| `/api/mcp/config` signs any team id, and replacing the attach secret means editing the database by hand                                                                                               | Security  |
 | Picking **Ollama** during setup records nothing: a new team runs on Anthropic, and its first message says Clawboo Native has no provider key                                                          | Ollama    |
 | Setup accepts an Ollama with no model pulled, then every run fails with "model not found"                                                                                                             | Ollama    |
 | Agents run on Anthropic when an `ANTHROPIC_API_KEY` is in your shell or in `~/.openclaw/.env`, even after you picked another default provider                                                         | Providers |

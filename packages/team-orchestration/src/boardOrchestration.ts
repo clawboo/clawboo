@@ -393,8 +393,8 @@ export interface BoardOrchestratorDeps {
   /**
    * Surface a risky delegation on the LEADER's approval queue and await the
    * resolution (the server reuses the DB-mediated `tool_call_approvals` handshake;
-   * its TTL + poll-deadline give the timeout-not-deadlock guarantee, and a sticky
-   * `allow_always` for the scope skips the prompt). Optional — omitted ⇒ delegations
+   * its TTL + poll-deadline give the timeout-not-deadlock guarantee; nothing is
+   * remembered, so every risky delegation asks). Optional; omitted ⇒ delegations
    * are never gated.
    */
   requestDelegationApproval?: (input: {

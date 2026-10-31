@@ -254,7 +254,7 @@ curl "http://localhost:18790/api/governance/audit?agentId=<agent-id>&eventType=b
 
 ## `POST /api/governance/delegation-approval`
 
-Asks a team lead to approve a risky delegation before it runs. If the lead has answered **Always** for this kind of delegation before, the route answers `allow_always` at once. Otherwise it opens a pending approval in `tool_call_approvals` (it appears in the [approval cards](/using/approvals)) and holds the request open until the lead answers or the approval expires. The approval's key is `delegate:<kind>`.
+Asks a team lead to approve a risky delegation before it runs. It opens a pending approval in `tool_call_approvals` (it appears in the [approval cards](/using/approvals)) and holds the request open until the lead answers or the approval expires. The approval's key is `delegate:<kind>`, and it is marked `neverRemember`: every request asks, whatever the lead answered before.
 
 The wait is fixed at 5 minutes: the approval expires 5 minutes after it is created, and the request gives up at the same time. `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default) does not change this wait. It sets how old an abandoned pending approval must be before the hourly cleanup expires it and unblocks any task it was holding.
 
@@ -283,7 +283,7 @@ The wait is fixed at 5 minutes: the approval expires 5 minutes after it is creat
 
 `expired` means the 5 minutes ran out. `timeout` means the approval row disappeared, or the server hit an error while waiting: the route never answers `500`, it answers `timeout`. Treat `deny`, `expired` and `timeout` alike: do not run the delegation.
 
-One `allow_always` answer skips the prompt for that lead and kind on every later request. No route withdraws it.
+An `allow_always` answer allows this delegation only, exactly like `allow_once`. The next request opens a new approval.
 
 **`400 Bad Request`**: missing `leaderAgentId`:
 
