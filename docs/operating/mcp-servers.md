@@ -155,7 +155,7 @@ The attach token, and the rule that an unsigned TeamChat session gets no tools, 
 
 <Accordion title="If an attach URL leaks">
 
-The token and the signatures never change on their own. To replace them, stop the server, delete the install's signing secret, and start it again:
+The token and the signatures never change on their own. To replace them, stop the server, delete the install's signing secret, and start it again. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo`:
 
 ```bash
 clawboo stop

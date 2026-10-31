@@ -120,18 +120,18 @@ chmod 600 clawboo-backup-*.db
 
 The database is most of your data, but not all of it. Copy these too when you need them:
 
-| Copy                             | Why                                                                                             |
-| -------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `secrets/` (both files together) | Saved provider keys, connector credentials and sign-ins. One file is useless without the other. |
-| `settings.json`                  | The OpenClaw Gateway link.                                                                      |
-| `proxy-device-identity.json`     | Clawboo's identity with the Gateway, so you do not have to pair it again.                       |
-| `browser-profiles/`              | The sites your agents' browsers are signed in to.                                               |
-| `runtimes/`                      | Codex and Hermes agents' saved sessions, including a copy of your Codex sign-in.                |
-| `~/.openclaw`                    | OpenClaw's own agents, config and keys, if you use OpenClaw. Clawboo never backs it up.         |
+| Copy                                         | Why                                                                                             |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `secrets/` (both files together)             | Saved provider keys, connector credentials and sign-ins. One file is useless without the other. |
+| `settings.json`                              | The OpenClaw Gateway link.                                                                      |
+| `proxy-device-identity.json`                 | Clawboo's identity with the Gateway, so you do not have to pair it again.                       |
+| `browser-profiles/`                          | The sites your agents' browsers are signed in to.                                               |
+| `runtimes/`                                  | Codex and Hermes agents' saved sessions, including a copy of your Codex sign-in.                |
+| `~/.openclaw` (or your `OPENCLAW_STATE_DIR`) | OpenClaw's own agents, config and keys, if you use OpenClaw. Clawboo never backs it up.         |
 
 ### Back up everything
 
-Stop the server and copy the whole folder:
+Stop the server and copy the whole folder. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo` here and in the commands below:
 
 ```bash
 clawboo stop
@@ -180,15 +180,14 @@ Reset only to wipe data. An upgrade needs no reset; see [After an upgrade](#afte
 
 <Warning>
 
-Both resets delete data you cannot get back. Back up first if any of it matters, and stop the server before you delete anything. A running server keeps the old database open and goes on serving it, and `clawboo` attaches to that server, so the reset seems not to happen.
+Both resets delete data you cannot get back. Back up first if any of it matters, and stop the server before you delete anything. A running server keeps the old database open and goes on serving it, and `clawboo` attaches to that server, so the reset seems not to happen. With `STUDIO_ACCESS_TOKEN` set, `clawboo stop` cannot stop the server: stop it as the note under [Back up everything](#back-up-everything) says, and delete only after it has stopped. The commands below delete only if `clawboo stop` succeeds.
 
 </Warning>
 
 ### Reset only the data
 
 ```bash
-clawboo stop
-rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
+clawboo stop && rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
 clawboo
 ```
 
@@ -199,8 +198,7 @@ The secret that signs MCP attach URLs goes with the database. Attach URLs you co
 ### Reset everything
 
 ```bash
-clawboo stop
-rm -rf ~/.clawboo
+clawboo stop && rm -rf ~/.clawboo
 clawboo
 ```
 

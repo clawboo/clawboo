@@ -30,7 +30,7 @@ A handoff needs a git worktree, a separate checkout Clawboo makes for one task. 
 
 - Two of these runtimes connected: Clawboo Native, Claude Code, Codex, Hermes. OpenClaw cannot take part: `/api/runtimes/openclaw/run` answers `404` with `unknown runtime 'openclaw'`. See [Providers and runtimes](/using/providers-and-runtimes).
 - A git repository on this computer with at least one commit, and its absolute path.
-- The server address. The examples use `http://127.0.0.1:18790`; `clawboo` prints the address it actually uses. If you set `STUDIO_ACCESS_TOKEN`, API calls need the access cookie; see [Reach Clawboo from another machine](/guides/self-host-securely).
+- The server address. The examples use `http://127.0.0.1:18790`; `clawboo` prints the address it actually uses. The `curl` examples assume no access token. If you set `STUDIO_ACCESS_TOKEN`, add `-b 'clawboo_access=<token>'` to each `curl` command; see [Authentication](/reference/rest-api/index#authentication).
 
 <Warning>
 

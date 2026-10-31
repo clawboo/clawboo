@@ -24,7 +24,7 @@ keywords:
 
 ## Before you begin
 
-- **Node.js in OpenClaw's range:** 22.22.3 or later in the 22 line, 24.15.0 or later in the 24 line, or 25.9.0 and later (`>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`). That is stricter than Clawboo's own minimum of 22.12, so a Node that runs Clawboo can still be refused. The setup doesn't check, so run `node --version` first. See OpenClaw's [Node.js guide](https://docs.openclaw.ai/install/node).
+- **Node.js in OpenClaw's range:** the setup installs the newest 2026.9 release of OpenClaw. Since 2026.9.34 that release needs 24.22.1 or later in the 24 line, or 26.12.1 and later (`>=24.22.1 <25 || >=26.12.1`). Node 22 and Node 25 can no longer run it, even though Clawboo itself runs on Node 22.12 and later. The setup doesn't check, so run `node --version` first. See OpenClaw's [Node.js guide](https://docs.openclaw.ai/install/node).
 - **`npm` on your `PATH`.** The setup installs OpenClaw with `npm install -g openclaw@~2026.9`.
 - **A credential OpenClaw can reuse:** a provider key you connected in Clawboo, a ChatGPT sign-in, or the local Ollama you set up for [Clawboo Native](/runtimes/native). With none of these, the setup asks you for a key.
 

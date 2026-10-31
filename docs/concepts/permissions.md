@@ -30,13 +30,13 @@ A git worktree keeps two agents' file changes apart. It is not a sandbox. Claude
 
 ## Each runtime at a glance
 
-| Runtime        | Its own prompts and sandbox                          | Where it works                                                                     | Clawboo asks you before                                             |
-| -------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Clawboo Native | None of its own: Clawboo provides its tools          | Team chat and one-to-one chat: no folder. Task runner: the task's worktree         | Each shell command, once you turn shell commands on                 |
-| Claude Code    | Off (`bypassPermissions`)                            | Task runner with a repository: the task's worktree. Otherwise: your Clawboo folder | Nothing it does with its own tools                                  |
-| Codex          | Off (approval `never`, sandbox `danger-full-access`) | Same as Claude Code                                                                | Nothing it does with its own tools                                  |
-| Hermes         | Off (`--yolo`)                                       | Same as Claude Code                                                                | Nothing it does with its own tools                                  |
-| OpenClaw       | The OpenClaw Gateway's own settings                  | The agent's own OpenClaw workspace, never a Clawboo worktree                       | Shell commands, following the agent's **Command Execution** setting |
+| Runtime        | Its own prompts and sandbox                          | Where it works                                                                                                           | Clawboo asks you before                                             |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| Clawboo Native | None of its own: Clawboo provides its tools          | Team chat, one-to-one chat, and research and review tasks: no folder. Other task-runner runs: the task's worktree        | Each shell command, once you turn shell commands on                 |
+| Claude Code    | Off (`bypassPermissions`)                            | Task runner with a repository: the task's worktree, except for research and review tasks. Otherwise: your Clawboo folder | Nothing it does with its own tools                                  |
+| Codex          | Off (approval `never`, sandbox `danger-full-access`) | Same as Claude Code                                                                                                      | Nothing it does with its own tools                                  |
+| Hermes         | Off (`--yolo`)                                       | Same as Claude Code                                                                                                      | Nothing it does with its own tools                                  |
+| OpenClaw       | The OpenClaw Gateway's own settings                  | The agent's own OpenClaw workspace, never a Clawboo worktree                                                             | Shell commands, following the agent's **Command Execution** setting |
 
 On every runtime, calls to connectors go through Clawboo and follow the rules in [Connectors](#connectors). Team chat and the task runner are the two ways Clawboo runs agents; [How a team works](/intro/how-it-works) explains which work takes which path.
 

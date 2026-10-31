@@ -112,7 +112,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** **Settings** > **Insights** > **Tokens Used** stays empty, or lists only OpenClaw agents, while your other agents work.
 
-**What it affects:** Tokens Used counts OpenClaw turns only. Spend by Clawboo Native, Claude Code, Codex and Hermes agents never appears there. It still counts toward your budgets, and each task's card and drawer show what its runs cost.
+**What it affects:** Tokens Used counts OpenClaw turns only. Spend by Clawboo Native, Claude Code, Codex and Hermes agents never appears there. It still counts toward your budgets, and each task's card and drawer show what its runs cost. The exception is a Hermes agent's routine and API runs, which record no cost at all (see [Hermes reports no usage](#hermes-reports-no-usage)).
 
 **What to do:** read task costs on the [Board](/using/board), and budgets in **Settings** > **Insights** > **Governance**. See [Budgets and spend](/using/budgets-and-spend).
 
@@ -332,7 +332,7 @@ With an access token set, send your access cookie too. See [Teams](/using/teams)
 
 **What it affects:** Clawboo has no user accounts and keeps no data apart per person. Anyone with the access token gets the whole install.
 
-**What to do:** run one install per person, each with its own data folder (`CLAWBOO_HOME`). See [Data and state](/operating/data-and-state).
+**What to do:** run one install per person, each under its own user account on the computer or in its own virtual machine. Separate data folders (`CLAWBOO_HOME`) under one account do not keep people apart: they share `~/.openclaw` and its saved keys, and coding agents can read any file that account can. See [Data and state](/operating/data-and-state).
 
 **Status:** open, by design.
 

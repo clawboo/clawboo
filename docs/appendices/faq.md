@@ -185,17 +185,16 @@ clawboo restart
 
 ### How do I reset Clawboo?
 
-An upgrade needs no reset: a newer Clawboo adds what it needs to your database when it opens it. Reset only to wipe data, because a reset deletes data you cannot get back. Stop the server first, or it keeps serving the old database.
+An upgrade needs no reset: a newer Clawboo adds what it needs to your database when it opens it. Reset only to wipe data, because a reset deletes data you cannot get back. Stop the server first, or it keeps serving the old database. If the server uses an access token, `clawboo stop` cannot stop it: stop it with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints, and delete files only after it has stopped.
 
-To reset only the data, delete the database and its two side files:
+To reset only the data, delete the database and its two side files. The `&&` deletes them only if `clawboo stop` succeeds:
 
 ```bash
-clawboo stop
-rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
+clawboo stop && rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
 clawboo
 ```
 
-Your provider keys and `settings.json` stay. Everything in the database starts over: teams and agents, the board, chats, memory, routines, budgets and most dashboard settings, including your default model. To reset everything, including the saved keys, delete the whole `~/.clawboo` folder instead. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo`.
+Your provider keys and `settings.json` stay. Everything in the database starts over: teams and agents, the board, chats, memory, routines, budgets and most dashboard settings, including your default model. To reset everything, including the saved keys, delete the whole `~/.clawboo` folder instead. That also deletes task worktrees with any uncommitted work in them, and `clawboo backup` does not copy those, so commit or copy that work first. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo`.
 
 Keys you saved under **Settings > Providers** also live in `~/.openclaw/.env`, which a reset does not touch. To keep a copy of the database first, run `clawboo backup`. See [Hard reset](/operating/data-and-state#hard-reset).
 

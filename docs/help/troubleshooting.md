@@ -594,7 +594,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 **What it means:** **Tokens Used** counts OpenClaw agents only. Clawboo Native, Claude Code, Codex and Hermes agents show zero there, however much they worked.
 
-**Fix:** see their cost on each task's card and, once you add a budget, on its row in **Settings > Insights > Governance**.
+**Fix:** see their cost on each task's card and, once you add a budget, on its row in **Settings > Insights > Governance**. A Hermes agent's routine and API runs record no cost and do not count toward budgets; check those in your provider's own dashboard.
 
 </Accordion>
 

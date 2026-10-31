@@ -69,7 +69,7 @@ ingress:
 
 </Tabs>
 
-The rules ignore letter case, because 0.5.0 also routes variants such as `/API/MCP/config`. Under a path prefix, add the same rule for the prefixed path (`/clawboo/api/mcp`), because Clawboo also answers `/api/` without the prefix. Releases after 0.5.0 require the access cookie or an agent's attach token on these paths, and refuse an attach token that arrives through a proxy. The proxy recipes below keep the rule as a second layer.
+The rules ignore letter case, because 0.5.0 also routes variants such as `/API/MCP/config`. Under a path prefix, add the same rule for the prefixed path (`/clawboo/api/mcp`), because Clawboo also answers `/api/` without the prefix. Releases after 0.5.0 require the access cookie on these paths. The four MCP server paths also accept an agent's attach token, but `/api/mcp/config` never does, and an attach token that arrives through a proxy is refused. The proxy recipes below keep the rule as a second layer.
 
 ## Choose a path
 

@@ -20,7 +20,7 @@ These docs track the latest code. The latest npm release is 0.5.0, so some featu
 - **Node.js 22.12 or newer.** Check with `node --version`. On an older Node, `clawboo` stops right away with a message naming the version it found. Get Node from [nodejs.org](https://nodejs.org) or a version manager such as nvm or fnm.
 - **A terminal and a web browser.** You type one command; everything after that happens in the browser.
 - **An AI provider, chosen during setup:** an API key, a local Ollama, or a ChatGPT subscription. You don't need one to install.
-- **Only if you add OpenClaw teammates:** OpenClaw needs Node 22.22.3 or later on the 22 line, 24.15 or later on the 24 line, or 25.9 or later. Clawboo does not check this before it installs OpenClaw, so compare `node --version` first.
+- **Only if you add OpenClaw teammates:** the OpenClaw release Clawboo installs needs Node 24.22.1 or later on the 24 line, or 26.12.1 or later. Node 22 and Node 25 cannot run it. Clawboo does not check this before it installs OpenClaw, so compare `node --version` first.
 
 There is no Clawboo account, Docker image or database to set up.
 

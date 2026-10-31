@@ -50,7 +50,7 @@ The lead calls its delegate tool, or writes a delegate line, naming a teammate a
 </Step>
 <Step title="Clawboo creates a task">
 
-The hand-off becomes a card on the board, claimed for that teammate and moved to In progress. You can watch it in the team chat's **Tasks** card and on the board.
+The hand-off becomes a card on the board, claimed for that teammate and moved to In progress. If the teammate is busy, the card waits in To do until it is free. You can watch it in the team chat's **Tasks** card and on the board.
 
 </Step>
 <Step title="The teammate works on its own runtime">

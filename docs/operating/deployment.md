@@ -116,7 +116,7 @@ systemctl --user enable --now clawboo
 loginctl enable-linger "$USER"
 ```
 
-`journalctl --user -u clawboo` shows its log. On macOS, run the same command under launchd, with the same working directory and variables.
+`journalctl --user -u clawboo` shows its log. On macOS, run the same server command under launchd, with the same working directory and variables. Under launchd there is no journal, so set `StandardOutPath` and `StandardErrorPath` in its plist to a log file (a full path, as launchd does not expand `~`) and read that file.
 
 ## Ports
 
@@ -159,6 +159,8 @@ clawboo restart
 ```
 
 Or run `clawboo`: it notices that the running server is older and offers to restart it.
+
+With `STUDIO_ACCESS_TOKEN` set, `clawboo restart` cannot restart the server and the old version keeps running. Stop it with the command `clawboo restart` prints, or through the service manager that runs it, then start it again [directly](#start-the-server-directly) or through that service manager.
 
 </Tab>
 

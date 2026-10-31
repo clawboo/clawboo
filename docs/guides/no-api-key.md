@@ -156,7 +156,7 @@ Clawboo runs Codex with its own sandbox and approval prompts turned off. A Codex
 
 ## Run OpenClaw on your local Ollama (optional)
 
-OpenClaw agents can run on the same local model. Do the Ollama path above first, so Clawboo knows you chose Ollama. OpenClaw also needs a Node.js version it accepts: 22.22.3 or a later 22.x, 24.15.0 or a later 24.x, or 25.9.0 or newer.
+OpenClaw agents can run on the same local model. Do the Ollama path above first, so Clawboo knows you chose Ollama. OpenClaw also needs a Node.js version it accepts: 24.22.1 or a later 24.x, or 26.12.1 or newer.
 
 <Steps>
 

@@ -99,13 +99,13 @@ Clawboo notices a dead run in two ways. A running task proves it is alive every 
 
 ## The board and the chat
 
-The board is the record of the work. Chat messages describe it, but nothing written in a chat changes the board: only Clawboo's own task handling, your moves on the board, and agents' task tools do.
+The board is the record of the work. Chat messages describe it, but ordinary chat text does not change the board: only hand-offs (a delegate tool call, or a `<delegate>` or `<plan>` in a reply, see [How work is delegated](/concepts/delegation-and-orchestration)), Clawboo's own task handling, your moves on the board, and agents' task tools do.
 
 When the board changes through Clawboo's board API, which includes your moves and comments in the dashboard, Clawboo also posts a short system line into the agents' peer room. The dashboard does not show that room; see [Peer chat](/concepts/peer-chat).
 
 ## Where the work happens
 
-Most tasks run through team chat, and an agent Routine that names no repository runs the same way. Those runs get no git worktree of their own and no automatic check. Coding runtimes start in the Clawboo server's own folder (`~/.clawboo` for an npm install), with their own approval prompts turned off. They can read and change any file your user account can. A task lands in Done when its agent reports back.
+Most tasks run through team chat. An agent Routine that names no repository runs on a separate path (see [Two ways Clawboo runs agents](/intro/how-it-works#two-ways-clawboo-runs-agents)). Neither gets a git worktree of its own or an automatic check. Coding runtimes start in the Clawboo server's own folder (`~/.clawboo` for an npm install), with their own approval prompts turned off. They can read and change any file your user account can. A task lands in Done when its agent reports back.
 
 Runs that name a repository, started through the runtime run API or by an agent Routine (the repository is set through the API), get an isolated worktree for work that changes files. If the agent changed files there, the change is checked before the task can be Done. A worktree keeps file changes apart; it is not a sandbox. See [What agents can do](/concepts/permissions), [When work is checked](/concepts/verification) and [Worktrees and handoff](/concepts/worktrees-and-handoff).
 
