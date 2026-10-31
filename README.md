@@ -137,7 +137,7 @@ To build a mixed team, connect the tools first, then pick which tool each teamma
 - **New Boos for Codex, Claude Code and Hermes.** Agents on those three runtimes now get their own Boo, so you can tell at a glance which tool each teammate runs on.
 - **Build the team on the graph.** Drag a thread from any Boo to a teammate, a skill or a connector, or onto empty canvas to add a new agent.
 - **For work and for life.** The marketplace now loads 400+ agents and 80+ teams from 19 packs, including a new Clawboo Life and Home pack (morning brief, family calendar, trip desk and more). Each agent and team's detail view says where it came from: the source repo and license, plus the pinned commit for community packs. Offline you still get the 15 built-in agents.
-- **OpenClaw 2026.9 support.** Clawboo now installs and targets OpenClaw 2026.9, which needs Node.js 22.22.3+ on the 22 line, 24.15+ on the 24 line, or 25.9+. OpenClaw shell-command approvals now wait up to 30 minutes for you, even after you close the tab.
+- **OpenClaw 2026.9 support.** Clawboo now installs and targets OpenClaw 2026.9, which needed Node.js 22.22.3+ on the 22 line, 24.15+ on the 24 line, or 25.9+ at that release. OpenClaw 2026.9.34 and later need 24.22.1+ on the 24 line, or 26.12.1+. OpenClaw shell-command approvals now wait up to 30 minutes for you, even after you close the tab.
 - **CLI.** New `clawboo stop`, `clawboo restart` and `clawboo backup` commands, and re-running `clawboo` offers to restart an older server. Needs Node.js 22.12 or newer.
 
 Full notes in the [CHANGELOG](./apps/cli/CHANGELOG.md).
