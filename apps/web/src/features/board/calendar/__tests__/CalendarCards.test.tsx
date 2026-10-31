@@ -238,8 +238,9 @@ describe('the stamp on a running task', () => {
     const title = `Running since ${timeOnDay(since, now)}. Added ${shortDate(added)} at ${timeLabel(added)}`
     expect(stamp).toHaveAttribute('title', title)
     expect(stamp.getAttribute('title')).toMatch(/^Running since /)
-    // The timer leads the elapsed time; a screen reader hears the whole sentence.
-    expect(stamp.querySelector('svg')).toHaveClass('lucide-timer')
+    // A small live dot leads the elapsed time; a screen reader hears the whole sentence.
+    expect(stamp.querySelector('span.bg-mint')).toHaveAttribute('aria-hidden', 'true')
+    expect(stamp.querySelector('svg')).toBeNull()
     expect(stamp.textContent).toBe(`${elapsedLabel(now - since)}, ${title}`)
     expect(elapsedLabel(now - since)).toBe('14m')
   })

@@ -32,7 +32,7 @@ export function AssignAgentSelect({
   const [saving, setSaving] = useState(false)
 
   if (members.length === 0) {
-    return <span className="text-[12px] text-muted-foreground">No agents on this team</span>
+    return <span className="text-xs text-muted-foreground">No agents on this team</span>
   }
 
   async function handleChange(agentId: string) {

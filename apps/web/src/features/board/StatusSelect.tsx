@@ -58,7 +58,7 @@ export function StatusSelect({
   // board's catch-all "Other" handling rather than a broken, empty dropdown.
   if (options.length === 0) {
     return (
-      <span className="font-data text-[12.5px] text-foreground" data-testid="task-status-readonly">
+      <span className="text-compact text-foreground" data-testid="task-status-readonly">
         {statusLabel(value)}
       </span>
     )

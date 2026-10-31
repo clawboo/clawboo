@@ -25,6 +25,7 @@ import { server } from '../../../../__vitest__/mswServer'
 import { BoardPanel } from '../../BoardPanel'
 import { longDate } from '../calendarFormat'
 import { buildRange, dayKey, localeWeekStart, startOfDay } from '../calendarModel'
+import { pickView, pollBoard } from '../../__tests__/boardControls'
 import { resetBoardStorage } from '../../__tests__/resetBoardStorage'
 
 // dnd-kit's real drag can't run in jsdom, so the real handlers are captured and
@@ -38,6 +39,10 @@ const dnd = vi.hoisted(() => ({
   onDragCancel: undefined as undefined | (() => void),
   dropAnimation: undefined as unknown,
 }))
+vi.mock('@/lib/useVisiblePolling', async (importOriginal) =>
+  (await import('../../__tests__/boardControls')).pollingByHand(await importOriginal()),
+)
+
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>()
   return {
@@ -292,7 +297,6 @@ afterEach(() => {
 describe('cards an agent just moved', () => {
   it('marks the cards an agent moved or added, and only those, then puts the mark out', async () => {
     freezeClock()
-    const user = userEvent.setup()
     const at = earlierToday()
     const board = serveBoard([
       { id: 'a', title: 'Moved by an agent', status: 'todo', createdAt: at },
@@ -308,7 +312,7 @@ describe('cards an agent just moved', () => {
       { id: 'c', title: 'Left alone', status: 'todo', createdAt: at + 1 },
       { id: 'b', title: 'Brand new', status: 'todo', createdAt: at + 2 },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await screen.findByText('Brand new')
     expect(arrivedTitles()).toEqual(['Brand new', 'Moved by an agent'])
     const today = dayKey(at)
@@ -323,7 +327,6 @@ describe('cards an agent just moved', () => {
 
   it('marks at most six at once, and leaves out a card that went to Needs you', async () => {
     freezeClock()
-    const user = userEvent.setup()
     const at = earlierToday()
     const moved = Array.from({ length: 8 }, (_, i) => `m${i + 1}`)
     const board = serveBoard([
@@ -344,7 +347,7 @@ describe('cards an agent just moved', () => {
           : { id, title: `Task ${id}`, status: 'done', createdAt: at + i + 1, completedAt: at },
       ),
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await within(screen.getByTestId('calendar-needs-you-today')).findByText('Now needs a person')
 
     expect(
@@ -364,7 +367,6 @@ describe('cards an agent just moved', () => {
 
   it('marks nothing on the read after the person moved a card, until the quiet spell is over', async () => {
     freezeClock()
-    const user = userEvent.setup()
     const at = earlierToday()
     const board = serveBoard([
       { id: 'a', title: 'Work in hand', status: 'in_progress', createdAt: at },
@@ -386,7 +388,7 @@ describe('cards an agent just moved', () => {
       { id: 'a', title: 'Work in hand', status: 'done', createdAt: at, completedAt: Date.now() },
       { id: 'z', title: 'Added meanwhile', status: 'todo', createdAt: at + 1 },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await screen.findByText('Added meanwhile')
     expect(arrivedTitles()).toEqual([])
 
@@ -396,13 +398,12 @@ describe('cards an agent just moved', () => {
       { id: 'a', title: 'Work in hand', status: 'done', createdAt: at, completedAt: at },
       { id: 'z', title: 'Added meanwhile', status: 'in_progress', createdAt: at + 1 },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(arrivedTitles()).toEqual(['Added meanwhile']))
   })
 
   it('marks nothing on a read that lands while the person’s move is still being saved', async () => {
     freezeClock()
-    const user = userEvent.setup()
     const at = earlierToday()
     const board = serveBoard([
       { id: 'a', title: 'Work in hand', status: 'in_progress', createdAt: at },
@@ -427,7 +428,7 @@ describe('cards an agent just moved', () => {
       { id: 'a', title: 'Work in hand', status: 'done', createdAt: at, completedAt: at },
       { id: 'z', title: 'Added meanwhile', status: 'todo', createdAt: at + 1 },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await screen.findByText('Added meanwhile')
     expect(arrivedTitles()).toEqual([])
 
@@ -473,13 +474,12 @@ describe('cards an agent just moved', () => {
     // Once the quiet spell is over, the agent picking it up is marked.
     vi.setSystemTime(Date.now() + 7 * SECOND)
     board.tasks = [{ ...failed, status: 'in_progress', attention: null }]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(arrivedTitles()).toEqual(['Failed run']))
   })
 
   it('marks nothing on a read that comes long after the one before, as after a hidden tab', async () => {
     freezeClock()
-    const user = userEvent.setup()
     const at = earlierToday()
     const board = serveBoard([{ id: 'a', title: 'Task a', status: 'todo', createdAt: at }])
     renderBoard()
@@ -490,7 +490,7 @@ describe('cards an agent just moved', () => {
       { id: 'a', title: 'Task a', status: 'in_progress', createdAt: at },
       { id: 'b', title: 'Task b', status: 'todo', createdAt: at + 1 },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await screen.findByText('Task b')
     expect(arrivedTitles()).toEqual([])
 
@@ -499,7 +499,7 @@ describe('cards an agent just moved', () => {
       { id: 'a', title: 'Task a', status: 'in_progress', createdAt: at },
       { id: 'b', title: 'Task b', status: 'in_progress', createdAt: at + 1 },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(arrivedTitles()).toEqual(['Task b']))
   })
 
@@ -528,7 +528,7 @@ describe('cards an agent just moved', () => {
     expect(arrivedTitles()).toEqual([])
 
     other = { ...other, status: 'in_progress' }
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(arrivedTitles()).toEqual(['Beta work']))
   })
 
@@ -542,7 +542,7 @@ describe('cards an agent just moved', () => {
 
     await user.click(screen.getByRole('button', { name: /^Next week/ }))
     board.tasks = [{ id: 'a', title: 'Task a', status: 'in_progress', createdAt: at }]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     // Open work from today rides in Earlier on a later week.
     const earlier = screen.getByTestId('calendar-cell-in_progress-earlier')
     await waitFor(() => expect(within(earlier).getByText('Task a')).toBeInTheDocument())
@@ -552,7 +552,7 @@ describe('cards an agent just moved', () => {
       { id: 'a', title: 'Task a', status: 'in_progress', createdAt: at },
       { id: 'b', title: 'Task b', status: 'todo', createdAt: at + 1 },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(arrivedTitles()).toEqual(['Task b']))
   })
 })
@@ -798,11 +798,11 @@ describe('the Today ping', () => {
     await screen.findByTestId('board-calendar')
     await advance(1000)
 
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await advance(1000)
     // The board's own five-second read.
     const reads = board.reads
-    await advance(5000)
+    await pollBoard()
     await waitFor(() => expect(board.reads).toBeGreaterThan(reads))
     await advance(1000)
 
@@ -866,15 +866,15 @@ describe('the Today ping', () => {
     await user.click(todayButton())
     await advance(1000)
     board.tasks = [{ id: 't1', title: 'First task', status: 'todo', createdAt: earlierToday() }]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await screen.findByTestId('board-calendar')
     await advance(1000)
 
     // Nor in the undated view, which has no today.
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     await user.keyboard('t')
     await advance(1000)
-    await user.click(screen.getByRole('radio', { name: 'Week' }))
+    await pickView(user, 'Week')
     await screen.findByTestId('board-calendar')
     await advance(1000)
     expect(pings.seen).toEqual([])
@@ -925,9 +925,9 @@ describe('where the Today button points', () => {
 
     // The undated view has no Today button; back in a week, it points again.
     await user.click(screen.getByRole('button', { name: /^Next week/ }))
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     expect(screen.queryByTestId('board-today-direction')).toBeNull()
-    await user.click(screen.getByRole('radio', { name: 'Week' }))
+    await pickView(user, 'Week')
     expect(arrow()).toHaveAttribute('data-direction', 'left')
   })
 
@@ -1236,7 +1236,7 @@ describe('the range announcer', () => {
       ...board.tasks,
       { id: 't2', title: 'Second task', status: 'todo', createdAt: earlierToday() },
     ]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     expect(
       await within(screen.getByTestId('calendar-cell-todo-earlier')).findByText('Second task'),
     ).toBeInTheDocument()
@@ -1249,7 +1249,7 @@ describe('the range announcer', () => {
     expect(screen.queryByTestId('calendar-row-earlier')).toBeNull()
     expect(announcer.textContent).toMatch(/^Last week, .+\. 0 tasks\.$/)
 
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    await pickView(user, 'Kanban')
     expect(announcer).toHaveTextContent(/^All tasks, newest first\.$/)
   })
 })

@@ -33,7 +33,12 @@ import { sinceLabel } from '../calendarFormat'
 import { startOfDay } from '../calendarModel'
 import type { SeenRecord } from '../seenModel'
 import { useSeenBoard } from '../useSeenBoard'
+import { pollBoard } from '../../__tests__/boardControls'
 import { resetBoardStorage } from '../../__tests__/resetBoardStorage'
+
+vi.mock('@/lib/useVisiblePolling', async (importOriginal) =>
+  (await import('../../__tests__/boardControls')).pollingByHand(await importOriginal()),
+)
 
 const HOUR = 3_600_000
 const KEY = 'clawboo.board.seen.'
@@ -176,8 +181,6 @@ describe('since you last looked', () => {
     const line = screen.getByTestId('board-since')
     expect(within(line).getByRole('button', { name: 'Show' })).toBeInTheDocument()
     expect(within(line).getByRole('button', { name: 'Mark seen' })).toBeInTheDocument()
-    // The line takes the place of the hint about who moves the cards.
-    expect(screen.queryByTestId('board-agent-hint')).toBeNull()
   })
 
   it('puts a dot on each card that changed, and a screen reader hears it', async () => {
@@ -238,10 +241,9 @@ describe('since you last looked', () => {
     await show()
     await waitFor(() => expect(screen.getByTestId('calendar-needs-you-today')).toHaveFocus())
     expect(screen.queryByTestId('board-since')).toBeNull()
-    expect(screen.getByTestId('board-agent-hint')).toBeInTheDocument()
   })
 
-  it('clears the line and every dot with Mark seen, and the agent hint returns', async () => {
+  it('clears the line and every dot with Mark seen', async () => {
     awayBoard()
     const user = userEvent.setup()
     renderBoard()
@@ -252,9 +254,6 @@ describe('since you last looked', () => {
 
     expect(screen.queryByTestId('board-since')).toBeNull()
     expect(dottedTitles()).toEqual([])
-    expect(screen.getByTestId('board-agent-hint')).toHaveTextContent(
-      'Agents create and move work here.',
-    )
     expect(stored('all')?.pending).toBeNull()
     // The line went with the button in it, so focus moves to the range title
     // rather than falling to the page, and a screen reader hears what happened.
@@ -320,7 +319,6 @@ describe('reading the record', () => {
     renderBoard()
     await screen.findByTestId('board-calendar')
 
-    expect(screen.getByTestId('board-agent-hint')).toBeInTheDocument()
     expect(screen.queryByTestId('board-since')).toBeNull()
     expect(dottedTitles()).toEqual([])
     // The look is remembered, for next time.
@@ -359,7 +357,7 @@ describe('reading the record', () => {
     renderBoard()
     await screen.findByTestId('board-calendar')
 
-    expect(screen.getByTestId('board-agent-hint')).toBeInTheDocument()
+    expect(screen.queryByTestId('board-since')).toBeNull()
     expect(dottedTitles()).toEqual([])
     await waitFor(() =>
       expect(stored('all')).toMatchObject({
@@ -402,7 +400,7 @@ describe('reading the record', () => {
     const user = userEvent.setup()
     renderBoard()
     await screen.findByTestId('board-calendar')
-    expect(screen.getByTestId('board-agent-hint')).toBeInTheDocument()
+    expect(screen.queryByTestId('board-since')).toBeNull()
 
     await user.click(cardFor('Move this one myself'))
     await screen.findByTestId('task-detail-drawer')
@@ -422,7 +420,7 @@ describe('reading the record', () => {
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByTestId('task-detail-drawer')).toBeNull())
 
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await screen.findByTestId('board-since')
 
     // The agent's change is news; the person's own move is not.

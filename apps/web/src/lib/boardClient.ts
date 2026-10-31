@@ -280,6 +280,8 @@ export interface CreateTaskForAgentInput {
   /** The team member who does the work. The server binds the task to them and
    *  starts it; its result is reported on the task card, not to the team lead. */
   assigneeAgentId: string
+  /** The task this one follows up on. */
+  parentTaskId?: string
 }
 
 /** Create a task for one agent on a team. Resolves null on any failure. */
@@ -318,23 +320,51 @@ async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> 
   }
 }
 
-/** A person's comment on a task. `forwarded` = the server passed it on to the
- *  task's agent (its mailbox, plus a steer into the run working on the task). */
+/**
+ * Where a person's reply on a task went (the server's `personReply`): into the
+ * run working on it, the task started again for it, waiting in the agent's
+ * mailbox for its next run, or not sent.
+ */
+export type ReplyDelivery =
+  | { status: 'steered'; agentId: string }
+  | { status: 'woke-agent'; agentId: string }
+  | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' }
+  | {
+      status: 'not-delivered'
+      agentId: string | null
+      reason: 'finished' | 'unassigned' | 'failed'
+    }
+
+/** A person's comment on a task, and where the server delivered it. */
 export async function postTaskComment(
   taskId: string,
   body: string,
-): Promise<{ ok: boolean; forwarded: boolean }> {
+): Promise<{
+  ok: boolean
+  forwarded: boolean
+  delivery: ReplyDelivery | null
+  commentId: string | null
+}> {
   try {
     const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/comments`, {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({ body, authorType: 'user' }),
     })
-    if (!r.ok) return { ok: false, forwarded: false }
-    const payload = (await r.json().catch(() => null)) as { forwarded?: boolean } | null
-    return { ok: true, forwarded: payload?.forwarded === true }
+    if (!r.ok) return { ok: false, forwarded: false, delivery: null, commentId: null }
+    const payload = (await r.json().catch(() => null)) as {
+      forwarded?: boolean
+      delivery?: ReplyDelivery
+      comment?: { id?: unknown }
+    } | null
+    return {
+      ok: true,
+      forwarded: payload?.forwarded === true,
+      delivery: payload?.delivery ?? null,
+      commentId: typeof payload?.comment?.id === 'string' ? payload.comment.id : null,
+    }
   } catch {
-    return { ok: false, forwarded: false }
+    return { ok: false, forwarded: false, delivery: null, commentId: null }
   }
 }
 

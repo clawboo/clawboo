@@ -30,6 +30,7 @@ import {
   rangeBounds,
   startOfDay,
 } from '../calendarModel'
+import { openDisplay, pickView } from '../../__tests__/boardControls'
 import { resetBoardStorage } from '../../__tests__/resetBoardStorage'
 
 const dnd = vi.hoisted(() => ({
@@ -357,13 +358,14 @@ describe('the calendar board', () => {
     expect(within(strip).getByText('24 runs')).toBeInTheDocument()
   })
 
-  it('hides and shows routine runs with the Routines switch, and remembers the choice', async () => {
+  it('hides routine runs with the switch in Display, and remembers the choice', async () => {
     serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }])
     const user = userEvent.setup()
     render(<BoardPanel />)
     await screen.findByTestId('calendar-routine-run')
+    await openDisplay(user)
     const toggle = screen.getByTestId('board-routines-toggle')
-    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
     await user.click(toggle)
     expect(screen.queryByTestId('calendar-routine-run')).toBeNull()
     expect(JSON.parse(window.localStorage.getItem('clawboo.board.calendar')!)).toMatchObject({
@@ -390,7 +392,7 @@ describe('the calendar board', () => {
     expect(screen.getByTestId('board-range-title').textContent).toBe(title)
   })
 
-  it('switches to Month and to the undated All view, and remembers the view', async () => {
+  it('switches to Month and to the undated Kanban board, and remembers the view', async () => {
     serve([{ id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() }], {
       runs: false,
     })
@@ -398,14 +400,14 @@ describe('the calendar board', () => {
     render(<BoardPanel />)
     await screen.findByTestId('board-calendar')
 
-    await user.click(screen.getByRole('radio', { name: 'Month' }))
+    await pickView(user, 'Month')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'month')
     expect(screen.getByText('This month')).toBeInTheDocument()
 
-    // All is the same board with one row instead of days.
-    await user.click(screen.getByRole('radio', { name: 'All' }))
+    // Kanban is the same board with one row instead of days.
+    await pickView(user, 'Kanban')
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'all')
-    expect(screen.getByText('All tasks')).toBeInTheDocument()
+    expect(screen.getByText('Every task by status, newest first')).toBeInTheDocument()
     expect(
       within(screen.getByTestId('calendar-cell-todo-all')).getByText('Any task'),
     ).toBeInTheDocument()

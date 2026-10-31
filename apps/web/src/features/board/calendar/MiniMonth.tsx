@@ -167,10 +167,7 @@ export function MiniMonth({
       }
     >
       <div className="mb-2 flex items-center justify-between pl-1.5">
-        <h2
-          id={headingId}
-          className="font-display font-display-cut text-[14px] font-semibold text-foreground"
-        >
+        <h2 id={headingId} className="text-sm font-semibold tabular-nums text-foreground">
           {monthLabel}
         </h2>
         <span className="flex items-center gap-0.5">
@@ -214,7 +211,7 @@ export function MiniMonth({
                 key={i}
                 scope="col"
                 abbr={h.long}
-                className="pb-1 text-center text-[10.5px] font-semibold text-muted-foreground"
+                className="pb-1 text-center text-micro font-medium text-muted-foreground"
               >
                 {h.short}
               </th>
@@ -229,7 +226,7 @@ export function MiniMonth({
               <tr key={week[0]}>
                 <th
                   scope="row"
-                  className="pr-1 text-center text-[10px] font-normal tabular-nums text-muted-foreground"
+                  className="pr-1 text-center text-micro font-normal tabular-nums text-muted-foreground"
                 >
                   <span className="sr-only">Week </span>
                   {/* Mid-week decides it, so a Sunday-first row is not labelled
@@ -266,7 +263,7 @@ export function MiniMonth({
                         aria-current={today ? 'date' : undefined}
                         onClick={() => onPick(d)}
                         className={[
-                          'relative mx-auto flex h-8 w-8 cursor-pointer flex-col items-center justify-center rounded-full text-[12.5px] tabular-nums transition-colors hover:bg-foreground/[0.08] focus-visible:outline-2 focus-visible:outline-offset-1',
+                          'relative mx-auto flex h-8 w-8 cursor-pointer flex-col items-center justify-center rounded-full text-xs tabular-nums transition-colors hover:bg-foreground/[0.08] focus-visible:outline-2 focus-visible:outline-offset-1',
                           inMonth ? 'text-foreground' : 'text-muted-foreground',
                           today ? 'font-semibold' : '',
                         ].join(' ')}
@@ -294,7 +291,7 @@ export function MiniMonth({
         <button
           type="button"
           onClick={() => onPick(now)}
-          className="cursor-pointer rounded-md px-2 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-foreground/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="cursor-pointer rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-foreground/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           Go to today
         </button>

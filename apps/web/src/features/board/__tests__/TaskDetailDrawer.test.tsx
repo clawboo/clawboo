@@ -3,18 +3,24 @@
 // /executions, and /workspace/detail. The drawer is READ-ONLY — it displays
 // comments but has no compose box, so the user interaction is the Close button.
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
+import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
+import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useToastStore } from '@/stores/toast'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 
 import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
+import { TaskComments } from '../TaskComments'
 import { TaskDetailDrawer } from '../TaskDetailDrawer'
+
+// The agent's Boo under the title reads the theme.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ThemeProvider })
 
 afterEach(() => cleanup())
 
@@ -78,8 +84,16 @@ describe('TaskDetailDrawer', () => {
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
 
     expect(await screen.findByText("Coder's report")).toBeInTheDocument()
-    // Once in the named report, once in the full comment log below it.
-    expect(screen.getAllByText('Shipped and verified.')).toHaveLength(2)
+    // Once, in the named report, rendered as the markdown it is written in. The
+    // Comments section keeps the rest of the log, so it is not drawn at all here.
+    expect(screen.getAllByText('Shipped and verified.')).toHaveLength(1)
+    expect(
+      within(screen.getByTestId('task-report')).getByText('Shipped and verified.').tagName,
+    ).toBe('P')
+    // Comments holds only the reply box: the report is not listed a second time.
+    expect(
+      within(screen.getByTestId('task-comments-section')).queryByTestId('task-comments'),
+    ).toBeNull()
   })
 
   it('falls back to a plain heading when the boo is not in the fleet', async () => {
@@ -427,8 +441,52 @@ describe('TaskDetailDrawer', () => {
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
 
     expect(
-      await screen.findByText(/Reviewed by claude-code · claude-haiku-4-5/),
+      await screen.findByText(/Reviewed by Claude Code · claude-haiku-4-5/),
     ).toBeInTheDocument()
+  })
+
+  it('says a review did not complete instead of naming a reviewer, and flags an agent-written check', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Ship it',
+            status: 'in_review',
+            verification: JSON.stringify({
+              status: 'pass',
+              attempts: [
+                {
+                  deterministic: { command: 'echo ok', commandSource: 'agent', passed: true },
+                  critic: {
+                    ran: true,
+                    outcome: 'errored',
+                    findings: [{ severity: 'other', title: 'review did not complete' }],
+                    reviewerRuntime: 'claude-code',
+                    reviewerModel: null,
+                    reviewedSha: 'abc',
+                  },
+                },
+              ],
+              debtNotes: [],
+            }),
+          },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    expect(await screen.findByText('Review did not complete (Claude Code)')).toBeInTheDocument()
+    expect(screen.queryByText(/Reviewed by/)).not.toBeInTheDocument()
+    expect(screen.getByText('echo ok')).toBeInTheDocument()
+    expect(screen.getByText(/written by the agent/)).toBeInTheDocument()
+    // The verdict reads in words, with its mark.
+    expect(screen.getByTestId('task-verdict')).toHaveTextContent(/^Passed$/)
   })
 
   describe('runtime', () => {
@@ -633,16 +691,20 @@ describe('TaskDetailDrawer', () => {
         ]),
       )
       const { container } = render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
-      await screen.findByText('Execution ledger (3)')
+      expect(await screen.findByRole('button', { name: 'Run history 3' })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      )
+      const runs = within(screen.getByTestId('task-runs'))
       // The team engine types every run 'openclaw'; the row names the runtime that ran.
-      const estimated = screen.getByText('codex').parentElement as HTMLElement
-      expect(estimated).toHaveTextContent('· ~$0.0042 est.')
-      const reported = screen.getByText('claude-code').parentElement as HTMLElement
+      const estimated = runs.getByText('Codex').parentElement as HTMLElement
+      expect(estimated).toHaveTextContent('Codex Succeeded · ~$0.0042 est.')
+      const reported = runs.getByText('Claude Code').parentElement as HTMLElement
       expect(reported).toHaveTextContent('· $0.1200')
       expect(reported).not.toHaveTextContent('est.')
       // A run that recorded no cost shows none.
-      const stopped = screen.getByText('cancelled').parentElement as HTMLElement
-      expect(stopped).not.toHaveTextContent('$')
+      const stopped = runs.getByText('Cancelled').parentElement as HTMLElement
+      expect(stopped).toHaveTextContent(/^OpenClaw Cancelled$/)
       expect(await axe(container)).toHaveNoViolations()
     })
   })
@@ -783,5 +845,344 @@ describe('TaskDetailDrawer: a task that needs you', () => {
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
     await screen.findByText('Ship it')
     expect(screen.queryByTestId('task-needs-you')).toBeNull()
+  })
+})
+
+describe('TaskDetailDrawer: reading and stepping', () => {
+  /** A task with only a title, plus `extra` on the task and `ancestors` beside it. */
+  function plainHandlers(
+    id: string,
+    title: string,
+    extra: Record<string, unknown> = {},
+    ancestors: unknown[] = [],
+  ) {
+    return [
+      http.get(`/api/board/${id}`, () =>
+        HttpResponse.json({
+          task: { id, title, status: 'todo', ...extra },
+          comments: [],
+          ancestors,
+        }),
+      ),
+      http.get(`/api/board/${id}/executions`, () => HttpResponse.json({ executions: [] })),
+      http.get(`/api/board/${id}/workspace/detail`, () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    ]
+  }
+
+  it('draws no section that has nothing in it', async () => {
+    server.use(...plainHandlers('t1', 'Ship it'))
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findByRole('heading', { name: 'Ship it' })
+    expect(screen.getByRole('button', { name: 'Properties' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Activity' })).toBeInTheDocument()
+    for (const empty of [/^Verification/, /^Workspace/, /^Run history/, /^Brief/])
+      expect(screen.queryByRole('button', { name: empty })).toBeNull()
+    // Comments is always there: it holds the reply box.
+    expect(screen.getByRole('button', { name: 'Comments' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Reply' })).toBeInTheDocument()
+  })
+
+  it('folds a section from its heading', async () => {
+    server.use(...plainHandlers('t1', 'Ship it'))
+    const user = userEvent.setup()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const heading = await screen.findByRole('button', { name: 'Properties' })
+    expect(screen.getByText('Runtime')).toBeInTheDocument()
+    await user.click(heading)
+    expect(heading).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('Runtime')).toBeNull()
+  })
+
+  it('steps to the next and previous task with J and K, and with the arrows', async () => {
+    server.use(...plainHandlers('t2', 'Second task'))
+    const user = userEvent.setup()
+    const onOpenTask = vi.fn()
+    render(
+      <TaskDetailDrawer
+        taskId="t2"
+        onClose={() => {}}
+        position={{ index: 1, total: 3, prev: 't1', next: 't3' }}
+        onOpenTask={onOpenTask}
+      />,
+    )
+    await screen.findByRole('heading', { name: 'Second task' })
+    expect(screen.getByTestId('task-position')).toHaveTextContent('2 of 3')
+
+    screen.getByRole('button', { name: 'Close' }).focus()
+    await user.keyboard('j')
+    expect(onOpenTask).toHaveBeenLastCalledWith('t3')
+    await user.keyboard('k')
+    expect(onOpenTask).toHaveBeenLastCalledWith('t1')
+    await user.click(screen.getByRole('button', { name: 'Next task' }))
+    expect(onOpenTask).toHaveBeenLastCalledWith('t3')
+
+    // A J typed into the status list is not a step.
+    onOpenTask.mockClear()
+    await user.click(screen.getByTestId('task-status-select'))
+    expect((await screen.findAllByRole('option')).length).toBeGreaterThan(0)
+    await user.keyboard('j')
+    expect(onOpenTask).not.toHaveBeenCalled()
+  })
+
+  it('shows the first task with no way back', async () => {
+    server.use(...plainHandlers('t1', 'Ship it'))
+    render(
+      <TaskDetailDrawer
+        taskId="t1"
+        onClose={() => {}}
+        position={{ index: 0, total: 2, prev: null, next: 't2' }}
+        onOpenTask={() => {}}
+      />,
+    )
+    await screen.findByRole('heading', { name: 'Ship it' })
+    expect(screen.getByRole('button', { name: 'Previous task' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next task' })).toBeEnabled()
+  })
+
+  it('names the parent task and the work it is part of, and opens the parent', async () => {
+    server.use(
+      ...plainHandlers('t3', 'Write the intro', { parentTaskId: 't2' }, [
+        { id: 't1', parent_task_id: null, title: 'Launch the new board', status: 'in_progress' },
+        { id: 't2', parent_task_id: 't1', title: 'Draft the launch post', status: 'in_progress' },
+      ]),
+    )
+    const user = userEvent.setup()
+    const onOpenTask = vi.fn()
+    render(<TaskDetailDrawer taskId="t3" onClose={() => {}} onOpenTask={onOpenTask} />)
+    const parent = await screen.findByRole('button', { name: 'Draft the launch post' })
+    expect(screen.getByText('Part of').nextElementSibling).toHaveTextContent('Launch the new board')
+    await user.click(parent)
+    expect(onOpenTask).toHaveBeenCalledWith('t2')
+  })
+
+  it("shows the skeleton, not the last task's content, while the next one loads", async () => {
+    server.use(...plainHandlers('t1', 'Ship it'))
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/board/t2', async () => {
+        await gate
+        return HttpResponse.json({
+          task: { id: 't2', title: 'Second task', status: 'todo' },
+          comments: [],
+          ancestors: [],
+        })
+      }),
+      http.get('/api/board/t2/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t2/workspace/detail', () => HttpResponse.json({ ok: false })),
+    )
+    const { rerender } = render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findByRole('heading', { name: 'Ship it' })
+
+    rerender(<TaskDetailDrawer taskId="t2" onClose={() => {}} />)
+    expect(screen.getByTestId('task-detail-loading')).toBeInTheDocument()
+    expect(screen.queryByText('Ship it')).toBeNull()
+    release()
+    expect(await screen.findByRole('heading', { name: 'Second task' })).toBeInTheDocument()
+  })
+})
+
+// An agent's text is untrusted: an image in it would load from wherever its
+// address points the moment the text is shown, and the address can carry data
+// out. It shows as a link to open instead.
+describe('agent markdown loads no images', () => {
+  const BODY =
+    'Done.\n\n![the chart](https://images.example/p.png?d=secret)\n\n![](data:image/png;base64,AAAA)'
+
+  it('draws an image in the report as a link, and fetches nothing', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done' },
+          comments: [{ body: BODY, authorType: 'agent', authorAgentId: 'agent-7' }],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const report = await screen.findByTestId('task-report')
+    expect(report.querySelector('img')).toBeNull()
+    const link = within(report).getByRole('link', { name: 'Image: the chart' })
+    expect(link).toHaveAttribute('href', 'https://images.example/p.png?d=secret')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'))
+    // A data address is named, not linked.
+    expect(within(report).getByText('Image')).toBeInTheDocument()
+  })
+
+  it('draws an image in an agent comment as a link', () => {
+    render(<TaskComments comments={[{ body: BODY, authorType: 'agent' }]} />)
+    const log = screen.getByTestId('task-comments')
+    expect(log.querySelector('img')).toBeNull()
+    expect(within(log).getByRole('link', { name: 'Image: the chart' })).toBeInTheDocument()
+  })
+})
+
+describe('TaskDetailDrawer: review fixes', () => {
+  function stubTask(id: string, task: Record<string, unknown>, getTask?: () => Promise<Response>) {
+    return [
+      http.get(`/api/board/${id}`, () =>
+        getTask
+          ? getTask()
+          : HttpResponse.json({ task: { id, ...task }, comments: [], ancestors: [] }),
+      ),
+      http.get(`/api/board/${id}/executions`, () => HttpResponse.json({ executions: [] })),
+      http.get(`/api/board/${id}/workspace/detail`, () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    ]
+  }
+
+  it('lists the findings of the latest attempt, the one the verdict and reviewer line describe', async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'in_review',
+        verification: JSON.stringify({
+          status: 'pass',
+          attempts: [
+            {
+              critic: {
+                ran: true,
+                findings: [{ severity: 'major', title: 'First try: missing test' }],
+              },
+            },
+            {
+              critic: {
+                ran: true,
+                findings: [{ severity: 'minor', title: 'Latest: rename a variable' }],
+              },
+            },
+          ],
+          debtNotes: [],
+        }),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).getByText(/Latest: rename a variable/)).toBeInTheDocument()
+    expect(within(verification).queryByText(/First try: missing test/)).toBeNull()
+  })
+
+  it('keeps a late reply for the task it stepped away from off the one it shows', async () => {
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder', teamId: 'team-1' } as AgentState],
+      selectedAgentId: null,
+    })
+    const failed = {
+      title: 'Draft the launch post',
+      status: 'blocked',
+      teamId: 'team-1',
+      assigneeAgentId: 'agent-7',
+      sourceDelegationId: 'assign:n1:agent:agent-7:origin:human',
+      attention: { reason: 'failed', failedRuns: 1, detail: 'provider out of credits' },
+    }
+    // The first read of t1 answers at once; the re-read after Retry waits.
+    let reads = 0
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      ...stubTask('t1', failed, async () => {
+        reads++
+        if (reads > 1) await gate
+        return HttpResponse.json({ task: { id: 't1', ...failed }, comments: [], ancestors: [] })
+      }),
+      http.post('/api/board/:id/retry', () => HttpResponse.json({ ok: true }, { status: 202 })),
+      ...stubTask('t2', { title: 'Second task', status: 'todo' }),
+    )
+    const user = userEvent.setup()
+    const { rerender } = render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const banner = await screen.findByTestId('task-needs-you')
+    await user.click(within(banner).getByRole('button', { name: /Retry/ }))
+    await waitFor(() => expect(reads).toBe(2))
+
+    // J, before the re-read of t1 comes back.
+    rerender(<TaskDetailDrawer taskId="t2" onClose={() => {}} />)
+    expect(await screen.findByRole('heading', { name: 'Second task' })).toBeInTheDocument()
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByRole('heading', { name: 'Second task' })).toBeInTheDocument()
+    expect(screen.queryByTestId('task-detail-loading')).toBeNull()
+  })
+})
+
+describe('TaskDetailDrawer: replying', () => {
+  it('sends a reply, says what sending does first and where the reply went after', async () => {
+    useFleetStore.setState({
+      agents: [{ id: 'agent-7', name: 'Coder', teamId: 'team-1' } as AgentState],
+      selectedAgentId: null,
+    })
+    const comments: Record<string, unknown>[] = []
+    let status = 'blocked'
+    let posted: Record<string, unknown> | null = null
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Draft the launch post',
+            status,
+            teamId: 'team-1',
+            sourceDelegationId: 'assign:n1:agent:agent-7:origin:human',
+            attention:
+              status === 'blocked' ? { reason: 'failed', failedRuns: 1, detail: 'no key' } : null,
+          },
+          comments,
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.post('/api/board/t1/comments', async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>
+        comments.push({ id: 'c9', body: posted['body'], authorType: 'user', createdAt: Date.now() })
+        status = 'todo'
+        return HttpResponse.json({
+          ok: true,
+          comment: { id: 'c9' },
+          forwarded: true,
+          delivery: { status: 'woke-agent', agentId: 'agent-7' },
+        })
+      }),
+    )
+    const onChanged = vi.fn()
+    const user = userEvent.setup()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} onChanged={onChanged} />)
+
+    const box = await screen.findByRole('textbox', { name: 'Reply' })
+    expect(box).toHaveAttribute('placeholder', 'Reply to Coder…')
+    expect(screen.getByText('Sending starts Coder on this again.')).toBeInTheDocument()
+
+    await user.type(box, 'Use the staging key.{Enter}')
+    expect(posted).toEqual({ body: 'Use the staging key.', authorType: 'user' })
+    const receipt = await screen.findByTestId('reply-receipt')
+    expect(receipt).toHaveTextContent('Coder is starting on this')
+    // The note sits under the reply it belongs to.
+    expect(receipt.closest('li')).toHaveTextContent('Use the staging key.')
+    expect(box).toHaveValue('')
+    expect(onChanged).toHaveBeenCalled()
+  })
+
+  it('says a finished task can take the reply as a follow-up', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done', assigneeAgentId: 'agent-7' },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findByRole('textbox', { name: 'Reply' })
+    expect(
+      screen.getByText('This task is finished. You can send your reply as a follow-up task.'),
+    ).toBeInTheDocument()
   })
 })

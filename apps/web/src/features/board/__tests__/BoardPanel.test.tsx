@@ -1,6 +1,6 @@
-// Durable Board panel: columns + cards from GET /api/board, and the Refresh
-// re-fetch. msw's onUnhandledRequest:'error' keeps the test honest about which
-// endpoints are hit.
+// Durable Board panel: columns + cards from GET /api/board, and the 5s poll's
+// re-fetch (driven by hand: `pollBoard()`). msw's onUnhandledRequest:'error' keeps
+// the test honest about which endpoints are hit.
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -16,6 +16,7 @@ import { useViewStore } from '@/stores/view'
 import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
 import { BoardPanel } from '../BoardPanel'
+import { pollBoard } from './boardControls'
 import { resetBoardStorage } from './resetBoardStorage'
 
 /** One team with two agents: enough for the New task dialog to have a choice. */
@@ -64,6 +65,10 @@ const dnd = vi.hoisted(() => ({
   onDragEnd: undefined as undefined | ((e: unknown) => void),
   announcements: undefined as undefined | Record<string, (args: never) => string | undefined>,
 }))
+vi.mock('@/lib/useVisiblePolling', async (importOriginal) =>
+  (await import('./boardControls')).pollingByHand(await importOriginal()),
+)
+
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>()
   return {
@@ -101,16 +106,24 @@ describe('BoardPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('explains the agent-driven model so the read-only board is self-explanatory', async () => {
+  it('keeps the header to one quiet bar: the title, the team and New task with its key', async () => {
     server.use(
       http.get('/api/board', () =>
         HttpResponse.json({ tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }] }),
       ),
     )
     render(<BoardPanel />)
-    const hint = await screen.findByTestId('board-agent-hint')
-    expect(hint).toHaveTextContent(/Agents create and move work here/i)
-    expect(hint).toHaveTextContent(/hand one a task too/i)
+    await screen.findByTestId('board-card')
+    const header = screen.getByTestId('board-header')
+    expect(within(header).getByRole('heading', { name: 'Board' })).toBeInTheDocument()
+    expect(within(header).getByLabelText('Filter by team')).toBeInTheDocument()
+    expect(within(header).getByRole('button', { name: 'New task' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'c',
+    )
+    // No sentence under the title, and no Refresh: the board reads itself every 5s.
+    expect(screen.queryByText(/Agents create and move work here/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull()
   })
 
   it("shows each card's run cost, marks an estimate, and shows none when no run recorded one", async () => {
@@ -152,15 +165,17 @@ describe('BoardPanel', () => {
     // No run recorded a cost: the card shows nothing, rather than a $0 it never charged.
     expect(costOf('Never ran')).toBeNull()
     expect(costOf('Older server')).toBeNull()
-    // A runtime that reported $0 did charge nothing, so that is shown.
-    expect(costOf('Ran free')).toHaveTextContent(/^\$0\.000$/)
-    expect(costOf('Ran free')).toHaveAttribute('title', 'Cost the runtime reported')
-    expect(costOf('Ran priced')).toHaveTextContent(/^~\$0\.02 est\.$/)
+    // A runtime that reported $0 did charge nothing, so that is shown. The card
+    // shows the figure; the title and the screen reader say what kind it is.
+    const shown = (title: string) => costOf(title)?.querySelector('[aria-hidden]')?.textContent
+    expect(shown('Ran free')).toBe('$0.000')
+    expect(costOf('Ran free')).toHaveAttribute('title', '$0.000, the cost the runtime reported')
+    expect(shown('Ran priced')).toBe('~$0.02')
     expect(costOf('Ran priced')).toHaveAttribute(
       'title',
-      'Estimated, not a charge the runtime reported',
+      '$0.02, estimated, not a charge the runtime reported',
     )
-    expect(costOf('Ran billed')).toHaveTextContent(/^\$0\.42$/)
+    expect(shown('Ran billed')).toBe('$0.42')
   })
 
   it('offers a New task button in the header', async () => {
@@ -330,8 +345,8 @@ describe('BoardPanel', () => {
   })
 
   it('keeps the last good board when a refresh fails after a successful load', async () => {
-    // A transient failure on a board that already loaded (the 5s poll and the
-    // Refresh button share the same `refresh()` path) must NOT blank the
+    // A transient failure on a board that already loaded (every read goes through
+    // the same `refresh()` path as the 5s poll) must NOT blank the
     // populated columns to the error screen — it keeps the last good snapshot.
     let calls = 0
     let fail = false
@@ -343,14 +358,13 @@ describe('BoardPanel', () => {
           : HttpResponse.json({ tasks: [{ id: 't1', title: 'Persisted card', status: 'todo' }] })
       }),
     )
-    const user = userEvent.setup()
     render(<BoardPanel />)
 
     await screen.findByText('Persisted card') // first load succeeds
     expect(calls).toBe(1)
 
     fail = true
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2)) // the failing fetch fired
 
     // Last good snapshot retained; no error-screen swap.
@@ -358,7 +372,7 @@ describe('BoardPanel', () => {
     expect(screen.queryByTestId('board-fetch-error')).toBeNull()
   })
 
-  it('re-fetches the board on Refresh', async () => {
+  it('re-fetches the board on its poll', async () => {
     let calls = 0
     let tasks = [{ id: 't1', title: 'First', status: 'todo' }]
     server.use(
@@ -367,14 +381,13 @@ describe('BoardPanel', () => {
         return HttpResponse.json({ tasks })
       }),
     )
-    const user = userEvent.setup()
     render(<BoardPanel />)
 
     await screen.findByText('First')
     expect(calls).toBe(1)
 
     tasks = [...tasks, { id: 't2', title: 'Second', status: 'todo' }]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
 
     expect(await screen.findByText('Second')).toBeInTheDocument()
     expect(calls).toBeGreaterThanOrEqual(2)
@@ -434,8 +447,7 @@ describe('BoardPanel', () => {
     )
     expect(within(screen.getByTestId('board-column-done')).queryByTestId('board-card')).toBeNull()
     // A subsequent poll doesn't resurrect the move either (override truly cleared).
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     expect(
       within(screen.getByTestId('board-column-in_progress')).getByTestId('board-card'),
     ).toBeInTheDocument()
@@ -502,7 +514,7 @@ describe('BoardPanel', () => {
 
     // A poll now reports the task advanced past 'done' to 'cancelled'.
     board = [{ id: 't1', title: 'Ship it', status: 'cancelled' }]
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
 
     // The card follows the server to Cancelled; it is NOT stuck in Done. Cancelled
     // starts folded into a rail that keeps its count; opening it shows the card.
@@ -519,7 +531,7 @@ describe('BoardPanel', () => {
   })
 
   it('ignores a board response that was already in flight when a drag committed', async () => {
-    // Regression (#105): reads overlap by design (the 5s poll, Refresh/Retry, the
+    // Regression (#105): reads overlap by design (the 5s poll, Retry, the
     // post-create reconcile), so a GET issued BEFORE a drag commits can resolve
     // AFTER it, carrying the PRE-drag status. Applied unconditionally it snapped the
     // card back to its old column until the next poll healed it. `refresh()` is
@@ -544,12 +556,11 @@ describe('BoardPanel', () => {
         HttpResponse.json({ ok: true, task: { id: 't1', status: 'done' } }),
       ),
     )
-    const user = userEvent.setup()
     render(<BoardPanel />)
     await screen.findByTestId('board-card')
 
     // Start the slow read, then commit the drag while it is still in flight.
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(calls).toBe(2))
     await act(async () => {
       dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'done' } }) // in_progress → done (legal)
@@ -618,7 +629,7 @@ describe('BoardPanel', () => {
     await screen.findByTestId('board-card')
 
     // Start the slow read, then create a task while it is still in flight.
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(calls).toBe(2))
 
     await user.click(screen.getByRole('button', { name: /New task/i }))
@@ -727,16 +738,17 @@ describe('BoardPanel', () => {
       }),
     )
     const user = userEvent.setup()
+    // The card draws its agent's Boo, which reads the theme.
     render(
-      <>
+      <ThemeProvider>
         <BoardPanel />
         <ConfirmDialog />
-      </>,
+      </ThemeProvider>,
     )
-    // Sanity: before the move the card carries its runtime + verdict pills.
+    // Sanity: before the move the card carries its agent and its failed check.
     const card = await screen.findByTestId('board-card')
-    expect(within(card).getByText('claude-code')).toBeInTheDocument()
-    expect(within(card).getByText('fail')).toBeInTheDocument()
+    expect(within(card).getByText('Assigned to Coder')).toBeInTheDocument()
+    expect(within(card).getByTitle('Verification failed')).toBeInTheDocument()
 
     await act(async () => {
       dnd.onDragEnd?.({ active: { id: 't1' }, over: { id: 'todo' } }) // in_progress → todo (release)
@@ -749,14 +761,12 @@ describe('BoardPanel', () => {
     await waitFor(() => expect(patched).toEqual({ status: 'todo' }))
 
     // The commit mirrors the server's →todo release: it also clears the assignee and the
-    // verdict, so the card in To do no longer shows the misleading 'fail' verdict; the
+    // verdict, so the card in To do no longer shows the misleading failed check; the
     // reflection is complete, not just the column. (Deleting the →todo branch in
-    // commitStatus fails this.) It keeps the agent it is bound to, whose runtime the
-    // fleet names, and does not pretend to be OpenClaw's.
+    // commitStatus fails this.) It keeps the agent it is bound to.
     const todoCard = () => within(screen.getByTestId('board-column-todo')).getByTestId('board-card')
-    await waitFor(() => expect(within(todoCard()).queryByText('fail')).toBeNull())
-    expect(within(todoCard()).getByText('claude-code')).toBeInTheDocument()
-    expect(within(todoCard()).queryByText('openclaw')).toBeNull()
+    await waitFor(() => expect(within(todoCard()).queryByTitle('Verification failed')).toBeNull())
+    expect(within(todoCard()).getByText('Assigned to Coder')).toBeInTheDocument()
   })
 
   it('offers "Complete anyway" when a drag to Done hits the verification gate', async () => {
@@ -834,7 +844,7 @@ describe('BoardPanel', () => {
     // A drawer status commit patches BoardPanel.tasks via onStatusCommitted, so the card
     // jumps columns at once instead of waiting up to ~5s for the reconciliation poll.
     // Server truth advances on the PATCH (a real backend would), so the next poll —
-    // proxied by Refresh, the same refresh() path the 5s poll uses — keeps the card in
+    // run here by hand through the same refresh() path, keeps the card in
     // its new column with no flicker and no duplicate.
     let board = [{ id: 't1', title: 'Ship it', status: 'todo' }]
     let boardGets = 0
@@ -907,9 +917,9 @@ describe('BoardPanel', () => {
       ).toHaveFocus(),
     )
 
-    // The next poll (Refresh runs the identical refresh()) reconciles against the advanced
+    // The next poll reconciles against the advanced
     // server and keeps the card put — no flicker back to To do, still exactly one card.
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
+    await pollBoard()
     await waitFor(() => expect(boardGets).toBeGreaterThan(getsBeforeMove))
     expect(
       within(screen.getByTestId('board-column-backlog')).getByTestId('board-card'),
@@ -1052,6 +1062,86 @@ describe('BoardPanel', () => {
       await screen.findByTestId('board-card')
       expect(screen.getByTestId('needs-you-empty')).toBeInTheDocument()
     })
+  })
+
+  it('steps the drawer down and up its column with J and K, in the order the board draws it', async () => {
+    resetBoardStorage({ view: 'all' })
+    const HOUR = 60 * 60 * 1000
+    const tasks = [
+      { id: 'a', title: 'Newest', status: 'todo', createdAt: Date.now() - HOUR },
+      { id: 'b', title: 'Middle', status: 'todo', createdAt: Date.now() - 2 * HOUR },
+      { id: 'c', title: 'Oldest', status: 'todo', createdAt: Date.now() - 3 * HOUR },
+      { id: 'd', title: 'Elsewhere', status: 'backlog', createdAt: Date.now() - HOUR },
+    ]
+    server.use(
+      http.get('/api/board', () => HttpResponse.json({ tasks })),
+      http.get('/api/board/:id', ({ params }) =>
+        HttpResponse.json({
+          task: tasks.find((t) => t.id === params['id']),
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/:id/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/:id/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await user.click((await screen.findByText('Middle')).closest('button')!)
+    const drawer = await screen.findByTestId('task-detail-drawer')
+    await within(drawer).findByRole('heading', { name: 'Middle' })
+    expect(within(drawer).getByTestId('task-position')).toHaveTextContent('2 of 3')
+
+    await user.keyboard('j')
+    expect(await within(drawer).findByRole('heading', { name: 'Oldest' })).toBeInTheDocument()
+    expect(within(drawer).getByTestId('task-position')).toHaveTextContent('3 of 3')
+    expect(within(drawer).getByRole('button', { name: 'Next task' })).toBeDisabled()
+
+    await user.keyboard('kk')
+    expect(await within(drawer).findByRole('heading', { name: 'Newest' })).toBeInTheDocument()
+    expect(within(drawer).getByTestId('task-position')).toHaveTextContent('1 of 3')
+  })
+
+  it('steps only through the cards the board draws, not a folded Earlier row', async () => {
+    // Week view. Backlog work from before the week sits in Earlier, folded
+    // because it is only parked work; J and K pass over it.
+    const HOUR = 60 * 60 * 1000
+    const tasks = [
+      {
+        id: 'old',
+        title: 'Parked long ago',
+        status: 'backlog',
+        createdAt: Date.now() - 10 * 24 * HOUR,
+      },
+      {
+        id: 'a',
+        title: 'Parked this morning',
+        status: 'backlog',
+        createdAt: Date.now() - 2 * HOUR,
+      },
+      { id: 'b', title: 'Parked an hour ago', status: 'backlog', createdAt: Date.now() - HOUR },
+    ]
+    server.use(
+      http.get('/api/board', () => HttpResponse.json({ tasks })),
+      http.get('/api/board/:id', ({ params }) =>
+        HttpResponse.json({
+          task: tasks.find((t) => t.id === params['id']),
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/:id/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/:id/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    const user = userEvent.setup()
+    render(<BoardPanel />)
+    await user.click((await screen.findByText('Parked this morning')).closest('button')!)
+    const drawer = await screen.findByTestId('task-detail-drawer')
+    await within(drawer).findByRole('heading', { name: 'Parked this morning' })
+    expect(within(drawer).getByTestId('task-position')).toHaveTextContent('1 of 2')
+    expect(within(drawer).getByRole('button', { name: 'Previous task' })).toBeDisabled()
   })
 
   it('opens the task a chat card asked for ("Open on board")', async () => {

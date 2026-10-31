@@ -9,6 +9,7 @@
 // is read from the board API.
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { delegationTargetOf } from '@clawboo/board-core'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChevronDown, ChevronRight, KanbanSquare, ListChecks } from 'lucide-react'
@@ -18,9 +19,9 @@ import { InlineApprovalCard } from '@/features/approvals/InlineApprovalCard'
 import { ToolApprovalCard } from '@/features/approvals/ToolApprovalCard'
 import { usePendingApprovals } from '@/features/approvals/usePendingApprovals'
 import { attentionLabel, taskAttentionOf } from '@/features/board/boardStatus'
+import { ReplyReceipt } from '@/features/board/ReplyReceipt'
 import { TaskComments, type TaskComment } from '@/features/board/TaskComments'
 import { formatRunCost, runCostOf } from '@/features/board/taskCost'
-import { useTaskActions } from '@/features/board/useTaskActions'
 import { MD_COMPONENTS } from '@/features/chat/chatComponents'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { resolveRuntimeMark } from '@/features/runtimes/RuntimeBrand'
@@ -28,7 +29,7 @@ import { Button, IconButton } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { FloatingCard } from '@/features/shared/FloatingCard'
 import { StatusPill } from '@/features/shared/StatusPill'
-import { boardClient, postTaskComment, type BoardTask } from '@/lib/boardClient'
+import { boardClient, postTaskComment, type BoardTask, type ReplyDelivery } from '@/lib/boardClient'
 import { useBoardStore, type BoardTaskView } from '@/stores/board'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -286,11 +287,11 @@ function composerHint(
   task: BoardTaskView,
   name: string | null,
   runtime: string | null,
-  retryable: boolean,
+  hasAgent: boolean,
 ): string {
   if (task.status === 'done' || task.status === 'cancelled')
-    return 'This task is finished. Your comment is saved on it.'
-  if (!task.assigneeAgentId) return 'No agent is on this task yet. Your comment is saved on it.'
+    return 'This task is finished. You can send your comment as a follow-up task.'
+  if (!hasAgent) return 'No agent is on this task yet. Your comment is saved on it.'
   const who = name ?? 'The agent'
   if (task.status === 'in_progress') {
     const delivery = runtime ? MID_RUN_DELIVERY[runtime] : undefined
@@ -299,9 +300,9 @@ function composerHint(
     return `${who} sees this the next time it checks in.`
   }
   if (task.status === 'in_review') return `${who} sees this the next time it runs.`
-  if (retryable)
-    return `Send and retry runs it again, with your comment for ${name ?? 'the agent'}.`
-  return `${name ?? 'The agent'} reads this when the task starts.`
+  if (task.status === 'blocked' || task.status === 'todo')
+    return `Sending starts ${name ?? 'the agent'} on this again.`
+  return `${who} reads this when the task starts.`
 }
 
 function TaskDetail({ task }: { task: BoardTaskView }) {
@@ -317,7 +318,6 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
     return agent ? (agent.runtime ?? 'openclaw') : null
   })
   const addToast = useToastStore((s) => s.addToast)
-  const { retry } = useTaskActions()
 
   const [row, setRow] = useState<BoardTask | null>(null)
   const [comments, setComments] = useState<TaskComment[] | null>(null)
@@ -336,28 +336,32 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
-  const attention = taskAttentionOf(task)
-  const retryable =
-    Boolean(task.assigneeAgentId) &&
-    attention !== null &&
-    attention.reason !== 'unassigned' &&
-    (task.status === 'todo' || task.status === 'blocked' || task.status === 'backlog')
+  // The agent the task belongs to: its assignee, or the agent it is bound to
+  // while it waits (a move back to To do clears the assignee, not the binding).
+  const boundId =
+    task.assigneeAgentId ??
+    delegationTargetOf(typeof row?.sourceDelegationId === 'string' ? row.sourceDelegationId : null)
+  const boundName = useAgentName(boundId)
+  // Where each reply sent from here went, by comment id.
+  const [receipts, setReceipts] = useState<Map<string, { delivery: ReplyDelivery; body: string }>>(
+    () => new Map(),
+  )
 
-  const send = async (andRetry: boolean): Promise<void> => {
+  const send = async (): Promise<void> => {
     const body = draft.trim()
     if (!body || sending) return
     setSending(true)
     const res = await postTaskComment(task.id, body)
+    setSending(false)
     if (!res.ok) {
-      setSending(false)
       addToast({ type: 'error', message: 'Couldn’t send your comment. Please try again.' })
       return
     }
     setDraft('')
-    if (andRetry) await retry(task.id)
-    else if (res.forwarded && assigneeName)
-      addToast({ type: 'success', message: `Sent to ${assigneeName}.` })
-    setSending(false)
+    if (res.commentId && res.delivery) {
+      const { commentId, delivery } = res
+      setReceipts((m) => new Map(m).set(commentId, { delivery, body }))
+    }
     setReloadKey((n) => n + 1)
   }
 
@@ -411,7 +415,20 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
         <div className="mt-4">
           <SectionLabel>Comments</SectionLabel>
           {comments ? (
-            <TaskComments comments={comments} compact />
+            <TaskComments
+              comments={comments}
+              compact
+              after={(c) => {
+                const r = c.id ? receipts.get(c.id) : undefined
+                return r ? (
+                  <ReplyReceipt
+                    delivery={r.delivery}
+                    task={{ id: task.id, title: task.title, teamId: row?.teamId ?? null }}
+                    body={r.body}
+                  />
+                ) : null
+              }}
+            />
           ) : (
             <div className="text-[11.5px] text-muted-foreground">Loading…</div>
           )}
@@ -422,7 +439,7 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
         className="shrink-0 border-t border-border p-2.5"
         onSubmit={(e) => {
           e.preventDefault()
-          void send(false)
+          void send()
         }}
       >
         <div className="rounded-xl border border-border bg-background transition-colors focus-within:border-foreground/30">
@@ -432,7 +449,7 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
-                void send(false)
+                void send()
               }
             }}
             rows={2}
@@ -443,19 +460,8 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
           />
           <div className="flex items-center gap-2 px-2 pb-2">
             <span className="min-w-0 flex-1 truncate px-1 text-[11px] text-muted-foreground">
-              {composerHint(task, assigneeName, assigneeRuntime, retryable)}
+              {composerHint(task, boundName, assigneeRuntime, boundId != null)}
             </span>
-            {retryable && (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={!draft.trim() || sending}
-                onClick={() => void send(true)}
-              >
-                Send and retry
-              </Button>
-            )}
             <Button type="submit" size="sm" variant="primary" disabled={!draft.trim() || sending}>
               Send
             </Button>
