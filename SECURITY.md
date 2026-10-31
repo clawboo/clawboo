@@ -42,8 +42,10 @@ problem a machine is good at, and the interesting bugs in a tool like this are s
 ## Scope notes
 
 Clawboo is a **local-first** tool: by default the dashboard binds to loopback (`127.0.0.1`) so it is not
-reachable from other hosts on your network, all state lives under `~/.clawboo/`, and runtime API keys are
-stored in an AES-256-GCM encrypted vault. The threat model that the codebase defends against includes
+reachable from other hosts on your network, Clawboo's own state lives under `~/.clawboo/`, and API keys are
+stored there in an AES-256-GCM encrypted vault. Keys connected under **Providers** are also written,
+unencrypted, to OpenClaw's `~/.openclaw/.env` and its agents' `auth-profiles.json`, so the OpenClaw Gateway
+can use them. The threat model that the codebase defends against includes
 malicious agent/model output, untrusted capability/skill content, untrusted peer-chat posts, a single
 compromised runtime attempting to read another's state, and a browser-based drive-by attacker: a malicious
 web page you visit while Clawboo is running that tries to reach the loopback API from your own browser (a
@@ -68,13 +70,21 @@ choosing to execute locally.
 
 ### Exposing the dashboard beyond loopback
 
-If you deliberately widen the bind (set `HOST=0.0.0.0` or a LAN address, e.g. to reach the dashboard from
-another machine), the API is then reachable by other hosts on that network. In that case you **must set an
-access token**: export `STUDIO_ACCESS_TOKEN=<a long random string>` before starting the server. With a token
-set, every `/api/*` route and the gateway WebSocket require it (open `/?access_token=<token>` once to set the
-cookie). The server **refuses to start** on a non-loopback bind with no token — set `STUDIO_ACCESS_TOKEN`, or
-set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose. (`HOSTNAME` is ignored as a bind signal, so
-a container's auto-set hostname never silently widens the bind — use an explicit `HOST=`.)
+If you deliberately widen the bind (set `HOST=0.0.0.0`, e.g. to reach the dashboard from another machine),
+the API is then reachable by other hosts on that network. In that case you **must set an access token**:
+export `STUDIO_ACCESS_TOKEN=<a long random string>` before starting the server, using only the characters
+`A-Z a-z 0-9 . _ ~ -` (any other character disables the token check). With a token set, every `/api/*` route
+and the gateway WebSocket require it (open `/?access_token=<token>` once to set the cookie); Clawboo's own
+agents reach the MCP servers with a per-install attach token instead. The server **refuses to start** on a
+non-loopback bind with no token: set `STUDIO_ACCESS_TOKEN`, or set `CLAWBOO_ALLOW_INSECURE=1` to run
+unauthenticated on purpose. (`HOSTNAME` is ignored as a bind signal, so a container's auto-set hostname never
+silently widens the bind; use an explicit `HOST=`.)
+
+A reverse proxy on the same machine (nginx, Caddy, a Cloudflare Tunnel connector) forwards every request from
+`127.0.0.1`, so it needs the access token too, unless the proxy authenticates every request itself. Releases up
+to and including 0.5.0 let any loopback request reach `/api/mcp/*` without the token, so behind such a proxy,
+deny `/api/mcp/` at the proxy. The [self-hosting guide](https://docs.claw.boo/guides/self-host-securely) has
+the configuration.
 
 ### Connectors run as you, and so does anything else on your machine
 
@@ -93,7 +103,8 @@ not "no shell involved".
 
 That is the environment vector, and it is the only one a local-first tool can close. **A connector
 child is still a process running as you.** It can read your home directory, your SSH keys, your
-`~/.aws` credentials, the clawboo database, and the vault files on disk. No local key scheme changes
+`~/.aws` credentials, the clawboo database, the vault files on disk, and any provider keys in OpenClaw's
+`~/.openclaw/.env`. No local key scheme changes
 that. This is why **community** entries stay blocked until a sandbox exists: installing one is a
 one-click install of somebody else's package, chosen from a list rather than by you.
 
@@ -130,8 +141,8 @@ The same reasoning applies to the governance controls. On a loopback bind with n
 process can therefore mint itself a grant, or resolve one of its own approval prompts. **Treat the
 approval flow and the lethal-trifecta gate as controls against a confused or prompt-injected model,
 not as controls against local code execution.** If you need the stronger property, set
-`STUDIO_ACCESS_TOKEN` (see above); the token is stripped from every spawned child's environment, so a
-connector cannot read it.
+`STUDIO_ACCESS_TOKEN` (see above); the token is stripped from the environment of the coding runtimes and
+connectors clawboo spawns, so a connector does not inherit it.
 
 We do not currently run a paid bug-bounty program. We are grateful for responsible disclosure and will
 credit reporters who wish to be named.

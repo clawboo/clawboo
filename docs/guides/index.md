@@ -1,24 +1,37 @@
 ---
-title: Guides (cookbook)
-description: Task-oriented walkthroughs that compose Clawboo features into end-to-end workflows.
+title: 'Recipes'
+description: 'End-to-end walkthroughs that combine several Clawboo features to finish one real job, for people who do not write code and for developers.'
+icon: 'chef-hat'
+keywords: ['guides', 'cookbook', 'how-to', 'tutorials', 'walkthroughs']
 ---
 
-The reference and concept pages tell you what each piece of Clawboo does in isolation. These guides do the opposite: each one is a single, realistic workflow that wires several features together: a [team](/concepts/teams-and-planes) of mixed [runtimes](/runtimes/index), a [budget](/concepts/governance) with a hard cap, an [MCP](/operating/mcp-servers) attach to an outside agent, and walks it start to finish. Where a guide needs the precise shape of a route, store, or default, it links to the relevant [concept](/concepts/index), [using](/using/index), [operating](/operating/index), or [reference](/reference/index) page rather than restating it. Start with whichever outcome matches what you are trying to ship; each guide names its prerequisites up front.
+Each recipe takes one real job from start to finish: the clicks, what you should see, and what to do when something goes wrong. The pages under Use Clawboo explain one feature at a time; recipes show how the features fit together.
 
-## The guides
+Every recipe assumes Clawboo is installed and onboarding is done. If not, start with the [Quickstart](/getting-started/quickstart).
 
-- **[Build a multi-runtime team](/guides/multi-runtime-team)**: connect more than one of the five runtimes (`clawboo-native`, `openclaw`, `claude-code`, `codex`, `hermes`), deploy a team that mixes them, and watch them coordinate over the board and group chat.
-- **[Set up governance & budgets](/guides/governance-and-budgets)**: put a USD budget with a hard cap on an agent, mission, or team, layer on depth/fan-out/cost caps, and route risky delegations through the approval queue so a runaway run is stopped, not just logged.
-- **[Self-host securely](/guides/self-host-securely)**: keep the default loopback bind, turn on the access gate, understand the encrypted credential vault and redaction, and expose the dashboard safely if you must reach it off-machine.
-- **[Attach the MCP to an external agent](/guides/attach-mcp-external-agent)**: point an outside agent (a Claude Code, Codex, or any MCP client) at Clawboo's Tasks, Memory, Tools, and TeamChat servers so it joins your team as a peer over the shared plane.
-- **[Cross-runtime handoff](/guides/cross-runtime-handoff)**: pause a task on one runtime and resume it on another, carrying the worktree system-of-record and `AGENT_HANDOFF.json` so the second runtime picks up cold.
-- **[Recurring team work](/guides/recurring-team-work)**: schedule team-task work with Routines, understand the team-task vs runtime-own-life cron domains, and handle the error-halts-until-resumed posture.
+## If you don't write code
 
-## See also
+| Recipe                                                 | What you get                                                                                                     | Who it is for                                                             |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [Run a content or research team](/guides/content-team) | A marketplace team that writes to your rules, takes your comments while it works, and repeats the job every week | Founders, marketers and small teams                                       |
+| [Run Clawboo without an API key](/guides/no-api-key)   | A team on a free local model (Ollama) or on your ChatGPT plan                                                    | Anyone without an API key, or who wants prompts to stay on their computer |
+| [Mix runtimes on one team](/guides/multi-runtime-team) | One team whose members run on different engines, picked in the dashboard                                         | Anyone with two or more runtimes connected                                |
+| [Repeat work on a schedule](/using/routines)           | A routine that sends your team the same request every day or week                                                | Anyone with a recurring report or check                                   |
+| [Keep spend under a limit](/using/budgets-and-spend)   | Spend tracking, warnings, and an optional hard cap                                                               | Anyone who pays a provider per token                                      |
+| [Give your team an app](/using/connectors)             | Gmail, Slack, Notion, web search and other tools your agents can use                                             | Teams whose work lives in other apps                                      |
 
-- [Getting Started](/getting-started/index), install and first run before you reach for a guide
-- [Core concepts](/concepts/index), the model behind every workflow here
-- [Using Clawboo](/using/index), per-feature how-tos the guides compose
-- [Operating Clawboo](/operating/index), deployment, security, and MCP-as-teammate
-- [Reference](/reference/index), the exact route, schema, and env-var shapes
-- [Glossary](/appendices/glossary), canonical term definitions
+## If you write code
+
+| Recipe                                                                   | What you get                                                                                  | Who it is for                                     |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| [Hand a task from one runtime to another](/guides/cross-runtime-handoff) | A coding task started on one runtime in its own git worktree, paused, and finished on another | Developers who drive Clawboo through its REST API |
+| [Attach an outside agent](/operating/mcp-servers)                        | Your own Claude Code, Codex or other MCP client connected to your team's board and memory     | Developers with their own agent setup             |
+| [Reach Clawboo from another machine](/guides/self-host-securely)         | The dashboard on another computer, through an SSH tunnel or a proxy with an access token      | People who run Clawboo for others                 |
+| [Back up and move Clawboo](/operating/data-and-state)                    | Where Clawboo keeps its data, and how to back it up and restore it                            | Anyone moving to a new computer                   |
+
+## Related
+
+- [Quickstart](/getting-started/quickstart): install Clawboo and connect AI before you start a recipe.
+- [Use Clawboo](/using/index): one page per feature, for when you need the details.
+- [Choose a runtime](/runtimes/index): what each runtime needs and what it can do.
+- [Troubleshooting](/help/troubleshooting): look up an error message and its fix.

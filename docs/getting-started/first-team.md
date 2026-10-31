@@ -1,110 +1,125 @@
 ---
-title: Deploy your first team
-description: Deploy a team of agents, run the Know-Your-Team gate, send a message in group chat, and watch a delegation land on the board.
+title: 'Work with your first team'
+sidebarTitle: 'First team'
+description: 'Give your team a job, watch Boo Zero split it into tasks, find the results, and steer, approve or stop the work.'
+keywords:
+  [
+    'first team',
+    'delegation',
+    'hand-off',
+    'Know Your Team',
+    'team chat',
+    'group chat',
+    'steer',
+    'stop',
+  ]
 ---
 
-By the end of this tutorial you'll have a team of agents in Clawboo, you'll have run the one-time "Know Your Team" introduction flow, and you'll have sent a message in group chat and watched the team leader delegate a task onto the durable board.
+Use this page once you have a deployed team, for example from the [Quickstart](/getting-started/quickstart). You'll open the team chat, give the team a job, watch it work, find the results, and steer or stop the work.
 
-A _team_ is a named group of Boos (agents) that collaborate in one shared chat room. Clawboo gives you two ways to deploy one: pick a ready-made template from the marketplace catalog (85 teams, 436 agents), or, on the native-first path, let onboarding seed a starter team for you. This tutorial covers both, then walks the same group-chat-and-board collaboration loop that follows either.
+## Before you begin
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## Prerequisites
-
-<Note>
-- A running Clawboo dashboard. If you haven't installed it yet, start with [Quickstart, native](/getting-started/quickstart-native) (no Gateway) or [Quickstart, OpenClaw](/getting-started/quickstart-openclaw).
-- At least one connected runtime. Either path in this tutorial works:
-  - **Native**: you pasted a provider key during native onboarding, then picked a team from the marketplace and deployed it.
-  - **OpenClaw**: your OpenClaw Gateway is connected, so you can deploy a marketplace-template team of OpenClaw agents.
-</Note>
-
-<Info>
-Team chat and delegation run **server-side** and work for every runtime, including a native-only team with no Gateway. The composer is live as soon as the team has agents, and a delegation cascade keeps running even if you close the browser tab.
-</Info>
+- **A deployed team.** Deploy one in the [Quickstart](/getting-started/quickstart), or click **+** (**Create a team**) at the bottom of the left rail to pick one from the Marketplace.
+- **A connected AI provider or runtime**, so the agents can answer.
 
 ## Steps
 
-### 1. Get a team
+<Steps>
 
-You either already have one (from native onboarding) or you deploy one now.
+<Step title="Open the team chat">
 
-**You already have a team.** During native onboarding you picked a starter team from the marketplace and deployed it (every agent `clawboo-native`). The wizard's "Your team is ready" screen was that team's **Meet your team** beat, so its group chat opens directly on the **introduce yourself** step. Skip to [step 3](#3-run-the-know-your-team-gate) and start from the second screen there; your team already exists.
+Click the team's icon on the left rail to open its Home, then click **General** below the team's agents. General is the chat with the whole team.
 
-**Deploy a template team.** The **+** button (Create a team) at the bottom of the team rail, the sidebar's leftmost strip, takes you to the Marketplace's **Teams** tab (the catalog of 85 teams, 436 agents). Press **Deploy** on a team card, then customize its name, icon, color, and the runtime each member runs on. You can mix runtimes: a native leader with a Claude Code or OpenClaw specialist, for example. (Prefer a blank team? Use the **Start from scratch** card on that same tab.)
+The first time you open a team's chat, a one-time introduction comes first:
 
-![The Marketplace Teams tab that Create a team opens: curated team templates with Details and Deploy buttons, beside a Start from scratch card](/images/team-gallery.png)
+1. **Meet your team** shows the agents and the leader. Click **Get Started**.
+2. **Introduce yourself:** write who you are and what you're working on (at least 5 characters), then click **Continue to Team Space**. Clawboo saves it to the team's context.
 
-**Expected result:** the create-team modal advances to a deploy screen: the team icon you picked, animating, above a **Deploying** heading that carries your team's name.
+A team you deployed during setup skips the first screen. [Team chat](/using/team-chat) covers this screen, rooms and clearing a chat.
 
-### 2. Watch the team deploy
+**You should see** the chat on the left, with the **Team graph** and **Tasks** cards on the right.
 
-Clawboo now creates the team and its agents in order:
+</Step>
 
-1. **`POST /api/teams`** creates the team row (name, icon, color, the template id).
-2. For each agent in the template, **`createAgent`** writes its four agent files: `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, and a collaboration-protocol `AGENTS.md`, then **`POST /api/teams/:id/agents`** assigns it to the team. The protocol file teaches each agent the team roster and the structured `<delegate to="@Name">task</delegate>` syntax it uses to route work.
-3. If the template defines `@mention` routing, agent-to-agent coordination is auto-enabled.
+<Step title="Give the team a job">
 
-The deploy screen tracks this live: a **Creating _agent name_…** line names the agent being written right now, and a progress bar under it counts `N/M agents`. When the last one lands, the screen flips to a check mark and **"Team deployed!"**, then the modal hands you off.
+Type your request in the message box and press Enter (Shift+Enter starts a new line). Your message goes to Boo Zero, which decides who should do what. To talk to one agent instead, start the message with `@` and its name; the message is delivered exactly as you typed it.
 
-**Expected result:** after the brief **"Team deployed!"** beat the modal closes itself and you land directly in your new team's group chat (**General**, in the sidebar's rooms list), with a success toast confirming the agent count. There is no separate "done" dialog to dismiss.
+Ask for work with clear parts and a clear result. For example:
 
-### 3. Run the "Know Your Team" gate
+```text
+Write a welcome email series for new customers of our budgeting app: three short emails with subject lines, and a note on when to send each one.
+```
 
-The first time you open a team's group chat, a one-time onboarding gate fills the window _instead of_ the chat. This is the **Know Your Team** flow, and it runs once per team.
+```text
+Turn these meeting notes into a short summary, a list of decisions, and a task list with an owner for each task: (paste your notes here)
+```
 
-The gate has two phases:
+A quick question gets a direct answer. Work with several parts is split into tasks.
 
-1. **Meet your team**: a welcome card showing each agent's avatar and, when Boo Zero (the universal team leader) is identified, a "Led by ..." badge. The copy explains that your team is led by Boo Zero, who takes your request and routes it to the right specialist. Click **Get Started**.
-2. **Your turn**: a textarea asks you to introduce yourself ("your name, what you're working on, how you'd like the team to help"). Type a short intro and click **Continue to Team Space**.
+**You should see** task cards appear in the chat as Boo Zero hands out the parts.
 
-A team deployed during onboarding opens straight on phase 2: the wizard's "Your team is ready" screen already showed you the same **Meet your team** card, so the gate does not repeat it.
+</Step>
 
-Your introduction is persisted to SQLite as the source of truth and injected into the team's context preamble on every future message, so every agent always sees it, and Boo Zero replies in-character to acknowledge it.
+<Step title="Watch the team work">
 
-**Expected result:** the gate closes and the settled **team space** opens: the group chat on the left, with the **Team graph** card (the team's [Ghost Graph](/using/ghost-graph)) and the **Tasks** card beside it. You learn what each teammate does by watching the first real task in action, not from a scripted intro round.
+Each hand-off becomes a task on the board, assigned to one teammate. You can follow it in three places:
 
-### 4. Send a message in group chat
+- **Task cards in the chat.** Each card names its teammate and shows a status that moves from **Queued** to **Working** to **Done**. A task that needs you shows why instead, such as **Failed** or **Stopped**.
+- **The Tasks card** beside the chat sorts this chat's tasks into **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**.
+- **The Team graph card** shows the team, with a live status on each agent.
 
-You're now in normal group chat. Type a request into the composer at the bottom and send it.
+The [Board](/using/board) holds every task from every team, by status and by day. Team chat runs on the Clawboo server, so the work continues if you close the browser tab.
 
-Your message routes to the team's leader by default (Boo Zero, or the first team member). To address a specific agent, start your message with `@AgentName`; the longest-prefix match against the roster wins, and the @mention is stripped before delivery.
+</Step>
 
-**Expected result:** the leader starts responding, its reply streaming live into the transcript with its own avatar and name.
+<Step title="Find the results">
 
-### 5. Watch a delegation land on the board
+- **Boo Zero's answer.** When the teammates finish, Boo Zero posts one summary in the chat.
+- **Each teammate's answer** is saved on its task. Open **Comments & activity** on the task card in the chat, or open the task on the Board, and read the teammate's comment.
+- **Files.** Agents return their results as text. Claude Code, Codex, Hermes and OpenClaw agents can also write files. In team chat, Claude Code, Codex and Hermes start in Clawboo's own data folder (`~/.clawboo`), so name the full folder path you want when you ask for files. OpenClaw agents work in their own OpenClaw workspace. [What agents can do](/concepts/permissions) explains what each runtime may touch.
 
-When the leader decides a request needs hands-on work, it emits a structured `<delegate to="@Name">task</delegate>` directive in its response. Clawboo's orchestration engine, which observes every team member's session, turns that directive into a durable [board](/concepts/the-board) task; it does _not_ scrape prose for intent.
+![Boo Zero's summary in a team chat: it reports what three teammates produced for a pricing page and what is still open, with the Team graph and Tasks cards on the right](/images/leader-synthesis.png)
 
-For each delegation, the engine:
+</Step>
 
-1. **Creates a board task** and **atomically claims** it for the target agent (a lost claim is a conflict, never retried).
-2. **Delivers the task** to that agent's session through a non-destructive queue (a busy agent's task waits for its turn boundary; it never interrupts an in-flight run).
-3. **Reports the result back** when the agent finishes: the task moves to `done` and a report-up summary lands on the board.
+<Step title="Steer, approve or stop">
 
-You see this in the chat as a **Board task** card, a labeled row with a status pill that flips live from **Queued** to **Working** to **Done**, plus the assignee's avatar and name. The board is the source of truth; the card is a read-only projection of it, so it survives a page refresh. Completed tasks are also batched into a `[Task Update]` narration delivered back to the leader for synthesis. The expand icon on the card opens the same task on the [Board](/using/board), under its status. The **Tasks** card beside the chat lists the same tasks, grouped by status.
+- **Steer a running task.** Open the task in the **Tasks** card, write in **Comment or steer this task…** and send. The agent working on it reads your comment while it works, and a task that has not started yet gets it when it does. [Choose a runtime](/runtimes/index) shows how each runtime takes a comment.
+- **Approve.** Some actions wait for your OK. They appear in **Needs you** on the Board and in a tray above the message box; see [Approvals](/using/approvals). Claude Code, Codex and Hermes use their own built-in tools without asking.
+- **Stop.** While the team works, the send button turns into **Stop**. Stop ends the team's runs in this chat and drops hand-offs that have not started. Tasks that were running wait in **Needs you** as **Stopped** and don't restart on their own; retry them from there when you're ready.
 
-**Expected result:** at least one Board task card appears inline in the chat, its status pill advancing to **Done**, and the leader synthesizes the teammate's work back to you.
+</Step>
 
-## What you should see
+</Steps>
 
-The settled team space puts the group chat on the left and the team's cards beside it, with Board task cards interleaved into the conversation as delegations land:
+## How Boo Zero hands out work
 
-![Clawboo team chat: a team's General chat on the left, with its Team graph and Tasks cards on the right](/images/team-space.png)
+Boo Zero answers what it can and hands out the rest. Each hand-off becomes a task on the board, assigned to a teammate. When the teammate finishes, its result is saved as a comment on the task and passed back to the agent that handed it out. Boo Zero then writes your answer.
 
-The **Team graph** card renders the team's Ghost Graph as a hierarchy, the leader at the top, teammates below, and the `@mention` routing from each agent's `AGENTS.md` drawn as edges:
+<Accordion title="Under the hood">
 
-![The Growth team's Team graph card, maximized: Boo Zero at the top, the lead Ada beneath it, and four specialists in a row below, joined by routing edges](/images/team-graph.png)
+The leader hands off a job with a structured signal, never by Clawboo guessing from its prose. The signal depends on the runtime the leader runs on:
 
-## What just happened
+| Leader runs on               | How it hands off a job                                      |
+| ---------------------------- | ----------------------------------------------------------- |
+| Clawboo Native               | Calls its `delegate` tool                                   |
+| Claude Code, Codex or Hermes | Calls the `team_delegate` tool on Clawboo's TeamChat server |
+| OpenClaw                     | Writes a `<delegate to="@Name">` block in its reply         |
 
-Deploying a team created real agent records in SQLite, the [registry of record](/appendices/glossary) for which agents and teams exist, and wrote each agent's collaboration protocol into its `AGENTS.md`, which is what teaches the leader the `<delegate>` syntax and seeds the Ghost Graph's edges. The Know-Your-Team gate ran once so you could meet the team and introduce yourself, persisting your introduction so every future message carries it. Then, in chat, the leader's structured delegation became a durable board task: the server-side orchestration engine derives tasks from typed signals rather than parsing prose, claims each task race-free, and reflects the result back, which is why the work survives a refresh (and a tab close) and the leader is never left waiting on a silent teammate.
+Clawboo limits how deep hand-offs can nest and how many one turn can send out, and stops sending a task to a teammate that keeps failing it. [Limits and defaults](/reference/limits-and-defaults) has the numbers, and [How a team works](/intro/how-it-works) follows the whole path.
+
+</Accordion>
+
+## Good to know
+
+- **Team chat work is not checked automatically.** Review the results, or add a reviewer agent to the team and ask Boo Zero to have it check the work. See [How work is checked](/concepts/verification).
+- **A team costs more tokens than one agent.** Boo Zero, each teammate and the final summary are separate model runs. See [Budgets and spend](/using/budgets-and-spend).
 
 ## Next steps
 
-- [The board](/concepts/the-board), the durable, race-free coordination substrate behind every delegation
-- [Delegation and orchestration](/concepts/delegation-and-orchestration), how structured signals become board tasks
-- [Peer chat](/concepts/peer-chat), how mixed-runtime agents talk to each other as named peers
-- [Using group chat](/using/group-chat), the group-chat surface in depth, including the gate
-- [Tour the dashboard: the sidebar, the Org chart, and the view modes](/getting-started/dashboard-tour)
+- [Team chat](/using/team-chat): rooms, mentions and clearing a chat.
+- [Teams](/using/teams): change a team's members, leader, brief and rules.
+- [Board](/using/board): every task, steering comments and **Needs you**.
+- [Routines](/using/routines): give the team work on a schedule.
+- [Tour the dashboard](/getting-started/dashboard-tour): find your way around the rest of the app.

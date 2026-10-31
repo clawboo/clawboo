@@ -1,168 +1,226 @@
 ---
-title: Cross-runtime handoff
-description: Pause a file-mutating board task on one runtime and resume it cold on another, using the per-task worktree and AGENT_HANDOFF.json.
+title: 'Hand a task from one runtime to another'
+sidebarTitle: 'Cross-runtime handoff'
+description: 'Start a coding task on one runtime in its own git worktree, pause it, and finish it on another runtime through the REST API.'
+icon: 'arrow-right-left'
+keywords:
+  [
+    'cross-runtime handoff',
+    'AGENT_HANDOFF.json',
+    'worktree',
+    'keepForResume',
+    'pause and resume',
+    'run API',
+  ]
 ---
 
-Use this guide when you want one [runtime](/appendices/glossary) to start a file-mutating board task, pause without losing work, and have a _different_ runtime (or a human) pick it up cold, with no chat history and no shared model session. A Claude Code agent can do the first pass and a Codex agent the second; the receiving runtime reconstructs what's done, what's broken, and what's next from the task's git worktree alone.
-
-This works because a file-mutating task carries its own isolated world: a per-task [worktree](/concepts/worktrees-and-handoff) (its **system-of-record**) plus a structured `AGENT_HANDOFF.json` clock-out artifact. The board is the dispatcher; the worktree is the durable world the dispatched work happens in. This guide composes [Worktrees and handoff](/concepts/worktrees-and-handoff), [the executor runner](/internals/executor-runner), and the [Board API](/reference/rest-api/board) workspace routes into one workflow.
+Use this recipe to start a code change on one runtime, for example Claude Code, pause it, and have another runtime, for example Codex, finish it in the same git checkout. The second runtime learns what is done and what is next from files in that checkout, not from a chat history. This is a developer recipe: you drive every step through the REST API.
 
 <Note>
-This guide drives the dispatch over REST (`POST /api/runtimes/:id/run`) so the mechanics are explicit. In normal use the team orchestrator dispatches and resumes tasks for you; you don't call these routes by hand. The point here is to see exactly how the pause/resume seam works.
+
+A handoff needs a git worktree, a separate checkout Clawboo makes for one task. A run gets one only when it is started with `POST /api/runtimes/:id/run` and a `repoPath`, or by an agent routine whose task template names a `repoPath` (set through the API; the routine dialog has no repository field). Team chat, rooms, delegations and tasks you start from the board never get a worktree, so they never write a handoff.
+
 </Note>
 
-## Prerequisites
+**What you'll build:** one task, started by Claude Code with a pause at the end, then finished by Codex in the same checkout, with the result left on a branch for you to merge.
 
-- Two connected, **worktree-capable** runtimes. Of the five runtimes, `clawboo-native`, `claude-code`, `codex`, and `hermes` declare `worktrees: true`; OpenClaw declares `worktrees: false` (its agents run in Gateway-owned workspace dirs, so the runner never retargets them, and the executor runner refuses a connected substrate before it claims anything). See [Connecting runtimes](/runtimes/connecting-runtimes) and the [capability matrix](/runtimes/index).
-- A git repository on disk to branch from: its absolute `repoPath`.
-- An existing board task in `todo` for a **file-mutating** kind (`code`, the default). Read-only / research tasks (`research`, `review`) get no worktree, so there is nothing to hand off; provisioning one for them is refused with **422**. See [the board](/concepts/the-board) and [Board API](/reference/rest-api/board).
+**Time:** about 20 minutes, plus however long the two runs take.
 
-The examples assume the API at the default loopback port `18790`; substitute your resolved port (see [Deployment](/operating/deployment)).
+## Before you begin
 
-## The flow
+- Two of these runtimes connected: Clawboo Native, Claude Code, Codex, Hermes. OpenClaw cannot take part: `/api/runtimes/openclaw/run` answers `404` with `unknown runtime 'openclaw'`. See [Providers and runtimes](/using/providers-and-runtimes).
+- A git repository on this computer with at least one commit, and its absolute path.
+- The server address. The examples use `http://127.0.0.1:18790`; `clawboo` prints the address it actually uses. The `curl` examples assume no access token. If you set `STUDIO_ACCESS_TOKEN`, add `-b 'clawboo_access=<token>'` to each `curl` command; see [Authentication](/reference/rest-api/index#authentication).
+
+<Warning>
+
+A worktree keeps a task's file changes apart from your own checkout. It is not a sandbox. Claude Code, Codex and Hermes run with their approval prompts turned off and can read and change any file your user account can. See [What agents can do](/concepts/permissions).
+
+</Warning>
+
+## How it works
 
 ```mermaid
 sequenceDiagram
-    participant A as Runtime A (claude-code)
-    participant R as Executor runner
-    participant W as Worktree (SoR)
-    participant B as Runtime B (codex)
-
-    R->>A: run task (claim → provision worktree)
-    A->>W: do work in the checkout
-    A->>W: writeHandoff → AGENT_HANDOFF.json
-    Note over R: keepForResume → release task to todo,<br/>KEEP the worktree
-    R->>B: run SAME task (reuse the worktree)
-    B->>W: reconstructState → done / broken / next
-    B->>W: continue, then complete (verification gate)
+    participant You
+    participant A as Runtime A
+    participant W as Task worktree
+    participant B as Runtime B
+    You->>A: run with keepForResume
+    A->>W: edit files, write AGENT_HANDOFF.json
+    Note over W: task back to To do, checkout kept
+    You->>B: run the same task
+    B->>W: read the handoff, finish the work
+    Note over W: check runs, task Done or Blocked
 ```
 
 ## Steps
 
-### 1. Start the task on the first runtime
+<Steps>
 
-Dispatch the task on runtime A with `repoPath` set and `keepForResume: true`. `keepForResume` is the load-bearing flag: it tells the runner to **pause** at the end of a successful run instead of completing. The `kind` defaults to `code`, which isolates to a worktree.
+<Step title="Create the task without an assignee">
 
 ```bash
-curl -X POST http://localhost:18790/api/runtimes/claude-code/run \
+curl -s -X POST http://127.0.0.1:18790/api/board \
   -H 'Content-Type: application/json' \
-  -d '{
-    "taskId": "<task-id>",
-    "assigneeAgentId": "claude-worker-1",
-    "repoPath": "/abs/path/to/repo",
-    "kind": "code",
-    "keepForResume": true
-  }'
+  -d '{"title":"Add input validation to the signup form","description":"Reject an empty email and passwords under 12 characters, with tests. Set VERIFY_CMD in init.sh to npm test.","teamId":"<team-id>"}'
 ```
 
-What the [executor runner](/internals/executor-runner) does, in order:
+The response holds the new task, in status `todo`. Keep its `id`.
 
-1. **Atomic claim.** A single guarded UPDATE flips the task `todo → in_progress`. A lost claim is a **409** and is never retried; it means another worker legitimately owns the task.
-2. **Worktree acquisition.** Because `claude-code` declares `capabilities().worktrees`, the runner provisions a fresh isolated checkout on the branch `clawboo/task-<id>`, branched from a commit SHA (not the dirty tree), and writes + commits the system-of-record scaffold (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`). The worktree lives **outside** your repo, under the Clawboo state dir, namespaced by a hash of the repo path, so it never touches your repo's own `git status`.
-3. **Run.** The runtime works in the checkout, mutating real files.
-4. **Pause (because `keepForResume`).** On a successful terminal the runner writes `AGENT_HANDOFF.json` into the worktree (with `nextBestStep` carrying the run's reported summary), then calls `releaseTask`; the task drops back to `todo` and the **worktree is kept**. The verification gate does **not** run on a pause; it runs only on a `complete` (step 4 below).
+Leave out `assigneeAgentId`. A task created for an agent goes straight to the team's chat engine, which runs it without a worktree, and your run in the next step then gets a `409`. The `teamId` is optional (`GET /api/teams` lists your teams' ids): with it, the task shows on that team's board and its spend counts toward the team's budget.
 
-### 2. Inspect the handoff (optional)
+</Step>
 
-The pause leaves a fully cold-resumable task. Confirm it with the [cold-resume read](/reference/rest-api/board#get-apiboardtaskidworkspace):
+<Step title="Start the task on the first runtime">
 
 ```bash
-curl http://localhost:18790/api/board/<task-id>/workspace
-```
-
-The `resume` block is `reconstructState`'s output, computed purely from the worktree: `AGENT_HANDOFF.json`, falling back to `task-progress.md` + `init.sh`. No chat history, no board UI:
-
-```json
-{
-  "ok": true,
-  "workspace": { "status": "active", "branch": "clawboo/task-<id>", "...": "..." },
-  "resume": {
-    "hasHandoff": true,
-    "done": [],
-    "broken": [],
-    "next": "<runtime A's reported summary>",
-    "commands": { "init": "./init.sh", "verify": "", "start": "" },
-    "warnings": [],
-    "lastRuntime": "claude-code",
-    "nativeSessionId": "<id or null>"
-  },
-  "handoff": { "...": "the parsed AGENT_HANDOFF.json" }
-}
-```
-
-<Note>
-`AGENT_HANDOFF.json` is **structured data, not prose**; the next runtime parses it rather than interpreting English. Its `runtime` field is role-neutral and may be `'human'`, so a person can pick up (or hand off) the task from the exact same artifact. See [Worktrees and handoff](/concepts/worktrees-and-handoff#the-cross-runtime-handoff).
-</Note>
-
-### 3. Resume on a different runtime
-
-Dispatch the **same `taskId`** on runtime B. The task is back in `todo`, so runtime B claims it cleanly and reuses the kept worktree; this is the cross-runtime continuation path. Drop `keepForResume` to let runtime B finish for real.
-
-```bash
-curl -X POST http://localhost:18790/api/runtimes/codex/run \
+curl -s -X POST http://127.0.0.1:18790/api/runtimes/claude-code/run \
   -H 'Content-Type: application/json' \
-  -d '{
-    "taskId": "<task-id>",
-    "assigneeAgentId": "codex-worker-1",
-    "repoPath": "/abs/path/to/repo",
-    "kind": "code"
-  }'
+  -d '{"taskId":"<task-id>","assigneeAgentId":"<agent-id>","repoPath":"/absolute/path/to/repo","keepForResume":true}'
 ```
 
-The runner's `acquireWorkspace` finds the existing active worktree for the task and reuses it as-is rather than provisioning a new one. (If a garbage-collection sweep had reaped the directory, keeping the branch, the runner rebuilds the checkout from the retained branch before running, so a reused worktree is never a missing directory.) Either way it reconstructs the `ResumeState` from the worktree's system-of-record and seeds the prompt's context tier with the prior handoff, so runtime B starts from runtime A's `done` / `broken` / `next`, not from scratch.
+The request stays open until the run ends, which can take minutes. Keep it open, and call the server directly rather than through a proxy with a short timeout: closing the connection cancels the run and its process, and the task goes back to To do.
 
-### 4. Let the resuming runtime complete
+What the fields do:
 
-Because step 3 dropped `keepForResume`, runtime B finishes the run through the normal completion path: the runner runs the worktree `complete` action, which decides clean-vs-retain by diffing the checkout against its baseline (the system-of-record bookkeeping files are excluded from that diff):
+- `keepForResume: true` (the boolean) makes the run pause at the end instead of finishing.
+- `repoPath` is the repository the worktree branches from. The run's `kind` defaults to `code`, which needs it. Read-only `research` and `review` runs get no worktree.
+- `assigneeAgentId` becomes the run's identity. Memory and the board credit the work to it, and Clawboo Native, Codex and Hermes keep a home folder per identity. Use the id of an agent on the task's team (from `GET /api/agents`), or leave it out to use the runtime's id. Only letters, digits, `-` and `_` are allowed.
 
-| Diff vs baseline | What happens                                                                                                                               | Terminal status                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| Empty            | No deliverable: worktree + branch removed                                                                                                  | `done` (verification gate intentionally bypassed)                                                                                 |
-| Non-empty        | Worktree retained, the [verification](/concepts/verification) gate runs (deterministic build/test/lint, plus an optional read-only critic) | `pass` → `done` · `fail` with attempts left → `in_progress` · `fail` at the attempt budget, and `completed_with_debt` → `blocked` |
+Clawboo claims the task and makes the worktree: a folder under `~/.clawboo/worktrees/` on a new branch, `clawboo/task-<task-id>`, in your repository. The agent works there. At the end, Clawboo writes `AGENT_HANDOFF.json` into the worktree, with the agent's summary as the next step, and puts the task back in To do. The worktree stays, and no check runs on a pause.
 
-Only a promotable verdict moves `in_review → done`. See [Verification](/concepts/verification) and the [`PATCH .../workspace` complete action](/reference/rest-api/board#patch-apiboardtaskidworkspace).
+You should get a `200` whose JSON includes `"ok": true`, `"status": "todo"`, `"usedWorktree": true` and the agent's `summary`.
+
+</Step>
+
+<Step title="Read the handoff (optional)">
+
+```bash
+curl -s http://127.0.0.1:18790/api/board/<task-id>/workspace
+```
+
+The response has four parts: `ok`, `workspace` (including `worktreePath`, the folder, and `branch`), `resume` (what the next runtime will read: `done`, `broken`, `next`, and `lastRuntime`), and `handoff` (the parsed `AGENT_HANDOFF.json`). The handoff is structured data, so the next runtime reads fields rather than prose.
+
+</Step>
+
+<Step title="Finish the task on the second runtime">
+
+Send the same `taskId` and `repoPath` to the other runtime, without `keepForResume`:
+
+```bash
+curl -s -X POST http://127.0.0.1:18790/api/runtimes/codex/run \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<task-id>","assigneeAgentId":"<agent-id>","repoPath":"/absolute/path/to/repo"}'
+```
+
+Clawboo finds the task's worktree and reuses it. If the folder was removed by a cleanup, Clawboo rebuilds it from the branch, which is why the second run needs `repoPath` too. Codex starts from the handoff: what is done, what is broken, and what to do next.
+
+</Step>
+
+<Step title="Let the check decide where the task lands">
+
+When the second run ends, Clawboo compares the worktree with its starting point:
+
+| What changed  | What happens                                                                                                     | The task ends in                                                                                                                                            |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nothing       | Clawboo removes the worktree and its branch.                                                                     | **Done**                                                                                                                                                    |
+| Files changed | The check runs: the verify command from the worktree's `init.sh` and, for a large change, a separate review run. | **Done** when it passes. A failure is retried inside the same request; once the attempts are used up (2 by default), **Blocked**, waiting in **Needs you**. |
+
+The request returns once that is settled. The worktree starts with a placeholder verify command, and a placeholder counts as a failed check, which is why the task description in step 1 asks the agent to set `VERIFY_CMD`. See [How work is checked](/concepts/verification).
+
+</Step>
+
+<Step title="Review and merge the work">
+
+Clawboo never merges or pushes. The work stays on the branch `clawboo/task-<task-id>` in your repository, and in the worktree folder:
+
+```bash
+git -C /absolute/path/to/repo log --oneline main..clawboo/task-<task-id>
+git -C /absolute/path/to/repo diff main...clawboo/task-<task-id>
+git -C /absolute/path/to/repo merge clawboo/task-<task-id>
+```
+
+Replace `main` with the branch you started from. An agent may leave its changes uncommitted in the worktree folder. Clawboo commits them once the verify command passes, when you pause the workspace, and before a cleanup removes the folder. If the branch shows nothing new, look in the folder from `workspace.worktreePath`.
+
+</Step>
+
+</Steps>
+
+## Check that it worked
+
+- After the first run, `GET /api/board/<task-id>` shows the task in `todo`, and the workspace response shows `resume.hasHandoff: true` with `lastRuntime` set to `claude-code`.
+- After the second run, `GET /api/board/<task-id>/executions` lists a run by each runtime.
+- The task ends in `done` or `blocked`, and `git -C /absolute/path/to/repo branch` lists `clawboo/task-<task-id>` unless the run changed nothing.
 
 ## Variations
 
-| You want…                           | Do this                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hand off to a **human**             | Write `AGENT_HANDOFF.json` directly via [`POST /api/board/:taskId/workspace/handoff`](/reference/rest-api/board#post-apiboardtaskidworkspacehandoff) with `runtime: "human"`. The person reads the worktree, runs `./init.sh` to confirm the baseline, and works from `done`/`broken`/`next`.                                            |
-| Pause manually (no run)             | [`PATCH /api/board/:taskId/workspace`](/reference/rest-api/board#patch-apiboardtaskidworkspace) with `{"action":"pause"}` commits uncommitted work, drops the worktree directory, and keeps the branch, resumable.                                                                                                                       |
-| Continue on the **same** runtime    | If runtime B equals runtime A and the runtime supports native resume, the runner threads the persisted `nativeSessionId` into `ctx.resume` and resumes the exact native session. A **cross**-runtime pickup ignores `nativeSessionId` and resumes from the structured handoff alone; a session id is meaningless to a different runtime. |
-| Pin the branch point                | Pass `baseSha` (or `baseRef`) when provisioning via [`POST /api/board/:taskId/workspace`](/reference/rest-api/board#post-apiboardtaskidworkspace); the default branch point is `HEAD` resolved to a full SHA.                                                                                                                            |
-| Inspect the worktree's files + diff | [`GET /api/board/:taskId/workspace/detail`](/reference/rest-api/board#get-apiboardtaskidworkspacedetail) returns the system-of-record file contents and the unified diff against the baseline.                                                                                                                                           |
-
-## Verify it worked
-
-- After step 1, `GET /api/board/<task-id>` shows the task back in `todo` (the pause released it) and `GET /api/board/<task-id>/workspace` returns `resume.hasHandoff: true` with `lastRuntime` set to runtime A.
-- After step 3, the task's `assigneeRuntime` reflects runtime B, and the run's execution row (the cross-runtime ledger) records a second entry via [`GET /api/board/:taskId/executions`](/reference/rest-api/board#get-apiboardtaskidexecutions).
-- After step 4, the task lands in a terminal status (`done`, `in_review`/`blocked` if a non-empty diff went through the verification gate, or back to `in_progress` on a `fail` verdict).
+| You want                          | Do this                                                                                                                                                                                                                                                                                              |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hand the task to a person         | Write the handoff yourself with `POST /api/board/<task-id>/workspace/handoff`, for example `{"handoffFrom":"Sam","runtime":"human","nextBestStep":"Finish the password rule and its test"}`. `handoffFrom` and `runtime` are required. The person works in the folder from `workspace.worktreePath`. |
+| Pause without a run               | `PATCH /api/board/<task-id>/workspace` with `{"action":"pause"}` commits any uncommitted work, removes the folder and keeps the branch. The next run rebuilds the folder from the branch when you pass `repoPath`.                                                                                   |
+| Resume on the same runtime        | Send the second run to the runtime that did the first. Where the runtime supports it, it also picks up its own earlier session; a different runtime starts from the handoff file alone.                                                                                                              |
+| See the worktree's files and diff | `GET /api/board/<task-id>/workspace/detail` returns the task notes in the worktree and the diff against its starting point.                                                                                                                                                                          |
+| Run it on a schedule              | Create an agent routine through the API with a `repoPath` in its task template. Each fire makes a new task and runs it in a worktree, without a pause. See the [Schedules API](/reference/rest-api/schedules).                                                                                       |
 
 ## Troubleshooting
 
-<Warning>
-**The resume run provisioned a new worktree instead of reusing.** `acquireWorkspace` reuses an existing **active** workspace row whose `worktreePath` still exists and is git-registered. Pass the same `repoPath` on the resume dispatch so the runner can rebuild a reaped checkout from the retained branch; without `repoPath` it can only fall through to a fresh provision.
-</Warning>
+<AccordionGroup>
 
-<Warning>
-**The first runtime completed instead of pausing.** `keepForResume` must be `true` (boolean) in the run body. Without it, a successful run with a non-empty diff routes straight into the verification gate and a clean verdict promotes the task to `done`; there is nothing left to hand off.
-</Warning>
+<Accordion title="The run answers 409">
 
-<Danger>
-**A worktree is concurrency isolation, not a sandbox.** It guarantees two parallel teammates can't trample each other's edits; it does **not** confine what code can do (network, filesystem, syscalls). Untrusted or Docker-running work needs `container`-tier isolation (a container or microVM), which the worktrees subsystem documents as an escalation point but never provisions. See [Worktrees and handoff](/concepts/worktrees-and-handoff#what-it-is-and-what-it-isnt).
-</Danger>
+**What it means:** Clawboo could not claim the task. It is not in To do, it already has an assignee (for example because you created it with `assigneeAgentId`), or you closed the connection before the claim.
 
-<Danger>
-**Don't retry a 409 on claim or status change.** A 409 from the claim (or an `illegal_transition` on a status PATCH) is data, not a transient error; the task is simply taken or the transition is illegal. A dead `in_progress` task is recovered by the board's orphan reconciliation, which releases it to `todo` for a normal re-claim. See [the board](/concepts/the-board#the-atomic-claim).
-</Danger>
+**Fix:** check the task with `GET /api/board/<task-id>`. Do not retry in a loop. To run a task that is assigned or **Blocked**, move it back to To do first with `PATCH /api/board/<task-id>` and `{"status":"todo"}`, which also clears the assignee.
 
-## Related
+</Accordion>
 
-- [Worktrees and handoff](/concepts/worktrees-and-handoff): the system-of-record + `AGENT_HANDOFF.json` model
-- [The executor runner](/internals/executor-runner): claim → worktree → run → verify → handoff, and the `keepForResume` pause
-- [Board API](/reference/rest-api/board): the `/api/board/:taskId/workspace*` routes
-- [Runtimes API](/reference/rest-api/runtimes): `POST /api/runtimes/:id/run`, the dispatch entry point
-- [Verification](/concepts/verification): the builder≠judge gate the resuming runtime triggers on completion
-- [Connecting runtimes](/runtimes/connecting-runtimes): bring `claude-code` / `codex` / `hermes` / `clawboo-native` online
-- [Multi-runtime team guide](/guides/multi-runtime-team): build a team mixing runtimes
-- [Glossary](/appendices/glossary): canonical term definitions
+<Accordion title="The run answers 422 and the task has a [blocked: no isolation] comment">
+
+**What it means:** the run changes files, so it needs a worktree, and Clawboo could not make one. The comment reads "This task changes files, so it needs an isolated git worktree, but no repository path was provided for it." when `repoPath` is missing, or names the path when Clawboo could not create the worktree there. The task goes back to To do.
+
+**Fix:** pass `repoPath` with the absolute path of a git repository that has at least one commit. For read-only work, send `"kind":"research"` or `"kind":"review"` instead.
+
+</Accordion>
+
+<Accordion title="The run answers 404 unknown runtime 'openclaw'">
+
+**What it means:** OpenClaw agents cannot be run this way. The run route accepts `clawboo-native`, `claude-code`, `codex` and `hermes`.
+
+**Fix:** use one of those runtimes.
+
+</Accordion>
+
+<Accordion title="curl seems to hang">
+
+**What it means:** the run is still going. The request returns only when the run ends.
+
+**Fix:** leave it open. If you stop it, Clawboo cancels the run, and the task goes back to To do with the worktree kept.
+
+</Accordion>
+
+<Accordion title="The first run finished instead of pausing">
+
+**What it means:** the run body did not carry `"keepForResume": true` as a boolean, so the run went on to the check.
+
+**Fix:** send `true`, not `"true"`. A task that reached Done cannot be reopened, so create a new task for the rest of the work. A Blocked task can go back to To do with `PATCH /api/board/<task-id>` and `{"status":"todo"}`.
+
+</Accordion>
+
+<Accordion title="The task ended Blocked">
+
+**What it means:** the check failed on every attempt. A placeholder verify command in `init.sh` always fails.
+
+**Fix:** read the task's comments with `GET /api/board/<task-id>` to see what failed. Set `VERIFY_CMD` in the worktree's `init.sh`, move the task back to To do, and run it again with the same `repoPath`.
+
+</Accordion>
+
+</AccordionGroup>
+
+## Next steps
+
+- [Worktrees and handoff](/concepts/worktrees-and-handoff): the files in a task's worktree and what each one is for.
+- [How work is checked](/concepts/verification): the verify command, the review run, and when a task lands Blocked.
+- [Runtimes API](/reference/rest-api/runtimes): every field and status of `POST /api/runtimes/:id/run`.
+- [Board API](/reference/rest-api/board): the task and workspace routes used here.
+- [Mix runtimes on one team](/guides/multi-runtime-team): put agents on different runtimes in team chat.

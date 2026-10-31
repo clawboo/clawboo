@@ -1,249 +1,178 @@
 ---
-title: Governance
-description: USD budgets with an auto-pause kill-switch, tool-loop circuit breakers, depth/fan-out/cost caps, the delegation approval handshake, and the human gate on shell commands.
+title: 'Budgets and guardrails'
+sidebarTitle: 'Budgets and guardrails'
+description: 'The limits Clawboo puts on spend, stuck runs and delegation: which are on by default, which you turn on, and which kinds of run each one covers.'
+icon: 'shield-check'
+keywords:
+  [
+    'governance',
+    'budget',
+    'hard cap',
+    'warn only',
+    'circuit breaker',
+    'delegation depth',
+    'fan-out',
+    'delegation approval',
+    'spend limit',
+  ]
 ---
 
-Governance is the set of guardrails that make a runaway agent _impossible_, not merely visible. Where [observability](/concepts/observability) tells you what a run did, governance stops a run that has gone wrong: a [budget](/appendices/glossary) that has run out of dollars, a tool loop that thrashes without progress, a delegation tree that tries to grow too deep, or a destructive delegation that a human should sign off on first.
+Clawboo puts limits on what your agents spend and on how far their work spreads. A few limits are always on. The one that stops spending, a budget in **hard cap** mode, is off until you create one. These guardrails narrow the damage a run that goes wrong can do. They cannot rule out a runaway agent, and most of them cover only some of the ways work runs.
 
-Every governance signal is keyed on a typed [`RuntimeEvent`](/appendices/glossary): a `cost` event's dollar delta, a `tool-call` / `tool-result` pair, a typed error `code`, and never on rendered model prose. That is the same no-prose-as-control-signal discipline the whole [delegation and orchestration](/concepts/delegation-and-orchestration) layer follows: a control decision must come from a machine-readable field, because an LLM's free text is unparseable and adversarially manipulable.
+Use this page to learn what each guardrail does and where it applies. To create, raise or resume a budget, see [Budgets and spend](/using/budgets-and-spend).
 
-This page explains the five mechanisms: the budget **kill-switch** (cap vs warn mode, per agent / mission / team, auto-pause at 100%); the five **circuit breakers** (a cross-runtime backstop for stuck loops); the orchestrator-boundary **caps** (depth / fan-out / cost); the **approval handshake** for risky delegations; and the **command-execution gate**, which decides whether an agent may run a shell command on your machine without asking you first.
+## Where work runs decides which guardrails apply
 
-## What it is, and what it isn't
+Work reaches your agents along two main paths. [How a team works](/intro/how-it-works) explains both.
 
-Governance is **enforcement in code, below the model**. The budget kill-switch aborts a live run; the breakers halt a thrashing loop; the caps refuse a delegation before it spawns; the approval gate blocks a risky delegation until a human resolves it; the command-execution gate holds a shell command until a human answers, or refuses it outright. None of these ask the model to behave; they make misbehavior structurally impossible regardless of what the model decides.
+- **Team chat.** Messages in General and rooms, the hand-offs they lead to, and the tasks you give an agent on the Board. Most work runs here.
+- **The task runner.** Agent routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started through the API with `POST /api/runtimes/:id/run`.
 
-Governance is **on by default and uncapped by default**. The breakers and caps always run with conservative defaults that a healthy run never trips. Budgets enforce _nothing_ until a user sets a limit, and the shipped posture is **track-and-warn**: a budget records spend and emits a warning at 80% and 100%, but a user must explicitly choose `cap` mode to get the auto-pause. There is no global feature flag; these are always-on parts of the [executor runner](/internals/executor-runner).
+An agent routine on OpenClaw takes a third, smaller path: a dispatcher that sends the work over the OpenClaw Gateway and waits for the result. The guardrails differ by path:
 
-Governance is **not** a substitute for the sandbox. A worktree gives a file-mutating run an isolated checkout (a _concurrency_ boundary), and a container is the documented escalation for a _privilege_ boundary; budgets and breakers bound _spend and effort_, not _blast radius_. The two are complementary; see [Worktrees and handoff](/concepts/worktrees-and-handoff).
+| Guardrail                         | Default                  | Team chat                        | Task runner                     | OpenClaw agent routine |
+| --------------------------------- | ------------------------ | -------------------------------- | ------------------------------- | ---------------------- |
+| Spend counted against budgets     | On, once a budget exists | Yes                              | Yes                             | Yes                    |
+| Budget warnings in the audit log  | On, once a budget exists | No                               | Yes                             | Yes                    |
+| Hard cap refuses the next run     | Off until you set one    | No                               | Yes                             | Yes                    |
+| Hard cap stops a run partway      | Off until you set one    | Clawboo Native on a priced model | Clawboo Native                  | No                     |
+| Per-run cost cap                  | Off                      | No                               | Routines set up through the API | No                     |
+| Circuit breakers                  | On                       | No                               | Yes                             | No                     |
+| Delegation depth and fan-out caps | On                       | Yes                              | Depth only                      | No                     |
+| Approval for risky delegations    | On                       | Yes                              | No                              | No                     |
 
-## The model
+One-to-one chat follows its own rules. A Clawboo Native agent's one-to-one chat charges only that agent's budget, and only for a priced model. One-to-one chat with an OpenClaw agent is not charged to any budget.
 
-The governance signals all feed the same place: the cost / tool-call / tool-result loop inside the executor runner that drains a runtime's `RuntimeEvent` stream. Budget and breaker state are run-local accumulators; on the first trip, the loop breaks and a single teardown path runs.
+## Budgets
 
-```mermaid
-flowchart TD
-    A[RuntimeEvent stream] --> B{event kind}
+A **budget** is a dollar limit on one scope:
 
-    B -->|cost| C[recordSpend<br/>agent · mission · team]
-    C --> D{cap budget<br/>paused at 100%?}
-    D -->|yes| K[stopForBudget]
-    D -->|no| E{per-node cost<br/>cap reached?}
-    E -->|yes| K
-    E -->|no| F[stepBreaker: cost]
+- **agent**: everything one agent spends.
+- **mission**: one delegation tree, counted on its top task (the first task in the chain of hand-offs).
+- **team**: everything a team's runs spend.
 
-    B -->|tool-call| G[stepBreaker: tool-call]
-    B -->|tool-result| H[stepBreaker: tool-result]
-    B -->|error: denial code| I[stepBreaker: policy-denied]
+The scope list in the Governance panel also offers **tenant**. Nothing charges a tenant budget, so it never warns and never pauses.
 
-    F --> J{breaker trip?}
-    G --> J
-    H --> J
-    I --> J
-    J -->|yes| L[stopForBreaker]
-    J -->|no| A
+Each budget has a mode:
 
-    K --> M[abort run · audit · release task → todo]
-    L --> M
+- **warn only** (the default). Clawboo counts spend and never pauses anything. From 80% of the limit the budget reads **soft_capped**, and it stays there past 100%.
+- **hard cap** (you opt in). Spend is counted the same way. At 100% the budget reads **paused**, and what that stops depends on the path (see the table above and [What a hard cap stops](#what-a-hard-cap-stops)).
 
-    style K fill:#fee,stroke:#c33
-    style L fill:#fee,stroke:#c33
-    style M fill:#eef,stroke:#33c
-```
+Spend counts against a scope only after a budget exists for it. With no budget, nothing is measured against a limit, though costs still show where Clawboo reports them.
 
-The breaker feed is gated on `!stopForBudget`, so **the budget check wins ties** and at most one teardown, one `adapter.abort`, runs per run. Both teardowns end the same way: the run aborts, a forensic event lands in the [governance audit log](/appendices/glossary), and the task is released back to `todo` (retryable). The caps and the approval gate sit one layer up, in the orchestrator, refusing a delegation _before_ it ever becomes a run.
+### How spend is measured
 
-## The budget kill-switch
+Not every runtime reports what a run cost. Claude Code reports a dollar figure. Clawboo Native works one out from token counts for six models it has list prices for: claude-haiku-4-5, claude-sonnet-4-6, gpt-4o, gpt-4o-mini, and the OpenRouter ids anthropic/claude-haiku-4.5 and openai/gpt-4o-mini. These are the **priced models**. The default leader models (claude-sonnet-5 on Anthropic, gpt-5.4 on OpenAI) are not on the list.
 
-A budget is a USD cap on a scope. There are four scopes:
+Everything else is an estimate: from token counts where the runtime reports them, or from the length of the text when it reports none. Estimates count toward budgets the same as reported figures. A Hermes run started by a routine or the API reports nothing, so no budget sees it. The cost table in [Budgets and spend](/using/budgets-and-spend) has the details for each runtime.
 
-| Scope     | What it bounds                                                                                                                                              |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`   | One agent's lifetime spend.                                                                                                                                 |
-| `mission` | One delegation tree's spend, the _root_ task of the tree (a top-level task is its own mission). Spend rolls up here so one tree can't drain the org budget. |
-| `team`    | A whole team's spend.                                                                                                                                       |
-| `tenant`  | Dormant per-org seam (see [Boundaries](#boundaries-and-non-goals)).                                                                                         |
+### What a hard cap stops
 
-Each budget has a `limitUsdCents`, a `spentUsdCents`, a `status` (`active` → `soft_capped` → `paused`), and a `mode` (`cap` or `warn`). All money is integer cents, so the atomic SQL increment and the pure tier math agree byte-for-byte.
+**In the task runner**, Clawboo checks the agent, mission and team budgets before a run starts and refuses the run if a hard cap among them is paused. During the run it counts each cost report and stops the run as soon as a hard cap pauses. Only Clawboo Native reports cost while it works, once per model turn. Claude Code and Codex report cost only as the run ends. If that report takes a hard cap to its limit, the work is already done, but Clawboo still records the run as auto-paused (cancelled), sends its task back to To do, and refuses the next run.
 
-### Cap vs warn mode
+**In team chat**, nothing checks a budget before a turn starts. A Clawboo Native run on a priced model stops after its next model turn once a hard cap pauses. Every other run (Claude Code, Codex, Hermes, OpenClaw, and Clawboo Native on other models) is charged when it finishes. The budget then reads paused, but the next team-chat turn still runs. To halt a team that is over its budget, press **Stop** in the chat.
 
-Mode is the difference between _enforcing_ a budget and _watching_ one:
+**For an OpenClaw agent routine**, a paused hard cap refuses the fire before it starts. OpenClaw reports no cost while it works, so Clawboo estimates the run from its text when it succeeds; a failed or timed-out run records no spend. If that estimate crosses the cap, the task gets the comment "Budget cap reached" and the routine's next fire is refused.
 
-- **`warn` (the shipped default).** The budget records spend and emits a governance warning at the 80% and 100% crossings, but its persisted status is clamped so it never reads `paused`. The kill-switch, which triggers on `status === 'paused'`, leaves a warn budget's run alone. A new budget created via the REST surface defaults to `warn`; a hard cap is opt-in.
-- **`cap`.** Identical tracking, but the 100% crossing persists `status = 'paused'` and the kill-switch aborts the run. Once `paused`, the scope stays paused on further spend until a human resumes it or raises the cap.
+When a hard cap stops a task-runner run, the run is cancelled and the task goes back to To do with the comment "Auto-paused: `<scope>` budget reached. Raise the cap (or resume) to continue." If the run was a routine fire, the routine then stops until you resume it, and the task the fire created waits in **Needs you** (see [How routines run](/concepts/scheduling)). When a hard cap stops a team-chat run, its task fails.
 
-The clamp lives in the DB layer (`recordSpend`), and the kill-switch additionally checks `mode === 'cap'` explicitly, belt-and-suspenders, so a warn budget can never auto-pause even if the DB clamp regressed.
+### Resuming and raising a budget
 
-### How spend is recorded
-
-On every `cost` event, the runner records the dollar delta against all three concrete scopes (agent, mission, team) atomically:
-
-```ts
-const a = recordSpend(db, 'agent', assigneeAgentId, ledgerCents)
-const m = missionId ? recordSpend(db, 'mission', missionId, ledgerCents) : null
-const t = task.teamId ? recordSpend(db, 'team', task.teamId, ledgerCents) : null
-```
-
-`recordSpend` is an atomic read-modify-write under `BEGIN IMMEDIATE` (the board's [contention recipe](/concepts/the-board#the-contention-recipe)): it reads the current spend, applies the delta, recomputes the status via the shared tier math, and persists, all while holding the write lock, so two concurrent cost events can never lose an update. It returns the resulting status plus which threshold this delta `crossed`: `'soft'`, `'hard'`, or `'none'`, so the caller can act exactly once per crossing. A scope with no budget row returns `null` (uncapped, the common case).
-
-Two precision details make the ledger honest:
-
-- **Sub-cent carry.** A cost event can be a fraction of a cent (`$0.004` ⇒ `0.4¢`). The ledger accumulates spend in _micro-cents_ (ten-thousandths of a cent) so repeated tiny amounts are not floored to zero; the displayed `spentUsdCents` is `floor(microCents / 10000)`.
-- **Estimated cost for runtimes without USD.** A runtime that reports token usage but no dollar figure (Codex, Hermes, an unpinned native model) emits `costUsd: null`. The runner estimates spend from the exact token usage × the model rate so the cap still engages; a real `costUsd` (Claude Code, a pinned native model) is used as-is.
-
-### Auto-pause and the kill-switch teardown
-
-When a `cap`-mode scope crosses 100%, or the optional per-run `maxNodeCents` ceiling is reached: the runner sets `stopForBudget`, aborts the live run, and runs one teardown:
-
-1. **Audit**, an `auto_pause` entry in the governance audit log (`eventType: 'budget'`) recording the scope, cost, and per-node spend.
-2. **System comment** on the board task: _"Auto-paused: `<scope>` budget reached. Raise the cap (or resume) to continue."_
-3. **Complete the execution** as `cancelled` with error `budget_paused:<scope>`, and emit an `execution_completed` observability event.
-4. **Release the task** to `todo`; retryable once a human raises the cap or resumes the budget.
-
-There is also a **pre-flight gate**: before a run even claims its task, the runner checks whether any relevant `cap`-paused budget already exists (most-specific first: agent → mission → team). If one does, the dispatch is refused with `budget_paused` _before_ the claim, so an over-budget run never mutates the board or spawns a process. This is the only enforceable cap for a [connected-substrate](/appendices/glossary) runtime like OpenClaw that reports cost only on the terminal event; the mid-run kill-switch can't fire if there are no mid-run cost events, so the pre-flight gate stops the _next_ run instead.
-
-Resuming a paused budget is a human override. A bare resume of a scope whose spend already meets its limit re-pauses on the very next cost event, so the resume route accepts a grace amount that raises the cap above current spend to make real forward progress.
-
-<Tip>
-Because budgets are `null` (uncapped) by default and the default posture is warn-mode, a fresh install enforces *no dollars at all*. You get the always-on tracking, audit log, and circuit breakers for free; you opt into hard enforcement per scope when you want it. See [Cost and budgets](/using/cost-and-budgets).
-</Tip>
-
-## The circuit breakers
-
-The breakers are a deterministic, cross-runtime **backstop** for a run that is going nowhere. They are distinct from the budget kill-switch (which stops on _dollars_) and from a runtime's own max-turns limit (which stops on _iteration count_, per runtime): the breakers halt a run that burns turns or tokens making no progress or repeating a failing call, _before_ the dollar ceiling is reached.
-
-The breaker is a pure stateful reducer (`stepBreaker`) over run-local state. It does no I/O, never reads the wall clock (every timestamp arrives on the signal), and uses no randomness. The runner derives a typed `BreakerSignal` from each `RuntimeEvent` and steps the reducer, which returns the first trip it sees, or `null`.
-
-There are five trip reasons:
-
-| Reason                 | Fires when                                                                         | Default                           |
-| ---------------------- | ---------------------------------------------------------------------------------- | --------------------------------- |
-| `iteration-cap`        | Settled tool-calls in one run exceed the ceiling.                                  | `> 30`                            |
-| `repeat-failure`       | The _same failing_ tool signature (name + hash of typed input) N times in a row.   | `≥ 3`                             |
-| `no-progress`          | N tool-results that add no _new_ successful output.                                | `≥ 6`                             |
-| `token-velocity`       | Tokens-per-minute exceeds the ceiling, over a window of at least the minimum span. | `> 200,000` / min, `≥ 15s` window |
-| `repeat-policy-denied` | The _same_ typed policy-denial code N consecutive times.                           | `≥ 2`                             |
-
-A few of these have deliberate nuance worth understanding:
-
-- **`no-progress` only counts failures.** A successful tool call with a _new_ signature is progress (it resets the stall counter). A successful _repeat_ of an already-seen tool is treated as neutral; a healthy run legitimately re-reads the same file or config while reasoning, so counting that as no-progress would false-abort it. A genuinely stuck loop (repeated failures, or alternating failures that never produce new successful output) still trips.
-- **`token-velocity` needs two cost events.** The first cost event sets the window start. This is reachable on runtimes that emit cost _per turn_ (the native harness) and across [session rotations](/internals/executor-runner), but a wrapped-oneshot adapter (Claude Code, Codex, Hermes) emits exactly one cost event per run, so for those, velocity is a multi-rotation backstop, never an in-run trip. It is a coarse runaway net, not a fight with a runtime's own max-turns.
-- **`repeat-policy-denied` keys on the typed error `code`, never the message prose.** A small allowlist of codes (`policy_denied`, `permission_denied`, `eacces`, `eperm`, and similar) marks a `RuntimeEvent` error as a denial. A run rapidly fighting the [tool broker](/appendices/glossary)'s guardrails is a "fighting the rails" signal worth a fast backstop; the specific reason still surfaces in the audit comment.
-
-The breaker teardown mirrors the budget teardown exactly: a forensic `circuit_break` audit entry (with the trip reason, detail, and a counter snapshot), a typed `[stopped: <reason>] … Released to todo for re-planning.` board comment so the leader can re-plan, a `cancelled` execution with error `circuit_broken:<reason>`, and a release to `todo`. The worktree is left intact, so the [handoff](/concepts/worktrees-and-handoff) stays writable and a retry resumes from clean state.
-
-Per-run overrides flow through the run input (`breakerConfig`), validated by a zod schema; each field is optional and falls back to the conservative default. A per-team or per-agent override table is a noted future seam.
-
-## The caps
-
-The caps are stateless predicates enforced in code below the model, independent of what it asks for. They do not all sit at one boundary: **depth** and **fan-out** are orchestration checks that refuse a delegation _before_ it becomes a board task and a run; **children** and the **root rate** are Tasks MCP creation checks that refuse the board write itself, so a runtime that skips the orchestrator and calls `create_subtask` directly is bounded too; **cost** is runner enforcement, evaluated in the executor's cost loop once a run already exists (see below).
-
-| Cap          | Bounds                                                                                                                                                    | Default                 | Where it lives                                                                                                        |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **depth**    | How deep a delegation tree may grow (a create is refused once the parent's ancestor depth reaches the max; dispatch refuses only a task already past it). | `2`                     | The orchestrator, the board's capped create path, and the runner — one shared constant, via the board ancestor chain. |
-| **fan-out**  | How many parallel delegations _one turn_ may spawn.                                                                                                       | `8`                     | The client orchestrator, per turn.                                                                                    |
-| **children** | How many children _one parent_ may accumulate on the board (non-dropped), counted across turns.                                                           | `24`                    | The board's capped create path, called by the Tasks MCP create tools.                                                 |
-| **cost**     | A single run's accrued cent ceiling, independent of any budget row.                                                                                       | opt-in (`maxNodeCents`) | The runner's cost loop.                                                                                               |
-
-The **depth cap** is the single-reduce-point rule: a delegation tree may go at most two levels deep, so a leader delegates to a specialist who can delegate once more, and no further. The orchestrator computes depth from the board's `parent_task_id` ancestor chain, not from a prompt, and refuses a delegation that would exceed it, leaving a system comment on the source task and a reflection telling the delegator to handle the work directly.
-
-The **fan-out cap** counts the delegations spawned in a single turn. When the count reaches the max, the overflow delegations are dropped (with a comment naming how many were not started), and an `onCapHit` callback fires, which the server orchestrator turns into a `cap_hit` row in the [audit log](/appendices/glossary). The default is eight parallel children per turn.
-
-The **children cap** is the board-write counterpart to fan-out: fan-out bounds one turn, this bounds one parent for its whole life. It is enforced by the board's capped create path — the check and the insert share one `BEGIN IMMEDIATE` transaction, so two attached runtimes racing the same parent cannot both slip past the ceiling — and reached through the Tasks MCP create tools, where an attached runtime creates rows unsupervised. It refuses with a tool-error the caller should not retry unchanged. Dropped (soft-deleted) children fall out of the count, which is the user's way to free a slot; `done` and `cancelled` ones still count, because they are still rows on the board and the alternative would be trivially evadable by an agent that cancels as it creates. Unlike an orchestrator cap hit, this refusal writes no `cap_hit` audit row: it is returned to the calling model instead, on the typed `_meta.denied` channel, so a repeat offender trips the circuit breaker rather than filling the audit feed.
-
-The **cost cap** (`maxNodeCents`) is a per-run cent ceiling passed inline at dispatch time. It accumulates the same estimated/real cents the budget ledger sees, and crossing it sets `stopForBudget = 'node'`, the same teardown as a budget auto-pause. It uses `>=` (at the cap is enforced), matching the budget hard cap's exact-boundary semantics.
-
-## The approval handshake
-
-Some delegations should not run until a human approves them, a destructive or external action a leader is about to hand to a specialist. The orchestrator gates these on the leader's approval queue.
-
-A client-side heuristic decides which delegations are risky (matching obviously destructive or external verbs like `delete`, `deploy`, `publish`, `rm -rf`, `prod`, `secret`, `force-push`). A risky delegation calls the delegation-approval endpoint, which reuses the existing DB-mediated `tool_call_approvals` handshake:
-
-1. **Sticky scope.** If the leader has previously resolved an `allow_always` for this scope key (`delegate:<kind>`), the prompt is skipped and the approval returns immediately.
-2. **Otherwise, a pending approval is created** and the handler _blocks_ on a poll loop until the leader resolves it via the existing Approvals UI, or until the TTL or the waiter deadline expires.
-3. **The resolution decides.** `allow_once` or `allow_always` lets the delegation proceed; anything else (`deny`, `expired`, `timeout`) skips the delegation, leaving a system comment and a reflection so the leader can revise or reassign.
-
-The poll loop is what makes a forgotten approval **time out rather than deadlock**: each approval carries an `expiresAt`, the waiter has its own deadline, and a durable TTL reaper atomically expires abandoned pending approvals on an interval (and unblocks the linked board task, unless a non-promotable verification verdict is what holds it `blocked`). Until a leader is identified, no approval is requested.
-
-<Note>
-A **mirrored OpenClaw exec** card runs on a different clock. Its row carries the deadline the Gateway sent with the request, or a thirty-minute hold when the request carried none, and its own 30-second sweep retires it to `expired` once that deadline passes, rather than the generic 24-hour reaper, whose age-based judgement would leave a card looking answerable for most of a day after the Gateway had already given up on the command behind it. An expiry is recorded as `expired` and never as `deny`, because it is a non-decision: nobody refused the command, nobody was asked in time, and writing a denial would claim a human had made a call they never made. The trade-off is that retiring an expired exec card writes no audit row and emits no observability event, so an exec timeout is absent from the audit trail where the reaper's expiries appear.
-</Note>
-
-<Info>
-The client REST call **fails closed**. If the approval endpoint is unreachable, the request maps to `timeout` (a non-approving resolution), never `allow_once`. The whole point of the gate is human sign-off for a destructive action, so an unreachable endpoint must not auto-approve. Only *risky* delegations reach this path, so the strictness can never deadlock ordinary team work.
-</Info>
-
-## The command-execution gate
-
-Budgets, breakers, and caps bound _spend and effort_, and the handshake above gates one risky delegation. This mechanism bounds _what an agent may run on your machine_, which makes it the most operator-visible of the five. It works differently per runtime, and the conditions matter more than the mechanism does.
-
-### An OpenClaw Boo's posture is held at the Gateway
-
-A Boo's **Permissions** tab carries a **Command Execution** control with three postures. Clawboo writes the chosen one into the [Gateway](/concepts/gateway-and-events)'s own policy for that agent, because the Gateway consults only its own policy when it decides whether to ask. Clawboo keeps the value in its own record too, and that copy gates nothing by itself:
-
-| Posture             | What the Boo does                    |
-| ------------------- | ------------------------------------ |
-| **Run Freely**      | Executes commands without asking.    |
-| **Ask for Unknown** | Asks approval for unlisted commands. |
-| **Always Ask**      | Asks approval for every command.     |
-
-**A newly created OpenClaw Boo now starts at "Ask for Unknown".** The old default was no gate at all: an agent with no entry in the Gateway's policy resolves to unrestricted, so every Boo ever created ran commands without asking. Creation now applies a posture at the Gateway, defaulting to "Ask for Unknown" when the caller supplied no exec config, and it writes one only when the resolved config carries an `execAsk` of `off`, `on-miss`, or `always`. Because a per-agent entry wins over the fleet-wide default, the fleet-wide Command Approval control in [System maintenance](/using/system-maintenance) no longer loosens a Boo created this way: that Boo carries its own explicit entry.
+**Resume** puts a paused budget back to active. If spend is still at or over the limit, the next cost report pauses it again, and the row shows a **will re-pause** pill. To make room, raise the limit with **Set cap** on the budget's row.
 
 <Warning>
-If the Gateway refuses that policy, **creation fails**. The upstream agent is deleted and the call throws, because a Boo whose stated posture is not the one in force is worse than no Boo. With the Gateway unreachable you cannot create an OpenClaw Boo at all. Changing a posture later is honest in the same way: a Gateway refusal answers `502` with `savedLocally: true` rather than `ok`. Note that on that refusal the value you chose does stay in Clawboo's own record, so the tab shows it again after a reload while the Gateway is still enforcing the old one.
+
+**Saving a budget again can turn a hard cap into warn only.** The mode is set on every save. Saving the same scope from the create form with **warn only** selected (the form's default), or sending `POST /api/governance/budgets` without `"mode": "cap"`, switches the budget to warn only. To raise a hard cap's limit, use **Set cap** on its row, which keeps the mode.
+
 </Warning>
 
-**Nothing re-asserts a posture.** There are exactly two write sites, creating the Boo and changing the control in its Permissions tab. No reconciliation runs on connect, on sync, or at boot.
+There is one more way a hard cap appears: creating a Clawboo Native agent through the API with a `budgetUsd` value also creates a hard-cap budget for that agent.
 
-### A standing grant is a decision you can take back
+### The per-run cost cap
 
-Answering **Always** to an OpenClaw command prompt records a standing grant in OpenClaw's own list, and the same Permissions tab lists them under "Commands this Boo can run without asking", each with what it covers and a revoke button. Rows that grant a whole program or any command at all are flagged **Broad**; rows OpenClaw keeps on file but skips are flagged **Not in effect**.
+A routine created through the API can carry a per-run cost cap (`maxNodeCents` in its task template). The task runner stops that routine's run once the run itself has cost that much, the same way a paused hard cap would. Nothing else sets it, and it is off by default. The Governance panel shows a **per-node cost** chip with the value **per-run**: that chip names the feature, it is not a limit in force.
 
-The screen is deliberately **revoke-only**: it cannot create, edit, or narrow a grant, and it cannot touch a grant made fleet-wide to every Boo on the computer (those appear only as a count). Revoking rewrites the whole permissions document under the Gateway's compare-and-swap and then re-reads the list before showing you a result, because the one thing the panel must not do is report a permission as revoked while the Gateway still honours it. The list does not update live: a grant minted by answering Always while the tab is open appears after a refresh.
+## Circuit breakers
 
-### The native shell asks every time, and remembers nothing
+Circuit breakers stop a task-runner run that is going nowhere, before a budget would. They are always on in the task runner. They do not run in team chat or for OpenClaw routines.
 
-A `clawboo-native` Boo's `run_command` tool is a per-command human gate with no allowlist behind it. It is **off until it is switched on for that Boo**, and even switched on it exists only on a run that has a working folder (in practice a board task) and only when the host is not Windows. Once it does exist, a human is asked before every command, so a command allowed once asks again the next time. "Always" is never offered there. A run may ask about at most **ten** commands.
+| Breaker        | Trips when                                                                  | Default                    |
+| -------------- | --------------------------------------------------------------------------- | -------------------------- |
+| Iteration cap  | A run makes more tool calls than the limit                                  | More than 30               |
+| Repeat failure | The same tool call, with the same input, keeps failing                      | 3 times in a row           |
+| No progress    | Tool results in a row add no new successful output                          | 6 in a row                 |
+| Token velocity | The run uses tokens faster than the limit, measured over 15 seconds or more | More than 200,000 a minute |
+| Repeat denial  | The same policy refusal comes back                                          | 2 times in a row           |
 
-Declining is not only a decision about one command. A refusal latches the tool for the rest of that run, and the refusal itself is emitted as a typed `policy_denied` error, as is every later attempt the latch turns away. Two of those in a row trip the `repeat-policy-denied` breaker above, which tears the run down and releases the task back to `todo`, so a declined command can end the task rather than just the command. A card nobody answers holds the run for its full ten minutes, and the run makes no other progress while it waits. Both the latch and the ten-command ceiling are per driver run, not per task, so a task that is re-driven starts again at zero with the latch cleared.
+A successful call that repeats an earlier one counts as neither progress nor failure, so an agent that re-reads a file is not penalized. Token velocity needs at least two cost reports in one run, so in practice it can trip only on Clawboo Native.
 
-<Warning>
-No audit row is written for a `run_command` execution, so an approved native command never appears in the tools audit (`GET /api/tools/audit`). The only record that it was allowed is the approval row it came from, carrying your decision and the time you made it. And the gate bounds _what is asked_, never _what a command can do_ once you allow it: see [Security](/operating/security#commands-agents-run-on-this-machine) for that boundary, stated plainly.
-</Warning>
+When a breaker trips, the run is cancelled, the task gets a comment that starts `[stopped: <reason>]`, and the task goes back to To do. For a routine fire, the routine then stops and its task waits in **Needs you**, as with a hard cap. A worktree, if the run had one, is kept. Each trip is written to the audit log as a `circuit_break` event. A run started through the API can tune the limits with a `breakerConfig` object.
 
-## Design rationale and trade-offs
+## Caps on delegation and task creation
 
-The shape of this subsystem follows one conviction: governance should make a runaway agent _impossible_, not just visible. The mechanisms (cent-budget auto-pause, an independent reviewer, approval plumbing that times out rather than deadlocks) mirror patterns proven in production agent systems.
+These caps are always on. Clawboo enforces them in code, whatever the model asks for.
 
-Several deliberate choices follow from that:
+- **Depth.** A chain of hand-offs can be three tasks deep. The leader hands off the first task, and the agents on the next two levels can each hand off once more. The agent on a third-level task cannot delegate: it is told to do the work itself or report back. The Governance panel shows this as **max spawn depth** 2, meaning a task can have at most two tasks above it. The same limit applies to multi-step plans and to subtasks agents file through Clawboo's Tasks tools, and the task runner refuses a task that sits deeper.
+- **Fan-out.** One team-chat turn can start at most 8 hand-offs at once (the steps of a multi-step plan are not counted). The rest are not started, the leader is told how many were dropped, and the audit log records a `cap_hit` event.
+- **Repeated failures.** After the same task fails 3 times in a row with the same teammate, the leader cannot hand it to that teammate again. It is told to do the work itself, give it to someone else, or tell you it cannot be done. The count resets when the Clawboo server restarts.
+- **Children.** When an agent files subtasks itself through Clawboo's Tasks tools, one parent task can have at most 24 child tasks. Deleting a child frees a slot. Finished and cancelled children still count.
+- **New top-level tasks.** The Tasks tools refuse to create a top-level task once 30 were created in the last 5 minutes, counting tasks from every source.
 
-- **Typed events, never prose.** Every signal keys on a structured `RuntimeEvent` field. The breaker's tool signatures hash _typed_ input; the policy-denial breaker keys on the typed error `code`; the budget reads the `cost` event's dollar delta. This is non-negotiable because the alternative, scraping the model's free text for "I'm stuck" or "permission denied"; is both unparseable and trivially manipulable.
-- **Budget wins ties; one teardown per run.** The breaker feed is gated on `!stopForBudget` so exactly one abort fires. A double-abort would race the runtime's cleanup.
-- **Track-and-warn by default.** Auto-pausing dollars on a fresh install with no configured limit would be a hostile first impression. The default posture _measures_; you get audit, tracking, and breakers for free, and you opt into dollar enforcement per scope. (The DB column defaults to `warn`; the [production defaults](/operating/production-defaults) document the posture.)
-- **Release to `todo`, not `failed`.** A stopped run leaves a retryable task and an intact worktree, so a human can raise a cap, resume a budget, or let the leader re-plan, recovery, not a dead end.
-- **Reuse over new tables.** Approvals reuse the `tool_call_approvals` handshake; cost caps reuse the budget teardown; the audit log carries every governance event type. Fewer moving parts to keep consistent.
+Tasks you create on the Board are never refused by these caps, though they count toward the 5-minute total.
 
-The trade-off is that the defaults are _coarse_. A breaker tuned conservatively (30 tool calls, 200k tokens/min) will let a genuinely-expensive-but-healthy run proceed; the per-run cost cap and the budgets are the precise instruments, and they are opt-in. Governance bounds the obvious runaway cheaply and leaves the fine-grained controls to a user who wants them.
+## Approval for risky delegations
 
-## Boundaries and non-goals
+When an agent in team chat hands off a task whose text contains a risky word, Clawboo asks you before the hand-off happens. The approval appears with your other pending approvals, for example in the Governance panel's **Approval queue** (see [Approvals](/using/approvals)).
 
-- **Not a privilege boundary.** Budgets and breakers bound spend and effort, not blast radius. A run that stays under budget can still do anything its tools permit inside its worktree, and a shell command you approve reaches past the worktree to the machine itself; the privilege boundary is the (documented, opt-in) container escalation, not governance.
-- **The OpenClaw path cannot auto-abort mid-run.** OpenClaw emits no incremental cost events (only a final cost on `done`), so there is no per-event crossing signal for the kill-switch to fire on during a run. Its budgets are enforced by a pre-flight gate on the _next_ dispatch, not a mid-run kill; a documented asymmetry with runtimes that stream per-turn cost (like the native runtime, which does abort mid-stream).
-- **Single implicit tenant today.** Budgets and the audit log carry a dormant `tenant_id` column and a reserved `tenant` budget scope, but no per-tenant filtering is active in v0.5.0. Multi-tenant scoping is a future seam, not a shipped feature.
-- **Caps are coarse-grained, not per-tool quotas.** Depth, fan-out, and a per-run cost ceiling are the orchestrator-boundary caps, and a per-parent child count plus a root-creation rate bound direct **Tasks MCP** board writes (the REST board route is deliberately uncapped); there is no per-tool call quota or per-skill budget, that granularity, if needed, would be a new seam.
+The check is a plain match on whole words, in any letter case:
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+- delete, destroy, deploy, publish, release, secret, credential, prod, production
+- the phrases drop table and rm -rf
+- api_key, api-key or apikey, and force-push, force_push or forcepush
 
-## See also
+Because it matches whole words only, "deleted", "deployment" or "secrets" do not trigger it, and neither do "API key" or "force push" written with a space. The steps of a multi-step plan are not checked at all. Treat the check as a speed bump, not a review of what the task does.
 
-- [Verification](/concepts/verification), the builder-≠-judge gate that makes "done" mean _verified_
-- [Observability](/concepts/observability), the event log and audit trail governance writes into
-- [The board](/concepts/the-board), the durable task store governance releases tasks back to
-- [Worktrees and handoff](/concepts/worktrees-and-handoff), the isolation boundary governance complements
-- [Governance dashboard](/using/governance-dashboard), the human-facing surface for budgets, caps, and approvals
-- [Cost and budgets](/using/cost-and-budgets), setting USD budgets and the cost view
-- [Governance API](/reference/rest-api/governance), the REST surface for budgets and delegation approval
-- [Glossary](/appendices/glossary), canonical term definitions
+The request waits up to 5 minutes. If you allow it, the hand-off goes ahead. If you choose **Don't allow**, or nobody answers in time, the hand-off is skipped and the agent that handed it off is told it was not approved. If Clawboo cannot record the request, the hand-off is skipped too.
+
+The approval card in the dashboard offers only a one-time allow and **Don't allow**. An approval resolved as `allow_always` through the API (`POST /api/tools/approvals/:id/resolve`) is permanent: Clawboo stops asking about that leader's risky hand-offs, with no expiry, and the dashboard has no control to take it back. When you have Boo Zero, it leads every team, so one such answer covers all of them.
+
+## Running commands and using apps
+
+Separate approvals decide whether an agent may run a shell command or act in a connected app without asking you:
+
+- An OpenClaw agent's **Command Execution** setting (new OpenClaw agents start at **Ask for Unknown**). See [Command permissions](/using/command-permissions).
+- A Clawboo Native agent's **Let this Boo ask to run commands** switch, off by default. When it is on, the agent asks before every command, and a run can ask at most 10 times. Commands are offered only on task-runner runs in a worktree, never in team chat or one-to-one chat, and never on Windows.
+- Approvals for actions in connected apps. See [Approvals](/using/approvals).
+
+Claude Code, Codex and Hermes run with their own approval prompts turned off, so Clawboo does not ask before their commands. [What agents can do](/concepts/permissions) explains what that means for your files.
+
+## What these guardrails do not cover
+
+- **What a run can touch.** Budgets, breakers and caps limit spend and effort. A run that stays under its budget can still read and change anything its runtime can reach. See [What agents can do](/concepts/permissions).
+- **Stuck runs in team chat.** Team chat has no circuit breakers. Besides the delegation caps, its guard against a stuck run is time. A handed-off task whose run reports nothing for 8 minutes is failed (24 minutes while the agent is inside one tool call), and any run silent for 30 minutes is ended. The task runner ends a run after the same 30 minutes of silence.
+- **Warnings from team-chat spend.** Spend from team chat moves a budget's bar and status in the Governance panel, but no warning event is written to the audit log.
+- **Expensive but healthy runs.** The breakers are tuned so a healthy run never trips them, so a costly run that keeps making progress passes them. A hard-cap budget is the only limit set in dollars, and it holds only as far as [What a hard cap stops](#what-a-hard-cap-stops) describes.
+
+<AccordionGroup>
+
+<Accordion title="Under the hood">
+
+- Budget statuses are `active`, `soft_capped` (from 80%) and `paused` (a hard cap at 100%). A warn-only budget never reads `paused`. The modes are stored as `warn` and `cap`, and spend is kept in fractions of a cent so tiny costs add up.
+- Each recorded amount is charged to every scope that has a budget: the agent, the team and, when the run works a task, the mission. Each scope is updated in its own write.
+- The audit log's event types are `budget` (warnings and auto-pauses), `circuit_break`, `cap_hit`, `approval`, `verification`, `tool_call` and `install`.
+- A risky-delegation approval is a row in the tool-call approvals table with the scope key `delegate:code`. A past `allow_always` row for the same leader and key skips the prompt.
+- Budgets over REST: `GET` and `POST /api/governance/budgets`, `POST /api/governance/budgets/:scope/:scopeId/resume` (an optional `graceUsdCents` raises the limit to current spend plus the grace and keeps the mode) and `GET /api/governance/audit`. See the [Governance API](/reference/rest-api/governance).
+- The run loop that applies budgets and breakers is described in [Executor runner](/internals/executor-runner).
+
+</Accordion>
+
+</AccordionGroup>
+
+## Related
+
+- [Budgets and spend](/using/budgets-and-spend): create, raise and resume budgets, see where spend shows, and read the cost table.
+- [What agents can do](/concepts/permissions): what a run can touch, which these limits do not bound.
+- [How routines run](/concepts/scheduling): what a refused or stopped run does to a routine.
+- [Approvals](/using/approvals): where pending approvals appear and how to answer them.
+- [Governance API](/reference/rest-api/governance): budgets, the audit log and delegation approval over REST.
+- [Limits and defaults](/reference/limits-and-defaults): every number on this page in one place.

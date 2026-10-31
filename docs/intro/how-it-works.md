@@ -1,122 +1,176 @@
 ---
-title: How Clawboo works
-description: 'An end-to-end architecture overview: the CLI, the bundled server and SPA, the durable board, the runtime seam, and the MCP spine.'
+title: 'How a team works'
+sidebarTitle: 'How a team works'
+description: 'What happens after you send a message: who answers, how work becomes tasks on the Board, and the two ways Clawboo runs agents.'
+icon: 'workflow'
+keywords:
+  [
+    'architecture',
+    'overview',
+    'how it works',
+    'message lifecycle',
+    'team engine',
+    'task runner',
+    'executor runner',
+    'delegation',
+    'hand-off',
+  ]
 ---
 
-Clawboo installs with `npm install -g clawboo` (or `npx clawboo` to try it without installing) and runs as a single `clawboo` command that becomes a local mission-control dashboard for a fleet of AI agents. Under that one command sits a small, deliberate stack: a bundled Express server serving a Vite single-page app, a SQLite database that is the durable source of truth for task coordination, a uniform interface (`RuntimeAdapter`) that lets one orchestrator drive five different agent runtimes, four Model Context Protocol servers that those runtimes share, and an append-only event log that every visualization is a projection of.
+You talk to a team in its chat. The team's leader answers you, or splits the work into tasks for teammates, and every task is a card on the Board. Teammates send their results back to the leader, who replies with the combined answer. This page follows one message through that loop, then explains the two ways Clawboo runs agents.
 
-This page is the 10,000-foot view. It walks each layer once: how a command launches a server, how the browser talks to it, where task state lives, how agents actually execute, and how the live graph is derived, and links into the concept deep-dives for each piece. If you want to understand _why_ before _what_, start with [What is Clawboo](/intro/what-is-clawboo); if you want to run it, jump to [installation](/getting-started/installation).
+## The pieces
 
-## What it is, and what it isn't
+- **The Clawboo server** is one program that runs in the background on your computer. It runs your teams' work, so closing the browser tab does not stop it. It keeps teams, chats, tasks and memory in a database in your Clawboo folder (`~/.clawboo` by default).
+- **The dashboard** is the page you use in your browser. It talks only to that server.
+- **Runtimes** are the programs that run agents: Clawboo Native (built in), Claude Code, Codex, Hermes and the OpenClaw Gateway. See [Choose a runtime](/runtimes/index).
+- **Providers** are the AI services your agents' prompts go to, such as Anthropic, OpenAI or a local Ollama.
 
-Clawboo is a **local-first orchestrator**, not a hosted SaaS. The whole stack runs in one process on `127.0.0.1` by default: there is no cloud control plane, no account, no telemetry phoning home. The browser, the API, the database, and the agent-coordination spine all live on your machine.
+Prompts go only to the providers and apps you connect. There is no Clawboo account, and Clawboo itself sends no telemetry.
 
-It is an **orchestrator over runtimes**, not a runtime itself, except for one. Clawboo's job is to coordinate agents that run on engines like the OpenClaw Gateway, Claude Code, Codex, or Hermes, driving them all through a single interface. The one runtime it _owns_ is `clawboo-native`, an in-process conversational harness that talks to provider SDKs directly so you can run a team with nothing but a pasted API key. See [the agent model](/concepts/agent-model).
+## What happens when you send a message
 
-It is **board-canonical**. The durable [board](/concepts/the-board) (SQLite) is the source of truth for task and coordination state. Chat is narration of that state; a runtime owns _how_ an agent runs and _who exists_ lives in the agent [registry of record](/appendices/glossary). No single subsystem owns everything; each layer below owns exactly one concern.
+<Steps>
 
-## The model
+<Step title="You post in a team's chat">
 
-The whole system is one process; the CLI launcher hands off to a long-lived Express server that serves the SPA, fronts SQLite, and bridges to the runtimes.
+Write in **General** or in a room. To aim the message at one agent, start it with `@` and the agent's name.
+
+</Step>
+
+<Step title="Clawboo picks who answers">
+
+The agent you mentioned answers. Otherwise Boo Zero, your team leader, does. With no Boo Zero, the team's **Leader** answers if it is in this chat, and otherwise the chat's first member.
+
+</Step>
+
+<Step title="The turn runs on the server">
+
+The turn runs on that agent's runtime. You can close the tab; the chat catches up when you come back.
+
+</Step>
+
+<Step title="It answers, or hands off work">
+
+A quick question gets a direct answer. For work with several parts, the leader hands pieces to teammates, and each hand-off becomes a task on the Board, assigned to that teammate. Each runtime signals a hand-off its own way, and Clawboo reads all of them.
+
+</Step>
+
+<Step title="Teammates do their tasks">
+
+Teammates work at the same time. A busy teammate finishes its current task first, and the new one waits in **To do**. A teammate can hand part of its own task to someone else.
+
+</Step>
+
+<Step title="Results come back">
+
+As tasks finish, their results go back to whoever handed out the work, in one batch. Each result also lands on its task card. Clawboo tells the leader which tasks are still out.
+
+</Step>
+
+<Step title="The leader answers you">
+
+The leader combines the results into one reply in the chat. You should see that reply, and the task cards in **Done**.
+
+</Step>
+
+</Steps>
 
 ```mermaid
-flowchart TB
-    USER([npx clawboo]) -->|fork / spawn| SRV
-
-    subgraph SRV["Clawboo server (one process)"]
-        EXPRESS["Express + ws<br/>access gate · /api/* router"]
-        SPA["Vite SPA<br/>(static, served by Express)"]
-        DB[("SQLite<br/>board · registry · memory<br/>event log · governance")]
-        RUNNER["Executor runner<br/>(RuntimeAdapter seam)"]
-        MCP["MCP servers<br/>tasks · memory · tools · teamchat"]
-        EXPRESS --- SPA
-        EXPRESS --- DB
-        EXPRESS --- RUNNER
-        EXPRESS --- MCP
-        RUNNER --- DB
-    end
-
-    BROWSER([Browser]) -->|"GET / → SPA"| EXPRESS
-    BROWSER -->|"same-origin /api/*"| EXPRESS
-    BROWSER -->|"WS /api/gateway/ws"| EXPRESS
-
-    EXPRESS -->|"WS proxy (token + device-signed)"| GW[OpenClaw Gateway]
-    RUNNER -->|"spawn / SDK / in-process"| RTS["Runtimes<br/>native · claude-code · codex · hermes"]
-    RTS -->|"attach MCP over loopback /api/mcp/*"| MCP
-    GW -->|"agents.list + events → sync"| DB
+sequenceDiagram
+    participant You
+    participant Lead as Boo Zero
+    participant Board
+    participant Mate as Teammate
+    You->>Lead: Message in General or a room
+    Lead->>Board: Each hand-off becomes a task
+    Board->>Mate: Task delivered
+    Mate-->>Board: Result on the task card
+    Board-->>Lead: Results, in one batch
+    Lead-->>You: Combined answer
 ```
 
-Two execution paths reach the agents. OpenClaw runs ride the **live Gateway connection** the browser proxies through; the other four runtimes execute **server-side through the executor runner**. Both surface their outcomes onto the same board and the same event log.
+What each agent is told on every turn is listed in [What an agent sees](/concepts/agent-context).
 
-## How it works
+## What you see while it works
 
-### 1. The CLI launches a server, then gets out of the way
+- **In the chat**, the reply streams in, and each hand-off appears as a task card with its status, such as **Queued**, **Working** or **Done**.
+- **On the Board** and in the chat's **Tasks** card, cards move from **To do** to **In progress** to **Done**. Anything that waits on you collects under **Needs you**.
+- **The Team graph** shows which agents are working.
+- **The Activity card** shows each tool call as it happens.
 
-`clawboo` is a thin launcher. It probes for an already-running dashboard (env var → a runtime port file at `~/.clawboo/api-port.txt` → a scan of `18790`–`18809`), and if it finds none it `fork`s the bundled server (`server.js`, sitting next to the CLI) in production mode, detached, and polls until the server writes its port. Then it opens your browser at the resolved URL and exits.
+![The Board in Week view: Needs you holds a blocked task and two unassigned ones with Assign to and Dismiss, In progress holds running and Verifying cards, Done holds finished tasks, and two scheduled Routine runs sit in To do](/images/board-kanban.png)
 
-The port-discovery probe is signature-checked, not just a TCP test: the CLI does an HTTP `GET /api/settings` and confirms a Clawboo-shaped JSON response (`gatewayUrl` plus `hasToken`) before trusting a port, because the fallback range overlaps the OpenClaw Gateway's auxiliary ports and Chrome's remote-debugging port, which a naive TCP probe would mistake for the dashboard. The server resolves its own bind interface and port: it binds **loopback `127.0.0.1` by default** and picks the first free port from `18790` upward, so a fresh install is never network-exposed and never collides with whatever else you run on `:3000`. See [deployment](/operating/deployment).
+## How it ends
 
-### 2. The browser talks to the server, same-origin
+- **The answer arrives** in the chat.
+- **You press Stop.** While agents in a chat are working, the send button turns into **Stop**. It ends every run in that chat, and their tasks go back to **To do**, where they do not restart on their own. Your other chats keep going.
+- **Something fails**, or **something needs you**: see the next section.
 
-The SPA is just static files Express serves; in production any unmatched `GET` falls through to `index.html` so client-side routing works. Every API call the SPA makes is a **same-origin relative path** (`fetch('/api/board')`, `fetch('/api/settings')`, …); there is no hardcoded backend host in the browser. That keeps the architecture portable: wherever the server is reachable, the SPA reaches it.
+## When something goes wrong
 
-Sitting in front of every route is an optional **access gate**, active only when `STUDIO_ACCESS_TOKEN` is set. It folds the request path to lowercase before matching (so an uppercased `/API/settings` can't evade it), validates the token's character set, and, importantly, admits an MCP transport request without the cookie when it carries the **attach token** the server wrote into a spawned runtime's attach URL, because that path is the control plane a runtime attaches to with its credentials scrubbed. It decides by that token, never by source address alone: a same-host reverse proxy makes every request look like loopback. The address can only refuse, so a token arriving from another host or through a proxy is turned away. A non-loopback bind with no token set makes the server refuse to start (exit 1); running unauthenticated on a wide bind requires an explicit `CLAWBOO_ALLOW_INSECURE=1`, which downgrades the refusal to a loud warning. See [security](/operating/security).
+| What happens                                                       | What you see                                                                                                                                | What you can do                                                                                |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| A teammate's run fails                                             | Its task moves to **Needs you** with the reason in a comment, and whoever handed it out is told. Later steps of the same plan are cancelled | Click **Retry**, or use the card's **More** menu to give it to another agent or **Dismiss** it |
+| A teammate goes quiet for 8 minutes (24 inside one long tool call) | Clawboo stops the run and the task fails, as above                                                                                          | The same                                                                                       |
+| The same teammate fails the same task 3 times                      | Clawboo stops handing that task to it                                                                                                       | Reword the request, or give the task to another agent                                          |
+| A hand-off contains a risky word, such as deploy or delete         | The hand-off waits under **Needs you**, and is skipped if nobody answers within 5 minutes                                                   | Allow it or turn it down: see [Approvals](/using/approvals)                                    |
 
-There is one non-HTTP path: the browser opens a WebSocket to the same-origin `/api/gateway/ws`, which the server proxies to the OpenClaw Gateway, injecting the upstream auth token and signing the device handshake server-side so the browser never holds a credential. That's the only way the browser reaches the Gateway. See [Gateway and events](/concepts/gateway-and-events).
+[Troubleshooting](/help/troubleshooting) lists the messages you may see and what to do about each.
 
-### 3. The board is the durable source of truth
+## Two ways Clawboo runs agents
 
-When a team delegates work, the work becomes a row in SQLite. The [board](/concepts/the-board), `tasks`, `task_deps`, `task_comments`, `workspaces`, `execution_processes`, is the transactional substrate for all coordination. An agent picks up work by **atomically claiming** a task (a single conditional `UPDATE` that exactly one concurrent caller can win; a lost claim is a `409` the caller never retries), a run is recorded as an `execution_processes` ledger row, and the outcome lands back on the board. A person working the [Board](/using/board) by hand has the last word: moving a card stops the run working on that task, and the agent that delegated it hears what the person decided. Refresh the page, restart the server, or run a dozen agents against the one database file; the board survives all of it, with a WAL-based contention recipe and two startup/interval reconciliation passes that recover crashed and abandoned work.
+Everything above runs on Clawboo's **team chat** path. A second path, the **task runner**, runs one board task at a time, for agent Routines and for runs started through the API. The two paths do not give an agent the same things:
 
-SQLite is more than the board. The same database file is the agent [registry of record](/appendices/glossary) (synced from the Gateway), shared [memory](/concepts/memory), the [governance](/concepts/governance) ledger, and the observability [event log](/concepts/observability). There is **no migration ladder**; the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` is the sole schema source, applied once when a database is opened, so the file is immediately usable. Opening an older file also adds any columns it is missing, derived from that same DDL. See the [database schema](/reference/database-schema#upgrading-an-existing-database).
+|                                                          | Team chat                                                                                                                                      | Task runner                                                                                                                                                                                                     |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What runs on it                                          | Messages in General and rooms, hand-offs, plan steps, tasks you give an agent on the Board (including **Retry** and **Assign**), team Routines | Agent Routines on Clawboo Native, Claude Code, Codex and Hermes; runs started with `POST /api/runtimes/:id/run`                                                                                                 |
+| Where Claude Code, Codex and Hermes work                 | The server's folder: your Clawboo folder (`~/.clawboo` by default) on an npm install                                                           | The task's own git worktree when the task names a repository. A task that changes files without one is refused. Research and review tasks, such as agent Routines made in the app, start in the server's folder |
+| Clawboo Native file and shell tools                      | None                                                                                                                                           | Only on runs with a worktree. File tools cannot reach outside it. An approved shell command starts there but runs as you, with network access                                                                   |
+| Work checked before **Done**                             | Never                                                                                                                                          | When the run had a worktree and changed files                                                                                                                                                                   |
+| Memory                                                   | Agents look facts up with their memory tools                                                                                                   | The most relevant facts are added at the start                                                                                                                                                                  |
+| Team rules, teammates and your introduction              | Included                                                                                                                                       | Not included                                                                                                                                                                                                    |
+| Circuit breakers                                         | None; the team limits below apply instead                                                                                                      | Yes                                                                                                                                                                                                             |
+| A hard-cap budget                                        | Never refuses a turn; stops a Clawboo Native run partway only on a priced model                                                                | Refuses new runs once reached, and stops a Clawboo Native run partway                                                                                                                                           |
+| Restart in a fresh session when the context window fills | No                                                                                                                                             | Up to 3 times per task                                                                                                                                                                                          |
 
-### 4. Runtimes execute through one seam, or over the live Gateway
+An agent Routine you create in the app sends only its instructions, so it runs on the task runner without a repository: no worktree and no checks, but with memory added and circuit breakers on. A team Routine posts its instructions into the team's chat, like a message from you.
 
-A claimed task has to actually _run_ somewhere. Clawboo drives every runtime through a single [RuntimeAdapter](/appendices/glossary) interface that emits a normalized [RuntimeEvent](/appendices/glossary) stream, so the orchestrator never branches on a runtime id. There are two execution paths:
+Several rows have their own page: [What agents can do](/concepts/permissions) covers where agents work, [How work is checked](/concepts/verification) covers checks, and [Budgets and guardrails](/concepts/governance) covers budgets and breakers.
 
-- **The server-side executor runner** drives the four non-OpenClaw runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`). For each one it claims the task, opens an execution row, acquires an isolated git [worktree](/concepts/worktrees-and-handoff), assembles a cache-stable prompt, drains the adapter's event stream to a terminal `done`, then writes a report-up summary, drives the task status (through the builder-≠-judge [verification](/concepts/verification) gate), and clocks out an `AGENT_HANDOFF.json` so a different runtime can resume cold. The runner talks _only_ through the adapter trait and an injected driver; it never assumes a runtime is a spawned process, so a future human-in-the-loop participant slots in behind the same seam. See the [executor runner internals](/internals/executor-runner).
-- **The live OpenClaw Gateway connection** handles OpenClaw runs. OpenClaw is a _connected substrate_, not a CLI Clawboo spawns: its agents run in Gateway-owned workspaces, so the one-shot executor runner explicitly refuses an OpenClaw task. Team runs are still driven **server-side**, over the server-held paired operator connection, not from your browser; the browser's own proxied connection carries the 1:1 chat, exec approvals, and the live fleet view through the OpenClaw-specific **Bridge→Policy→Handler** pipeline. See [Gateway and events](/concepts/gateway-and-events) and the [runtimes overview](/runtimes/index).
+### OpenClaw and one-to-one chat
 
-### 5. MCP servers are the shared spine
+- **OpenClaw agents never use the task runner.** In team chat they run over the Clawboo server's own connection to the OpenClaw Gateway, so they keep working with the tab closed. An OpenClaw agent Routine goes through a separate dispatcher, with no worktree, no checks and no circuit breakers, and it is stopped after 10 minutes by default.
+- **A one-to-one chat** on an agent's page is a plain conversation, outside both paths. A Clawboo Native agent's chat runs on the server. An OpenClaw agent's chat goes over the Gateway connection your browser holds.
 
-Different runtimes don't speak a common orchestration protocol, except through MCP. Clawboo hosts four [Model Context Protocol](/appendices/glossary) servers, **tasks, memory, tools, and teamchat**, over the same SQLite substrate, and every runtime attaches them. A `clawboo-native` agent connects in-process; a spawned CLI runtime attaches over the loopback `/api/mcp/*` control plane; OpenClaw attaches them through its Gateway config. This is how a Claude Code specialist reads the board, a Hermes agent saves a shared memory fact, and a Codex agent posts to the team room, all against the same data, regardless of where it runs. See [MCP servers](/operating/mcp-servers).
+### The team's own limits
 
-### 6. The event log projects the live graph
+Team chat has no circuit breakers, but it has limits of its own:
 
-Every coordination action, a task created, a delegation routed, a run started, a cost recorded, is appended to one `orchestration_events` table. The server-side runner emits directly; the browser-observed OpenClaw stream is mirrored back via `POST /api/obs/ingest`. Every observability surface is then a **pure projection of that log**: the [Ghost Graph](/using/ghost-graph) you watch a team collaborate on is `projectGraph(events)` (served at `GET /api/obs/graph`); fleet-health triage, the per-mission trace view, and the cost overlay are other reducers over the same stream. Replaying the log reproduces the state; the graph is never hand-drawn, it is derived. See [observability](/concepts/observability).
+- One turn can hand off at most 8 tasks. Extra hand-offs are dropped with a note.
+- Hand-offs go at most three levels below the leader. The agent on a third-level task must do the work itself.
+- Clawboo stops handing a task to a teammate that has failed it 3 times in a row.
+- A teammate that goes quiet for 8 minutes is stopped (24 minutes while inside one tool call).
 
-![The Org chart, projected from the event log: Boo Zero above three labeled teams, each showing how many of its Boos are running](/images/ghost-graph.png)
+[Limits and defaults](/reference/limits-and-defaults) lists every number.
 
-## Design rationale and trade-offs
+<Accordion title="Under the hood">
 
-**One process, local-first.** Bundling the server, SPA, database, and MCP spine into a single `npx`-launched process is what makes "screenshot-shareable in five minutes" achievable: no infra to provision, no account to create. The cost is that scaling beyond one machine is not a turn of a config knob; the single SQLite data-access layer is the deliberate seam where a future SQLite→Postgres or multi-tenant move would land (the coordination, registry, and governance tables, 18 of the 28, already carry a dormant `tenant_id` column).
+- **One server.** The `clawboo` command starts a server that serves the dashboard and the `/api/*` routes on one port, the first free one from 18790. It listens on `127.0.0.1` unless you set `HOST`. [CLI](/reference/cli) covers ports and stopping the server, and [Security](/operating/security) covers the access token.
+- **Two engines.** Team chat runs on one team engine per chat room (`teamOrchestrator.ts` and `serverDeliver.ts` in `apps/web/server/lib/teamChat/`). The task runner is `runTaskOnRuntime` in `apps/web/server/lib/executorRunner.ts`; see [Executor runner](/internals/executor-runner).
+- **Hand-off signals.** A Clawboo Native leader calls its `delegate` tool. A Claude Code, Codex or Hermes leader calls the `team_delegate` tool. An OpenClaw agent writes a `<delegate to="@Name">` block, or uses `sessions_send`. A `<plan>` block sets up an ordered chain of steps. [Delegation and orchestration](/concepts/delegation-and-orchestration) has the details.
+- **Clawboo's tools.** Every runtime reaches Clawboo's Tasks, Memory and Tools MCP servers, and every runtime except OpenClaw also gets TeamChat. See [MCP servers](/operating/mcp-servers).
+- **Where agents are stored.** OpenClaw agents are mirrored from the Gateway. Other agents exist only in Clawboo's database.
+- **The event log.** Each step is recorded in an event log that feeds the Activity cards, the Observability panel and the live status on a team's graph. A graph's layout comes from the team's members and each agent's routing, not from the log.
+- **Other traffic.** Besides your providers and connected apps, Clawboo contacts GitHub for the marketplace catalog and npm to check for updates.
 
-**Board-canonical over narration-only.** Making SQLite the source of truth for coordination buys durability (state survives a restart), race-freedom (the atomic claim), and recoverability (the reconciliation passes), at the cost of a second persistence layer beside each runtime's own session state. The alternative, treating a chat transcript as authority, can't be transactionally claimed, can't survive a refresh, and can't tell a crashed run from a slow one.
+</Accordion>
 
-**One adapter seam over per-runtime code paths.** The `RuntimeAdapter` interface and the normalized event union mean the orchestrator, the board, and the observability log are written once and work for every runtime; a specialist on Claude Code and a leader on `clawboo-native` coordinate identically. The cost is that each new runtime must be wrapped to fit the seam, and permanent asymmetries (Hermes has no token stream; OpenClaw runs in its own sandbox) live in each adapter's declared capabilities rather than being papered over.
+## Related
 
-**MCP as the cross-runtime contract.** Rather than syncing a second board into each runtime's own coordination model (drift, double-dispatch, stale-claim races), Clawboo exposes its board/memory/tools/team-room as MCP servers and lets runtimes attach. The runtime stays a black box; the shared plane stays the single source of truth.
-
-## Boundaries and non-goals
-
-- **Not multi-machine in v0.5.0.** The stack is one local process. The `tenant_id` columns are a dormant seam, not active per-tenant scoping.
-- **Not a hosted product.** There is no cloud control plane, no account system, and no remote management surface beyond binding to a non-loopback interface (which requires an access token, or the server refuses to start).
-- **OpenClaw is special.** Four runtimes go through the uniform executor runner; OpenClaw is a connected substrate driven over a live WebSocket and refused by the runner, a deliberate asymmetry, not an inconsistency.
-- **This is the overview, not the spec.** Each layer here has a concept page with the real mechanics, and a reference page with the exact routes, shapes, and defaults. Follow the links.
-
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## See also
-
-- [What is Clawboo](/intro/what-is-clawboo): the positioning and the wedge
-- [Why Clawboo](/intro/why-clawboo): differentiators vs running runtimes standalone
-- [The agent model](/concepts/agent-model): Boo, Boo Zero, and the five runtime classes
-- [The board](/concepts/the-board): the durable, transactional coordination substrate
-- [Gateway and events](/concepts/gateway-and-events): the OpenClaw path and the Bridge→Policy→Handler pipeline
-- [Observability](/concepts/observability): the event log and the Ghost Graph projection
-- [Runtimes overview](/runtimes/index): the five runtimes and the capability matrix
-- [MCP servers](/operating/mcp-servers): attaching the shared spine to a runtime
-- [Installation](/getting-started/installation): `clawboo` and what it launches
-- [Glossary](/appendices/glossary): canonical term definitions
+- [Key concepts](/concepts/index): every term on this page in one sentence.
+- [What an agent sees](/concepts/agent-context): the context each turn and run carries.
+- [What agents can do](/concepts/permissions): what each runtime can reach on your computer.
+- [How work is checked](/concepts/verification): when finished work is tested.
+- [Work with your team in chat](/using/team-chat): rooms, Stop, `/reset` and the Tasks card.
+- [Delegation and orchestration](/concepts/delegation-and-orchestration): how hand-offs work in detail.

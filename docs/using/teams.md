@@ -1,204 +1,265 @@
 ---
-title: Create and manage teams
-description: Create a team from a marketplace template or empty, find its Home and its chats (General plus rooms), set leaders and rules, pick color collections, and archive or delete it.
+title: 'Create and manage teams'
+sidebarTitle: 'Teams'
+description: 'Create a team from a template or from scratch, choose a runtime and model for each member, set team rules, and archive or delete a team.'
+icon: 'users'
+keywords:
+  [
+    'team',
+    'deploy a team',
+    'team rules',
+    '/rule',
+    'team brief',
+    'Leader',
+    'archive',
+    'delete team',
+    'color collection',
+    'Refresh Protocol',
+    'team space',
+  ]
 ---
 
-Use this page when you want to group [Boos](/appendices/glossary) into a team, the unit Clawboo coordinates as one shared plane: its chats (a General chat plus any rooms you add), its board, memory, brief and rules all belong to the team. A team is a row in SQLite (`teams`) plus the agents whose `team_id` points at it; everything else (its chats, its [Ghost Graph](/using/ghost-graph), [Boo Zero](/using/boo-zero)'s per-team brief, the durable rules) hangs off that row.
+A team is a group of agents that work on your requests together. Each team has its own chats (**General** plus any rooms you add), its own tasks on the board, a brief, and rules that every member follows. [Boo Zero](/using/boo-zero), your team leader, coordinates every team.
 
-You manage teams from two places in the dashboard: the **team rail** (the leftmost 60px column of the sidebar, `TeamSidebar`) for creating, switching, archiving, and deleting, and the **chat header** of the team's General chat or any of its rooms (`GroupChatViewHeader`) for its brief and rules. Both are backed by `/api/teams*` and `/api/team-rules/*`.
+Use this page to create a team, choose each member's runtime and model, set team rules, and archive or delete a team. For a guided first run, follow [Deploy your first team](/getting-started/first-team).
 
-For a guided first run, start with [Deploy your first team](/getting-started/first-team). For the conceptual model (why a team has a shared plane and a private plane), see [Teams and planes](/concepts/teams-and-planes).
+## Before you begin
 
-## Prerequisites
+A team template creates real agents, so you need at least one runtime that can run them:
 
-<Note>
-A team is a Clawboo-native record. Deploying a populated template creates each agent through the runtime you pick for it: a **Clawboo Native** or coding-runtime agent is created server-side with no OpenClaw Gateway, while an agent you put on **OpenClaw** needs a live Gateway connection. Because an unavailable OpenClaw suggestion degrades to Clawboo Native, a marketplace team still deploys fully native when the Gateway is offline. Creating an *empty* team and a template with zero agents both work with nothing connected.
-</Note>
+- Clawboo Native, the built-in runtime, with a provider: an API key or a local Ollama.
+- Or the OpenClaw Gateway, Claude Code, Codex or Hermes.
 
-- The dashboard is open and connected (see [Connecting runtimes](/runtimes/connecting-runtimes) or the OpenClaw quickstart).
-- Optional: a [marketplace](/using/marketplace) template in mind. The catalog ships 85 teams across nineteen packs, two first-party and seventeen adapted from upstream repositories.
+See [Providers and runtimes](/using/providers-and-runtimes). An empty team needs nothing connected.
 
-## Steps
+## Create a team
 
-### 1. Open the team browser
+<Steps>
 
-In the team rail, click the dashed **+** button (tooltip **Create a team**). It takes you to the **Marketplace → Teams** tab, the one canonical place to browse and deploy a team. Press **Deploy** on any team card (or the **Start from scratch** card, for a blank team) to open `CreateTeamModal` at its **customize** step.
+<Step title="Open the team templates">
 
-The modal is a four-step flow (**pick → customize → deploy → complete**), but the **pick** step only appears on the first-run welcome screen, before you have any teams; every other entry, the marketplace **Deploy** buttons and **Start from scratch**, jumps straight to **customize**. When the pick step does show, it renders the same team showcase described next.
+In the team rail, click the dashed **+** at the bottom (**Create a team**). The [Marketplace](/using/marketplace) opens on its **Teams** tab.
 
-![The team showcase: curated team templates with Details and Deploy buttons](/images/team-gallery.png)
+</Step>
 
-### 2. Browse the team showcase
+<Step title="Pick a starting point">
 
-The Teams tab, and the first-run pick step, list the team catalog with a search box and two filter rows:
+Click **Deploy** on a team card to start from that template. To see who is on a team first, click **Details**. For an empty team, click the **Start from scratch** card.
 
-- **Category pills**: the popular categories inline, the rest folded under a **+N more** toggle; only categories that actually have templates render.
-- **Pack pills**: `All`, then one pill for each pack in the catalog, each with a colored dot.
+</Step>
 
-Press **Deploy** on a team card to advance to **customize** pre-filled with that template's name, icon, and color. Press the **Start from scratch** card to advance with a blank `New Team` / `👻` placeholder and no agents.
+<Step title="Customize the team">
 
-### 3. Customize the team
+Set the team's name, badge and colors, and each member's runtime and model. See [Customize the team](#customize-the-team).
 
-The **customize** step has three sections:
+</Step>
 
-| Field                   | What it sets                                                                                   | Stored as                                                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Name**                | The team's display name                                                                        | `teams.name`                                                                                               |
-| **Team badge**          | The icon (tap the badge to open the icon picker) and accent color (icon + halo tint)           | `teams.icon`, `teams.color`                                                                                |
-| **Teammate colors**     | A _color collection_ that colors every teammate's Boo avatar, with a live roster preview       | `teams.colorCollectionId`                                                                                  |
-| **Runtime (per agent)** | The runtime each roster agent runs on, chosen from a per-row dropdown                          | `agents.runtime` (at create)                                                                               |
-| **Model (per agent)**   | The model an agent runs on, from a dropdown next to its runtime (Native, OpenClaw, and Hermes) | native `AgentConfig.primaryModel`; OpenClaw `agents.list[]` override; Hermes `execConfig` (via OpenRouter) |
+<Step title="Deploy">
 
-The accent color and the teammate color collection are independent: the accent tints the team badge and its halo on the [Org chart](/using/ghost-graph), while the collection decides how the member Boos are colored. The roster preview seeds its palette with a client-minted team id so the colors you see here match the deployed team exactly (per-team hue rotation).
+Click **Deploy team**, or **Create team** for an empty team. Clawboo creates each agent and shows its progress.
 
-The eight color collections are `vivid-pop`, `dusty-pastel-pro`, `coastal-mist`, `executive-jewel`, `sharp-saas`, `soft-neutral-editorial`, `monochrome-accent`, and `classic`. `classic` is the default and uses the legacy per-Boo tints (it ignores the hue-rotation seed).
+You land in the new team's **General** chat. Before you can message the team, a **Meet your team** card asks you to introduce yourself. See [Team chat](/using/team-chat).
 
-Every agent in the roster preview also carries its own **runtime** dropdown, Clawboo Native, OpenClaw, or any connected coding runtime (Claude Code, Codex, Hermes), so one team can mix runtimes; there is no separate "native team vs OpenClaw team" choice. Each row defaults to a smart suggestion (a marketplace team suggests OpenClaw, a blank team suggests Clawboo Native) that degrades to Clawboo Native with an inline note when the suggested runtime is not connected, so the deploy always succeeds. A genuine leadership role is badged **Leader**, but every agent, the leader included, picks its own runtime; clicking a disabled OpenClaw option opens the OpenClaw setup flow in Settings.
+</Step>
 
-Agents on **Clawboo Native**, **OpenClaw**, and **Hermes** also get an inline **model** dropdown beside the runtime pill (Hermes routes every model through OpenRouter, so its dropdown is the live OpenRouter catalog; **Codex** and **Claude Code** run the delegated task with their own account/SDK default and have no picker). The picker is **two-layer**: choose a provider first, from the ones you have actually connected, then a model from that provider's catalog. Rather than an opaque "Recommended", the trigger names the model that will really run (`Default · <model>` when you have not overridden it; on Clawboo Native the leader row and the specialist rows can name different models, see [how native agents get a model](/runtimes/native#the-agent-config)), and the panel opens on the provider the current model belongs to; a long catalog such as live OpenRouter gets a scoped search box. A native pick lands on `AgentConfig.primaryModel`, an OpenClaw pick writes a per-agent override into `openclaw.json`, and a Hermes pick is stored in the agent's `execConfig`. Switching a row's runtime clears its model pick, since a model id belongs to one runtime's catalog. You can change any agent's model later from its [detail view](/using/agents).
+</Steps>
 
-The footer button is the primary action; its label changes with context: **Create team** (empty), **Deploy team** (template), or **Create agent** (single-agent deploy from the marketplace's agent "Deploy" button).
+An empty team opens on its chat too, but **Get Started** stays disabled until the team has an agent. Add one with **Create Boo** in the agent column (see [Agents](/using/agents)).
 
-### 4. Deploy
+## Customize the team
 
-Pressing the action button issues `POST /api/teams`. The request includes the client-minted `id` (a UUID, so the deployed palette matches the preview), `name`, `icon`, `color`, `colorCollectionId`, and `templateId`. The handler validates the id against a UUID regex and falls back to a server-minted id otherwise. `name`, `icon`, and `color` are all required; omit any and the route returns `400`.
+The customize step has three sections.
 
-For an **empty** team the modal closes immediately. For a **template** team the modal enters the **deploy** step and creates each agent in order:
+| Section             | What you set                                                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Name**            | The team's name.                                                                                                                                                                                                          |
+| **Team badge**      | The team's icon (click the badge to change it) and its accent color. The color tints the team's icon in the team rail and its halo on the [Org chart](/using/org-chart).                                                  |
+| **Teammate colors** | A color collection for the members' Boos, with a live preview of the roster: Vivid Pop, Dusty Pastel Pro, Coastal Mist, Executive Jewel, Sharp SaaS, Soft Neutral Editorial, Monochrome Accent, or Classic (the default). |
 
-```mermaid
-flowchart TD
-  A["POST /api/teams"] --> B["addTeam + selectTeam (store)"]
-  B --> C{template?}
-  C -- "no" --> Z["done — empty team"]
-  C -- "yes" --> D["for each catalog agent"]
-  D --> E["dedup name collisions"]
-  E --> F["createAgent: SOUL / IDENTITY / TOOLS / AGENTS / CLAWBOO"]
-  F --> G["POST /api/teams/:id/agents"]
-  G --> H{more agents?}
-  H -- "yes" --> D
-  H -- "no" --> I["PATCH /api/teams/:id leaderAgentId"]
-  I --> J["PUT /api/boo-zero/team-briefs/:id"]
-  J --> K["enable agentToAgent if any routing"]
-  K --> L["complete"]
-```
+### Choose a runtime and model for each member
 
-Along the way the deploy loop also:
+The roster under **Teammate colors** lists each member. Each row has:
 
-- **Deduplicates names** against your existing agents and teams (auto-suffixing on a collision) so a second deploy of the same template does not clash.
-- **Writes per-agent files**: `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, an enhanced `AGENTS.md` (team roster + collaboration protocol), and a workspace-root `CLAWBOO.md` reference.
-- **Generates Boo Zero's per-team brief** (`PUT /api/boo-zero/team-briefs/:id`, best-effort).
-- **Enables agent-to-agent coordination** (`PATCH /api/system/openclaw-config { agentToAgent: { enabled: true } }`) if any agent's `AGENTS.md` has `@`-routing, non-fatal if it fails.
+- A **runtime** picker: Clawboo Native, OpenClaw, Claude Code, Codex or Hermes. One team can mix runtimes.
+- A **model** picker, for members on Clawboo Native, OpenClaw or Hermes. Pick a provider first (only the providers you connected are listed), then a model. Until you pick one, it reads **Default**, followed by the model the member will run on Clawboo Native and OpenClaw.
 
-When the loop finishes you land in the new team's **General** chat.
+Members on Claude Code or Codex run on that tool's own default model, so they have no model picker. Changing a member's runtime clears its model pick.
 
-## Find your way around a team
+Which runtime a row starts on:
 
-The sidebar has two parts: the **team rail** on the left and the **agent column** beside it.
+- A Marketplace template suggests OpenClaw for every member. A team from scratch suggests Clawboo Native. During first-time setup, every member starts on the runtime you connected in setup.
+- When the suggested runtime is not connected, the row falls back to Clawboo Native and says so, for example **OpenClaw unavailable · using Clawboo Native**.
+- You can pick OpenClaw only while the OpenClaw Gateway is connected, and Claude Code, Codex or Hermes only once you have connected them. Clicking a greyed-out runtime closes this dialog and opens **Settings > Runtimes** so you can connect it.
 
-- **Team rail.** One icon per team, with the Boo Zero mascot at the top and the dashed **+** at the bottom. Click a team's icon to select the team and open its **Home**. Right-click it for the team's actions (see [Archive and delete](#archive-and-delete)).
-- **Home.** A placeholder for now: it says that the team's dashboards, and the artifacts its agents make, will live there. The **Home** row in the agent column's nav opens it too.
-- **Agent column.** With a team selected, it shows the team's name and a search icon that filters the agents, then the team's agents as a grid of mascot tiles (a pulsing mint dot marks the ones working, a red dot any in error, and Boo Zero comes last). Click a tile to open that agent's page (see [Working with agents](/using/agents)). Below the tiles come the team's chats, then **Create Boo** (see [Create a Boo](/using/agents#create-a-boo)) and the nav.
+Clawboo Native needs a provider to answer. Without one, the team still deploys, but its Clawboo Native agents cannot reply until you connect a provider. The chat tells you why.
 
-## A team's chats: General and rooms
+### What happens when you deploy
 
-The agent column lists the team's chats under a **New room** button. **General** comes first, labelled **General (Main Room)**: the team's own group chat, with everyone on the team in it, always pinned. Your **rooms** follow, pinned ones first. A room is a subset of the team's members with its own conversation and its own task cards; **New room** asks for a name and at least one member, then opens the room's chat. Boo Zero leads General and every room, and is never a member you pick. The team's rules, brief, memory and board stay team-wide, whichever chat you are in.
+- **Clashing names get a number.** If agents or a team with the same names already exist, Clawboo gives the new ones the next free number, for example **Code Reviewer Boo 2**. It also updates who hands work to whom to match.
+- **One failed agent does not stop the rest.** Clawboo keeps going, then lists any failures in a message such as **2 of 3 agents created (Writer Boo failed)**. If no agent can be created, you return to the customize step with **No agents could be created. Check that the runtime is connected, then retry.** The empty team stays, so you can retry or delete it.
+- **OpenClaw members need the Gateway.** If you put a member on OpenClaw while the Gateway is offline, the deploy stops with **Connect an OpenClaw Gateway to deploy the OpenClaw members, or switch them to another runtime.**
+- **The team gets a brief.** Clawboo writes a starting [team brief](#team-brief) that you can edit.
 
-Each chat's row has a **...** menu with **Clear chat**, which takes the chat's messages off the screen (they are set aside, not deleted) and has every agent start that conversation fresh; its tasks stay on the board and in the chat's **Tasks** card. A room's menu also has **Pin** (or **Unpin**), **Rename** and **Delete**. See [Group chat](/using/group-chat) for working in General and in rooms.
+## The team's Leader
 
-## Leaders
+When you deploy a template, a member whose name or role reads as a lead (CTO, Team Lead, Project Manager, Coordinator and similar) gets a **Leader** badge in the roster. That member becomes the team's Leader.
 
-A team's leader is **not** forced to the first agent. Clawboo's model is:
+- Boo Zero still leads the team. On the team graph, the Leader sits between Boo Zero and the other members.
+- On Clawboo Native, the Leader gets the team-lead instructions and the leader model. The other members get the specialist ones.
+- When your install has no Boo Zero, the Leader leads the team's chats. A team with no Leader is led by its first member.
 
-- **Boo Zero is the universal leader of every team.** It is teamless in the database and participates in each team via a team-scoped session.
-- **`teams.leaderAgentId` is the optional _team-internal lead_**, a second-tier coordinator that sits below Boo Zero. The deploy loop sets it only when it detects a genuine leadership role in the roster (CTO, Team Lead, and similar archetypes). When no leader role is detected, the `PATCH /api/teams/:id` writes `null` so the column stays accurate on re-deploys.
+In a team chat, a message goes to the member you @mention. Otherwise it goes to Boo Zero, then to the Leader if it is in that chat, then to the chat's first member. See [Team chat](/using/team-chat).
 
-At runtime, `resolveTeamLeader` resolves the effective leader in priority order: Boo Zero if it exists in the fleet, else the team-internal lead if it is a member of this team, else the first member, else `null` (an empty team with no Boo Zero). A room follows the same order among its own members: a message goes to the member you `@mention`, else Boo Zero, else the team-internal lead if it is in the room, else the room's first member.
+The dashboard has no control for changing the Leader after you deploy. The API can change it: see **Under the hood** at the end of this page.
 
-<Note>
-To change the internal lead later, `PATCH /api/teams/:id` with `{ "leaderAgentId": "<agentId>" }` (or `null` to clear it). The PATCH body accepts any subset of `name`, `icon`, `color`, `colorCollectionId`, `isArchived`, and `leaderAgentId`.
-</Note>
+## Brief and rules
 
-## Team rules
+Open a team's settings from any of its chats: in **General** or a room, click the gear in the chat header. Its tooltip is the team's name followed by **brief & rules**.
 
-Team rules are durable, user-set instructions injected into the message preamble for **every team agent and every Boo Zero turn in this team**. They exist because corrections you type in chat ("you are not sub-agents", "delegate via `<delegate>`, don't do the work yourself") roll out of the last-few-messages context window and get forgotten; rules survive across sessions. They are stored in the `settings` table under the key `team-rules:<teamId>`, capped at 4000 characters server-side.
+The settings window has five sections: **Icon**, **Accent color**, **Color collection**, **Brief** and **Rules**. Icon and color changes save as you make them.
 
-There are two ways to set them.
+![The Growth team's settings window: the Brief, with Save and Regenerate, above the Rules box with one rule per line and Save rules](/images/team-brief-rules.png)
 
-### From the rules editor (the gear in a team chat's header)
+### Team rules
 
-In the team's General chat or any of its rooms, click the gear in the header (`GroupChatViewHeader`); its tooltip reads `<team name> brief & rules`. This opens `TeamSettingsSheet`, which stacks the team's icon/accent/collection pickers, the per-team **Brief**, and the **Rules** editor.
+Team rules are instructions that every member of the team follows. Clawboo adds them to every turn in the team's chats (General and every room), for Boo Zero and for each teammate, including the work Boo Zero hands out. A correction you save as a rule keeps applying, so you do not have to repeat it. Rules apply from the next turn.
 
-The Rules editor (`TeamRulesEditor`) is a plain textarea, one rule per line. It loads via `GET /api/team-rules/:teamId` and saves the whole text via `PUT /api/team-rules/:teamId` with `{ content }`. The Save button is disabled until the content is dirty.
+A team Routine posts into **General**, so its runs follow the rules too. A Routine aimed at one agent runs without them.
 
-### From the `/rule` slash command
+You can add rules in two ways.
 
-In the composer of the team's General chat or any of its rooms, type `/rule <text>` and send. This is intercepted **before** the message is routed to any agent:
+<Tabs>
+
+<Tab title="The Rules box">
+
+In the team's settings, type in **Rules**, one rule per line, then click **Save rules**. You should see **Team rules saved.** Rules can be up to 4,000 characters; a longer save fails with **Could not save rules.**
+
+</Tab>
+
+<Tab title="/rule in a chat">
+
+In any of the team's chats, type `/rule` and the rule, then send it:
 
 ```text
-/rule delegate via <delegate>, don't do the work yourself
+/rule Every price on the page comes from the live plan catalog.
 ```
 
-The handler fetches the current rules, appends your text as a new `- ` line (deduping an exact duplicate, case-insensitively), and saves via `PUT /api/team-rules/:teamId`. It drops one `meta` confirmation entry into the merged team transcript and shows a toast; the message is never sent to a runtime.
+Clawboo saves it as a rule instead of sending it to an agent. The chat shows **Rule saved for team:** with your rule, and a **Team rule saved.** message appears.
 
-<Info>
-The `/rule ` prefix must be followed by whitespace and a non-empty body. `/rule` alone, `/rules`, or `/rule:` do not trigger the command; they fall through and are sent as a normal message.
-</Info>
+</Tab>
 
-## Color collections
+</Tabs>
 
-Two color choices are independent:
+`/rule` keeps your rules as a bulleted list: it turns every line into a bullet, drops blank lines, and skips a rule that is already there (ignoring capital letters). It works only with a space and some text after it, so `/rules` or `/rule:` is sent as a normal message. If the new rule would take the rules past 4,000 characters, you see **Could not save team rule. Try again?**
 
-- The **accent color** (`teams.color`) tints the team's icon in the team rail, its badge on the graphs, and its halo on the Org chart. Pick it in the customize step or later in the settings sheet (`TeamAccentPicker`).
-- The **color collection** (`teams.colorCollectionId`) decides how member Boos are colored. Pick it with `TeamColorCollectionPicker` in the customize step or the settings sheet. The roster preview updates live.
+### Team brief
 
-Both the customize step and the settings sheet write the collection through `PATCH /api/teams/:id` (the sheet does it optimistically; the store updates first, then persists).
+The brief describes the team: what it is for, who is on it, and how they work together. Clawboo writes one when you deploy a template, and you can edit it in the team's settings. **Regenerate** rebuilds it from the current members; nothing changes until you click **Save**.
 
-## Archive and delete
+Boo Zero reads a team's brief only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Team chats do not include the brief, so use rules for anything the team must follow. See [What Boo Zero reads](/using/boo-zero#what-boo-zero-reads).
 
-Right-click a team's icon in the team rail to open `TeamContextMenu`. It has four actions:
+## Rename a team
 
-| Action                      | What it does                                                                           | Route                                      |
-| --------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **Archive** / **Unarchive** | Hides the team from the active list (toggles `isArchived`) without touching agents     | `PATCH /api/teams/:id` `{ isArchived }`    |
-| **Refresh Protocol**        | Regenerates each member's `AGENTS.md` with the current roster + collaboration protocol | per-agent file writes (needs a connection) |
-| **Delete team only**        | Deletes the team and **orphans** its agents (sets each member's `team_id` to `null`)   | `DELETE /api/teams/:id`                    |
-| **Delete with agents**      | Deletes the team's agents first, each through its runtime, then deletes the team       | per-agent delete + `DELETE /api/teams/:id` |
+The dashboard has no rename control for a team: you name it on the customize step. To rename a team later, use the API call under **Under the hood** at the end of this page.
 
-Both delete actions ask you to confirm first. **Delete team only** keeps your agents; they just become unassigned. **Delete with agents** permanently removes the agents from their runtimes before removing the team, and needs no Gateway. Its confirm mentions the Gateway only when the team has an OpenClaw agent, which is also removed from the Gateway. If an agent fails to delete, the team is still deleted and a toast reports how many of N agents were removed.
+## Refresh a team's protocol
 
-<Danger>
-`DELETE /api/teams/:id` also cleans up the team's durable `settings` rows: `team-rules:<teamId>` and `team-onboarding:<teamId>`, and the `boo_zero_team_briefs` row FK-cascades. Deleting a team therefore discards its rules, onboarding state, and Boo Zero brief permanently. There is no migration ladder and no undo; archive instead if you only want to hide it.
-</Danger>
+Each member's AGENTS.md lists the team and how to hand work to teammates. After you add or remove members, right-click the team's icon in the team rail and choose **Refresh Protocol**. Clawboo rebuilds that file for every member and keeps each member's routing rules.
 
-An OpenClaw agent removed by **Delete with agents** while its Gateway is down is gone from clawboo at once and is deleted from the Gateway the next time the server connects to it. It does not come back into a team in the meantime. See [Delete a Boo](/using/agents#delete-a-boo).
+Refresh Protocol needs the OpenClaw Gateway connected, even for a team with no OpenClaw members. Without it you see **Not connected to Gateway**. Only OpenClaw agents read AGENTS.md as instructions; on every runtime it also draws the team graph's links (see [Agents](/using/agents#edit-the-agent-files)).
 
-## Verify it worked
+## Archive a team
 
-- `GET /api/teams` returns the team with an `agentCount` (a subquery over `agents.team_id`). A freshly created empty team reports `agentCount: 0`; a deployed template reports its member count. The response also includes an `assignments` array (`{ agentId, teamId }`) so the client can patch its fleet store.
-- Pass `?includeArchived=true` to `GET /api/teams` to see archived teams; without it, archived teams are filtered out.
-- After deploy, the team's General chat opens and its **Team graph** card shows the new Boos. The brief & rules gear sits in the chat header.
-- After `/rule`, re-open the rules editor (or `GET /api/team-rules/:teamId`); your line should be present as a `- ` bullet.
+Right-click the team's icon in the team rail and choose **Archive**. The team leaves the team rail, which also puts its chats and its Home out of reach. Nothing is deleted: its agents, chats and tasks stay in Clawboo.
+
+**You cannot undo this from the dashboard.** **Unarchive** appears only on an archived team's icon, and the team rail does not show archived teams. To bring a team back, use the API call under **Under the hood** at the end of this page.
+
+## Delete a team
+
+Right-click the team's icon in the team rail and choose how much to delete.
+
+| Choice                 | What it deletes                                                         | Confirm button        |
+| ---------------------- | ----------------------------------------------------------------------- | --------------------- |
+| **Delete team only**   | The team. Its agents stay in Clawboo, with no team.                     | **Delete team**       |
+| **Delete with agents** | Every agent on the team, with their files and own chats, then the team. | **Delete everything** |
+
+Both choices also delete the team's rules, its brief, its rooms and your introduction to the team.
+
+**Delete with agents** works without the OpenClaw Gateway. An OpenClaw member leaves the Gateway at once if it is connected, otherwise the next time Clawboo connects to it. If some agents cannot be deleted, the team is still deleted, and a message says how many agents were removed.
+
+<Warning>
+
+Deleting a team cannot be undone. **Delete with agents** removes the agents for good, along with their files and their own chats.
+
+</Warning>
 
 ## Troubleshooting
 
-<Warning>
-**"Deploy team" errors with "Connect an OpenClaw Gateway".** This blocks only when you put an agent explicitly on **OpenClaw** while the Gateway is offline, so you do not create a broken OpenClaw member. Either connect the Gateway (click the disabled OpenClaw option to open its setup flow) or switch those agents to another runtime. A team with no OpenClaw agents, and any agent that degraded to Clawboo Native, deploys with no Gateway. An *empty* team needs nothing connected.
-</Warning>
+<AccordionGroup>
 
-<Warning>
-**A second deploy of the same template renames the agents.** The deploy loop auto-suffixes agent and team names that collide with existing ones, so you may see `Code Reviewer Boo 2` rather than a hard failure. This is intentional dedup, not a bug.
-</Warning>
+<Accordion title="Connect an OpenClaw Gateway to deploy the OpenClaw members">
 
-<Warning>
-**Rules or `/rule` don't seem to change agent behavior immediately.** Rules are injected into the *preamble of the next message*. They take effect on the next turn, not retroactively, and the client-side fetch is cached for 5 seconds; back-to-back `/rule` commands read the cache, so a rapid second rule may briefly read stale content before the next fetch.
-</Warning>
+**What it means:** you put a member on OpenClaw while the OpenClaw Gateway is offline.
 
-## Related
+**Fix:** connect the Gateway in **Settings > Runtimes**, or switch those members to another runtime on the customize step.
 
-- [Deploy your first team](/getting-started/first-team), the guided happy path
-- [Teams and planes](/concepts/teams-and-planes), the conceptual model (shared plane vs private plane)
-- [Group chat](/using/group-chat), the team's General chat, its rooms, and the Know-Your-Team gate
-- [Boo Zero](/using/boo-zero), the universal leader, briefs, and display name
-- [The Ghost Graph](/using/ghost-graph), a team's graph, and the Org chart with its team halos
-- [Marketplace](/using/marketplace), browse and deploy the 436 agents / 85 teams
-- [`/api/teams` reference](/reference/rest-api/teams), full request/response shapes
+</Accordion>
+
+<Accordion title="No agents could be created">
+
+**What it means:** no agent in the template could be created. The empty team stays in the team rail.
+
+**Fix:** open **Settings > Runtimes**, check that the runtimes you picked are connected, then deploy again. Delete the empty team if you do not need it.
+
+</Accordion>
+
+<Accordion title="The new agents have a number after their names">
+
+This is expected. A team or agents with the same names already exist, so Clawboo numbered the new ones to keep every name unique.
+
+</Accordion>
+
+<Accordion title="Refresh Protocol says Not connected to Gateway">
+
+Refresh Protocol needs the OpenClaw Gateway connected, even for a team with no OpenClaw members. Connect it in **Settings > Runtimes**, then try again.
+
+</Accordion>
+
+<Accordion title="A team disappeared from the team rail">
+
+The team was archived. Its agents, chats and tasks are still in Clawboo. The dashboard cannot unarchive it; use the API call under **Under the hood** below.
+
+</Accordion>
+
+<Accordion title="The team does not follow a rule">
+
+Rules apply from the next turn in the team's chats, not to replies already sent. Open the team's settings and check that the rule is in **Rules**. A Routine aimed at one agent runs without the team's rules; a team Routine follows them.
+
+</Accordion>
+
+</AccordionGroup>
+
+<Accordion title="Under the hood">
+
+- **Files a deploy writes.** Each member gets a SOUL.md (its persona plus the default House Style personality), an IDENTITY.md, a TOOLS.md, and an AGENTS.md that lists the teammates and how to hand them work. Which runtime reads which file is on [Agents](/using/agents#edit-the-agent-files).
+- **OpenClaw config.** If any member's routing names a teammate, Clawboo turns on agent-to-agent messaging in the OpenClaw Gateway's config.
+- **API calls.** `PATCH /api/teams/:id` renames a team, changes its Leader, or brings back an archived team. It takes any of `name`, `icon`, `color`, `colorCollectionId`, `leaderAgentId` (an agent id, or `null` for no Leader) and `isArchived`. To find an archived team's id, call `GET /api/teams?includeArchived=true`. An unarchived team returns to the team rail after you reload the page.
+
+```http
+PATCH /api/teams/<team-id>
+Content-Type: application/json
+
+{ "isArchived": false }
+```
+
+See the [Teams API reference](/reference/rest-api/teams) for every field, and the [REST API overview](/reference/rest-api/index) for how to call the API.
+
+</Accordion>
+
+## Next steps
+
+- [Team chat](/using/team-chat): talk to your team, add rooms, and introduce yourself.
+- [Agents](/using/agents): change one member's model, personality or files.
+- [Boo Zero](/using/boo-zero): how your team leader is chosen and what it reads.
+- [Marketplace](/using/marketplace): find more teams and agents to deploy.
+- [Teams API reference](/reference/rest-api/teams): every team route and field.

@@ -1,186 +1,196 @@
 ---
-title: Review and resolve approvals
-description: Allow or deny pending exec approvals, native run_command requests, and the shared tool and delegation queue, from the board and the chat composer.
+title: 'Answer approval requests'
+sidebarTitle: 'Approvals'
+description: 'What waits for your yes, where approval cards appear, what each button does, what Always remembers, and how long a request waits.'
+keywords:
+  [
+    'approvals',
+    'exec approval',
+    'Allow Once',
+    'Always',
+    'Deny',
+    "Don't allow",
+    'run_command',
+    'risky delegation',
+    'risky hand-off',
+    'Needs you',
+    'approval queue',
+  ]
 ---
 
-Use this page when an agent pauses for your decision: an OpenClaw exec command waiting on a gate, a native Boo asking to run one program, or a brokered tool call / risky delegation queued for a human. All three surface as approval cards on the board and above the chat composer, where you resolve each with an allow or a **Deny**, plus **Always** on the cards that offer it.
+Some actions wait for a person before they happen. Each one appears as an approval card, and nothing happens until you answer it or it runs out of time. Use this page when an agent is waiting on you, or when you want to decide what it may do without asking next time.
 
-The cards cover three kinds of request, and they are wired differently:
+## What asks for your approval
 
-- **Exec Approvals**: OpenClaw's command-execution gate. One request reaches you two ways at once. It arrives live over your own tab's Gateway connection, and Clawboo's server separately mirrors it into the shared `tool_call_approvals` table as a `kind='exec'` row, which is what keeps the card alive when no tab is open. Either card resolves back through the Gateway, and, when the agent is known, the decision is also logged to Clawboo's history table.
-- **Native `run_command` approvals**: a [Clawboo Native](/runtimes/native) Boo asking to run one program, on a Boo whose shell you switched on. These are Clawboo's own rows end to end, and none of them is ever remembered.
-- **The shared tool-approval queue**: Clawboo's own database-mediated handshake for brokered tool calls and risky delegations. The same queue (and the same resolve buttons) is reused by the [Governance dashboard](/using/governance-dashboard), so there is one resolve path, not two.
+| Request                                     | When it asks                                                                                                          | How long it waits                                                      |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| A shell command from an OpenClaw agent      | When the agent's **Command Execution** setting says to ask. Agents you create in Clawboo start on **Ask for Unknown** | Until the OpenClaw Gateway's deadline, or 30 minutes when it sets none |
+| A shell command from a Clawboo Native agent | Before every command, once you let the agent ask to run commands                                                      | 10 minutes                                                             |
+| A connector call                            | When Clawboo rates the call as risky, for example one that changes or deletes something in an app                     | 5 minutes                                                              |
+| A risky hand-off                            | When a leader in team chat hands off a task whose text contains a risky word                                          | 5 minutes                                                              |
 
-Which broker tools an agent can reach at all is not shown here: the [Capabilities dashboard](/using/capabilities-dashboard) greys out every tool whose requirement is unmet and lists why.
+Claude Code, Codex and Hermes never ask before using their own tools, such as their shell and file editing: Clawboo runs them with their own approval prompts turned off. Their connector calls and hand-offs still follow the rules above. [What agents can do](/concepts/permissions) explains what they can reach. [Command permissions](/using/command-permissions) sets when the two shell checks ask, and [Connectors](/using/connectors#when-a-connector-call-asks-you-first) lists which connector calls ask.
 
-## Prerequisites
+The risky-word check matches whole words, in any letter case:
 
-<Note>
-There is **no standalone Approvals nav view**. Approvals surface where they were raised, so you resolve them in context rather than on a separate screen. Whether anything appears at all depends on whether an agent is configured to ask before acting.
-</Note>
+- delete, destroy, deploy, publish, release, secret, credential, prod, production
+- the phrases drop table and rm -rf
+- api_key, api-key or apikey, and force-push, force_push or forcepush
 
-- Approvals appear in two places, both always available:
-  - The **Needs you** column on the [board](/using/board), the first column. It also holds tasks that failed or stalled and are waiting on you; approvals come first, under **Approval pending** when both are there. In the Today, Week and Month views its items sit in today's row, and on a week or month without today the column folds to a narrow rail that takes you back to today. In the All view they fill the column.
-  - An **inline tray above the composer** in [group chat](/using/group-chat) and 1:1 [agent chat](/using/agents), scoped to that team or agent (capped at three cards, with a "view on the board" link for the rest).
-- For **exec approvals** to appear, the agent's command-execution policy must be set to ask. Open an OpenClaw agent, go to the **Permissions** tab → **Execution Permissions**, and set **Command Execution** to **Always Ask** or **Ask for Unknown**. Then ask the agent to run a command. It pauses and the request appears here. See [command permissions](/using/command-permissions) for what each posture means.
-- For **native `run_command` approvals** to appear, the Boo's shell must be switched on (**Permissions** tab → **Running commands**) and the run must have a working folder, which in practice means a board task. Every native Boo created through Clawboo's own screens starts with that switch off.
-- For **tool / delegation approvals**, no extra setup is needed; the broker writes a pending row when a risky or availability-gated tool call needs sign-off, and the governance delegation gate writes one for a risky delegation.
+Other forms do not trigger it: "deleted", "deployment" and "secrets" pass, and so do "API key" and "force push" written with a space. [Budgets and guardrails](/concepts/governance#approval-for-risky-delegations) has the full rules.
 
-## Steps
+## Where approvals appear
 
-### 1. Find the pending items and read them
+- **Needs you** on the [Board](/using/board), the first column. It shows requests for the teams in the board's filter, plus Boo Zero's requests and any request Clawboo cannot tie to an agent.
+- **The chat**, in a tray above the message box. A team chat shows that team's requests, and a one-to-one chat shows that agent's. The tray holds three cards, then a **+N more, view on the board** link.
+- **The Tasks card** beside a team chat and the **Tasks & Routines** card on an agent's page, under **Needs you**.
+- **Settings > Insights > Governance**, in the **Approval queue**. It lists every pending request from every team, or "No pending approvals".
+- **Settings > Workspace > Capabilities**, at the top of the panel, while something is waiting.
 
-Every surface is scoped. On the board, when a team is selected, exec approvals are filtered to that team's agents (requests with no `agentId` always show); selecting **no team** shows all. The chat tray is scoped to the team or agent you have open. Exec approvals are sorted oldest-first.
+Answer a request in any of these places and it clears from the others within a few seconds. A request that Clawboo cannot tie to an agent shows in every chat and under every board filter. Connector calls from OpenClaw agents arrive this way, because OpenClaw agents reach connectors without an agent identity.
 
-Each **exec approval** card shows:
+## Read a card
 
-- An amber "Exec Approval" label with a pulsing alert dot.
-- The owning agent's name and a live `expires Ns` countdown. It counts down to the deadline the Gateway sent with the request; when a request arrives without one, Clawboo holds the mirrored card for 30 minutes.
-- The command in a code block, plus any of `cwd`, `host`, `path`, and `security` as detail rows, and an error line if the request carried one.
+Requests appear on two kinds of card.
 
-Each **tool / delegation approval** card (in the queue below) is written for the person deciding, not for the system asking. It shows:
+### Command cards on the Board and in chat
 
-- The **app's logo and name** when the call goes through a connector, otherwise the agent's name, and a live `expires Ns` countdown.
-- A **one-sentence headline** in the second person naming the actor and the effect, plus a short factual chip. The chip states what the call does and never reassures: an action is classified from its verb as **reads**, **sends**, **changes** or **destroys**, and an unrecognised verb falls to `changes` rather than to `reads`, so a call can never resolve downward into looking safer than it is.
-- The **decisive fields inline** (who it is addressed to, what it is about, which file or record), with the rest behind one disclosure. Credential-shaped values are masked before display.
-- The **agent's own words**, quoted and attributed, when it supplied a reason. They are never used as the headline.
+On the Board, in the Tasks cards and in the chat tray, an OpenClaw agent's command appears on a command card:
 
-When a request cannot be read confidently, the card says so and shows the raw detail rather than inventing a friendly summary.
+- **Wants to run a command** with the agent's Boo and name, or in the chat tray an **Exec Approval** label (with the agent's name in a team chat).
+- **expires Ns**: roughly how long is left.
+- The command, cut off after about two lines.
+- An error line, when your last answer did not go through.
+- Three buttons: **Allow Once**, **Always** and **Deny**.
 
-### 2. Resolve each item
+### Request cards
 
-Every card carries an allow and a deny, and, where the decision can be remembered at all, a way to say so. The live exec card in your own tab has three buttons (**Allow Once**, **Always**, **Deny**). A card from Clawboo's own queue has two buttons plus an **Always** checkbox you tick before pressing allow, and on a command card the allow button reads **Run it** rather than "Allow".
+Every other request uses a request card, and so does every request in the Governance and Capabilities queues, OpenClaw commands included. A request card shows:
 
-| Action         | Exec approval                                                                                                                                                                                        | Native `run_command`                                               | Tool / delegation approval                                                                                              |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| **Allow Once** | Permits this single run                                                                                                                                                                              | Runs this one command; the next one asks again                     | Permits this single call (`allow_once`)                                                                                 |
-| **Always**     | Asks the Gateway to remember this command in this folder, so it stops prompting. What it remembered then appears on the Boo's [Permissions tab](/using/command-permissions), where you can revoke it | Never offered                                                      | Mints a durable rule in `approval_rules`, bound to the grant, covering any arguments for that tool, expiring in 30 days |
-| **Deny**       | Rejects the run                                                                                                                                                                                      | Rejects the command, and latches the tool for the rest of that run | Rejects the call (`deny`)                                                                                               |
+- For a call to an app reached through Composio, the app's logo and name. Otherwise the agent's name, or **Waiting on you** when Clawboo cannot tell which agent asked.
+- A short label for the kind of action, such as **Runs a command**, **Reads only** or **Acts on your Gmail**, and the seconds left.
+- One sentence naming the agent and what it wants, such as "Ada wants to run a command on this computer."
+- The details that decide the answer, such as the recipient, the file or the command: two on the Board and in chat, three in the queues. A **Show N more details** link opens the rest, including any note the agent gave, which Clawboo marks as not verified.
+- On some cards, a checkbox that remembers your answer (see [Answer a request](#answer-a-request)).
+- An allow button named for the action, such as **Run it**, **Allow read**, **Send it** or **Delete it** (otherwise **Allow**), and **Don't allow**.
 
-What happens under the hood differs by surface:
+A request card shows a command in full unless it is very long, and adds the **Folder** it runs in when Clawboo knows it. A risky hand-off card names the leader, and the task text and the teammate it is for sit under **Show N more details**.
 
-- **Exec approval.** The decision goes to the Gateway via `exec.approval.resolve`, then (when the agent is known) is persisted to Clawboo's history through `POST /api/approvals`. The card buttons disable while the decision is in flight. After an allow, Clawboo runs a deterministic followup to recover the command's output in webchat-only setups where the Gateway's own delivery would otherwise drop it. One caveat: a decision made from a tab that has no Gateway socket of its own still reaches the Gateway, but writes no `approval_history` record and runs no output-recovery followup. The decision lands; the history entry does not.
-- **Tool / delegation approval.** The decision is written to the `tool_call_approvals` row via `POST /api/tools/approvals/:id/resolve`. The broker (or the delegation gate) is long-polling that row in another process, so it unblocks the moment you resolve. The queue re-polls every 3 seconds, so the card clears on its own.
+## Answer a request
 
-<Note>
-Resolving the same tool/delegation row twice is a no-op; the resolve is guarded on `status='pending'`, so a stale double-click can't flip an already-decided approval. Answering the same exec card twice is safe as well: the second answer comes back as `alreadyResolved` rather than an error, and an exec approval that has already expired Gateway-side resolves silently (the card just disappears) rather than showing a confusing error.
-</Note>
+| Request                                                   | Allow it         | Remember the answer                                                                                                                       | Refuse it                                                                            |
+| --------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| OpenClaw command, on the Board or in chat                 | **Allow Once**   | **Always**                                                                                                                                | **Deny**                                                                             |
+| OpenClaw command, in the Governance or Capabilities queue | **Run it**       | Tick **Always allow this command in this folder**, then **Run it**. The box appears only when the Gateway accepts Always for that command | **Don't allow**                                                                      |
+| Clawboo Native command                                    | **Run it**       | Not offered: every command asks                                                                                                           | **Don't allow**. The agent cannot ask about another command for the rest of that run |
+| Connector call                                            | The allow button | Tick **Do not ask again for this for 30 days**, then allow. Only some cards offer it                                                      | **Don't allow**. The call is refused                                                 |
+| Risky hand-off                                            | **Allow**        | Not offered in the dashboard                                                                                                              | **Don't allow**. The hand-off is skipped and the leader is told                      |
 
-### 3. Watch the per-Boo indicator
+A few details decide what you see:
 
-While a Boo has an exec approval pending, its node in the [Ghost Graph](/using/ghost-graph) shows a pulsing **amber ring** around the circle. The ring is matched by `agentId`, so it points at exactly the Boo waiting on you. It clears the instant you resolve.
+- **Always on the Board and in chat.** The command card offers **Always** every time. When the Gateway does not accept it for that command, for example because the agent is set to **Always Ask**, the card shows an error. Choose **Allow Once** or **Deny** instead.
+- **The 30-day box on connector cards.** It appears only when the call was made under access you shared with the agent, Clawboo could read the request, and the call is not one that must ask every time. A run that has read private data and also taken in outside content asks before any call that could send data out, and those cards never offer the box.
+- **Hand-offs in a row.** A leader's hand-offs in one turn start one after another, so the hand-offs after a risky one wait for your answer too.
 
-## An exec approval outlives your browser tab
+## What Always remembers
 
-Clawboo's server keeps its own long-lived connection to the Gateway and declares, as a browser tab does, that it can answer exec approvals. When a request arrives it mirrors it into the shared queue as a `kind='exec'` row, keyed by the Gateway's own request id, which is what makes a redelivered request land on the card that is already there instead of a duplicate.
-
-What that buys you:
-
-- **Close the tab** while a command is waiting and the card is still there when you come back.
-- **Refresh** mid-decision and you get the same card, not a second one.
-- **Open a tab halfway through the window** and the waiting command is already in the queue.
-- Before this, a browser tab was the only connection that could answer, so a command raised with no tab open was not queued for later. It was refused outright, reported as `exec denied: Headless runs cannot wait for interactive exec approval`.
-
-What the window actually is:
-
-- The countdown is the deadline the Gateway sent with the request. When a request arrives without one, Clawboo holds the mirrored card for **30 minutes**, the window it expects the Gateway to be using.
-- Once that passes, a sweep running every 30 seconds retires the row to `expired`. Deliberately not to `deny`: nobody answered, and recording an expiry as a denial would claim a human refused something nobody was asked about.
-
-## Native run_command approvals
-
-A [Clawboo Native](/runtimes/native) Boo can ask to run a program, but only when you have switched that on for it (**Permissions** tab → **Running commands**) and only on a run that has a working folder, which in practice means a board task. On 1:1 chat, team-room turns, dispatch turns, and on Windows, the tool is absent rather than gated, so nothing asks.
-
-It raises the same command card a mirrored exec request does. The headline names the Boo and says it wants to run a command on this computer, the chip reads **Runs a command**, the **Command** and the **Folder** sit inline rather than behind the disclosure, and the allow button reads **Run it**.
-
-What is different about it:
-
-- **Run it or Don't allow, and nothing else.** There is no allowlist at this tier, so **Always** is never offered. A command you allow today asks again the next time, because an "Always" that behaved as an allow-once would be a control that lies.
-- **The card does not tell you why.** The Boo supplies a one-sentence reason with the call and Clawboo stores it on the row, but the command card does not display it. What you see is the command and the folder.
-- **The card is held for 10 minutes**, and the run makes no other progress while it waits. A card nobody answers blocks the task for the full window.
-- **Ten commands per run.** After ten asks in one driver run the tool refuses to ask again. That ceiling is per driver run, not per task, so a task that is re-driven starts again at zero.
-- **Declining can end the task, not just the command.** A refusal latches the tool for the rest of that run, and a second attempt trips the host circuit breaker, which aborts the board task.
-- **It leaves no tool-audit row.** A `run_command` execution is not written to the tool audit, so it does not appear in `GET /api/tools/audit`.
+- **An OpenClaw command.** The Gateway lets that agent run the command in that folder without asking, with no end date. To take it back, open the agent's page, then **Details** > **Permissions**, and revoke it under **Commands this Boo can run without asking** (see [Command permissions](/using/command-permissions)). Revoking does not undo a command that already ran.
+- **A connector tool.** Clawboo stops asking about that tool, with any arguments, for 30 days, for the access you shared with that agent. Calls that change or delete something still ask every time, because a second check asks about them whatever you ticked, and so do calls that must always ask. To end it early, stop sharing the connector with the agent on the graph ([Connectors](/using/connectors)). Sharing it again starts with nothing remembered.
+- **A risky hand-off.** The dashboard never remembers one. An answer of `allow_always` sent through the API is different: that leader is never asked about a risky hand-off again, with no end date, and the dashboard has no control to undo it. Boo Zero leads its teams when it is available, so for Boo Zero one such answer covers every team.
 
 <Warning>
-The command on the card is the program Clawboo resolved and the program it will spawn, so what you approve is what runs, and it runs as one program with no pipes, redirects, or shell operators. Clawboo does refuse a list of 59 program names before it raises the card, and that list is a speed bump rather than a boundary: several ordinary programs reach a shell without appearing on it, and the repo carries a test asserting they are accepted so no future reader mistakes the list for a sandbox. **The person answering the card is the boundary.** An approved command runs in the Boo's working folder, as you, with access to the network.
+
+Approve a command only when you understand it. An approved command runs on this computer as your user account, with network access. Clawboo cannot undo what it did.
+
 </Warning>
 
-## What the cards report
+## If nobody answers in time
 
-### Exec approval card
+- **OpenClaw command.** The card goes away and Clawboo records the request as expired, not as a refusal. Clawboo's server keeps a copy of each request, so the card waits for you even while no browser tab is open. If an open tab received the request live, the agent's one-to-one chat in that tab also notes that the approval timed out.
+- **Clawboo Native command.** The command does not run, and the agent cannot ask about another one for the rest of that run. The run waits while the card is open.
+- **Connector call.** The call is refused.
+- **Risky hand-off.** The hand-off is skipped and the leader is told. When the hand-off came from a task, that task gets the comment `Delegation to <name> not approved (<reason>); skipped.`
 
-| Field                                | Source                                                         | Notes                                                                                                         |
-| ------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Agent name                           | Resolved from `agentId` (or the session key) against the fleet | Falls back to the raw `agentId` or "Unknown Agent"                                                            |
-| `command`                            | The request payload                                            | Shown in a code block                                                                                         |
-| `cwd` / `host` / `path` / `security` | The request payload                                            | Rendered as detail rows only when present                                                                     |
-| `expires Ns`                         | `expiresAtMs − now`                                            | Counts down to the deadline the Gateway sent. A mirrored card that arrived without one is held for 30 minutes |
-| error                                | The request payload                                            | Red line, shown only if set                                                                                   |
+## What a card does not show
 
-A card restored from Clawboo's own queue deliberately carries less than the live one. `host`, `security`, the resolved path and the session key are null rather than invented, so what you get back is the command and the folder.
+- **The folder, on the Board and in chat.** A command card there shows only the command, and cuts a long one off. Open the **Approval queue** in **Governance** to see the full command and its folder.
+- **Why the agent wants it.** No card shows an agent's reason for a command, even when it gave one.
+- **Every field at once.** A request card shows the deciding fields first. The rest, and any note from the agent, are behind **Show N more details**.
+- **Secrets.** Values that look like passwords or keys are masked.
+- **An exact countdown.** The seconds left are worked out when the card is drawn, so treat them as approximate.
+- **Past answers.** The dashboard keeps no list of requests you already answered. The audit log in **Governance** records risky hand-off decisions.
 
-### Tool / delegation card
+## Check that it worked
 
-| Field         | Source                        | Notes                                                                                                                         |
-| ------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `toolName`    | The `tool_call_approvals` row | Input to `humanizeApproval`, not rendered raw. The card shows the app or agent and a plain-language effect instead            |
-| `reason`      | The row                       | The agent's own words. Quoted, attributed, and marked unverified; never used as the headline                                  |
-| `argsSummary` | The row (scrubbed JSON)       | Re-masked at display time. Decisive fields are lifted inline; the rest sits behind one disclosure rather than being truncated |
-| `expires Ns`  | `expiresAt − now`             | The approval's own TTL                                                                                                        |
-
-<Info>
-**The two surfaces overlap now.** They still speak different decision strings: an exec decision is `allow-once` / `allow-always` / `deny` (with hyphens) and is logged to `approval_history`, while a tool or delegation decision is `allow_once` / `allow_always` / `deny` (with underscores) and is written to the `tool_call_approvals` row. What is no longer true is that they write different tables. A mirrored exec request is itself a `tool_call_approvals` row, carrying `kind='exec'`, and a native `run_command` request is a row in that same table under the ordinary `kind='tool'`. The buttons read the same in the UI; the wire values differ.
-</Info>
-
-## When Always is offered
-
-**Always** is not on every card, and the card you are looking at decides it.
-
-| Card                             | Where it comes from                                                    | Is **Always** offered?                                                                                                                    |
-| -------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| The live exec card               | An OpenClaw exec request arriving on this tab's own Gateway connection | Yes. All three buttons, every time, with no gate                                                                                          |
-| A queue card, `kind='exec'`      | The same request, mirrored into Clawboo's queue by the server          | Only when the Gateway said it would accept an Always for this request                                                                     |
-| A queue card, `run_command`      | A native Boo's shell                                                   | Never                                                                                                                                     |
-| A queue card, tool or delegation | The broker or the delegation gate                                      | Only when the request was not raised as unrememberable, Clawboo read it confidently, and it was made under a grant a rule can be bound to |
-
-On a mirrored exec card the answer is worked out on the server when the request arrives, not guessed at render time. **Always** is offered only when both of these hold, and withheld when either fails:
-
-1. The request's `ask` is not `always`. A Boo set to **Always Ask** is a Boo that can never remember a command, so offering the button would be a control that lies.
-2. The request's `unavailableDecisions` list does not contain `allow-always`. That is the Gateway's own statement about this particular request.
-
-For a tool or delegation approval, a prompt is marked unrememberable when it is raised. That covers a call whose run has accumulated the [lethal trifecta](/appendices/glossary) and a call made after the run ingested untrusted content. Both are properties of _this run_ rather than of the tool, so a standing allow would authorize a future run that looks nothing like it. Clawboo also withholds it when it could not read the request confidently, and when the call was made through a brokered app rather than under a grant it could bind a rule to.
-
-When the checkbox is there, its label tells you the scope of what you are about to remember: **Always allow this command in this folder** on an exec card, **Do not ask again for this for 30 days** on a tool or delegation card.
-
-## Verify it worked
-
-- The resolved card disappears from the board's **Needs you** column (its amber count drops by one, and the column reads "Nothing needs you right now" once nothing is left) and from any in-chat tray. For an exec approval, the Boo's amber ring also clears in the Ghost Graph.
-- For an exec **allow**, the agent resumes and (after the followup) reports the command's output back into the chat transcript.
-- For a tool/delegation approval, the waiting tool call / delegation proceeds (on allow) or is rejected (on deny) within a few seconds.
-- The decision history is queryable: `GET /api/approvals?agentId=<id>` returns the persisted exec-approval decisions for that agent (most recent first).
+- The card leaves **Needs you**, the chat tray and the queues. When nothing is left, **Needs you** reads "Nothing needs you right now".
+- An allowed command runs and the agent carries on. After **Always**, if the command's output does not reach the chat, Clawboo asks the agent to run it again so you see the result. The command is on the agent's list by then, so no new card appears. After **Allow Once** Clawboo does not do this; if no output appears, ask the agent to run the command again.
+- A refused or expired hand-off leaves the "not approved" comment on the task it came from.
+- On the [Org chart](/using/org-chart) and team graphs, an OpenClaw agent with a command waiting shows a pulsing amber ring. The ring appears only for requests this browser tab received while it was open.
 
 ## Troubleshooting
 
-<Warning>
-**A card vanished before you resolved it.** An exec card is retired when the deadline the Gateway sent with the request passes, and a mirrored card that arrived with no deadline is held for 30 minutes. An expiry is a non-decision, not a deny: the row is retired to `expired`, and nothing is recorded as a human refusing anything. Resolve promptly, or set the agent's policy to **Ask for Unknown** so only unfamiliar commands prompt. Note that retiring an expired exec card writes no audit row and emits no observability event, so exec timeouts are absent from the audit trail where other expiries appear.
-</Warning>
+<AccordionGroup>
 
-<Warning>
-**The agent allowed a command but produced no output.** In webchat-only setups the Gateway's internal `deliver:true` followup can drop the output. Clawboo runs a best-effort recovery that re-sends the command with `deliver:false`; if it still does not land, ask the agent to run the command again.
-</Warning>
+<Accordion title="A card disappeared before I answered">
 
-<Danger>
-**Always outlives the run.** For a tool approval it mints a standing rule bound to the grant the call was made under, covering any arguments for that tool, and it expires after 30 days: a rule with no expiry would be a permission nobody revisits. Revoking the grant deletes its rules, so a later re-grant cannot silently inherit approvals you gave under different circumstances. Use **Allow Once** when you want to keep the gate for next time.
+It ran out of time. The waits are in [What asks for your approval](#what-asks-for-your-approval). For OpenClaw agents that ask too often, set **Command Execution** to **Ask for Unknown**, so only commands the agent is not already allowed to run ask. See [Command permissions](/using/command-permissions).
 
-**For an exec approval, Always is no longer a one-way door.** The Gateway remembers the command, and what it remembered is listed under **Commands this Boo can run without asking** on the Boo's **Permissions** tab, where you can revoke it. See [command permissions](/using/command-permissions) for what each entry means, what revoking warns you about, and what it cannot reach. There is still no undo for the command that already ran.
+</Accordion>
 
-**Sometimes there is no Always at all.** Which card you are looking at decides it, and a native `run_command` card never offers it. The cases are listed in _When Always is offered_ above.
-</Danger>
+<Accordion title="I pressed Always and the card shows an error">
 
-## Related
+The Gateway did not accept **Always** for that command. An agent set to **Always Ask** never remembers a command, and the Gateway can refuse it for other commands too. Press **Allow Once** or **Deny**, or change the agent's **Command Execution** setting first.
 
-- [Governance](/concepts/governance), how budgets, circuit breakers, caps, and approvals form the guardrail layer
-- [Command permissions](/using/command-permissions), the standing grants an exec **Always** creates, and how to take one back
-- [Governance dashboard](/using/governance-dashboard), reuses the same tool-approval queue
-- [The Ghost Graph](/using/ghost-graph), where the per-Boo pending-approval ring renders
-- [`/api/governance` reference](/reference/rest-api/governance), the `/api/approvals`, `/api/tools/approvals`, and delegation-approval shapes
+</Accordion>
+
+<Accordion title="I allowed a command but its output never appeared">
+
+After **Allow Once**, Clawboo does not ask the agent to repeat the command, and the Gateway may not send the output to the chat. Ask the agent to run the command again.
+
+</Accordion>
+
+<Accordion title="clawboo could not reach the Gateway to send that decision.">
+
+Your tab has no connection to the OpenClaw Gateway, and Clawboo's server could not pass your answer on either. Check that OpenClaw is connected under **Settings** > **Workspace** > **Runtimes**, then answer again before the card expires.
+
+</Accordion>
+
+<Accordion title="An agent ran a command without asking me">
+
+Claude Code, Codex and Hermes never ask before a command. An OpenClaw agent runs without asking when it is set to **Run Freely**, or when the command is already on its list under **Commands this Boo can run without asking**. A Clawboo Native agent asks before every command.
+
+</Accordion>
+
+<Accordion title="clawboo could not tell which agent asked for this.">
+
+The request arrived with no agent identity, which is how connector calls from OpenClaw agents arrive. Decide from the details on the card. The card appears in every chat and under every board filter.
+
+</Accordion>
+
+<Accordion title="A leader is waiting, but I see no card">
+
+Set the board's team filter to **All teams**, or open the **Approval queue** in **Governance**, which lists every pending request. A risky hand-off waits only 5 minutes, so it may have expired already.
+
+</Accordion>
+
+</AccordionGroup>
+
+<Accordion title="Under the hood">
+
+- **OpenClaw requests.** Clawboo's server keeps its own connection to the Gateway and copies each command request into Clawboo's tool-call approvals table as a row of kind `exec`, keyed by the Gateway's id. Every 30 seconds it marks rows past their deadline `expired`, never `deny`, and writes no audit row for them.
+- **Answers.** A tab with its own Gateway connection sends the answer straight to the Gateway (`exec.approval.resolve`). Every other answer goes through `POST /api/tools/approvals/:id/resolve`, which answers the Gateway first for an `exec` row. Answering twice is safe: the second answer changes nothing.
+- **Clawboo's own requests.** Connector calls, Clawboo Native commands and risky hand-offs are rows in the same table, and the dashboard checks for new ones every 3 seconds. Clawboo records answers as `allow_once`, `allow_always` and `deny`; OpenClaw's words are `allow-once`, `allow-always` and `deny`.
+- **Remembered answers.** A connector **Always** writes a standing rule bound to the access you shared, expiring after 30 days, and stopping the share deletes its rules. A risky hand-off is stored per leader under the scope `delegate:code`, and an earlier `allow_always` row for that leader and scope skips the card.
+- **Cleanup.** Once an hour, Clawboo expires any request still pending after `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default). That cleanup does not lengthen the waits on this page.
+- **History.** `GET /api/approvals?agentId=<id>` lists the OpenClaw command decisions made from tabs with a Gateway connection, newest first.
+- Shapes and codes: [Governance API](/reference/rest-api/governance) and [Tools and MCP API](/reference/rest-api/tools-and-mcp). Every waiting time is in [Limits and defaults](/reference/limits-and-defaults).
+
+</Accordion>
+
+## Next steps
+
+- [Command permissions](/using/command-permissions): choose when OpenClaw and Clawboo Native agents ask, and revoke what **Always** allowed.
+- [Connectors](/using/connectors): share connectors with agents and see which calls ask.
+- [What agents can do](/concepts/permissions): what each runtime can reach without asking.
+- [Budgets and guardrails](/concepts/governance): the risky hand-off check and the other limits on agents.
+- [Board](/using/board): everything else that waits in **Needs you**.

@@ -1,190 +1,144 @@
 ---
-title: The board
-description: "Clawboo's durable, transactional task-coordination substrate: state machine, atomic claim, dependencies, and crash recovery."
+title: 'The board'
+sidebarTitle: 'The board'
+description: "How tasks move on a team's board: statuses, Needs you, one agent per task, steering by comment, and when work restarts by itself."
+keywords:
+  [
+    'board',
+    'kanban',
+    'tasks',
+    'task status',
+    'Needs you',
+    'claim',
+    'dependencies',
+    'steering',
+    'auto-refire',
+    'retry',
+  ]
 ---
 
-The board is Clawboo's durable, transactional source of truth for task coordination. It is a set of SQLite tables, `tasks`, `task_deps`, `task_comments`, `workspaces`, and `execution_processes`, fronted by a single data-access layer that every other subsystem goes through. When a team delegates work, the work becomes a board task; when an agent picks up work, it atomically claims a board task; when a run completes, the outcome lands on the board. Refresh the page, restart the server, run twelve agents at once against one database file; the board survives all of it.
+The **board** is a team's task list. Every piece of work a teammate is asked to do becomes a task card on it. A card appears when Boo Zero hands work to a teammate, when you give an agent a task with **New task**, and when an agent Routine fires. The board is the record of who is doing what. The chat only describes it.
 
-This page explains what the board is and isn't, the task lifecycle and its legal transitions, the atomic claim that makes single-assignee work race-free, dependency chains, the link to per-task worktrees, the write-contention recipe that keeps many concurrent writers honest, and how orphaned and stale work is recovered.
+Use this page to understand what a card's status means, why a task is waiting, and when work restarts on its own. For the controls, see [Track work on the board](/using/board).
 
-## What it is, and what it isn't
+## The mental model
 
-The board is **canonical for task and coordination state**; chat is **narration** of that state. A board mutation is the decision of record. A chat message is a description of a decision, never a write path back to the board. The REST handlers reflect each board mutation into the team chat room _after_ the canonical write completes, best-effort, precisely so the narration can never become the authority.
-
-The board does **not** duplicate agent or session state. _Who exists_ lives in the agent [registry of record](/appendices/glossary); _how an agent runs_ lives in its [runtime](/appendices/glossary). The board references agents and runtimes by id and owns only _task_ state: title, status, assignee, priority, dependencies, the worktree pointer, the cost ledger, and a verification verdict. It is the dispatcher; the [worktree](/concepts/worktrees-and-handoff) is the world the dispatched work happens in.
-
-The board is the substrate beneath [delegation and orchestration](/concepts/delegation-and-orchestration): the orchestrator turns structured delegation signals into board tasks, and the board's primitives (claim, dependencies, status transitions) are what make that orchestration durable and race-free.
-
-## The task lifecycle
-
-A task moves through seven statuses. The full set is `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, and `cancelled`. `done` and `cancelled` are terminal; they have no outgoing transitions. A newly created task defaults to `todo` (immediately claimable) unless the caller asks for `backlog` (triage-only, not yet ready to work).
-
-<Note>
-The Board panel does not give every status a column of its own. It shows **Needs you**, Backlog, To do, In progress, Done and Cancelled: an `in_review` task stays in In progress under a **Verifying** mark while its check runs, and every `blocked` task needs a person, so it sits in Needs you. Needs you also holds the other tasks nothing will move on their own, which the server works out from each task's status, bound agent, run ledger and verdict (the task's `attention`), for example an `in_progress` task with no agent and no running run (`unstarted`). The statuses and the transition table below are unchanged by this grouping. See [Using the board](/using/board#the-columns).
-</Note>
+A card moves through statuses, mostly from left to right: **Backlog** to **To do** to **In progress** to **Done**. One agent owns a card while it works on it. A card can wait on other cards. If the agent working on a card stops responding, the card goes back to To do, and Clawboo decides whether to run it again.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> backlog: create (status: backlog)
-    [*] --> todo: create (default)
-
-    backlog --> todo
-    backlog --> blocked
-    backlog --> cancelled
-
-    todo --> in_progress: atomic claim
-    todo --> blocked
-    todo --> backlog
-    todo --> cancelled
-
-    in_progress --> in_review
-    in_progress --> done: gated
-    in_progress --> blocked
-    in_progress --> todo: release
-    in_progress --> cancelled
-
-    in_review --> done: gated
-    in_review --> in_progress
-    in_review --> blocked
-    in_review --> cancelled
-
-    blocked --> todo
-    blocked --> in_progress
-    blocked --> backlog
-    blocked --> cancelled
-
-    done --> [*]
-    cancelled --> [*]
+flowchart LR
+    BL[Backlog] --> TD[To do] --> IP[In progress] --> D[Done]
+    IP --> NY[Needs you]
+    NY --> TD
 ```
 
-The transition table is the single authority on what is legal. It is declared exactly once in code, in [`@clawboo/board-core`](/reference/packages/board-core) — the server enforces it inside the write transaction and the board UI derives its status editor from the same module, so the two cannot drift:
+## Statuses and columns
 
-| From          | Legal `to` states                                   |
-| ------------- | --------------------------------------------------- |
-| `backlog`     | `todo`, `blocked`, `cancelled`                      |
-| `todo`        | `in_progress`, `blocked`, `backlog`, `cancelled`    |
-| `in_progress` | `in_review`, `done`, `blocked`, `todo`, `cancelled` |
-| `in_review`   | `done`, `in_progress`, `blocked`, `cancelled`       |
-| `blocked`     | `todo`, `in_progress`, `backlog`, `cancelled`       |
-| `done`        | _(terminal)_                                        |
-| `cancelled`   | _(terminal)_                                        |
+| Status      | What it means                                                                                | Where the card shows                    |
+| ----------- | -------------------------------------------------------------------------------------------- | --------------------------------------- |
+| Backlog     | Parked. Not ready to work yet.                                                               | Backlog                                 |
+| To do       | Ready, and waiting for its agent to start.                                                   | To do                                   |
+| In progress | An agent is working on it.                                                                   | In progress                             |
+| In review   | The finished work is being checked.                                                          | In progress, with a **Verifying** badge |
+| Blocked     | Stuck: a run failed or went quiet, a check could not pass it, or an agent marked it blocked. | Needs you                               |
+| Done        | Finished.                                                                                    | Done                                    |
+| Cancelled   | Dropped.                                                                                     | Cancelled                               |
 
-A few rules are worth calling out:
+Done and Cancelled are final: a card in either cannot move again. The board does not let you move a card into In progress or In review by hand, because each means an agent or a check is working on it. A task that reaches In progress some other way, with no agent and no run behind it, shows in Needs you as **Not started**.
 
-- **Same-status is an idempotent no-op** and always allowed, so re-emitting a transition does no harm.
-- **`in_progress → todo` is the release path.** A task can fall back to `todo` to be re-claimed; doing so clears the assignee (and the assignee runtime), so the [atomic claim](#the-atomic-claim) can re-acquire it. It also clears the stored verification verdict, because releasing for re-claim is a cross-runtime rebind boundary; a previous runtime's failing verdict must not gate a fresh runtime's legitimate completion. The release also detaches the task from any resident team orchestrator still mapping it to a session, since that mapping would otherwise keep refusing the re-claim. (When a person makes the move, the person-move handling below stops that run instead.)
-- **`in_progress` and `in_review` are "locked" statuses.** While a task is in one of them it is actively owned, and its assignee must not be reassigned.
-- **A finished task records when it finished.** The first move to `done` or `cancelled` stamps `completed_at`; writing the same terminal status again (a run's late result, say) does not move it. A person finishing a task by hand may give an earlier time, the day the work was really done, as long as it falls between the task's creation and now; otherwise the move is refused with `invalid_completed_at`. The board's calendar places finished work on that day.
-- **A person's move is final.** A status change through the board's `PATCH` route (the Board panel and the task drawer) is a person deciding the task. Unless it moves the task into `in_progress` or `in_review`, it stops the run working on the task, whichever path started it (the team engine, the executor runner, or an OpenClaw routine fire), and closes that run's execution as `cancelled`. A cancel also cancels the plan steps waiting on the task (see [Dependencies](#dependencies)), whoever delegated the task is told when a person marks it done or cancels it, and the run's late result no longer overrides the move. Moved back to `todo`, a task bound to an agent is started again (or left to the ready-pump, which the move wakes), and one with no agent bound waits in Needs you. See [Delegation and orchestration](/concepts/delegation-and-orchestration#failure-handling).
+## One agent per task
 
-Status changes go through one function that enforces the table against the freshly read row, inside a write transaction, so a stale pre-check from a concurrent caller can never sneak through. A REST-layer pre-check, if any, is only fast-fail ergonomics; the transactional check is the real gate. An illegal transition returns a `409` from the REST layer.
+A task is worked by one agent at a time. When an agent starts a task, it claims the card, and only one claim can win, even when several agents try at the same moment. The others see the card as taken and leave it.
 
-<Info>
-Reaching `done` carries an intrinsic verification gate. Any transition to `done` is rejected with `verification_required` when the task carries a non-promotable verification verdict (a failing deterministic gate, including red-gate `completed_with_debt`). This is the builder-≠-judge rule enforced in the board itself, un-bypassable by any caller except an explicit, audited `humanOverride`. A task with *no* stored verdict is unverified, not failing, and lands `done` normally. See [Verification](/concepts/verification).
-</Info>
+Each task also remembers which chat it came from: General or one of the team's rooms. That chat's coordinator runs it (see [Teams, rooms and runtimes](/concepts/teams-and-planes)). If the room was deleted, General runs it.
 
-## The atomic claim
+## Tasks that wait on other tasks
 
-A task is worked by exactly one assignee. The board guarantees this with a single conditional UPDATE rather than a read-then-write:
+A task can depend on other tasks. It becomes ready only when every task it depends on is Done, and ready tasks start in order of priority. A plan of hand-offs works this way: each step waits for the one before it. Clawboo refuses a dependency that would make a loop, because a loop could never finish.
 
-```sql
-UPDATE tasks
-   SET assignee_agent_id = ?, assignee_runtime = ?, status = 'in_progress', updated_at = ?
- WHERE id = ?
-   AND status = 'todo'
-   AND assignee_agent_id IS NULL
-   AND dropped = 0
-RETURNING *
-```
+When a handed-off task fails, or you cancel a task, the tasks still waiting on it in To do or Backlog are cancelled too. That way they do not sit there forever. Whoever handed out the work is told which steps were dropped.
 
-Because the guard (`status='todo' AND assignee IS NULL AND dropped=0`) is part of the same atomic statement that does the write, at most one concurrent caller can win. The winner gets the updated row back; every loser gets zero rows.
+## Comments steer the work
 
-That zero-row result is **data, not an error**. The claim function returns `{ ok: false, reason: 'conflict' }` and the REST layer maps it to a `409`. The rule the whole system follows is **never retry a 409**; a conflict means someone else legitimately owns the work, so a retry would either no-op or fight for a task that is already taken. (A `404` `not_found` distinguishes "the task doesn't exist" from "someone already claimed it.")
+A comment you add to a task is a reply to the agent the task belongs to: the agent working on it, or the agent it is bound to while it waits. Write it in the board's task drawer, in a team chat's **Tasks** card, or in **Tasks & Routines** on the agent's page. What the reply does depends on where the task stands:
 
-<Tip>
-The "never retry a 409" rule is structural. The contention layer that wraps the claim retries *only* transient SQLite lock errors; it explicitly returns a 0-row result to the caller unretried, so application-level conflicts and database-level lock contention are handled by completely different mechanisms. See [the contention recipe](#the-contention-recipe).
-</Tip>
+- **In progress.** The reply goes into the running work. Clawboo Native, Claude Code, Codex and OpenClaw take it at their next step. Hermes pauses and resumes the same session with your reply as its next input. An older Codex CLI without `codex app-server` cannot take it mid-run, so it waits for the next run.
+- **Waiting on you, or in To do.** The reply starts the agent on the task again, as **Retry** does, so answering a blocked task needs no second click. Replies sent within 15 seconds of each other start one run. A plan step that still waits on an earlier task keeps the reply until it can start.
+- **Being checked, or in Backlog.** The reply waits in the agent's mailbox, which the agent reads when its next run starts.
+- **Done or Cancelled.** A finished task cannot run again, so the reply is saved but not sent. You can send it instead as a follow-up task for the same agent.
 
-Stale re-claim of a dead, abandoned `in_progress` task is deliberately _not_ the claim's job. Liveness lives in one place; [reconciliation](#orphan-and-stale-reconciliation) releases such a task back to `todo`, after which an ordinary claim re-acquires it.
+Clawboo puts every reply it sends into the agent's mailbox first, so a reply that misses a run is read at the next one. Under each reply, a note says where it went. Clawboo passes on the first 1,000 characters. See [Steer a running task](/using/board#steer-a-running-task) for each case, and [Choose a runtime](/runtimes/index) for how each runtime takes a reply mid-run.
 
-## Dependencies
+## Needs you
 
-Tasks form a blocks / blocked-by graph in the `task_deps` table. Linking a dependency means "this task won't become ready to work until that task is `done`." A composite primary key on `(task_id, depends_on_task_id)` prevents duplicate edges, and inserts are conflict-tolerant, so re-linking is harmless. A link that would close a cycle — directly (`A → B`, then `B → A`) or transitively — is refused at write time, because a cycle can never resolve: readiness requires every dependency to be `done`, so each task in the cycle would sit un-ready forever with nothing surfacing the stall. The reachability check runs in the same transaction as the insert, so concurrent links cannot race one in.
+**Needs you** is the board's first column. It holds everything that will not move without a person: pending approvals, and tasks that are stuck for one of these reasons.
 
-A task is **ready** when it is `todo`, not dropped, and _every_ one of its dependencies is `done`. Plans become dependency chains: each step depends on the prior step, and an orchestration ready-pump fires the next step the moment its blocker completes. Ready tasks are ordered by priority (descending), then by recency.
+| Label        | What happened                                                |
+| ------------ | ------------------------------------------------------------ |
+| Failed       | The run ended with an error.                                 |
+| Timed out    | The agent stopped responding and the run was ended.          |
+| Stopped      | You stopped the run. It will not restart on its own.         |
+| Needs review | A check could not pass the work.                             |
+| Blocked      | An agent marked it blocked.                                  |
+| Unassigned   | No agent is bound to it, so no one will pick it up.          |
+| Not started  | It is in progress, but no agent and no run is working on it. |
 
-Dependencies also drive failure recovery. When a blocker fails, moves to `blocked` or otherwise can't reach `done`, its downstream chain can never become ready and would otherwise sit as permanent ghost `todo` cards. The board can cancel the still-pending (`todo` / `backlog`) transitive dependents of a failed task via a recursive walk of the dependency graph, returning the cancelled rows so the orchestrator can report the stalled plan to the team leader. Tasks already `in_progress`, `done`, or `cancelled` are left untouched. The same walk runs when a person cancels a task on the board: a cancelled step can never be `done`, so the steps waiting on it are cancelled with it and returned to the caller.
+Each card leads with the one action that gets it going: **Retry** runs it again, **Assign** hands a task with no agent to one, and **Review** or **Open** opens the task. Its **More** menu holds the rest, including **Dismiss**, which moves the task to Cancelled for good. Failed and Timed out show a count, such as **Failed 3×**, when it has happened more than once in a row.
 
-The board similarly walks the _parent_ chain (via the self-referential `parent_task_id`) with a recursive query to compute a task's ancestors, which is how delegation depth is enforced: the orchestrator and the board's capped create path refuse a _create_ once the parent's ancestor chain has reached the depth ceiling (default 2), while the executor runner refuses a _dispatch_ only for a task whose own ancestor chain is already past it. The two comparisons differ on purpose: the invariant is that anything creatable is dispatchable, so a task sitting exactly at the ceiling still runs. That create path adds two ceilings of its own: a per-parent live-child count (default 24), so an agent looping on `create_subtask` cannot quietly fill the board with rows, and a rolling-window rate on ROOT creation (default 30 per 5 minutes), which bounds the other runaway shape: a loop that files parentless tasks forever. Both recursive reads validate their raw SQL output with a schema at runtime rather than trusting the type system over a raw query.
+## When work restarts by itself
 
-## Worktree linkage
+Clawboo starts a task in To do on its own when it is ready and bound to an agent. It holds back when you stopped the task's last run, or when its last 3 runs in a row failed or timed out. A successful run, or a Stop, resets that count.
 
-When a task involves file mutation, it gets an isolated git [worktree](/concepts/worktrees-and-handoff) so concurrent runs never collide. The board doesn't own that worktree; it owns a _pointer_ to it. Two columns on the task, `worktree_ref` and `branch_ref`, record where the isolated work lives; a `workspaces` row tracks the worktree's own lifecycle (`active`, then `archived` on cleanup or `stale` on garbage collection). The board is annotating the durable task with a filesystem location; the worktree subsystem owns the actual checkout and the system-of-record files inside it.
+| What happened                                                | Where the task goes                                        | Does it run again by itself?                                        |
+| ------------------------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| A handed-off task failed or went quiet in team chat          | Blocked, shown in Needs you as **Failed** or **Timed out** | No. Whoever handed it off is told, and you can **Retry** it.        |
+| The process running it died, or the Clawboo server restarted | To do                                                      | Yes, until 3 runs in a row have failed. Then it waits in Needs you. |
+| You pressed **Stop**                                         | To do                                                      | No. It waits in Needs you as **Stopped**.                           |
 
-Read-only or research tasks don't pay the worktree cost; provisioning a worktree for a non-file-mutating task is refused (the REST layer returns `422`). The worktree is for the concurrency boundary that file-mutating work needs.
+Clawboo notices a dead run in two ways. A running task proves it is alive every 30 seconds; after 3 minutes with no sign of life, the run is timed out and the task returns to To do. When the server starts, runs left over from before that have shown no sign of life for 3 minutes are marked failed, and their tasks return to To do. The limits for a teammate that goes quiet in team chat are on [How work is delegated](/concepts/delegation-and-orchestration).
 
-## Execution processes
+## The board and the chat
 
-Each spawned run for a task is recorded as an `execution_processes` row, a per-run ledger that exists for any executor. An exec row is opened only _after_ a successful claim, starts in `running`, and is closed with an outcome (`succeeded`, `failed`, `timed_out`, or `cancelled`) plus an optional token / cost ledger and git before/after commit checkpoints. This ledger is what crash recovery reads on restart, which is why an executor that starts work must open one and close it.
+The board is the record of the work. Chat messages describe it, but ordinary chat text does not change the board: only hand-offs (a delegate tool call, or a `<delegate>` or `<plan>` in a reply, see [How work is delegated](/concepts/delegation-and-orchestration)), Clawboo's own task handling, your moves on the board, and agents' task tools do.
 
-The ledger is also where cost lives. Each run records its cost, its tokens, and where the cost came from (the runtime's own report, or Clawboo's estimate from the run's token usage or text length) on its own row, and a task's cost is the sum of its runs. Recording a cost never changes a row's status, so it can land on a run that a Stop already closed.
+When the board changes through Clawboo's board API, which includes your moves and comments in the dashboard, Clawboo also posts a short system line into the agents' peer room. The dashboard does not show that room; see [Peer chat](/concepts/peer-chat).
 
-## The contention recipe
+## Where the work happens
 
-Clawboo is team-first: many agents may write one SQLite file. Without care, concurrent writers hit SQLite's single-writer lock and degrade into a "convoy." The board's answer is a layered recipe: five connection-level pragmas plus two application-level pieces.
+Most tasks run through team chat. An agent Routine that names no repository runs on a separate path (see [Two ways Clawboo runs agents](/intro/how-it-works#two-ways-clawboo-runs-agents)). Neither gets a git worktree of its own or an automatic check. Coding runtimes start in the Clawboo server's own folder (`~/.clawboo` for an npm install), with their own approval prompts turned off. They can read and change any file your user account can. A task lands in Done when its agent reports back.
 
-Every connection sets, at open:
+Runs that name a repository, started through the runtime run API or by an agent Routine (the repository is set through the API), get an isolated worktree for work that changes files. If the agent changed files there, the change is checked before the task can be Done. A worktree keeps file changes apart; it is not a sandbox. See [What agents can do](/concepts/permissions), [When work is checked](/concepts/verification) and [Worktrees and handoff](/concepts/worktrees-and-handoff).
 
-| Pragma               | Value        | Why                                                                                  |
-| -------------------- | ------------ | ------------------------------------------------------------------------------------ |
-| `journal_mode`       | `WAL`        | Write-ahead logging lets readers and a writer proceed concurrently.                  |
-| `busy_timeout`       | `250` (ms)   | Wait a quarter-second for the write lock, then hand off to the jittered retry below. |
-| `wal_autocheckpoint` | `50` (pages) | A passive checkpoint keeps the WAL lean without an app-level write counter.          |
-| `synchronous`        | `NORMAL`     | Standard WAL durability/performance balance.                                         |
-| `foreign_keys`       | `ON`         | Referential integrity is enforced.                                                   |
+## What you control
 
-On top of those, the board's data-access layer adds two application-level mechanisms:
+- **Give an agent a task**: use **New task** on the board. It starts at once if the agent is free, and waits in To do otherwise.
+- **Move a card**: drag it, or change its status in the task drawer. Your move is final. Clawboo stops any run working on the task, and tells whoever handed it off when you finish or cancel it. The agent cannot move the card back: its own status changes are refused until a new run on the task starts.
+- **Steer a task**: reply on it in the board's task drawer, the team chat's **Tasks** card or the agent's page.
+- **Unstick a task**: use **Retry**, assign an agent, or **Dismiss** from Needs you.
 
-- **Jittered retry.** Writes are wrapped so that _only_ transient lock errors (`SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED`) are retried, with a jittered backoff (20–150 ms) bounded by a **1.5-second wall-clock budget** rather than an attempt count, because the retry sleep blocks the server's event loop: an attempt count does not bound how long a contended write can freeze the server, a deadline does. A 0-row result, like a lost claim race, is returned to the caller unretried, which is what lets callers honor the never-retry-a-409 rule. Any other error propagates immediately.
-- **`BEGIN IMMEDIATE` transactions.** Multi-step writes (status transitions, reconciliation passes) acquire the write lock up front rather than escalating mid-transaction, which avoids lock-escalation deadlocks. The whole transaction re-runs from scratch on a transient lock error.
+[Track work on the board](/using/board) has the steps for each.
 
-<Note>
-Because `better-sqlite3` is fully synchronous, the retry uses a synchronous, non-busy-spinning sleep (`Atomics.wait`); making every repository method async just to back off would be a needless cost.
-</Note>
+## Limits
 
-## Orphan and stale reconciliation
+- One agent works a task at a time. To split work, hand out separate tasks.
+- Agents that create tasks with Clawboo's task tools are capped: at most 24 child tasks under one parent (finished ones count) and 30 new top-level tasks in 5 minutes. Tasks you create on the board are not capped. See [Governance](/concepts/governance).
+- Most work runs without a worktree or a check, as described in [Where the work happens](#where-the-work-happens).
 
-Two recovery passes keep the board from accumulating stuck work: one for crashes, one for abandonment.
+<Accordion title="Under the hood">
 
-**Orphan reconciliation runs once at startup, and it is liveness-aware.** An execution row still marked `running` is reaped only when its task has stopped beating, meaning `updated_at` older than the same TTL the stale sweep uses. A still-beating row belongs to a live process, such as a second Clawboo on the same state dir or the previous server's drains during a fast restart, so it is spared. Each reaped execution is marked `failed`, gets a `recovery_tombstone` so a second pass is a no-op (no infinite auto-resume), and has its task released back to `todo` so a fresh claim can pick it up. A run that truly died but is not yet stale at boot keeps missing beats and is released by the interval sweep below once the TTL has passed. It runs in a single `BEGIN IMMEDIATE` transaction and never blocks boot.
+- **Tables.** The board is the `tasks`, `task_deps`, `task_comments`, `workspaces` and `execution_processes` tables in Clawboo's SQLite database. Every write goes through one data-access layer in `@clawboo/db`, and the legal status changes are declared once in [`@clawboo/board-core`](/reference/packages/board-core), which the server and the board UI both read.
+- **Claiming.** A claim is a single conditional update that succeeds only for a `todo` task with no assignee, so a lost race returns `409` and is never retried. Any move to `todo` clears the assignee and the stored check result.
+- **Recovery.** A boot pass reaps orphaned runs, and a sweep every 60 seconds times out runs whose task has not been touched for 3 minutes (`CLAWBOO_BOARD_STALE_TTL_MS`). The re-run rule is `MAX_AUTO_FIRES = 3` over each task's run ledger; a run that ended `cancelled` is never re-fired. Both passes put stuck work straight back to `todo`, outside the normal status rules.
+- **Rooms.** Each task carries a `room_id`. The server's dispatcher fires ready tasks per chat, and a task whose room is archived goes to General.
 
-**Stale-task reconciliation runs on an interval.** It releases an `in_progress` task whose owner has stopped proving it is alive. A task that is `in_progress`, whose `updated_at` is older than the TTL, and whose execution is still `running` is timed out and released to `todo`. A boot pass plus a periodic interval cover both startup and steady state.
+The claim statement, the write-contention recipe, the dependency walks and both recovery passes are described in [Board internals](/internals/board-internals). The REST surface is the [Board API](/reference/rest-api/board).
 
-<Info>
-`tasks.updated_at` **is** a liveness signal. Every drain that claims a task heartbeats it every 30 seconds for as long as it owns the task, on a timer rather than on event traffic, so a working-but-silent run keeps beating and is never falsely swept. That is what lets the TTL be short: 3 minutes by default, six missed beats, tunable via `CLAWBOO_BOARD_STALE_TTL_MS`. The per-team server orchestrator's own 8-minute idle watchdog (swept every 30 seconds) still handles a delegate that goes quiet without dying, and it runs server-side, so closing the browser does not stop it.
-</Info>
+</Accordion>
 
-## Design rationale and trade-offs
+## Related
 
-The board exists because narration-only orchestration is fragile: a chat transcript can't be transactionally claimed, can't survive a refresh as authority, and can't tell a crashed run from a slow one. Making the board canonical buys durability (state survives restart), race-freedom (the atomic claim), and recoverability (the two reconciliation passes), at the cost of a second persistence layer beside the runtime's own session state.
-
-SQLite is a deliberate choice: it ships in-process, needs no server, and, with the WAL recipe, handles the team-scale concurrency Clawboo needs without a database to administer. The single data-access layer is the seam where a future SQLite→Postgres or multi-tenant move would land; the dormant `tenant_id` column on every board table is the placeholder for that.
-
-## Boundaries and non-goals
-
-- **Not a general-purpose project tracker.** The board exists to coordinate agent execution, not to replace a human-facing issue tracker. Its statuses, transitions, and recovery passes are tuned for runtime-driven work.
-- **Not the agent or session registry.** The board references agents and sessions by id and owns no agent identity, agent files, or live session state. Those belong to the registry of record and the runtime.
-- **Single implicit tenant today.** Every board table carries a `tenant_id` column, but it is a dormant seam; no per-tenant filtering is active in v0.5.0. Multi-tenant scoping is a future seam, not a shipped feature.
-
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## See also
-
-- [Delegation and orchestration](/concepts/delegation-and-orchestration), how delegation signals become board tasks
-- [Verification](/concepts/verification), the builder-≠-judge gate on `→ done`
-- [Worktrees and handoff](/concepts/worktrees-and-handoff), the isolated world a task's work happens in
-- [Database schema](/reference/database-schema), the full table definitions
-- [Board API](/reference/rest-api/board), the REST surface over these primitives
-- [Glossary](/appendices/glossary), canonical term definitions
+- [How work is delegated](/concepts/delegation-and-orchestration): how a hand-off becomes a task and how results come back.
+- [Teams, rooms and runtimes](/concepts/teams-and-planes): which chat runs a task.
+- [When work is checked](/concepts/verification): which tasks get an automatic check before Done.
+- [Track work on the board](/using/board): the columns, the task drawer and every action.
+- [Board internals](/internals/board-internals): claims, contention and recovery for contributors.

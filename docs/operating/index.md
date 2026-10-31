@@ -1,40 +1,43 @@
 ---
-title: Operating Clawboo
-description: 'Operator overview: where Clawboo runs, how to expose it safely, where data lives, and what the defaults are.'
+title: 'Self-hosting overview'
+sidebarTitle: 'Overview'
+description: 'What to read when you run the Clawboo server for yourself or a small team, and how a fresh install behaves before you change anything.'
+icon: 'server'
+keywords: ['operating', 'operator', 'self-host', 'production', 'Operating Clawboo']
 ---
 
-This section is for the person who runs the Clawboo server, on a laptop, a shared box, or behind a reverse proxy, rather than the person clicking around the dashboard. Clawboo is a single Node process: a bundled Express server that serves the SPA, exposes the REST API, hosts the four [MCP servers](/reference/mcp-tools) in-process, and owns one SQLite file plus an encrypted secrets vault under `~/.clawboo`. By default it binds **loopback (`127.0.0.1`)** with no authentication, which is the right posture for a single-user machine; exposing it on a network is an explicit opt-in that requires the access gate. The pages below cover the four operator concerns in order: where it runs, how to expose it safely, what attaches to it, and where the state lives, and the reference pages give the exact knobs.
+Use this section if you run the Clawboo server: on your own computer, on a shared machine or home server, or behind a reverse proxy so a small team can reach it. If you only use the dashboard on the computer where you installed it, the defaults below already keep it on that machine, and you can go straight to [Use Clawboo](/using/index).
+
+## What you are running
+
+Clawboo is one Node.js program. It serves the dashboard and the REST API on one port, hosts Clawboo's [MCP servers](/operating/mcp-servers), and keeps its data in a SQLite file in `~/.clawboo`. Clawboo Native agents run inside that program. Claude Code, Codex and Hermes run as programs it starts on the same machine, and OpenClaw agents run in the OpenClaw Gateway.
 
 ## In this section
 
-| Page                                                  | What it covers                                                                                                                                                                                                                                               |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [Deployment](/operating/deployment)                   | How the CLI launches the bundled server, port resolution and the `18790` auto-fallback window, the state directory, and dev vs. production boots.                                                                                                            |
-| [Security](/operating/security)                       | The default loopback bind, the access gate (case-folded, charset-validated, with an attach token for the `/api/mcp/*` runtime control plane), server-side device auth, the encrypted vault, display-layer redaction, and how to expose the dashboard safely. |
-| [MCP servers](/operating/mcp-servers)                 | The four MCP servers (tasks, memory, tools, teamchat) as teammates: the in-process Streamable HTTP transport, the bundled stdio bins, attach config, and per-run scoping.                                                                                    |
-| [Data & state](/operating/data-and-state)             | The SQLite database (35 tables, no migration ladder), the `~/.clawboo` file and directory layout, the boot probe, and how to back up or hard-reset.                                                                                                          |
-| [Production defaults](/operating/production-defaults) | The shipped posture: budgets in warn mode, circuit-breaker defaults, approval TTLs, GC windows, and the rationale for each.                                                                                                                                  |
+| Page                                                             | Read it when                                                                                             |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [Reach Clawboo from another machine](/guides/self-host-securely) | You want to open the dashboard from another computer, over an SSH tunnel, or through a reverse proxy.    |
+| [Deployment](/operating/deployment)                              | You run the server as a service, in a container or from source, or you need its ports, logs and updates. |
+| [Security](/operating/security)                                  | You want the security model: the access token, the same-origin guard, the key vault, and what each does. |
+| [Data and state](/operating/data-and-state)                      | You want to find, back up, move or reset Clawboo's data, or see what it writes in OpenClaw's folder.     |
+| [MCP servers](/operating/mcp-servers)                            | You want an agent that Clawboo does not run to use the board, shared memory, tools or the peer room.     |
+| [Production defaults](/operating/production-defaults)            | You want to know what a fresh install allows and limits, and how to change each default.                 |
 
-## Operator concerns at a glance
+## The default posture
 
-- **Where it runs**: one bundled server process. It picks a free API port at boot (default `18790`, scanning up to `18809`) and binds loopback unless you set `HOST` (`HOSTNAME` is ignored). Start with [Deployment](/operating/deployment).
-- **How to expose it safely**: a non-loopback bind without `STUDIO_ACCESS_TOKEN` would be reachable unauthenticated by anyone on your network, so the server refuses to start in that case. The access gate is the only auth for a non-loopback bind. See [Security](/operating/security).
-- **What attaches to it**: runtimes (and external agents) reach the shared plane by attaching Clawboo's MCP servers. A server-spawned runtime attaches `/api/mcp/*` with the attach token written into its URL rather than the gate cookie; everything else still needs the cookie. See [MCP servers](/operating/mcp-servers).
-- **Where data lives**: everything Clawboo owns sits under `~/.clawboo` (`CLAWBOO_HOME` overrides it): the SQLite DB, `settings.json`, the secrets vault, worktrees, and the proxy device identity. OpenClaw's `~/.openclaw` is only ever read for interop. See [Data & state](/operating/data-and-state).
-- **What the defaults are**: production-leaning out of the box: budgets track-and-warn instead of hard-capping, circuit breakers are conservative, and the boot probe surfaces a degraded environment without blocking. See [Production defaults](/operating/production-defaults).
+- **Only this machine can connect.** The server listens on `127.0.0.1` until you set `HOST`.
+- **There is no access token.** Anyone who can reach the server can use it until you set `STUDIO_ACCESS_TOKEN`. With `HOST` set to anything but a loopback address, the server refuses to start without one, but a reverse proxy on the same machine does not trip that check.
+- **Browsers must use a local address.** The same-origin guard rejects API calls that arrive under another name, such as your proxy's domain, until you list it in `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`.
+- **State lives in `~/.clawboo`.** Clawboo also writes provider keys and OpenClaw settings in OpenClaw's `~/.openclaw` folder.
+- **Spend is tracked, not capped.** Budgets warn by default. A hard cap is something you turn on.
 
-## Related reference
+Prompts go only to the providers and apps you connect. No Clawboo account, and Clawboo itself sends no telemetry. The server also fetches the Marketplace catalog from GitHub, OpenRouter's public model list and the latest version from npm, and the dashboard loads its font from Google Fonts and its GitHub star count; [Production defaults](/operating/production-defaults#what-leaves-the-machine) lists each one.
 
-When you need the exact value rather than the framing, go to the reference cluster:
+Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off, so they can read and change any file your user account can. For work you do not trust, run Clawboo under a separate user account or in a virtual machine. See [What agents can do](/concepts/permissions).
 
-- [Configuration](/reference/configuration), `settings.json` shape and the file/directory locations Clawboo resolves.
-- [Environment variables](/reference/environment-variables), every `CLAWBOO_*`, `OPENCLAW_*`, and provider variable Clawboo reads (`CLAWBOO_HOME`, `CLAWBOO_API_PORT`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and the rest).
-- [CLI](/reference/cli), `clawboo` and the bundled MCP stdio bins.
-- [REST API overview](/reference/rest-api/index), base URL, the access-gate behavior on every route, and the error envelope.
-- [Database schema](/reference/database-schema), the 35 tables and their relationships.
+## Related
 
-## See also
-
-- [How it works](/intro/how-it-works), the end-to-end architecture this section operates.
-- [Installation](/getting-started/installation), `clawboo` and what it launches.
-- [Glossary](/appendices/glossary), canonical terms (the board, runtime, AgentSource, MCP quartet).
+- [CLI reference](/reference/cli): start, stop and restart the server, find its port, and read its log.
+- [Environment variables](/reference/environment-variables): every variable the server reads.
+- [Limits and defaults](/reference/limits-and-defaults): every number, timeout and cap in one place.
+- [Troubleshooting](/help/troubleshooting): error messages and what to do about each one.

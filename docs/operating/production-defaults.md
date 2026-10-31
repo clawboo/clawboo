@@ -1,142 +1,75 @@
 ---
-title: Production defaults & posture
-description: 'The values a fresh Clawboo install runs with: log level, budget posture, breaker thresholds, reaper TTLs, each justified, with override env vars.'
+title: 'Production defaults'
+description: 'What a fresh Clawboo install allows and limits out of the box, and how to change each default before you run it for a team.'
+keywords:
+  [
+    'defaults',
+    'posture',
+    'rate limit',
+    'budgets',
+    'OpenTelemetry',
+    'HOST',
+    'STUDIO_ACCESS_TOKEN',
+    'Production defaults & posture',
+  ]
 ---
 
-This page is the operator's reference for the values a fresh Clawboo install runs with out of the box, and why each was chosen. Clawboo is designed to be a first-impression product, not a lab harness: nothing throttles or pauses an agent until you opt in, observability is local-only unless you point it at a collector, and the safety backstops are tuned so a healthy run never trips one.
-
-The defaults live in two kinds of place. The net-new, server-level posture values (log level, budget posture, the gateway-probe timeout, OTel) are owned by a single readable catalog, `apps/web/server/lib/defaults.ts`. The subsystem-specific thresholds (circuit breakers, reaper TTLs, the worktree GC limits) stay as env-overridable constants in the packages that own them; `defaults.ts` references them for visibility rather than copying them, because a pure package cannot import an app module. Both kinds are documented below.
-
-<Note>
-Every value here is a per-process default today. Each is also the seam where a future hosted, multi-tenant deployment would read per-tenant config, without changing the default chosen now.
-</Note>
+Use this page before you run Clawboo for anyone but yourself. It lists the defaults that decide who can reach the server, how much it accepts, what limits spending, and what leaves the machine, with how to change each one. Every other number, such as breaker thresholds and timeouts, is in [Limits and defaults](/reference/limits-and-defaults).
 
 ## At a glance
 
-The server-level posture defaults (from `defaults.ts`):
+| Default                                         | Out of the box                                                                                                                                                                                                                    | How to change it                                                                                                                        |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Network bind                                    | `127.0.0.1`: only this machine can connect                                                                                                                                                                                        | Set `HOST`, for example `HOST=0.0.0.0`. See [Reach Clawboo from another machine](/guides/self-host-securely).                           |
+| Port                                            | The first free port from 18790 to 18809                                                                                                                                                                                           | `CLAWBOO_API_PORT` pins one port (startup fails if it is taken). `CLAWBOO_API_PORT_START` moves the scan.                               |
+| Access token                                    | Off: anyone who can reach the server can use it                                                                                                                                                                                   | Set `STUDIO_ACCESS_TOKEN`, using only letters, digits, `.`, `_`, `~` and `-`. Any other character turns the gate off.                   |
+| Wide bind without a token                       | The server refuses to start                                                                                                                                                                                                       | Set a token. `CLAWBOO_ALLOW_INSECURE=1` starts it with no protection.                                                                   |
+| Same-origin guard                               | On: API calls must arrive under a local name (`localhost`, a `127.x` address, `::1`, or the bind address)                                                                                                                         | `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS` add names. Nothing turns the guard off.                                           |
+| Path prefix                                     | The dashboard is served at `/`                                                                                                                                                                                                    | `CLAWBOO_BASE_PATH`, for example `/clawboo`.                                                                                            |
+| API rate limit                                  | 3,000 requests a minute per client address, across `/api`                                                                                                                                                                         | Fixed.                                                                                                                                  |
+| Sensitive-route limit                           | 60 requests a minute per client address, on 26 routes                                                                                                                                                                             | Fixed.                                                                                                                                  |
+| Request body                                    | JSON up to 2 MB                                                                                                                                                                                                                   | Fixed.                                                                                                                                  |
+| Budgets                                         | None exist. A new budget is **warn only**                                                                                                                                                                                         | Create one in **Settings > Insights > Governance** and choose **hard cap**.                                                             |
+| Install-wide spend cap                          | None                                                                                                                                                                                                                              | No setting. Cap each agent or team instead.                                                                                             |
+| Coding runtimes' sandboxes and approval prompts | Off for Claude Code, Codex and Hermes                                                                                                                                                                                             | No setting. For untrusted work, run Clawboo under a separate user account or in a VM. See [What agents can do](/concepts/permissions).  |
+| Clawboo Native shell commands                   | Off for every agent                                                                                                                                                                                                               | Turn on **Let this Boo ask to run commands** on the agent's **Permissions** tab.                                                        |
+| OpenTelemetry export                            | Off: traces stay in the local event log                                                                                                                                                                                           | `OTEL_EXPORTER_OTLP_ENDPOINT`. The npm package does not include the OpenTelemetry SDK; see below.                                       |
+| Log level                                       | `info`                                                                                                                                                                                                                            | `LOG_LEVEL`, for example `debug`.                                                                                                       |
+| Data folder                                     | `~/.clawboo`                                                                                                                                                                                                                      | `CLAWBOO_HOME`. See [Data and state](/operating/data-and-state).                                                                        |
+| Vault master key                                | `secrets/master.key`, next to the encrypted vault                                                                                                                                                                                 | `CLAWBOO_SECRETS_MASTER_KEY`, set to the existing key. A new key makes every saved key unreadable; see [Security](/operating/security). |
+| Telemetry                                       | None                                                                                                                                                                                                                              | Nothing to turn off.                                                                                                                    |
+| Requests Clawboo makes itself                   | The Marketplace catalog from GitHub and the latest version from npm (each cached 6 hours), and OpenRouter's public model list (cached 30 minutes). The dashboard also loads its font from Google Fonts and the GitHub star count. | `CLAWBOO_CATALOG_INDEX_URL` points the catalog elsewhere. The others have no setting.                                                   |
 
-| Default                  | Value            | Why                                                               | Override                            |
-| ------------------------ | ---------------- | ----------------------------------------------------------------- | ----------------------------------- |
-| Log level                | `info`           | `debug` is too noisy for a shipped product                        | `LOG_LEVEL`                         |
-| Budget posture           | `track-and-warn` | Nothing pauses an agent out of the box; spend is tracked + warned | Settings (per-budget `mode`)        |
-| Global hard cap          | none (`null`)    | No auto-pause until a user sets a cap budget                      | Settings (create a `cap` budget)    |
-| Budget warn threshold    | `80%`            | The soft-warning crossing; mirrors the governance math            | (fixed; shared constant)            |
-| Gateway probe timeout    | `1500 ms`        | Fast, tight; a miss marks the registry stale, never fatal         | (fixed constant)                    |
-| OTel exporter            | off              | Local event log is the default trace store; no collector required | `OTEL_EXPORTER_OTLP_ENDPOINT`       |
-| Memory auto-inject cap   | `1500` chars     | Seeded facts never crowd out the actual instruction               | `disableMemoryAutoInject` (per-run) |
-| Memory auto-inject top-K | `5` facts        | Top-ranked facts seeded into the volatile tier per run            | (per-run request field)             |
+The server reads environment variables when it starts, so restart it after you change one. **Settings > System Health** shows three of these defaults in its **Production defaults** card: the log level, the budget posture and observability.
 
-The referenced package-local defaults (the safety backstops and housekeeping timers):
+## Request limits
 
-| Default                                  | Value                   | Why                                                         | Override                              |
-| ---------------------------------------- | ----------------------- | ----------------------------------------------------------- | ------------------------------------- |
-| Breaker: max tool iterations             | `30`                    | Hard ceiling on settled tool-calls per run                  | `breakerConfig` (per-run)             |
-| Breaker: repeat-failure threshold        | `3`                     | Consecutive identical-tool failures before halt             | `breakerConfig` (per-run)             |
-| Breaker: no-progress threshold           | `6`                     | Consecutive results with no new output before halt          | `breakerConfig` (per-run)             |
-| Breaker: token-velocity ceiling          | `200000` tok/min        | Only egregious runaways trip it                             | `breakerConfig` (per-run)             |
-| Breaker: velocity min window             | `15000 ms`              | An early burst can't false-trip a short run                 | `breakerConfig` (per-run)             |
-| Breaker: repeat-policy-denied threshold  | `2`                     | Consecutive identical denial codes before halt              | `breakerConfig` (per-run)             |
-| Session rotation watermark               | `85%` of context window | Rotate to a fresh session before exhausting context         | `maxRotations` (per-run)              |
-| Session rotation chain cap               | `3` successors          | Bounds the successor chain per task                         | `maxRotations` (per-run)              |
-| Approval TTL                             | `86400000 ms` (24 h)    | Abandoned pending approvals auto-expire                     | `CLAWBOO_APPROVAL_TTL_MS`             |
-| Approval reaper interval                 | `3600000 ms` (1 h)      | How often the reaper sweeps                                 | `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` |
-| MCP probe interval                       | `60000 ms`              | MCP liveness health-probe cadence                           | `CLAWBOO_MCP_PROBE_MS`                |
-| Worktree GC age                          | `72 h`                  | Reap worktrees older than this (if their task isn't locked) | (fixed constant)                      |
-| Worktree GC max count                    | `25`                    | Reap oldest beyond this count                               | (fixed constant)                      |
-| Board stale-task TTL                     | `180000 ms` (3 min)     | Six missed 30 s heartbeats: the owning drain is gone        | `CLAWBOO_BOARD_STALE_TTL_MS`          |
-| Board stale sweep interval               | `60000 ms` (60 s)       | How often the sweep runs                                    | `CLAWBOO_BOARD_STALE_SWEEP_MS`        |
-| Board capped create: children per parent | `24`                    | Bounds an agent looping on raw board creation               | (fixed constant)                      |
-| Board capped create: nesting depth       | `2`                     | The same ancestor-chain ceiling as the delegation depth cap | (fixed constant)                      |
-| Board capped create: root rate           | `30 / 5 min`            | Bounds an agent looping on parentless `create_task`         | (fixed constant)                      |
+Clawboo counts requests per client address over a one-minute window, in memory. Over a limit it answers `429` with `Too many requests. Wait a moment and retry.`, or on a sensitive route `Too many requests for this operation. Wait a moment and retry.`, and sends standard `RateLimit-*` headers.
 
-<Tip>
-Per-run overrides (`breakerConfig`, `maxRotations`, `disableMemoryAutoInject`) are fields on the `POST /api/runtimes/:id/run` body. Process-level overrides are env vars; see [Environment variables](/reference/environment-variables).
-</Tip>
+The sensitive routes are the ones that install, connect, disconnect or sign out of a runtime; start a CLI sign-in; install, set up or edit OpenClaw, control its Gateway or approve a device; update Clawboo; connect, authorize, configure or disconnect a connector, add or remove a custom connector, or set the Composio key; change a native agent's shell switch; revoke a command-allowlist entry; and reindex or install memory embeddings. The 60-a-minute limit applies on top of the general one.
 
-## Logging
+The address is the connection's own, and forwarding headers are ignored. Behind a reverse proxy on the same machine, every request comes from `127.0.0.1`, so all your users share one count. The dashboard's page files have a separate limit of 3,000 a minute and do not count against the API.
 
-**`logLevel: 'info'`.** The pino logger ships at `info`. `debug` is too verbose to be a sensible default for a shipped product. Override per process with the standard `LOG_LEVEL` env var, which `@clawboo/logger` reads once at module-eval time (guarded so a browser import never touches `process.env`).
+## Budgets
 
-## Budget posture, track-and-warn, hard cap is opt-in
+A fresh install has no budgets, so nothing caps spend. To set a ceiling, open **Settings > Insights > Governance**, create a budget for an agent or a team, and choose **hard cap**. When spend reaches the cap, the budget pauses and that scope gets no new work; how fast a running agent stops depends on its runtime. A **warn only** budget tracks spend against its limit and never stops work. See [Budgets and spend](/using/budgets-and-spend) for what each runtime reports and how a cap stops each kind of run.
 
-This is the load-bearing posture decision. **Budgets ship as `track-and-warn`.** Out of the box, nothing pauses an agent on spend. Cost is recorded and a warning event is emitted when a budget crosses a threshold, but the run continues. There is no global hard cap (`budgetHardCapUsdCents` is `null`), so until you create a `cap` budget for an agent, team, or globally, no spend ceiling is enforced.
+There is no install-wide cap. The Governance form also offers a `tenant` scope, but nothing charges or enforces it. Through the API, saving a budget without a `mode` makes it warn only, even when it was a hard cap. System Health's **budget posture** row always shows the shipped default, `track-and-warn`, not the budgets you create.
 
-The two budget modes behave differently inside the executor's per-cost-event check:
+## OpenTelemetry
 
-| Mode             | At 80% (soft)                   | At 100% (hard)                                                                  |
-| ---------------- | ------------------------------- | ------------------------------------------------------------------------------- |
-| `warn` (default) | Emit a soft-warning audit event | Emit a hard-warning event; run **continues** (status clamps away from `paused`) |
-| `cap` (opt-in)   | Emit a soft-warning audit event | Auto-pause the budget; the executor aborts the run and releases the task        |
+Clawboo keeps traces in its local event log. To also send them to an OTLP collector, set `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`); `OTEL_SERVICE_NAME` defaults to `clawboo`. Traces cover runs that go through the task runner, which are agent routines and `POST /api/runtimes/:id/run`. Team chat turns produce none.
 
-A new budget created without an explicit `mode` defaults to `warn`. Only a `cap` budget's 100% crossing trips the kill-switch; the executor checks `status === 'paused' && mode === 'cap'` per scope (agent, mission, team) and stops on the first paused cap. The `80%` soft-warning threshold (`budgetWarnSoftPct`) is shared with the governance budget math so the two never drift.
+The `clawboo` npm package does not include the OpenTelemetry SDK, so on an npm install the export does not start. System Health's **OTel exporter** check then reports that the exporter failed to initialize, and traces stay local, even though the **observability** row reads that the exporter is active. Export works when you run Clawboo from a source checkout, where the SDK is installed.
 
-<Note>
-"Track-and-warn by default" means a fresh install will not surprise you by halting an agent. To enforce a spend ceiling, create a `cap`-mode budget in the Governance dashboard. See [governance](/concepts/governance) for the kill-switch, caps, and approval mechanics.
-</Note>
+## What leaves the machine
 
-## Observability, local-first, exporter opt-in
+Prompts go only to the providers and apps you connect. No Clawboo account, and Clawboo itself sends no telemetry. Besides your providers, the server makes three requests of its own. It fetches the Marketplace catalog from GitHub. It asks `registry.npmjs.org` for the latest Clawboo version when the dashboard checks for updates. And when the dashboard shows a model picker, it fetches OpenRouter's public model list, which sends no key. In your browser, the dashboard also loads its font from Google Fonts and its GitHub star count from `api.github.com`.
 
-**`otelEnabledByDefault: false`.** Clawboo's always-on local event log is the default trace store; no external collector is required to get traces, fleet health, or the Ghost-Graph projection. The OpenTelemetry SDK is lazy-imported and stays a no-op unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set. A no-collector boot never even requires the `@opentelemetry/*` packages. Point the env var at a Jaeger/OTLP collector to bridge the local log to your tracing stack.
+## Related
 
-## Gateway probe timeout
-
-**`gatewayProbeTimeoutMs: 1500`.** The boot probe checks whether the OpenClaw Gateway is reachable with a tight 1.5-second timeout. The check is optional: a miss marks the agent registry **stale** (degraded), never fatal; SQLite still serves the last-synced agents, so the dashboard renders fine with the Gateway down. This is a fixed constant (no env override); see [System Health](/using/system-health) for how degraded checks surface.
-
-## Memory auto-injection
-
-At run start, the executor seeds the most-relevant memory facts for the task into the prompt's cache-safe volatile tier. **`memoryAutoInjectMaxChars: 1500`** bounds the seeded block (≈ a few hundred tokens) so it never crowds out the actual instruction, and **`memoryAutoInjectTopK: 5`** caps how many top-ranked facts are seeded. Auto-injection is on by default; a single run opts out with `disableMemoryAutoInject` on its run request. See [memory](/concepts/memory) for the shared/private memory tiers.
-
-## Circuit breakers, the no-progress backstop
-
-The tool-loop circuit breakers are a deterministic, cross-runtime backstop distinct from the budget kill-switch (which stops on dollars) and a runtime's own max-turns. They halt a run that burns turns or tokens making no progress, or that repeats the same failing tool call, before the dollar ceiling is reached. The defaults are conservative; a healthy run never trips one, and live in `@clawboo/governance`:
-
-| Threshold                     | Default  | Trips when                                                             |
-| ----------------------------- | -------- | ---------------------------------------------------------------------- |
-| `maxToolIterations`           | `30`     | Settled tool-calls in one run exceed this                              |
-| `repeatFailureThreshold`      | `3`      | This many consecutive identical-tool failures (same tool + same input) |
-| `noProgressThreshold`         | `6`      | This many consecutive tool-results add no new successful output        |
-| `tokenVelocityCeiling`        | `200000` | Tokens/minute exceeds this (only egregious runaways)                   |
-| `velocityMinWindowMs`         | `15000`  | Velocity is not evaluated until the measurement window spans this long |
-| `repeatPolicyDeniedThreshold` | `2`      | This many consecutive identical policy-denial codes                    |
-
-The token-velocity ceiling needs at least two cost events spanning `velocityMinWindowMs`, so it is reachable on per-turn-cost runtimes (native) and across rotations; a one-cost-per-run wrapped adapter never trips it within a single run. The budget check wins ties (the breaker feed is gated on the budget not having already stopped the run), so at most one teardown runs per run. Override these per run with the zod-validated `breakerConfig` field on the run request; an invalid config is ignored. See [governance](/concepts/governance) for how a tripped breaker is recorded and how the task is released.
-
-## Session rotation
-
-When a run approaches its context-window limit, the executor rotates to a fresh successor session carrying a short handoff note rather than failing. The watermark and chain cap (`DEFAULT_ROTATION` in `@clawboo/executor`):
-
-- **`thresholdPct: 0.85`**: rotate at 85% of the runtime's reported context window.
-- **`maxRotations: 3`**: at most three successor sessions per task, bounding a pathological loop.
-
-A runtime that reports no context window never rotates on the watermark. Override the chain cap per run with `maxRotations` on the run request.
-
-## Board creation caps
-
-Two ceilings bound raw board growth on the board's capped create path, reached through the [Tasks MCP](/reference/mcp-tools#create_subtask) create tools, where an attached runtime creates rows unsupervised: a parent may hold at most **24** non-dropped children, and a child is refused once its parent's ancestor chain reaches the **depth cap of 2** (both `DEFAULT_MAX_CHILDREN` and `DEFAULT_MAX_DEPTH` live in `@clawboo/governance`; the depth number is the one the orchestrator and the executor runner also enforce as `MAX_SPAWN_DEPTH`). The check and the insert share one `BEGIN IMMEDIATE` transaction, so concurrent runtimes cannot both pass the ceiling. Both are fixed constants with no env override, like the worktree GC limits: they are runaway bounds, not workflow limits, and an over-cap create comes back to the calling model as a tool-error it should not retry unchanged (after remediation — a dropped child, or the rate window rolling — a retry can succeed). Root creation is bounded separately by a rolling-window rate (**30 per 5 minutes**, `DEFAULT_MAX_ROOT_CREATES` / `DEFAULT_ROOT_CREATE_WINDOW_MS`), since a per-parent ceiling has no subject on a root task. The REST route, the UI, and the team-chat orchestrator write through the board repository directly and are deliberately uncapped, though the rows they create still count toward both measurements.
-
-## Housekeeping timers: reapers, sweeps, and GC
-
-Several best-effort background passes run at boot and on an interval. None blocks boot; all are unref'd. They are env-overridable except the worktree GC limits (fixed constants).
-
-**Approval reaper.** Abandoned pending approvals expire after `CLAWBOO_APPROVAL_TTL_MS` (default 24 h) and any task they blocked is unblocked, except a task carrying a non-promotable verification verdict, which stays `blocked` for its human. The reaper runs one pass at boot plus a singleton interval set by `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` (default 1 h).
-
-**MCP liveness supervisor.** The in-process MCP servers are pre-warmed at boot and health-probed every `CLAWBOO_MCP_PROBE_MS` (default 60 s), rebuilding on failure with backoff.
-
-**Worktree GC.** At boot, stale worktrees are reaped: those older than 72 h, plus the oldest beyond a 25-count limit, but only if their task is not locked (`in_progress` / `in_review`), and commit-before-drop means no uncommitted work is lost. The 72 h age and 25 count are fixed constants in `@clawboo/worktrees`.
-
-**Board dispatch pump.** Delegation-derived work no longer waits for a user message. The pump scans for teams holding fireable delegations or undelivered mailbox rows and wakes their orchestrator, 10 s after boot and then every `CLAWBOO_DISPATCH_PUMP_MS` (default 60 s). The board lifecycle bus already pushes on every relevant mutation, so this interval is the durable backstop and the boot-resume path rather than the primary trigger. A task whose last run was `cancelled` is never auto-fired: that is the durable marker of a user Stop, and only a human re-queues it.
-
-**Board stale-task sweep.** Releases an `in_progress` task whose owner has stopped proving it is alive. It runs one pass at boot plus an interval set by `CLAWBOO_BOARD_STALE_SWEEP_MS` (default 60 s), releasing a task whose `updatedAt` is older than `CLAWBOO_BOARD_STALE_TTL_MS` (default 3 min). The short TTL is safe because `updatedAt` is a real liveness signal: every drain that claims a task heartbeats the row every 30 s on a timer for as long as it owns it, so 3 minutes is six missed beats. The orchestrator's own 8-minute idle watchdog (swept every 30 s, server-side) still covers the different case of a delegate that is alive but has gone quiet.
-
-<Warning>
-The TTL is only as trustworthy as the heartbeat. A drain that claims a task without beating it will have its live work swept mid-run, so if you add a code path that claims a board task, give it a `startTaskHeartbeat` too. Lowering the TTL below a few beat intervals has the same effect. The TTL also has a ceiling: keep it, plus the sweep interval, under the orchestrator's 8-minute idle watchdog. The sweep is what publishes `task_released`, and that release is what detaches a stale session from the engine, so a TTL tuned past that window lets the watchdog reach the phantom session first, fail the task to `blocked`, and cancel its dependent plan steps.
-</Warning>
-
-## See also
-
-- [Environment variables](/reference/environment-variables), full list of every override env var
-- [Governance](/concepts/governance), budgets, the kill-switch, circuit breakers, caps, approvals
-- [System Health](/using/system-health), how degraded/fatal checks surface at boot
-- [Verification](/concepts/verification), the builder≠judge gate that decides when a task is done
-- [Deployment](/operating/deployment), CLI, ports, state directory, bundled server
-- [Runtimes API](/reference/rest-api/runtimes), the `POST /api/runtimes/:id/run` body with the per-run overrides
+- [Limits and defaults](/reference/limits-and-defaults): breaker thresholds, timeouts, caps and every other number.
+- [Reach Clawboo from another machine](/guides/self-host-securely): change the bind, set the token and the allowlists, and add a proxy.
+- [Security](/operating/security): what the access token, the guard and the vault protect against.
+- [Budgets and spend](/using/budgets-and-spend): set budgets and read what agents spend.
+- [Environment variables](/reference/environment-variables): every variable on this page and the rest.

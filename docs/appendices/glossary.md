@@ -1,167 +1,245 @@
 ---
-title: Glossary
-description: Canonical definitions of Clawboo's core terms, each linked to the page that explains it.
+title: 'Glossary'
+description: 'Plain definitions of the words in Clawboo and its docs, from A to Z, and the names the app uses today next to older names you may still see.'
+keywords:
+  [
+    'glossary',
+    'terms',
+    'definitions',
+    'Atlas',
+    'Ghost Graph',
+    'Scheduler',
+    'Group Chat',
+    'team space',
+    'Know Your Team',
+    'kill-switch',
+    'Cost dashboard',
+    'Needs approval',
+    'native runtime',
+  ]
 ---
 
-Definitions of the vocabulary used throughout the Clawboo docs. Each entry is a one- or two-sentence definition with a link to the page that goes deeper. Terms are grouped by area; within a group they are roughly ordered from most-foundational to most-specific.
+Plain definitions of the words you meet in Clawboo and in these docs, from A to Z. Each entry links to the page that explains it. If you saw a name somewhere else, such as Atlas or Ghost Graph, look it up in [Names in the app](#names-in-the-app). Terms for contributors, with their code names, are under [For developers](#for-developers).
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+## Terms
 
-## Agents and runtimes
+### A
 
-**Boo**: Clawboo's name for an agent: one participant in a team, rendered as a ghost-lobster avatar. Every Boo is backed by a real agent record from an AgentSource; there are no decorative agents. See [the agent model](/concepts/agent-model).
+**Access token**: an optional secret that guards the dashboard and Clawboo's API. Without one, anything that can reach the server can use it. With one, each browser presents the token once before it gets in. Set one before you open Clawboo to other computers. See [Security model](/operating/security).
 
-**Boo Zero**: the universal team leader, runtime-neutral and native by default. It is identified from the registry's `defaultId` (`resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), falling back to the first teamless agent, then the first agent overall. The same Boo Zero leads every team regardless of runtime. Boo Zero is teamless in the database but participates in every team via team-scoped sessions. See [the agent model](/concepts/agent-model) and [Boo Zero briefs](/using/boo-zero).
+**Agent**: an AI worker on one of your teams. Each agent runs on one runtime and one model, follows its own instruction files, and appears in the dashboard as a Boo. See [Agents](/using/agents).
 
-**runtime**: the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`. Each is wrapped behind one RuntimeAdapter interface so a team can mix runtimes. See [runtimes overview](/runtimes/index).
+**Agent files**: the instruction files an agent keeps, edited under **Details** > **Agent Files** on its page. SOUL.md holds its personality and instructions, and AGENTS.md lists the teammates it hands work to. What each file does depends on the runtime. See [Agents](/using/agents).
 
-**the 5 runtimes**: `openclaw` (the OpenClaw Gateway), `clawboo-native` (the in-process harness), `claude-code`, `codex`, and `hermes`. The four non-OpenClaw runtimes are declared in `descriptor.ts`; OpenClaw is the fifth, handled separately because it is a connected substrate rather than a CLI/SDK Clawboo spawns. See [runtimes overview](/runtimes/index).
+**Approval**: a request that waits for your yes before it goes ahead: a shell command from a Clawboo Native or OpenClaw agent, a connector call that needs a yes, or a risky hand-off in team chat. Approvals appear in **Needs you** on the Board and in the chat where the agent works. See [Approvals](/using/approvals).
 
-**native runtime**: `clawboo-native`, Clawboo's own in-process conversational harness. It talks to provider SDKs directly (Anthropic, OpenAI, OpenRouter, Ollama), runs with no OpenClaw Gateway, and is `builtIn` (ships inside the server, nothing to install; connect by pasting a provider key). See [the native runtime](/runtimes/native).
+### B
 
-**RuntimeAdapter**: the single TypeScript interface every runtime implements (`id`, `participantKind`, `capabilities()`, `health()`, `start()`, `events()`, `abort()`, `setModel()`, `writeContext()`, and an optional `steer()`). Adapters wrap a black-box runtime and normalize its native signals into a RuntimeEvent stream; Clawboo supervises and relays, it does not reimplement runtime loops. See [the RuntimeAdapter trait](/internals/runtime-adapter).
+**Board**: every task in one place, by status and by day. Its first column, **Needs you**, holds what waits on you. See [Board](/using/board).
 
-**RuntimeEvent**: the normalized 7-variant lifecycle union every adapter emits: `text-delta`, `tool-call`, `tool-result`, `status`, `cost`, `done`, and `error`. It is what lets one orchestrator drive heterogeneous runtimes off a single event shape. See [the RuntimeAdapter trait](/internals/runtime-adapter).
+**Boo**: how the dashboard draws an agent: a small mascot with a badge for the agent's runtime. Buttons such as **Create Boo** use the word too. See [Agents](/using/agents).
 
-**steering**: getting a message to an agent while its run is still going, so a person's comment on an in-progress task reaches the agent working on it instead of waiting for its next run. Each runtime declares how through `capabilities().steering`: `live` (the message joins the running turn at its next step; native, Claude Code, Codex, OpenClaw), `interrupt-resume` (the run is stopped and the same session resumed with the message; Hermes), or `none`. See [steering a running task](/runtimes/index#steering-a-running-task).
+**Boo Zero**: your team leader. One agent leads the chats of every team: it answers messages that @mention no one, and hands work to teammates. Clawboo creates it on Clawboo Native once you have a Clawboo Native agent on a team and a connected provider; otherwise it uses your OpenClaw Gateway's default agent. See [Boo Zero](/using/boo-zero).
 
-**AgentSource**: the registry seam that answers "where does the agent list come from?" Reads are SQLite-backed (so they work even when the upstream is down); writes, file I/O, and sessions go to the upstream and mirror into SQLite. `AgentSource` is about _who exists_; `RuntimeAdapter` is about _how agents run_; the two must not entangle. See [the AgentSource registry of record](/internals/agent-source).
+**Brief**: a team's short description, edited together with its rules. Boo Zero reads it only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Boo Zero's page also has a **Global Brief**, which Clawboo saves but does not use yet. See [Teams](/using/teams) and [Boo Zero](/using/boo-zero).
 
-**registry of record**: the principle that SQLite is the canonical store of which agents and teams exist. The OpenClaw Gateway is one `AgentSource` synced _into_ SQLite, not the source of truth for the registry. See [the AgentSource registry of record](/internals/agent-source).
+**Budget**: a dollar limit on one agent, team or mission. In **warn only** mode, the default, Clawboo counts spend and warns you as the budget fills. In **hard cap** mode, which you opt into, it also pauses work at 100%, though in team chat a hard cap can stop only some runs. No budget exists until you create one. See [Budgets and spend](/using/budgets-and-spend).
 
-## Teams and planes
+### C
 
-**team**: a named group of Boos. A team has a leader (Boo Zero by default), an emoji/color, durable rules, its own group chat (**General**), and any rooms opened inside it. Teams are the unit of collaboration. See [teams and planes](/concepts/teams-and-planes).
+**Capabilities**: the skills, tools and connectors your agents can use. **Settings** > **Capabilities** lists them all, with what each one needs. See [Capabilities](/using/capabilities).
 
-**shared plane**: everything Clawboo owns and coordinates across runtimes: the registry, the board, team chat, scheduling, shared memory, the tools broker, verification, governance, the event log, and the worktree system-of-record. See [teams and planes](/concepts/teams-and-planes).
+**Circuit breaker**: an automatic stop for a task-runner run that is going nowhere, such as one that repeats the same failing call. See [Budgets and guardrails](/concepts/governance).
 
-**private plane**: everything a single runtime keeps to itself: its own messaging channels, its own cron/heartbeat, its private cognitive memory and self-improvement, its built-in tools, and its native session resume. Clawboo observes the private plane but never clobbers it. The split is resolved from a runtime's capabilities by `resolveRuntimeIntegration`. See [teams and planes](/concepts/teams-and-planes).
+**Claude Code**: Anthropic's coding agent, one of the runtimes Clawboo can run agents on. It needs an Anthropic API key. See [Claude Code](/runtimes/claude-code).
 
-**Know Your Team gate**: a once-per-team onboarding flow that runs before the group-chat composer unlocks. It has two phases: a "Meet your team" welcome (roster plus the leader), then a user self-introduction that is persisted and injected into every team turn's context. Cascade prevention lives in the server orchestrator, so the gate no longer needs an agent-introduction round. See [group chat](/using/group-chat).
+**Clawboo Native**: Clawboo's built-in runtime, with nothing to install. It runs agents on an API key from one of ten providers (Anthropic, OpenAI, OpenRouter, Google, xAI, Groq, Mistral, Together, Cerebras or Moonshot), or on a local Ollama with no key. See [Clawboo Native](/runtimes/native).
 
-**room**: a conversation inside a team between a subset of its members, with its own transcript, its own orchestrator, and its own task cards. Boo Zero presides over every room without being a member, and the team's rules, brief, memory and board stay team-wide. Deleting a room archives it: the conversation is kept, its work stops, and its tasks stay on the board. Not the same thing as the peer-chat team room below. See [rooms](/using/group-chat#rooms).
+**Clear chat**: empties one chat (General or a room) and starts that conversation fresh for its agents. Clawboo sets the messages aside rather than deleting them, and the chat's tasks stay on the Board. See [Team chat](/using/team-chat).
 
-**General**: a team's own group chat, its default room, labelled **General (Main Room)** in the sidebar's rooms list. It is always pinned, and it can be cleared but not renamed or deleted. See [group chat](/using/group-chat).
+**Codex**: OpenAI's coding agent, one of the runtimes Clawboo can run agents on. You connect it with **Sign in with ChatGPT**, not an API key. See [Codex](/runtimes/codex).
 
-**Clear chat**: the **...** menu action that empties one chat (General or a room). It asks first, then sets the messages aside on the server rather than deleting them, and the agents start that conversation fresh (OpenClaw teammates get a `/reset`). The chat stops showing the task cards made before the clear, but the board and the chat's **Tasks** card keep them, and other chats are not touched. See [clear a chat](/using/group-chat#clear-a-chat).
+**Connector**: a link to an outside app or tool, such as GitHub, Gmail, a folder or a web browser, that agents use through Clawboo. Connecting one gives no agent access until you share it with that agent on the graph. The two browser connectors are the exception: every new agent gets them. See [Connectors](/using/connectors).
 
-## The board and orchestration
+**Cost estimate**: a cost Clawboo works out itself when a runtime reports none, marked **est.** on task cards. Models Clawboo has no price for, including local Ollama models, are estimated at a default rate. See [Budgets and spend](/using/budgets-and-spend).
 
-**the board** (the durable board): the transactional, SQLite-backed kanban board that is the source of truth for team task and coordination state. It survives refresh, supports race-free single-assignee claiming, and is the dispatcher the executor drives. The **Board** view lays it out as a calendar: status columns across the top, days down the side. See [the board](/concepts/the-board) and [using the board](/using/board).
+### D
 
-**task**: one kanban card on the board. A task has one of seven statuses (`backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`), an optional assignee, dependencies, and an optional worktree. `done` and `cancelled` are terminal. The Board view has no In review or Blocked column: an `in_review` task shows in **In progress** marked **Verifying**, and a `blocked` one in **Needs you**. See [the board](/concepts/the-board).
+**Delegation**: an agent handing part of its work to a teammate, also called a hand-off. Each hand-off becomes a task on the Board. See [How a team works](/intro/how-it-works).
 
-**Needs you**: the Board's first column, holding pending approvals and every task that will not move until a person acts (a failed, timed-out, stopped, blocked or unassigned task, one whose verification could not pass, or one left in In progress with no agent and no run). In the Today, Week and Month views its items sit in today's row. See [things that need you](/using/board#things-that-need-you).
+**Device pairing**: OpenClaw makes you approve each new device before it can connect to the OpenClaw Gateway. Clawboo shows an **Approve this device** card that does it for you. See [OpenClaw](/runtimes/openclaw).
 
-**atomic claim**: the race-free `UPDATE … WHERE status='todo' AND assignee IS NULL AND dropped=0` that lets at most one caller win a task. An empty result is a conflict that the caller must NOT retry (the "never retry a 409" rule). See [the board](/concepts/the-board) and [board internals](/internals/board-internals).
+### F
 
-**delegation**: one agent handing a unit of work to another. In the shipping engine a delegation is a structured signal (a `sessions_send` tool call or a `<delegate>`/`<plan>` directive parsed from a terminal `done`) that becomes a durable board task plus a claim, never a regex match over prose. See [delegation and orchestration](/concepts/delegation-and-orchestration).
+**Fleet**: **Settings** > **Insights** > **Fleet**: all your agents at a glance, with recent task and check results, spend, and health per runtime. See [Tour the dashboard](/getting-started/dashboard-tour).
 
-## Peer chat and MCP
+### G
 
-**mixed-runtime peer chat** (team room): a shared `team_chat` room where every runtime is a named peer and any runtime can lead. It is narration over the canonical board: a chat post is never a write path to the board. See [peer chat](/concepts/peer-chat).
+**General**: a team's main chat, with every member, listed as **General (Main Room)**. You can clear it, but not rename or delete it. See [Team chat](/using/team-chat).
 
-**`isUser=false`**: the safety-critical substring in a delivered peer post's header (`[Inter-session message · … · isUser=false]`). It marks the post as tool-routed evidence from a peer, not a user instruction, so a peer that says "ignore your instructions" cannot land with user authority. The token is reproduced verbatim. See [peer chat](/concepts/peer-chat).
+**Governance**: **Settings** > **Insights** > **Governance**: budgets, limits, the approval queue and the audit log. See [Budgets and guardrails](/concepts/governance).
 
-**MCP** (Model Context Protocol): the protocol Clawboo uses to expose its shared services to runtimes as tools. Runtimes attach Clawboo's MCP servers over Streamable HTTP (or stdio) and act on the team's coordination surface through them. See [MCP servers](/operating/mcp-servers).
+### H
 
-**MCP trifecta / quartet**: Clawboo's four hosted MCP servers: `tasks` (the board), `memory` (the shared tier), `tools` (the brokered tool surface), and `teamchat` (the peer room). The "trifecta" was the first three; "quartet" adds `teamchat`. See [MCP tools reference](/reference/mcp-tools).
+**Hermes**: an open-source agent, published as the `hermes-agent` Python package, and one of the runtimes Clawboo can run agents on. It keeps its own memory and skills between runs. See [Hermes](/runtimes/hermes).
 
-## Memory and capabilities
+**Home**: a team's own page, opened from the team's icon on the team rail. It is a placeholder for the team's dashboards and its agents' work; to work with the team, open **General**. See [Tour the dashboard](/getting-started/dashboard-tour).
 
-**memory**: Clawboo's two-tier knowledge store. The **shared tier** is the SQLite-backed `SqliteMemoryStore` exposed via the Memory MCP server, which all five runtimes read and write; the **private tier** is each runtime's own native memory, which Clawboo observes but never clobbers. A run's MCP binding can scope writes to a team. See [memory](/concepts/memory).
+### L
 
-**capability**: any skill, tool, or connector a runtime can use, normalized into one `CapabilityRecord`. The records are fanned in from per-runtime `CapabilitySource` adapters into one inventory that drives both the Ghost Graph and the Capabilities dashboard. See [capabilities](/concepts/capabilities).
+**Leader**: a badge Clawboo gives the team member whose name or role reads as a lead when you deploy a team template. Boo Zero still leads the team. The Leader leads the team's chats only when your install has no Boo Zero. See [Teams](/using/teams).
 
-**CapabilitySource**: an adapter whose `read()` projects a plane's skills/tools/connectors into `CapabilityRecord`s. Six exist: five per-runtime (native, hermes, claude-code, codex, openclaw) plus `connector` for Clawboo's own outbound MCP connections. A multiplexer merges them and treats a source's failure as data, not an error. See [capabilities](/concepts/capabilities).
+### M
 
-**manageability tier**: the per-capability field that decides whether Clawboo can write to it: `managed` (Clawboo owns the row), `external-write` (the runtime owns the store, Clawboo writes through it), `runtime-of-record` (Clawboo drives changes through the runtime's API), or `observe-only` (read-only). The UI and the write path are a pure function of this tier. See [capabilities](/concepts/capabilities).
+**Marketplace**: ready-made agents, teams and skills that you deploy with a click. Clawboo downloads the full catalog from GitHub; offline, it shows a built-in set of 5 teams and 15 agents. See [Marketplace](/using/marketplace).
 
-**connector**: an MCP server Clawboo connects to itself, either by spawning it as a local child process or by dialling a remote one over HTTPS with an OAuth token. Distinct from a connector a _runtime_ attaches, which Clawboo only observes. See [connectors](/using/connectors).
+**MCP**: the Model Context Protocol, an open standard for giving AI agents tools from another program. Agents reach Clawboo's board, memory and tools through Clawboo's own MCP servers, and most connectors are MCP servers too. See [MCP servers](/operating/mcp-servers).
 
-**grant**: one row that is simultaneously the permission the tool broker enforces and the edge the Ghost Graph draws. The renderer and the gate call the same `decideGrant` over the same rows, so a badge cannot disagree with what a call would actually do. An **owner** grant records what a runtime already attaches and is never drawn; an **operator** grant is a deliberate human share, and that is the one that draws an edge and can be detached. See [connectors](/using/connectors).
+**Meet your team**: the introduction a team's chat shows on your first visit: the team's agents, then a few words from you about who you are. The agent that answers you in any of the team's chats receives your introduction with your message. See [Team chat](/using/team-chat).
 
-**drift**: a connected connector whose tool list no longer hashes to what a human approved, which is how a rug-pull shows up. Deliberately never collapsed into an error, because the remedy is different: an error says retry, drift says read what changed before trusting it again.
+**Memory**: the facts your agents save and share, shown in the sidebar's **Memory** view as a graph and a list. An agent on a team reads its team's facts and the global ones. See [Memory](/using/memory).
 
-**lethal trifecta**: the combination of reading private data, ingesting untrusted content, and being able to reach the network, accumulated across a whole run rather than judged per call. A call whose run has all three always prompts, and that approval can never be remembered.
+**Mission**: a task together with every task handed off under it. A budget can cover one mission. See [Budgets and guardrails](/concepts/governance).
 
-## Verification
+**Model**: the AI model an agent runs on, such as a Claude model, a GPT model or a local Ollama model. You pick a default, and you can change the model per agent. See [Connect providers and runtimes](/using/providers-and-runtimes).
 
-**verification**: the gate that makes "done" mean _verified_. A task carrying a non-promotable verdict cannot transition to `done`. See [verification](/concepts/verification).
+### N
 
-**builder≠judge**: the principle that the agent that did the work never certifies its own work. The only signals are the deterministic gate (an exit code) and an independent read-only critic; a generator never self-certifies. See [verification](/concepts/verification).
+**Needs you**: the Board's first column. It holds approvals and every task that waits on a person: one that failed, timed out, was stopped, is blocked, has no agent, needs review, or never started. See [Board](/using/board).
 
-**deterministic gate**: the strongest verification signal: Clawboo runs the task's verify command and reads its exit code. A red gate is always a `fail`. See [verification](/concepts/verification).
+### O
 
-**critic**: the read-only independent reviewer that runs on a green gate when a diff is risky or large. It emits structured findings; a blocking finding turns the attempt into a `fail` and routes the fix back. See [verification](/concepts/verification).
+**Ollama**: a free program that runs AI models on your own computer. Clawboo Native can run agents on it with no API key. See [Connect providers and runtimes](/using/providers-and-runtimes).
 
-**completed_with_debt**: the verdict written when the verification attempt budget is spent and the last attempt still failed, with the open items recorded as `debtNotes`. It covers a red deterministic gate as well as an unresolved blocking critic finding. The board's `→ done` gate still treats it as promotable over a green gate, but the worktree completion path does not: an exhausted fix loop routes the task to `blocked` for a human. See [verification](/concepts/verification).
+**OpenClaw**: an open-source agent runtime that runs its own Gateway on your computer. Clawboo can run agents on it next to its other runtimes. See [OpenClaw](/runtimes/openclaw).
 
-## Governance
+**OpenClaw Gateway**: the program OpenClaw runs on your computer. Clawboo connects to it to create, run and chat with OpenClaw agents. See [OpenClaw](/runtimes/openclaw).
 
-**governance**: the guardrail layer that makes a runaway agent impossible, not just visible: budgets, circuit breakers, caps, and approvals. See [governance](/concepts/governance).
+**Org chart**: every agent on every team on one live chart, around Boo Zero. Open it from the sidebar or with `Cmd/Ctrl + 1`. See [Org chart and team graphs](/using/org-chart).
 
-**budget** (kill-switch): a USD spending limit recorded in integer cents. `recordSpend` is atomic; a `cap`-mode budget auto-pauses at 100% (the kill-switch that aborts the run), while a `warn`-mode budget only tracks spend and emits warnings at the crossings without ever pausing. A budget with no row is uncapped. See [governance](/concepts/governance) and [cost and budgets](/using/cost-and-budgets).
+### P
 
-**circuit breaker**: a deterministic, cross-runtime backstop that stops a run burning turns or tokens with no progress. It trips on `iteration-cap`, `repeat-failure`, `no-progress`, `token-velocity`, or `repeat-policy-denied`, keyed on typed `RuntimeEvent` fields rather than scraped prose. See [governance](/concepts/governance).
+**Peer chat**: the shared channel where teammates on different runtimes post updates to each other while they work. You do not see it in the dashboard; your chats with a team are General and its rooms. See [How agents talk to each other](/concepts/peer-chat).
 
-**cap**: a hard ceiling enforced in code: delegation depth (default max 2), per-turn fan-out, per-parent live-child count on the board (default 24), a root-creation rate (default 30 per 5 min), and per-node cost. The depth cap is the single-reduce-point + report-up-by-default discipline. See [governance](/concepts/governance).
+**Permissions**: the **Permissions** section on an agent's page, under **Details**. On Clawboo Native it holds the switch that lets the agent ask to run shell commands. On OpenClaw it sets when the agent asks before running a command, and lists the commands it may run without asking. See [Command permissions](/using/command-permissions).
 
-**approval**: a human gate on something an agent wants to do, resolved from the Approvals queue. Three kinds share that queue. A **tool or delegation approval** is Clawboo's own database-mediated handshake for a risky brokered call. An **exec approval** is a shell command OpenClaw's Gateway is holding: the Gateway still owns the decision, but Clawboo now mirrors the request into the same `tool_call_approvals` table (`kind: 'exec'`) and answers it over the server's own Gateway connection, so the card survives a closed browser tab. A **`run_command` approval** is a native Boo asking to run one program. See [approvals](/using/approvals).
+**Personality**: the presets and sliders on an agent's page that set its tone. Clawboo writes the result into the agent's SOUL.md. See [Agents](/using/agents).
 
-**standing grant**: a command an OpenClaw Boo may run without asking again, written by the Gateway when someone answers **Always** to an exec approval. Clawboo lists a Boo's standing grants in its **Permissions** tab and is the only place in Clawboo they can be taken back. A grant is usually bound to both the exact command and the folder it ran in, so the same command run elsewhere asks again. See [command permissions](/using/command-permissions).
+**Provider**: the service that runs an AI model, such as Anthropic, OpenAI, OpenRouter or your own Ollama. You connect one with an API key or a sign-in. Clawboo is free; the provider bills any usage. See [Connect providers and runtimes](/using/providers-and-runtimes).
 
-**`run_command`**: the native runtime's shell tool. It is a local tool rather than a brokered one, so it exists only inside a `clawboo-native` run and never appears in any other runtime. It is off unless switched on per Boo, takes one program as an argument list rather than a shell string, asks a person before every command, and remembers nothing. See [Clawboo Native](/runtimes/native).
+### R
 
-## Observability
+**Room**: a smaller chat inside a team, with some of its members. It has its own conversation, task cards and graph, while the team's rules, brief, memory and board stay team-wide. Boo Zero leads every room. Deleting a room archives it. See [Team chat](/using/team-chat).
 
-**observability**: the layer that makes the orchestrator measurable and debuggable: an append-only event log, traces, a Ghost-Graph projection, and a fleet-health triage. See [observability](/concepts/observability).
+**Route**: a line on the Org chart from one agent to another, meaning "this agent hands work to that one". It is a line in the first agent's AGENTS.md, and only OpenClaw agents follow it. See [Org chart and team graphs](/using/org-chart).
 
-**event log**: the append-only, SQLite-backed stream of orchestration events (each with a monotonic `seq`). It is the always-on local trace store; replaying it deterministically reproduces the projected graph state. See [observability](/concepts/observability).
+**Routine**: work that runs on a schedule. A team routine posts its instructions in the team's chat for Boo Zero; an agent routine gives one agent a task. See [Routines](/using/routines).
 
-**trace**: one mission's events grouped by `traceId`, reconstructed into a span tree. When an OTLP endpoint is configured the same trace is exported to Jaeger; otherwise the event log is the trace store. See [observability](/concepts/observability).
+**Runtime**: the engine that runs an agent: Clawboo Native (built in), OpenClaw, Claude Code, Codex or Hermes. A team can mix runtimes. See [Choose a runtime](/runtimes/index).
 
-**fleet health**: the triage taxonomy projected from the event log: `working`, `idle`, `stalled` (quiet past a threshold while an execution is open), and `zombie` (quiet long enough that the process is almost certainly dead). See [observability](/concepts/observability).
+### S
 
-## Worktrees, handoff, scheduling
+**Settings**: one window with three groups. **Workspace** holds Providers, Runtimes, Memory, Capabilities and Routines; **Insights** holds Fleet, Tokens Used, Observability and Governance; **System** holds System and System Health. Open it from the sidebar or with `Cmd/Ctrl + ,`. See [Tour the dashboard](/getting-started/dashboard-tour).
 
-**worktree**: a per-task git worktree on its own branch, provisioned outside the user's repo, giving a file-mutating task an isolated world any runtime can pick up. It provides concurrency isolation, not a privilege boundary. See [worktrees and handoff](/concepts/worktrees-and-handoff).
+**Share**: to give an agent a connector on the graph. Pull a thread off its Boo and pick the connector, or drop a connector tile onto the Boo. Dragging a tile from another agent's ring asks for **Read**, **Write** or **Admin** access. **Stop sharing** takes it back from one agent. See [Connectors](/using/connectors).
 
-**system-of-record**: the durable, on-disk scaffold committed into each worktree root (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`) so a cold runtime can answer "what is this / how to run / how to verify / where are we" from files alone. See [worktrees and handoff](/concepts/worktrees-and-handoff).
+**Sign in with ChatGPT**: connects Codex to your ChatGPT plan instead of an API key. Hermes and OpenClaw can use the plan too, each with its own sign-in. Clawboo Native cannot. See [Connect providers and runtimes](/using/providers-and-runtimes).
 
-**AGENT_HANDOFF**: `AGENT_HANDOFF.json`, the structured, zod-validated clock-out artifact written into a worktree (done/broken/next-step, commands, evidence, native session id). It is the cross-runtime bridge: one runtime can pause and a different runtime can reconstruct state from this file. See [worktrees and handoff](/concepts/worktrees-and-handoff).
+**Skill**: a label for something an agent is good at, picked from the Marketplace's **Skills** tab or on the graph. It shows on the agent's ring and in the Capabilities panel, but gives the agent no new tool and does not change its instructions. Hermes agents also write skill files of their own, which Hermes reads. See [Capabilities](/using/capabilities).
 
-**Routine**: scheduled work for a team or one agent. A team routine posts its instructions into the team's group chat for the team's lead; an agent routine files a board task for one agent. Routines are Clawboo's own cron for team work, distinct from a runtime's own-life cron; trying to register a team-task schedule into a runtime-own-life source is refused. See [scheduling](/concepts/scheduling) and [Routines](/using/routines).
+**Standing permission**: a command an OpenClaw agent may run without asking again, recorded when you answer **Always** to its command approval. You see and remove them in the agent's **Permissions** section. See [Command permissions](/using/command-permissions).
 
-**scheduler**: the engine that fires Routines: a durable `scheduled_runs` ledger as source of truth plus a rebuildable in-process ticker. A team routine's fire goes through the team chat to the team's lead; an agent routine's fire is dispatched through the standard executor pipeline. See [scheduling](/concepts/scheduling).
+**Steer**: to reply on a task while an agent is working on it, so the agent reads your reply during the run. A reply reaches the task's agent at any other status too: a waiting task starts again, and a finished one offers **Send as a follow-up task**. Reply from the Board's task drawer, a team chat's **Tasks** card or the agent's **Tasks & Routines** card. See [Steer a running task](/using/board#steer-a-running-task).
 
-## Gateway and events
+**System Health**: **Settings** > **System** > **System Health**: Clawboo's startup checks, with a way to run them again. See [System Health](/using/system-health).
 
-**Gateway**: the OpenClaw Gateway, the runtime + upstream the `openclaw` runtime talks to. The browser never connects to it directly; it goes through Clawboo's same-origin proxy, which injects auth server-side. See [the Gateway and events](/concepts/gateway-and-events) and [the OpenClaw runtime](/runtimes/openclaw).
+### T
 
-**Bridge→Policy→Handler**: the three-layer pipeline every Gateway event flows through: the **Bridge** classifies a raw frame (`classifyEvent`), the **Policy** is a pure function deriving intents (`derivePolicy`), and the **Handler** dispatches to state (`createEventHandler`). No event takes a shortcut around it. See [the Gateway and events](/concepts/gateway-and-events) and [the event pipeline](/internals/event-pipeline).
+**Task**: one piece of work on the Board, usually with an agent, a status and comments. See [Board](/using/board).
 
-**device pairing**: OpenClaw 2026.5.x requires a human to approve a new device before its WebSocket connect succeeds; an unapproved connect returns `NOT_PAIRED`. Clawboo surfaces a one-click approval that shells out to the OpenClaw CLI. See [the OpenClaw runtime](/runtimes/openclaw).
+**Task runner**: one of the two ways Clawboo runs agents. It runs agent routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started through the API. Only the task runner gives a run that names a git repository its own worktree, checks finished work, and stops runs that go nowhere. Most work runs in team chat instead. See [How a team works](/intro/how-it-works).
 
-## UI surfaces
+**Tasks card**: the card beside a team chat that sorts the chat's tasks into **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**. Open a task there to read its comments, steer it, or open it on the Board. An agent's page has a **Tasks & Routines** card instead. See [Team chat](/using/team-chat).
 
-**Ghost Graph**: the React Flow canvas that renders a team's Boos, their skills/resources as orbital nodes, and their delegation edges, with optional team halos and click-to-expand. See [the Ghost Graph](/using/ghost-graph).
+**Team**: a group of agents that work together, with its own chats, rules, brief and memory. Deploy one from the Marketplace or build your own. See [Teams](/using/teams).
 
-**Org chart** (formerly **Atlas**): the global, all-teams view of the Ghost Graph. Boo Zero presides over every team, at the center in the default radial layout or at the top of a tree. Open it from the sidebar's **Org chart** row or with Cmd/Ctrl+1. The code still calls it `atlas` (the graph scope, and the `atlas-radial` / `atlas-top-down` layouts). See [the Ghost Graph](/using/ghost-graph).
+**Team chat**: a team's conversations: **General** and any rooms. When you send a message that @mentions no one, Boo Zero answers it or hands the work to a teammate. See [Team chat](/using/team-chat).
 
-**Home**: a team's own page, opened from the team's icon on the rail or the sidebar's **Home** row. Today it is a placeholder for the team's dashboards and the artifacts its agents make. See [the dashboard tour](/getting-started/dashboard-tour#home).
+**Team graph**: the card beside a team's chat that draws the team, with each agent's live status. In a room it is the **Room graph**. See [Org chart and team graphs](/using/org-chart).
 
-**marketplace**: the in-app catalog of 436 first-class agents and 85 workflow teams across nineteen packs, two of Clawboo's own and seventeen adapted from upstream repositories (sixteen MIT-licensed, one Apache-2.0). The content is hand-maintained JSON under the repository's `catalog/` folder, excluded from the npm tarball and fetched at runtime from `/api/catalog/*`; only the built-in pack is compiled in, so first-run onboarding works offline. Deploying an entry writes its markdown body to the agent's files. See [the marketplace](/using/marketplace) and [the marketplace catalog reference](/reference/marketplace-catalog).
+**Team rules**: short rules that every member of a team follows on every turn in that team's chats. Edit them with the team's brief, or add one with `/rule` in a chat. See [Teams](/using/teams).
 
-## Security
+**Tokens Used**: **Settings** > **Insights** > **Tokens Used**: recorded token use and cost by team and agent. It counts OpenClaw agents only. See [Budgets and spend](/using/budgets-and-spend).
 
-**vault** (secrets vault): Clawboo's encrypted-at-rest store for runtime credentials. Each value is encrypted with AES-256-GCM under a local master key; the key-resolution chain is process env → vault → OpenClaw's `.env`. It is defense in depth: a wrong or lost master key fails closed, protecting against casual inspection and a leaked vault file. See [security](/operating/security).
+**Trace**: the record of one task-runner run, with its steps, tool calls and errors, shown in the **Observability** panel. See [Observability](/concepts/observability).
 
-## See also
+### V
 
-- [Core concepts overview](/concepts/index)
-- [Reference map](/reference/index)
-- [Known issues](/appendices/known-issues)
-- [FAQ](/appendices/faq)
+**Vault**: Clawboo's encrypted store for the keys you connect, kept in your Clawboo folder. Keys you save under **Providers** are also copied, unencrypted, into OpenClaw's files. See [Where keys are stored](/using/providers-and-runtimes#where-keys-are-stored).
+
+**Verification**: Clawboo's check on finished work. It runs the project's test command, and for bigger changes a second agent reviews the work. It runs only for task-runner runs that worked in their own git worktree and changed files, so most work is never checked. See [How work is checked](/concepts/verification).
+
+### W
+
+**Worktree**: a separate working copy of a git repository, on its own branch, where one task's file changes stay apart from other work. It is not a sandbox: the agent can still reach the rest of your computer. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
+
+## Names in the app
+
+The dashboard's labels are the names these docs use. The right-hand column lists older or other names you may meet in earlier releases, older pages, or elsewhere.
+
+| In the app                                                                        | What it is                                                | Older or other names                                                  |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Org chart**                                                                     | Every team on one chart, around Boo Zero                  | Atlas (the sidebar name up to 0.5.0), Ghost Graph                     |
+| **Team graph**, **Room graph**                                                    | The graph card beside a team's chat, or beside a room     | Ghost Graph                                                           |
+| **General**                                                                       | A team's main chat, shown as **General (Main Room)**      | Group Chat (the sidebar name up to 0.5.0), group chat                 |
+| A team chat with its cards (**Browser**, **Team graph**, **Tasks**, **Activity**) | A team's working view                                     | team space                                                            |
+| **Meet your team**                                                                | The one-time introduction before a team's chat opens      | Know Your Team gate                                                   |
+| **Routines**                                                                      | Work that runs on a schedule, for a team or for one agent | Scheduler (before 0.4.0)                                              |
+| **Needs you**                                                                     | The Board's first column                                  | Needs approval (before 0.4.0)                                         |
+| **Tokens Used**                                                                   | Recorded token use and cost, for OpenClaw agents          | Cost dashboard; the welcome screen's **Cost** button opens it         |
+| **warn only**, **hard cap**                                                       | The two budget modes                                      | kill-switch (for hard cap)                                            |
+| **Clawboo Native**                                                                | The built-in runtime                                      | native runtime, native harness, `clawboo-native` (its id)             |
+| **OpenClaw Gateway**, **Gateway**                                                 | OpenClaw's own server on your computer                    | gateway                                                               |
+| **Boo**                                                                           | An agent, as the dashboard draws it                       | agent                                                                 |
+| **Boo Zero**                                                                      | Your team leader                                          | universal leader, team lead                                           |
+| **Leader**                                                                        | The badge on a team's lead member                         | team lead                                                             |
+| **Memory**                                                                        | Team memory as a graph and a list                         | Memory browser                                                        |
+| **Capabilities**, **Governance**, **Observability**, **System Health**            | Panels in Settings                                        | Capabilities dashboard, Governance dashboard, Observability dashboard |
+| **Fleet**                                                                         | **Settings** > **Insights** > **Fleet**                   | Fleet in the sidebar (up to 0.5.0)                                    |
+| **System**                                                                        | **Settings** > **System** > **System**                    | System maintenance                                                    |
+
+## For developers
+
+<Accordion title="Code names and architecture terms">
+
+| Term                                              | What it is                                                                                                                                                                | Read more                                                          |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `RuntimeAdapter`                                  | The interface every runtime implements, with `capabilities()`, `start()`, `events()`, `abort()` and an optional `steer()` among its members                               | [The RuntimeAdapter trait](/internals/runtime-adapter)             |
+| `RuntimeEvent`                                    | The seven event kinds every adapter emits: `text-delta`, `tool-call`, `tool-result`, `status`, `cost`, `done` and `error`                                                 | [The RuntimeAdapter trait](/internals/runtime-adapter)             |
+| Runtime ids                                       | `clawboo-native`, `openclaw`, `claude-code`, `codex` and `hermes`, plus the test-only `clawboo-mock`, offered only with `CLAWBOO_ENABLE_MOCK_RUNTIME=1`                   | [Choose a runtime](/runtimes/index)                                |
+| Steering modes                                    | `live` (Clawboo Native, OpenClaw, Claude Code, Codex) and `interrupt-resume` (Hermes)                                                                                     | [Steering a running task](/runtimes/index#steering-a-running-task) |
+| `AgentSource`                                     | Where the agent list comes from: five sources (OpenClaw, Clawboo Native, and one each for Claude Code, Codex and Hermes), mirrored into SQLite                            | [AgentSource and the agent registry](/internals/agent-source)      |
+| `CapabilitySource`                                | Six sources that report skills, tools and connectors: one per runtime, plus `connector`                                                                                   | [Capabilities](/concepts/capabilities)                             |
+| Manageability tier                                | Whether Clawboo can change a capability: `managed`, `external-write`, `runtime-of-record` or `observe-only`                                                               | [Capabilities](/concepts/capabilities)                             |
+| Task statuses                                     | `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done` and `cancelled`. The Board shows `in_review` as **Verifying** in In progress, and `blocked` in Needs you | [The board](/concepts/the-board)                                   |
+| Atomic claim                                      | `UPDATE ... WHERE status='todo' AND assignee IS NULL AND dropped=0`. An empty result is a conflict, and the caller never retries it                                       | [Board internals](/internals/board-internals)                      |
+| Team engine, executor runner                      | The server code behind team chat, and behind the task runner                                                                                                              | [The executor runner](/internals/executor-runner)                  |
+| Clawboo's MCP servers                             | Tasks, Memory, Tools and TeamChat. OpenClaw agents get the first three                                                                                                    | [MCP tools reference](/reference/mcp-tools)                        |
+| `isUser=false`                                    | The marker in a peer post's header that tells an agent the post is evidence from a peer, not an instruction from you                                                      | [How agents talk to each other](/concepts/peer-chat)               |
+| Bridge, Policy, Handler                           | The browser's three steps for OpenClaw Gateway events: classify the frame, decide what it means, update the dashboard                                                     | [The event pipeline](/internals/event-pipeline)                    |
+| Event log                                         | The append-only table of orchestration events, each with a rising `seq`                                                                                                   | [Observability](/concepts/observability)                           |
+| Deterministic gate, critic, `completed_with_debt` | The test-command check, the read-only reviewer, and the verdict given when the last attempt still fails                                                                   | [How work is checked](/concepts/verification)                      |
+| Worktree files                                    | `TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh` and `VERIFICATION.md`, plus the `AGENT_HANDOFF.json` a run leaves for the next one                             | [Worktrees and handoff](/concepts/worktrees-and-handoff)           |
+| `run_command`                                     | Clawboo Native's shell tool                                                                                                                                               | [What agents can do](/concepts/permissions)                        |
+| Drift                                             | A connector whose command or tool list changed after you gave access. Clawboo refuses its calls, and its tile says **Changed since you approved it**                      | [Connectors](/using/connectors)                                    |
+| Lethal trifecta                                   | Private data, untrusted content and a way to send data out, together in one run. Calls that could send data out then always ask                                           | [What agents can do](/concepts/permissions)                        |
+| Boo Zero resolution                               | An agent designated as Boo Zero, then a Clawboo Native Boo Zero, then the OpenClaw Gateway's default agent                                                                | [Boo Zero](/using/boo-zero)                                        |
+
+</Accordion>
+
+## Related
+
+- [Tour the dashboard](/getting-started/dashboard-tour): where each of these things lives on screen.
+- [Key concepts](/concepts/index): the ideas behind the terms, in reading order.
+- [Known issues](/appendices/known-issues): what does not work yet, and what to do about it.
+- [FAQ](/appendices/faq): short answers to common questions.

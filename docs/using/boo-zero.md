@@ -1,128 +1,157 @@
 ---
-title: Configuring Boo Zero
-description: Set Boo Zero's display name, global brief, and per-team brief and rules, the universal team leader's identity and behavior.
+title: 'Boo Zero, your team leader'
+sidebarTitle: 'Boo Zero'
+description: 'How Boo Zero leads every team, how Clawboo picks it, what it reads, and how to use its own chat, its display name and the briefs.'
+icon: 'compass'
+keywords:
+  [
+    'Boo Zero',
+    'universal leader',
+    'team leader',
+    'global brief',
+    'team brief',
+    'display name',
+    '@TeamName',
+    'leader',
+  ]
 ---
 
-Use this page when you want to control how Boo Zero, the universal team leader, names itself, what it knows about your teams, and the rules it follows. Boo Zero participates in every team but belongs to none, and its identity is load-bearing across every team, so Clawboo gives you explicit surfaces to anchor its name and inject durable guidance, keeping its self-identity and delegation behavior stable.
+Boo Zero is your team leader, and it leads every team. When you send a message in a team's chat without @mentioning anyone, Boo Zero answers it or hands the work to the right teammate. Each hand-off becomes a task on the board. Boo Zero belongs to no team, so you never add it to a team or a room. It still leads **General** and every room of every team that has at least one member.
 
-There are two places to configure Boo Zero, split by scope:
+Use this page to see how Clawboo picks Boo Zero, what Boo Zero reads, and how to use its own chat, its display name and the briefs.
 
-- **Global** (display name + global brief): the **Brief** section of the **Details** card on Boo Zero's own page.
-- **Per-team** (brief + rules): the team settings sheet behind the gear in a team chat's header (General or any room), plus the `/rule` slash command in the team composer.
+You can spot Boo Zero by its red Boo, which never wears an accessory. It sits at the top of the team rail, and every team on the Org chart branches off it.
 
-## Who Boo Zero is
+![The Org chart: Boo Zero at the top, leading the Growth, Support and Platform teams](/images/ghost-graph.png)
 
-Boo Zero is the runtime-neutral universal leader, identified at connect time, and by default it is a Clawboo-native agent. The client resolves it from the registry's `defaultId` (from `GET /api/agents`, which the server computes as `resolveBooZero`: an explicit override, then the native Boo Zero, then the OpenClaw default), then falls back to the first teamless agent (`teamId === null`), then the first agent overall. The resolved id lives in `useBooZeroStore.booZeroAgentId`. The same Boo Zero leads every team regardless of the team's runtime mix, and every room inside a team the same way.
+## How Clawboo picks Boo Zero
 
-![Boo Zero's agent page: its chat on the left, and its Activity card listing the delegate tool calls that handed work to Ada, Kit, Juno and Iris](/images/boo-zero-delegations.png)
+Your install has one Boo Zero. Clawboo picks it in this order:
 
-Boo Zero is **teamless in the database** (`teamId === null`) but **participates in every team** via team-scoped sessions. It presides over every room of a team as well: it is never stored as a room member and the room's member picker does not offer it, yet it leads the room's conversation. In any team's or room's [Ghost Graph](/using/ghost-graph), and at the root of the Org chart, Boo Zero is pulled in as the universal leader even though it has no team membership; the `TeamHaloLayer` deliberately omits it from any team's hull because its `teamId` stays `null`.
+1. **An agent designated as Boo Zero.** The dashboard does this in one case: if you set up Clawboo with **Sign in with ChatGPT**, the lead agent of the team you deploy during setup becomes Boo Zero. It does not replace a Boo Zero you designated or a Clawboo Native one. You can also designate any agent through the API (see **Under the hood** at the end of this page).
+2. **A Boo Zero on Clawboo Native that Clawboo creates for you.** It appears once you have a Clawboo Native agent on a team and a connected provider (an API key or a local Ollama). It is named **Boo Zero** and starts on your default Clawboo Native model.
+3. **Your OpenClaw Gateway's default agent**, when there is no Clawboo Native Boo Zero. This is the case in an install that uses only OpenClaw.
 
-Two visible signals mark Boo Zero in the UI, both driven by `@clawboo/boo-avatar`:
+With none of these, there is no Boo Zero. Each team's chats are then led by the team's own [Leader](/using/teams), or by its first member.
 
-- **Reserved OpenClaw-Red tint.** When `isBooZero: true`, the avatar's tint is forced to `TINTS[0]` (`#ff4d4d`, OpenClaw red). Every other agent's tint is a deterministic hash over the other nine tints, so the red ghost-lobster is Boo Zero's alone. The accessory is also hard-locked to `none`; Boo Zero is the clean mascot, never wearing glasses/hat/headphones/crown.
-- **A "Leadership" orbital** in the graph. For every Boo flagged `isUniversalLeader`, `useGraphData` synthesizes a reserved `SkillNode` (`skillId: 'clawboo-leadership'`, `isLeadership: true`) that orbits Boo Zero. `SkillNode` renders it with an amber Compass icon and hides the Install button; this skill cannot be installed on any other agent. It is a graph-layer attribute, not a real capability record, so it survives any future change to Boo Zero's tools.
+Boo Zero can change as your install grows. Say you use OpenClaw, then put a Clawboo Native agent on a team with a provider connected. Clawboo creates a Clawboo Native Boo Zero, which takes over from the Gateway's default agent.
 
-![The Org chart showing Boo Zero presiding over every team](/images/ghost-graph.png)
+## Boo Zero's own chat
+
+Click the mascot at the top of the team rail. Boo Zero's page opens and works like any [agent's page](/using/agents); the agent column hides while you are there. The message box reads **Ask me anything… use @ to tag a team**.
+
+Use this chat to ask Boo Zero about your teams. Every message you send here carries a fixed set of rules that names Boo Zero and tells it how to lead. You cannot edit them.
+
+To give a team work, send the request in that team's chat instead. Boo Zero leads there, and its hand-offs become tasks on the board. A Clawboo Native Boo Zero cannot hand out work from its own chat.
+
+### Ask about one team with @TeamName
+
+Start your message with @ and the team's name, or click the team in the **Teams** row above the message box:
+
+```text
+@Growth What is still open for Friday's review?
+```
+
+Clawboo then adds a snapshot of that team to this one message: its brief (the first 900 characters), a summary of its board, a few facts from its memory, and its recent chat. Only a mention at the very start of the message counts.
+
+## What Boo Zero reads
+
+| Text                | Where you edit it                                     | When Boo Zero reads it                                                                                                                                 |
+| ------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Team rules**      | The team's brief and rules, or `/rule` in a team chat | Every turn in that team's chats. Every teammate reads them too.                                                                                        |
+| **A team's brief**  | The team's brief and rules                            | Only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Team chats do not include it. |
+| **Its fixed rules** | Nowhere: they are built in                            | Every message in Boo Zero's own chat.                                                                                                                  |
+| **Global brief**    | **Details > Brief** on Boo Zero's page                | Never. Clawboo does not use the Global Brief yet.                                                                                                      |
+
+In a team's chats, Boo Zero follows its own instructions. Each turn also gives it the team's rules, what you told the team about yourself, and who is on the team. See [What an agent sees](/concepts/agent-context) for the full list. Team rules and the brief are explained on [Teams](/using/teams#team-rules).
+
+On Clawboo Native, Boo Zero's own instructions are its SOUL.md, under **Details > Agent Files** on its page. You can read and change them there, but they tell Boo Zero how to hand out work, so change them with care.
+
+## Set the display name and Global Brief
+
+<Steps>
+
+<Step title="Open Boo Zero's page">
+
+Click Boo Zero's mascot at the top of the team rail.
+
+</Step>
+
+<Step title="Open the Brief section">
+
+In the **Details** card, click **Brief**. If **Details** is closed, open it with the folder icon in the page header.
+
+</Step>
+
+<Step title="Change the display name">
+
+Under **Display name**, type a name of up to 80 characters, then click **Save**. Reload the page to see the new name everywhere.
+
+</Step>
+
+<Step title="Edit the Global Brief (optional)">
+
+Edit the text, then click **Save**. **Regenerate from teams** rebuilds a draft that lists your teams; nothing changes until you click **Save**.
+
+</Step>
+
+</Steps>
+
+The display name is the name the dashboard shows for Boo Zero, and the name its fixed rules use in its own chat. It starts as **Boo Zero**. While the OpenClaw Gateway is connected, saving also puts the new name at the top of Boo Zero's SOUL.md.
 
 <Note>
-The **authoritative** identity at runtime is the `[Your Rules]` anchor block built by `buildBooZeroRulesBlock` (`lib/booZeroRules.ts`), injected as the first section of every Boo-Zero-bound message: user messages, agent-to-Boo-Zero delegations, wake-ups, and the 1:1 chat path. That block is hard-coded (not editable through the UI) so the load-bearing safety rules, name, never spawn sub-agents, `<delegate>`-only routing, silence-on-relay, no false timeouts, no re-greeting, can never be deleted by editing a brief. Everything below is the editable context that rides alongside it.
+
+Clawboo does not use the Global Brief yet. It saves what you write, but no chat or task sends it to Boo Zero, whatever the description above the box says. The default text includes a copy of Boo Zero's fixed rules; editing that copy changes nothing. For guidance Boo Zero must follow in a team, add a [team rule](/using/teams#team-rules).
+
 </Note>
 
-## Prerequisites
+## The team's own Leader
 
-- A connected runtime with Boo Zero identified (a fresh fleet hydration resolves it automatically).
-- For per-team configuration, open one of the team's chats; the brief & rules gear lives in the header of the team's General chat and of each of its rooms.
-
-## Set the display name and global brief
-
-These two editors live in the **Brief** section of the **Details** card on Boo Zero's own page. Boo Zero's Details card shows the same section pills as any agent on its runtime, plus a **Brief** pill. Brief is Boo-Zero-only: `InlineEditor` gates it on `isBooZero`, so it appears for no other agent.
-
-### Steps
-
-1. **Open Boo Zero's page.** Click the mascot at the top of the team rail. This selects no team (`selectTeam(null)`) and opens Boo Zero's page. It is laid out like any agent's page (the chat with cards beside it; see [Working with agents](/using/agents)), and in this view the sidebar shows only the team rail, with no agent column.
-2. **Open the Brief section.** In the **Details** card, pick the **Brief** pill. The card opens on Personality, and if it is closed, the folder icon in the chat header opens it.
-3. **Set the display name.** Type a name in the Display Name field (defaults to `Boo Zero`, max 80 characters) and click **Save**. This `PUT`s `/api/boo-zero/display-name/:agentId` with `{ name }`, storing the override in Clawboo's SQLite `settings` table under `boo-zero:display-name:<agentId>`. Saving also fires a best-effort sync of the new name into Boo Zero's `SOUL.md` heading (`syncBooZeroSoulIdentity`) so the persisted identity aligns with the override.
-4. **Edit the global brief.** The Global Brief textarea holds Boo Zero's overall responsibilities plus an auto-generated index of the teams it leads. Edit freely, then click **Save** to `PUT` `/api/boo-zero/global-brief` with `{ content }`, stored in `settings` under `boo-zero:global-brief`. Use **Regenerate from teams** to rebuild a fresh draft from your current team list; this does not save until you click **Save**.
-
-### What each field does
-
-| Field        | Stored as                                        | Endpoint                                             | Where it goes                                                                                                                              |
-| ------------ | ------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Display name | `settings` key `boo-zero:display-name:<agentId>` | `PUT /api/boo-zero/display-name/:agentId` `{ name }` | Overlaid on the fleet entry at hydration; synced into `SOUL.md` heading (best-effort); fed into the `[Your Rules]` anchor as `displayName` |
-| Global brief | `settings` key `boo-zero:global-brief`           | `PUT /api/boo-zero/global-brief` `{ content }`       | Injected into Boo Zero's context preamble on every interaction                                                                             |
-
-<Tip>
-The global brief seeds itself from `buildGlobalBrief` when nothing is stored. That generated default already embeds the same canonical rules block the LLM sees at runtime, so the maintenance UI shows you exactly what Boo Zero carries forward. The **Notes** section at the bottom of the brief is the freeform area for your own always-on guidance.
-</Tip>
-
-<Note>
-The display-name toast tells you to **reload to apply across all views**. The override is read at hydration time, so a reload re-overlays the new name everywhere. The per-turn rules anchor picks up the new name on the next message regardless.
-</Note>
-
-## Set per-team brief and rules
-
-Per-team configuration lives in the team settings sheet (`TeamSettingsSheet`), opened from the gear in a team chat's header (`GroupChatViewHeader`). The gear is the same in the team's General chat and in each of its rooms, because the brief and rules are team-wide. The sheet stacks two editors below the team's icon/accent/color controls: the per-team **Brief** and the per-team **Rules**.
-
-### Steps
-
-1. **Open one of the team's chats** (General or a room) and click the gear in the header. Its tooltip reads `<team name> brief & rules`.
-2. **Edit the per-team brief.** This is what Boo Zero reads when it operates on this specific team. It is stored in the dedicated `boo_zero_team_briefs` table (one row per team, FK-cascaded on team delete) via `PUT /api/boo-zero/team-briefs/:teamId` with `{ content }`.
-3. **Edit the team rules.** Type one rule per line. **Save rules** `PUT`s `/api/team-rules/:teamId` with `{ content }` (capped at 4000 characters server-side), persisting to the `settings` key `team-rules:<teamId>`. These rules are injected into the preamble of **every team agent's** message and **every Boo Zero turn in this team**.
-
-![The Growth team's settings sheet: the per-team brief Boo Zero reads, and the team rules, one per line](/images/team-brief-rules.png)
-
-### Per-team surfaces at a glance
-
-| Surface        | Stored as                                              | Endpoint(s)                                            | Scope of injection                                             |
-| -------------- | ------------------------------------------------------ | ------------------------------------------------------ | -------------------------------------------------------------- |
-| Per-team brief | `boo_zero_team_briefs` table (PK `teamId`, FK cascade) | `GET`/`PUT`/`DELETE /api/boo-zero/team-briefs/:teamId` | Boo Zero, when working in this team                            |
-| Team rules     | `settings` key `team-rules:<teamId>`                   | `GET`/`PUT /api/team-rules/:teamId`                    | Every team agent's preamble + every Boo Zero turn in this team |
-
-<Note>
-Per-team rules and briefs survive across sessions. The reason they exist: a user correction like "they are not sub-agents, delegate via `<delegate>`" sits only in chat history and rolls out of the last-8-messages context window within an hour. Persisting it durably means the team stops repeating the same mistake.
-</Note>
-
-## Capture a rule with `/rule`
-
-The fastest way to add a team rule is the `/rule` slash command in a team chat's composer, no need to open the sheet. It works the same in the team's General chat and in any of its rooms, and the rule applies to the whole team.
-
-1. In the composer, type `/rule <text>` (the command requires a space after `/rule` and a non-empty body, so `/rules` or `/rule:` will not trigger it).
-2. Press send. Clawboo intercepts the message **before** routing to any agent: it fetches the team's current rules, appends your text as a new line (deduping exact case-insensitive duplicates via `appendRule`), and `PUT`s them back through `saveTeamRules`. Nothing is sent to the runtime.
-3. A single confirmation entry (`Rule saved for team: <text>`) appears in the merged team view as a breadcrumb. On failure you get an error toast and the message is dropped.
-
-The same rules text is wrapped in `[Team Rules — set by the user, authoritative] … [End Team Rules]` (`buildTeamRulesBlock`) before injection, so agents recognize it as authoritative user guidance.
-
-## Verify it worked
-
-- **Display name**: re-fetch `GET /api/boo-zero/display-name/:agentId`; the response `{ name }` should match what you saved. After a reload, the new name appears in chat headers and on Boo Zero's tile in the sidebar's mascot grid.
-- **Global brief**: re-fetch `GET /api/boo-zero/global-brief`; `{ content }` should be your saved markdown. A `null` content means nothing is stored and the UI is showing the generated default.
-- **Per-team brief**: re-fetch `GET /api/boo-zero/team-briefs/:teamId`; a non-`null` `{ content }` confirms the upsert.
-- **Team rules**: re-fetch `GET /api/team-rules/:teamId`; `{ content }` reflects your saved rules (or your `/rule` appends). Reopening the team settings sheet shows the same content.
+Besides Boo Zero, a team can have its own Leader: a member whose name or role reads as a lead, marked with a **Leader** badge when you deploy the team. Boo Zero still leads. The Leader sits under Boo Zero on the team graph, and leads the team's chats only when your install has no Boo Zero. See [Teams](/using/teams).
 
 ## Troubleshooting
 
-<Warning>
-**Boo Zero still uses the wrong name in chat.** The `SOUL.md` sync that runs on Save is best-effort and may not persist on older OpenClaw runtimes. This is not a problem in practice: the per-turn `[Your Rules]` anchor carries the authoritative `displayName` regardless, so Boo Zero refers to itself correctly on the next turn even when the file write does not land.
-</Warning>
+<AccordionGroup>
 
-<Warning>
-**The Brief pill is missing.** It only renders in the Details card on Boo Zero's own page, gated by `isBooZero`. If Boo Zero has not been identified yet (no agents hydrated, or a fresh connect mid-flight), the pill will not appear. Re-hydrate the fleet and reopen Boo Zero's page from the mascot.
-</Warning>
+<Accordion title="A team is led by one of its members, not Boo Zero">
 
-<Danger>
-**Editing a brief does not change the safety rules.** The `## Required behavior` block you see inside the global brief is sourced from `buildBooZeroRulesBlock` for display parity; editing the brief textarea is documentation only. The runtime source is `lib/booZeroRules.ts`, which is not user-editable. To change Boo Zero's enforced behavior you change that code, not the brief.
-</Danger>
+There is no Boo Zero yet. On Clawboo Native, Clawboo creates one once a Clawboo Native agent is on a team and a provider is connected. Connect an API key or a local Ollama in **Settings > Runtimes**.
 
-## Related
+</Accordion>
 
-- [Agent model](/concepts/agent-model), Boo, Boo Zero, and the five runtime classes
-- [Using teams](/using/teams), create/manage teams, leaders, and color collections
-- [The Ghost Graph](/using/ghost-graph), where the Leadership orbital and red tint appear
-- [Group chat](/using/group-chat), the team chats (General and rooms) that host the `/rule` command and the brief & rules gear
-- [Agents](/using/agents), the agent page's cards, the Details card, and the SOUL/IDENTITY/TOOLS/AGENTS files
+<Accordion title="The Brief section is missing">
 
-## See also
+**Brief** appears only on Boo Zero's own page. Open the page from the mascot at the top of the team rail. If the dashboard has not identified Boo Zero yet, for example right after it connects, reload the page.
 
-- [Teams API reference](/reference/rest-api/teams), `/api/team-rules`, `/api/team-chat`, team-onboarding shapes
-- [Glossary](/appendices/glossary), Boo Zero, Ghost Graph, the board, runtime
+</Accordion>
+
+<Accordion title="Boo Zero still shows its old name">
+
+The dashboard applies the display name when it loads. Reload the page.
+
+</Accordion>
+
+<Accordion title="Boo Zero ignores what I wrote in the Global Brief">
+
+This is expected: Clawboo does not use the Global Brief yet. Put the guidance in a [team rule](/using/teams#team-rules) instead.
+
+</Accordion>
+
+</AccordionGroup>
+
+<Accordion title="Under the hood">
+
+- `GET /api/boo-zero/override` returns `overrideAgentId`, the `effective` Boo Zero, and the `tier` it came from: `override`, `native`, `openclaw`, or `null` when there is none.
+- `POST /api/boo-zero/override` with `{ "agentId": "<agent id>" }` makes any agent Boo Zero, on any runtime. `{ "agentId": null }` clears the choice. A missing or archived agent returns 404.
+- Display name: `GET` and `PUT /api/boo-zero/display-name/:agentId`. Global Brief: `GET` and `PUT /api/boo-zero/global-brief`. Team briefs: `GET`, `PUT` and `DELETE /api/boo-zero/team-briefs/:teamId`.
+- See the [Boo Zero API reference](/reference/rest-api/boo-zero) for every field.
+
+</Accordion>
+
+## Next steps
+
+- [Teams](/using/teams): team rules, the team brief and the team's Leader.
+- [Team chat](/using/team-chat): how messages reach Boo Zero and the team.
+- [Agents](/using/agents): the agent page that Boo Zero's page is built on.
+- [What an agent sees](/concepts/agent-context): everything in a turn, for Boo Zero and every teammate.
+- [Agent model](/concepts/agent-model): agents, runtimes and Boo Zero in one picture.

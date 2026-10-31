@@ -1,154 +1,192 @@
 ---
-title: Install Clawboo
-description: Install Clawboo with npm i -g clawboo or npx clawboo, launch the dashboard, and see the launch sequence, port discovery, and where Clawboo keeps its state.
+title: 'Install, update and remove Clawboo'
+sidebarTitle: 'Install'
+description: 'What Clawboo needs, how to run it with npx or a global npm install, what the clawboo command starts, and how to stop, update or uninstall it.'
+icon: 'download'
+keywords:
+  ['npm', 'npx', 'node', 'update', 'upgrade', 'uninstall', 'port', 'server log', 'Claude Agent SDK']
 ---
 
-By the end of this tutorial you'll have the Clawboo dashboard running locally and open in your browser, ready for the onboarding wizard. Installation is a single command; there is nothing to configure first.
+Clawboo installs from npm and runs as a small server on your computer that you use in your browser. This page covers what you need, the two ways to run it, what the `clawboo` command does, and how to stop, update and remove it. To go straight to a working team, follow the [Quickstart](/getting-started/quickstart).
 
 <Note>
-These docs describe Clawboo **v0.5.0**, the current release.
+
+These docs track the latest code. The latest npm release is 0.5.0, so some features described here arrive with the next release; see the Unreleased section of the [changelog](/appendices/changelog).
+
 </Note>
 
-## Prerequisites
+## Requirements
 
-<Note>
-- **Node.js 22.12 or newer.** Clawboo's `engines` field requires `node >=22.12.0`. `npx` ships with Node, so if you have a recent Node you already have everything you need.
-- **A terminal and a web browser.** The launcher opens your default browser automatically.
-- **No OpenClaw and no provider key required to launch.** You pick a runtime and (optionally) paste a provider key *inside* the onboarding wizard, not before it. A global install (`npm i -g clawboo`) is recommended for a persistent `clawboo` command and one-click updates, but `npx clawboo` works too.
-</Note>
+- **Node.js 22.12 or newer.** Check with `node --version`. On an older Node, `clawboo` stops right away with a message naming the version it found. Get Node from [nodejs.org](https://nodejs.org) or a version manager such as nvm or fnm.
+- **A terminal and a web browser.** You type one command; everything after that happens in the browser.
+- **An AI provider, chosen during setup:** an API key, a local Ollama, or a ChatGPT subscription. You don't need one to install.
+- **Only if you add OpenClaw teammates:** the OpenClaw release Clawboo installs needs Node 24.22.1 or later on the 24 line, or 26.12.1 or later. Node 22 and Node 25 cannot run it. Clawboo does not check this before it installs OpenClaw, so compare `node --version` first.
 
-Check your Node version:
+There is no Clawboo account, Docker image or database to set up.
+
+## Run Clawboo
+
+<Tabs>
+
+<Tab title="Try it with npx">
 
 ```bash
-node --version
+npx clawboo@latest
 ```
 
-If it prints `v22.12.0` or higher, you're set (Clawboo's `engines` field requires `node >=22.12.0`, so an earlier 22.x is too old). If not, install a current Node from [nodejs.org](https://nodejs.org) or via a version manager (`nvm`, `fnm`, etc.) before continuing.
+Keep `@latest`: a bare `npx clawboo` can reuse an older copy from npm's cache. An npx run cannot update itself from the dashboard; see [Update Clawboo](#update-clawboo).
 
-## Steps
+</Tab>
 
-### 1. Install and run
-
-Install Clawboo globally, then run it:
+<Tab title="Install it globally">
 
 ```bash
 npm install -g clawboo
 clawboo
 ```
 
-The global install gives you a persistent `clawboo` command and one-click in-app updates from the dashboard. Prefer not to install? `npx clawboo@latest` downloads and runs the latest package (currently `0.5.0`) without adding anything to your global `node_modules`. Keep the `@latest`: a bare `npx clawboo` can reuse an older build already in npm's cache.
+A global install gives you a lasting `clawboo` command and one-click updates from the dashboard.
 
-**Expected result:** the terminal prints the Clawboo ASCII logo and a version line like `Clawboo v0.5.0`, then begins starting the dashboard.
+</Tab>
 
-### 2. Watch the launch sequence
+</Tabs>
 
-Run bare, the CLI is a thin launcher. Its job is to get you to a running dashboard and open your browser there. (It also carries `backup`, `stop`, and `restart`; see the [CLI reference](/reference/cli).) In order, it:
+On a first start the terminal shows:
 
-1. **Prints the logo and tagline.**
-2. **Does an informational Gateway probe.** It opens a quick TCP connection to `localhost:18789` (the OpenClaw Gateway's default port). This is purely informational; it prints either `OpenClaw Gateway detected` or `No Gateway detected — the dashboard will guide you through setup.` and does not change what happens next. You do **not** need a Gateway running; the native runtime needs none at all.
-3. **Finds or starts the dashboard server.** First it looks for an already-running Clawboo dashboard (see [Port discovery](#port-discovery) below). If it finds one, it asks that server what version it is and offers to restart it when it turns out to be older than the CLI you just ran, since the server is detached and would otherwise stay bound to the port on the old build. If none is found, it starts the bundled server.
-4. **Opens your browser** at the discovered URL.
-
-**Expected result:** you see a spinner that resolves to `Dashboard started`, then `Clawboo opened at http://localhost:18790` (or the next free port in the `18790–18809` range), and a "Clawboo is ready!" summary with next-step hints.
-
-### 3. Land on the onboarding wizard
-
-On a fresh machine there is no saved state, so the dashboard opens directly into the onboarding wizard.
-
-**Expected result:** your browser shows the Clawboo welcome screen with a **Get Started** button. From here, pick a path:
-
-- **Native runtime (recommended, no Gateway):** [Quickstart: native](/getting-started/quickstart-native). Paste one provider key and you have a working team in about a minute.
-- **OpenClaw Gateway:** [Quickstart: OpenClaw](/getting-started/quickstart-openclaw). Detect, install, configure, and start the Gateway from inside the wizard.
-
-## What you should see
-
-A "Clawboo is ready!" banner in your terminal:
-
-```
+```text
 ✔ Dashboard started
 ✔ Clawboo opened at http://localhost:18790
-
-Clawboo is ready!
-
-  What to do next:
-  •  Deploy a pre-built team or create your own
-  •  Open Ghost Graph to see your agent topology
-  •  Browse the Marketplace for skills and team templates
-  •  Track token usage by team and agent
 ```
 
-…and the onboarding welcome screen in your browser.
+Your browser opens on the setup wizard. Continue with the [Quickstart](/getting-started/quickstart).
 
-![The Clawboo dashboard: a team's General chat on the left, with its Team graph and Tasks cards on the right](/images/team-space.png)
+### Add Claude Code teammates (optional)
 
-## What just happened
+The Claude Code runtime needs the Claude Agent SDK, which the `clawboo` package does not include because it would add about 210 MB to every install. Install the two together, globally:
 
-`clawboo` ran a launcher that started Clawboo's **bundled server**, a single self-contained Node process that serves both the dashboard UI and every `/api/*` route, and pointed your browser at it. The server bound to **loopback only** (`127.0.0.1`) so a fresh install is never reachable from other machines on your network, picked a free port, and recorded that port so the next `clawboo` can find it again. All of Clawboo's own state lives under `~/.clawboo`; nothing was written into your project or your global Node install.
+```bash
+npm install -g clawboo @anthropic-ai/claude-agent-sdk
+```
 
-## Port discovery
+To check it, run `npm ls -g @anthropic-ai/claude-agent-sdk`: it lists the package when it is installed. A one-off `npx` run cannot load the SDK. Then connect Claude Code in **Settings → Runtimes**; see [Claude Code](/runtimes/claude-code).
 
-The launcher and the server share one port-resolution scheme so they always agree on where the dashboard lives.
+## What the clawboo command does
 
-| Step                 | What happens                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Default port**     | `18790`, one above the OpenClaw Gateway's `18789`, in the uncommonly-used 18000–18999 range.                                                                                                                                                                                                                                                                       |
-| **Already running?** | Before starting anything, the CLI checks (in order) the `CLAWBOO_API_PORT` env var, the runtime port file at `~/.clawboo/api-port.txt`, then a scan of `18790`→`18809`. If a Clawboo dashboard is already up, it just opens the browser there instead of starting a second server.                                                                                 |
-| **Signature probe**  | The CLI doesn't trust a bare open TCP port. It does an HTTP `GET /api/settings` and only accepts a response that is Clawboo-shaped JSON (it must contain a `gatewayUrl` string and a `hasToken` boolean). This is why the launcher correctly skips an OpenClaw Gateway auxiliary port or a Chrome `--remote-debugging-port` that happens to sit in the same range. |
-| **Free-port scan**   | When starting fresh, the server tries `18790` and scans up to 20 consecutive ports (`18790`→`18809`) for the first free one.                                                                                                                                                                                                                                       |
-| **Explicit pin**     | Set `CLAWBOO_API_PORT=<port>` to force a specific port. It is used exactly and the server fails loudly if that port is taken (no fallback when you've chosen explicitly).                                                                                                                                                                                          |
-| **Port file**        | After binding, the server writes the chosen port to `~/.clawboo/api-port.txt` so the next `clawboo` (and the Vite dev proxy, and the e2e helpers) can discover it without scanning.                                                                                                                                                                                |
+1. Checks your Node.js version.
+2. Says whether an OpenClaw Gateway answers on its default port (18789). This is information only; you don't need a Gateway.
+3. Finds the Clawboo server if it is already running, or starts it. If the running server is older than the command you ran, it offers to restart it on the new version.
+4. Opens your browser at the dashboard.
 
-<Tip>
-If `18790` is busy, both the launcher and the server will quietly move up to the next free port and report it. You never have to free port 3000-style collisions; Clawboo stays out of the commonly-contested low ports.
-</Tip>
+**The server keeps running after you close the terminal.** Run `clawboo` again to reopen the dashboard: it finds the running server instead of starting a second one.
 
-## Bundled vs dev launch
+| Detail          | Value                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------- |
+| Address         | `http://localhost:18790`, or the next free port up to 18809                             |
+| Who can connect | Only this computer: the server listens on 127.0.0.1 unless you set `HOST`               |
+| Server log      | `~/.clawboo/server.log`, which rolls over to `server.log.1` past 5 MB                   |
+| Fixed port      | `CLAWBOO_API_PORT=18800 clawboo` uses exactly that port and fails if something holds it |
 
-`clawboo` runs the **bundled server**; `server.js` sits next to the CLI entry point in the published package, and the launcher `fork`s it with `NODE_ENV=production`, detached, so it keeps running after the CLI exits. This is the path every end user takes.
+The [CLI reference](/reference/cli) covers how the command finds the server, and every flag.
 
-There is also a **dev launch** used only when you run the CLI from inside a checkout of the Clawboo monorepo (no bundled `server.js` present): the launcher walks up to find the repo root and spawns `npx tsx apps/web/server/index.ts` instead. Working inside the repo, you'll normally start the dev environment directly with `pnpm dev`, which runs an orchestrator that picks a free API port up front and then runs the Express API and the Vite dev server (`:5173`) together so both agree on the port.
+## Stop and restart
 
-<Note>
-The dev launch is an internal fallback for contributors. For installing and using Clawboo, `clawboo` and the bundled server are all you need. See [Deployment](/operating/deployment) for the full launch model.
-</Note>
+```bash
+clawboo stop
+clawboo restart
+```
 
-## Where state lives
+- `clawboo stop` stops the server. Running it when nothing is running is safe.
+- `clawboo restart` stops the server, starts a fresh one on the same port and opens the browser. Add `--no-open` to skip the browser.
+- `clawboo backup` saves a one-file copy of the database in the folder you run it from, even while the server runs.
 
-Clawboo keeps **all of its own state** under a single directory, separate from OpenClaw's:
+If you run Clawboo with npx, use `npx clawboo@latest stop` and so on.
 
-| Location                   | What's there                                                                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `~/.clawboo/`              | Clawboo's own state directory (override with `CLAWBOO_HOME`).                                                                              |
-| `~/.clawboo/clawboo.db`    | The SQLite database, the registry of record for agents, teams, the board, memory, settings, and more.                                      |
-| `~/.clawboo/settings.json` | Gateway URL/token and other saved settings.                                                                                                |
-| `~/.clawboo/api-port.txt`  | The runtime port file written on each successful bind.                                                                                     |
-| `~/.openclaw/`             | OpenClaw's state directory. Clawboo only ever **reads** this for interop (Gateway config and provider-key fallback); it never writes here. |
+## Update Clawboo
 
-Because Clawboo's state is self-contained, "uninstalling" is just removing `~/.clawboo` (and, if you only used Clawboo through `npx`, clearing the npx cache). Upgrading needs no such step: there is no migration ladder, but a newer Clawboo adds any columns your existing database is missing when it opens it.
+When a newer version is on npm, an **Update available** chip appears at the bottom left of the dashboard.
 
-<Danger>
-Deleting `~/.clawboo` permanently removes your teams, board tasks, chat history, memory, and settings. Back up `~/.clawboo/clawboo.db` first if you want to keep them.
-</Danger>
+- **Global install:** click the chip (**Click to update**). Clawboo installs the new version, restarts the server and reloads the page.
+- **npx run:** click the chip (**Copy command**) to copy `npx clawboo@latest`, then run it in a terminal. It notices the older server still running and offers to restart it.
+
+To update a global install from a terminal instead:
+
+```bash
+npm install -g clawboo@latest
+clawboo
+```
+
+The second command offers to restart the older server; `clawboo -y` restarts it without asking. Your data stays where it is: a newer version adds what it needs to your existing database when it opens it.
+
+## Uninstall
+
+1. Optional: in **Settings → Providers**, click **Disconnect** on each key you added there. Keys saved in that panel are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's key file, and **Disconnect** removes every copy.
+2. Stop the server and remove the package with the two commands below.
+3. To delete your data as well, remove the `~/.clawboo` folder.
+
+```bash
+clawboo stop
+npm uninstall -g clawboo
+```
+
+<Warning>
+
+Deleting `~/.clawboo` permanently removes your teams, tasks, chats, memory, settings and saved keys. To keep a copy of the database, run `clawboo backup` before you uninstall.
+
+</Warning>
+
+If you only used npx, there is no global package: run `npx clawboo@latest stop`, then remove `~/.clawboo` if you want. OpenClaw, Codex, Claude Code and Hermes are separate programs, and uninstalling Clawboo leaves them in place.
+
+## Where your data lives
+
+Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the encrypted key vault and the server log. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
 
 ## Troubleshooting
 
-<Warning>
-**"Could not find the Clawboo server."** The launcher couldn't locate either the bundled `server.js` or a monorepo checkout. Re-run `npx clawboo@latest` (the `@latest` is what forces a re-fetch; a bare `npx clawboo` can reuse whatever is already in npm's `_npx` cache), or install it explicitly with `npm install -g clawboo`.
-</Warning>
+<AccordionGroup>
 
-<Warning>
-**"Dashboard is taking too long to start."** On a first cold boot, especially on Windows, where Defender scans the freshly-extracted package, the bundled server can take 20–30 seconds to bind. The launcher waits up to 45 seconds. If it still times out, run `clawboo` again; the second launch is warm and fast.
-</Warning>
+<Accordion title="Clawboo requires Node.js 22.12 or newer">
 
-<Warning>
-**The browser opened to the wrong page (e.g. "Unauthorized").** The launcher matched a non-Clawboo listener in the `18790`→`18809` range. The current launcher verifies the Clawboo JSON signature before opening the browser, so it skips Gateway auxiliary ports and Chrome's debug port. To pin a specific known-free port, set `CLAWBOO_API_PORT=<port> clawboo`.
-</Warning>
+Your Node is too old for Clawboo. Install Node 22.12 or newer from [nodejs.org](https://nodejs.org), or switch with a version manager (`nvm install 22` or `fnm use 22`), then run the command again.
+
+</Accordion>
+
+<Accordion title="Dashboard is taking too long to start.">
+
+The first start can be slow, especially on Windows while antivirus software scans the new files. The command waits up to 45 seconds. When it gives up, it prints the last lines of `~/.clawboo/server.log` and the log's full path: read the log for the reason, fix it, then run `clawboo` again.
+
+</Accordion>
+
+<Accordion title="Could not find the Clawboo server.">
+
+The installed package is incomplete. Run `npx clawboo@latest`, or reinstall with `npm install -g clawboo`.
+
+</Accordion>
+
+<Accordion title="A Clawboo server is running on port N, but it requires an access token.">
+
+You set `STUDIO_ACCESS_TOKEN` to protect the dashboard, so the command cannot talk to the server. Open `http://localhost:18790/?access_token=YOUR_TOKEN` once in your browser (use the port the message names), or unset the variable and restart the server. `clawboo stop` and `clawboo restart` cannot confirm a protected server either; they print a command that stops it by hand.
+
+</Accordion>
+
+<Accordion title="The dashboard opened on an unexpected port">
+
+If your shell sets a `PORT` variable, Clawboo uses that port instead of 18790. Unset it, or choose a port with `CLAWBOO_API_PORT`. The address Clawboo prints is always the right one.
+
+</Accordion>
+
+<Accordion title="The update chip says the update failed">
+
+The chip shows npm's own reason. A permission error means npm cannot write to its global folder, which is common with a system-wide Node. The chip then suggests running the update with `sudo` in a terminal. To avoid `sudo`, install Node with a version manager such as nvm or fnm, which keeps global packages in your home folder, and install Clawboo again under it. If the update installed but the page did not come back, run `clawboo restart`.
+
+</Accordion>
+
+</AccordionGroup>
+
+For other problems, see [Troubleshooting](/help/troubleshooting).
 
 ## Next steps
 
-- [Quickstart: the native runtime (no Gateway)](/getting-started/quickstart-native)
-- [Quickstart: the OpenClaw Gateway path](/getting-started/quickstart-openclaw)
-- [Deploy and watch your first team collaborate](/getting-started/first-team)
-- [Tour the dashboard](/getting-started/dashboard-tour)
-- [Operating: deployment, ports, and the bundled server](/operating/deployment)
-- [Reference: the `clawboo` CLI](/reference/cli)
+- [Quickstart](/getting-started/quickstart): connect an AI provider and deploy your first team.
+- [Data and state](/operating/data-and-state): every file Clawboo keeps, backup and reset.
+- [CLI reference](/reference/cli): every command and flag.
+- [Remote access](/guides/self-host-securely): reach Clawboo from another machine.

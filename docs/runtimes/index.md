@@ -1,145 +1,128 @@
 ---
-title: Runtimes overview
-description: The five runtimes Clawboo can drive, the three runtime classes, and the full capability matrix that decides how each one is integrated.
+title: 'Choose a runtime'
+sidebarTitle: 'Choose a runtime'
+description: 'Compare the five runtimes Clawboo runs agents on: what each needs, what it costs, how it treats files, comments and commands, and how to pick.'
+icon: 'cpu'
+keywords:
+  [
+    'runtimes overview',
+    'runtime',
+    'capability matrix',
+    'clawboo-native',
+    'openclaw',
+    'claude-code',
+    'codex',
+    'hermes',
+    'steering',
+    'provider',
+    'model',
+    'gateway',
+  ]
 ---
 
-A [runtime](/appendices/glossary) is the engine that actually runs an agent. Clawboo supports five: `openclaw`, `clawboo-native`, `claude-code`, `codex`, and `hermes`, and drives each one through a single [RuntimeAdapter](/appendices/glossary) interface. That uniformity is the point: a [team](/appendices/glossary) can mix runtimes freely, and the orchestrator drives every one of them off the same normalized [RuntimeEvent](/appendices/glossary) stream. A specialist running on Claude Code, a leader running on `clawboo-native`, and an agent on the OpenClaw Gateway all coordinate through the same [board](/concepts/the-board), [memory](/concepts/memory), and [team chat](/concepts/peer-chat).
+A runtime is the program that runs an agent's work. It sends the agent's prompts to an AI model, runs the agent's tools, and reports back to Clawboo. Clawboo supports five runtimes. Every agent runs on one of them, and one team can mix them.
 
-This page introduces the five runtimes, the three **runtime classes** that determine how the host integrates each one, and the full capability matrix, built directly from each adapter's `capabilities()` and the runtime descriptor.
+Use this page to pick a runtime for a new agent or team, and to see what each one can and can't do. To connect one, see [Connect providers and runtimes](/using/providers-and-runtimes).
 
-## The five runtimes
+## Providers, models, runtimes and the Gateway
 
-| Runtime id       | Name           | What it is                                                                | Connection model                                              |
-| ---------------- | -------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `clawboo-native` | Clawboo Native | An in-process conversational harness that talks to provider SDKs directly | Built in: paste a provider key, no Gateway, no install        |
-| `openclaw`       | OpenClaw       | An agent run by the external OpenClaw Gateway                             | A connected substrate driven over a live WebSocket connection |
-| `claude-code`    | Claude Code    | The Claude Code agent SDK, spawned per run                                | External CLI Clawboo installs; head-less API key              |
-| `codex`          | Codex          | OpenAI's Codex agent, hosted per run in `codex app-server`                | External CLI Clawboo installs; interactive ChatGPT OAuth      |
-| `hermes`         | Hermes         | The Hermes agent CLI, spawned per run                                     | External CLI Clawboo installs; head-less API key              |
+Four words come up whenever you connect AI to Clawboo. Each names a different layer.
 
-The four non-OpenClaw runtimes (`clawboo-native`, `claude-code`, `codex`, `hermes`) are declared in a single descriptor and reachable through `/api/runtimes`. OpenClaw is the fifth, handled separately because it is a connected substrate (see [runtime classes](#runtime-classes)), not a CLI/SDK Clawboo spawns and not a member of the `/api/runtimes` id set. Its lifecycle (Gateway install, device pairing, channels) lives on its own page.
+| Layer                | What it is                                                                                                      | Examples                                              | Where you choose it                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------ |
+| **Provider**         | The company, or the program on your computer, that runs AI models. A cloud provider bills you for what you use. | Anthropic, OpenAI, OpenRouter, Google, a local Ollama | **Settings > Providers**, a ChatGPT sign-in, or Ollama       |
+| **Model**            | The AI model an agent thinks with. Each provider offers several.                                                | `claude-sonnet-5`, `gpt-5.4`, `llama3.2`              | Per agent. Codex and Claude Code use their own default model |
+| **Runtime**          | The program that runs the agent: its turns, its tools, its files.                                               | Clawboo Native, OpenClaw, Claude Code, Codex, Hermes  | Per agent, when you create it                                |
+| **OpenClaw Gateway** | OpenClaw's own server, which hosts OpenClaw agents. Only the OpenClaw runtime uses it.                          | `ws://localhost:18789`                                | **Settings > Runtimes > OpenClaw**                           |
 
-<Note>
-Each adapter declares `participantKind: 'agent'`. `'human'` is a reserved seam in the trait so a person could later be a first-class task assignee or delegation target behind the same interface; nothing branches on it in v0.5.0.
-</Note>
+So one agent might run on Clawboo Native with the model `llama3.2` from your local Ollama, while its teammate runs on Claude Code with your Anthropic key. One key can serve several runtimes: an Anthropic key works for Clawboo Native, Claude Code and Hermes.
 
-## Runtime classes
+## Compare the runtimes
 
-Every runtime declares a `runtimeClass` that says how it composes with the host. The host routes a runtime to the right integration depth **by construction**: a pure function reads the runtime's declared capabilities and never branches on a runtime id. This is the [shared plane vs private plane](/concepts/teams-and-planes) boundary made mechanical.
+|                                   | Clawboo Native                               | OpenClaw                                                    | Claude Code                                   | Codex                       | Hermes                                                                            |
+| --------------------------------- | -------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------- |
+| **Best for**                      | Most teams; nothing to install               | OpenClaw users, messaging channels                          | Coding with Anthropic's agent                 | Teams on a ChatGPT plan     | An open-source agent that keeps its own skills                                    |
+| **You need**                      | A provider key, or a local Ollama            | A key, a ChatGPT sign-in or Ollama, and a supported Node.js | An Anthropic API key and the Claude Agent SDK | A ChatGPT sign-in           | An OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in; Python 3.11 to 3.13 |
+| **Installed by**                  | Built in                                     | Clawboo (**Set up OpenClaw**)                               | Clawboo (**Install**)                         | Clawboo (**Install**)       | Clawboo (**Install**)                                                             |
+| **Cost you see**                  | Exact for six models, estimated for the rest | Estimated                                                   | Reported by Claude Code                       | Estimated from token counts | Estimated in team chat; none on agent Routines or API runs                        |
+| **Shared memory**                 | Its team's                                   | Global only                                                 | Its team's                                    | Its team's                  | Its team's                                                                        |
+| **Own git worktree for a task**   | Task runs on a repository                    | Never                                                       | Task runs on a repository                     | Task runs on a repository   | Task runs on a repository                                                         |
+| **A comment on a running task**   | Read before its next step                    | Read before its next step                                   | Read before its next step                     | Read before its next step   | The run pauses, reads it, then resumes                                            |
+| **Agent files it reads**          | `SOUL.md`                                    | `SOUL.md`, `IDENTITY.md`, `AGENTS.md`                       | `SOUL.md`                                     | `SOUL.md`                   | `SOUL.md`                                                                         |
+| **Asks before running a command** | Every time, if you turn commands on          | Per its Gateway policy                                      | No                                            | No                          | No                                                                                |
 
-```mermaid
-flowchart TD
-    caps["capabilities() — runtimeClass + nativeHome + native* claims"]
-    caps --> resolve["resolveRuntimeIntegration(caps)"]
+What the rows mean:
 
-    resolve --> cs{"runtimeClass ==<br/>connected-substrate?"}
-    cs -->|yes| connected["home: connected<br/>preserve* = false<br/>useGatewayChannels from nativeChannels<br/>(runner REFUSES via /run → 422)"]
-    cs -->|no| persist{"nativeHome persist &&<br/>scope = per-identity?"}
-    persist -->|yes| persistent["home: persistent (per-identity)<br/>preserveSkills / preserveMemory<br/>from native* claims"]
-    persist -->|no| ephemeral["home: ephemeral<br/>preserve* = false"]
-```
+- **Cost.** Estimates count toward your budgets the same way real costs do. [Budgets and spend](/using/budgets-and-spend) explains how each runtime's spend is worked out.
+- **Worktrees.** A worktree is a separate checkout of a git repository for one task. No runtime gets one in team chat. Only a task run that names a repository does: one started through the REST API, or an agent Routine whose template names a repository. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
+- **Agent files.** Clawboo Native uses `SOUL.md` as the agent's instructions; Claude Code, Codex and Hermes get it as a persona at the top of each prompt. On every runtime, `AGENTS.md` also draws the agent's links on the team graph. OpenClaw shows a `TOOLS.md` tab, but OpenClaw 2026.9 and later doesn't load that file. See [Agents](/using/agents).
+- **Commands.** A new OpenClaw agent asks before running a command it hasn't been allowed (**Ask for Unknown**). See [OpenClaw](/runtimes/openclaw#what-a-new-boo-is-allowed-to-run).
 
-- **`wrapped-oneshot`**: a per-run spawned worker. Clawboo installs the CLI (or, for `clawboo-native`, ships it inside the server), spawns it for one task, drains its events, and tears it down. `claude-code`, `codex`, and `hermes` are wrapped one-shots. A wrapped one-shot may still accrue durable state if it claims a persistent per-identity home (Hermes and Codex do).
-- **`connected-substrate`**: a long-lived runtime the host drives over its existing live connection, rather than spawning. `openclaw` is the only connected substrate: runs ride the live Gateway session over the adapter's long-lived client. The server-side executor runner **refuses** a connected substrate before it claims a board task: `POST /api/runtimes/:id/run` would return `422` `connected_substrate`, because OpenClaw work is dispatched through the live Gateway path, not the one-shot runner. (And `openclaw` is not a `/api/runtimes` id, so that route 404s it first.)
-- **`native`**: a host-native participant. `clawboo-native` is the only one: Clawboo _is_ this runtime's substrate, so its private plane (persisted conversation transcripts) lives in a stable per-identity home the host materializes.
+<Warning>
 
-`resolveRuntimeIntegration` turns these claims into a plan with three home kinds: `persistent` (a per-identity dir that outlives the run), `ephemeral` (a throwaway per-run dir), or `connected` (no host-managed home; the substrate owns its own state entirely). The `preserveSkills` / `preserveMemory` flags are **clamped to a persistent home**; a runtime that claims `preserve` but only gets an ephemeral home degrades to the safe default rather than producing a contradictory plan. `coRunScheduler` is always `false`: the host's [scheduler](/concepts/scheduling) owns when-to-run, so a runtime's own cron (`nativeScheduler`) is informational and can never co-run for teammate dispatch.
+Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off. Nothing asks before they run a command or change a file, and they can read and change any file your user account can. A per-task worktree keeps their edits apart from your checkout, but it is not a sandbox. Read [What agents can do](/concepts/permissions) before you point them at work you care about.
 
-## The capability matrix
+</Warning>
 
-Each adapter answers `capabilities()` with a fixed shape. The fields below come straight from each `capabilities()` body and the runtime descriptor.
+## How to pick
 
-### Execution capabilities
-
-| Capability                                    | `clawboo-native` | `openclaw`            | `claude-code`     | `codex`           | `hermes`           |
-| --------------------------------------------- | ---------------- | --------------------- | ----------------- | ----------------- | ------------------ |
-| `streaming` (incremental text deltas)         | yes              | yes                   | yes               | yes               | **no**             |
-| `mcp` (can call MCP tool servers)             | yes              | **no**                | yes               | yes               | yes                |
-| `worktrees` (isolated git worktrees)          | yes              | **no**                | yes               | yes               | yes                |
-| `resume` (resume a prior session)             | yes              | yes                   | yes               | yes               | yes                |
-| `toolApproval` (surfaces tool-approval gates) | yes              | yes                   | yes               | yes               | yes                |
-| `contextWindowTokens`                         | 200000           | _(omitted)_           | 200000            | _(omitted)_       | _(omitted)_        |
-| `steering` (takes input mid-run)              | `live`           | `live`                | `live`            | `live`            | `interrupt-resume` |
-| `runtimeClass`                                | `native`         | `connected-substrate` | `wrapped-oneshot` | `wrapped-oneshot` | `wrapped-oneshot`  |
-
-`streaming: false` on Hermes is a permanent asymmetry, not a missing feature: Hermes has no native token stream, so the host derives its lifecycle from the structured output instead. `mcp: false` and `worktrees: false` on OpenClaw reflect that OpenClaw agents run in Gateway-owned workspaces under OpenClaw's own sandbox; Clawboo never retargets a live OpenClaw agent's cwd, and OpenClaw attaches Clawboo's [MCP servers](/operating/mcp-servers) through the Gateway config rather than the adapter. `contextWindowTokens` drives the proactive session-rotation watermark; when it is omitted (or 0), rotation fires only on an explicit `max_turns` signal. `steering` says how a message reaches a run that is already working; see [steering a running task](#steering-a-running-task).
-
-### Native-preservation seam
-
-These claims tell the host which native powers each runtime carries, so it can decide what to materialize and what to preserve across runs.
-
-| Claim                | `clawboo-native` | `openclaw`  | `claude-code` | `codex`        | `hermes`       |
-| -------------------- | ---------------- | ----------- | ------------- | -------------- | -------------- |
-| `nativeHome.scope`   | `per-identity`   | _(omitted)_ | _(omitted)_   | `per-identity` | `per-identity` |
-| `nativeHome.persist` | `true`           | _(omitted)_ | _(omitted)_   | `true`         | `true`         |
-| `nativeSkills`       | `none`           | `preserve`  | `none`        | `none`         | `preserve`     |
-| `nativeMemory`       | `preserve`       | `preserve`  | `none`        | `none`         | `preserve`     |
-| `nativeChannels`     | `none`           | `gateway`   | `none`        | `none`         | `none`         |
-| `nativeScheduler`    | no               | yes         | no            | no             | yes            |
-
-How those claims resolve through `resolveRuntimeIntegration`:
-
-- **`clawboo-native`**: `home: persistent (per-identity)`, `preserveMemory: true`. Clawboo materializes a stable per-identity home and its persisted conversation transcripts survive and resume across dispatches. No native skills dir (capabilities ride the shared [tools broker](/concepts/capabilities)), no channels (the shared spine is its only voice).
-- **`openclaw`**: `home: connected`. The Gateway owns its own state dir entirely, so the host provisions and preserves nothing; `preserveSkills`/`preserveMemory` resolve to `false` because there is nothing host-managed to keep. `useGatewayChannels` is `true` (`nativeChannels: 'gateway'`); OpenClaw's own channels and cron are runtime-native and the host never serves or co-runs them.
-- **`claude-code`**: `home: ephemeral`. A stateless wrapped one-shot: the cognition is the model, no durable cross-run substrate exists to preserve. `nativeHome` is omitted, so the SDK runs against the user's real HOME / Keychain auth.
-- **`codex`**: `home: persistent (per-identity)`. The host materializes a managed per-agent `CODEX_HOME`, so Codex threads survive across runs and resuming the previous thread (`thread/resume`) gives a Codex leader real conversation continuity. The preserve flags stay `false` (no native skills/memory substrate); the durable state is the session files plus a seeded copy of the user's `~/.codex/auth.json` (parse-validated, freshness-checked, never written back; see [Codex](/runtimes/codex)).
-- **`hermes`**: `home: persistent (per-identity)`, `preserveSkills: true`, `preserveMemory: true`. The Hermes self-improvement loop compounds in one stable home per identity: self-created skills, `MEMORY.md`, and `state.db` accrue across runs.
-
-### Models
-
-| Runtime          | `models` declared by `capabilities()`                                                                                                                                   |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `clawboo-native` | `['claude-haiku-4-5', 'claude-sonnet-4-6', 'gpt-4o-mini', 'gpt-4o']` (routable surface, not exhaustive; `AgentConfig` picks the model; any provider-supported id works) |
-| `openclaw`       | `[]` (the Gateway resolves models from its own config)                                                                                                                  |
-| `claude-code`    | `['sonnet', 'opus', 'haiku']`                                                                                                                                           |
-| `codex`          | `['gpt-5-codex', 'gpt-5', 'o4-mini']`                                                                                                                                   |
-| `hermes`         | `[]` (provider-defined; Hermes resolves models via its own provider config)                                                                                             |
-
-An empty `models` array does not mean "no models"; it means the list is owned elsewhere (the Gateway config for OpenClaw, Hermes's own provider config for Hermes).
-
-## How a runtime is wired
-
-Each non-OpenClaw runtime is a pure [RuntimeAdapter](/internals/runtime-adapter) constructed with a per-run driver factory: the adapter wraps a black-box runtime and the factory supplies the real driver (the Claude Agent SDK, `codex app-server`, the `hermes` CLI, or the in-process native harness). The adapters live in dependency-light packages that import only `@clawboo/executor`; the real subprocess/SDK drivers live server-side so the browser bundle never sees them. All five adapters are always available; actual usability depends on install and credential state at run time, not on a flag.
-
-Health for the CLI runtimes is "the binary resolves", checked via `resolveRuntimeBin`, which probes `PATH` **and** the well-known user-install dirs (so a Hermes binary in the Python user-site bin reads healthy even though that dir is usually off the server's PATH). Native health is "any routable provider key resolves, or local Ollama is set up" (chosen in onboarding or the providers manager, or `OLLAMA_BASE_URL` set), no binary, no network call.
+- **Start with Clawboo Native.** It is built in, so there is nothing to install. Connect one provider key, or a local Ollama to run with no key at all. Onboarding sets it up first. See [Clawboo Native](/runtimes/native).
+- **No API key, but a ChatGPT plan?** Choose **Sign in with ChatGPT** in onboarding. Your team then runs on [Codex](/runtimes/codex) and uses your plan instead of a per-token bill. See [Run Clawboo without an API key](/guides/no-api-key).
+- **Coding work in a repository?** [Claude Code](/runtimes/claude-code) and [Codex](/runtimes/codex) bring their own coding tools. Read the warning above first.
+- **Already use OpenClaw, or want its channels?** [OpenClaw](/runtimes/openclaw) agents keep their messaging channels and their own cron jobs on the Gateway, and join your teams in Clawboo.
+- **Want an agent that builds up skills over time?** [Hermes](/runtimes/hermes) keeps a home for each agent, where its skills and memory carry over between runs.
+- **Mix them.** When you deploy a team, each member has its own runtime picker in **Customize team**, and Boo Zero leads them all. An agent keeps the runtime it was created on, so choose before you deploy. To move work to another runtime, create a new agent there.
 
 ## Steering a running task
 
-When you comment on a task that an agent is working on (from the Tasks card in the team chat, or `POST /api/board/:taskId/comments` with `authorType: 'user'`), the comment is passed to the agent two ways. It always goes into the agent's mailbox, which every run reads when it starts, so a task that is queued, retried, or picked up later still sees it. And if a run is working on that task right now, the comment is **steered into that run**, so the agent reads it before the run ends instead of at its next run. When the steer lands, the mailbox copy is marked delivered so the agent does not read it twice.
+Steering means getting a message to an agent while it is still working on a task. Open the task in the board's task drawer, a team chat's **Tasks** card, or the agent's **Tasks & Routines** card. Type your comment and click **Send**. The line beside **Send** tells you what will happen for that task, and once you send, a note under your comment says where it went.
 
-How the comment gets into a running run is the runtime's business, and each adapter declares it in `capabilities().steering`:
+Unless the task is finished, your comment goes into the agent's mailbox, which every run reads when it starts. If a run is working on the task right now, Clawboo also passes the comment into that run:
 
-- **`live`**: the runtime takes the message into the turn in progress at its next boundary (a tool call or a model call) without stopping anything.
-- **`interrupt-resume`**: the runtime has no way in once a run has started, so Clawboo stops the run's process and resumes the same session with the comment as the next input. The tool call in flight at that moment is lost; the run is not. The stop is absorbed inside the driver: the orchestrator sees one run that carries on, so the task stays in progress with the same agent, and nothing reads the stop as a failure or as you pressing Stop.
-- **`none`**: no mid-run channel; the mailbox is the only delivery, at the agent's next run.
+| Runtime        | What happens to a comment on a running task                                                                                               | The line beside **Send** in the **Tasks** card |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Clawboo Native | Read at the start of its next turn. A run that was about to finish takes one more turn to read it.                                        | "… gets this now, before its next step."       |
+| OpenClaw       | Joins the running turn at its next step, without stopping a tool that is running.                                                         | "… gets this now, before its next step."       |
+| Claude Code    | Joins the running turn at its next step.                                                                                                  | "… gets this now, before its next step."       |
+| Codex          | Joins the running turn at its next step.                                                                                                  | "… gets this now, before its next step."       |
+| Hermes         | Clawboo stops the run and resumes the same session with your comment. A tool call in progress at that moment is lost; the run carries on. | "… pauses to read this, then carries on."      |
 
-| Runtime          | `steering`         | How a comment reaches a running task                                                                                  |
-| ---------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `clawboo-native` | `live`             | Queued into the conversation and read at its next turn; a run that was about to finish takes one more turn to read it |
-| `openclaw`       | `live`             | `chat.send` with `queueMode: 'steer'` into the session's active run                                                   |
-| `claude-code`    | `live`             | A user message pushed into the SDK's streaming input, folded into the running turn                                    |
-| `codex`          | `live`             | `turn/steer` on the app-server's in-progress turn                                                                     |
-| `hermes`         | `interrupt-resume` | The `hermes chat -q` process is stopped and the same session resumed with the comment                                 |
+If the comment can't get into the run (the run ended a moment earlier, or the runtime refused it), nothing is lost: the agent reads it from its mailbox at its next run, and the note under the comment says so. When it does land, the mailbox copy is marked as delivered, so the agent doesn't read it twice. A comment on a task that is not running behaves by the task's status: a task that waits on you, or waits in **To do**, starts again for it, and a finished task does not get it at all. Each case is in [Steer a running task](/using/board#steer-a-running-task).
 
-A comment that cannot get into the run (the run ended a moment earlier, or the runtime refused it) is not lost: it stays in the mailbox for the agent's next run. Small team notices (for example "a task you delegated just finished") use the same channel in a passive form: they ride along if the run reads input again, but never keep a finishing run going and never stop a run to deliver an FYI.
+<Accordion title="Under the hood: how each runtime takes a comment">
 
-## Boundaries and non-goals
+A person's comment is posted with `POST /api/board/:taskId/comments` and `authorType: 'user'`, and the answer's `delivery` field says where it went (see the [Board API](/reference/rest-api/board)). Each runtime declares how it takes input mid-run in its `steering` capability: `live` (Clawboo Native, OpenClaw, Claude Code and Codex) or `interrupt-resume` (Hermes).
 
-- **OpenClaw is not a `/api/runtimes` runtime.** It is a connected substrate driven over the Gateway. Its routes 404 on the runtimes API and it is refused by the one-shot runner. Manage it through the [system API](/reference/rest-api/system), not the runtimes API.
-- **Clawboo does not reimplement runtime loops.** Each adapter wraps the runtime as a black box and normalizes its native signals into `RuntimeEvent`s. Clawboo supervises, relays, and coordinates on the [shared plane](/concepts/teams-and-planes); it does not own the runtime's inner turn loop.
-- **`nativeScheduler` never co-runs.** A runtime can ship its own cron, but the host's scheduler always owns when-to-run for teammate dispatch. The claim is informational only.
-- **No conversion between runtimes.** A runtime's agents are not migrated, exported, or "collapsed into native." The runtimes are co-equal peers.
+- **Clawboo Native** queues the comment into the conversation as a user message for its next turn.
+- **OpenClaw** gets it through `chat.send` with `queueMode: 'steer'` over the server's own Gateway connection. If the run ends with the steer still unread, Clawboo cancels it (`chat.abort`) and the comment waits in the mailbox.
+- **Claude Code** gets a user message pushed into the SDK's streaming input.
+- **Codex** gets `turn/steer` on the app-server's in-progress turn.
+- **Hermes** has no way in once a run starts, so Clawboo stops `hermes chat` and resumes the same session with the comment. The orchestrator sees one run that carries on, so the task stays in progress with the same agent.
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+Small team notices, such as "a task you delegated just finished", use the same channel but never keep a finishing run going and never stop a run.
 
-## See also
+</Accordion>
 
-- [Connecting runtimes](/runtimes/connecting-runtimes), install, connect, disconnect, the encrypted vault
-- [Clawboo Native](/runtimes/native) · [OpenClaw](/runtimes/openclaw) · [Claude Code](/runtimes/claude-code) · [Codex](/runtimes/codex) · [Hermes](/runtimes/hermes)
-- [The RuntimeAdapter trait](/internals/runtime-adapter), the interface every runtime implements
-- [Teams and planes](/concepts/teams-and-planes), the shared-plane / private-plane boundary `runtimeClass` resolves
-- [The executor runner](/internals/executor-runner), claim → worktree → run → verify → handoff, and the connected-substrate refusal
-- [`/api/runtimes` reference](/reference/rest-api/runtimes), full request/response shapes
-- [Glossary](/appendices/glossary), canonical term definitions
+## Connect a runtime
+
+Open **Settings** (Cmd/Ctrl + ,) and choose **Runtimes** under **Workspace**. Each runtime has a row with its status (**Not installed**, **Needs key**, **Needs login** or **Connected**) and one button: **Install**, **Connect**, **Sign in** (Codex) or **Manage** once it is connected. OpenClaw's row offers **Set up**, or **Reconnect** when its Gateway is offline.
+
+![The Runtimes panel in Settings, listing OpenClaw, Codex, Claude Code, Hermes and Clawboo Native with their status and buttons](/images/runtimes-panel.png)
+
+The full walkthrough, including what **Disconnect** removes, is in [Connect providers and runtimes](/using/providers-and-runtimes).
+
+<Accordion title="Under the hood: runtime ids and the REST API">
+
+The runtime ids are `clawboo-native`, `openclaw`, `claude-code`, `codex` and `hermes`. The `/api/runtimes` routes cover the four runtimes other than OpenClaw, so `/api/runtimes/openclaw/...` answers `404`. OpenClaw is set up through `/api/system/*` and runs over the Gateway connection. See the [Runtimes API](/reference/rest-api/runtimes) and the [System API](/reference/rest-api/system).
+
+Each runtime's adapter declares its capabilities (streaming, MCP, worktrees, steering, its runtime class and its home directory). The full matrix is in [The runtime adapter](/internals/runtime-adapter).
+
+</Accordion>
+
+## Related
+
+- [Clawboo Native](/runtimes/native): the built-in runtime, its providers and local Ollama
+- [OpenClaw](/runtimes/openclaw): set up the Gateway, and what Clawboo runs and writes there
+- [Connect providers and runtimes](/using/providers-and-runtimes): install, connect, sign in and disconnect
+- [What agents can do](/concepts/permissions): each runtime's access to your files, commands and network
+- [Budgets and spend](/using/budgets-and-spend): how each runtime's cost reaches your budgets

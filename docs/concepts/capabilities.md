@@ -1,204 +1,87 @@
 ---
-title: Capabilities
-description: The unified capability inventory, one CapabilityRecord stream fanned from six sources, with manageability tiers that decide what Clawboo can change.
+title: 'Capabilities'
+sidebarTitle: 'Capabilities'
+description: 'What the capability inventory shows, the six places its skills, tools and connectors come from, and which of them Clawboo can change.'
+keywords:
+  [
+    'capabilities',
+    'capability inventory',
+    'capabilities dashboard',
+    'skills',
+    'tools',
+    'connectors',
+    'grants',
+    'manageability',
+    'observe-only',
+    'runtime-of-record',
+  ]
 ---
 
-A [capability](/appendices/glossary) is any skill, tool, or connector an agent can use. Clawboo runs [five runtimes](/runtimes/index), and each one tracks its own capabilities differently: a brokered MCP tool in a clawboo-owned table, a Hermes `SKILL.md` on disk, an OpenClaw Gateway extension behind `config.patch`, a built-in nobody can touch. The **capability inventory** normalizes all of that into one shape, the `CapabilityRecord`, fanned in from per-runtime adapters, merged by a multiplexer, and persisted to a durable table.
+A **capability** is a skill, a tool or a connector that an agent can use. Each runtime keeps track of its own in a different way, so Clawboo gathers them into one **capability inventory**. You see it in the **Capabilities** panel (**Settings**, then **Workspace**, then **Capabilities**) and as the tiles around each Boo on the Org chart.
 
-One stream feeds two surfaces: the per-agent skill and connector nodes on the [Ghost Graph](/appendices/glossary), and the Capabilities dashboard. Every record carries a `manageability` tier, and that tier alone decides whether Clawboo can install, enable, or disable the capability, or merely observe it. The UI affordances and the write path are a pure function of the tier.
+For every entry, the inventory also records who owns it, which decides whether Clawboo can change it or can only show it. Use this page to understand what the inventory shows, where entries come from, and what you can change.
 
-This page explains the record shape, the six sources, the manageability tiers and how they route writes, the multiplexer's never-fail fan-in, the durable projection that survives a disconnected source, and the boundaries Clawboo deliberately does not cross.
+## The mental model
 
-## What it is, and what it isn't
+Think of the inventory as one stock list for several stockrooms. Clawboo owns some of the stockrooms, so it can switch items on and off there. The others belong to a runtime: Clawboo can read the labels, and in one case ask the runtime to make a change, but it never rearranges a runtime's own shelves.
 
-The inventory is a **read-mostly observation layer with a tier-gated write path**. Clawboo's stance is: _observe every capability across all runtimes; manage only what the owning runtime cedes._ That stance is encoded in the data, not in branching logic. A record that says `observe-only` is a record Clawboo will never write; the panel renders no Enable/Disable button for it, and the REST layer refuses any write against it.
+## What the inventory shows
 
-It is **not** a marketplace and **not** a skill installer in itself. The [marketplace](/using/marketplace) is where you browse the 436 agents and 85 teams; installing a curated skill is one specific write the inventory routes (to the native source), but the inventory's primary job is to _surface what exists_ across heterogeneous runtimes in one consistent shape.
+- **Three kinds of entry**: skills, tools and connectors.
+- **Where each one belongs**: the runtime that owns it, and whether it belongs to one agent or to every agent on that runtime.
+- **A status**: **Ready**, **Disabled**, **Pending auth** or **Unavailable**. An unavailable entry is greyed out, with the reason.
+- **The action Clawboo can take**, if any: **Enable** or **Disable**. An entry Clawboo can only show reads "built-in, managed by" and the runtime's name.
 
-It is also **not** a second copy of any runtime's own state. A capability source `read()` reflects the runtime's authoritative store: the Gateway config, the Hermes home on disk, the `tool_registry` table, into records each time. The persisted `capabilities` table is a cache of the last good read per source, not a parallel source of truth.
+The panel groups entries by runtime, with a filter for each one, a **Refresh** button, and any pending tool approvals at the top. Sometimes a runtime cannot be read, for example while your OpenClaw Gateway is offline. The panel then says so and shows the last entries it knew for that runtime.
 
-The inventory sits at the boundary between Clawboo's [shared plane and each runtime's private plane](/concepts/teams-and-planes): the manageability tier is exactly the line between "Clawboo can change this" and "this belongs to the runtime, Clawboo only watches."
+## Where entries come from
 
-## The model
+The inventory reads from six sources. What Clawboo may do with an entry depends on its source.
 
-Six `CapabilitySource` adapters each project a plane's capabilities into `CapabilityRecord`s. Five are per-runtime; the sixth is Clawboo's own outbound MCP connections. A `CapabilityMultiplexer` fans their `read()` calls into one merged list. A service layer persists each healthy source's records and serves cached rows for any source that degraded. Both the Ghost Graph and the dashboard consume the merged result.
+| Source      | What it reads                                                                                                                                                                                       | Can Clawboo change it?                                                                                                                                                                          |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clawboo     | The tools Clawboo's tool broker serves (such as `web_search`), each Clawboo Native agent's switches for the Memory, Tasks and Tools servers, and skills installed from the Marketplace on any agent | Yes. Clawboo owns these, so **Enable** and **Disable** work. Skills are installed from the [Marketplace](/using/marketplace).                                                                   |
+| Hermes      | The `SKILL.md` skills and the `mcp.json` connectors in each Hermes agent's home, and Hermes's built-ins                                                                                             | No, shown only. Hermes owns its skills, and Clawboo rewrites `mcp.json` on every run.                                                                                                           |
+| Claude Code | Clawboo's servers attached to Claude Code, and Claude Code's built-ins                                                                                                                              | No, shown only.                                                                                                                                                                                 |
+| Codex       | Clawboo's four servers attached to Codex, and Codex's built-ins                                                                                                                                     | Not at present. Each server row always reads **Pending auth**, even after you sign in, with a disabled **Enable** and a hint to run `codex login`. Clawboo refuses any change to these entries. |
+| OpenClaw    | The Gateway's `tools.allow` and `tools.deny` lists, its MCP servers and plugins, and OpenClaw's built-ins                                                                                           | Partly. Allow and deny entries can be switched, and Clawboo asks the Gateway to make the change. Other servers and plugins are shown only, and so are Clawboo's own servers registered there.   |
+| Connectors  | The connectors Clawboo is running for you, from the Connectors page                                                                                                                                 | Not from this panel. Connect and disconnect on the [Connectors](/using/connectors) page.                                                                                                        |
 
-```mermaid
-flowchart TD
-    subgraph sources["Six CapabilitySources"]
-        N["native\n(managed)"]
-        H["hermes\n(observe-only)"]
-        CC["claude-code\n(observe-only)"]
-        CX["codex\n(external-write,\npending-auth)"]
-        OC["openclaw\n(runtime-of-record)"]
-        CN["connector\n(observe-only,\nclawboo's own)"]
-    end
+## Connectors and grants
 
-    N --> MUX
-    H --> MUX
-    CC --> MUX
-    CX --> MUX
-    OC --> MUX
-    CN --> MUX
+Connecting a connector makes it available, but gives it to no agent. An agent reaches a connector only through a **grant**: your permission for that agent to use it, with an access level and a rule for when to ask you first. You manage grants on the Org chart; [Connectors](/using/connectors) has the steps.
 
-    MUX["CapabilityMultiplexer\nread(): merge, never reject"]
-    MUX --> SVC["service.loadCapabilities\npersist OK sources +\nserve cached rows for degraded"]
+On the Org chart, each Boo's tiles show its own entries plus the entries its runtime shares with every agent, such as built-ins. A connector tile appears on a Boo only when that agent holds a grant for it. A connector whose list of tools has changed since you approved it shows **Changed since you approved it**. Read what changed before you trust it again, rather than signing in again.
 
-    SVC --> TBL[("capabilities table\nsource-scoped reconcile")]
-    SVC --> REST["GET /api/capabilities\n{ records, sources }"]
+## What you control
 
-    REST --> GG["Ghost Graph\n(per-agent skill/connector nodes)"]
-    REST --> DASH["Capabilities dashboard\n(actions = f(manageability))"]
-```
+- **Switch entries on or off**: in the Capabilities panel, for entries Clawboo owns and for OpenClaw's allow and deny entries. See [Capabilities](/using/capabilities).
+- **Add skills**: install them from the [Marketplace](/using/marketplace).
+- **Add connectors and decide who uses them**: connect on the Connectors page, then give agents access on the Org chart. See [Connectors](/using/connectors).
+- **Approve tool calls**: answer the approvals waiting at the top of the panel, or in [Approvals](/using/approvals).
 
-## The CapabilityRecord
+## Limits
 
-Every source projects into one normalized row. A brokered MCP tool, a Hermes `SKILL.md`, an OpenClaw plugin, and a runtime built-in are all the same shape; that uniformity is what lets one renderer and one write path serve all five runtimes.
+- Clawboo never changes Hermes skills, or your own Claude Code settings in `~/.claude`.
+- OpenClaw's MCP servers and plugins cannot be switched from Clawboo; change them in OpenClaw.
+- Codex entries cannot be changed from Clawboo.
+- Clawboo cannot tell OpenClaw agents apart, so the connectors you give an OpenClaw agent on the Org chart do not reach it. Its use of apps through Composio asks for your approval each time.
 
-The load-bearing fields:
+<Accordion title="Under the hood">
 
-| Field                       | Meaning                                                                                                                                                                                                               |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                        | Source-namespaced composite `${sourceId}:${rawKey}`. Opaque to the UI; the prefix is how a write routes back to the owning source.                                                                                    |
-| `sourceKey`                 | The natural identifier inside the owning store: a tool name, a skill slug, a connector id.                                                                                                                            |
-| `kind`                      | `skill`, `tool`, or `connector`.                                                                                                                                                                                      |
-| `runtime`                   | The runtime that owns the capability (open set, includes a dormant `human` seam).                                                                                                                                     |
-| `scope`                     | `team`, `agent`, or `global`. `agentId` is set for agent scope, `null` otherwise.                                                                                                                                     |
-| `source`                    | The origin it was read from (`brokered-mcp`, `curated-skill`, `filesystem-skill-md`, `mcp-connector`, `runtime-builtin`, `openclaw-extension`, `external-vendor-cli`). This drives both the tier and the write route. |
-| `manageability`             | The tier that gates the write path (see below).                                                                                                                                                                       |
-| `available` + `diagnostics` | Server-evaluated availability. `available: false` greys the row in _both_ renderers; `diagnostics` says why.                                                                                                          |
-| `status`                    | `ready`, `disabled`, `manageable-but-pending-auth`, or `unavailable`.                                                                                                                                                 |
-| `writable`                  | `false` when the owning source emits a row it cannot actually write yet; so the dashboard renders no dead button. Defaults to `true`.                                                                                 |
-| `hint`                      | A source-supplied affordance string (e.g. the auth command for a pending-auth connector) so the panel never hardcodes a per-runtime string.                                                                           |
-| `tenantId`                  | A dormant multi-tenant seam, always `null` today.                                                                                                                                                                     |
+- **The record.** Each entry is a `CapabilityRecord`. Its `id` has the form `<source>:<runtime>:<scope>:<agentId or global>:<kind>:<key>`, and it carries `kind`, `scope` (`agent` or `global` in practice), `manageability`, `status`, `available`, `writable`, `hint`, `health` (`unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`) and, for granted connectors, `grantId`.
+- **Manageability.** `managed`: Clawboo owns it. `external-write`: the runtime owns the store and Clawboo would write through it (Codex, blocked today). `runtime-of-record`: the runtime owns it and Clawboo asks the runtime to change it (OpenClaw allow and deny lists). `observe-only`: read only.
+- **Writes.** The REST handler refuses an enable or disable on an `observe-only` or non-writable entry with `422`, and an unknown entry with `404`. The panel hides more buttons than that: it offers none for unavailable or pending-auth entries either. An install takes the owning runtime from the agent's own record, never from the request.
+- **Degraded sources.** Each source's last good read is kept in the `capabilities` table. When a source fails to read, its cached rows are served instead, and fresh rows win when both exist.
 
-The `CapabilityRecord` is a superset of the tool broker's `ToolDescriptor`; it inherits availability, provenance, and risk, and adds `kind`, `runtime`, `scope`, and `manageability` so a tool, a skill, and a connector unify. The type lives in a browser-safe, zero-dependency package so the SPA can import it to type the REST response.
+See the [Capabilities API](/reference/rest-api/capabilities) and the [packages overview](/reference/packages/index).
 
-The `id` is deterministic: it encodes `sourceId + runtime + scope + agentId + kind + sourceKey`, so the same capability re-reads to the same row, and the persistence layer can upsert by `id` rather than diffing.
+</Accordion>
 
-## The six sources
+## Related
 
-Each source is a `CapabilitySource` adapter, a `read()` that projects records plus a `write()` that the multiplexer routes by id prefix. The adapters live server-side; the package holds only the neutral types, the trait, and the multiplexer.
-
-| Source        | Owns                          | Manageability of its records    | What it reads                                                                                                                                                                                                                                      |
-| ------------- | ----------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `native`      | The clawboo-managed plane     | `managed`                       | The `tool_registry` brokered tools (global), each native agent's MCP toggles (`AgentConfig.tools`), and the per-agent `skills` table (curated installs).                                                                                           |
-| `hermes`      | Hermes's private self-model   | `observe-only`                  | `SKILL.md` files and `mcp.json` connectors under each Hermes per-identity home, plus a built-ins roll-up.                                                                                                                                          |
-| `claude-code` | Claude Code's own `~/.claude` | `observe-only`                  | The clawboo-attached MCP servers and Claude's built-ins. Clawboo has no persistent Claude store to manage.                                                                                                                                         |
-| `codex`       | An ephemeral per-run home     | `external-write` (auth-blocked) | The clawboo-attached MCP servers, surfaced `manageable-but-pending-auth` (real, but blocked behind `codex login`), plus built-ins.                                                                                                                 |
-| `openclaw`    | The Gateway config domain     | `runtime-of-record`             | `tools.allow`/`tools.deny`, `mcp.servers`, and plugins read over the shared operator connection, plus built-ins.                                                                                                                                   |
-| `connector`   | Clawboo's own MCP connections | `observe-only`                  | The live outbound connectors Clawboo spawned or dialled itself. Global INVENTORY scope: the record says the connector exists and is running. It reaches an agent only through a grant, never by being global. See [Connectors](/using/connectors). |
-
-The `connector` source is the one place Clawboo owns the process and still records `observe-only`. That is deliberate: `managed` makes the dashboard render Enable and Disable buttons, and this source's `write()` refuses every action, so those buttons could only ever fail. Connecting and disconnecting are a REST surface of their own, because one spawns a process and completes a handshake and the other reaps a process tree. Neither is a capability toggle.
-
-Two details about the `native` source are worth calling out, because they're where "manage what's ceded" gets concrete:
-
-- A **curated skill** installed onto _any_ agent is a clawboo-managed annotation, the same thing a `TOOLS.md` bullet always was. Its record carries the _agent's_ runtime (so it groups under that runtime in the dashboard) but `manageability: 'managed'`, because Clawboo owns the `skills` table row. A curated skill on an OpenClaw agent is still managed by Clawboo.
-- A **native install** reuses the existing tool-broker pipeline: `evaluateInjection` on the supply-chain payload, then `appendAudit`, rather than forking a second install path. The payload is scanned as _two_ surfaces rather than one blob, because it is two different things. The skill's name and content are prose bound for an agent's context, so they evaluate on `prompt`, where instruction-override phrasing blocks and a machine-directed string is flagged for review. A connector's command, args, and env are spawn-bound, so they evaluate on `exec`, where everything that fires blocks, so a malicious MCP-connector command can't slip the scan before a future caller wires it to a spawn. Scanning both halves at the stricter setting is what used to refuse security-education prose for quoting the payload it teaches people to reject.
-
-The `openclaw` source reuses the _shared_ operator connection that the OpenClaw `AgentSource` already holds; it never opens a second Gateway connection. When the Gateway is down, its `read()` returns no records with a degraded status, and the service layer falls back to the last good rows (see [The durable projection](#the-durable-projection)).
-
-## Manageability tiers
-
-The four tiers are the heart of the model. Each tier answers one question: _what may Clawboo do to this capability?_, and the answer is mechanical at every layer: the panel derives its button set from the tier, and the REST handler refuses any write the tier forbids.
-
-| Tier                | What Clawboo may do                                                                      | Where it applies                                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `managed`           | Clawboo fully owns the durable row, install, enable, disable.                            | Brokered tools, native MCP toggles, curated skills (the `native` source).                  |
-| `external-write`    | The runtime owns the store; Clawboo writes _through_ it (e.g. dialecting an MCP config). | Codex's attached MCP servers (today auth-blocked).                                         |
-| `runtime-of-record` | The runtime owns it; Clawboo drives changes through the runtime's own API.               | OpenClaw `tools.allow`/`tools.deny`, driven via `config.patch`.                            |
-| `observe-only`      | Clawboo can read but never write.                                                        | Built-ins, Hermes skills, attached spines Clawboo doesn't surface as a durable user store. |
-
-A deliberate deviation from Clawboo's sibling [scheduler seam](/concepts/scheduling): manageability is **per-record, not per-source**. One adapter can emit mixed tiers: Hermes emits `observe-only` `SKILL.md` rows _and_ an `observe-only` built-ins roll-up, while the `native` adapter emits only `managed` rows. Because the tier rides each record, the write gate lives at the REST layer (resolve the target record, reject if `observe-only`) and is defended again inside each source's `write()`, rather than being a single flag on the source.
-
-The action set the dashboard renders is a literal function of the record:
-
-- `observe-only` → no action; the row reads "built-in, managed by _\<runtime\>_."
-- `available: false` → no action; a row the user can see is unusable shouldn't offer a live button.
-- `writable: false` → no action; this is the OpenClaw connector/plugin case where a `config.patch` toggle is a documented follow-up, so there's no dead button.
-- `manageable-but-pending-auth` → a disabled Enable button carrying the source's `hint` (e.g. "pending auth, run `codex login`").
-- otherwise → Enable when `disabled`, Disable when `ready`.
-
-The REST handler enforces the same gate it shows: before dispatching an `enable`/`disable`, it resolves the record and returns `422` if the capability is `observe-only` or non-writable, so the writability check is never delegated to an adapter's `write()` throw. An install against an unknown agent is rejected `404` up front (an unknown agent would otherwise produce an invisible orphan annotation plus a false `{ ok: true }`).
-
-<Info>
-The install request carries a `runtime`, but the REST handler ignores it and resolves the owning runtime authoritatively from the agent row. The browser's `installSkill` hardcodes `openclaw` as a placeholder; trusting that would mislabel a skill installed on a non-OpenClaw agent. The agent row is the source of truth for the owning runtime.
-</Info>
-
-## The multiplexer and never-failing reads
-
-The `CapabilityMultiplexer` registers all six sources and fans their `read()` calls into one merged `{ records, sources }` result. The contract that makes the inventory robust is: **a source `read()` never rejects**: degradation is _data_. The multiplexer wraps each source in a try/catch, so even a source that violates its own contract becomes a degraded status entry rather than taking the whole inventory down. One dead Gateway can't blank the dashboard.
-
-Writes route by ownership: an `install` routes by the spec's `via` field; an `enable`/`disable` routes by the capability id's source prefix (`parseCapabilityId` splits on the first `:`, so a `rawKey` containing a colon survives). An unknown source throws a typed `UnknownCapabilityError` that the REST layer maps to `404`; an `observe-only` write raises `UnsupportedCapabilityWriteError` → `422`.
-
-## The durable projection
-
-The service layer (`loadCapabilities`) is the single read path both renderers go through. It does three things on every fetch:
-
-1. **Fan the multiplexer** to get the live merged records plus each source's status.
-2. **Persist each OK source's records** to the `capabilities` table with a _source-scoped reconcile_; `upsertCapabilities` deletes only the rows that source no longer reports and upserts the rest, in one `BEGIN IMMEDIATE` transaction. A re-read from one adapter never touches another adapter's rows.
-3. **Serve cached rows for degraded sources**; if a source came back `ok: false`, the service reads its last good rows from the table and merges them in, so a blipped Gateway never blanks its slice of the inventory.
-
-The merge dedupes by `id` with fresh records winning over cached ones, then applies the query filter (`runtime`, `kind`, `scope`, `agentId`). The source-scoped reconcile is the disconnect-tolerance mechanism: the table is a per-source cache, and a fresh `read()` repopulates it. There is no migration or back-fill; a hard reset of the table is acceptable because the next read rebuilds it.
-
-<Note>
-The `writable: false` derivation for a degraded OpenClaw connector or plugin is *recomputed* when serving cached rows. The column doesn't persist `writable`, so `rowToRecord` re-derives it from the row's origin and kind, through the same `isSourceWritable` predicate the owning source's `write()` gates on; without that, the cached (disconnected-Gateway) path would drop `writable` and the dead Enable/Disable button would resurface. A Gateway `tools.allow`/`tools.deny` row (kind `tool`) stays writable through the round trip, because `config.patch` is a real write path for it.
-</Note>
-
-## One stream, two surfaces
-
-The "one inventory" claim is structural, not aspirational: the Ghost Graph and the Capabilities dashboard both call the same browser client (`fetchCapabilities` → `GET /api/capabilities`) and never issue a divergent query. The Ghost Graph groups the `agent`-scoped records by `agentId` into its per-agent skill and connector nodes, and uses each record's `available` flag to grey unavailable nodes, the same greying the dashboard applies. This replaced an earlier per-agent `TOOLS.md` parse: the graph and the dashboard would have drifted if they read capabilities two different ways, so they were collapsed onto one stream.
-
-## What lands on one Boo's ring
-
-The Ghost Graph draws a tile per capability, and `groupAgentCapabilities` decides which
-records reach which agent. Two rules govern it, and they pull in opposite directions on
-purpose.
-
-**A runtime's global capabilities are inherited, additively.** An agent's ring shows its
-own `scope: 'agent'` records _plus_ every `scope: 'global'` record matching its runtime. A
-runtime builtin belongs to every agent on that runtime, so an OpenClaw Boo draws its
-built-in tools whether or not it also carries per-agent records. Inheritance does not cross
-runtimes: a Codex agent never picks up a native global.
-
-**A connector is never inherited.** Connecting one makes it available and gives it to
-nobody. An agent reaches a connector only through a grant, and the grant projection emits
-an agent-scoped record for exactly those, so a global connector record is dropped before
-the per-runtime bucket is built. That ordering is what keeps the first rule safe: what
-remains to inherit is builtins and extensions, and drawing those cannot claim access an
-agent does not have.
-
-<Note>
-  Inheritance used to be a fallback rather than a sum, applying only while an agent had
-  nothing of its own. Gaining a single agent-scoped record then dropped every inherited
-  tile at once, so installing one marketplace skill on an OpenClaw Boo took its runtime
-  builtins off the graph in the same frame. Nothing was lost in reality, which is the
-  point: the graph was under-reporting what the agent could do.
-</Note>
-
-## Design rationale and trade-offs
-
-The inventory exists because "what can this team do?" had no single answer across five runtimes. Each runtime's capability model is genuinely different: a config domain, a filesystem of `SKILL.md`s, a `tool_registry` table, an inline MCP attach, and Clawboo's honest position is that it _cannot_ own all of them. Encoding "who owns this" as a per-record `manageability` tier, rather than as branching code in the UI, buys two things: the panel and the write path stay a pure function of the record (no per-runtime special cases to drift), and a new source can declare a mix of tiers without changing any consumer.
-
-The cost is a second persistence layer beside each runtime's own store, kept honest by the source-scoped reconcile and the fresh-wins merge. The trait and multiplexer deliberately mirror the [scheduler seam](/concepts/scheduling) and the [AgentSource](/internals/agent-source) registry, so the three "fan many sources into one view, degrade gracefully" surfaces share a shape a contributor learns once.
-
-## Boundaries and non-goals
-
-- **Clawboo never writes a runtime's private store it has declared off-limits.** Hermes `SKILL.md` skills are `observe-only` precisely because the invariant is that Clawboo never writes a Hermes skills directory; the Hermes `mcp.json` is regenerated every run, so it's surfaced read-only too. Observing the private plane is the line; clobbering it is not.
-- **Not every tier has a live runtime surface yet.** The `external-write` write path (the MCP-config transcoder that dialects a canonical spec per runtime) is built and unit-tested, but no runtime exposes a clawboo-managed _persistent_ connector store in v0.5.0; Codex's home is ephemeral and auth-blocked, Hermes's `mcp.json` is regenerated. So the genuine live writes today are `managed` (native) and `runtime-of-record` (OpenClaw `tools.allow`/`tools.deny`); the other tiers are represented and gated but await a persistent store to plug into.
-- **OpenClaw connector and plugin toggles are not writable yet.** The `openclaw` source emits MCP connectors and plugins as `runtime-of-record`, but their `config.patch` toggle is a documented follow-up, so each is marked `writable: false`; only the Gateway `tools.allow`/`tools.deny` surface is a confirmed runtime-of-record write today.
-- **Single implicit tenant.** Every record and the `capabilities` table carry a `tenantId`, but it is a dormant seam; no per-tenant filtering is active in v0.5.0.
-
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## See also
-
-- [Memory](/concepts/memory), the other shared-vs-private observe-don't-clobber surface
-- [Teams and planes](/concepts/teams-and-planes), the shared-plane / private-plane split the tiers encode
-- [Scheduling](/concepts/scheduling), the sibling source-multiplexer seam this one mirrors
-- [The agent model](/concepts/agent-model), the runtimes whose capabilities are inventoried
-- [Capabilities dashboard](/using/capabilities-dashboard), the UI over this inventory
-- [Capabilities API](/reference/rest-api/capabilities), the REST surface
-- [Glossary](/appendices/glossary), canonical term definitions
+- [Capabilities](/using/capabilities): the Capabilities panel, step by step.
+- [Connectors](/using/connectors): connect apps and servers, and give agents access.
+- [Org chart](/using/org-chart): every team's Boos and their capability tiles.
+- [Teams, rooms and runtimes](/concepts/teams-and-planes): what each runtime keeps to itself.
+- [Memory](/concepts/memory): the other shared resource every teammate uses.

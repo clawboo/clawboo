@@ -1,187 +1,118 @@
 ---
-title: Dashboard tour
-description: A map of the Clawboo dashboard, the sidebar, Home and rooms, the view modes, the Org chart vs the per-team Ghost Graph, and every nav panel.
+title: 'Tour the dashboard'
+sidebarTitle: 'Dashboard tour'
+description: 'A map of the Clawboo dashboard: the team rail, the agent column, the sidebar nav, Settings, team chats, the Org chart and agent pages.'
+icon: 'map'
+keywords:
+  ['sidebar', 'navigation', 'layout', 'settings', 'Atlas', 'Ghost Graph', 'Fleet', 'team space']
 ---
 
-The Clawboo dashboard is a single-page app: a sidebar on the left and one large content area that swaps between views. This page is a map. It walks the shell left to right (the team rail, the agent column, the content area), explains the **view modes** that decide what fills the content area, and clarifies the one distinction newcomers trip on most: the **Org chart** (formerly Atlas), which draws every team on one [Ghost Graph](/using/ghost-graph) canvas, versus the **per-team Ghost Graph** in a card beside each team's chat.
+Use this page to find your way around. The dashboard is one browser window: a sidebar on the left, and the page you are working on to its right. When you open Clawboo, it starts on the Org chart.
 
-Read this after you've finished onboarding ([native](/getting-started/quickstart-native) or [OpenClaw](/getting-started/quickstart-openclaw)) and have at least one team. If the dashboard is empty, [deploy your first team](/getting-started/first-team) first.
+![The Clawboo dashboard: on the left the team rail and the agent column with the team's agents, its General chat and the nav; in the middle a team chat; on the right the Team graph and Tasks cards](/images/team-space.png)
 
-## The shell
+## The sidebar
 
-The app is a two-part sidebar plus a swappable content area:
-
-```mermaid
-flowchart LR
-    A["Team rail<br/>(60px)<br/>Boo Zero mascot + team icons"]
-    B["Agent column<br/>(236px, resizable)<br/>team · agents · rooms · nav"]
-    C["Content area<br/>(flex)<br/>the active view"]
-    A --> B --> C
-```
-
-Together, the team rail and the agent column are **the sidebar**. The content area is always present. The agent column is hidden in the standalone **Boo Zero** view: that view dedicates the window to Boo Zero's agent page, so the agent column, which follows the selected team, has nothing to show. In that view the rail carries the sidebar toggle at its top. You can also collapse the whole sidebar out of the way.
-
-### Resize and collapse the sidebar
-
-- **Resize** the agent column by dragging its right edge, anywhere from 176 to 420px (its natural width is 236px). Double-click the edge to reset it. The edge works from the keyboard too: focus it, then use the left and right arrow keys to narrow or widen the column, or Enter to collapse it. Narrower than its natural width, the column keeps its layout and is clipped, fading out at its right edge.
-- **Collapse** the sidebar with the collapse toggle in the agent column's top row, with `Cmd/Ctrl + \`, or by dragging the edge below about 120px. Collapsed, the whole sidebar (rail and column) leaves the screen.
-- **Expand** it again from the expand toggle at the start of the view's header. While the sidebar is collapsed, every view puts one there: Home, the Org chart, a team chat, an agent's page, panels such as Board, Memory, Connectors, and Marketplace, and the welcome screen's top bar. Hover the toggle to **peek**: the sidebar slides in over the content at its docked position, with its own toggle right under your pointer, and hides again when the pointer leaves. Click the toggle to dock the sidebar.
-
-Your browser remembers the width and whether the sidebar is collapsed (the `clawboo.sidebar.width` and `clawboo.sidebar.collapsed` keys).
+The sidebar has two parts: a narrow team rail on the far left, and the agent column next to it.
 
 ### Team rail
 
-The leftmost strip is a Discord-style icon rail. Top to bottom:
-
-- **The Boo Zero mascot** (the Clawboo logo). Clicking it deselects any team and opens the standalone **Boo Zero** view. [Boo Zero](/concepts/agent-model) is the universal team leader, teamless in the registry, but present in every team. Right-clicking the mascot offers "Show all agents," which clears the team filter and opens the [Org chart](#the-org-chart-vs-the-per-team-ghost-graph).
-- **One icon per active team** (its emoji on its color; hover for its name). Clicking a team icon selects that team _and_ opens its **[Home](#home)**. A pill marks the selected team. Right-clicking a team icon opens a context menu: archive/unarchive, "Refresh Protocol" (regenerate each agent's routing file), "Delete team only" (orphan the agents), or "Delete with agents."
-- **The "+" button** (Create a team), below the team icons, opens the Marketplace's **Teams** tab, the one place to browse and deploy a team or start one from scratch.
-
-Archived teams are filtered out of the rail; unarchive one from a team's context menu while it's still visible, or before archiving.
+- **Boo Zero** (the red mascot at the top) opens Boo Zero's own page, where you talk to the leader of all your teams. Right-click it and choose **Show all agents** to open the Org chart.
+- **One icon per team.** Click an icon to open that team's **Home**. Right-click it for **Archive**, **Refresh Protocol**, **Delete team only** and **Delete with agents**; [Teams](/using/teams) explains each. Archiving takes a team off the rail, which puts its chats and Home out of reach. Nothing is deleted, but the dashboard has no list of archived teams to bring one back from.
+- **+** (**Create a team**) opens the Marketplace's **Teams** tab, where you deploy a ready-made team or start one from scratch.
 
 ### Agent column
 
-This column follows the selected team. Top to bottom:
+From top to bottom:
 
-- **The top row**: the selected team's name (or "All Agents" when no team is selected), a **search** icon, and the **collapse toggle**. The search icon opens a quiet field in the same row that filters the agents by name as you type; `Escape` clears and closes it.
-- **The mascot grid**: the team's agents as tiles, each with its Boo and name. A pulsing dot marks an agent that's working and a red dot one in error, and Boo Zero comes last. Clicking a tile opens that [agent's page](#the-agent-page). With no team selected, every agent is listed as a row instead, with a live status badge (Idle / Working / Error / Sleeping, with a fine-grained activity verb when running), a "seen X ago" timestamp, and a trash icon on hover to delete it.
-- **The rooms list**, with no heading: a **New room** button, then **General**, the team's own group chat with everyone on the team (its row reads "General (Main Room)" and is always pinned). The team's other [rooms](#rooms) follow, pinned ones first (most recently pinned on top), then newest first. Each row shows its members' faces; click a row to open that chat, or hover it for its **"..."** menu.
-- **Create Boo**: adds a new agent to the selected team, on OpenClaw while an OpenClaw Gateway is connected and on Clawboo Native otherwise.
-- **The nav**: the work surfaces you switch between most, then the **Settings** gear.
-- **The theme toggle**, at the very bottom.
+- **The team's name** (or **All Agents** when no team is selected), a search for agents, and the button that hides the sidebar.
+- **The team's agents**, each drawn as a Boo. A pulsing green dot marks an agent that is working and a red dot one with an error. Boo Zero comes last. Click an agent to open its page.
+- **The team's chats:** **New room**, then **General**, the chat with the whole team, then any rooms you made. A room is a smaller group of teammates with its own chat; see [Team chat](/using/team-chat).
+- **Create Boo** adds an agent to the team. It runs on OpenClaw while an OpenClaw Gateway is connected, and on Clawboo Native otherwise.
+- **The nav**, described below, and the theme switch (**System**, **Light**, **Dark**).
 
-The nav is deliberately short, five work surfaces plus the team's Home and the Settings gear, in this order:
+Drag the agent column's edge to resize it; double-click the edge to reset it. To hide the whole sidebar, drag the edge far to the left, click the hide button, or press `Cmd/Ctrl + \`. While it is hidden, a button at the start of each page's header brings it back, and hovering that button shows the sidebar without docking it.
 
-| Item                                 | View it opens                                 | Shortcut       |
-| ------------------------------------ | --------------------------------------------- | -------------- |
-| **Home** _(when a team is selected)_ | The team's [Home](#home)                      | None           |
-| **Org chart**                        | The all-teams Ghost Graph                     | `Cmd/Ctrl + 1` |
-| **Board**                            | The durable task board, by status and by day  | `Cmd/Ctrl + 2` |
-| **Connectors**                       | Connect MCP servers and apps for your agents  | `Cmd/Ctrl + 3` |
-| **Memory**                           | The shared memory, full-screen with its graph | `Cmd/Ctrl + 4` |
-| **Marketplace**                      | Browse 436 agents and 85 teams                | None           |
-| **Settings** (gear)                  | Opens the Settings modal (see below)          | `Cmd/Ctrl + ,` |
+### The nav
 
-<Note>
-There is no standalone **Approvals** nav item. Approvals surface where they are raised: the **Needs you** column on the [board](/using/board) and an inline tray above the [group-chat](/using/group-chat) composer. See [Approvals](/using/approvals).
-</Note>
+| Item                               | What it opens                                                                                                                     | Shortcut       |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| **Home** (when a team is selected) | The team's Home page, a placeholder. To work with the team, open **General**                                                      | None           |
+| **Org chart**                      | Every team on one live chart, under Boo Zero                                                                                      | `Cmd/Ctrl + 1` |
+| **Board**                          | Every task by status on **Kanban**, or by day in **Today**, **Week** and **Month**, with anything waiting on you in **Needs you** | `Cmd/Ctrl + 2` |
+| **Connectors**                     | Apps and tools your agents can use, such as GitHub, Gmail or a local folder                                                       | `Cmd/Ctrl + 3` |
+| **Memory**                         | The team memory, as a graph and a list                                                                                            | `Cmd/Ctrl + 4` |
+| **Marketplace**                    | Ready-made agents, teams and skills                                                                                               | None           |
+| **Settings**                       | Everything else, in one window (below)                                                                                            | `Cmd/Ctrl + ,` |
 
-**Fleet** is no longer in the sidebar; it lives in the Settings modal, under **Insights**. It is the read-only overview of the whole fleet: agent count, 24-hour task and verify pass rates, spend, and per-runtime health.
+There is no separate approvals page. Requests that wait for your OK appear in **Needs you** on the Board and in a tray above the chat's message box; see [Approvals](/using/approvals).
 
-![The Fleet overview in the Settings modal: agent count, task and verify pass rates, 24-hour spend, and per-runtime health](/images/fleet-health.png)
+## Settings
 
-### The Settings modal
+**Settings** opens a window with eleven items in three groups. **Search settings** at the top finds an item by name, or by words such as "api key" or "cron".
 
-Everything for managing, configuring, and inspecting the dashboard lives in a **Settings modal**, opened from the gear at the bottom of the sidebar or with **`Cmd/Ctrl + ,`**. It groups eleven surfaces. Memory is one of them and is also in the sidebar, on purpose: Settings shows its list, and the sidebar opens it full-screen with the graph.
+| Group     | Item              | What it's for                                                                                                                                                     |
+| --------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace | **Providers**     | Add, check and remove AI provider keys, and sign in with your ChatGPT subscription                                                                                |
+| Workspace | **Runtimes**      | Connect and manage Clawboo Native, OpenClaw, Claude Code, Codex and Hermes                                                                                        |
+| Workspace | **Memory**        | The team memory as a list (the sidebar's **Memory** adds the graph)                                                                                               |
+| Workspace | **Capabilities**  | The tools, skills and connectors your agents can use                                                                                                              |
+| Workspace | **Routines**      | Work that runs on a schedule, for a team or for one agent                                                                                                         |
+| Insights  | **Fleet**         | All agents at a glance: 24-hour task and verify pass rates, spend, health per runtime, recent issues                                                              |
+| Insights  | **Tokens Used**   | Token counts by team and agent, for OpenClaw agents only                                                                                                          |
+| Insights  | **Observability** | Traces, errors and health views from Clawboo's event log                                                                                                          |
+| Insights  | **Governance**    | Budgets, limits and the audit log                                                                                                                                 |
+| System    | **System**        | OpenClaw's default command approval (while a Gateway is connected), OpenClaw and Node.js versions, and **Check for Updates**, which updates OpenClaw, not Clawboo |
+| System    | **System Health** | Startup checks, with a way to run them again                                                                                                                      |
 
-| Group     | Item              | What it shows                       |
-| --------- | ----------------- | ----------------------------------- |
-| Workspace | **Providers**     | Connect/manage LLM provider keys    |
-| Workspace | **Runtimes**      | Connect/manage runtimes             |
-| Workspace | **Memory**        | Shared-memory browser               |
-| Workspace | **Capabilities**  | The capability inventory            |
-| Workspace | **Routines**      | Scheduled work for teams and agents |
-| Insights  | **Fleet**         | The fleet overview (see above)      |
-| Insights  | **Tokens Used**   | Cost dashboard                      |
-| Insights  | **Observability** | Traces, errors, fleet health, evals |
-| Insights  | **Governance**    | Budgets, caps, audit, approvals     |
-| System    | **System**        | Gateway control, model, API keys    |
-| System    | **System Health** | Boot probe + degradation checks     |
+[Providers and runtimes](/using/providers-and-runtimes) walks through the first two. To update Clawboo itself, see [Install](/getting-started/installation).
 
-### Content area
+## Team chats
 
-The content area renders exactly one view at a time, chosen by the current **view mode** (see below). When you switch views, the old view fades out and the new one fades in. Pressing `Escape` from an agent's page, the Boo Zero view, a team's Home, or a team chat returns you to the welcome screen.
+Click **General** or a room to open a team chat: the conversation on the left, cards on the right. The header shows the chat's members (in a room, click them to **Edit room members**), a gear for the team's **brief & rules**, and one button per card:
 
-## View modes
+- **Browser**: the page each of the chat's agents has open in its web browser. Every new agent gets the built-in browser connectors.
+- **Team graph** (**Room graph** in a room): the team, with a live status on each agent.
+- **Tasks**: the chat's tasks in **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**. Open a task to read its comments, steer it, or open it on the Board.
+- **Activity**: a live feed of the agents' tool calls, results and errors.
 
-The dashboard's state is a single discriminated union, the `ViewMode`, and the content area is a `switch` over it. There are six shapes:
+The graph and **Tasks** start open. Your browser remembers which cards you keep open and how you sized them. The first time you open a team's chat, a one-time introduction screen comes first; see [Work with your first team](/getting-started/first-team).
 
-| View mode   | What it shows                                                                           | How you reach it                                           |
-| ----------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `welcome`   | The welcome screen                                                                      | `Escape` from a chat, agent, or Home view, or no selection |
-| `agent`     | An agent's page: its chat, with cards beside it                                         | Click a mascot tile or an agent row                        |
-| `booZero`   | Boo Zero's agent page (agent column hidden)                                             | Click the mascot                                           |
-| `teamspace` | A team's Home                                                                           | Click a team icon, or **Home** in the nav                  |
-| `groupChat` | A team chat (General or a room), with cards beside it                                   | Click **General** or a room in the rooms list              |
-| `nav`       | One of the nav panels (5 in the sidebar, 11 in the Settings modal, with Memory in both) | Click a nav item or a Settings item                        |
+## The Org chart and a team's graph
 
-The `groupChat` mode carries an optional `roomId`; without one, it is the team's own group chat, General. The `nav` mode carries a `view` field, one of the 15 `NAV_VIEWS`: `graph` (the Org chart), `fleet`, `cost`, `marketplace`, `connectors`, `routines`, `system`, `obs`, `board`, `runtimes`, `providers`, `memory`, `governance`, `capabilities`, `health`. The dashboard opens on `nav: graph` (the Org chart) by default, so a fresh launch lands you on the org-wide map.
+The **Org chart** shows every team at once, with Boo Zero at the top. It opens in a radial layout; switch to **Tree** at the top right. A single team's graph is the **Team graph** card beside its chat. [Org chart](/using/org-chart) covers both, including how to build a team on the canvas.
 
-### Keyboard navigation
-
-- `Escape`: leave an agent's page, the Boo Zero view, a team's Home, or a team chat, back to the welcome screen. Ignored while you're typing, or while any overlay is open: an open dialog, drawer, menu or dropdown takes `Escape` first, innermost one first, so dismissing a dropdown inside a dialog leaves the dialog (and anything you typed into it) alone.
-- `Cmd/Ctrl + 1` to `Cmd/Ctrl + 4`: jump to the first four work surfaces in the nav, in order: **1** Org chart, **2** Board, **3** Connectors, **4** Memory. Marketplace has no shortcut.
-- `Cmd/Ctrl + ,`: open the Settings modal (Providers, Runtimes, Memory, Capabilities, Routines, Fleet, Tokens Used, Observability, Governance, System, System Health).
-- `Cmd/Ctrl + \`: collapse or expand the sidebar.
-
-## Home
-
-Each team has a **Home** page. The team's icon in the rail opens it, and so does the **Home** row at the top of the nav. For now Home is a placeholder: it says the team's dashboards, and the artifacts its agents make, will live there. To talk to the team, open **General** or one of its rooms from the rooms list.
-
-## The team chat
-
-Clicking **General** or a room opens a team chat: the conversation on the left, with **cards** stacked beside it. The first time you open a team's chat, the one-time "Know Your Team" gate fills the window instead; see [Deploy your first team](/getting-started/first-team).
-
-The chat's header shows the team's icon, the chat's name, and its members' faces. In a room, clicking the faces (**Edit room members**) opens the room dialog to change the room's name and members, or delete it. The gear opens the team's **brief & rules**, and the header also holds one toggle per card. The cards stack top to bottom:
-
-- **Browser**: what the chat's agents have open in their browsers, in a window of its own, with their faces in its top bar to switch between them.
-- **Team graph** (**Room graph** in a room): the per-team [Ghost Graph](#the-org-chart-vs-the-per-team-ghost-graph).
-- **Tasks**: the chat's board tasks in sections (Needs you, In progress, To do, Done, Cancelled); a room shows only its own tasks. Open a task to see its progress and comments, leave a comment that steers the agent working on it, or jump to it with **Open on Board**.
-- **Activity**: the team's live activity feed: tool calls, results, and errors.
-
-The graph and **Tasks** start open. Each card has maximize and close buttons, you can resize the splits between the chat and the cards, and with every card closed the chat takes the whole width. Your browser remembers which cards are open in each view (the `clawboo.panes` key) and how you sized them. Delegated work also shows up in the conversation itself, as Board task cards.
-
-### Rooms
-
-A team can have **rooms**: each is a subset of the team's members with its own conversation, its own task cards (the tasks delegated in it), and its own **Room graph** card. The team's own group chat is the default room, **General**. Boo Zero presides over every room the way it presides over the team, and the team's rules, brief, memory, and board stay team-wide.
-
-- **New room**, at the top of the rooms list, opens a dialog for a name and the members (at least one). Creating the room opens its chat.
-- Each room row's **"..."** menu offers **Pin / Unpin**, **Rename** (inline, in the row), **Clear chat**, and **Delete**. General's menu has only **Clear chat**.
-- **Clear chat** sets the chat's messages aside and starts its agents on the conversation fresh; **Delete** archives the room and stops its work. Both ask first, and both leave the tasks on the board.
-
-See [Using group chat](/using/group-chat) for rooms, routing inside a room, and clearing a chat.
-
-## The Org chart vs the per-team Ghost Graph
-
-The single most useful thing to internalize: **the same Ghost Graph component renders at two scopes**, and which one you're looking at depends on how you got there.
-
-- **The Org chart** is the Ghost Graph at **`atlas` scope** (the scope value keeps the view's old name). It ignores the selected team and pulls _every_ agent onto one canvas, with each team clustered around a presiding Boo Zero (the default radial layout; a Tree/Radial toggle switches to a top-down hierarchy with each team laid out as a row). Reach it from the **Org chart** nav item, `Cmd/Ctrl + 1`, or the mascot's "Show all agents." Its header toggles an **Activity** dock, and its command bar opens an **agent browser** dock; in the radial layout, the browser dock turns the graph so the team you're watching sits beside it. This is the org-wide map, every team at once.
-- **The per-team Ghost Graph** is the same component at the default **`team` scope**, shown in the **Team graph** card beside a team's chat. It filters to the selected team's agents (plus Boo Zero), or to a room's members in a room, and renders that team's internal routing as a top-down hierarchy. You don't navigate to it separately; it's one of the team chat's cards. It has no Activity or browser dock of its own, because those are cards beside the chat.
-
-So: **the Org chart is a nav destination; the per-team Ghost Graph is a card in a team's chat.** They share rendering, hover cascades, the peacock skill-expand interaction, and the **+** button for building on the canvas, while the Tree/Radial toggle and team halos belong to the Org chart. See [Using the Ghost Graph](/using/ghost-graph) for both in depth.
-
-![The Org chart, the all-teams Ghost Graph, in its Tree layout with team halos on: Boo Zero at the top and each team's Boos in a labeled row beneath it](/images/ghost-graph.png)
+![The Org chart in its Tree layout with team halos on: Boo Zero at the top, and each team's agents in a labeled row beneath it](/images/ghost-graph.png)
 
 ## The agent page
 
-Clicking a mascot tile (or an agent row) opens the agent's page: its chat on the left, and **cards** on the right that you toggle from the chat header, stacked top to bottom:
+Click an agent to open its page: its chat on the left, and cards on the right that you turn on and off from the chat's header.
 
-- **Graph**: the agent's compact graph (its Boo, skills, and resources), with the runtime-and-model control and the **+** button in its top-right corner.
-- **Tasks & Routines**: the agent's tasks in sections (Needs you, In progress, To do, Done, Cancelled), each opening in place with its progress, its comments, a comment box that steers the agent, and **Open on Board**; then the routines that send this agent work, with **New routine**.
-- **Browser**: the agent's browser.
-- **Activity**: the agent's live activity feed.
-- **Details** (the folder icon): its section pills sit in its top row, with no title above them: **Workspace**, **Personality**, **Permissions** (on OpenClaw and native agents), **Brief** (Boo Zero only), and **Agent Files**. Agent Files opens a second row of tabs, one per agent file the agent's runtime reads (SOUL.md, IDENTITY.md, TOOLS.md, and AGENTS.md on an OpenClaw agent), with **Save**.
+- **Graph**: the agent with its skills, connectors and model. Change the model from the card's top corner.
+- **Tasks & Routines**: the agent's tasks, which you can open and steer, and the routines that send it work, with **New routine**.
+- **Browser** and **Activity**: as in a team chat.
+- **Details**: **Workspace**, **Personality**, **Permissions** (on OpenClaw and Clawboo Native agents), **Brief** (on Boo Zero only) and **Agent Files**, its SOUL.md and other files. Which files an agent follows depends on its runtime.
 
-**Graph** and **Details** start open. As in a team chat, each card can be maximized or closed, the splits are resizable, and your browser remembers the sizes and which cards are open. See [Working with agents](/using/agents).
+**Graph** and **Details** start open. [Agents](/using/agents) covers each card. In Boo Zero's own chat, start your message with `@` and a team's name, or click the team's chip above the message box, to bring that team's brief into your message; see [Boo Zero](/using/boo-zero).
 
-![The agent page: chat on the left, the Graph card top-right with the agent's skills, connectors and model, and the Details card bottom-right with its section pills and the personality presets and sliders](/images/agent-detail.png)
+![An agent page: the chat on the left, the Graph card at the top right with the agent's skills, connectors and model, and the Details card below it with its section pills and the personality presets and sliders](/images/agent-detail.png)
 
-## Where to go from here
+## Keyboard shortcuts
 
-- Click a **team icon** to open its Home, then **General** in the rooms list to watch the team collaborate.
-- Open the **Org chart** to see how all your teams relate under Boo Zero.
-- Open the **Board** to see delegated work as durable, claimable tasks, laid out by status and by day, with anything waiting on you in **Needs you**.
-- Open **Settings**, then **Runtimes**, to connect Claude Code, Codex, Hermes, or OpenClaw alongside the native runtime.
+| Keys                  | What they do                                                                                                         |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `Cmd/Ctrl + 1` to `4` | Open the Org chart, Board, Connectors or Memory                                                                      |
+| `Cmd/Ctrl + ,`        | Open Settings                                                                                                        |
+| `Cmd/Ctrl + \`        | Hide or show the sidebar                                                                                             |
+| `Escape`              | Close Settings; otherwise go from an agent page, Boo Zero's page, a team's Home or a team chat to the welcome screen |
 
-## See also
+Shortcuts other than `Cmd/Ctrl + \` don't fire while you type in a text field. The welcome screen has buttons for the Org chart, the Marketplace and **Cost**, which opens **Tokens Used**. [Keyboard shortcuts](/reference/keyboard-shortcuts) also lists the Board and graph keys.
 
-- [Deploy your first team](/getting-started/first-team), get a team on screen, then come back to this map
-- [Using group chat](/using/group-chat), the team chat, its rooms, and clearing a chat
-- [Using the Ghost Graph](/using/ghost-graph), the Org chart and the per-team graph in depth
-- [Working with agents](/using/agents), the agent page and its cards
-- [Teams and planes](/concepts/teams-and-planes), what a team is, shared vs private plane
-- [The board](/concepts/the-board), the durable substrate beneath the Board view
-- [Peer chat](/concepts/peer-chat), what happens inside a team's group chat
-- [Agent model](/concepts/agent-model), Boo, Boo Zero, and the runtime classes
-- [Connecting runtimes](/runtimes/connecting-runtimes), what the Runtimes view manages
-- [Glossary](/appendices/glossary), canonical term definitions
+## Next steps
+
+- [Work with your first team](/getting-started/first-team): give a team a job and find the results.
+- [Team chat](/using/team-chat): rooms, mentions and clearing a chat.
+- [Board](/using/board): tasks, **Needs you** and steering.
+- [Org chart](/using/org-chart): the all-teams chart and each team's graph.
+- [Agents](/using/agents): the agent page, models, personality and files.
+- [Keyboard shortcuts](/reference/keyboard-shortcuts): every shortcut in one place.

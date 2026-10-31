@@ -1,140 +1,191 @@
 ---
-title: Check System Health
-description: Read the boot-probe checklist, the degraded/fatal banner, resolved runtime state, and re-run the probe from the System Health panel.
+title: 'Check System Health'
+sidebarTitle: 'System Health'
+description: 'Read the checks Clawboo runs on its own folder, database, key vault and connections, and fix the one that fails.'
+icon: 'heart-pulse'
+keywords:
+  [
+    'boot probe',
+    'diagnostics',
+    'health check',
+    'degraded',
+    'fatal',
+    'master key',
+    'secrets vault',
+    'Re-run probe',
+  ]
 ---
 
-Use this page when you want to know whether your Clawboo install is sound: which foundations passed at boot, what the server resolved (state dir, database, port), and what production posture it is running with. The **System Health** panel is the always-available surface over the [boot probe](/appendices/glossary); it is a regular item in the Settings modal.
+**System Health** shows whether Clawboo's own parts work: its folder, its database, the vault that holds your keys, the tool servers your agents use, and its connections to the OpenClaw Gateway and an OpenTelemetry collector. Use this page when something in Clawboo is not working, or to check an install after an upgrade or a move. For your agents' own work and errors, see [Check on your agents](/using/observability).
 
-The panel (`SystemHealthPanel`) is backed by `/api/health`. The boot probe runs once on every server start and is cached; the panel reads that cached report and can recompute it on demand.
+## Open System Health
 
-## Prerequisites
+Open **Settings** (the **Settings** row at the bottom of the left sidebar, or Cmd+, on macOS and Ctrl+, on Windows and Linux), then **System Health** in the **System** group. It works on a fresh install before you connect anything, and while the OpenClaw Gateway is down.
 
-<Note>
-System Health is always available. It is the one liveness surface that answers even when the OpenClaw Gateway is down; the report is computed from local filesystem, SQLite, vault, and in-process MCP state, not from a runtime connection.
-</Note>
+Clawboo runs its checks each time its server starts. The panel shows the results of the last run and reads them again every 30 seconds while its tab is visible, but reading does not run the checks again. Click **Re-run probe** to run them now, for example after you fix something.
 
-- A running Clawboo server. No runtime needs to be connected; the panel works on a fresh install before you have onboarded.
+A failed check never stops Clawboo. The server keeps running, so you can read the details here.
 
-## Open the panel
+## Read the panel
 
-Open **Settings** (the gear at the bottom of the sidebar, or `Cmd/Ctrl + ,`), then **System Health** under the System group (heart-pulse icon). Selecting it switches the view to the `health` nav slot, which renders `SystemHealthPanel`.
+- **The header pill** sums up the checks: **All systems go**, **N degraded** or **N fatal**. If you don't use OpenClaw, expect **1 degraded** from the **OpenClaw Gateway** check (see [Fix a failing check](#fix-a-failing-check)).
+- **A banner** appears when a check fails. "Running degraded." means some optional parts are unavailable and the rest of Clawboo works normally. "The install has a fatal problem." means Clawboo cannot work properly until you fix it. The banner points you to the failing check, and to resetting `~/.clawboo` only as the last resort.
+- **Checks** lists each check with an **OK**, **Degraded** or **Fatal** pill, how long it took, and a one-line result. A failed check also shows its details: what went wrong, often with the file or setting involved.
+- **Runtime state** and **Production defaults** show what this server is using (see [Runtime state and defaults](#runtime-state-and-defaults)).
 
-On open, the panel calls `GET /api/health` and renders the report. It also re-fetches every 30 seconds while the view is mounted, so a long-lived dashboard stays current without a manual refresh.
+## The checks
 
-## What the panel shows
+The checks run in this order. Three of them are fatal when they fail, because nothing works without them; the rest are degraded.
 
-The panel has three sections plus a status banner.
+| Check                         | What it checks                                                                                                                                                | When it fails |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| **Clawboo home writable**     | Clawboo can create and write its folder, `~/.clawboo` (or the folder `CLAWBOO_HOME` names)                                                                    | Fatal         |
+| **Secrets vault permissions** | Only your user account can read the key vault's folder, its master key, and the key Clawboo uses to identify itself to the OpenClaw Gateway (macOS and Linux) | Degraded      |
+| **Master key**                | The vault's master key can still decrypt what it encrypted                                                                                                    | Degraded      |
+| **Database integrity**        | The database opens and passes SQLite's integrity check                                                                                                        | Fatal         |
+| **Database schema**           | Every table and column Clawboo needs is in the database                                                                                                       | Fatal         |
+| **API port file**             | The port file names the port this server listens on                                                                                                           | Degraded      |
+| **MCP servers**               | Clawboo's four tool servers start and answer: tasks (the board), memory, tools (connected apps) and teamchat (messages between agents)                        | Degraded      |
+| **OpenClaw Gateway**          | Clawboo's server is connected to the OpenClaw Gateway. Without a running Gateway it always reads **Degraded**, even if you don't use OpenClaw                 | Degraded      |
+| **OTel exporter**             | The OpenTelemetry exporter loaded. Passes as disabled when no endpoint is set                                                                                 | Degraded      |
 
-### The header status pill
+## Fix a failing check
 
-The toolbar shows a single rollup pill computed from the report's `fatal` and `degraded` arrays:
+Fix the fatal checks first: a database that cannot open also stops the **MCP servers** check. After a fix, click **Re-run probe**. Where a fix says to restart Clawboo, run `clawboo restart` (on an install protected by an access token, see the [CLI reference](/reference/cli) instead).
 
-| Pill                       | Condition                               |
-| -------------------------- | --------------------------------------- |
-| `All systems go` (success) | no fatal and no degraded checks         |
-| `N degraded` (warning)     | at least one degraded check, none fatal |
-| `N fatal` (error)          | at least one fatal check                |
+<AccordionGroup>
 
-### The degraded / fatal banner
+<Accordion title="Clawboo home writable is Fatal">
 
-When the report has any failing check, a banner appears above the checklist:
+**What it means:** Clawboo cannot create or write its folder. The details give the system's reason, such as a permission error.
 
-- **Fatal**: _"The install has a fatal problem."_ The failing check below says what to do; resetting `~/.clawboo` and re-running onboarding is the last resort.
-- **Degraded**: _"Running degraded."_ Some optional subsystems are unavailable; the rest of Clawboo works normally. The failing checks below tell you which.
+**Fix:** make sure your user account owns `~/.clawboo` and can write to it, or set `CLAWBOO_HOME` to a folder you can write. Then restart Clawboo.
 
-This split is intentional: almost everything **degrades** (the server keeps running) rather than being fatal. Three failures are fatal: the [clawboo home](/appendices/glossary) is not writable, the SQLite file fails its integrity check, or its schema is short a column, because nothing works without them.
+</Accordion>
 
-### The Checks checklist
+<Accordion title="Secrets vault permissions is Degraded">
 
-Each entry in `report.checks[]` renders as a row with an icon, the humanized check name, a tone pill (`OK` / `Degraded` / `Fatal`), the check's `durationMs`, a one-line `message`, and, only when the check failed, its `detail` line. The nine checks the boot probe runs, in order:
+**What it means:** other users on this computer could read the files that protect your keys. The details name each file and its current mode, such as `secrets/ is 755`.
 
-| Check id                   | Label                     | What it verifies                                                                                                                                     | Failure tone |
-| -------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `clawbooHomeWritable`      | Clawboo home writable     | `~/.clawboo` exists and is writable (mkdir + `W_OK`)                                                                                                 | **fatal**    |
-| `vaultPerms`               | Secrets vault permissions | `secrets/` is `0700`, `master.key` is `0600`, proxy device identity is `0600` (POSIX only; skipped on Windows; "not yet created" on a fresh install) | degraded     |
-| `masterKeyBootSentinel`    | Master key                | A fixed sentinel encrypted on first boot decrypts on every later boot, proving the master key still works                                            | degraded     |
-| `databaseIntegrity`        | Database integrity        | SQLite opens and `PRAGMA integrity_check` returns `ok`                                                                                               | **fatal**    |
-| `databaseSchema`           | Database schema           | The core bootstrap tables are present, and no column the schema declares is missing from them                                                        | **fatal**    |
-| `apiPortFileMatches`       | API port file             | The on-disk api-port file matches the actual listening port (skipped pre-listen when no port is supplied)                                            | degraded     |
-| `mcpServersHealthy`        | MCP servers               | Each of the four MCP servers (`tasks`, `memory`, `tools`, `teamchat`) builds and answers a `tools/list` round-trip                                   | degraded     |
-| `openclawGatewayReachable` | OpenClaw Gateway          | The Gateway is reachable and synced (skipped if no Gateway is configured; a miss degrades to serving last-synced agents from SQLite)                 | degraded     |
-| `otelExporterReachable`    | OTel exporter             | Only runs when an OTLP endpoint is configured; otherwise reports "disabled" and passes                                                               | degraded     |
-
-<Note>
-`mcpServersHealthy` is a constructability + `tools/list` check: it builds a fresh server instance per probe over the same database, not the cached HTTP singleton that real attaches consume. It proves the server can be built and answers a request; it is not a liveness probe of the pre-warmed singleton.
-</Note>
-
-### Runtime state
-
-The `report.resolved` block, shown as a key/value card, surfaces what the server actually resolved this boot:
-
-| Row                | Source                                                                       |
-| ------------------ | ---------------------------------------------------------------------------- |
-| clawboo home       | `resolveClawbooDir(process.env)` (`~/.clawboo`, `CLAWBOO_HOME` override)     |
-| database           | the resolved SQLite path (`~/.clawboo/clawboo.db`)                           |
-| API port           | the actual listening port, or `(unknown)` pre-listen                         |
-| OpenClaw state dir | OpenClaw's interop dir, or `(not resolved)`                                  |
-| secrets vault      | `present` or `not yet created`                                               |
-| master key         | `verified`, or `unreadable — re-enter runtime keys` when the sentinel failed |
-
-### Production defaults
-
-The `report.config` block surfaces the shipped production-defaults posture so you (or a bug report) can see what this install runs with:
-
-| Row            | Value shown                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------------- |
-| log level      | `info` (pino level; `LOG_LEVEL` env override)                                                           |
-| budget posture | `track-and-warn (no global hard cap; warns at 80%)` when no hard cap is set; otherwise `hard cap $X.XX` |
-| observability  | `local event log (OTel opt-in)`, or `OTel exporter active` when an OTLP endpoint is configured          |
-
-The 80% figure is the budget math's soft-cap percentage (`SOFT_CAP_PERCENT`), referenced by `budgetWarnSoftPct` so the two never drift. See [Production defaults](/operating/production-defaults) for the full posture catalog.
-
-## Re-run the probe
-
-After you fix a failing check (for example, you tighten the vault permissions or re-enter a runtime key), click **Re-run probe** in the toolbar.
-
-This calls `POST /api/health/recheck`, which recomputes a fresh report, re-running the integrity check, the MCP round-trips, and the Gateway/OTel probes, and replaces the cached one. The button is disabled (with a spinner) while a probe is in flight; concurrent probes are de-duped server-side so the slow checks run at most once.
-
-The plain `GET /api/health` returns the cached report (or computes one on first call if the server has not produced one yet); only `recheck` forces a fresh run.
-
-## Options / variations
-
-| Action              | Route                      | Effect                                                                   |
-| ------------------- | -------------------------- | ------------------------------------------------------------------------ |
-| Open / auto-refresh | `GET /api/health`          | Returns the latest cached `BootReport` (computes one if none exists yet) |
-| Re-run probe        | `POST /api/health/recheck` | Recomputes fresh and replaces the cache                                  |
-
-Both responses carry a top-level `ok` field (`true` when there are no fatal checks), so a simple external liveness check can read that one field. Every check's `detail` and the resolved paths are redacted-on-display before send; a credential-shaped substring is masked while the readable paths and config stay.
-
-## Verify it worked
-
-- After a successful **Re-run probe**, the header pill flips to `All systems go` and every row reads `OK` (assuming you fixed the failing checks).
-- A bare liveness check works from any shell:
+**Fix:** make those files private to your account, then click **Re-run probe**. Run the line for each file the details name:
 
 ```bash
-curl -s http://localhost:18790/api/health | jq '.ok, .fatal, .degraded'
+chmod 700 ~/.clawboo/secrets
+chmod 600 ~/.clawboo/secrets/master.key
+chmod 600 ~/.clawboo/proxy-device-identity.json
 ```
 
-`.ok` is `true` when no check is fatal; `.fatal` and `.degraded` list the failing check ids by name.
+If you set `CLAWBOO_HOME`, use that folder instead of `~/.clawboo`.
 
-## Troubleshooting
+</Accordion>
 
-<Danger>
-**A fatal check means the install is broken.** A fatal `clawbooHomeWritable` or `databaseIntegrity` is not something the panel can fix. A fatal `databaseSchema` means the database is short something the current version needs: a core table, or a column that could not be added. Its `detail` names what is missing and the remedy, so follow that before resetting. When nothing there applies, reset `~/.clawboo` and re-run the onboarding wizard to start clean. (Back up the database first if you need its data.)
-</Danger>
+<Accordion title="Master key is Degraded">
 
-<Warning>
-**`master key` reads "unreadable, re-enter runtime keys".** The boot sentinel did not decrypt, which means the master key changed, was lost, or `CLAWBOO_SECRETS_MASTER_KEY` now differs from what encrypted the vault. Stored runtime provider keys cannot be decrypted; re-enter them from **Settings**, then the **Runtimes** panel (see [Connecting runtimes](/runtimes/connecting-runtimes)), or reset `~/.clawboo` for a clean start. This check degrades; the server keeps running.
-</Warning>
+**What it means:** the key that encrypts the vault is not the one that encrypted it, so Clawboo cannot read your saved provider keys or connector sign-ins. The **master key** row under **Runtime state** reads **unreadable** and asks you to re-enter runtime keys.
 
-<Note>
-**`OpenClaw Gateway` shows degraded but everything else works.** The Gateway is optional. When it is unreachable, Clawboo serves the last-synced agents from SQLite; this is a degraded check, never fatal. If you run native-first (no Gateway), this check is skipped entirely.
-</Note>
+The key is `~/.clawboo/secrets/master.key`, or the value of `CLAWBOO_SECRETS_MASTER_KEY` when that is set. It usually changes when that variable is set, changed or removed, when `master.key` is deleted or replaced, or when `~/.clawboo` is restored without its `secrets` folder.
 
-## Related
+**Fix:**
 
-- [`/api/settings` and `/api/health` reference](/reference/rest-api/settings): full request/response shapes for the health routes
-- [Production defaults](/operating/production-defaults): budget posture, breaker defaults, and the full shipped-defaults catalog
-- [Connecting runtimes](/runtimes/connecting-runtimes): where the encrypted vault and runtime keys live
-- [Security](/operating/security): the vault, redaction, and safe exposure
-- [Data and state](/operating/data-and-state): SQLite, file locations, backup, and reset
+1. If you can, put the original key back: set `CLAWBOO_SECRETS_MASTER_KEY` to its old value, or restore the original `master.key`. Restart Clawboo, then click **Re-run probe**. Your saved keys work again.
+2. If the original key is gone, the saved keys cannot be recovered. Delete `~/.clawboo/secrets/runtime-keys.json`, the vault file that holds them, and click **Re-run probe**. Then re-enter your keys under **Settings** > **Providers** (or on a runtime's card under **Settings** > **Runtimes**, wherever you first entered them) and reconnect your connectors.
+
+If the result says the vault is unreadable instead, the details give the reason, such as a `CLAWBOO_SECRETS_MASTER_KEY` that is not a 32-byte key.
+
+</Accordion>
+
+<Accordion title="Database integrity is Fatal">
+
+**What it means:** the database could not be opened, or SQLite found damage in it. The details give SQLite's own words.
+
+**Fix:** stop Clawboo with `clawboo stop` and restore `~/.clawboo/clawboo.db` from a backup. With no backup, keep a copy of the damaged file, then reset the data: Clawboo starts with an empty database, and you lose everything that was in it, such as your teams, board, chats and memory. [Data and state](/operating/data-and-state) has the steps for both.
+
+</Accordion>
+
+<Accordion title="Database schema is Fatal">
+
+**What it means:** a table or column Clawboo needs is missing from the database. The details name it.
+
+**Fix:** restart Clawboo first. Each time it opens the database it adds any missing columns, so this usually clears. If the result says the schema "cannot be upgraded in place", this version of Clawboo cannot run on that database: the details name the file and the choices. Either run the Clawboo version that created the database, or move the file aside to start clean, which loses everything stored in it, such as your teams, board, chats and memory.
+
+</Accordion>
+
+<Accordion title="API port file is Degraded">
+
+**What it means:** `~/.clawboo/api-port.txt` names a different port from the one this server listens on, or is missing. The `clawboo` command reads this file to find the server, so `clawboo stop` and `clawboo restart` can miss this one. A common cause is a second Clawboo server that started later and wrote its own port.
+
+**Fix:** if you run more than one Clawboo server, stop the one you don't need with `CLAWBOO_API_PORT=<port> clawboo stop`. Then run `clawboo restart`, and the running server writes its port again. This server's port is the **API port** row under **Runtime state**.
+
+</Accordion>
+
+<Accordion title="MCP servers is Degraded">
+
+**What it means:** one of Clawboo's tool servers did not start or answer, so agents may lose its tools: board tasks, memory, connected apps or messages between agents. The details name the server and its error. "MCP servers not probed (database unavailable)" means the database failed first; fix that.
+
+**Fix:** restart Clawboo. If the check still fails, look for the error in the server log, `~/.clawboo/server.log`, and [open an issue](https://github.com/clawboo/clawboo/issues) with the details.
+
+</Accordion>
+
+<Accordion title="OpenClaw Gateway is Degraded">
+
+**What it means:** Clawboo's server was not connected to the OpenClaw Gateway when the checks ran. The result reads "OpenClaw Gateway not reachable", followed by the connection state, and the details give the Gateway's address. If you don't use OpenClaw, this is expected and harmless: Clawboo checks for a Gateway at its default address on every start, so the check reads **Degraded** and the panel says "Running degraded." even though nothing is wrong. If you do use OpenClaw, your OpenClaw agents still show as they were at the last sync but cannot take work. Your other runtimes are not affected.
+
+**Fix:** if you use OpenClaw, start or reconnect the Gateway in **Settings** > **Runtimes** > **OpenClaw** (**Reconnect**, or **Manage** > **Restart**), then click **Re-run probe**. The check reflects the moment the checks ran, so a Gateway that started afterwards reads **Degraded** until you run them again. [OpenClaw](/runtimes/openclaw) covers the Gateway's own errors.
+
+</Accordion>
+
+<Accordion title="OTel exporter is Degraded">
+
+**What it means:** an OpenTelemetry endpoint is set (`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), but the exporter failed to load. Traces stay in Clawboo's own log. On an install from npm this is expected: the package does not include the OpenTelemetry SDK.
+
+**Fix:** to clear the warning, unset both variables and restart Clawboo. To export traces, run Clawboo where the SDK is installed, such as a source checkout. See [Export traces with OpenTelemetry](/using/observability#export-traces-with-opentelemetry).
+
+</Accordion>
+
+</AccordionGroup>
+
+## Runtime state and defaults
+
+**Runtime state** shows what this server is using. It helps when you have moved Clawboo's folder, or run more than one copy.
+
+| Row                    | What it shows                                                              |
+| ---------------------- | -------------------------------------------------------------------------- |
+| **clawboo home**       | Clawboo's folder: `~/.clawboo`, or the folder `CLAWBOO_HOME` names         |
+| **database**           | The database file this server uses                                         |
+| **API port**           | The port this server listens on                                            |
+| **OpenClaw state dir** | OpenClaw's folder, usually `~/.openclaw`                                   |
+| **secrets vault**      | Whether the encrypted key vault exists: **present** or **not yet created** |
+| **master key**         | **verified**, or **unreadable** when the **Master key** check failed       |
+
+**Production defaults** shows how this version is set up out of the box. Its **log level** and **budget posture** rows always show the shipped default, not your own settings:
+
+| Row                | What it shows                                                                                                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **log level**      | Always `info`, the shipped level. Setting `LOG_LEVEL` changes what the server logs, but not this row                                                                                                      |
+| **budget posture** | Always "track-and-warn (no global hard cap; warns at 80%)". It does not reflect your budgets: a hard cap you set in **Governance** does not show here (see [Budgets and spend](/using/budgets-and-spend)) |
+| **observability**  | "local event log (OTel opt-in)", or "OTel exporter active" whenever an OpenTelemetry endpoint is set, even if the exporter failed to load. The **OTel exporter** check is the one to trust                |
+
+<Accordion title="Under the hood">
+
+- `GET /api/health` returns the report from the last run of the checks, and `POST /api/health/recheck` runs them again (the **Re-run probe** button). Both carry a top-level `ok`, which is `true` when no check is fatal, plus `fatal` and `degraded` lists of check ids. A monitor can read that one field.
+- With an access token set (`STUDIO_ACCESS_TOKEN`), these routes need the access cookie like every other `/api` route.
+- Check ids, in order: `clawbooHomeWritable`, `vaultPerms`, `masterKeyBootSentinel`, `databaseIntegrity`, `databaseSchema`, `apiPortFileMatches`, `mcpServersHealthy`, `openclawGatewayReachable`, `otelExporterReachable`.
+- Credential-shaped text in a check's details is masked before it is sent.
+- See the [Settings, health and layout API](/reference/rest-api/settings) for the full report shape.
+
+```bash
+curl -s http://localhost:18790/api/health
+```
+
+Use the port your Clawboo prints when it starts, if it is not 18790.
+
+</Accordion>
+
+## Next steps
+
+- [Data and state](/operating/data-and-state): every file in `~/.clawboo`, and how to back up, restore and reset.
+- [CLI reference](/reference/cli): restart Clawboo and find its log.
+- [OpenClaw](/runtimes/openclaw): start, restart and repair the OpenClaw Gateway.
+- [Connect providers and runtimes](/using/providers-and-runtimes): re-enter a provider key.
+- [Check on your agents](/using/observability): your agents' work, errors and traces.
+- [Troubleshooting](/help/troubleshooting): fixes for other problems.

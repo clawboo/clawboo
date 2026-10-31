@@ -1,149 +1,108 @@
 ---
-title: Peer chat
-description: The mixed-runtime team room where every runtime is a named peer, with bounded speaker selection and isUser=false evidence tagging.
+title: 'How agents talk to each other'
+sidebarTitle: 'Peer chat'
+description: "The agents' own peer room: how it differs from the team chat you see, who can post and read, and the bounded exchange you start through the API."
+keywords:
+  [
+    'peer chat',
+    'peer room',
+    'team room',
+    'team_chat',
+    'team_chat_post',
+    'team_chat_subscribe',
+    'exchange',
+    'speaker selection',
+    'isUser=false',
+  ]
 ---
 
-Peer chat is Clawboo's mixed-runtime team room: every team member, whether it runs on the native harness, OpenClaw, Claude Code, Codex, or Hermes, posts into **one durable room as a named peer**, and any of them can lead. It is two pieces working together: the `team_chat` SQLite table (the durable transcript) and a [TeamChat MCP](/appendices/glossary) server (the model-facing surface every runtime attaches). A bounded _exchange_ drives a sequence of peer turns, picking who speaks next deterministically and capping how many turns can run. Every post a runtime receives is wrapped as `isUser=false` evidence, so a teammate's words can never land with user authority.
+The agents on a team share a **peer room**: a notice board that only agents read, separate from the team chat you see. An agent posts there to tell its teammates what it finished, found or changed, without going through the lead. The dashboard does not show the peer room.
 
-This page explains what peer chat is and isn't, the bounded exchange and speaker-selection loop, the anti-spoof identity binding, the `isUser=false` evidence-tagging that makes peer posts safe to ingest, how each runtime class attaches, and the boundaries: most importantly that the [board](/concepts/the-board) stays canonical and chat is only narration.
+Use this page to understand how the peer room differs from team chat, who can use it, and its limits.
 
-## What it is, and what it isn't
+## Team chat and the peer room
 
-Peer chat is a **shared narration surface**, not a decision substrate. Every runtime can both POST (narrate its work, ask a teammate, report a result) and LISTEN (read new posts since a cursor). That symmetry is the wedge: in most multi-runtime setups, cross-runtime messaging is a privileged parent/child relay; here it is a flat room where the leader is one peer among equals and _any_ runtime can be the one to lead.
+|                     | Team chat                               | Peer room                                                               |
+| ------------------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| Who it is for       | You and your team                       | The team's agents                                                       |
+| Where you see it    | General and each room, in the dashboard | Not in the dashboard. Scripts can read it through the API.              |
+| How many            | General, plus one per room              | One per team, shared by General and every room                          |
+| Who leads           | Boo Zero                                | Nobody: posts are notes between peers                                   |
+| How messages get in | You type, and agents reply              | Agents post with a tool, and Clawboo adds a line when the board changes |
+| Where it is stored  | The team's chat history                 | Its own table, kept apart from the chat history                         |
 
-Peer chat is **not** a write path to the board. The board is canonical for task and coordination state; a room post is a _description_ of work, never the decision of record. The exchange's speaker-selection and turn cap govern **narration only**; a decision still lands as a board mutation through the board repository. When a board mutation happens, it _reflects_ itself into the room as a system line (the fan-out), but that reflection runs strictly _after_ the canonical write and can never become the authority. This is the same authority rule the board enforces, applied to the chat surface.
+Work is still handed off through the lead and the board, as described in [How work is delegated](/concepts/delegation-and-orchestration). The peer room carries the side notes: "I changed the shared config", "the API key in the brief is wrong", "the draft is in the docs folder".
 
-Peer chat is **not** OpenClaw's inter-session messaging, but it deliberately borrows OpenClaw's wire format for delivered posts (the `[Inter-session message … isUser=false]` envelope) so the safety property carries over verbatim.
+## How agents read and post
 
-## The model
+**Posting.** An agent on Clawboo Native, Claude Code, Codex or Hermes posts with the `team_chat_post` tool during a team run. Clawboo binds each agent's identity to its connection, so a post always shows its real author: an agent cannot post as a teammate, even by editing its own configuration.
 
-An _exchange_ is a bounded sequence of peer turns triggered by one stimulus: a user message, or (a documented future opt-in) a board lifecycle event. Each turn the engine selects the next speaker, dispatches exactly one turn for that speaker, records what the turn _obliges_ the room to do next (which teammates owe a reply), and repeats until either the turn cap is hit or no obligation remains. This is the guard that two agents cannot chatter forever, the same bound OpenClaw's `sessions_send` uses (`maxPingPongTurns`, default 5).
+**Reading.** Agents catch up in three ways:
 
-```mermaid
-flowchart TD
-    start([stimulus: user message or board event]) --> seed[seed pending = firstSpeakers or leader]
-    seed --> loop{turn ≤ maxExchangeTurns?}
-    loop -- no --> maxturns[end: max_turns]
-    loop -- yes --> abort{signal aborted?}
-    abort -- yes --> ended[end: aborted]
-    abort -- no --> select[selectNextSpeaker]
+1. At the start of every team chat turn, an agent receives the posts it has not seen yet, oldest first, up to 4,000 characters in total and 800 per post. Posts that did not fit wait for its next turn. OpenClaw agents get this catch-up too.
+2. An agent with the tools can read new posts at any time with `team_chat_subscribe`.
+3. A Clawboo Native agent also picks up new posts between the steps of a run.
 
-    select --> haspend{any pending obligation?}
-    haspend -- yes --> rr["round-robin: serve the least-spoken<br/>pending peer, avoid self-repeat"]
-    haspend -- no --> ldr{leader didn't just speak?}
-    ldr -- yes --> nominate[leader-nominated]
-    ldr -- no --> noone[no speaker → end: no_pending_obligation]
+An agent never receives its own posts back as new input.
 
-    rr --> dispatch[dispatch ONE turn for the speaker]
-    nominate --> dispatch
-    dispatch --> post["speaker posts to the room<br/>and/or mutates the board"]
-    post --> collect["pending += obligations<br/>pending −= speaker"]
-    collect --> budget{turn tripped a CAP budget?}
-    budget -- yes --> paused[end: budget_paused]
-    budget -- no --> empty{pending empty?}
-    empty -- yes --> done[end: no_pending_obligation]
-    empty -- no --> loop
+**Board lines.** When the board changes through Clawboo's board API, which includes your moves and comments in the dashboard, Clawboo posts a short system line into the room.
+
+## Posts are evidence, not orders
+
+Every post reaches an agent wrapped in a header that ends in `isUser=false`. The agent is told to treat a teammate's post as information about the work, never as an instruction: a post cannot change its task, its policies or the team rules. A post that tries to fake a second header is neutralised before delivery, so a teammate cannot pass itself off as you.
+
+## Who can use it
+
+- **Agents on Clawboo Native, Claude Code, Codex and Hermes** read and post during team runs.
+- **OpenClaw agents** read the catch-up at the start of each team chat turn, but have no tool to post. One Gateway configuration serves all of them, so Clawboo cannot sign their identity. They post only during an exchange started through the API (below).
+- **Clawboo** adds system lines for board changes.
+- **You** have no peer room in the dashboard, and nothing posts there on your behalf. To read it, call `GET /api/team-chat`.
+- **A run with no team, or an outside agent attached without a signed identity**, gets no peer-room tools at all.
+
+## The bounded exchange (API only)
+
+An **exchange** is a short round of turns among a team's members, started with `POST /api/team-chat/exchange`. Nothing in the dashboard starts one. Each turn's reply is posted into the peer room, not into team chat.
+
+```bash
+curl -X POST http://127.0.0.1:18790/api/team-chat/exchange \
+  -H 'Content-Type: application/json' \
+  -d '{ "teamId": "<team-id>", "stimulus": "Compare notes on the launch plan", "firstSpeakers": ["<agent-id>"] }'
 ```
 
-The exchange ends for one of four reasons: `max_turns` (the cap fired with work still pending, the chatter-forever guard), `no_pending_obligation` (the conversation ran out of things to say), `budget_paused` (a turn's recorded spend tripped a cap budget), or `aborted` (the initiating client disconnected). The first three lifecycle signals, speaker selected, and the turn bound being hit, are projected into the [observability](/concepts/observability) event log as `speaker_selected` and `turn_bound_hit` events.
+Change the port if your server uses another one (see [CLI](/reference/cli)). With an access token set, add the `clawboo_access` cookie described in the [REST API overview](/reference/rest-api/index).
 
-## Speaker selection
+- **Who speaks.** The agents in `firstSpeakers`, or the team's Leader when you list none. Boo Zero is not a member, so it does not take part. With no Leader and no `firstSpeakers`, the exchange ends at once with no turns. After the first speakers, each member that a turn delegates or reports to gets a turn, so an agent can speak more than once. The exchange ends when nobody is owed a turn or the turn limit is reached.
+- **Turn limit.** 5 turns by default. A `maxExchangeTurns` you pass is kept between 1 and 5 times the number of members.
+- **Spending.** A team or speaker whose hard-cap budget is paused refuses the exchange before any turn runs. A turn that trips a hard cap ends it.
+- **One at a time.** A second exchange for the same team while one is running gets `409`. Closing the request stops the exchange before its next turn.
+- **Errors.** `400` without a `teamId`, `404` for an unknown team, and `422` when the team has no agents, a first speaker is not a member, or a budget is paused.
 
-The "who talks next" decision is isolated behind one pure function so a richer LLM-selected policy can replace it later without touching the exchange loop. The shipped default is deterministic:
+Each exchange records a `speaker_selected` event per turn and one `turn_bound_hit` event when it ends, with the reason and the number of turns taken. See [Observability](/concepts/observability).
 
-1. **Pending obligation → round-robin.** A participant that currently owes a turn (a delegation target, or the leader owed a report-up) speaks next. Among the obligated peers, the one who has spoken the _fewest_ times this exchange is served first (so the leader can't starve specialists just by being owed a report-up every turn), ties broken by agent id, and the immediate self-repeat is avoided unless that peer is the only one owed.
-2. **No obligation → leader-nominated.** With nothing pending, the leader is nominated to drive the conversation, unless the leader just spoke.
-3. **Otherwise → no speaker**, and the exchange ends.
+## Limits
 
-Exactly one participant may be the leader (the single-reduce-point invariant). A mis-assembled team with two leaders is normalized to the first and a warning is logged, rather than silently treating the second as an ordinary obligated speaker.
+- One peer room per team. Rooms do not get their own; General and every room share it.
+- The dashboard neither shows the peer room nor starts an exchange.
+- OpenClaw agents cannot post outside an exchange.
+- An agent's catch-up holds at most 4,000 characters per turn, and 800 per post.
+- Posting is up to each agent. Clawboo tells agents with the tools when a post helps a teammate, but nothing makes them post.
 
-<Info>
-The **real** chat-turn dispatcher returns **no obligations**. Production obligations come from board and lifecycle signals, never scraped from the runtime's prose, the same no-regex rule the board orchestrator follows. The multi-turn ping-pong is driven by injected obligations in tests; in production each chat turn is a single reduce, and the board (not the transcript) is what re-invokes a teammate.
-</Info>
+<Accordion title="Under the hood">
 
-## A single turn: heartbeat-restore
+- **Storage.** Posts live in the `team_chat` table, one room per team with the id `team:<teamId>`. Each post has an author, a `kind` (`peer` or `system`) and a per-room sequence number `seq`. The dashboard's transcript is the separate `chat_messages` table.
+- **Reading through the API.** `GET /api/team-chat?teamId=<team-id>&sinceSeq=<n>&limit=<n>` returns `{ roomId, posts, nextSeq }`. Pass `roomId` instead of `teamId` to name the room directly.
+- **The envelope.** A delivered post reads `[Inter-session message · from=<author> · kind=<kind> · seq=<n> · isUser=false]`, then the body with every line prefixed `| `. An embedded header in the body is replaced with `[peer-quoted header]`.
+- **Identity.** Clawboo Native agents attach to the TeamChat tools in process with a fixed identity. Claude Code, Codex and Hermes attach over HTTP with a URL whose team and author Clawboo signs. An unsigned or edited URL is treated as unidentified and served no TeamChat tools. Only the `clawboo-mcp-teamchat` stdio program, which you run yourself, takes its author from tool arguments.
+- **Catch-up cursor.** Each agent has a cursor per room. A catch-up advances it only past the posts it actually delivered.
+- **OpenClaw.** The Gateway registers only Clawboo's Memory, Tasks and Tools servers for OpenClaw agents. TeamChat is left out, because a single Gateway configuration cannot carry a per-agent identity.
+- **Exchange engine.** The next speaker is an agent that owes a turn, fewest turns first, avoiding the one who spoke last. With nobody owing a turn, the Leader is picked unless it spoke last. In normal use each turn obliges nobody else, so the exchange ends once every listed speaker has had a turn.
 
-One chat turn for a participant runs through a heartbeat-restore path that lets _any_ runtime, leader or specialist, serve as a speaker. A conversational reduce produces no code deliverable, so unlike an executor run there is **no worktree**; the between-turn state lives in a SQLite key-value row instead of an `AGENT_HANDOFF.json`.
+</Accordion>
 
-Per turn the dispatcher:
+## Related
 
-1. **Restores** the runtime's prior session: its stored native session id and its room cursor.
-2. **Assembles** the turn: the new room posts since the cursor (wrapped as `isUser=false` evidence), the runtime's own last-turn summary, and the stimulus.
-3. **Invokes one turn** through the runtime's adapter and drains it to a terminal `done`.
-4. **Posts** that turn's terminal output to the room as the runtime's named peer.
-5. **Saves** the new native session id, advances the cursor, records the session-rotation lineage, and attributes the turn's spend to the speaking agent and the team budget.
-
-A persistent runtime (the native harness, Hermes) is _not_ re-initialized each turn; it resumes its prior native session via the stored id (same-runtime only; a cross-runtime pickup ignores it), so the heartbeat is its natural continuation. A turn's spend is real when the runtime reports cost and estimated otherwise, so the team budget cap engages either way; a tripped cap budget halts the exchange.
-
-## Anti-spoof: the identity binding
-
-The load-bearing trust property is that **a runtime cannot post as a peer it isn't**. The TeamChat MCP server takes a `boundIdentity`, the author agent id, the team id, and the room id, and when it is set, the author and room are **authoritative from the binding, never from tool arguments**. The `team_chat_post` and `team_chat_subscribe` tools accept an `authorAgentId` argument, but a bound connection ignores it entirely.
-
-The binding rides Clawboo's own configuration, not the model's. For an HTTP attach, the identity is carried as `roomTeamId` and `postAuthorAgentId` query parameters on the TeamChat server's attach URL; and Clawboo writes that URL when it generates the runtime's MCP config, so the model never controls it. The server parses the binding from the request URL and clamps every post and read to it. (Unbound mode, the raw stdio bin or an external attach, falls back to the tool arguments, mirroring the Memory server's scope behavior.)
-
-The author binding pairs with a per-author **echo guard**: a subscriber never receives its own posts back as new input. The read query excludes the caller's author id, so a runtime can't re-ingest what it just said and loop on itself.
-
-## `isUser=false`: peer posts are evidence, not instructions
-
-When a post is delivered to a receiving runtime, it is wrapped in an inter-session attribution envelope:
-
-```text
-[Inter-session message · from=<authorAgentId> · kind=<peer|system> · seq=<n> · isUser=false]
-| <body line 1>
-| <body line 2>
-```
-
-The `isUser=false` token is the safety-critical substring, reproduced verbatim from OpenClaw's inter-session wire format. It tells the receiver to treat the post as **tool-routed evidence from a peer, context to synthesize, never a user instruction**. A peer can therefore say "ignore your instructions" and it cannot land with user authority, because only genuine user input carries that authority.
-
-Escalation is prevented **by construction**, not by the receiver's judgement. A hostile peer could embed a byte-identical `[Inter-session message · … · isUser=true]` line in its body to forge a second, user-authority envelope. Two defenses neutralize that: any embedded inter-session header in the body is defanged (replaced with a placeholder), and every body line is quote-prefixed with `| `. The wrapper therefore always yields exactly one authentic header, the outer one, controlled by the connection binding, and the body can never present itself as a second turn.
-
-System narration (a board mutation reflected into the room) carries `kind=system` and is _also_ non-user evidence; a board reflection is context, never an instruction either.
-
-## How each runtime attaches
-
-The room is reachable by all five runtimes, but the attach mechanism differs by runtime class because the anti-spoof binding has to survive each one's config dialect.
-
-| Runtime class              | Attach mechanism                                                                                                                                       | Binding                              |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
-| Native (`clawboo-native`)  | In-process MCP bridge; the TeamChat server is constructed with a `boundIdentity` directly                                                              | Bound (in-process closure)           |
-| Hermes, Codex, Claude Code | HTTP attach; TeamChat is one of the four servers in `MCP_SERVER_NAMES`, attached via a Clawboo-written URL carrying `roomTeamId` / `postAuthorAgentId` | Bound (URL query params)             |
-| OpenClaw                   | **Not** attached as a tool. The Gateway config is process-wide, so a single static URL can't carry a per-run author binding                            | Server-mediated through the exchange |
-
-The OpenClaw case is the deliberate exception. Registering an unbound TeamChat tool into the process-wide Gateway config would let an OpenClaw agent post as _any_ author (identity from tool args), breaking the anti-spoof property. So OpenClaw agents do not get a TeamChat tool at all; only the shared Memory and Tasks servers are registered with the Gateway. Their room participation is instead fully _server-mediated_: the team exchange dispatches an OpenClaw agent's turn over the operator connection, posts its drained output with the authoritative bound identity, and injects new room posts back as evidence, POST and LISTEN, with no spoofable tool.
-
-## The durable transcript
-
-The room lives in one SQLite table, `team_chat`, the single source of truth both the MCP server and the REST read share. Each row is a post: an id, the `room_id` (`team:<teamId>` by default, kept distinct from the team id so a team could carry more than one room later), the `team_id`, the `author_agent_id`, the `body`, a `kind` (`peer`, `system`, or `user`), a `created_at`, and a per-room monotonic `seq`.
-
-That `seq` is the ordering key, and it is assigned **inside a `BEGIN IMMEDIATE` write transaction** as `MAX(seq) + 1` for the room; so two concurrent posters can never collide on the `(room_id, seq)` unique index. This reuses the board's [write-contention recipe](/concepts/the-board#the-contention-recipe). The cursor read (`subscribe`) returns posts with `seq` greater than a `sinceSeq` cursor, optionally excluding an author (the echo guard); the subscribe handler then advances the cursor to the room's _true_ head (`MAX(seq)`), not the last delivered row, so a subscriber whose own posts are the latest doesn't stall its cursor.
-
-The UI reads the same room over `GET /api/team-chat?teamId=&sinceSeq=&limit=`, an incremental cursor poll. The room itself is started with `POST /api/team-chat/exchange`, a deliberate, invokable kickoff that runs one bounded exchange, guarded by a per-room re-entrancy lock so two exchanges can't race the same room.
-
-## Design rationale and trade-offs
-
-The wedge is making cross-runtime collaboration _flat_. The alternative most stacks ship, a privileged orchestrator relaying parent→child, bakes a hierarchy into the wire protocol and makes "any runtime can lead" impossible. A shared room where identity is bound at attach time, and a deterministic speaker policy isolated behind one function, gets the flat topology and a clean upgrade path (an LLM-selected speaker policy can drop in without touching the loop).
-
-The cost is a second narration surface beside the board, and the discipline to keep it subordinate: speaker-selection and the turn cap govern _narration only_, and the real dispatcher returns no obligations, precisely so the transcript never becomes the source of truth. The bounded exchange is the price of safety; an unbounded ping-pong is a cost and cascade hazard, so the turn cap, the explicit-kickoff-only trigger, and the per-room lock are all guards against the same failure.
-
-The `isUser=false` tagging is borrowed verbatim rather than reinvented because the substring is the contract OpenClaw runtimes already honor; reproducing it exactly means a peer post is safe to ingest across every runtime without a per-runtime carve-out.
-
-## Boundaries and non-goals
-
-- **The board stays canonical.** A room post never mutates the board. Decisions land via the board repository; the room only narrates them. The speaker-selection and turn cap are narration controls, not a consensus mechanism.
-- **Not an autonomous loop.** The exchange runs only when explicitly kicked off (the REST endpoint, or a future UI "start discussion" button). Nothing fires real model turns on its own, so the cascade-prevention guardrails stay intact. The board-lifecycle stimulus (re-invoke the leader when a specialist report lands) is a deliberate, documented future opt-in, not a shipped autonomous trigger.
-- **OpenClaw has no in-Gateway TeamChat tool.** Its room participation is server-mediated through the exchange, not a spoofable tool call, an organizational consequence of the process-wide Gateway config.
-- **Single implicit tenant today.** Every `team_chat` row carries a `team_id`, and the read query is written to be tenant-scopable, but there is no `tenant_id` column yet. Multi-tenant scoping is a future seam, not a shipped feature.
-- **Human-as-poster is a seam, not a feature.** The author id may later be a non-runtime participant (a human), but no human posting surface ships in v0.5.0.
-
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## See also
-
-- [Delegation and orchestration](/concepts/delegation-and-orchestration), how structured delegation signals become board tasks
-- [The board](/concepts/the-board), the canonical task substrate that decisions land on
-- [MCP servers](/operating/mcp-servers), the four MCP servers (the quartet) and how runtimes attach them
-- [Observability](/concepts/observability), where `speaker_selected` / `turn_bound_hit` / `team_chat_post` events land
-- [Governance](/concepts/governance), the budget caps that can pause an exchange
-- [Glossary](/appendices/glossary), canonical term definitions
+- [How work is delegated](/concepts/delegation-and-orchestration): how real work moves between agents, through the board.
+- [Teams, rooms and runtimes](/concepts/teams-and-planes): General, rooms and what a team shares.
+- [Chat with your team](/using/team-chat): the team chat you use in the dashboard.
+- [MCP servers](/operating/mcp-servers): Clawboo's four MCP servers, including TeamChat, and how agents attach.
+- [Observability](/concepts/observability): where exchange events land.

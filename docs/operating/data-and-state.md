@@ -1,234 +1,251 @@
 ---
-title: Data and state
-description: Where Clawboo stores everything, how to back it up, how upgrades reach an existing database, and how to reset it.
+title: 'Data and state'
+description: 'Where Clawboo keeps its data, what it writes in the OpenClaw folder, how to back it up, and what a reset removes and leaves behind.'
+keywords:
+  [
+    'backup',
+    'restore',
+    'reset',
+    'CLAWBOO_HOME',
+    'clawboo.db',
+    'state directory',
+    'server.log',
+    'CLAWBOO_DB_PATH',
+  ]
 ---
 
-Use this page when you need to find Clawboo's data, back it up, move it, or wipe it. Clawboo keeps **all** of its own state under one directory (`~/.clawboo` by default). It also _reads_ OpenClaw's directory (`~/.openclaw`) for interop, but never writes there.
+Use this page to find Clawboo's data, back it up, move it or wipe it. Clawboo keeps its own state in one folder, `~/.clawboo`. It also writes a few files in OpenClaw's folder, `~/.openclaw`, and a reset of `~/.clawboo` leaves those alone.
 
-There is no migration ladder. The SQLite schema is bootstrapped from an idempotent `CREATE TABLE IF NOT EXISTS` DDL block when a database is opened (once at boot for the server), and opening an older file also adds any columns it is missing, so a normal upgrade needs no action from you. Resetting is for wiping state, or for the rare schema change that is not additive; see [Hard reset](#hard-reset).
+## Where Clawboo keeps its data
 
-## The state directory
-
-Clawboo's own state lives under `resolveClawbooDir()`, which defaults to `~/.clawboo`. The `CLAWBOO_HOME` environment variable overrides the location (it expands a leading `~` and resolves to an absolute path), useful for test sandboxes or running multiple isolated instances.
+Clawboo's folder is `~/.clawboo`. To use another folder, set `CLAWBOO_HOME` before you start the server (a leading `~` is expanded). The database, the key vault, the logs and the worktrees all move with it.
 
 ```bash
-# default
+CLAWBOO_HOME=/srv/clawboo clawboo
+```
+
+```text
 ~/.clawboo/
-
-# override
-CLAWBOO_HOME=/data/clawboo clawboo
+├── clawboo.db                  the database
+├── clawboo.db-wal, -shm        SQLite working files for the database
+├── settings.json               the OpenClaw Gateway link
+├── api-port.txt                the port the server is using
+├── server.log, server.log.1    server output, when clawboo started the server
+├── gateway.log, gateway.pid    an OpenClaw Gateway that Clawboo started
+├── connector-pids.json         connector processes to clean up after a crash
+├── proxy-device-identity.json  Clawboo's device key for the Gateway
+├── secrets/
+│   ├── master.key              the key that decrypts the vault
+│   ├── runtime-keys.json       the encrypted vault
+│   ├── disconnected-runtimes.json
+│   └── keyless-providers.json
+├── browser-profiles/           each agent's browser profile
+├── frames/                     screenshots from agents' browsers
+├── runtimes/                   per-agent homes for Codex and Hermes
+├── catalog/                    a cached copy of the Marketplace catalog
+├── worktrees/                  git worktrees for board tasks
+└── reviews/                    checkouts for verifying finished work
 ```
 
-Every file Clawboo owns:
+| Path                                 | What it holds                                                                                                                                     | Safe to delete?                             | What you lose                                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `clawboo.db`, `-wal`, `-shm`         | Teams, agents, the board, chats, memory, routines, budgets, most dashboard settings, and the secret that signs MCP attach URLs                    | Only to start over, with the server stopped | All of that. Attach URLs you copied by hand stop working.                                        |
+| `settings.json`                      | The Gateway URL and token, and when you dismissed the first-run screen. The access token is never read from here, only from `STUDIO_ACCESS_TOKEN` | Yes                                         | The saved Gateway link. Clawboo falls back to the Gateway details in OpenClaw's `openclaw.json`. |
+| `api-port.txt`                       | The port of the running server                                                                                                                    | Yes                                         | Usually nothing: `clawboo` also scans ports 18790 to 18809.                                      |
+| `server.log`, `server.log.1`         | Output of a server that `clawboo` started                                                                                                         | Yes                                         | Old log lines.                                                                                   |
+| `gateway.log`, `gateway.pid`         | Output and process id of an OpenClaw Gateway that Clawboo started                                                                                 | Yes                                         | Old log lines. Clawboo finds the Gateway by its port instead.                                    |
+| `connector-pids.json`                | Connector processes Clawboo started                                                                                                               | Yes, with the server stopped                | After a crash, leftover connector processes are not cleaned up at the next start.                |
+| `proxy-device-identity.json`         | The key pair Clawboo uses to identify itself to the OpenClaw Gateway                                                                              | Only if you can pair again                  | Clawboo makes a new identity, so the Gateway may ask you to pair it again.                       |
+| `secrets/master.key`                 | The key that decrypts the vault                                                                                                                   | No                                          | Every key in the vault: re-enter provider keys and reconnect connectors.                         |
+| `secrets/runtime-keys.json`          | The encrypted vault: provider keys, connector credentials and sign-ins, the Composio key                                                          | Only to remove every saved key              | The same as losing the master key.                                                               |
+| `secrets/disconnected-runtimes.json` | The runtimes you disconnected                                                                                                                     | Yes                                         | A disconnected runtime can pick up a key from your shell or `~/.openclaw/.env` again.            |
+| `secrets/keyless-providers.json`     | Whether you chose local Ollama for Clawboo Native                                                                                                 | Yes                                         | Clawboo forgets the choice; choose Ollama again.                                                 |
+| `browser-profiles/`                  | Each agent's browser profile, including the sites it is signed in to                                                                              | Yes                                         | Agents' browser sign-ins and cookies.                                                            |
+| `frames/`                            | Screenshots saved from agents' browsers                                                                                                           | Yes                                         | Those screenshots.                                                                               |
+| `runtimes/`                          | Per-agent homes for Codex and Hermes agents, including a copy of your Codex sign-in                                                               | Yes, when no run is active                  | Those agents' saved sessions; they start fresh.                                                  |
+| `catalog/`                           | A cached copy of the Marketplace catalog                                                                                                          | Yes                                         | Nothing. Clawboo downloads it again.                                                             |
+| `worktrees/`                         | Git worktrees for board tasks that run in a repository                                                                                            | No: Clawboo removes old ones itself         | Uncommitted work in those checkouts.                                                             |
+| `reviews/`                           | Read-only checkouts for verifying finished work                                                                                                   | Yes, when no check is running               | Nothing.                                                                                         |
 
-| Path (under `~/.clawboo/`)         | What it is                                                                                                                                | Resolved by                    |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `clawboo.db`                       | The SQLite database, the agent registry of record, board, memory, chat history, settings, governance, the event log, and more (35 tables) | `getDbPath()`                  |
-| `clawboo.db-wal`, `clawboo.db-shm` | SQLite Write-Ahead Log sidecars (created automatically; see [WAL files](#wal-files))                                                      | SQLite (WAL mode)              |
-| `settings.json`                    | Gateway URL + token, optional studio access token, first-run dismissal timestamp                                                          | `resolveSettingsPath()`        |
-| `api-port.txt`                     | The port the running server bound to (a discovery hint for the CLI and the Vite proxy)                                                    | `getApiPortFilePath()`         |
-| `proxy-device-identity.json`       | The proxy's persistent Ed25519 device identity (holds a **private** key; mode `0600`)                                                     | `getProxyDeviceIdentityPath()` |
-| `gateway.pid`                      | PID of the managed OpenClaw Gateway process (when Clawboo started it for you)                                                             | `getGatewayPidPath()`          |
-| `secrets/master.key`               | 32-byte AES-256-GCM master key for the credential vault (mode `0600` inside a `0700` dir)                                                 | `getVaultPaths()`              |
-| `secrets/runtime-keys.json`        | The encrypted runtime/provider API-key vault, ciphertext only, keyed by env-var name                                                      | `getVaultPaths()`              |
-| `secrets/keyless-providers.json`   | Your choice for a keyless provider, today local Ollama for Clawboo Native: chosen, or removed by a disconnect (no secret material)        | `setKeylessProviderChoice()`   |
-| `worktrees/<repo-hash>/`           | Per-task git worktrees (the worktree system-of-record), grouped by a hash of the repo path                                                | `worktreeRootForRepo()`        |
-| `reviews/<repo-hash>/`             | Detached read-only review checkouts used by the verification critic                                                                       | `reviewRootForRepo()`          |
+On macOS and Linux, Clawboo makes the database, its working files and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts here with your account's full file access; see [What agents can do](/concepts/permissions).
 
-<Note>
-The Express server (and the entire web app) reads and writes `~/.clawboo/clawboo.db`. The `defaultDbPath()` helper in `@clawboo/db` resolves a *different* path (`~/.openclaw/clawboo/clawboo.db`) and is only used by the out-of-process MCP stdio bins; see [The database path](#the-database-path).
-</Note>
+## What Clawboo writes in OpenClaw's folder
 
-## OpenClaw interop (read-only)
+OpenClaw keeps its state in `~/.openclaw` (`OPENCLAW_STATE_DIR` moves it). Clawboo writes there in these cases:
 
-Clawboo reads three files from OpenClaw's state directory for interop and **never writes to `~/.openclaw`**. The directory resolves via `resolveStateDir()`, in this order:
+| When you                                              | Clawboo writes                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Connect a key under **Settings > Providers**          | The key, unencrypted, in `.env` and in each OpenClaw agent's `agents/<id>/agent/auth-profiles.json`, as well as in Clawboo's encrypted vault. **Disconnect** under Providers removes every copy.                                                                                                 |
+| Set up OpenClaw from Clawboo                          | `openclaw.json` (a local Gateway and a default model) and `.env` (the Gateway token, plus the provider key, or `OLLAMA_API_KEY=ollama-local` for Ollama). The provider key also goes into each OpenClaw agent's `auth-profiles.json`. It fills in what is missing and keeps your other settings. |
+| Change an OpenClaw setting in the dashboard           | `openclaw.json`: the default command approval in **Settings > System**, OpenClaw's default model in **Settings > Runtimes**, an OpenClaw agent's model, or agent-to-agent messaging when you add a route on the Org chart or deploy a team whose agents route work to each other.                |
+| Create an OpenClaw agent or edit its files            | Through the Gateway: the agent, a `workspace-<name>` folder, and its files such as `SOUL.md` and `AGENTS.md`.                                                                                                                                                                                    |
+| Connect to the Gateway (every time)                   | Through the Gateway: its config registers Clawboo's Memory, Tasks and Tools MCP servers and denies the tools that spawn sub-agents, keeping your own denials.                                                                                                                                    |
+| Start a Gateway that asks for a repair                | Clawboo runs `openclaw doctor --fix` once, then tries again.                                                                                                                                                                                                                                     |
+| Run a Clawboo MCP stdio bin without `CLAWBOO_DB_PATH` | `~/.openclaw/clawboo/clawboo.db`, a separate database the bin creates. See [Two database paths](#two-database-paths).                                                                                                                                                                            |
 
-1. `OPENCLAW_STATE_DIR`, then `MOLTBOT_STATE_DIR`, then `CLAWDBOT_STATE_DIR`. The first one set wins (a leading `~` is expanded, and the result is made absolute).
-2. With none of them set: `~/.openclaw` if that directory exists.
-3. Otherwise the first of `~/.clawdbot`, `~/.moltbot` that exists (the two legacy names).
-4. Otherwise `~/.openclaw`, whether or not it exists.
+Clawboo also reads `openclaw.json` (the Gateway's port and token when `settings.json` has none), `.env` (the last place it looks for a provider key, after your environment and the vault), the agents' `auth-profiles.json` (which providers OpenClaw has keys or sign-ins for), and `state/openclaw.sqlite`. It opens that database read-only, to show the standing command permissions on an OpenClaw agent's **Permissions** tab and which browser tab belongs to which agent.
 
-| Path (under `~/.openclaw/`) | Why Clawboo reads it                                                                                                                                                                            |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `openclaw.json`             | Gateway URL + auth token defaults when Clawboo's own `settings.json` has no usable token                                                                                                        |
-| `.env`                      | Lowest-priority fallback for a runtime provider key (e.g. an existing `ANTHROPIC_API_KEY` auto-satisfies `claude-code` / `clawboo-native`)                                                      |
-| `state/openclaw.sqlite`     | OpenClaw's own state database, opened **read-only** with `fileMustExist`: the standing grants shown on an OpenClaw Boo's Permissions tab, and which browser tab belongs to which OpenClaw agent |
+Keys you enter during onboarding or on a **Runtimes** card go only into the vault. See [Providers and runtimes](/using/providers-and-runtimes) for where each kind of key is stored.
 
-<Note>
-`state/openclaw.sqlite` is OpenClaw's database, and the Gateway is live against it, so Clawboo opens it read-only and never writes to it. Reading the grants this way is deliberate: the RPC that would return them, `exec.approvals.get`, is a write, and issuing it against a stored policy that cannot be parsed would replace the whole fleet's permissions with a fail-closed default. Anything Clawboo cannot read here is reported as unreadable, never as an empty list. See [Approvals](/using/approvals).
-</Note>
+## What a reset leaves behind
 
-Backing up or resetting `~/.clawboo` never touches OpenClaw's data. The two directories are independent.
+Resetting `~/.clawboo` never touches `~/.openclaw`, so after a full reset:
 
-## The database
-
-`clawboo.db` is a single SQLite file holding **35 tables**. There is no separate Postgres, no external store, no migration ladder. The schema is applied by `ensureSchema()` (`packages/db/src/schemaBootstrap.ts`), an idempotent `CREATE TABLE IF NOT EXISTS` block that the server runs **once at boot**; `createDb()` is the batteries-included open-and-bootstrap form still used by one-shot processes (the MCP stdio bins, the eval harness, tests). That DDL is the _sole_ source of truth for the schema (the Drizzle `schema.ts` is the typed query layer over the same tables, never used to apply migrations). See the [database schema reference](/reference/database-schema) for the full table list and ERD.
-
-### The database path
-
-The path you back up is `~/.clawboo/clawboo.db`. Two resolvers exist, for two consumers:
-
-- **`getDbPath()`** (`apps/web/server/lib/db.ts`) → `~/.clawboo/clawboo.db` via `resolveClawbooDir()`. This is the path the **Express server** uses everywhere. It honors `CLAWBOO_HOME`. The server opens it once through `getDb()` and reuses that one connection for the whole process lifetime; `closeDb()` on shutdown is the only thing that closes it.
-- **`defaultDbPath()`** (`@clawboo/db`) → `~/.openclaw/clawboo/clawboo.db`, with a `CLAWBOO_DB_PATH` override. This is used **only** by the MCP stdio bins (`clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`, `clawboo-mcp-teamchat`) that an external runtime may spawn out of process.
-
-<Info>
-The two resolvers default to different paths. If an external runtime spawns a Clawboo MCP stdio bin and you want it to read the same database the server serves, set `CLAWBOO_DB_PATH` to the server's actual `clawboo.db` so both processes open one file. The multi-process WAL recipe (below) is what keeps concurrent access safe.
-</Info>
-
-### WAL files
-
-Every connection opens in WAL (Write-Ahead Logging) mode with this pragma set:
-
-```ts
-journal_mode = WAL
-foreign_keys = ON
-synchronous = NORMAL
-busy_timeout = 250 // short on purpose — the app-level retry budget does the waiting
-wal_autocheckpoint = 50 // keep the WAL lean (~50-page passive checkpoints)
-```
-
-WAL mode creates two sidecar files next to the database:
-
-- `clawboo.db-wal`: the write-ahead log (recent writes not yet checkpointed into the main file).
-- `clawboo.db-shm`: shared-memory coordination for concurrent readers/writers.
-
-Both are normal SQLite artifacts. They matter for backups (below).
+- **Keys you connected under Providers keep working.** They are still in `~/.openclaw/.env` and in the OpenClaw agents' `auth-profiles.json`, and Clawboo reads `.env` when its vault has no key. To remove them, disconnect each one under **Settings > Providers** before you reset, or delete their lines from those files.
+- **Runtimes you disconnected can connect again on their own.** Clawboo records a disconnect in `~/.clawboo`, so after the reset a matching key in your shell or in `~/.openclaw/.env` reaches them again.
+- **OpenClaw agents stay in OpenClaw**, including agents Clawboo created, with their files. Clawboo finds the Gateway again from `openclaw.json`.
+- **The Gateway keeps Clawboo's MCP entries.** Clawboo rewrites them with a new attach token the next time it connects.
 
 ## Back up your data
 
-Everything recoverable lives in `~/.clawboo`. A copy of the whole directory is a complete backup, and the simplest one.
+### Back up the database
 
-<Note>
-Every "stop the server first" step on this page is `clawboo stop`. Paths below are written as `~/.clawboo`; if you set `CLAWBOO_HOME`, substitute that directory. The launcher starts the dashboard server **detached**, so there is usually no terminal holding it and no Ctrl-C to press. `clawboo stop` finds the running instance through `~/.clawboo/api-port.txt` and terminates it; `clawboo restart` does the stop and the start in one step, reclaiming the same port when it is free after the stop (so an open browser tab reconnects); if something else has taken it, the successor falls back to normal port resolution. See the [CLI reference](/reference/cli#clawboo-stop).
-</Note>
+`clawboo backup` copies the database into one consistent file. It is safe to run while the server is running.
 
-### Quick backup (whole state dir)
+```bash
+clawboo backup
+clawboo backup ~/backups
+clawboo backup ~/backups/clawboo.db --force
+```
 
-Stop the server first so writes are quiesced, then copy the directory:
+With no argument it writes `clawboo-backup-<date>-<time>.db` in the current folder. Give it a folder to write the timestamped file there, or a file name. It refuses to replace an existing file unless you add `-f` (`--force`).
+
+It copies the database only. The file holds all your teams, tasks, chats and memory, and the secret that signs MCP attach URLs, yet it is created with your default file permissions. Restrict it:
+
+```bash
+chmod 600 clawboo-backup-*.db
+```
+
+### What else to copy
+
+The database is most of your data, but not all of it. Copy these too when you need them:
+
+| Copy                                         | Why                                                                                             |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `secrets/` (both files together)             | Saved provider keys, connector credentials and sign-ins. One file is useless without the other. |
+| `settings.json`                              | The OpenClaw Gateway link.                                                                      |
+| `proxy-device-identity.json`                 | Clawboo's identity with the Gateway, so you do not have to pair it again.                       |
+| `browser-profiles/`                          | The sites your agents' browsers are signed in to.                                               |
+| `runtimes/`                                  | Codex and Hermes agents' saved sessions, including a copy of your Codex sign-in.                |
+| `~/.openclaw` (or your `OPENCLAW_STATE_DIR`) | OpenClaw's own agents, config and keys, if you use OpenClaw. Clawboo never backs it up.         |
+
+### Back up everything
+
+Stop the server and copy the whole folder. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo` here and in the commands below:
 
 ```bash
 clawboo stop
 cp -a ~/.clawboo ~/clawboo-backup-$(date +%Y%m%d)
-clawboo            # bring the dashboard back up
+clawboo
 ```
 
-This captures the database, settings, the encrypted vault (and its master key), the device identity, and any worktrees.
+The copy holds your vault and its key and your agents' signed-in browser profiles. Store it as carefully as a password file.
 
-### Database-only backup
+<Note>
 
-To back up just the data tables, copy the database **plus its WAL sidecars**. With WAL mode, recent writes may still live in `clawboo.db-wal`; copying only the main file can miss them.
+With `STUDIO_ACCESS_TOKEN` set, `clawboo stop` and `clawboo restart` cannot identify the server through the access gate. They print its port and a command that stops it by port, then exit without stopping it. Run that command, or stop Clawboo through the service manager that runs it (systemd, Docker). Start it again [directly](/operating/deployment#start-the-server-directly) or through that service manager, not with `clawboo`, which cannot tell when a token-protected server is ready. `clawboo backup` works either way because it reads the database file directly. See the [CLI reference](/reference/cli).
 
-```bash
-# stop the server first, then copy all three:
-clawboo stop
-cp ~/.clawboo/clawboo.db     ~/clawboo.db.bak
-cp ~/.clawboo/clawboo.db-wal ~/clawboo.db-wal.bak 2>/dev/null || true
-cp ~/.clawboo/clawboo.db-shm ~/clawboo.db-shm.bak 2>/dev/null || true
-```
-
-<Tip>
-The easiest single-file backup is the built-in [`clawboo backup`](/reference/cli#clawboo-backup) command, which runs an online, checkpoint-consistent copy via better-sqlite3's `.backup()`. It's safe to run while the server is live and produces one file with no separate WAL sidecars:
-
-```bash
-# write ./clawboo-backup-<timestamp>.db in the current directory
-clawboo backup
-
-# or name the destination explicitly
-clawboo backup /path/to/clawboo.db.bak
-
-# overwrite an existing destination file
-clawboo backup /path/to/clawboo.db.bak --force
-```
-
-If you don't have the Clawboo CLI handy, the `sqlite3` CLI equivalent is `sqlite3 ~/.clawboo/clawboo.db ".backup '/path/to/clawboo.db.bak'"`.
-</Tip>
-
-<Danger>
-The vault is useless without its master key, and the master key is useless without the vault. If you back up `secrets/runtime-keys.json` you **must** also back up `secrets/master.key` (or set `CLAWBOO_SECRETS_MASTER_KEY` to a key you control). A wrong, rotated, or lost master key fails closed; saved runtime provider keys cannot be decrypted, and you re-enter them in the Runtimes panel. See [Security](/operating/security).
-</Danger>
+</Note>
 
 ### Restore
 
-Restore by copying the files back into `~/.clawboo` with the server stopped (`clawboo stop`), then bring it back with `clawboo`. If you restore a database-only backup, restore the WAL sidecars too, or delete a stale `clawboo.db-wal` / `clawboo.db-shm` so SQLite re-creates them clean against the restored main file.
+<Steps>
+<Step title="Stop the server">
+
+Run `clawboo stop`, or stop the service that runs Clawboo.
+
+</Step>
+<Step title="Put the backup in place">
+
+Copy the backup file over `~/.clawboo/clawboo.db`, or replace `~/.clawboo` with a whole-folder copy.
+
+</Step>
+<Step title="Remove stale working files">
+
+If you restored a single-file backup, delete any `clawboo.db-wal` and `clawboo.db-shm` left beside it from the old database.
+
+</Step>
+<Step title="Start Clawboo">
+
+Run `clawboo`. You should see your teams and board as they were when you made the backup.
+
+</Step>
+</Steps>
+
+A database from another install carries that install's attach secret, so copy any attach URLs you set up by hand again from [MCP servers](/operating/mcp-servers).
 
 ## Hard reset
 
-There is no schema migration step to run. Upgrading Clawboo brings an existing database up to the new schema when it opens it, adding any columns it is missing (see [Upgrading an existing database](/reference/database-schema#upgrading-an-existing-database)). A reset is for when you want the data gone, or after the rare schema change that is not additive, and means **deleting the database file**; the boot-time `ensureSchema()` bootstrap re-creates every table the next time the server opens it.
+Reset only to wipe data. An upgrade needs no reset; see [After an upgrade](#after-an-upgrade).
 
-### Reset just the data (keep credentials and settings)
+<Warning>
+
+Both resets delete data you cannot get back. Back up first if any of it matters, and stop the server before you delete anything. A running server keeps the old database open and goes on serving it, and `clawboo` attaches to that server, so the reset seems not to happen. With `STUDIO_ACCESS_TOKEN` set, `clawboo stop` cannot stop the server: stop it as the note under [Back up everything](#back-up-everything) says, and delete only after it has stopped. The commands below delete only if `clawboo stop` succeeds.
+
+</Warning>
+
+### Reset only the data
 
 ```bash
-# stop the server first, then delete the DB and its WAL sidecars:
-clawboo stop
-rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
+clawboo stop && rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo/clawboo.db-shm
 clawboo
 ```
 
-The next time the server starts, `ensureSchema()` recreates an empty, fully-bootstrapped schema. Your `settings.json` and the secrets vault are untouched.
+Clawboo creates an empty database at the next start. Your keys, settings, logs and browser profiles stay. You lose everything in the database: teams and their agents, the board, chats, memory, routines, budgets and most dashboard settings. OpenClaw agents themselves stay in OpenClaw.
 
-### Full reset (everything)
+The secret that signs MCP attach URLs goes with the database. Attach URLs you copied by hand stop working; Clawboo's own runtimes and a local OpenClaw Gateway get new ones on their next run or connection.
 
-The clean-slate remedy, also what the boot probe recommends after a fatal failure, is to remove the whole state directory and re-run onboarding:
+### Reset everything
 
 ```bash
-clawboo stop
-rm -rf ~/.clawboo
+clawboo stop && rm -rf ~/.clawboo
 clawboo
 ```
 
-<Note>
-Stop the server **before** deleting the directory. A running server keeps writing to the deleted files through their open handles and re-creates `api-port.txt` and a fresh database underneath you, so the reset looks like it didn't take.
-</Note>
+Clawboo starts as a new install. This also deletes the vault and its key, the device identity, the logs, the browser profiles and the worktrees, including any uncommitted work in them (run `git worktree prune` in each repository afterwards). It does not touch `~/.openclaw`; see [What a reset leaves behind](#what-a-reset-leaves-behind).
 
-<Warning>
-A full reset deletes your saved provider keys (the vault and its master key), the proxy device identity, all teams/agents/board/chat/memory data, and any task worktrees. This is safe for a pre-1.0 single-user install but is **destructive**; back up first if any of it matters.
-</Warning>
+## Two database paths
 
-## How boot health checks your data
+The server always uses `clawboo.db` in Clawboo's folder (`~/.clawboo/clawboo.db`, or the same file under `CLAWBOO_HOME`). The four MCP stdio bins (`clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`, `clawboo-mcp-teamchat`) open the file named by `CLAWBOO_DB_PATH` instead, which defaults to `~/.openclaw/clawboo/clawboo.db` and is created empty when missing. The two defaults differ on purpose.
 
-On every start (and from the System Health surface via `GET /api/health`), Clawboo runs a **boot probe** that reports a per-check verdict. Three of its checks concern your data, and those three are the only **fatal** ones (the server cannot run without them); everything else _degrades_ (the server keeps serving and shows a banner):
+For a stdio bin to see the server's board and memory, set `CLAWBOO_DB_PATH` to the server's database, or copy the stdio snippet from `GET /api/mcp/config?transport=stdio`, which sets it for you. The server itself ignores `CLAWBOO_DB_PATH`. See [MCP servers](/operating/mcp-servers).
 
-| Check id                | What it does                                                                                         | Verdict                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `clawbooHomeWritable`   | `mkdir -p` the state dir and assert write access                                                     | **Fatal** if not writable                                |
-| `databaseIntegrity`     | `PRAGMA integrity_check`; `ok` is healthy; any other string is corruption                            | **Fatal** if the file can't be opened or fails the check |
-| `databaseSchema`        | Confirm the core tables exist, and that no column the bootstrap DDL declares is missing from them    | **Fatal**; the detail names the missing columns          |
-| `vaultPerms`            | Assert `secrets/` is `0700` and `master.key` / `proxy-device-identity.json` are `0600` (POSIX only)  | Degrades if perms are too open                           |
-| `masterKeyBootSentinel` | Encrypt a sentinel on first boot, decrypt it on every later boot to prove the master key still works | Degrades if the key changed                              |
+## The server log
 
-A fatal check means the install is broken in a way the probe cannot fix, so read its `detail` first: it says what is wrong and what to do. Upgrading is not one of those cases, because opening an older database adds any columns it is missing on its own. When nothing in the detail applies, the [full reset](#full-reset-everything) above and re-running onboarding against a clean `~/.clawboo` is the supported recovery.
+A server started by `clawboo` writes its output to `~/.clawboo/server.log`. When `clawboo` starts a server and the log is over 5 MB, it first moves the old log to `server.log.1`. If the dashboard has not answered after about 45 seconds, `clawboo` prints the last lines of this log and its path.
 
-## Verify it worked
+A server you start yourself, from a service manager or with `node`, writes to its own output instead. After the in-app update restarts the server, the new server's output is not written to `server.log`; run `clawboo restart` to capture it again. An OpenClaw Gateway that Clawboo started logs to `~/.clawboo/gateway.log`. The [CLI reference](/reference/cli) covers starting, stopping and finding the server.
 
-- After a reset, start the server and open System Health (`GET /api/health`). `databaseIntegrity` and `databaseSchema` should pass; the report's `resolved.dbPath` should point at your expected `clawboo.db`.
-- After a backup/restore, confirm `clawboo.db` is present at `resolved.dbPath` and the integrity check passes.
-- After setting `CLAWBOO_HOME`, the boot report's `resolved.clawbooHome` and `resolved.dbPath` reflect the override.
+## How Clawboo checks its data at startup
 
-## Troubleshooting
+Each time it starts, Clawboo checks its folder, database and vault, and shows the results in **Settings > System Health** (and at `GET /api/health`).
 
-<Warning>
-**A database-only backup looks empty or stale.** WAL mode buffers recent writes in `clawboo.db-wal`. Copy all three files (`.db`, `.db-wal`, `.db-shm`) together, or use `sqlite3 ... ".backup"` for a single consistent file. Never copy `clawboo.db` alone while the server is running.
-</Warning>
+| Check                         | When it fails                                                                           | Severity |
+| ----------------------------- | --------------------------------------------------------------------------------------- | -------- |
+| **Clawboo home writable**     | Clawboo cannot create or write its folder.                                              | Fatal    |
+| **Database integrity**        | The database cannot be opened or is damaged.                                            | Fatal    |
+| **Database schema**           | A table or column the database needs is missing. The details name it.                   | Fatal    |
+| **Secrets vault permissions** | Other users can read `secrets/`, `master.key` or the device identity (macOS and Linux). | Degraded |
+| **Master key**                | The master key cannot decrypt the vault, so saved keys cannot be read.                  | Degraded |
 
-<Warning>
-**The MCP stdio bin opens a different (empty) database.** `defaultDbPath()` resolves to `~/.openclaw/clawboo/clawboo.db`, not `~/.clawboo/clawboo.db`. Point the bin at the server's database with `CLAWBOO_DB_PATH`.
-</Warning>
+The server keeps running either way, so you can read each check's details in System Health: they say what is wrong and what to do. Treat a fatal check as broken until fixed, and use a [full reset](#reset-everything) only as the last resort. When **Master key** fails, re-enter your provider keys and reconnect your connectors, or reset.
 
-<Danger>
-**System Health shows `master key changed`.** The master key no longer decrypts the vault sentinel. If you rotated or lost `secrets/master.key` (or changed `CLAWBOO_SECRETS_MASTER_KEY`), saved runtime keys are unrecoverable; re-enter them in the Runtimes panel, or do a [full reset](#full-reset-everything).
-</Danger>
+## After an upgrade
 
-## One-shot upgrades on first boot after an update
+When a new version first starts, it adds any columns the database is missing, so your data carries over with no step from you. It also turns on read-only Tasks and TeamChat for any Clawboo Native agent that has both turned off. That repair runs once and records that it ran, so turning either tool off afterwards sticks.
 
-Some releases have to repair data that already exists, because nothing else rewrites a stored row. These run once, record that they ran, and never reverse a later deliberate change.
+<Accordion title="Under the hood">
 
-**Coordination toolset repair.** Native agents created before the coordination overhaul were frozen with the Tasks and TeamChat MCP servers switched off, which disables the coordination plane those agents are now expected to use: the peer-inbox pull becomes a no-op and a leader cannot read the board it presides over. On the first boot after upgrading, existing native agents get those two axes turned back on (Tasks read-only, TeamChat on), leaving every other tool toggle exactly as you set it. A settings flag records that the pass ran, so turning either back off afterwards sticks. A failure is logged and retried on the next boot rather than being silently skipped.
+- The database holds 35 tables and runs in SQLite's WAL mode, which is why the `-wal` and `-shm` files sit beside it. `clawboo backup` uses SQLite's online backup, so its copy needs no working files. See the [database schema](/reference/database-schema).
+- `clawboo stop` sends the server a stop signal. On macOS and Linux the server stops its agent processes, folds the working files into `clawboo.db` and closes it, so after a clean stop `clawboo.db` alone holds every saved change. On Windows the process is ended at once with none of those steps, so copy the `-wal` and `-shm` files with the database.
+- The `POST /api/system/configure-openclaw` route, which no dashboard screen calls, replaces `openclaw.json` and `.env` outright and mints a new Gateway token. The dashboard's OpenClaw setup uses the route that fills in only what is missing.
 
-## See also
+</Accordion>
 
-- [CLI reference](/reference/cli): `clawboo backup`, `clawboo stop`, `clawboo restart`
-- [Configuration](/reference/configuration): `settings.json`, file and directory locations
-- [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_DB_PATH`, `CLAWBOO_SECRETS_MASTER_KEY`, `OPENCLAW_STATE_DIR`
-- [Database schema](/reference/database-schema): the 35 tables and ERD
-- [Security](/operating/security): the encrypted vault, redaction, and safe exposure
-- [Deployment](/operating/deployment): ports, the bundled server, and the CLI
+## Related
+
+- [CLI reference](/reference/cli): `clawboo backup`, `clawboo stop`, `clawboo restart`, and how `clawboo` finds the server.
+- [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_DB_PATH`, `CLAWBOO_SECRETS_MASTER_KEY`, `OPENCLAW_STATE_DIR`.
+- [Security](/operating/security): the vault, the master key, and who can reach the server.
+- [MCP servers](/operating/mcp-servers): attach outside agents and point the stdio bins at the right database.
+- [Database schema](/reference/database-schema): every table in `clawboo.db`.

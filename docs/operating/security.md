@@ -1,243 +1,257 @@
 ---
-title: Security model and safe exposure
-description: How Clawboo authenticates, isolates secrets, and redacts output, and how to expose the dashboard safely.
+title: 'Security model'
+sidebarTitle: 'Security'
+description: 'What protects a Clawboo install by default, what does not, where your keys are stored, and what changes when you expose the dashboard.'
+keywords:
+  [
+    'security',
+    'threat model',
+    'access token',
+    'access gate',
+    'STUDIO_ACCESS_TOKEN',
+    'same-origin guard',
+    'vault',
+    'reverse proxy',
+    'security advisory',
+  ]
 ---
 
-Clawboo is a local-first, single-user tool. A fresh install binds loopback only, holds no public credential, and runs every API route behind that boundary. The security model is built around that default: the network boundary is the primary control against other hosts, an always-on same-origin guard stops a malicious web page in your own browser from reaching the loopback API, the optional access gate is the opt-in second wall when you widen the bind, the secrets vault keeps provider keys off disk in plaintext, and a display-layer redaction pass keeps credentials out of responses and logs.
-
-This page explains the model end to end: the loopback bind, the same-origin guard, the access gate, server-side device authentication, the encrypted secrets vault, the commands agents can ask to run on this machine, and redact-on-display, and then gives honest guidance for exposing Clawboo beyond `localhost`. It is deliberately candid about what each control does and does not protect against.
-
-## What it is, and what it isn't
-
-Clawboo's security posture is **single-tenant, local-first**. The defaults assume one operator on one machine. Every shipped control is designed to make that default safe and to make widening it a conscious, opt-in act:
-
-- **The bind is the first wall.** By default nothing off the local machine can reach the dashboard or any `/api/*` route. This is the control you rely on for a normal install.
-- **The same-origin guard is always on.** Loopback stops other hosts, but not a page running in your own browser, because your browser originates the connection to `127.0.0.1`. The guard validates the `Origin`, `Host`, and `Sec-Fetch-Site` headers on every `/api/*` request and WebSocket upgrade, independent of the access gate, so a malicious page you visit cannot drive the loopback API. It ships enforced with zero configuration.
-- **The access gate is the opt-in second wall.** It is a single shared bearer token, off by default. It exists for the case where you deliberately bind a non-loopback interface.
-- **The vault is defense in depth for provider keys**, not a targeted-attacker boundary. It defeats commodity infostealers and accidental backup/share of the vault file; it does not protect against a process running as you.
-- **Redaction is a display-and-log boundary**, distinct from the storage-layer scrub. It is the last line that keeps a credential out of an API body or a log line.
-
-What Clawboo is _not_: a multi-user authorization system, a per-tenant isolation boundary, or a key-management service. Those are future seams (see [Boundaries and non-goals](#boundaries-and-non-goals)), not shipped features.
-
-## The model
-
-```mermaid
-flowchart TB
-    subgraph remote["Remote host"]
-        rc["Remote client"]
-    end
-    subgraph local["Local machine (127.0.0.1)"]
-        bind["Bind: loopback by default<br/>(widen only via explicit HOST)"]
-        guard["Same-origin guard<br/>(Origin + Host + Sec-Fetch-Site,<br/>always on)"]
-        gate["Access gate<br/>(STUDIO_ACCESS_TOKEN, opt-in)"]
-        api["/api/* routes"]
-        proxy["Gateway proxy<br/>(Ed25519 device auth, server-side)"]
-        vault["Secrets vault<br/>(AES-256-GCM)"]
-        runtime["Spawned runtime<br/>(env scrubbed of server<br/>+ operator secrets)"]
-    end
-
-    rc -. "blocked at the OS<br/>unless HOST set" .-> bind
-    bind --> guard
-    guard -->|"same-origin only<br/>(else 403)"| gate
-    gate -->|"valid cookie / token"| api
-    gate -->|"loopback /api/mcp/* only"| runtime
-    api --> proxy
-    api --> vault
-    vault -->|"plaintext ONLY into child env"| runtime
-    proxy -->|"signed connect frame"| upstream["Upstream OpenClaw Gateway"]
-```
-
-The flow is: a request reaches the bind; if the bind is loopback, only local traffic gets that far. The same-origin guard then checks the `Origin`, `Host`, and `Sec-Fetch-Site` headers and answers any cross-origin `/api/*` request with a `403`, so a malicious page in your browser is turned away before any work. If the access gate is enabled, the request must carry a valid token (cookie or one-time query param), except an MCP transport request carrying the attach token the server minted into one of its own spawned runtimes' attach URLs. Past the gate, the gateway proxy signs upstream connect frames with a server-held Ed25519 device key, and the secrets vault resolves provider keys into spawned-runtime env only, never into a response or a log.
-
-## The loopback bind (secure by default)
-
-The dashboard binds `127.0.0.1` unless you explicitly set `HOST`. The host resolver returns loopback, not `0.0.0.0`, so the dashboard and every `/api/*` route are reachable only from the local machine on a fresh install. An explicit `HOST` value wins (trimmed); anything else falls back to loopback.
-
-`HOSTNAME` is intentionally **ignored** as a bind signal. Docker, systemd, and many CI runners auto-inject `HOSTNAME` into every process, so honoring it would silently bind a container to its routable IP — a network exposure you never chose. Widening the bind must be a deliberate `HOST=`.
-
-`localhost`, `::1`, and the entire `127.0.0.0/8` range count as loopback. `0.0.0.0`, `::`, a LAN IP, or a hostname are all network-exposed.
+Clawboo is built for one person on one computer. Out of the box it listens only on that computer and turns away web pages that try to reach it. This page explains what that protects, what it does not, where your keys are stored, and what changes when you open the dashboard to other machines. To set up remote access, follow [Reach Clawboo from another machine](/guides/self-host-securely).
 
 <Warning>
-If you bind a non-loopback interface (`HOST=…`) **and** have not set an access token, the server **refuses to start** — the origin guard is not authentication against a non-browser client (a LAN peer can forge the `Host`/`Origin` headers), so a token-less wide bind would leave the dashboard and every `/api/*` route reachable unauthenticated. Fix one of: set `STUDIO_ACCESS_TOKEN=<random>` to require a token; unset `HOST` to bind loopback only; or set `CLAWBOO_ALLOW_INSECURE=1` to run unauthenticated on purpose (an explicit, greppable choice that logs a loud warning). The default loopback bind never trips this.
+
+**Security advisory: clawboo 0.5.0 and older behind a reverse proxy.** On these releases the access token does not cover `/api/mcp/`. Any request that reaches Clawboo from `127.0.0.1` skips the access cookie on every `/api/mcp/` path, including `/api/mcp/config`. A reverse proxy on the same machine (nginx, Caddy, a Cloudflare Tunnel connector) delivers every request from `127.0.0.1`. So anyone who can reach the proxy can use Clawboo's MCP servers: your boards, memory, team chat and tools. They can also ask `/api/mcp/config` for an attach URL signed as any of your agents, with that agent's connector grants. This holds even with `STUDIO_ACCESS_TOKEN` set.
+
+If that is your setup, deny all of `/api/mcp/` at the proxy now with the rule below, or upgrade once a release newer than 0.5.0 is out. Run `clawboo --version` to see your version.
+
 </Warning>
+
+<Tabs>
+
+<Tab title="nginx">
+
+```nginx
+# Inside the server block that proxies to Clawboo.
+location ~* ^/api/mcp(/|$) {
+    return 404;
+}
+```
+
+</Tab>
+
+<Tab title="Caddy">
+
+```caddyfile
+# Inside the site block, next to reverse_proxy.
+@mcp path /api/mcp /api/mcp/*
+respond @mcp 404
+```
+
+</Tab>
+
+<Tab title="Cloudflare Tunnel">
+
+```yaml
+# config.yml: the deny rule must come before the rule that reaches Clawboo.
+ingress:
+  - hostname: dash.example.com
+    path: '(?i)^/api/mcp(/|$)'
+    service: http_status:404
+  - hostname: dash.example.com
+    service: http://127.0.0.1:18790
+  - service: http_status:404
+```
+
+</Tab>
+
+</Tabs>
+
+All three rules ignore letter case, because 0.5.0 also routes variants such as `/API/MCP/config`. Under a path prefix, add the same rule for the prefixed path (`/clawboo/api/mcp`), because Clawboo also answers `/api/` without the prefix. Releases after 0.5.0 let a request without the cookie reach the MCP servers only with an attach token (see [The access token](#the-access-token)). Keep the deny rule anyway, as a second layer.
+
+## What is protected by default, and what is not
+
+| Who could reach Clawboo                                  | Protected by default? | What protects it                                                                                                       |
+| -------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Another computer on your network                         | Yes                   | Clawboo listens only on `127.0.0.1`                                                                                    |
+| A web page open in your browser                          | Yes                   | The same-origin guard                                                                                                  |
+| Anyone who can reach a reverse proxy in front of Clawboo | No                    | The access token, or a proxy that authenticates every request                                                          |
+| Another user account on the same computer                | Partly                | Your Clawboo folder is readable only by you (OpenClaw's `~/.openclaw/.env` may not be); the API needs the access token |
+| Agents, connectors and other programs running as you     | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))                 |
+
+The last three rows share one cause: anything that reaches Clawboo from `127.0.0.1` looks like you. Without `STUDIO_ACCESS_TOKEN`, it can call every `/api/` route, including the ones that answer approvals, grant connector access and start agent runs.
+
+So treat approvals and connector grants as controls against a confused or prompt-injected model, not against other code on your machine. Setting the token, even on a loopback-only install, closes the API to other user accounts. The coding runtimes and connectors Clawboo starts never receive the token, but a program running as you can still read your files, including Clawboo's database and key vault.
+
+## The loopback bind
+
+Clawboo listens on `127.0.0.1` unless you set `HOST`. `localhost`, `::1` and any `127.x.x.x` address also count as loopback. `HOSTNAME` is ignored, because Docker, systemd and many CI runners set it automatically; widening the bind takes an explicit `HOST`.
+
+To listen on the network, set `HOST=0.0.0.0`. Do not bind one network address such as `HOST=192.168.1.10`. Clawboo's own agents and background jobs connect to `127.0.0.1`, and a single-address bind does not listen there, so agents lose their Clawboo tools and `clawboo` cannot find the server.
+
+A non-loopback bind without a working access token refuses to start: the server logs `SECURITY: refusing to start` and exits with code 1. On a network, a script can send any `Host` or `Origin` header, so the same-origin guard cannot stop it and the token is the only authentication. `CLAWBOO_ALLOW_INSECURE=1` overrides the refusal and logs a `SECURITY:` warning instead. Use it only on a network where you would leave the dashboard open to everyone.
 
 ## The same-origin guard (always on)
 
-The loopback bind stops other hosts on your network, but it does not stop code running in your own browser: a web page you visit can still issue a `fetch` to (or open a WebSocket against) `http://127.0.0.1:<port>/api/*`, and because your browser originates the request, it reaches the loopback server. Left unguarded, a malicious page could drive the whole `/api/*` surface (start runtime work that spends provider credits, read your team chat and board), and a Cross-Site WebSocket Hijack could ride the server-injected upstream Gateway token. A loopback bind alone does not close this, and neither does CORS: the same-origin policy does not block the requests that matter here (a no-cors POST is still sent; a hijacked WebSocket still connects).
+The guard stops web pages in your own browser from using Clawboo. Your browser can reach `127.0.0.1`, so without it any site you visit could send requests to the API or open the Gateway WebSocket. The guard checks every `/api/` request and the WebSocket upgrade at `/api/gateway/ws`, with or without an access token:
 
-Clawboo closes it with a same-origin guard that runs on **every** `/api/*` request and WebSocket upgrade, **independent of the access token**, so it protects the default token-less install. It validates three things:
+- **Host** must be `localhost`, a `127.x.x.x` address, `::1`, the bind address, or a name in `CLAWBOO_ALLOWED_HOSTS`. This applies to every request, browser or not. It also blocks DNS rebinding, where an attacker's domain is pointed at `127.0.0.1`.
+- **Origin**, when the request has one, must exactly match an allowed origin. Those are `localhost`, `127.0.0.1` and `[::1]` at Clawboo's port (over `http` or `https`), the bind address at that port, and the entries in `CLAWBOO_ALLOWED_ORIGINS`.
+- **Sec-Fetch-Site**, when present, must be `same-origin`, `same-site` or `none`.
 
-- **`Origin`** against an exact-match allowlist. A browser sets `Origin` on every cross-site WebSocket handshake and state-changing fetch and cannot forge or omit it, so this is the core Cross-Site WebSocket Hijacking (CSWSH) and cross-site-request defense. A foreign origin is answered with a `403`.
-- **`Host`** against a hostname allowlist. This is the DNS-rebinding defense: an attacker who rebinds their own domain to `127.0.0.1` still sends `Host: their-domain`, which is not on the allowlist, so the request is rejected.
-- **`Sec-Fetch-Site`** as defense in depth, covering the cross-site no-cors GET case where a browser omits `Origin`. Only `same-origin`, `same-site`, and `none` are accepted; a `cross-site` value is rejected.
+A rejected request gets `403` with `{"error":"Cross-origin request blocked."}`, and a rejected WebSocket upgrade gets `403 Forbidden`. The dashboard page and its static files are not checked, because they hold no data.
 
-A request that carries neither `Origin` nor `Sec-Fetch-Site` is allowed, because a browser cannot omit both on a cross-site request, while non-browser clients (the CLI, a spawned runtime's loopback MCP attach, an SSE/`EventSource` stream) legitimately do. That is why the loopback `/api/mcp/*` attach and the team-chat streams keep working.
+The two variables take comma-separated lists and only add entries; the loopback entries always stay. When you reach Clawboo by any other name or address, set both: `CLAWBOO_ALLOWED_HOSTS` for the name (`dash.example.com`) and `CLAWBOO_ALLOWED_ORIGINS` for the full origin (`https://dash.example.com`). Without them the dashboard page loads, but every API call fails with the 403 above.
 
-**Posture.** The loopback allowlist (localhost, the `127.0.0.0/8` range, `::1`, plus the actual bind host) is always enforced with zero configuration, so the default Clawboo install is protected out of the box. The environment allowlists only **widen** the set, never disable it: to reach the dashboard from a non-loopback browser origin (a LAN IP or a reverse-proxy hostname), enumerate the origins in `CLAWBOO_ALLOWED_ORIGINS` (and hostnames in `CLAWBOO_ALLOWED_HOSTS`). Because the allowlist can only be widened, a `HOST=0.0.0.0` bind cannot silently re-open the hole while `127.0.0.1` stays reachable.
+In dev mode (`pnpm dev`), the server also answers CORS requests, with credentials, for the allowed origins only. In dev those include the Vite dev server on port 5173.
 
-<Note>
-The same-origin guard is not authentication against a non-browser client on a wide bind: a LAN peer can forge `Host` and `Origin` with a plain HTTP client, which the guard cannot detect. That is why a non-loopback bind still requires `STUDIO_ACCESS_TOKEN` (and the server refuses to start without it). The guard defends against the browser attacker; the token defends against the network peer. They are complementary, not substitutes.
-</Note>
+The guard is not authentication. A script or `curl` can send any `Host` and `Origin` it likes, which is why a network bind needs the access token.
 
-## The access gate (opt-in)
+## The access token
 
-The access gate is a single shared bearer token, controlled by the `STUDIO_ACCESS_TOKEN` environment variable and read at server start. A blank or unset value disables the gate entirely. When enabled, it is the only authentication on the dashboard, so its design is deliberately conservative.
-
-**Constant-time, length-hiding compare.** The token is never compared byte-by-byte against the cookie. Both sides are SHA-256-hashed to a fixed 32-byte digest first, then compared with a constant-time equality check. Hashing first means the comparison neither short-circuits on the first differing byte (a timing oracle) nor leaks the token's length.
-
-**Case-folded path test (no `/API/` bypass).** Before the gate tests whether a path is an `/api/*` route, it lowercases the pathname. The Express app also sets case-sensitive routing so its matcher and the gate agree. Together this closes a bypass where an uppercased `/API/settings` could resolve to the real handler while slipping past a case-sensitive prefix check. The gate folds case itself rather than trusting the host app's routing configuration.
-
-**The runtime control plane takes an attach token.** A spawned runtime attaches its MCP client to `http://127.0.0.1:<port>/api/mcp/*` with no cookie, by design, because the runtime's environment is scrubbed of the access token (see [Secrets never reach spawned runtimes](#secrets-never-reach-spawned-runtimes)). Instead, every MCP attach URL the server writes for a runtime carries an `attachToken`: an HMAC-SHA256 derived from the per-install attach-signing secret, which stays in Clawboo's own state and is never written into a runtime's config. The gate lets a cookieless request through only when it targets one of the four transport routes (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`), carries a valid attach token (compared in constant time), comes from a loopback TCP peer (`127.0.0.1`, `::1`, or `::ffff:127.0.0.1`), and carries no proxy forwarding header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`). A runtime dials the loopback port directly and never sends such a header, so a token that leaked is refused from another host and through the operator's proxy alike. `/api/mcp/config` mints signed attach URLs and needs the cookie, as does every other `/api/*` route.
-
-The credential is the token; the source address can only count against a request. Earlier releases admitted any `/api/mcp/*` request whose TCP peer was loopback. A same-host reverse proxy (nginx, Caddy, a Cloudflare Tunnel connector) forwards every remote request from `127.0.0.1`, so behind one, that rule put the MCP servers, and `/api/mcp/config`'s identity signing, in reach of anyone who could reach the proxy. Deny the four MCP server routes at your proxy as well ([Self-host securely](/guides/self-host-securely#step-2-reach-it-from-another-machine-without-widening-the-bind-recommended)).
-
-For the runtimes it spawns, Clawboo also adds `127.0.0.1`, `localhost` and `::1` to `NO_PROXY` whenever an HTTP proxy is configured in the server's environment. That keeps a runtime's MCP traffic, and its attach token, off the proxy, and off a proxy that adds `X-Forwarded-For`, which the gate would refuse.
-
-**Token charset validation (fail-loud).** The token is written raw into a `Set-Cookie` value and compared raw against the cookie, but percent-decoded on the query path. A token containing a cookie delimiter or other unsafe character would corrupt the cookie and silently lock the operator out of every `/api/*` route with no hint. So the gate validates the token against a safe charset (`[A-Za-z0-9._~-]`). If the token contains anything else, the gate logs a warning naming the offending character and **disables itself** rather than ship a permanent lockout.
-
-How a token is presented:
-
-| Channel                             | Behaviour                                                                                                                                                                                                                                                  |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `?access_token=<token>` query param | Validated; on success the gate sets an `HttpOnly`, `SameSite=Lax`, `Path=/` cookie and 302-redirects to strip the token from the URL. `Secure` is added only when the request arrived over TLS, so the cookie still works on a plain-http loopback origin. |
-| `clawboo_access` cookie             | The steady-state credential, validated on every `/api/*` request and every WebSocket upgrade.                                                                                                                                                              |
-| Invalid / missing                   | `401` with a JSON `{ error }` body. The missing-cookie message tells you to open `/?access_token=<token>` once to set the cookie.                                                                                                                          |
-
-The same authorization check guards the WebSocket upgrade for the gateway proxy: when the gate is enabled, an upgrade is allowed only if it carries a valid cookie.
-
-<Note>
-The access gate is a single shared secret; every client that knows the token has full operator access. It is the right tool for "lock down a deliberately-exposed single-user dashboard," not for multi-user authorization. There are no per-user accounts, roles, or scopes.
-</Note>
-
-## Server-side device authentication
-
-The upstream OpenClaw Gateway requires an Ed25519 device signature on every connect frame. Clawboo handles this entirely server-side in the [gateway proxy](/concepts/gateway-and-events), so the browser never manages device keys.
-
-The proxy holds a persistent Ed25519 identity at `~/.clawboo/proxy-device-identity.json`. The file contains the private key and is written with restrictive permissions: a `0700` directory and a `0600` file, and the proxy re-hardens the file to `0600` on every load, so an identity file loosened by an older code path or an upgrade is brought back to safe permissions. POSIX modes are advisory on Windows, so this is best-effort there.
-
-When a browser opens a WebSocket to the proxy, the proxy opens the upstream connection eagerly, captures the Gateway's `connect.challenge` nonce, then, on the browser's connect frame, injects the upstream bearer token (which lives only on the server; `GET /api/settings` exposes a `hasToken` flag, never the value) and signs the frame with the proxy's device identity, replacing any browser-supplied device fields. Fresh browser contexts (preview, incognito, a new machine) connect with no device setup. If signing fails for any reason, the proxy strips the device fields and forwards without them rather than crashing the connection.
-
-For the full handshake and event pipeline, see [Gateway and events](/concepts/gateway-and-events).
-
-## The encrypted secrets vault
-
-Provider and runtime API keys you connect through the dashboard are stored in an encrypted vault under Clawboo's own directory, never in OpenClaw's directory and never in plaintext on disk:
-
-| Path                                   | Contents                                | Permissions                     |
-| -------------------------------------- | --------------------------------------- | ------------------------------- |
-| `~/.clawboo/secrets/master.key`        | 32-byte AES master key, base64          | `0600` file inside a `0700` dir |
-| `~/.clawboo/secrets/runtime-keys.json` | `{ [envVar]: { iv, tag, ciphertext } }` | `0600`, ciphertext only         |
-
-Each value is encrypted with AES-256-GCM under the master key. The master key is auto-generated on first use, or you can supply your own via `CLAWBOO_SECRETS_MASTER_KEY` (a 32-byte key as base64, 64 hex characters, or a raw 32-character string). Decryption enforces the standard GCM 96-bit IV and 128-bit auth-tag lengths; a truncated tag, which would weaken forgery resistance, is rejected.
-
-The key and the ciphertext are colocated under `secrets/` by design — a local-first, single-user tool has no daemon or keychain, and the only reader that can reach the key (a process running as you) can already read the plaintext elsewhere. For true at-rest key/ciphertext **separation** (so a whole-directory backup of `secrets/` can't carry both), point `CLAWBOO_SECRETS_MASTER_KEY` at a source **outside** `~/.clawboo` — e.g. `CLAWBOO_SECRETS_MASTER_KEY=$(cat ~/.config/clawboo-master.key)` or a secret manager. Permissions are enforced at write (`0700` dir / `0600` files) and re-verified on every boot (a group/other-readable secret surfaces as a degraded check in System Health).
-
-**Resolution chain.** A runtime provider key is resolved by env-var name, highest priority first:
-
-1. `process.env[envVar]`: an explicit environment variable wins.
-2. The encrypted vault (decrypt).
-3. OpenClaw's `~/.openclaw/.env`, so an existing OpenClaw provider key auto-satisfies a sibling runtime.
-
-This single function is the _only_ place a secret value is read; callers put the plaintext straight into a spawned process's env and nowhere else.
-
-**Fail-closed.** A wrong, rotated, or lost master key, or a corrupt vault entry, returns `null`, never a partial plaintext and never a thrown error into a request path.
-
-<Danger>
-The vault is **defense in depth, not targeted-attacker-proof.** It defeats commodity infostealers and the accidental backup, sync, or sharing of the vault file (the ciphertext is useless without the separate master key), but it does **not** protect against a process running as you, which can read the master key from disk or grab the decrypted value from memory or the spawned child's env. The vault holds one value per env-var, server-wide; a multi-key / per-team model is a documented future seam.
-</Danger>
-
-### Secrets never reach spawned runtimes
-
-A spawned runtime (a Codex or Hermes CLI, the Claude Agent SDK child, and the deterministic verify gate) executes an _untrusted_ agent that can read its own process environment with a single `env` dump. A command you approve for a native Boo's `run_command` is a further spawned child with the same problem, and its environment is built from a stricter **allowlist** rather than from this scrub (see [Commands agents run on this machine](#commands-agents-run-on-this-machine)). The child-environment builder scrubs two families of secrets before the child inherits them, then merges the caller's explicit provider-key grant on top:
-
-- **Clawboo's own server secrets**, which must never leak: `GATEWAY_AUTH_TOKEN`, `STUDIO_ACCESS_TOKEN`, `CLAWBOO_SECRETS_MASTER_KEY`, and any `BETTER_AUTH*` key.
-- **A curated set of the operator's third-party shell credentials** that no runtime uses for auth: cloud, CI, package-registry, and database tokens such as `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, `NPM_TOKEN`, `STRIPE_SECRET_KEY`, and `DATABASE_URL`. This keeps a prompt-injected task from dumping the credentials you happen to have exported into your shell, including env-only secrets (CI-injected session tokens) that never touch disk and so are reachable no other way.
-
-The scrub is **by exact name, not a broad heuristic**. The provider auth a runtime legitimately reads from the ambient env (`OPENAI_API_KEY` for Codex, a configured provider key for Hermes, `ANTHROPIC_AUTH_TOKEN` for Claude Code) and infra config (`PATH`, `HOME`, `PYTHONUSERBASE`, proxy variables, `AWS_REGION`) are preserved, so tightening the scrub never silently breaks a runtime. AWS access keys are the one conditional case: they are scrubbed by default but kept when you explicitly run Claude Code against Amazon Bedrock (`CLAUDE_CODE_USE_BEDROCK`), the signal that a runtime needs them.
+`STUDIO_ACCESS_TOKEN` is an optional shared secret. Clawboo reads it from the environment when the server starts; a `studioAccessToken` entry in `settings.json` has no effect. When the token is set, every `/api/` path (in any letter case) and the Gateway WebSocket need the `clawboo_access` cookie. The dashboard page and static files load without it.
 
 <Warning>
-This is defense in depth, **best-effort by name, not a sandbox.** The agent still runs un-sandboxed and can read on-disk credentials (`~/.aws/credentials`, `~/.config/gh/hosts.yml`, a project `.env`), so treat every task you run as code you are choosing to execute locally. The scrub closes the trivial `env`-dump vector and the env-only secrets; it does not isolate the runtime.
+
+**Use only letters, digits, `.`, `_`, `~` and `-` in the token.** Any other character turns the check off. The server prints a warning that `STUDIO_ACCESS_TOKEN contains an unsupported character` and that the access gate is disabled, then keeps running. On a network bind it then refuses to start, but behind a reverse proxy on the same machine the dashboard is open. Output from `openssl rand -base64` can contain `+`, `/` or `=`. Generate tokens with `openssl rand -hex 24`, save the value, and check the boot log.
+
 </Warning>
 
-Scrubbing `STUDIO_ACCESS_TOKEN` is also exactly why the `/api/mcp/*` attach token exists: the runtime's env has been stripped of the access token, so it _cannot_ present the gate cookie, and the attach token in its MCP URLs is the controlled way to let only the server's own runtime through. It opens the four MCP transport routes and nothing else.
+**Sign in once per browser.** Open any Clawboo address with `?access_token=<token>` added, such as `https://dash.example.com/?access_token=<token>`. Clawboo checks the token, sets the cookie and redirects to the same address without the token. The cookie is `HttpOnly` and `SameSite=Lax`, its path is `/` (or your `CLAWBOO_BASE_PATH`), and it is `Secure` when the request carries `X-Forwarded-Proto: https`. The WebSocket accepts only the cookie.
 
-## Commands agents run on this machine
+| Request                                   | Answer                                                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `?access_token=` with the right token     | `302` redirect that sets the cookie                                                                  |
+| `?access_token=` with a wrong token       | `401` `{"error":"Invalid Clawboo access token."}`                                                    |
+| An `/api/` request without a valid cookie | `401` `{"error":"Clawboo access token required. Open /?access_token=<token> once to set a cookie."}` |
 
-Two paths put a shell command in front of you before it runs on the machine Clawboo runs on. Neither is sandboxed: what stands in the way is a human answering a card, and on the OpenClaw path only while that Boo's posture says to ask. They are not the only way a command reaches this machine, either. A spawned CLI runtime (Claude Code, Codex, Hermes) drives its own commands inside its worktree and raises no card here, so the rule above still holds: treat a task you run as code you are choosing to execute locally.
+**One secret, full access.** Everyone who has the token can do everything you can. There are no accounts, roles or per-person revocation. To rotate the token, change the variable and restart the server; every browser then signs in again.
 
-- **OpenClaw agents** run commands under a policy the [Gateway](/concepts/gateway-and-events) holds, not under Clawboo's own record of it. When that policy says to ask, the Gateway holds the command and puts the question only to connections that declared they can answer it. Clawboo's server-side connection is one of those, so it mirrors the request into its own approvals queue and relays your answer back; the card therefore survives a closed browser tab. Answering "Always" mints a standing grant in OpenClaw's own list, which you can review and take back from the Boo's Permissions tab. See [Approvals](/using/approvals).
-- **Native (`clawboo-native`) Boos** have a `run_command` tool, and it is **off until it is switched on for that Boo**. The switch is on the agent's Permissions tab, labelled "Let this Boo ask to run commands". The underlying field is absent from the native defaults, so every native Boo created through Clawboo's screens starts with it off. Even with the switch on, the tool exists only when the run has a working folder (in practice a board task with a provisioned worktree) and the host is not Windows. It is absent from 1:1 chat, team-room and dispatch turns, absent on Windows rather than degraded, and absent from every other runtime: it is a local native-loop tool, never registered with the tool broker, so it cannot appear inside a Claude Code, Codex, Hermes, or OpenClaw agent.
+**Agents do not receive it.** Clawboo removes the token from the environment of the coding runtimes, Clawboo Native shell commands and connectors it starts. The exception is an OpenClaw Gateway that you start from the dashboard: it inherits the server's whole environment, token included. Clawboo's own agents reach the MCP servers another way:
+
+- **From the release after 0.5.0**, every MCP attach URL Clawboo writes for its agents carries an `attachToken`, derived from a per-install secret in Clawboo's database. A request without the cookie reaches the four MCP servers (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`) only when all of these hold:
+  - it carries a valid attach token;
+  - it connects directly from a loopback address;
+  - it has none of the headers a proxy adds: `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or `X-Real-IP`.
+
+  `/api/mcp/config` always needs the cookie. A leaked attach token is useless from another machine or through your proxy.
+
+- **On 0.5.0 and older**, any request from `127.0.0.1` reaches all of `/api/mcp/` without the cookie. See the advisory at the top of this page.
+
+**The proxy warning.** With no token set, the first request that carries one of those proxy headers makes the server log a one-time `SECURITY:` warning. It says that the dashboard and every `/api/` route are open to anyone who can reach the proxy. The warning never blocks a request.
+
+**The `clawboo` command cannot manage a server that has a token.** Its status check gets a `401`, so `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, then exit. Run with the token in its environment and no server running, `clawboo` starts one but cannot see it answer: after about 45 seconds it prints `Dashboard is taking too long to start.` and exits, while the server keeps running. Start and stop a token-protected server directly or with a service manager, as described in [Run the Clawboo server](/operating/deployment).
+
+<Accordion title="Under the hood">
+
+- The token and the cookie value are each hashed with SHA-256 and compared in constant time, so the check leaks neither timing nor length.
+- The token check lowercases the path before it tests for `/api/`, and the API routes match letter case exactly, so `/API/settings` cannot slip past it.
+- The attach token is a hex HMAC-SHA256 keyed with a 32-byte secret stored in the database (`settings` key `mcp-attach-scope-secret`). It is the same in every attach URL on an install. Attach URLs that bind a team or an agent also carry a `scopeSig` signature over that scope.
+- When the server's environment sets `HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY`, Clawboo adds `127.0.0.1`, `localhost` and `::1` to `NO_PROXY` for the agents it starts. Their MCP calls then never pass through that proxy.
+- The request log masks `attachToken`, `scopeSig` and `provSig` in every URL it records.
+
+</Accordion>
+
+## Keys and secrets on disk
+
+Clawboo encrypts the keys it stores for itself, but some copies are plain text. Paths below use the defaults; `CLAWBOO_HOME` moves `~/.clawboo` and `OPENCLAW_STATE_DIR` moves `~/.openclaw`.
+
+| What                                                                                      | Where                                                                                         | Encrypted           |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------- |
+| Keys you connect on a **Runtimes** card; connector credentials, sign-ins and Composio key | The vault: `~/.clawboo/secrets/runtime-keys.json`, with its key in `secrets/master.key`       | Yes                 |
+| Keys you connect under **Providers**                                                      | The vault, plus OpenClaw's `~/.openclaw/.env` and every OpenClaw agent's `auth-profiles.json` | The vault copy only |
+| The Gateway token and the provider key that OpenClaw setup writes                         | `~/.openclaw/.env`, and the agents' `auth-profiles.json`                                      | No                  |
+| The Gateway address and token Clawboo connects with                                       | `~/.clawboo/settings.json`                                                                    | No                  |
+| The secret that signs MCP attach URLs, and every board, chat and memory                   | `~/.clawboo/clawboo.db`                                                                       | No                  |
+| The Gateway device key ([below](#the-openclaw-gateway-device-key))                        | `~/.clawboo/proxy-device-identity.json`                                                       | No                  |
+
+Clawboo writes the Providers copies so the OpenClaw Gateway can use the same key. **Disconnect** under **Providers** removes the vault copy and the OpenClaw copies. A key you connect on a Runtimes card stays in the vault. For which runtime reads which key, and what each Disconnect removes, see [Providers and runtimes](/using/providers-and-runtimes).
+
+**What the vault protects.** Each value is encrypted with AES-256-GCM. The key sits next to the ciphertext, so the encryption protects `runtime-keys.json` when that file is copied or shared on its own. Anything that can read your Clawboo folder can read the key too. A wrong or missing key never yields part of a value: saved keys read as missing, and System Health reports that the master key changed.
+
+**Keeping the key elsewhere.** `CLAWBOO_SECRETS_MASTER_KEY` supplies the key from the environment instead of `master.key`. Move your existing key rather than creating a new one, or every saved key becomes unreadable:
+
+<Steps>
+
+<Step title="Stop Clawboo">
+
+Stop the server with `clawboo stop`, Ctrl+C in its terminal, or your service manager.
+
+</Step>
+
+<Step title="Move the key out of the Clawboo folder">
+
+```bash
+mkdir -p ~/.config/clawboo
+mv ~/.clawboo/secrets/master.key ~/.config/clawboo/master.key
+chmod 600 ~/.config/clawboo/master.key
+```
+
+</Step>
+
+<Step title="Start Clawboo with the key in its environment">
+
+```bash
+export CLAWBOO_SECRETS_MASTER_KEY="$(cat ~/.config/clawboo/master.key)"
+```
+
+Then start the server as usual, with this variable set every time. If it is missing, Clawboo creates a new key and cannot read the keys you saved before. A value that is not a 32-byte key (as base64, 64 hex characters, or 32 plain characters) makes every save fail and every saved key read as missing.
+
+</Step>
+
+</Steps>
+
+This keeps a copy or backup of your Clawboo folder from carrying the key. It does not stop a program running as you, which can read both files.
+
+**Treat the database and its backups as secrets.** `clawboo.db` holds every board, chat and memory, and the secret that signs MCP attach URLs. Anyone with a copy can sign attach URLs as any of your agents. Clawboo keeps the database and your Clawboo folder readable only by you (file modes are advisory on Windows). `clawboo backup` writes its file with your default permissions, so restrict it yourself, for example with `chmod 600`. See [Data and state](/operating/data-and-state).
+
+## What agents can do on your machine
+
+Agents work with your user account's permissions. Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off, so they can read and change any file you can, run commands and reach the network. A task's git worktree keeps its file changes apart, but it is not a sandbox. A run without a worktree starts in the server's working folder (`~/.clawboo` when `clawboo` starts the server), which holds Clawboo's database and key vault. That covers every team-chat turn, research and review tasks, and every Routine you make in the dashboard. Clawboo Native agents run a shell command only when their **Let this Boo ask to run commands** switch is on and you approve that command. Coding runtimes and connectors do not inherit Clawboo's own secrets from the environment (an OpenClaw Gateway that Clawboo starts does), but they can read credential files on disk. Run untrusted work under a separate user account or in a virtual machine. [What agents can do](/concepts/permissions) has the details for each runtime.
+
+## The OpenClaw Gateway device key
+
+When Clawboo connects to an OpenClaw Gateway, its server signs the handshake with an Ed25519 device key stored in `~/.clawboo/proxy-device-identity.json`, readable only by you. The key identifies Clawboo to the Gateway and nothing else: it plays no part in signing in to the dashboard, which is the access token's job. The Gateway token stays on the server too. The browser never receives it, and `GET /api/settings` reports only whether one is set. To connect a Gateway, see [OpenClaw](/runtimes/openclaw).
+
+## Redaction in responses and logs
+
+Clawboo masks credential-looking text at two points:
+
+- **Before saving.** Tool-call records, memory facts, governance audit entries and observability events have recognized secrets replaced with `[REDACTED]` before they are written. The command text of an OpenClaw command approval is stored as written.
+- **Before showing or logging.** Observability, audit, tool-call and System Health data is masked with `••••` before it is sent to the browser. So are the structured fields of every server log line.
+
+The masking covers values under keys that contain words such as `token`, `secret`, `password`, `auth`, `credential` or `cookie`, though token counts are kept. It also covers strings shaped like common API keys, `Bearer` headers, JWTs, private-key blocks and `NAME_KEY=value` lines. It is a safety net built on known formats, so a key in a new format can slip through.
+
+## Rate limits
+
+Clawboo limits how many requests one client address can make per minute. Every `/api/` request counts toward a high general ceiling. Routes that install software, change runtime or OpenClaw setup, connect connectors or runtimes, start sign-ins, approve devices or update Clawboo have a much lower one. Over a limit, requests get `429` with a `Retry-After` header.
+
+The limits count the connection's own address and ignore `X-Forwarded-For`, so behind a reverse proxy every visitor shares one allowance. They stop runaway clients; they are not access control. The numbers are in [Limits and defaults](/reference/limits-and-defaults).
+
+## Reaching Clawboo from another machine
+
+The rules in short; [Reach Clawboo from another machine](/guides/self-host-securely) has the steps.
+
+1. **Prefer an SSH tunnel.** Clawboo keeps listening on `127.0.0.1`, and SSH does the authentication.
+2. **Put the token behind every reverse proxy.** Set `STUDIO_ACCESS_TOKEN` unless the proxy authenticates every request itself. Also set `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`, forward `Host` and `X-Forwarded-Proto`, and deny `/api/mcp/` at the proxy.
+3. **For a network bind, use `HOST=0.0.0.0` with a token**, plus the two allowlists for the address people use. Plain `http://` sends the cookie unencrypted, so put TLS in front unless you trust the network.
 
 <Warning>
-**The human answering the card is the boundary.** The native shell has no allowlist and remembers nothing, so you are asked before every command and a command you allowed once asks again the next time. "Always" is never offered there, because an Always that behaved as an allow-once would be a control that lies.
+
+**A reverse proxy is not authentication.** nginx, Caddy and a Cloudflare Tunnel connector deliver every request from `127.0.0.1`, so to Clawboo the whole internet looks like a local caller. Without `STUDIO_ACCESS_TOKEN`, the dashboard and every `/api/` route are open to anyone who can reach the proxy, and the server starts without complaint. Set the token, or make the proxy authenticate every request (HTTP basic auth, an SSO proxy such as oauth2-proxy, Cloudflare Access).
+
 </Warning>
 
-**What the native tool checks before it asks you.** A `run_command` call takes an `argv` array, never a command string, and the child is spawned with `shell: false`, so there are no pipes, redirects, or shell operators. Before an approval card is written, Clawboo resolves the program with `realpath`, applies its denylist to the **resolved** target, reads both words of a shebang so `#!/usr/bin/env python3` cannot hide the interpreter in the second, and then **spawns the resolved path**, so what the card shows is what runs. The denylist is 59 basenames (shells, run-another-program wrappers, interpreters, package runners, build tools, and remote-execution commands), matched with version suffixes stripped so `python3.11` and `node22` are caught alongside `python` and `node`.
+## Limits of this model
 
-<Danger>
-**That denylist is a speed bump, not a sandbox, and must not be read as one.** A basename list cannot be complete: `git -c core.pager=…`, `find -exec`, and `awk 'BEGIN{system(…)}'` all reach a shell without appearing on it, and a test in the repo asserts that those are accepted, so no future reader mistakes the list for a boundary. What the list removes is the commands whose effect a person could not have read off the card. What stands between a model and this machine is your answer to every single prompt.
-</Danger>
+- **One person, one secret.** There are no user accounts, roles or per-team permissions, and the token gives full access.
+- **One store for the whole install.** All teams share one database and one vault, and each key name holds one value for the whole install.
+- **Local code is trusted.** Anything running as your user can read Clawboo's files and, without the token, use its API.
 
-**The child environment is an allowlist, not the ambient one.** An approved command inherits only a fixed set of names, on a Unix host `PATH`, `HOME`, `SHELL`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `TMPDIR`, `LOGNAME`, `TERM`, `USER`, and the proxy variables. Provider credentials are not forwarded, so an approved `printenv` does not return your API keys. The command then runs in that Boo's working folder, as the user running Clawboo, with network access.
+## Related
 
-<Warning>
-**Approving a command means trusting it with the rest of that run.** An approved command runs on this host with network access, and Clawboo's API listens on loopback, so it can reach the approval-resolve route and answer the **next** card in the same run. It cannot answer its own, which does not exist until that command was allowed, and the ceiling of ten commands per run bounds how far this can go, but inside one run your approval is not confined to the one command you read. Closing this properly means authenticating the resolve route, a change to a surface older than this tool and not part of it.
-</Warning>
-
-**A mirrored OpenClaw command is on disk in clear text.** The `tool_call_approvals` row Clawboo writes for a Gateway exec request stores the command and folder in `argsSummary` **unscrubbed**: it is a direct insert that does not pass through the storage-layer scrub every broker approval goes through. [Redact-on-display](#redact-on-display) masks it only when the row is read back over REST. So a command that carries a secret on its own command line is sitting in plain text in Clawboo's SQLite file, whatever the API response shows you.
-
-## Redact-on-display
-
-Clawboo masks credential-looking content at two distinct boundaries, with two distinct markers, defense in depth:
-
-- **Storage-layer scrub** (in `@clawboo/db`) masks secrets with `[REDACTED]` _before_ anything is persisted to SQLite, the audit log, or the observability event log.
-- **Display/log-layer redaction** (in `@clawboo/logger`, re-exported by the server) masks with a bullet string (`••••`) at two later boundaries: just before an API response body is sent, and inside the pino logger so every log record passes through it.
-
-The display redactor masks both credential-looking **keys** (a key containing `token`, `secret`, `password`, `passwd`, `api_key`, `authorization`, a bare `auth`, `bearer`, `credential`, `private_key`, `access_key`, or `cookie`) and credential-shaped **values** (PEM private-key blocks, `sk-`/`sk-ant-`/`sk-or-` API keys, GitHub/GitLab PATs, Slack tokens, AWS access-key IDs, Google API keys, `Bearer …` headers, and JWTs). Crucially, numeric telemetry survives: a `SAFE_COUNT_KEYS` allowlist covers two families, the token _counts_ (`inputTokens`, `outputTokens`, `totalTokens`, and similar) and `author`/`authors` (caught only by the pattern's bare `auth` alternative), each matched case-insensitively against the exact key name. So a token _count_ is never masked while a real credential under e.g. `accessToken` or `authorization` still is, and a near-miss like `authorId` is still redacted. Numbers, booleans, and `null` always pass through.
-
-It is applied at the API response sites that expose stored payloads: the observability events, traces, and graph projection; the governance audit summary; and the tools audit `argsSummary`/`resultSummary`, each of which runs the JSON-string `data`/`summary` field through `redactJsonString` before sending, and at the System Health endpoint, which runs the whole report through `redactObject`.
-
-<Note>
-Redaction is a safety net, not the primary control; the value patterns are an intentional allow-list of known credential shapes, not universal coverage. A new vendor's key format may need an entry. The real guarantee that a provider key never reaches a response or log is the [vault's invariant](#the-encrypted-secrets-vault): the plaintext flows only into a spawned process's env.
-</Note>
-
-## How to expose Clawboo safely
-
-The honest summary: Clawboo is single-tenant and local-first today. If you keep the loopback default you need none of the following; if you widen the bind, do all of it.
-
-1. **Prefer not to widen the bind.** For local use, leave `HOST` unset. The dashboard is loopback-only and no token is needed.
-2. **If you must reach it remotely, tunnel rather than bind wide.** An SSH tunnel or a reverse proxy that terminates TLS and forwards to `127.0.0.1:<port>` keeps the bind loopback and adds a real transport-security and authentication layer in front. This is the recommended path.
-3. **If you do bind a non-loopback interface, set `STUDIO_ACCESS_TOKEN`.** Use a long random token from the safe charset (`[A-Za-z0-9._~-]`). The boot-time refusal exists to catch the case where you forget; do not run a non-loopback bind without it.
-4. **Terminate TLS in front of the dashboard** so the access cookie is sent with `Secure`. The gate only marks the cookie `Secure` when the request arrives over TLS (it detects this via `x-forwarded-proto: https`), so a terminating proxy that sets that header is what upgrades the cookie.
-5. **Treat the access token as a full-operator credential.** Everyone who has it can do everything. Rotate it by changing the env var and restarting; there is no per-user revocation.
-
-<Warning>
-A non-loopback bind with no access token is the single most dangerous misconfiguration: every `/api/*` route, including the ones that resolve provider keys into spawned runtimes, would be reachable by anyone on the network. That is why the server refuses to start, logging a `SECURITY: refusing to start` error and exiting with code 1. Only `CLAWBOO_ALLOW_INSECURE=1` downgrades that to a loud boot warning and keeps serving; if you see that warning, you opted in and the hole is open.
-</Warning>
-
-## Design rationale and trade-offs
-
-The model optimizes for a frictionless single-user local install while keeping a clear, opt-in path to a locked-down exposed one. Loopback-by-default means a fresh install is never accidentally on the network, and the always-on same-origin guard means a malicious web page in your own browser cannot reach the loopback API either, so the zero-config install is safe against both the remote host and the drive-by browser attacker. A single shared token (rather than accounts) keeps the exposed-but-single-user case trivial to set up. Server-side device auth keeps key management out of the browser entirely, so any browser context connects. The vault is a pragmatic "raise the bar against the common threats without pretending to defeat a local attacker" choice, and it says so plainly. Redaction is a cheap, broad backstop layered behind a narrow structural guarantee (secrets only enter child env).
-
-The trade-offs are equally plain: there is no multi-user authorization, the token is all-or-nothing, and the vault cannot defend against a process running as you. Each is a conscious scope boundary, not an oversight.
-
-## Boundaries and non-goals
-
-- **Single-tenant today.** There is no per-tenant isolation. The dormant `tenant_id` columns across the schema are a future seam; no per-tenant filtering or scoping is active in v0.5.0.
-- **OpenClaw shared memory is registered globally.** Because OpenClaw agents are cross-team, Clawboo registers the shared [Memory](/concepts/memory) MCP server for the OpenClaw runtime at _global_ scope rather than per-run/per-team scope (the other four runtimes get per-run team scope). In a multi-tenant world that global registration would need narrowing; it is a documented multi-tenant deferral, not a leak in the single-tenant model Clawboo ships.
-- **Not a key-management service.** The vault stores one value per env-var, server-wide. Named profiles, per-team keys, and rotation tooling are future seams.
-- **Not multi-user.** The access gate is one shared secret with no accounts, roles, or scopes.
-
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
-
-## See also
-
-- [Deployment](/operating/deployment): ports, state directory, and the bundled server
-- [Gateway and events](/concepts/gateway-and-events): the proxy handshake and event pipeline
-- [Connecting runtimes](/runtimes/connecting-runtimes): the connect/disconnect flow that writes the vault
-- [Memory](/concepts/memory): the shared-tier registration and its OpenClaw global-scope note
-- [Environment variables](/reference/environment-variables): `STUDIO_ACCESS_TOKEN`, `HOST`, `CLAWBOO_SECRETS_MASTER_KEY`
-- [Configuration](/reference/configuration): settings file and directory locations
-- [Glossary](/appendices/glossary): canonical term definitions
+- [Reach Clawboo from another machine](/guides/self-host-securely): SSH tunnels, reverse proxies and network binds, step by step
+- [What agents can do](/concepts/permissions): sandboxes, worktrees and approvals for each runtime
+- [Providers and runtimes](/using/providers-and-runtimes): connecting keys, and what Disconnect removes
+- [Data and state](/operating/data-and-state): every file Clawboo writes, backups and resets
+- [Environment variables](/reference/environment-variables): `HOST`, `STUDIO_ACCESS_TOKEN`, the allowlists and the rest
+- [Known issues](/appendices/known-issues): open problems, including the advisory above
