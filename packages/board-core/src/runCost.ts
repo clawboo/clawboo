@@ -51,7 +51,8 @@ export function summarizeRunCost(
     if (typeof cost !== 'number' || !Number.isFinite(cost)) continue
     costed++
     usd += cost
-    if (run.costSource !== 'local') local = false
+    // Only a zero cost reads as free, whatever its source says.
+    if (run.costSource !== 'local' || cost !== 0) local = false
     if (run.costSource !== 'reported' && run.costSource !== 'local') estimated = true
   }
   if (costed > 0) return local ? { usd, estimated, local } : { usd, estimated }

@@ -107,6 +107,7 @@ import {
   estimateTokensFromChars,
 } from './runtimes/estimateCost'
 import { runtimeIdentityHomePath } from './runtimes/identityHome'
+import { loadAgentConfig } from './runtimes/native/agentConfigStore'
 import { ensureTeamWorkdir, taskRunWorkdirFor } from './runtimes/teamWorkdir'
 import { buildPersonaBlock } from './runtimes/personaBlock'
 import {
@@ -1314,11 +1315,18 @@ async function runTaskInner(
     // charged but not warned about: it may legitimately not have reported.
     if (!sawSpend) {
       const outputChars = (summary || lastText).length
-      const local = isLocalModel(input.model)
+      // A Native run started with no model runs on the agent's configured one, so
+      // a Native agent on Ollama that failed before reporting stays free.
+      const nativeConfig =
+        input.model == null && runtimeId === 'clawboo-native'
+          ? loadAgentConfig(db, assigneeAgentId)
+          : null
+      const pricedModel = input.model ?? nativeConfig?.primaryModel ?? null
+      const local = isLocalModel(pricedModel, nativeConfig?.primaryProvider)
       const usd = local
         ? 0
         : estimateRunCostUsd({
-            model: input.model ?? null,
+            model: pricedModel,
             inputChars: passPromptChars,
             outputChars,
           })

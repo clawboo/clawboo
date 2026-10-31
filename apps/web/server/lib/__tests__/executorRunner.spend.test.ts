@@ -22,6 +22,7 @@ import {
   listExecutions,
   setBudgetLimit,
 } from '@clawboo/db'
+import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import { eq } from 'drizzle-orm'
 import type {
   Capabilities,
@@ -42,6 +43,7 @@ vi.mock('../obs', async (importOriginal) => ({
 const { getDb, resetDb } = await import('../db')
 const { runTaskOnRuntime } = await import('../executorRunner')
 const { estimateRunCostUsdFromUsage } = await import('../runtimes/estimateCost')
+const { saveAgentConfig } = await import('../runtimes/native/agentConfigStore')
 
 const CAPS: Capabilities = {
   streaming: true,
@@ -413,6 +415,26 @@ describe('executor runner: what a run is charged, and when a cap stops it', () =
     expect(row?.costSource).toBe('local')
     expect(row?.costUsd).toBe(0)
     expect(getBudget(getDb(), 'agent', 'codex-1')?.spentUsdCents ?? 0).toBe(0)
+  })
+
+  it('prices a Native run with no model and no cost report at its configured Ollama model: free', async () => {
+    saveAgentConfig(getDb(), {
+      ...DEFAULT_AGENT_CONFIG,
+      id: 'native-1',
+      name: 'Local',
+      primaryProvider: 'ollama',
+      primaryModel: 'llama3.2',
+      envVar: 'OLLAMA_BASE_URL',
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    capAgent('native-1')
+    const taskId = newTask()
+    await run(taskId, new SpendAdapter('clawboo-native', false), 'native-1')
+    const [row] = listExecutions(getDb(), taskId)
+    expect(row?.costSource).toBe('local')
+    expect(row?.costUsd).toBe(0)
+    expect(getBudget(getDb(), 'agent', 'native-1')?.spentUsdCents ?? 0).toBe(0)
   })
 
   it('keeps a finished result whose final cost report crossed the cap, and refuses the next run', async () => {

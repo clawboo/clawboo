@@ -82,6 +82,13 @@ describe('summarizeRunCost: a task costs the sum of its runs', () => {
     ).toEqual({ usd: 0.1, estimated: true })
   })
 
+  it('never shows a nonzero cost as free, whatever its source says', () => {
+    expect(summarizeRunCost([{ costUsd: 1, costSource: 'local' }])).toEqual({
+      usd: 1,
+      estimated: false,
+    })
+  })
+
   it('names the four sources, most trustworthy first', () => {
     expect(RUN_COST_SOURCES).toEqual(['reported', 'local', 'token-estimate', 'char-estimate'])
   })

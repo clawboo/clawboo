@@ -210,6 +210,18 @@ export function parseCodingModelConfig(
 
 /** The "mission" budget scope = the root of the delegation tree (a top-level task
  *  is its own mission). Mirrors executorRunner's private helper. */
+/** The model a Native turn is priced at when it reported no cost: its configured
+ *  model, written `ollama/<model>` for the Ollama provider so a local run stays
+ *  free (`isLocalModel`). Null when the agent has no stored config. */
+export function nativeCostModel(
+  cfg: { primaryProvider: string; primaryModel: string } | null,
+): string | null {
+  if (!cfg?.primaryModel) return null
+  return cfg.primaryProvider.trim().toLowerCase() === 'ollama'
+    ? `ollama/${cfg.primaryModel}`
+    : cfg.primaryModel
+}
+
 function missionRootId(db: ClawbooDb, taskId: string): string {
   const ancestors = getAncestors(db, taskId)
   if (ancestors.length === 0) return taskId
@@ -849,16 +861,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             | undefined
           const resolvedRuntime = row?.runtime ?? null
           // The model a cost estimate is priced at when the run's cost events name
-          // none. Native names its real model on every cost event; an OpenClaw
-          // agent's model is read from openclaw.json (its Gateway reports no usage,
-          // and an `ollama/…` model must price at $0); a coding runtime's comes from
-          // its own config. Computed here so the test seam gets it too.
+          // none. Native names its real model on every cost event, but a turn that
+          // fails before one is priced at its configured model (an Ollama one as
+          // `ollama/…`, so it stays free); an OpenClaw agent's model is read from
+          // openclaw.json (its Gateway reports no usage, and an `ollama/…` model must
+          // price at $0); a coding runtime's comes from its own config. Computed here
+          // so the test seam gets it too.
           const configuredModel =
             resolvedRuntime === 'openclaw'
               ? openclawAgentModel(row?.gatewayId ?? row?.sourceAgentId ?? null)
-              : resolvedRuntime && resolvedRuntime !== NATIVE_RUNTIME
-                ? (parseCodingModelConfig(row?.execConfig ?? null)?.model ?? null)
-                : null
+              : resolvedRuntime === NATIVE_RUNTIME
+                ? nativeCostModel(loadAgentConfig(db, targetAgentId))
+                : resolvedRuntime
+                  ? (parseCodingModelConfig(row?.execConfig ?? null)?.model ?? null)
+                  : null
 
           let adapter: RuntimeAdapter
           let homeKind = 'ephemeral'
