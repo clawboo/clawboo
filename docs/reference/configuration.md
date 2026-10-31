@@ -1,157 +1,160 @@
 ---
-title: Configuration reference
-description: settings.json schema, the ~/.clawboo state directory, every file Clawboo owns, and OpenClaw interop reads.
+title: 'Configuration reference'
+sidebarTitle: 'Configuration'
+description: 'Where Clawboo keeps each setting: environment variables, settings.json, the database settings table, your browser, ~/.clawboo files and ~/.openclaw.'
+keywords:
+  [
+    'settings.json',
+    'studioAccessToken',
+    'CLAWBOO_HOME',
+    'state directory',
+    'secrets vault',
+    'openclaw.json',
+    'auth-profiles.json',
+  ]
 ---
 
-Clawboo's persistent configuration is a single JSON file (`settings.json`) plus a small set of files Clawboo owns under its own state directory. This page documents the on-disk shapes, the path-resolution rules, and the OpenClaw files Clawboo reads (but does not treat as its own state).
+Clawboo spreads its configuration over a few places. Use this page to find where a setting lives, how to change it, and which files Clawboo reads or writes.
 
-For the environment variables that override these locations, see [Environment variables](/reference/environment-variables).
+| Where                                           | What it holds                                                     | How you change it                                                                            |
+| ----------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Environment variables                           | Bind address, ports, access token, URL prefix, folders, tuning    | Your shell or service manager; see [Environment variables](/reference/environment-variables) |
+| `~/.clawboo/settings.json`                      | The OpenClaw Gateway URL and token, and the first-run flag        | The dashboard's Gateway and OpenClaw setup, or by hand                                       |
+| The `settings` table in `~/.clawboo/clawboo.db` | Most dashboard settings, such as the default model and team rules | The dashboard                                                                                |
+| Your browser's local storage                    | View preferences such as the theme and sidebar width              | The dashboard, separately in each browser                                                    |
+| `~/.clawboo/secrets/`                           | Provider keys and connector secrets, encrypted                    | **Settings > Providers**, **Settings > Runtimes**, Connectors                                |
+| `~/.openclaw/`                                  | OpenClaw's own configuration, part of which Clawboo writes        | OpenClaw, or the dashboard                                                                   |
 
-## At a glance
-
-| Concern                    | Default location                 | Override                                | Resolver                |
-| -------------------------- | -------------------------------- | --------------------------------------- | ----------------------- |
-| Clawboo state dir          | `~/.clawboo/`                    | `CLAWBOO_HOME` (with `~` expansion)     | `resolveClawbooDir()`   |
-| Settings                   | `~/.clawboo/settings.json`       | follows `CLAWBOO_HOME`                  | `resolveSettingsPath()` |
-| SQLite DB (server)         | `~/.clawboo/clawboo.db`          | follows `CLAWBOO_HOME`                  | `getDbPath()`           |
-| SQLite DB (MCP stdio bins) | `~/.openclaw/clawboo/clawboo.db` | `CLAWBOO_DB_PATH`                       | `defaultDbPath()`       |
-| Secrets vault              | `~/.clawboo/secrets/`            | `CLAWBOO_SECRETS_MASTER_KEY` (key only) | `getVaultPaths()`       |
-| OpenClaw interop reads     | `~/.openclaw/`                   | `OPENCLAW_STATE_DIR`                    | `resolveStateDir()`     |
-
-<Note>
-Clawboo writes only under its own state directory (`~/.clawboo` by default). The exception is OpenClaw onboarding: when a user configures the OpenClaw runtime through the wizard, Clawboo writes `openclaw.json` and `.env` into OpenClaw's state directory on the user's behalf. Outside that flow, OpenClaw's directory is read-only interop.
-</Note>
+`~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path under them on this page moves with them. The `~/.codex`, `~/.hermes` and `~/.claude` paths below do not.
 
 ## settings.json
 
-The persisted settings file. Read by `loadSettings()`, written by `saveSettings()`, and surfaced (token-redacted) by `GET /api/settings`.
-
-- **Path**: `resolveSettingsPath()` → `<resolveClawbooDir()>/settings.json` → `~/.clawboo/settings.json` by default.
-- **Created**: lazily on the first `saveSettings()` call (the directory is `mkdir -p`'d first). Missing or unparseable file → defaults.
-- **In-memory shape** (`ClawbooSettings`):
-
-```ts
-interface ClawbooSettings {
-  gatewayUrl: string // upstream OpenClaw Gateway WebSocket URL
-  gatewayToken: string // upstream auth token (never returned to the browser)
-  studioAccessToken?: string // optional access-gate token
-  firstRunDismissedAt?: number // epoch ms the user dismissed the first-run nudge
-}
-```
-
-- **On-disk shape**: the gateway URL/token are nested under a `gateway` object; `studioAccessToken` and `firstRunDismissedAt` are top-level. `saveSettings()` only writes the fields the caller explicitly provides; omitted fields are left untouched.
+`<CLAWBOO_HOME>/settings.json` holds the connection to your OpenClaw Gateway. Clawboo creates it the first time it saves a setting; a missing or unreadable file means the defaults apply.
 
 ```json
 {
   "gateway": {
     "url": "ws://localhost:18789",
-    "token": "gateway-auth-token-value"
+    "token": "your-gateway-token"
   },
-  "studioAccessToken": "optional-access-gate-token",
   "firstRunDismissedAt": 1717286400000
 }
 ```
 
-### Field reference
+| Key                   | Type   | Default                | Meaning                                                                              |
+| --------------------- | ------ | ---------------------- | ------------------------------------------------------------------------------------ |
+| `gateway.url`         | string | `ws://localhost:18789` | The Gateway's WebSocket URL. Through the API it must start with `ws://` or `wss://`. |
+| `gateway.token`       | string | empty                  | The Gateway's auth token. `GET /api/settings` never returns it, only `hasToken`.     |
+| `firstRunDismissedAt` | number | unset                  | When you dismissed the first-run nudge, in milliseconds since 1970.                  |
 
-| Field                 | On-disk key           | Type                | Default                | Notes                                                                                                                         |
-| --------------------- | --------------------- | ------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `gatewayUrl`          | `gateway.url`         | string              | `ws://localhost:18789` | Falls back to the default URL when unset. Validated as `ws://`/`wss://` on write via `POST /api/settings`.                    |
-| `gatewayToken`        | `gateway.token`       | string              | `""`                   | Never returned by `GET /api/settings`; only `hasToken: boolean` is exposed. Resolved through the template chain below.        |
-| `studioAccessToken`   | `studioAccessToken`   | string \| undefined | undefined              | Optional token for the access gate (see [Security](/operating/security)).                                                     |
-| `firstRunDismissedAt` | `firstRunDismissedAt` | number \| undefined | undefined              | Set when the user dismisses the first-run nudge; surfaced by `GET /api/settings` as `firstRunDismissedAt` (number or `null`). |
+How the token is resolved:
 
-### Token resolution chain
+1. A value written as a template, such as `${GATEWAY_AUTH_TOKEN}`, is read from the server's environment first, then from OpenClaw's `~/.openclaw/.env`.
+2. With no usable token, Clawboo falls back to OpenClaw's `openclaw.json` (`gateway.auth.token` and `gateway.port`). It uses that token and, when `settings.json` has no URL, connects to `ws://localhost:<port>`.
+3. Otherwise the literal value is used.
 
-`gatewayToken` is resolved at read time, not stored verbatim in every case:
+The file is plain JSON, written with your default file permissions, so the Gateway token in it is protected only by the folder: Clawboo keeps `~/.clawboo` owner-only (mode 0700).
 
-1. If `gateway.token` is a template token like `${GATEWAY_AUTH_TOKEN}`, it is resolved from `process.env` first, then from `<resolveStateDir()>/.env`.
-2. If no usable token results, `loadSettings()` falls back to OpenClaw's `openclaw.json` (`gateway.auth.token` + `gateway.port`), resolving the same template syntax and synthesizing `ws://localhost:<port>`.
-3. Otherwise the literal value is used; `gatewayUrl` falls back to `ws://localhost:18789`.
+<Warning>
+A `studioAccessToken` key in settings.json does nothing. The access gate reads only the `STUDIO_ACCESS_TOKEN` environment variable, so a token written here leaves the dashboard open. See [Environment variables](/reference/environment-variables) for the variable and its rules.
+</Warning>
 
-This bridges OpenClaw's secret management (its `.env`) with Clawboo's proxy auth; it is not a dev-project `.env` pattern.
+## Settings stored in the database
 
-## State directory (`~/.clawboo`)
+Most settings you change in the dashboard are rows in the `settings` table of `clawboo.db`, so they travel with a database backup.
 
-Resolved by `resolveClawbooDir()`. The override `CLAWBOO_HOME` is `~`-expanded and resolved to an absolute path; otherwise the directory is `<homedir>/.clawboo`. Clawboo owns everything under this directory. The OpenClaw runtime dependency is unchanged; only the file home is Clawboo's own (matching how Codex and Claude Code each own their dir).
+| Setting                                                   | Where you change it                                                                            |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Default Clawboo Native provider and model                 | Onboarding, or **Make default** in the Clawboo Native providers list (**Settings > Runtimes**) |
+| Boo Zero's display name and global brief                  | Boo Zero's agent page, **Brief**                                                               |
+| Team rules and your introduction to a team                | Team chat: `/rule`, the team's brief and rules sheet, the Know Your Team step                  |
+| Whether memory may use OpenAI for embeddings              | Memory, when no local Ollama embedding model is available                                      |
+| Custom connectors and connector arguments                 | Connectors                                                                                     |
+| A Clawboo Native agent's model and tool switches          | The agent's page                                                                               |
+| Agent files for agents that do not run on OpenClaw        | The agent's **Agent Files**                                                                    |
+| Chat state: resume points, Clear chat times, leader state | Set automatically as you chat                                                                  |
+| The secret that signs MCP attach URLs                     | Created automatically; it never leaves the server                                              |
+| OpenClaw sync state and the tools Clawboo denies there    | Set automatically on each Gateway connection                                                   |
 
-| Path                              | Owner / writer                                          | Purpose                                                                                                                                                                                                             |
-| --------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `clawboo.db`                      | `getDbPath()` (Express server)                          | SQLite database: agent registry, board, memory, tools, governance, the event log, and all other tables. WAL mode. The server opens it once at boot and reuses one connection for the process lifetime.              |
-| `settings.json`                   | `resolveSettingsPath()`                                 | Persisted [settings](#settingsjson).                                                                                                                                                                                |
-| `api-port.txt`                    | `portUtils` (`writeApiPortFile`/`readApiPortFile`)      | Single line: the integer port the API bound to. Written on successful bind, removed on graceful shutdown. Read by the CLI, the Vite dev proxy, and e2e helpers.                                                     |
-| `proxy-device-identity.json`      | `gateway-proxy` (`loadOrCreateProxyDeviceIdentity`)     | The same-origin proxy's persistent Ed25519 keypair (holds the **private** key) for server-side Gateway device auth.                                                                                                 |
-| `gateway.pid`                     | `processManager` (`writeGatewayPid`/`removeGatewayPid`) | JSON `{ pid, port, startedAt }` for the managed OpenClaw Gateway process.                                                                                                                                           |
-| `worktrees/<repo-hash>/`          | `worktrees.ts` (`worktreeRootForRepo`)                  | Per-task git worktrees + the system-of-record scaffold, namespaced by a SHA-1 hash of the repo path. Outside the user's repo tree so they never pollute its `git status`.                                           |
-| `reviews/<repo-hash>/`            | `worktrees.ts` (`reviewRootForRepo`)                    | Detached, read-only review checkouts for the builder≠judge critic gate.                                                                                                                                             |
-| `secrets/`                        | `secretsVault.ts`                                       | The [encrypted runtime-credential vault](#secrets-vault).                                                                                                                                                           |
-| `runtimes/<runtimeId>/<agentId>/` | `runtimes/identityHome.ts` (`runtimeIdentityHomePath`)  | Per-identity persistent runtime homes (e.g. Hermes's skills/memory/session state), one per agent. The agent id is sanitized to a single path segment (dots excluded → traversal-impossible; empty id → `_default`). |
-| `runtimes/hermes/`                | `capabilitySource/hermes.ts`                            | The Hermes home scanned for native `SKILL.md` skills + `mcp.json` (observe-only capability read).                                                                                                                   |
+The table has no schema of its own beyond key and value; [Database schema](/reference/database-schema) describes it.
 
-### The two DB-path resolvers
+## Preferences stored in your browser
 
-There are two distinct resolvers for the SQLite path, and they differ:
+The theme, sidebar width and collapsed state, panel layout, Board view, Org chart layout and a few one-time flags live in your browser's local storage. They apply to one browser only, a database backup does not include them, and clearing the site's data resets them.
 
-- **`getDbPath()`** (`apps/web/server/lib/db.ts`): used by the Express server and the worktree/board code. Returns `<resolveClawbooDir()>/clawboo.db` → `~/.clawboo/clawboo.db`. It does **not** read `CLAWBOO_DB_PATH`; it follows `CLAWBOO_HOME`. Server code reaches the database through `getDb()`, a process-wide memo keyed on this path, rather than opening it per request.
-- **`defaultDbPath()`** (`@clawboo/db`): used by out-of-process consumers (the MCP stdio bins spawned by external runtimes). Honors `CLAWBOO_DB_PATH` when set, otherwise returns the legacy `~/.openclaw/clawboo/clawboo.db`. Each bin opens one connection for its own process lifetime.
+## Files under ~/.clawboo
 
-<Info>
-The MCP stdio bins must open the same SQLite file the server serves. When `CLAWBOO_HOME` is set to a non-default location (e.g. a sandbox), set `CLAWBOO_DB_PATH` to that same `clawboo.db` so the bins and the server agree. The multi-process WAL recipe is what makes a shared file safe.
-</Info>
+Clawboo owns everything in this folder. The bundled server also runs with it as its working directory. [Data and state](/operating/data-and-state) explains what to back up, what is safe to delete, and how to reset.
 
-## Secrets vault
+| Path                                 | What it holds                                                                                | Sensitive                       |
+| ------------------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------- |
+| `clawboo.db`, `-wal`, `-shm`         | The database: agents, teams, board, chats, memory, settings, the event log                   | Yes                             |
+| `settings.json`                      | The Gateway URL and token                                                                    | Yes                             |
+| `secrets/master.key`                 | The key that decrypts the vault                                                              | Yes                             |
+| `secrets/runtime-keys.json`          | Encrypted provider keys, connector secrets and sign-in tokens                                | Encrypted                       |
+| `secrets/disconnected-runtimes.json` | Which runtimes you disconnected                                                              | No                              |
+| `secrets/keyless-providers.json`     | Whether you chose or removed keyless Ollama                                                  | No                              |
+| `proxy-device-identity.json`         | The key pair Clawboo uses to sign in to the OpenClaw Gateway as a device                     | Yes                             |
+| `api-port.txt`                       | The port the server listens on; removed at shutdown if it still names that port              | No                              |
+| `server.log`, `server.log.1`         | Output of a server the CLI started                                                           | No                              |
+| `gateway.log`, `gateway.pid`         | Output and process record of an OpenClaw Gateway that Clawboo started                        | No                              |
+| `connector-pids.json`                | Connector processes Clawboo started, so leftovers from a crash are stopped at the next start | No                              |
+| `catalog/`                           | Verified marketplace packs, cached                                                           | No                              |
+| `frames/`                            | Saved screenshots from agents' browsers                                                      | May show private pages          |
+| `browser-profiles/`                  | Each agent's browser profile, including sites it is signed in to                             | Yes                             |
+| `worktrees/`, `reviews/`             | Per-task git worktrees and review checkouts                                                  | No                              |
+| `runtimes/<runtime>/<agent>/`        | Each Clawboo Native, Codex or Hermes agent's own runtime home                                | May hold runtime sign-in copies |
 
-Encrypts each runtime provider key at rest with AES-256-GCM under a local master key. This is defense in depth: it protects against casual inspection and a leaked disk or backup, and a wrong, rotated, or lost key fails closed (returns `null`, never plaintext).
+The database files and secrets are owner-only (mode 0600) in an owner-only folder (0700).
 
-- **Directory**: `<resolveClawbooDir()>/secrets/`, created with mode `0700` (best effort; advisory on Windows).
-- **Master key**: `secrets/master.key` (32 bytes, base64-encoded, mode `0600`). Auto-generated on first use if absent.
-- **Vault**: `secrets/runtime-keys.json`, mode `0600`, keyed by env-var name:
+## Saved keys
 
-```json
-{
-  "ANTHROPIC_API_KEY": { "iv": "...", "tag": "...", "ciphertext": "..." },
-  "OPENROUTER_API_KEY": { "iv": "...", "tag": "...", "ciphertext": "..." }
-}
-```
+Provider keys, connector secrets and sign-in tokens are encrypted with AES-256-GCM in `secrets/runtime-keys.json`, under the key in `secrets/master.key`. This protects a copied or synced vault file; a program running as your user can still read both files. To keep the key apart from the vault, set `CLAWBOO_SECRETS_MASTER_KEY`. If the key changes, saved keys read as missing and **System Health** reports that the master key changed.
 
-### Master key
+A runtime looks for its key in this order: the server's environment, the vault, then OpenClaw's `~/.openclaw/.env`. After you disconnect a runtime on its card in **Settings > Runtimes**, that runtime uses only the vault until you connect it again. That disconnect deletes every vault key the runtime reads, including keys other runtimes share; [Providers and runtimes](/using/providers-and-runtimes) covers connecting and disconnecting.
 
-| Aspect                     | Behavior                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------ |
-| Override                   | `CLAWBOO_SECRETS_MASTER_KEY` takes priority over the on-disk key file.                     |
-| Accepted forms             | 64 hex characters, base64, or a raw 32-character string, all decoding to exactly 32 bytes. |
-| Invalid override           | Throws loudly (the message lists the accepted forms).                                      |
-| Missing on-disk key        | Generated as 32 random bytes and persisted.                                                |
-| Wrong / rotated / lost key | Fails **closed**; `getRuntimeSecret` returns `null` rather than throwing.                  |
+<Warning>
+Keys you add in **Settings > Providers**, or in OpenClaw's setup inside Clawboo, are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's `auth-profiles.json`, because the OpenClaw Gateway reads them there. Disconnecting the provider removes both copies. A key you enter on a runtime's own card in **Settings > Runtimes** stays only in the encrypted vault.
+</Warning>
 
-### Runtime-key resolution chain
+## OpenClaw files Clawboo reads and writes
 
-`resolveRuntimeKey(envVar)` is the one place a secret value is read (callers put it straight into a spawned child's environment, never a log, response, audit, or SQLite). Highest priority first:
+Clawboo finds OpenClaw's folder from `OPENCLAW_STATE_DIR` (or the older `MOLTBOT_STATE_DIR` and `CLAWDBOT_STATE_DIR`), else the first of `~/.openclaw`, `~/.clawdbot` and `~/.moltbot` that exists, else `~/.openclaw`.
 
-1. `process.env[envVar]`
-2. the encrypted vault (`secrets/runtime-keys.json`)
-3. OpenClaw's `<resolveStateDir()>/.env` (so an existing OpenClaw provider key, e.g. `ANTHROPIC_API_KEY`, is reused automatically)
+It reads:
 
-## OpenClaw interop reads (`~/.openclaw`)
+- `openclaw.json`: the Gateway's port and token when `settings.json` has none, and the settings the **System** panel shows.
+- `.env`: a fallback for provider keys and for `${NAME}` token templates.
+- `agents/<id>/agent/auth-profiles.json`: which providers each OpenClaw agent has keys for.
 
-OpenClaw's state directory is located by `resolveStateDir()`. It honors `OPENCLAW_STATE_DIR` (and the legacy `MOLTBOT_STATE_DIR` / `CLAWDBOT_STATE_DIR`); otherwise it returns the first existing of `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, defaulting to `~/.openclaw`.
+It writes:
 
-Clawboo reads these OpenClaw files:
+- **When you connect or disconnect a provider** in **Settings > Providers** or OpenClaw's setup: the key line in `.env` and the `<provider>:default` profile in every agent's `auth-profiles.json`.
+- **When you set up OpenClaw** from the dashboard: `openclaw.json` and `.env` (the Gateway token, plus the provider key or `OLLAMA_API_KEY=ollama-local` for Ollama), and the Gateway URL and token in `settings.json`. With `OLLAMA_BASE_URL` set, the Ollama address goes into `openclaw.json` too.
+- **When you change OpenClaw settings from the dashboard**: `openclaw.json`, and any keys you enter. That covers the **System** panel, OpenClaw's default model, an OpenClaw agent's model, and drawing a routing link on the Org chart, which turns on agent-to-agent messaging.
+- **Each time it connects to the Gateway**: through the Gateway, it registers Clawboo's Memory, Tasks and Tools servers under `mcp.servers` and adds OpenClaw's sub-agent tools (`sessions_spawn`, `sessions_yield`) to `tools.deny`, alongside your own entries.
+- **When the Gateway refuses to start** and asks for a repair: it runs `openclaw doctor --fix --non-interactive` once, then tries again.
 
-| File                                   | Read by                                                 | Purpose                                                                                                    |
-| -------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `openclaw.json`                        | `loadSettings()`, `system.ts` (status/config endpoints) | Gateway URL/token/port defaults; `tools` and `mcp` config inspected/patched by the System panel endpoints. |
-| `.env`                                 | `readOpenclawEnvVar()`, token-template resolution       | Lowest-priority provider-key fallback; template-token (`${...}`) resolution.                               |
-| `agents/<id>/agent/auth-profiles.json` | `system.ts` (provider-detection)                        | Per-agent provider keys OpenClaw stores outside `.env`.                                                    |
+Resetting `~/.clawboo` leaves all of these in place, so provider keys saved this way keep working for OpenClaw. `OPENCLAW_CONFIG_PATH` is not read; the config is always `openclaw.json` inside that folder.
 
-<Note>
-`OPENCLAW_CONFIG_PATH` appears in design-intent notes but is not read by current code; the config path is always derived as `<resolveStateDir()>/openclaw.json`.
-</Note>
+## Other folders Clawboo reads
 
-## See also
+- `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`): to see whether you signed in with `codex login`. Each Codex agent then runs with its own home under `~/.clawboo/runtimes/`.
+- `~/.hermes/auth.json` (or `$HERMES_HOME/auth.json`): to see whether you signed in to Hermes.
+- `~/.claude`: Claude Code agents run with your real home folder, so the Claude Code SDK loads your own Claude Code settings from there.
 
-- [Environment variables](/reference/environment-variables), every `CLAWBOO_*` / `OPENCLAW_*` override.
-- [Settings API](/reference/rest-api/settings), `GET`/`POST /api/settings` shapes.
-- [Data and state](/operating/data-and-state), backup, reset, and file-location operations.
-- [Security](/operating/security), the access gate, device auth, and the redaction model.
-- [Deployment](/operating/deployment), ports, fallback, and the bundled server.
+<Accordion title="Under the hood">
+
+- `settings.json` is read by `loadSettings()` and written by `saveSettings()` in `@clawboo/config`; `GET /api/settings` returns `gatewayUrl`, `hasToken` and `firstRunDismissedAt`, and `POST /api/settings` accepts only `gatewayUrl`, `gatewayToken` and `firstRunDismissedAt`.
+- The server opens `<CLAWBOO_HOME>/clawboo.db`. The MCP stdio bins default to a different file, `~/.openclaw/clawboo/clawboo.db`, unless `CLAWBOO_DB_PATH` is set; the stdio snippets from `GET /api/mcp/config` set it. This split is deliberate.
+- Source of truth: `packages/config/src/index.ts`, `apps/web/server/lib/secretsVault.ts`, `apps/web/server/lib/openclawEnv.ts`, `apps/web/server/lib/providerKeys.ts`, `apps/web/server/api/system.ts`, `apps/web/server/lib/agentSource/openClawAgentSource.ts`.
+
+</Accordion>
+
+## Related
+
+- [Environment variables](/reference/environment-variables): every variable, including the ones that move these folders
+- [Data and state](/operating/data-and-state): back up, restore and reset
+- [Security](/operating/security): the access gate, the vault and what each protects
+- [Providers and runtimes](/using/providers-and-runtimes): connect keys and runtimes from the dashboard
+- [Settings API](/reference/rest-api/settings): `GET` and `POST /api/settings`

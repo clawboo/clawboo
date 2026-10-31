@@ -1,44 +1,61 @@
 ---
-title: Governance API
-description: 'REST reference for governance: list/set USD budgets, resume a paused scope, read the forensic audit log, and route a delegation approval.'
+title: 'Governance API'
+sidebarTitle: 'Governance'
+description: 'REST reference for budgets (spend tracking, optional hard caps, resume), the audit log, delegation approvals, and the approval-decision history.'
+keywords:
+  [
+    'governance',
+    'budgets',
+    'hard cap',
+    'warn only',
+    'spend',
+    'audit log',
+    'approvals',
+    'delegation approval',
+  ]
 ---
 
-REST surface for Clawboo's spend [governance](/concepts/governance): the hard USD budget kill-switch (list / set / resume budgets), the append-only forensic audit log, the delegation-approval handshake, and the persisted approval-decision history. The budget kill-switch and audit are always on; budgets are uncapped by default (a budget row exists only when you create one), so no USD is enforced until you set a cap.
+These routes cover [governance](/concepts/governance): spend budgets, the audit log, the approval a team lead gives before a risky delegation runs, and a history of approval decisions. For the dashboard side, see [Budgets and spend](/using/budgets-and-spend).
 
-These routes live in `budgets.ts`, `governanceAudit.ts`, `delegationApproval.ts`, and `approvals.ts`. All POST routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
+How budgets behave:
 
-<Note>
-The atomic spend increment that actually pauses a run happens inside the executor loop (`recordSpend` under `BEGIN IMMEDIATE`), not over REST. These routes are the human-facing surface: set a cap, read the ledger, resume a paused scope, and view the audit trail.
-</Note>
+- A scope is tracked only once it has a budget row. A scope is an `agent`, a `team`, a `mission` (a top-level task and every task delegated under it, keyed by the top-level task's id) or a `tenant`. You create rows with `POST /api/governance/budgets`. Clawboo also creates one when a native agent is created with `execConfig.budgetUsd` above 0: an agent budget in `cap` mode.
+- A budget is in `warn` mode unless you send `mode: 'cap'`. A `warn` budget tracks spend and moves to `soft_capped` from 80% of its limit, but it never pauses anything. Only a `cap` budget reaches `paused` at 100% and stops runs.
+- Nothing charges a `tenant` budget: the route accepts one, but no run records spend against it.
+- Spend is recorded by the server as runs report it, not through these routes. Which runs a hard cap can stop before they spend more depends on the runtime and on how the run started; see [Governance](/concepts/governance).
+
+The audit log is always written. Every route here is on the general rate tier (see [rate limits](/reference/rest-api/index#rate-limits)).
 
 ## Routes
 
-| Method | Path                                             | Summary                                                                                       | Stream? |
-| ------ | ------------------------------------------------ | --------------------------------------------------------------------------------------------- | ------- |
-| GET    | `/api/governance/budgets`                        | List every budget row                                                                         | No      |
-| POST   | `/api/governance/budgets`                        | Set or raise a budget cap                                                                     | No      |
-| POST   | `/api/governance/budgets/:scope/:scopeId/resume` | Resume a paused scope (human override)                                                        | No      |
-| GET    | `/api/governance/audit`                          | Read the forensic audit log (filterable)                                                      | No      |
-| POST   | `/api/governance/delegation-approval`            | Route a delegated child's risky action to the leader's approval queue (blocks until resolved) | No      |
-| GET    | `/api/approvals`                                 | List persisted approval decisions                                                             | No      |
-| POST   | `/api/approvals`                                 | Persist an approval decision                                                                  | No      |
+| Method | Path                                             | Summary                                                               | Stream? |
+| ------ | ------------------------------------------------ | --------------------------------------------------------------------- | ------- |
+| GET    | `/api/governance/budgets`                        | List every budget                                                     | No      |
+| POST   | `/api/governance/budgets`                        | Create a budget, or change its limit and mode                         | No      |
+| POST   | `/api/governance/budgets/:scope/:scopeId/resume` | Resume a paused budget, optionally with extra headroom                | No      |
+| GET    | `/api/governance/audit`                          | Read the audit log (filterable)                                       | No      |
+| POST   | `/api/governance/delegation-approval`            | Ask a team lead to approve a risky delegation (waits up to 5 minutes) | No      |
+| GET    | `/api/approvals`                                 | List stored approval decisions                                        | No      |
+| POST   | `/api/approvals`                                 | Store an approval decision                                            | No      |
 
 <Info>
-Two distinct approval surfaces share this page. `POST /api/governance/delegation-approval` is the **live, blocking handshake** over the `tool_call_approvals` table; it waits for the leader to resolve (or for a TTL to expire). `/api/approvals` is a separate **decision-history log** over the `approval_history` table, a fire-and-forget CRUD of past allow/deny decisions. They do not write the same table.
+
+Two separate approval records live here. `POST /api/governance/delegation-approval` opens a live approval in the `tool_call_approvals` table and waits for the answer. `/api/approvals` reads and writes `approval_history`, a plain log of past allow and deny decisions. The two never write the same table.
+
 </Info>
 
 ---
 
 ## `GET /api/governance/budgets`
 
-Lists every budget row, newest-updated first. There is no filter on this route; the handler always returns the full list.
+Lists every budget, most recently updated first. The route has no filters.
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: every budget row:
+**`200 OK`**:
 
 ```ts
 {
@@ -47,18 +64,18 @@ Lists every budget row, newest-updated first. There is no filter on this route; 
     scope: 'agent' | 'mission' | 'team' | 'tenant'
     scopeId: string
     limitUsdCents: number
-    spentUsdCents: number // whole-cent display mirror = floor(spentMicroCents / 10000)
-    spentMicroCents: number // lossless sub-cent spend accumulator
+    spentUsdCents: number // whole cents: floor(spentMicroCents / 10000)
+    spentMicroCents: number // the exact spend, in millionths of a dollar (10,000 per cent)
     status: 'active' | 'soft_capped' | 'paused'
     mode: 'cap' | 'warn'
     tenantId: string | null
-    createdAt: number
-    updatedAt: number
+    createdAt: number // epoch ms
+    updatedAt: number // epoch ms
   }>
 }
 ```
 
-A `cap`-mode budget auto-pauses the run at 100% of `limitUsdCents` (the kill-switch). A `warn`-mode budget (the default posture) records spend and emits warning events at the 80% / 100% crossings but never reaches `paused`; its status clamps to `soft_capped`.
+`status` is `active` below 80% of the limit and `soft_capped` from 80%. Only a `cap` budget becomes `paused`, at 100%, and stays paused until you resume it or raise its limit. A `warn` budget stops at `soft_capped` however far spend goes.
 
 ### Example
 
@@ -70,7 +87,7 @@ curl http://localhost:18790/api/governance/budgets
 
 ## `POST /api/governance/budgets`
 
-Sets a budget cap for a scope, or raises an existing cap. A new scope starts at spent 0 / `active`. Re-setting the limit recomputes status from the existing spend, so raising the cap above the current spend un-pauses the scope (the "raise the cap to resume" path). The body is validated by a zod schema.
+Creates a budget for a scope, or changes the limit and mode of an existing one. A new budget starts at 0 spent and `active`. Changing the limit recomputes `status` from the spend so far, so raising the limit above the current spend un-pauses a `cap` budget.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -78,28 +95,24 @@ Sets a budget cap for a scope, or raises an existing cap. A new scope starts at 
 ```ts
 {
   scope: 'agent' | 'mission' | 'team' | 'tenant'  // required
-  scopeId: string                                  // required, min length 1
-  limitUsdCents: number                            // required, positive integer (a 0 cap is rejected)
-  mode?: 'cap' | 'warn'                             // default 'warn' (track-and-warn)
+  scopeId: string                                  // required, non-empty
+  limitUsdCents: number                            // required, a positive integer (0 is refused)
+  mode?: 'cap' | 'warn'                            // 'warn' unless you send 'cap', on every write
   tenantId?: string | null
 }
 ```
 
-<Note>
-A cap of `0` is rejected by the schema (`limitUsdCents` must be a positive integer). "Uncapped" is the *absence* of a budget row, not a 0 limit. There is no delete route; to make a scope uncapped again, leave it without a row, or set a large cap and resume it.
-</Note>
+<Warning>
+
+`mode` is applied on every write, not only on create. Re-sending a `cap` budget without `mode: 'cap'`, for example to raise its limit, turns it into a `warn` budget and removes the hard stop. Always send `mode: 'cap'` when you update a hard cap.
+
+</Warning>
+
+A limit of `0` is refused: a budget is a positive limit, and an untracked scope is one with no row. There is no delete route; to stop a cap, change it to `warn` or raise its limit.
 
 ### Responses
 
-**`400 Bad Request`**: the body failed zod validation (wrong scope, missing `scopeId`, non-positive `limitUsdCents`, …):
-
-```json
-{ "error": "invalid body", "details": {} }
-```
-
-`details` is the zod `flatten()` of the validation failure.
-
-**`200 OK`**: the upserted budget row:
+**`200 OK`**: the budget as stored:
 
 ```ts
 {
@@ -119,10 +132,16 @@ A cap of `0` is rejected by the schema (`limitUsdCents` must be a positive integ
 }
 ```
 
+**`400 Bad Request`**: the body failed validation (an unknown scope, a missing `scopeId`, a limit that is not a positive integer). `details` is the zod `flatten()` output:
+
+```json
+{ "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
+```
+
 ### Example
 
 ```bash
-# A $5.00 hard cap on a team (500 cents, cap-mode auto-pause)
+# A $5.00 hard cap on a team: runs for this team stop when it is spent
 curl -X POST http://localhost:18790/api/governance/budgets \
   -H 'Content-Type: application/json' \
   -d '{"scope":"team","scopeId":"<team-id>","limitUsdCents":500,"mode":"cap"}'
@@ -132,68 +151,58 @@ curl -X POST http://localhost:18790/api/governance/budgets \
 
 ## `POST /api/governance/budgets/:scope/:scopeId/resume`
 
-Human override: force a paused scope back to `active` (the kill-switch re-arms on the next crossing). A bare resume of a scope whose spend already meets or exceeds its limit will re-pause on the next cost event; pass `graceUsdCents` to raise the cap above the current spend so the run can make forward progress. The response surfaces `willRepause: true` when you resume an at/over-limit scope without grace, so a UI can warn the operator.
+Sets a paused budget back to `active`. If the spend has already reached the limit, the next recorded cost pauses it again; send `graceUsdCents` to raise the limit to the current spend plus that amount, so work can continue. A resume with grace keeps the budget's mode. The response carries `willRepause: true` when you resume a budget at or over its limit without grace.
 
 - **Path params**:
 
-| Param     | Type                                         | Notes                                          |
-| --------- | -------------------------------------------- | ---------------------------------------------- |
-| `scope`   | `'agent' \| 'mission' \| 'team' \| 'tenant'` | Validated; an unknown value returns **400**.   |
-| `scopeId` | `string`                                     | The scope's id; matched together with `scope`. |
+| Param     | Type                                         | Notes                                         |
+| --------- | -------------------------------------------- | --------------------------------------------- |
+| `scope`   | `'agent' \| 'mission' \| 'team' \| 'tenant'` | Any other value is a **400**                  |
+| `scopeId` | string                                       | The scope's id; matched together with `scope` |
 
 - **Request body** (optional):
 
 ```ts
 {
-  graceUsdCents?: number  // positive integer; headroom to grant when still at/over the limit
+  graceUsdCents?: number  // a positive integer: headroom when spend is at or over the limit
 }
 ```
 
 ### Responses
 
-**`400 Bad Request`**: `:scope` is not one of the four scope names:
-
-```json
-{ "error": "invalid scope" }
-```
-
-**`400 Bad Request`**: the body failed zod validation (e.g. a non-positive `graceUsdCents`):
-
-```json
-{ "error": "invalid body", "details": {} }
-```
-
-**`404 Not Found`**: no budget row exists for that `(scope, scopeId)`:
-
-```json
-{ "error": "budget not found" }
-```
-
-**`200 OK`**: the resumed budget row plus the re-pause warning flag. `willRepause` is `true` when `spentUsdCents >= limitUsdCents` (you resumed without enough grace and the next cost event re-pauses it):
+**`200 OK`**: the resumed budget and the re-pause warning. `willRepause` is `true` when `spentUsdCents >= limitUsdCents`:
 
 ```ts
 {
   budget: {
-    id: string
-    scope: 'agent' | 'mission' | 'team' | 'tenant'
-    scopeId: string
-    limitUsdCents: number
-    spentUsdCents: number
-    spentMicroCents: number
-    status: 'active' | 'soft_capped' | 'paused'
-    mode: 'cap' | 'warn'
-    tenantId: string | null
-    createdAt: number
-    updatedAt: number
+    /* the same shape as POST /api/governance/budgets */
   }
   willRepause: boolean
 }
 ```
 
+**`400 Bad Request`**: `:scope` is not one of the four scopes:
+
+```json
+{ "error": "invalid scope" }
+```
+
+**`400 Bad Request`**: the body failed validation (for example a `graceUsdCents` that is not a positive integer):
+
+```json
+{ "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
+```
+
+**`404 Not Found`**: no budget exists for that `scope` and `scopeId`:
+
+```json
+{ "error": "budget not found" }
+```
+
 ### Example
 
 ```bash
-# Resume a paused team budget and grant $1.00 (100 cents) of headroom
+# Resume a paused team budget with $1.00 (100 cents) of headroom
 curl -X POST http://localhost:18790/api/governance/budgets/team/<team-id>/resume \
   -H 'Content-Type: application/json' \
   -d '{"graceUsdCents":100}'
@@ -203,22 +212,24 @@ curl -X POST http://localhost:18790/api/governance/budgets/team/<team-id>/resume
 
 ## `GET /api/governance/audit`
 
-Reads the append-only forensic audit log: installs, approvals, tool calls, budget events, cap hits, verifications, and circuit breaks, newest first. There is no write endpoint; the audit is written in-process by the subsystems that emit events. Each row's `summary` (scrubbed JSON at write time) is masked again at the rendering boundary for credential-shaped keys (defense in depth).
+Reads the append-only audit log, newest first: installs, approvals, tool calls, budget events, cap hits, check results and circuit breaks. There is no write route; the server writes these rows itself. Each row's `summary` was scrubbed of secrets when it was written, and is masked again before it is sent.
+
+The 80% and 100% budget warnings (`eventType: 'budget'`) are written by task-runner runs and OpenClaw Routine fires. Team chat and 1:1 chat update the budget row without writing a warning row.
 
 - **Query params**:
 
-| Param       | Type                                                                                                   | Default | Notes                                                                     |
-| ----------- | ------------------------------------------------------------------------------------------------------ | ------- | ------------------------------------------------------------------------- |
-| `agentId`   | `string`                                                                                               | unset   | Filter to one agent.                                                      |
-| `eventType` | `'install' \| 'approval' \| 'tool_call' \| 'budget' \| 'cap_hit' \| 'verification' \| 'circuit_break'` | unset   | Ignored if not one of these literals.                                     |
-| `since`     | `number`                                                                                               | unset   | Lower bound on `createdAt` (epoch ms); only used if a finite value `> 0`. |
-| `limit`     | `number`                                                                                               | `200`   | Clamped to `≤ 1000`; only used if a finite value `> 0`.                   |
+| Param       | Type                                                                                                   | Default | Notes                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------ | ------- | ---------------------------------------------------------- |
+| `agentId`   | string                                                                                                 | none    | Only this agent's rows                                     |
+| `eventType` | `'install' \| 'approval' \| 'tool_call' \| 'budget' \| 'cap_hit' \| 'verification' \| 'circuit_break'` | none    | Any other value is ignored                                 |
+| `since`     | number                                                                                                 | none    | `createdAt` lower bound (epoch ms); used only when above 0 |
+| `limit`     | number                                                                                                 | `200`   | At most 1000; used only when above 0                       |
 
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: the matching audit rows (always returned, even when empty):
+**`200 OK`**: the matching rows (an empty list when nothing matches):
 
 ```ts
 {
@@ -230,8 +241,8 @@ Reads the append-only forensic audit log: installs, approvals, tool calls, budge
     taskId: string | null
     teamId: string | null
     tenantId: string | null
-    summary: string // scrubbed + redacted JSON text
-    createdAt: number
+    summary: string // JSON text, scrubbed and masked
+    createdAt: number // epoch ms
   }>
 }
 ```
@@ -247,7 +258,9 @@ curl "http://localhost:18790/api/governance/audit?agentId=<agent-id>&eventType=b
 
 ## `POST /api/governance/delegation-approval`
 
-Plumbs a delegated child's risky action back to the **leader's** approval queue. A prior sticky `allow_always` for the `(leader, scope)` pair skips the prompt; otherwise the handler opens a pending row in the `tool_call_approvals` table (visible in the [Approvals UI](/using/approvals)) and **blocks until the leader resolves it or the TTL / poll-deadline expires**, so a forgotten approval times out rather than deadlocking. The scope key is `delegate:<kind>`.
+Asks a team lead to approve a risky delegation before it runs. If the lead has answered **Always** for this kind of delegation before, the route answers `allow_always` at once. Otherwise it opens a pending approval in `tool_call_approvals` (it appears in the [approval cards](/using/approvals)) and holds the request open until the lead answers or the approval expires. The approval's key is `delegate:<kind>`.
+
+The wait is fixed at 5 minutes: the approval expires 5 minutes after it is created, and the request gives up at the same time. `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default) does not change this wait. It sets how old an abandoned pending approval must be before the hourly cleanup expires it and unblocks any task it was holding.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -255,28 +268,16 @@ Plumbs a delegated child's risky action back to the **leader's** approval queue.
 ```ts
 {
   leaderAgentId: string       // required
-  kind?: string               // delegation kind → scope key 'delegate:<kind>'; default 'code'
-  targetAgentName?: string    // the agent the work is delegated to (for the prompt text)
-  task?: string               // the delegated task description
-  taskId?: string             // the board task this delegation gates (lets the TTL reaper unblock it)
+  kind?: string               // the delegation kind; the key is 'delegate:<kind>'; default 'code'
+  targetAgentName?: string    // the agent the work goes to (shown in the prompt)
+  task?: string               // what is being delegated
+  taskId?: string             // the board task this approval gates, so the cleanup can unblock it
 }
 ```
 
 ### Responses
 
-**`400 Bad Request`**: missing `leaderAgentId`:
-
-```json
-{ "error": "leaderAgentId required" }
-```
-
-**`200 OK`**: a prior sticky `allow_always` for this leader + scope short-circuits the prompt:
-
-```json
-{ "resolution": "allow_always" }
-```
-
-**`200 OK`**: no sticky rule, so a pending approval was opened and awaited; the resolution is whatever the leader chose, or a terminal expiry/timeout:
+**`200 OK`**: the outcome. Each one writes an `approval` audit row, except a `timeout` caused by a server error:
 
 ```ts
 {
@@ -284,11 +285,15 @@ Plumbs a delegated child's risky action back to the **leader's** approval queue.
 }
 ```
 
-`expired` = the approval's TTL elapsed before resolution; `timeout` = the poll-deadline elapsed (or the row vanished). Both are terminal "not approved" outcomes; the caller treats them as a denial.
+`expired` means the 5 minutes ran out. `timeout` means the approval row disappeared, or the server hit an error while waiting: the route never answers `500`, it answers `timeout`. Treat `deny`, `expired` and `timeout` alike: do not run the delegation.
 
-<Warning>
-This route awaits a human decision, so it can hang for the duration of the approval TTL / poll window. The TTL is configurable via `CLAWBOO_APPROVAL_TTL_MS`; see [environment variables](/reference/environment-variables). A reaper expires abandoned approvals out-of-band.
-</Warning>
+One `allow_always` answer skips the prompt for that lead and kind on every later request. No route withdraws it.
+
+**`400 Bad Request`**: missing `leaderAgentId`:
+
+```json
+{ "error": "leaderAgentId required" }
+```
 
 ### Example
 
@@ -302,36 +307,36 @@ curl -X POST http://localhost:18790/api/governance/delegation-approval \
 
 ## `GET /api/approvals`
 
-Lists persisted approval **decisions** from the `approval_history` table, newest first. This is a decision-history log distinct from the live delegation handshake above. Wrapped in a try/catch; a DB failure returns **500** with an empty `records` array.
+Lists stored approval decisions from `approval_history`, newest first. This is a plain log, separate from the live approvals above.
 
 - **Query params**:
 
-| Param     | Type     | Default | Notes                                     |
-| --------- | -------- | ------- | ----------------------------------------- |
-| `agentId` | `string` | unset   | Filter to one agent; omit for all agents. |
-| `limit`   | `number` | `50`    | Clamped to the range `[1, 200]`.          |
+| Param     | Type   | Default | Notes                                                                                                           |
+| --------- | ------ | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `agentId` | string | none    | Only this agent's decisions                                                                                     |
+| `limit`   | number | `50`    | Kept between 1 and 200. Send a number: a non-numeric value becomes `NaN`, and the query then runs with no limit |
 
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: the decision history rows:
+**`200 OK`**:
 
 ```ts
 {
   ok: true
   records: Array<{
-    id: number // autoincrement primary key
+    id: number
     agentId: string
-    action: string // 'allow-once' | 'allow-always' | 'deny' (as persisted by POST)
+    action: string // 'allow-once' | 'allow-always' | 'deny', as stored by POST
     toolName: string
-    details: string | null // JSON text, or null
-    createdAt: number
+    details: string | null // JSON text
+    createdAt: number // epoch ms
   }>
 }
 ```
 
-**`500 Internal Server Error`**: a DB error; note the empty `records`:
+**`500 Internal Server Error`**: a database error, with an empty list:
 
 ```json
 { "ok": false, "error": "<message>", "records": [] }
@@ -347,7 +352,7 @@ curl "http://localhost:18790/api/approvals?agentId=<agent-id>&limit=50"
 
 ## `POST /api/approvals`
 
-Persists a single approval decision into the `approval_history` table and returns the inserted row.
+Stores one approval decision in `approval_history` and returns the stored row.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -355,33 +360,15 @@ Persists a single approval decision into the `approval_history` table and return
 ```ts
 {
   agentId: string                                   // required
-  action: 'allow-once' | 'allow-always' | 'deny'    // required, validated against this set
+  action: 'allow-once' | 'allow-always' | 'deny'    // required
   toolName: string                                  // required
-  details?: Record<string, unknown> | null          // JSON-stringified before storage
+  details?: Record<string, unknown> | null          // stored as JSON text
 }
 ```
 
 ### Responses
 
-**`400 Bad Request`**: the body is missing or not an object:
-
-```json
-{ "ok": false, "error": "Invalid JSON body" }
-```
-
-**`400 Bad Request`**: a required field (`agentId`, `action`, or `toolName`) is missing/falsy:
-
-```json
-{ "ok": false, "error": "agentId, action, and toolName are required" }
-```
-
-**`400 Bad Request`**: `action` is not one of the three allowed values:
-
-```json
-{ "ok": false, "error": "Invalid action" }
-```
-
-**`200 OK`**: the decision was persisted (`record` is the inserted row, or `null` if the insert returned nothing):
+**`200 OK`**: the stored row (`null` if the insert returned nothing):
 
 ```ts
 {
@@ -397,7 +384,21 @@ Persists a single approval decision into the `approval_history` table and return
 }
 ```
 
-**`500 Internal Server Error`**: an insert failure:
+**`400 Bad Request`**: one of:
+
+```json
+{ "ok": false, "error": "Invalid JSON body" }
+```
+
+```json
+{ "ok": false, "error": "agentId, action, and toolName are required" }
+```
+
+```json
+{ "ok": false, "error": "Invalid action" }
+```
+
+**`500 Internal Server Error`**: the insert failed:
 
 ```json
 { "ok": false, "error": "<message>" }
@@ -415,19 +416,15 @@ curl -X POST http://localhost:18790/api/approvals \
 
 ## Error envelope
 
-The budget, audit, and delegation-approval routes use the standard `{ error: string }` envelope; the budget POST routes also attach a zod `details` object on validation failures. The `/api/approvals` routes use a distinct `{ ok: boolean, error: string }` shape; the GET also carries `records: []` on its 500, and the POST returns `{ ok: true, record }` / `{ ok: true, records }` on success.
+The budget, audit and delegation-approval routes answer validation errors as `{ "error": "<message>" }`, adding a zod `details` object on the budget routes. The budget and audit routes do not catch database errors: one reaches Express's default handler and comes back as an HTML `500`, not JSON. The delegation approval never answers `500`; it answers `timeout`. The `/api/approvals` routes answer `{ "ok": false, "error": "<message>" }`, and the `GET` adds `records: []` on its `500`.
 
-<Note>
-When the server is bound to a loopback interface (the default) there is no auth on `/api/*`. Binding to a non-loopback interface without `STUDIO_ACCESS_TOKEN` only logs a warning; setting the token activates the access gate in front of every route here. See [security](/operating/security).
-</Note>
+On the default loopback bind no token is needed for these routes, though the same-origin guard still refuses cross-origin browser requests. A non-loopback bind without `STUDIO_ACCESS_TOKEN` stops the server at startup unless `CLAWBOO_ALLOW_INSECURE=1` is set. With the token set, the access gate covers every route here. See the [REST API overview](/reference/rest-api/index) and [Security](/operating/security).
 
-## See also
+## Related
 
-- [Governance concepts](/concepts/governance), budgets, the kill-switch, circuit breakers, caps, and approvals
-- [Verification (builder ≠ judge)](/concepts/verification), what produces `verification` audit events
-- [Governance dashboard](/using/governance-dashboard), the UI over these routes
-- [Approvals](/using/approvals), where you resolve a delegation approval from the board or the chat
-- [Tools & MCP API](/reference/rest-api/tools-and-mcp), `/api/tools/approvals*`, the `tool_call_approvals` resolve path the handshake reuses
-- [Production defaults](/operating/production-defaults), the warn-mode budget posture
-- [Environment variables](/reference/environment-variables), `CLAWBOO_APPROVAL_TTL_MS` and the reaper interval
-- [REST API overview](/reference/rest-api/index)
+- [Governance](/concepts/governance): budgets, hard caps, circuit breakers and approvals, and which runs each one covers.
+- [Budgets and spend](/using/budgets-and-spend): set a budget in the dashboard, and how spend is counted per runtime.
+- [Approvals](/using/approvals): where a team lead answers a delegation approval.
+- [Verification](/concepts/verification): what writes `verification` audit rows.
+- [Tools and MCP API](/reference/rest-api/tools-and-mcp): the tool approval queue in the same `tool_call_approvals` table.
+- [Environment variables](/reference/environment-variables): `CLAWBOO_APPROVAL_TTL_MS` and the cleanup interval.

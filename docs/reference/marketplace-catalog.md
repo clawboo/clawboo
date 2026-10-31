@@ -1,429 +1,322 @@
 ---
-title: Marketplace catalog reference
-description: 'The agent and team catalog: the pack format, where the content lives, how it is fetched and verified, and the seed that keeps first-run onboarding working offline.'
+title: 'Marketplace catalog reference'
+sidebarTitle: 'Marketplace catalog'
+description: 'What the marketplace catalog contains, where Clawboo gets it and how often, all 19 packs with their licenses, and the pack format.'
+keywords:
+  [
+    'catalog',
+    'packs',
+    'pack format',
+    'pack.schema.json',
+    'CLAWBOO_CATALOG_INDEX_URL',
+    'templates',
+    'pinned commit',
+  ]
 ---
 
-The marketplace ships a catalog of **436 agents** and **85 teams**, organised as **nineteen packs**: JSON documents under the repository's top-level `catalog/` folder. Packs are not compiled into the app and are not in the npm tarball. The dashboard fetches them at runtime through its own API, verifies each pack against a published digest, and renders from a thin browse index.
-
-One pack is different. The **seed** (`catalog/packs/clawboo/builtin`, the five built-in teams and their fifteen agents) is compiled into the build, and the index endpoint merges it unconditionally. That is what makes first-run onboarding work with no network at all.
-
-This page documents the **pack format**, the **layout of `catalog/`**, the **fetch and verification path**, the **seed**, and the **content gates**. It does not enumerate individual entries; browse those in the marketplace UI (the Agents / Teams tabs) or read the committed packs.
+The marketplace catalog is the set of ready-made teams, agents and skills behind the **Marketplace**. This page lists what it contains, where Clawboo gets it and how often, the packs it is made of, and the pack format for anyone who wants to read or write a pack. To browse and deploy, see [Browse and deploy from the Marketplace](/using/marketplace).
 
 ## At a glance
 
-| Aspect                              | Value                                                                                                                                                                                                                                                             | Source of truth                                                                |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Total packs                         | 19                                                                                                                                                                                                                                                                | `catalog/catalog.config.json`                                                  |
-| Total agents                        | 436                                                                                                                                                                                                                                                               | `catalog/packs/*/*/pack.json`                                                  |
-| ↳ agency-agents                     | 116                                                                                                                                                                                                                                                               | `catalog/packs/agency/agents/`                                                 |
-| ↳ wshobson-agents                   | 97                                                                                                                                                                                                                                                                | `catalog/packs/wshobson/agents/`                                               |
-| ↳ clawboo-home                      | 35                                                                                                                                                                                                                                                                | `catalog/packs/clawboo/home/`                                                  |
-| ↳ coreyhaines-growth-marketing      | 26                                                                                                                                                                                                                                                                | `catalog/packs/coreyhaines/growth-marketing/`                                  |
-| ↳ voltagent-subagents               | 24                                                                                                                                                                                                                                                                | `catalog/packs/voltagent/subagents/`                                           |
-| ↳ alirezarezvani-business-desk      | 18                                                                                                                                                                                                                                                                | `catalog/packs/alirezarezvani/business-desk/`                                  |
-| ↳ clawboo built-ins                 | 15                                                                                                                                                                                                                                                                | `catalog/packs/clawboo/builtin/`                                               |
-| ↳ clawboo-founder-sprint            | 14                                                                                                                                                                                                                                                                | `catalog/packs/clawboo/founder-sprint/`                                        |
-| ↳ craighewitt-creator-ops           | 14                                                                                                                                                                                                                                                                | `catalog/packs/craighewitt/creator-founder-ops/`                               |
-| ↳ calesthio-generative-media        | 12                                                                                                                                                                                                                                                                | `catalog/packs/calesthio/generative-media/`                                    |
-| ↳ charliehills-creator-studio       | 12                                                                                                                                                                                                                                                                | `catalog/packs/charliehills/creator-studio/`                                   |
-| ↳ mattpocock-craft                  | 12                                                                                                                                                                                                                                                                | `catalog/packs/mattpocock/engineering-craft/`                                  |
-| ↳ phuryn-product-craft              | 12                                                                                                                                                                                                                                                                | `catalog/packs/phuryn/product-craft/`                                          |
-| ↳ agricidaniel-repurpose            | 8                                                                                                                                                                                                                                                                 | `catalog/packs/agricidaniel/repurpose/`                                        |
-| ↳ google-ads-analytics              | 7                                                                                                                                                                                                                                                                 | `catalog/packs/google/ads-and-analytics/`                                      |
-| ↳ thatrebeccarae-lifecycle-commerce | 6                                                                                                                                                                                                                                                                 | `catalog/packs/thatrebeccarae/lifecycle-commerce/`                             |
-| ↳ kgelster-storefront-catalog       | 5                                                                                                                                                                                                                                                                 | `catalog/packs/kgelster/storefront-catalog/`                                   |
-| ↳ blackforestlabs-visual-direction  | 2                                                                                                                                                                                                                                                                 | `catalog/packs/blackforestlabs/visual-direction/`                              |
-| ↳ heygen-presenter-video            | 1                                                                                                                                                                                                                                                                 | `catalog/packs/heygen/presenter-video/`                                        |
-| Total teams                         | 85 (24 wshobson, 10 clawboo-home, 5 each agency / voltagent / clawboo / coreyhaines, 4 each founder-sprint / craighewitt / alirezarezvani / calesthio, 3 each mattpocock / charliehills / phuryn, 2 each agricidaniel / thatrebeccarae, 1 each google / kgelster) | seventeen of the nineteen packs; blackforestlabs and heygen ship no teams      |
-| Pack-declared skills                | 45 across 7 packs, merged over the 44 built-in skills                                                                                                                                                                                                             | `catalog/packs/*/*/pack.json` + `apps/web/src/features/marketplace/catalog.ts` |
-| Browse index                        | `catalog/dist/v1/index.json` (~275 KB, card fields only)                                                                                                                                                                                                          | `scripts/catalog/build-index.ts`                                               |
-| Pack bundles                        | `catalog/dist/v1/packs/<publisher>/<slug>/<version>.json`                                                                                                                                                                                                         | the same script                                                                |
-| Compiled seed                       | ~56 KB, the clawboo pack only                                                                                                                                                                                                                                     | `scripts/catalog/build-seed.ts`                                                |
-| Served at                           | `/api/catalog/index`, `/api/catalog/{agents,teams}/:id`                                                                                                                                                                                                           | `apps/web/server/api/catalog.ts`                                               |
-| Content gate                        | `pnpm catalog:verify`                                                                                                                                                                                                                                             | `scripts/catalog/validate.ts`                                                  |
-| Byte budgets                        | seed under 128 KB, index under 512 KB                                                                                                                                                                                                                             | `scripts/catalog/budget.mjs`                                                   |
-| Agent ID prefixes                   | `adsapi-*`, `agency-*`, `bizdesk-*`, `clawboo-*`, `craft-*`, `creatorkit-*`, `creatorops-*`, `genmedia-*`, `growth-*`, `home-*`, `lifecycle-*`, `pmcraft-*`, `presenter-*`, `repurpose-*`, `shopcat-*`, `sprint-*`, `visdir-*`, `voltagent-*`, `wshobson-*`       | enforced by the pack format and `validate.ts`                                  |
-| Body invariants                     | no YAML frontmatter, no truncated description                                                                                                                                                                                                                     | `validate.ts` + `agentCatalog.test.ts`                                         |
-| Content denylist                    | no competing registry, installer, or invite                                                                                                                                                                                                                       | `validate.ts` + `agentCatalog.test.ts`                                         |
+| Item             | Value                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| Packs            | 19: two written for Clawboo, and 17 adapted from open-source repositories (16 MIT, 1 Apache-2.0)         |
+| Teams            | 85 in the full catalog; 5 when only the built-in pack is available                                       |
+| Agents           | 436 in the full catalog; 15 when only the built-in pack is available                                     |
+| Skills           | 44 built into Clawboo, listed on the **Skills** tab; 7 packs declare 45 more that their agents reference |
+| Comes from       | The Clawboo repository on GitHub, downloaded by your Clawboo server                                      |
+| Refreshed        | At most every 6 hours                                                                                    |
+| Offline fallback | The built-in pack, compiled into Clawboo                                                                 |
+| Format           | Pack schema version 1, published as JSON Schema in `catalog/schema/`                                     |
+
+The counts describe the catalog, not your fleet, and they grow as packs are added. The **Teams** and **Agents** tab counts in the Marketplace show what your server has loaded.
+
+## What the catalog contains
+
+- **Pack.** A bundle of agents, teams and skills from one source, usually one open-source repository, with one license and one provenance record (repository, pinned commit, authors).
+- **Agent.** One specialist: a card (name, role, emoji, color, description, category, tags and skills) and its texts. `IDENTITY.md` holds its full instructions, `SOUL.md` a shorter persona, and `TOOLS.md` tool notes. The 15 built-in agents also carry an `AGENTS.md`.
+- **Team.** A roster of at least two agents, plus routing: for each member, the `AGENTS.md` text that says whom it hands work to. A team can also carry a workflow description.
+- **Skill.** A named capability an agent's card lists. The 44 built-in skills appear on the **Skills** tab. A pack may declare its own skills for its agents, but may not redeclare a built-in one.
+
+When you deploy, Clawboo saves an agent's three texts on the new agent and writes its `AGENTS.md` from the team's routing. Only OpenClaw agents follow `IDENTITY.md`; on every other runtime the agent runs on `SOUL.md` plus its personality settings, and `IDENTITY.md` is kept for reference. The per-runtime table is in [What each runtime runs](/using/marketplace#what-each-runtime-runs).
+
+## Where the catalog comes from
+
+The catalog is not part of the npm package. Only the built-in pack ships inside Clawboo; your Clawboo server downloads the rest:
+
+1. The first time the dashboard asks for the catalog, the server downloads the catalog index from the Clawboo repository on GitHub, waiting up to 5 seconds.
+2. For each pack the index lists, it reads a copy saved in `~/.clawboo/catalog/`, or downloads one. It checks the pack's SHA-256 digest before reading it and skips a pack that does not match. Saved packs are keyed by their digest, so an unchanged pack is downloaded once.
+3. It merges every pack that passed with the built-in pack, which is always included, so the catalog is never empty.
+4. It keeps the result in memory for 6 hours. After that, the next request asks GitHub whether the index changed and rebuilds the catalog.
+
+A pack published upstream can therefore take up to 6 hours, or a server restart, to appear. The request carries no account or usage data; it only asks for the published files.
 
 <Note>
-The unit tests assert _lower bounds_ (`>= 100` agents, `>= 90` agency, `>= 15` clawboo, `>= 10` teams) rather than exact counts, so adding an entry does not break a test. The quality assertions are the exact ones.
+
+The 6-hour hold also applies to a download that failed. If GitHub could not be reached when the catalog was first needed, the Marketplace shows only the built-in pack (5 teams, 15 agents) until the next refresh. Restart the server (`clawboo restart`) to try again sooner.
+
 </Note>
 
----
+- The index URL is `https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json`. Set `CLAWBOO_CATALOG_INDEX_URL` to serve the same files from a mirror.
+- When the server runs from a repository checkout that has `catalog/dist/v1/`, it reads the catalog from those files instead of GitHub.
+- An index in a newer format than your Clawboo can read shows only the built-in pack. A single pack it cannot read is left out, and the rest still show.
 
-## Where the content lives
+## Packs
 
+| Pack                           | `id`                                | Entry prefix  | Agents  | Teams  | Skills | License    |
+| ------------------------------ | ----------------------------------- | ------------- | ------- | ------ | ------ | ---------- |
+| Agency Agents                  | `agency-agents`                     | `agency-`     | 116     | 5      | 0      | MIT        |
+| Engineering Agents             | `wshobson-agents`                   | `wshobson-`   | 97      | 24     | 0      | MIT        |
+| Clawboo Life and Home          | `clawboo-home`                      | `home-`       | 35      | 10     | 0      | MIT        |
+| Growth Marketing               | `coreyhaines-growth-marketing`      | `growth-`     | 26      | 5      | 9      | MIT        |
+| Research and Orchestration     | `voltagent-subagents`               | `voltagent-`  | 24      | 5      | 0      | MIT        |
+| Business and Compliance Desk   | `alirezarezvani-business-desk`      | `bizdesk-`    | 18      | 4      | 0      | MIT        |
+| Clawboo (built-in)             | `clawboo`                           | `clawboo-`    | 15      | 5      | 0      | MIT        |
+| Founder Sprint                 | `clawboo-founder-sprint`            | `sprint-`     | 14      | 4      | 0      | MIT        |
+| Creator and Founder Operations | `craighewitt-creator-ops`           | `creatorops-` | 14      | 4      | 0      | MIT        |
+| Generative Media Production    | `calesthio-generative-media`        | `genmedia-`   | 12      | 4      | 9      | MIT        |
+| Creator Studio                 | `charliehills-creator-studio`       | `creatorkit-` | 12      | 3      | 0      | MIT        |
+| Engineering Craft              | `mattpocock-craft`                  | `craft-`      | 12      | 3      | 7      | MIT        |
+| Product Craft                  | `phuryn-product-craft`              | `pmcraft-`    | 12      | 3      | 0      | MIT        |
+| Content Repurposing            | `agricidaniel-repurpose`            | `repurpose-`  | 8       | 2      | 0      | MIT        |
+| Ads and Analytics              | `google-ads-analytics`              | `adsapi-`     | 7       | 1      | 0      | Apache-2.0 |
+| Lifecycle Commerce             | `thatrebeccarae-lifecycle-commerce` | `lifecycle-`  | 6       | 2      | 7      | MIT        |
+| Storefront Catalog Ops         | `kgelster-storefront-catalog`       | `shopcat-`    | 5       | 1      | 6      | MIT        |
+| Image and Shot Direction       | `blackforestlabs-visual-direction`  | `visdir-`     | 2       | 0      | 4      | MIT        |
+| Presenter Video Studio         | `heygen-presenter-video`            | `presenter-`  | 1       | 0      | 3      | MIT        |
+| **Total**                      |                                     |               | **436** | **85** | **45** |            |
+
+The pack names are the pack filters in the Marketplace. Every agent and team id is the pack's prefix plus a slug, for example `agency-engineering-frontend-developer`, and is unique across the catalog. Every pack is at content version `1.0.0`.
+
+### Sources
+
+Clawboo Life and Home and the built-in pack are written for Clawboo. The other 17 are adapted from these repositories, each pinned to the commit it was taken from:
+
+| Pack                           | Upstream repository                                  | Pinned commit                              |
+| ------------------------------ | ---------------------------------------------------- | ------------------------------------------ |
+| Agency Agents                  | `github.com/msitarzewski/agency-agents`              | `64eee9f8e04f69b04e78e150d771a443c64720be` |
+| Engineering Agents             | `github.com/wshobson/agents`                         | `d82998e7df393c671ede2387a8435075f0b633f5` |
+| Growth Marketing               | `github.com/coreyhaines31/marketingskills`           | `b1aaa3619e747f4a836c61e03084c4a531de1262` |
+| Research and Orchestration     | `github.com/VoltAgent/awesome-claude-code-subagents` | `c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1` |
+| Business and Compliance Desk   | `github.com/alirezarezvani/claude-skills`            | `19392f7a08264ed00486a251f5b2098321771f94` |
+| Founder Sprint                 | `github.com/garrytan/gstack`                         | `394db326f2d3aaccd4804fe846b82aaa7d189dee` |
+| Creator and Founder Operations | `github.com/TheCraigHewitt/skills`                   | `fdbf39b61fbc8cb7cea67949bfb5e8fc567bbc51` |
+| Generative Media Production    | `github.com/calesthio/generative-media-skills`       | `8c85352d5d75d4dcbe58480bd138e37b9742bab1` |
+| Creator Studio                 | `github.com/charlie947/social-media-skills`          | `d2e948719eafc8ed9e2436357ad18489bb371a81` |
+| Engineering Craft              | `github.com/mattpocock/skills`                       | `6654f6b60cd9d5be8b54c6fafe44346dabeb3b76` |
+| Product Craft                  | `github.com/phuryn/pm-skills`                        | `18468a95b427e70e258b51389796367c6f684e7d` |
+| Content Repurposing            | `github.com/AgriciDaniel/claude-repurpose`           | `669187e2b69ef3c854d149657b7fb2483263dab4` |
+| Ads and Analytics              | `github.com/google/skills`                           | `0dad3f947e45a736060e524bbefa3eab692809f9` |
+| Lifecycle Commerce             | `github.com/thatrebeccarae/claude-marketing`         | `a8a63ec1341f05ec9c1e9cb52b4edeb14e3bdcba` |
+| Storefront Catalog Ops         | `github.com/kgelster/awesome-ecom-skills`            | `0b6f9e51b4a14b030ab52a2f1ff8a320bdc50070` |
+| Image and Shot Direction       | `github.com/black-forest-labs/skills`                | `8907d515b0ac270a988ec7a239add81ee13d6cba` |
+| Presenter Video Studio         | `github.com/heygen-com/skills`                       | `1bd5e4d33a028dfed3abf504c5e3dd644fb9ea8a` |
+
+Every pack ships a `NOTICE.md`, and attribution is collected in `THIRD_PARTY_NOTICES.md` (see [License and notices](/appendices/license-and-notices)). The 140 entries from Agency Agents (116) and Research and Orchestration (24) also link to the exact upstream file they came from (`origin.url`); the other packs record provenance once, at pack level. A pin records where content came from; nothing fetches the upstream repositories again. The 17 packs are marked `adaptation: "adapted"`, and their bodies have the upstream YAML frontmatter removed.
+
+## Pack format
+
+A pack is a folder of JSON files. The public specification is JSON Schema 2020-12 in the repository: `catalog/schema/pack.schema.json` describes a pack, and `catalog/schema/index.schema.json` the browse index. You can write a pack against those two files without installing anything. Inside the repository, `packages/pack-format` holds the same format in TypeScript.
+
+```text
+catalog/packs/<publisher>/<slug>/
+  pack.json            the manifest, plus the agent, team and skill listings
+  agents/<slug>.json   one agent's texts
+  teams/<slug>.json    one team's routing and workflow
+  NOTICE.md            required when provenance.repo is set
 ```
-catalog/                                 not a pnpm workspace member, not in any turbo task
-  catalog.config.json                    which packs exist, and where the index is served
-  schema/pack.schema.json                the PUBLIC pack specification (JSON Schema 2020-12)
-  schema/index.schema.json               the PUBLIC browse-index specification
-  packs/<publisher>/<slug>/
-    pack.json                            manifest + listings; each listing points at a body
-    agents/<slug>.json                   one agent document set
-    teams/<slug>.json                    one team body
-    NOTICE.md                            required when provenance.repo is set
-  dist/v1/index.json                     GENERATED, COMMITTED
-  dist/v1/packs/<publisher>/<slug>/<version>.json
-                                         GENERATED, COMMITTED
-```
-
-`catalog/` sits outside the workspace deliberately. A pull request that adds a pack is content, not code, and putting it through `turbo lint`, `turbo typecheck` and `turbo test` buys nothing. `website/` has the same posture. The CI consequence is described under [Content pull requests](#content-pull-requests).
-
-**`catalog/dist/` is committed.** That is what makes the fallback URL work with zero infrastructure: a raw `githubusercontent.com` URL against `main` serves the same bytes a CDN would, with no deploy step between merging a pack and it being installable.
-
----
-
-## The pack format
-
-`packages/pack-format` is the TypeScript home of the versioned pack shape: the v1 types, the zod validators, the version ladder, and `parseAgentPack`. It is `private: true` and never published - the artifact meant for the outside world is the **specification**, committed as JSON Schema 2020-12:
-
-| File                               | Describes                                                       |
-| ---------------------------------- | --------------------------------------------------------------- |
-| `catalog/schema/pack.schema.json`  | A whole pack: manifest, provenance, agent/team listings, bodies |
-| `catalog/schema/index.schema.json` | The merged browse index served at `/api/catalog/index`          |
-
-A third party writes a pack against those two files and installs nothing.
 
 ### The manifest
 
 ```ts
 interface PackManifest {
-  /** FIRST key, an integer, the dispatch key for the version ladder. */
-  schemaVersion: 1
-  id: SourceId
-  /** Entry-id prefix. Defaults to `id`. Keeps 'agency-agents' emitting 'agency-'. */
-  idPrefix?: string
+  schemaVersion: 1 // first key; an integer
+  id: string // the pack id, for example 'agency-agents'
+  idPrefix?: string // entry-id prefix; defaults to id
   name: string
   description: string
-  /** Exact semver of the CONTENT. Ranges ('^1.2.3', '1.x') are rejected. */
-  version: string
+  version: string // exact semver of the content; ranges such as '^1.2.3' are rejected
   provenance: Provenance
   counts: { agents: number; teams: number; skills: number }
-  /** Reviewable line in the content PR when a pack introduces a taxonomy value. */
-  newCategories?: string[]
-  /** Former id -> current id, or null if removed. NOT schema migration. */
-  renames?: Record<string, string | null>
+  newCategories?: string[] // categories this pack introduces
+  renames?: Record<string, string | null> // former entry id -> current id, or null if removed
 }
 ```
 
-`provenance` lives **once per pack** and replaces the per-entry `source` + `sourceUrl` pair the old TypeScript catalog carried: `sourceId`, `label`, `color`, `repo`, `ref` (the pinned commit), `license`, `authors`, `adaptation`, and `importedAt`. An entry whose upstream differs from the pack's can override it with an `origin` block.
-
-A pack that sets `provenance.repo` must ship a `NOTICE.md`. The SPDX id on its own is a claim with nothing behind it, so `pnpm catalog:verify` fails without the notice.
+- `provenance` is recorded once per pack: `sourceId`, `label`, `color` (`#RRGGBB`), `repo`, `ref` (the pinned commit), `license` (an SPDX id), `authors`, `adaptation` (`verbatim`, `adapted` or `original`) and `importedAt` (an ISO time). An entry from a different upstream can override it with an `origin` block (`url`, `adaptation`, `authors`).
+- `renames` is entry bookkeeping, not a schema migration. The built-in pack maps its five old team ids, such as `dev`, to the current ones, such as `clawboo-dev`.
+- `category` values are open: 19 are known (for example `engineering`, `marketing`, `research`, `support`), and a pack that uses another must list it in `newCategories`.
 
 ### Listings and bodies
 
-A **listing** is what a card renders. A **body** is what a detail sheet or a deploy needs. They are separate files because `IDENTITY.md` and `SOUL.md` are the overwhelming majority of the bytes and no card reads either one.
+A listing is what a card shows; a body is what the detail view and a deploy need. They are separate files because the agent texts are most of the bytes and no card reads them.
 
 ```ts
 interface AgentListing {
-  id: string // `${idPrefix ?? id}-${slug}`, globally unique, flat kebab-case
-  packId: SourceId
+  id: string // `${idPrefix}-${slug}`, flat kebab-case, unique across the catalog
+  packId: string
   slug: string
   name: string
   role: string
   emoji: string
   color: string // #RRGGBB
   description: string
-  category: CategoryId
+  category: string
   tags: string[]
-  skillIds: string[]
-  body: string // relative path to this entry's AgentBody document
-  origin?: EntryOrigin
+  skillIds: string[] // built-in skills or this pack's own
+  body: string // relative path to the agent's body file
+  origin?: { url?: string; adaptation?: string; authors?: string[] }
   suggestedRuntime?: string
 }
 
-interface AgentBody {
-  id: string
-  /** SOUL.md and IDENTITY.md required; TOOLS.md and AGENTS.md optional. */
-  files: Record<string, string>
-}
-```
-
-A team listing denormalises its roster, so a card renders member count and roles with no body fetch:
-
-```ts
 interface TeamListing {
   id: string
-  packId: SourceId
+  packId: string
   slug: string
   name: string
   emoji: string
   color: string
   description: string
-  category: CategoryId
+  category: string
   tags: string[]
-  members: { agentId: string; name: string; role: string }[]
+  members: { agentId: string; name: string; role: string }[] // so a card needs no body fetch
   body: string
-  origin?: EntryOrigin
+  origin?: { url?: string; adaptation?: string; authors?: string[] }
   defaultRuntime?: string
+}
+
+interface AgentBody {
+  id: string
+  files: Record<string, string> // must include non-empty SOUL.md and IDENTITY.md
 }
 
 interface TeamBody {
   id: string
   workflowNarrative?: string
-  /** Per-member AGENTS.md routing content, keyed by agent id. */
-  routing?: Record<string, string>
+  routing?: Record<string, string> // each member's AGENTS.md text, keyed by agent id
 }
-```
 
-`files` is a **map, not named fields**, so adding a fifth agent file is a no-op for every reader instead of a shape change each one has to follow.
-
-**The deploy path overlays on this map; it does not pass it through.** `AGENTS.md` and `CLAWBOO.md` are synthesized per-deploy from the team topology (`lib/teamProtocol.ts`) and never exist in a pack, and `IDENTITY.md` is rewritten with the agent's final, deduped name. `AgentFiles` and `toFilePayload` in `lib/createAgent.ts` are unchanged for exactly that reason: handing the pack's map straight to `createAgent` would drop the team protocol docs the orchestration contract depends on.
-
-### Skills
-
-An agent's `skillIds` resolve against the **merged registry**: the host's `BUILTIN_SKILLS` plus whatever the pack's own `skills` array adds. A pack may reference a builtin without redeclaring it, and must **not** redeclare one - the builtin wins the merge, so the copy would be silently discarded (`assertNoBuiltinSkillCollision`). Seven packs declare skills of their own, 45 in total; the other twelve, including both first-party packs, ship `skills: []`.
-
-pack-format cannot see the host registry, so this reference check lives where the registry does: `scripts/catalog/validate.ts` in the repo, `buildSkillRegistry` at runtime.
-
-### The two open unions
-
-`SourceId` and `CategoryId` are **open unions**, re-exported into the app as `TemplateSource` and `TemplateCategory`:
-
-```ts
-type Open<K extends string> = K | (string & {})
-type SourceId = Open<'clawboo' | 'agency-agents'>
-type CategoryId = Open<
-  | 'academic'
-  | 'content'
-  | 'design'
-  | 'devops'
-  | 'education'
-  | 'engineering'
-  | 'game-dev'
-  | 'general'
-  | 'marketing'
-  | 'ops'
-  | 'paid-media'
-  | 'product'
-  | 'project-management'
-  | 'research'
-  | 'sales'
-  | 'spatial'
-  | 'specialized'
-  | 'support'
-  | 'testing'
->
-```
-
-The listed values autocomplete; any other string is legal, because a third-party pack must be able to bring a pack id or a category without a Clawboo release.
-
-The cost is that `Record<TemplateSource, …>` and `Record<TemplateCategory, …>` are no longer exhaustive maps. Nothing indexes one directly any more. Display metadata resolves through two **total** functions in `features/marketplace/registry.ts`:
-
-- `metaFor(categoryId)` → `{ label, color }`, falling back to a title-cased label and a deterministic colour drawn from a 12-entry hex palette.
-- `sourceMetaFor(packId)` → the same for a pack.
-
-Both always return a value and the colour is always `#RRGGBB`, because the cards build alpha variants by string concatenation (`${color}18`). The predecessors of these functions were `TEMPLATE_CATEGORIES`, `SOURCE_META`, and `AGENT_DOMAIN_META`; an unguarded index on the last of those white-screened the Agents tab on an unrecognised value.
-
-The counterweight to an open taxonomy is the manifest's `newCategories`: a pack that introduces a category outside `KNOWN_CATEGORY_META` must declare it there, so a typo'd `enginering` becomes a reviewable line in the content PR rather than a silent 20th filter chip.
-
-### The version ladder
-
-Every pack declares an integer `schemaVersion` as its first key, and it is **never assumed**. `MIN_SUPPORTED_SCHEMA_VERSION` and `CURRENT_SCHEMA_VERSION` are both `1` today, and `UPGRADES` is deliberately empty - there is one version, so there is nothing to upgrade. The scaffold exists now so that adding v2 is "write the upgrade and add two entries" rather than inventing a migration story under deadline.
-
-`parseAgentPack(raw, { staleVersionPolicy })` never throws on bad input; it returns a result, so a caller can **reject the pack and keep the catalog**. That matters because onboarding renders `SelectTeamStep` with `allowStartFromScratch={false}`: an empty catalog bricks first-run, so one malformed third-party pack must not be able to empty it. Its six reject paths:
-
-| Code                                | Behaviour                                                                           |
-| ----------------------------------- | ----------------------------------------------------------------------------------- |
-| `missing-schema-version`            | Hard reject. Never defaults to 1.                                                   |
-| `schema-version-not-an-integer`     | Hard reject (`"1"` and `1.0.0` are the two spellings people reach for).             |
-| `schema-version-too-new`            | Hard reject, names the supported range, says to upgrade Clawboo.                    |
-| `schema-version-too-old`            | Hard reject, says to re-publish the pack at the current version.                    |
-| `invalid-at-declared-version`       | Validation runs at the DECLARED version first, so issues point at what was written. |
-| `upgrade-produced-invalid-document` | Self-check after the chain: a corrupt pack becomes a caught error, not an install.  |
-
-`staleVersionPolicy` is `'allow'` at host runtime, `'warn'` at a future publish endpoint, and `'error'` in the repo gate. **It defaults to `'allow'`**, which means a call site that forgets to pass it silently permits stale content rather than failing loudly.
-
----
-
-## Serving, fetching, verifying
-
-```mermaid
-flowchart LR
-  P["catalog/packs/**<br/>(hand-edited JSON)"] -->|"pnpm catalog:build"| D["catalog/dist/v1/**<br/>(canonical bytes + integrity)"]
-  P -->|"pnpm catalog:build"| S["compiled seed<br/>(~56 KB, clawboo pack)"]
-  D -->|"fetched, digest-checked"| API["/api/catalog/*<br/>(server flattens packs to entries)"]
-  S -->|"merged unconditionally"| API
-  API -->|"one request"| G["Grids, search, filters"]
-  API -->|"on open / deploy"| B["Detail sheet · team deploy"]
-```
-
-### Three tiers, in order
-
-`apps/web/server/lib/catalogIndex.ts` resolves the index:
-
-1. **The local filesystem.** If `catalog/dist/v1/` exists above the server module, it is used verbatim. A repo checkout, a fresh branch, and `pnpm dev` therefore work with no network - including on a branch whose catalog has never been pushed anywhere.
-2. **`CLAWBOO_CATALOG_INDEX_URL`.** An operator override.
-3. **The default URL**, a raw `githubusercontent.com` path against `main`.
-
-<Note>
-`CLAWBOO_CATALOG_INDEX_URL` is **not a feature flag** - Clawboo has none. It is an *endpoint override*, the same class of setting as `CLAWBOO_ALLOWED_ORIGINS`: both tiers serve the identical generated file, so there is no behavioural fork, only a different host.
-</Note>
-
-The fetch is timeout-bounded at 5 s, sends `If-None-Match`, caches for 6 hours in memory, and **never throws**. Offline, firewalled, 404, corrupt bytes - every one of them returns the seed.
-
-### The index is mutable, each row is immutable
-
-`index.json` is rewritten on every build. Each `packs[]` row inside it names one immutable bundle by version and carries `integrity`, a `sha256-<base64>` value computed over that bundle's exact bytes.
-
-**The integrity value is the trust anchor, not the URL.** The server recomputes the digest over the bytes it received and compares it **before `JSON.parse` ever sees them**. Bytes that fail are discarded unparsed. Verified bundles are cached on disk at `~/.clawboo/catalog/<hash>.json`, keyed by integrity - a sha-pinned raw URL still only advertises `max-age=300`, so this cache, not the CDN, is what makes a second launch free.
-
-### Hashing rule
-
-Bundles and the index are emitted as **canonical bytes**: keys sorted recursively, no insignificant whitespace, LF, and no trailing newline. Those exact bytes are written, served, and hashed.
-
-This is deliberately different from the retired ingest manifest, which hashed a _Prettier-canonical_ form. It had to: its inputs were TypeScript files a pre-commit hook restyles. A pack bundle has no formatter round-trip - it is generated, committed, fetched, and verified by a client that has never seen Prettier. `.prettierignore` already matches `catalog/dist/` through its `**/dist/` entry, and that exclusion is load-bearing rather than incidental.
-
-Pack **source** under `catalog/packs/**` is the opposite: hand-edited, reviewed in a diff, and therefore Prettier-formatted like any other JSON in the repo. Only `dist/` is canonical.
-
-### Compatibility
-
-An index whose top-level `schemaVersion` is newer than the build reads shows the **seed only**, plus one quiet log line. A single **pack** the build cannot read drops out and the rest of the catalog renders. That lets a v2 pack shape and v1 packs coexist in one index.
-
-### The three routes
-
-| Route                         | Answers with                                               |
-| ----------------------------- | ---------------------------------------------------------- |
-| `GET /api/catalog/index`      | Browse rows for the seed union every pack that verified    |
-| `GET /api/catalog/agents/:id` | One agent's `files` map, plus `sourceUrl` from the listing |
-| `GET /api/catalog/teams/:id`  | One team's `workflowNarrative` and `routing`               |
-
-All three are same-origin, so the existing origin guard covers them unchanged. The pack bundle stays the distribution and integrity unit; the server flattens it to entries so the browser needs no integrity logic, no second origin, and no knowledge that packs exist.
-
----
-
-## The seed
-
-`SelectTeamStep` renders with `allowStartFromScratch={false}`. An empty catalog is therefore not a degraded browse experience, it is a first run with nothing to click. So the builtin pack ships in the binary.
-
-`scripts/catalog/build-seed.ts` generates it into two places, from one pass over the same bytes:
-
-| File                                                      | Consumer           |
-| --------------------------------------------------------- | ------------------ |
-| `apps/web/src/features/marketplace/seed/{index,packs}.ts` | the browser SPA    |
-| `apps/web/server/lib/catalogSeed.ts`                      | the Express server |
-
-Two copies because `apps/web/server` and `apps/web/src` are separate build targets and an eslint boundary forbids either importing the other. `pnpm catalog:verify` fails if either drifts from the pack.
-
-Both are **generated and committed**. Never edit them by hand.
-
-The payload is one JSON string constant rather than an object literal: it is agent prose, so a literal is a file Prettier reflows on every regeneration and a reviewer cannot read, while a string constant diffs as a single line and V8 parses it faster.
-
----
-
-## Resolving a team into deployable agents
-
-`resolveTeamAgents(index, profile, routing?)` (in `teamCatalog.ts`) is the single consumer-facing resolver. For a first-party team it walks `agentIds`, fetches each member's body, and returns a `ResolvedAgent[]` carrying the merged `files` map - with the team's `routing[agentId]` already overlaid onto `AGENTS.md`. A dangling id is silently skipped; `teamCoverage.test.ts` guards against that. The resolver also handles two legacy input shapes (inline `agents`, and the deprecated `TeamProfile` with shared `skills[]`).
-
-```ts
-interface ResolvedAgent {
+interface PackSkill {
   id: string
   name: string
-  role: string
-  emoji?: string
-  color?: string
-  files: Record<string, string>
+  description: string
+  category: 'code' | 'web' | 'data' | 'comm' | 'file' | 'other'
+  tags: string[]
 }
 ```
 
-The member bodies are fetched through one `Promise.all` **before** the deploy step begins. That is deliberate: doing it inside the per-agent creation loop would turn a 12-agent deploy into 12 serial fetches with a partial-failure mode halfway through creating a team.
+- `files` is a map, so a pack can carry another agent file without a format change.
+- At deploy, Clawboo writes `SOUL.md` with the default personality added, `IDENTITY.md` with the agent's final name (a number is added when the name is taken), `TOOLS.md`, an `AGENTS.md` built from the team's routing and Clawboo's team instructions, and a `CLAWBOO.md` help file.
+- `suggestedRuntime` and `defaultRuntime` are optional hints the team dialog uses to preselect a runtime. No pack sets them.
 
-The agency workflow teams use hub-and-spoke `routing`: the first member is the leader, every other member routes work to `@<Leader>`, and the leader's `AGENTS.md` lists all members. This is what produces the dependency edges visible in the Ghost Graph after a team deploys. Two gates keep it honest: every team names at least two members, and every member has routing.
+### Versions
 
----
+`schemaVersion` is required, must be an integer, and is never assumed. Version 1 is the only one, so this Clawboo reads exactly version 1. A pack that fails is rejected on its own, and the rest of the catalog still loads.
 
-## ID prefix convention
+| Rejection                           | Cause                                                           |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `missing-schema-version`            | No `schemaVersion`                                              |
+| `schema-version-not-an-integer`     | A value such as `"1"` or `1.0.0`                                |
+| `schema-version-too-new`            | Newer than this Clawboo reads; upgrade Clawboo                  |
+| `schema-version-too-old`            | Older than this Clawboo reads; republish the pack               |
+| `invalid-at-declared-version`       | The pack does not validate against its own version              |
+| `upgrade-produced-invalid-document` | Upgrading the pack to the current version produced invalid data |
 
-Every entry id is globally unique across packs, and its prefix is the pack's `idPrefix ?? id`. The pack format states it as `id === \`${prefix}-${slug}\``; `validate.ts` adds the cross-pack half - no two packs may emit the same prefix, and no two packs may claim the same id.
+## Catalog routes
 
-| Pack              | Prefix     | Example                                 |
-| ----------------- | ---------- | --------------------------------------- |
-| agency-agents     | `agency-`  | `agency-engineering-frontend-developer` |
-| clawboo built-ins | `clawboo-` | `clawboo-dev-code-reviewer-boo`         |
-| founder sprint    | `sprint-`  | `sprint-founder-partner`                |
+The dashboard reads the catalog from its own server:
 
-<Note>
-The five builtin team ids gained their pack prefix in this move: `dev` became `clawboo-dev`, `marketing` became `clawboo-marketing`, and so on. The old ids are recorded in the clawboo pack's `renames` map, which is entry bookkeeping and not schema migration. A team row stored before the rename keeps its old `templateId`; nothing reads it for behaviour.
-</Note>
+| Route                         | Returns                                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `GET /api/catalog/index`      | `{ schemaVersion, counts, agents, teams, packs }`: browse rows for the built-in pack and every pack that verified |
+| `GET /api/catalog/agents/:id` | `{ id, files, sourceUrl? }`, or 404 `{ "error": "Unknown catalog agent" }`                                        |
+| `GET /api/catalog/teams/:id`  | `{ id, workflowNarrative?, routing?, sourceUrl? }`, or 404 `{ "error": "Unknown catalog team" }`                  |
 
-Agent _names_ are unique across the whole catalog, which is what lets an `@mention` in a team's routing resolve to exactly one agent.
+`sourceUrl` is the entry's `origin.url`, when it has one. Full shapes and examples are in the [Catalog API](/reference/rest-api/catalog).
 
----
+## For contributors
 
-## The `IDENTITY.md` invariant
+<AccordionGroup>
 
-**Every entry's `IDENTITY.md` is that agent's complete instruction body**, never a condensed summary and never an excerpt. What the agent-detail modal renders is exactly what is written on deploy, so you read the whole spec before you commit to it.
+<Accordion title="Repository layout">
 
-Adapted, not verbatim. Every entry drawn from an upstream repository was pruned, renamed, re-described, and re-formatted; the upstream YAML frontmatter is stripped, because the listing already stores `name`, `description`, `emoji`, and `color` as structured fields and feeding them back in as prompt text was pure waste. `SOUL.md` is the shorter distilled version.
-
-`scripts/catalog/validate.ts` holds one rule per defect the old ingest pass produced: no body opens with `---`, no description ends in an ellipsis, no body exceeds 50,000 characters, no entry repeats a tag. It also scans every string in every listing and body against a denylist of competing registries, competing installers, and chat invites, and runs the full prompt-injection evaluation over each field a deploy would write.
-
----
-
-## Sources
-
-Attribution lives in `THIRD_PARTY_NOTICES.md` and in each pack's `NOTICE.md`.
-
-| Pack                         | `id`                                | Count                        | Upstream repo                                        | Pinned commit                              | License    |
-| ---------------------------- | ----------------------------------- | ---------------------------- | ---------------------------------------------------- | ------------------------------------------ | ---------- |
-| agency-agents                | `agency-agents`                     | 116 agents, 5 workflow teams | `github.com/msitarzewski/agency-agents`              | `64eee9f8e04f69b04e78e150d771a443c64720be` | MIT        |
-| wshobson-agents              | `wshobson-agents`                   | 97 agents, 24 teams          | `github.com/wshobson/agents`                         | `d82998e7df393c671ede2387a8435075f0b633f5` | MIT        |
-| clawboo life and home        | `clawboo-home`                      | 35 agents, 10 teams          | first-party                                          | n/a                                        | MIT        |
-| growth marketing             | `coreyhaines-growth-marketing`      | 26 agents, 5 teams, 9 skills | `github.com/coreyhaines31/marketingskills`           | `b1aaa3619e747f4a836c61e03084c4a531de1262` | MIT        |
-| voltagent subagents          | `voltagent-subagents`               | 24 agents, 5 teams           | `github.com/VoltAgent/awesome-claude-code-subagents` | `c9e51ec0b3d43f5dcdd0b558a6cd28ba6ada97c1` | MIT        |
-| business and compliance desk | `alirezarezvani-business-desk`      | 18 agents, 4 teams           | `github.com/alirezarezvani/claude-skills`            | `19392f7a08264ed00486a251f5b2098321771f94` | MIT        |
-| clawboo built-ins            | `clawboo`                           | 15 agents, 5 teams           | first-party                                          | n/a                                        | MIT        |
-| founder sprint               | `clawboo-founder-sprint`            | 14 agents, 4 teams           | `github.com/garrytan/gstack`                         | `394db326f2d3aaccd4804fe846b82aaa7d189dee` | MIT        |
-| creator and founder ops      | `craighewitt-creator-ops`           | 14 agents, 4 teams           | `github.com/TheCraigHewitt/skills`                   | `fdbf39b61fbc8cb7cea67949bfb5e8fc567bbc51` | MIT        |
-| generative media production  | `calesthio-generative-media`        | 12 agents, 4 teams, 9 skills | `github.com/calesthio/generative-media-skills`       | `8c85352d5d75d4dcbe58480bd138e37b9742bab1` | MIT        |
-| creator studio               | `charliehills-creator-studio`       | 12 agents, 3 teams           | `github.com/charlie947/social-media-skills`          | `d2e948719eafc8ed9e2436357ad18489bb371a81` | MIT        |
-| engineering craft            | `mattpocock-craft`                  | 12 agents, 3 teams, 7 skills | `github.com/mattpocock/skills`                       | `6654f6b60cd9d5be8b54c6fafe44346dabeb3b76` | MIT        |
-| product craft                | `phuryn-product-craft`              | 12 agents, 3 teams           | `github.com/phuryn/pm-skills`                        | `18468a95b427e70e258b51389796367c6f684e7d` | MIT        |
-| content repurposing          | `agricidaniel-repurpose`            | 8 agents, 2 teams            | `github.com/AgriciDaniel/claude-repurpose`           | `669187e2b69ef3c854d149657b7fb2483263dab4` | MIT        |
-| ads and analytics            | `google-ads-analytics`              | 7 agents, 1 team             | `github.com/google/skills`                           | `0dad3f947e45a736060e524bbefa3eab692809f9` | Apache-2.0 |
-| lifecycle commerce           | `thatrebeccarae-lifecycle-commerce` | 6 agents, 2 teams, 7 skills  | `github.com/thatrebeccarae/claude-marketing`         | `a8a63ec1341f05ec9c1e9cb52b4edeb14e3bdcba` | MIT        |
-| storefront catalog ops       | `kgelster-storefront-catalog`       | 5 agents, 1 team, 6 skills   | `github.com/kgelster/awesome-ecom-skills`            | `0b6f9e51b4a14b030ab52a2f1ff8a320bdc50070` | MIT        |
-| image and shot direction     | `blackforestlabs-visual-direction`  | 2 agents, 4 skills, no teams | `github.com/black-forest-labs/skills`                | `8907d515b0ac270a988ec7a239add81ee13d6cba` | MIT        |
-| presenter video studio       | `heygen-presenter-video`            | 1 agent, 3 skills, no teams  | `github.com/heygen-com/skills`                       | `1bd5e4d33a028dfed3abf504c5e3dd644fb9ea8a` | MIT        |
-
-Every pack records its upstream repository and pinned commit in its own `provenance` block. Most adapted entries additionally carry an `origin.url`: a GitHub blob URL at that pinned commit, so the entry can be compared against what it was derived from. Entries written from scratch carry `origin.adaptation: "original"` instead, and the `wshobson-agents` pack records provenance at the pack level only. The pin is historical provenance, not an automated dependency: nothing re-fetches it.
-
----
-
-## Content pull requests
-
-A pull request that touches only `catalog/` skips the full CI matrix and runs `.github/workflows/catalog-ci.yml` instead: roughly two minutes rather than roughly fifty. The `filter` job in `ci.yml` makes that decision, with one deliberate carve-out - a change under `catalog/packs/clawboo/**` alters bytes that ship in the tarball, so it is a product change and gets the full matrix.
-
-<Warning>
-`catalog-ci.yml` must **never** be a branch-protection required check. It is paths-filtered, so on a PR that touches no catalog file it never reports, and GitHub treats a required check that never reports as pending forever. The `catalog-verify` job in `ci.yml` runs the same command on every code PR; that is the one to require.
-</Warning>
-
-### Adding or editing a pack
-
-```bash
-# edit catalog/packs/<publisher>/<slug>/**
-pnpm catalog:build     # regenerate catalog/dist and the compiled seed
-pnpm catalog:verify    # every content rule, then "is dist current?"
+```text
+catalog/
+  catalog.config.json      which packs exist, and which one is the built-in seed
+  schema/                  pack.schema.json and index.schema.json (the public spec)
+  packs/<publisher>/<slug>/
+  dist/v1/index.json       generated and committed: the browse index
+  dist/v1/packs/<publisher>/<slug>/<version>.json   generated and committed: one bundle per pack
 ```
 
-Commit the regenerated `catalog/dist/**` and, if you touched the seed pack, the regenerated seed modules. `catalog:verify` fails when they are not byte-for-byte what a rebuild would write, which is what keeps committed generated output honest.
+`catalog/` is not a pnpm workspace member and is in no turbo task: a pack is content, not code. `catalog/dist/` is committed, which is what lets the default index URL (a raw GitHub URL on `main`) serve the catalog with no deploy step.
 
-### Guards
+</Accordion>
 
-- `scripts/catalog/validate.ts` - schema, licence and NOTICE, referential integrity, quality rules, taxonomy declarations, denylist, injection scan.
-- `scripts/catalog/budget.mjs` - the seed under 128 KB, the index under 512 KB.
-- `catalogDist.test.ts` - the committed index matches the packs, and each bundle's bytes hash to the integrity the index publishes.
-- `scripts/check-entry-chunk.mjs` - post-build, by value: a seed body must appear in an emitted chunk, and a non-seed pack body must appear in none.
-- `entryImportGraph.test.ts` - the seed and `catalogClient.ts` are the only two catalog data seams in the SPA.
+<Accordion title="Add or change a pack">
 
----
+Edit the files under `catalog/packs/<publisher>/<slug>/`, then run:
 
-## See also
+```bash
+pnpm catalog:build
+pnpm catalog:verify
+```
 
-- [Marketplace (UI: browse & deploy)](/using/marketplace)
-- [Teams API](/reference/rest-api/teams)
-- [Agents API](/reference/rest-api/agents)
-- [The agent model](/concepts/agent-model)
-- [Glossary](/appendices/glossary)
+`catalog:build` regenerates `catalog/dist/` and the compiled built-in pack. `catalog:verify` runs every content rule, then checks that `catalog/dist/` and the compiled built-in pack are byte-for-byte what a rebuild would write. Commit the regenerated files with your change.
+
+</Accordion>
+
+<Accordion title="What catalog:verify checks">
+
+- The pack validates against the schema (strictly, with stale versions treated as errors), and every listing's body file exists and validates. A body file no listing points to is an error.
+- A pack with `provenance.repo` ships a non-empty `NOTICE.md`.
+- Every `skillIds` entry resolves to a built-in skill or one of the pack's own, and a pack does not redeclare a built-in skill.
+- A category the dashboard has no label for is listed in `newCategories`, and `newCategories` lists only new, used categories.
+- No two packs emit the same id prefix, and no two packs claim the same id.
+- Descriptions are at least 20 characters and do not end in `...`. An `IDENTITY.md` does not open with YAML frontmatter (`---`) and is at most 50,000 characters. No entry repeats a tag.
+- A team has at least two members, routes only to its members, and has routing for every member.
+- No string names a competing registry, installer or chat invite.
+- No text trips the prompt-injection scan, except findings reviewed in `scripts/catalog/injection-allowlist.ts`.
+
+`node scripts/catalog/budget.mjs` separately keeps the compiled built-in pack under 128 KB and the index under 512 KB.
+
+</Accordion>
+
+<Accordion title="Digests and canonical bytes">
+
+Each pack row in `index.json` names one bundle by version and carries `integrity`, a `sha256-<base64>` digest of the bundle's exact bytes. The server recomputes the digest and compares it before parsing the bundle, so bytes that do not match are never parsed.
+
+Bundles and the index are written as canonical bytes: object keys sorted recursively, no insignificant whitespace, LF line endings and no trailing newline. Those exact bytes are written, served and hashed, which is why Prettier never touches `catalog/dist/` (its `**/dist/` ignore entry). Pack sources under `catalog/packs/` are ordinary Prettier-formatted JSON.
+
+</Accordion>
+
+<Accordion title="The built-in pack">
+
+The built-in pack (`catalog/packs/clawboo/builtin`) is compiled into Clawboo, because first-run onboarding offers no start-from-scratch path and needs teams to pick from. `pnpm catalog:build` generates it into two files, one per build target, and `catalog:verify` fails if either drifts from the pack:
+
+| Generated file                            | Used by       |
+| ----------------------------------------- | ------------- |
+| `apps/web/src/features/marketplace/seed/` | The dashboard |
+| `apps/web/server/lib/catalogSeed.ts`      | The server    |
+
+Never edit them by hand.
+
+</Accordion>
+
+<Accordion title="CI for content pull requests">
+
+A pull request that changes only `catalog/` skips the full CI matrix and runs `.github/workflows/catalog-ci.yml`: the content rules, the injection scan and the size budgets, offline. A change under `catalog/packs/clawboo/` gets the full matrix, because that folder holds the built-in pack, which ships inside Clawboo.
+
+Never make `catalog-ci.yml` a required check. It is path-filtered, so it never reports on other pull requests, and GitHub would keep them waiting. The `catalog-verify` job in `ci.yml` runs the same checks on every code pull request; require that one. Publishing a release runs `pnpm catalog:verify` too.
+
+</Accordion>
+
+</AccordionGroup>
+
+## Related
+
+- [Browse and deploy from the Marketplace](/using/marketplace): search, details, deploy, and what each runtime runs.
+- [Catalog API](/reference/rest-api/catalog): the three catalog routes in full.
+- [License and notices](/appendices/license-and-notices): licenses and attribution for the adapted packs.
+- [Agents](/using/agents): the agent files a deployed agent gets, per runtime.
+- [Configuration](/reference/configuration): `~/.clawboo/catalog/` and the other files Clawboo keeps.

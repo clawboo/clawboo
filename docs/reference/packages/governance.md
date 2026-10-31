@@ -1,157 +1,174 @@
 ---
 title: '@clawboo/governance'
-description: 'Pure verification (builder≠judge) and governance primitives: verdict schemas, severity policy, budget cent-math, caps, and circuit-breaker reducer.'
+sidebarTitle: 'governance'
+description: 'The pure decision rules behind verification, budgets, delegation caps, circuit breakers and connector grants, and where each one is enforced.'
+keywords:
+  [
+    '@clawboo/governance',
+    'governance',
+    'decideGrant',
+    'grants',
+    'connector grants',
+    'budget math',
+    'warn',
+    'hard cap',
+    'circuit breaker',
+    'BREAKER_DEFAULTS',
+    'verification verdict',
+    'isVerdictPromotable',
+    'lethal trifecta',
+    'caps',
+  ]
 ---
 
-- **Version** `0.1.0`
-- **Purity** pure zero-dep (browser-safe; only external dep is `zod`, no `node:*` / DB / network)
-- **Purpose** The shared typed vocabulary for verification (builder≠judge) and governance (budgets, caps, circuit breakers): pure functions + zod schemas the board, server libs, and SPA all consume identically.
-- **Workspace deps** none
-- **External deps** `zod` `^3.25.0`
+`@clawboo/governance` holds Clawboo's decision rules as pure functions and zod schemas, with no database, network
+or `node:*` access. The board, the server and the SPA all import the same rules, so a badge on screen and the check
+that enforces it cannot disagree. The state the rules decide over lives in [@clawboo/db](/reference/packages/db),
+and the server applies the decisions.
 
-DB-bound concerns (tables, atomic SQL, audit inserts) live in `@clawboo/db`; runtime I/O (spawning the verify command, the review worktree) lives server-side. This package is purely the decision layer.
+Use this page when you change how Clawboo decides whether work passed verification, spend is over a budget, a
+delegation goes too deep, a run is looping, or an agent may call a connector tool.
 
-The barrel re-exports four module groups: `./verify`, `./budget`, `./caps`, `./breaker`. The package exposes a single `.` entry point (no subpath exports).
+## What it decides
 
-## Public API
+| Group (`src/`) | Decides                                                                | Main entry points                                                                                                                                     | Applied by                                                         |
+| -------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `verify/`      | whether a task's work passed, judged by someone other than its builder | `verificationStatusFor`, `classifySeverity`, `nextCycleDecision`, `isVerdictPromotable`, `shouldRunCritic`, `parseVerifyCommand`, the verdict schemas | the server's verification gate and `updateStatus` in `@clawboo/db` |
+| `budget/`      | a budget's status after spend                                          | `statusForSpend`, `budgetStatusAfter`, `softThresholdCents`, the cent conversions                                                                     | `recordSpend` in `@clawboo/db`                                     |
+| `caps/`        | how deep and wide delegation may go, and a per-run cost ceiling        | `checkDepthCap`, `checkFanoutCap`, `checkCostCap`                                                                                                     | the board's capped create path, the team engine, the task runner   |
+| `breaker/`     | when a run is looping or burning tokens                                | `createBreakerState`, `stepBreaker`, `toolSignature`, `breakerConfigSchema`                                                                           | the task runner                                                    |
+| `grants/`      | whether an agent may call a connector tool                             | `decideGrant`, `requiredMode`, `isLethalTrifecta`, `isToolInScope`, `canonicalizeSpec`                                                                | the tool broker's grant gate in `@clawboo/db`                      |
 
-### Functions
+## Budgets: warn is the default
 
-**verify**
+The budget functions compute a status from a limit and the spend so far: `active`, `soft_capped` at the soft
+threshold (`SOFT_CAP_PERCENT` of the limit), and `paused` at the limit. They do not decide whether `paused` stops
+anything. That depends on the budget's mode, stored by `@clawboo/db`:
 
-| Signature                                                                                  | Contract                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `classifySeverity(finding: Finding): 'block' \| 'warn'`                                    | Rationed blocking: `block` only for `security`/`crash`/`data_loss`/`wrong_algorithm`/`missing_ac`; everything else is `warn` (debt).                                                                                                                                                                                                                            |
-| `blockingFindings(verdict: CriticVerdict): Finding[]`                                      | The verdict's findings filtered to blocking severities.                                                                                                                                                                                                                                                                                                         |
-| `isBlocking(verdict: CriticVerdict): boolean`                                              | True when the verdict has ≥1 blocking finding.                                                                                                                                                                                                                                                                                                                  |
-| `verificationStatusFor(det: DeterministicResult, critic: CriticVerdict): 'pass' \| 'fail'` | Compose one attempt's status: a red gate is always `fail`; a green gate + a blocking critic finding is `fail`; otherwise `pass`. Never produces `completed_with_debt`.                                                                                                                                                                                          |
-| `nextCycleDecision({ attempt, maxCycles }: CycleInput): 'retry' \| 'mark_debt'`            | After a failing attempt, `mark_debt` once `attempt >= max(1, maxCycles)`, else `retry`. The retry budget is bounded; the evaluator is permanent.                                                                                                                                                                                                                |
-| `isVerdictPromotable(verdict: PromotableVerdict \| null \| undefined): boolean`            | The `→done` gate rule the board state machine enforces, and the check the approval reaper uses to leave a verification-held task `blocked`: `pass` → yes; `completed_with_debt` → only if the latest attempt's deterministic gate passed; anything else / missing → no. The worktree completion path no longer calls it, since it promotes only a clean `pass`. |
-| `parseVerifyCommand(initShText: string): string \| null`                                   | Parse `VERIFY_CMD='…'` (optional `export `) out of an `init.sh` body, reversing bash single-quote escaping. Returns `null` when absent or the placeholder.                                                                                                                                                                                                      |
-| `parseVerifyCommandFromVerificationMd(md: string): string \| null`                         | Parse the `` - Verify: `<cmd>` `` line out of a `VERIFICATION.md` body. `null` when absent or the placeholder.                                                                                                                                                                                                                                                  |
-| `shouldRunCritic(input: CriticTriggerInput): boolean`                                      | Run the read-only critic when `riskFlag`, `hasParent` (delegated work), or the diff exceeds the file/line thresholds (default 5 files / 300 lines).                                                                                                                                                                                                             |
+- **`warn`, the default.** Spend is tracked and warnings fire at the soft threshold and at 100%. A warn budget is
+  stored as `soft_capped` even past its limit, so it never reads `paused` and never stops work.
+- **`cap`, opt-in.** The budget pauses at 100%, and the task runner refuses to start work for a paused scope
+  (`budget_paused`).
 
-**budget**
+Spend is kept in micro-cents (`MICRO_CENTS_PER_CENT`), so sub-cent turns still add up. Which run paths a hard cap
+can actually stop, and when, is explained in [Budgets and guardrails](/concepts/governance); the user's view is
+[Budgets and spend](/using/budgets-and-spend).
 
-| Signature                                                              | Contract                                                                                                                                                                                                    |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `usdToCents(usd: number): number`                                      | USD → non-negative ROUNDED cents (display + the integer-cent per-node cap). NOT for the ledger: sub-half-cent rounds to 0.                                                                                  |
-| `usdToFractionalCents(usd: number): number`                            | USD → fractional cents (un-rounded) for the budget ledger, so sub-cent deltas accumulate losslessly.                                                                                                        |
-| `centsToUsd(cents: number): number`                                    | `cents / 100`.                                                                                                                                                                                              |
-| `softThresholdCents(limitCents: number): number`                       | `floor(limitCents * 80 / 100)`, same integer arithmetic as the SQL `CASE`.                                                                                                                                  |
-| `statusForSpend(limitCents: number, spentCents: number): BudgetStatus` | `paused` at/over limit, `soft_capped` at/over the 80% threshold, `active` below. `limitCents <= 0` ⇒ `active` (uncapped).                                                                                   |
-| `budgetStatusAfter(input: BudgetStatusInput): BudgetStatusResult`      | Apply a spend delta; reports the resulting status, the `crossed` threshold (`'soft'`/`'hard'`/`'none'`, non-`none` only on the tipping event), and `newSpentCents`. Mirrors the DB `recordSpend` authority. |
+## Caps
 
-**caps**
+| Rule             | Default                                                                         | Where it applies                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `checkDepthCap`  | `DEFAULT_MAX_DEPTH` = 2                                                         | refuses a delegation once the ancestor depth reaches the limit; the board, the team engine and the task runner share this one constant |
+| `checkFanoutCap` | `DEFAULT_MAX_CHILDREN` = 24                                                     | live children of one parent on the board's capped create path; the team engine applies it per turn with its own, smaller limit         |
+| root-task rate   | `DEFAULT_MAX_ROOT_CREATES` = 30 per `DEFAULT_ROOT_CREATE_WINDOW_MS` (5 minutes) | new tasks with no parent, so a looping agent trips quickly and the limit clears itself                                                 |
+| `checkCostCap`   | none                                                                            | a per-run cent ceiling the task runner applies only when the run input sets `maxNodeCents`                                             |
 
-| Signature                                          | Contract                                                                                                            |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `checkDepthCap({ depth, max }): CapResult`         | Reject (`ok: false`) once existing ancestor `depth >= max` (the new child would be `depth+1`).                      |
-| `checkFanoutCap({ siblingCount, max }): CapResult` | Reject once a parent already has `siblingCount >= max` children.                                                    |
-| `checkCostCap({ nodeCents, max }): CapResult`      | Reject once a single run's accrued `nodeCents >= max`; `>=` matches the budget hard cap's exact-boundary semantics. |
+The caps are enforced in code below the model, whatever the prompt asks for. The full list of numbers is on
+[Limits and defaults](/reference/limits-and-defaults).
 
-**breaker**
+## Circuit breakers
 
-| Signature                                                                      | Contract                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createBreakerState(config?: Partial<BreakerConfig>): BreakerState`            | Fresh run-local breaker accumulator, merging overrides over `BREAKER_DEFAULTS`.                                                                                                                                             |
-| `stepBreaker(state: BreakerState, signal: BreakerSignal): BreakerTrip \| null` | Deterministic step function (mutates `state`, no I/O, no clock read) over a typed signal; returns the FIRST trip seen, or `null`.                                                                                           |
-| `toolSignature(name: string, input: unknown): string`                          | Stable identity `<name>:<fnv1a-hash-of-JSON(input)>`, computed from typed fields, never scraped prose. Falls back to name-only on unserializable input.                                                                     |
-| `isPolicyDenialCode(code: string \| null \| undefined): boolean`               | True when `code` (case-insensitive) is in the typed denial allowlist (`policy_denied`/`permission_denied`/`denied`/`forbidden`/`unauthorized`/`eperm`/`eacces`). Keyed on the RuntimeEvent `error.code`, not message prose. |
+`createBreakerState(config)` makes a run-local accumulator, and `stepBreaker(state, signal)` feeds it one signal
+taken from a typed `RuntimeEvent` (a tool call, a tool result, a cost, a policy denial) and returns the first trip
+it sees. A trip names its reason: `iteration-cap`, `repeat-failure`, `no-progress`, `token-velocity` or
+`repeat-policy-denied`. `toolSignature(name, input)` identifies a repeated call from its name and a hash of its
+input, never from prose.
 
-### Types & interfaces
+`BREAKER_DEFAULTS` holds the thresholds, and `POST /api/runtimes/<id>/run` accepts a partial `breakerConfig` that
+`breakerConfigSchema` validates. Breakers run only on the task runner path, not in team chat.
 
-**verify**
+## Verification
 
-| Name                  | Shape / contract                                                                                                                                      |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Severity`            | `z.infer` of `severitySchema`: `'security' \| 'crash' \| 'data_loss' \| 'wrong_algorithm' \| 'missing_ac' \| 'style' \| 'perf' \| 'other'`.           |
-| `Finding`             | `{ severity, title, body, filePath \| null, startLine \| null, confidence }`, one critic finding; non-`severity`/`title` fields default.              |
-| `DeterministicResult` | `{ command, exitCode \| null, passed, stdoutTail, stderrTail, durationMs, timedOut }`, the gate's exit-code truth + scrubbed tails.                   |
-| `CriticOutput`        | `{ findings: Finding[] }`, exactly what a reviewer model emits.                                                                                       |
-| `CriticVerdict`       | `{ ran, findings, reviewerRuntime \| null, reviewerModel \| null, reviewedSha \| null }`, stored critic verdict; `ran: false` ⇒ critic not triggered. |
-| `StructuredError`     | `{ what, why, howToFix }`, an actionable failure routed back, not "FAIL".                                                                             |
-| `VerificationStatus`  | `'pass' \| 'fail' \| 'completed_with_debt'`.                                                                                                          |
-| `VerificationAttempt` | `{ attempt, at, deterministic, critic, status, structuredError \| null }`, one verify-fix attempt.                                                    |
-| `DebtNote`            | `{ criterion, severity, justification }`, a signed-off gap carried at cycle exhaustion.                                                               |
-| `VerificationResult`  | `{ status, attempts: VerificationAttempt[] (min 1), debtNotes, updatedAt }`, the full record stored on a task in one TEXT cell.                       |
-| `CycleInput`          | `{ attempt: number; maxCycles: number }`, input to `nextCycleDecision`.                                                                               |
-| `DiffStat`            | `{ filesChanged, insertions, deletions }`.                                                                                                            |
-| `CriticTriggerInput`  | `{ diffStat, hasParent, riskFlag?, threshold?: { files?; lines? } }`.                                                                                 |
+These rules judge one attempt at a task and decide what happens next. Which runs are verified at all (only
+task-runner runs in a git worktree with changes to check) is explained in [How work is checked](/concepts/verification).
 
-**budget**
+- **One attempt.** `verificationStatusFor(deterministic, critic)` returns `fail` when the verify command failed,
+  `fail` when it passed but the critic found a blocking problem, and `pass` otherwise.
+- **Blocking findings.** `classifySeverity` blocks on `security`, `crash`, `data_loss`, `wrong_algorithm` and
+  `missing_ac`; every other finding is recorded as debt.
+- **Retries.** `nextCycleDecision` retries a failed attempt until the attempts run out, then marks the work as
+  completed with debt, which sends the task to a person. The server's attempt budget is `CLAWBOO_MAX_FIX_CYCLES`
+  plus one (two attempts by default); the package's `DEFAULT_MAX_FIX_CYCLES` is not used by the server.
+- **Moving to done.** `isVerdictPromotable` is the rule `updateStatus` applies to a stored verdict on the way to
+  `done`: `pass` may move, and `completed_with_debt` may move only when the latest verify command passed. Any other
+  verdict is refused unless a person overrides it. A task with no stored verdict was never checked, and it moves to
+  `done` normally.
+- **The critic.** `shouldRunCritic` runs the read-only reviewer for delegated work, a risk flag (no caller sets one),
+  or a diff over the size threshold (`DEFAULT_CRITIC_THRESHOLD`).
+- **The verify command.** `parseVerifyCommand` reads `VERIFY_CMD` from a task's `init.sh` and returns `null` for a
+  missing value or the placeholder Clawboo writes.
 
-| Name                 | Shape / contract                                                            |
-| -------------------- | --------------------------------------------------------------------------- |
-| `BudgetStatus`       | `'active' \| 'soft_capped' \| 'paused'`.                                    |
-| `BudgetCrossing`     | `'none' \| 'soft' \| 'hard'`.                                               |
-| `BudgetStatusInput`  | `{ limitCents; spentCents (before this delta); deltaCents }`.               |
-| `BudgetStatusResult` | `{ status: BudgetStatus; crossed: BudgetCrossing; newSpentCents: number }`. |
+## Connector grants
 
-**caps**
+A grant says that an agent (or a team) may use one connector, in a mode, under an approval policy. It is both the
+permission the broker checks and the edge the Org chart draws: the graph asks `decideGrant` the same question
+through `previewGrant`, so the picture and the gate cannot disagree.
 
-| Name        | Shape / contract                    |
-| ----------- | ----------------------------------- |
-| `CapResult` | `{ ok: boolean; reason?: string }`. |
+| Term            | Values                                                                            |
+| --------------- | --------------------------------------------------------------------------------- |
+| Grant state     | `proposed`, `active`, `suspended`, `revoked`, `expired`; only `active` authorizes |
+| Mode            | `read`, `write`, `admin`, ranked in that order                                    |
+| Approval policy | `never`, `risk`, `writes`, `always`                                               |
+| Tool risk       | `safe`, `external`, `destructive`                                                 |
+| Decision        | `allow`, `require_approval` or `deny`, each with a reason                         |
 
-**breaker**
+`decideGrant` checks a call in a fixed order, and the order matters:
 
-| Name                 | Shape / contract                                                                                                                                                            |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BreakerConfig`      | `{ maxToolIterations, repeatFailureThreshold, noProgressThreshold, tokenVelocityCeiling, velocityMinWindowMs, repeatPolicyDeniedThreshold }`.                               |
-| `BreakerConfigInput` | `z.infer` of `breakerConfigSchema`, partial `BreakerConfig` (each field optional) accepted from a REST body / run input.                                                    |
-| `BreakerTripReason`  | `'iteration-cap' \| 'repeat-failure' \| 'no-progress' \| 'token-velocity' \| 'repeat-policy-denied'`.                                                                       |
-| `BreakerTrip`        | `{ reason: BreakerTripReason; detail: string; counters: Record<string, number> }`.                                                                                          |
-| `BreakerSignal`      | `{ kind: 'tool-call' \| 'tool-result' \| 'cost' \| 'policy-denied'; ts; signature?; ok?; tokens? }`, one observation derived from a typed RuntimeEvent.                     |
-| `BreakerState`       | Run-local accumulator: `{ config, toolIterations, consecFailures, lastFailSig, productiveSigs, nonProductive, consecDenials, lastDenialSig, windowStartTs, windowTokens }`. |
+<Steps>
 
-### Constants
+<Step title="Find the grant and check its state">
 
-| Name                            | Value / contract                                                                                                                                                                                                          |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `severitySchema`                | zod enum of the 8 `Severity` values.                                                                                                                                                                                      |
-| `findingSchema`                 | zod object for `Finding` (terse model output still parses via defaults).                                                                                                                                                  |
-| `deterministicResultSchema`     | zod object for `DeterministicResult`.                                                                                                                                                                                     |
-| `criticOutputSchema`            | zod object for `CriticOutput` (`findings` defaults to `[]`).                                                                                                                                                              |
-| `criticVerdictSchema`           | zod object for `CriticVerdict`.                                                                                                                                                                                           |
-| `structuredErrorSchema`         | zod object for `StructuredError`.                                                                                                                                                                                         |
-| `verificationStatusSchema`      | zod enum for `VerificationStatus`.                                                                                                                                                                                        |
-| `verificationAttemptSchema`     | zod object for `VerificationAttempt`.                                                                                                                                                                                     |
-| `debtNoteSchema`                | zod object for `DebtNote`.                                                                                                                                                                                                |
-| `verificationResultSchema`      | zod object for `VerificationResult` (`attempts` min 1).                                                                                                                                                                   |
-| `DEFAULT_MAX_FIX_CYCLES`        | `3`, exported but no longer wired: the server's budget is `verifyMaxAttempts()` (`CLAWBOO_MAX_FIX_CYCLES` plus one, default 2 attempts). Two disagreeing defaults made the `mark_debt` exit unreachable.                  |
-| `DEFAULT_CRITIC_THRESHOLD`      | `{ files: 5, lines: 300 }`, diff size above which the critic fires.                                                                                                                                                       |
-| `SOFT_CAP_PERCENT`              | `80`, soft-cap threshold percent.                                                                                                                                                                                         |
-| `MICRO_CENTS_PER_CENT`          | `10_000`, ledger micro-cent carry granularity.                                                                                                                                                                            |
-| `DEFAULT_MAX_DEPTH`             | `2`, the SINGLE ancestor-chain depth ceiling. The board's capped create path, the team orchestrator, and the executor runner all derive from it (both `MAX_SPAWN_DEPTH` constants are now aliases), so they cannot drift. |
-| `DEFAULT_MAX_CHILDREN`          | `24`, default per-parent LIFETIME live-child ceiling for the board's capped create path. Distinct from the per-turn fan-out cap (8).                                                                                      |
-| `DEFAULT_MAX_ROOT_CREATES`      | `30`, default root-task creations allowed per rolling window (a RATE, not a total — a lifetime cap on roots would jam a long-lived board).                                                                                |
-| `DEFAULT_ROOT_CREATE_WINDOW_MS` | `300_000` (5 min), the rolling window `DEFAULT_MAX_ROOT_CREATES` is measured over.                                                                                                                                        |
-| `BREAKER_DEFAULTS`              | `{ maxToolIterations: 30, repeatFailureThreshold: 3, noProgressThreshold: 6, tokenVelocityCeiling: 200_000, velocityMinWindowMs: 15_000, repeatPolicyDeniedThreshold: 2 }`.                                               |
-| `breakerConfigSchema`           | zod partial object for `BreakerConfigInput`.                                                                                                                                                                              |
-| `breakerTripReasonSchema`       | zod enum for `BreakerTripReason`.                                                                                                                                                                                         |
+No matching grant denies with `no-grant`. A revoked, suspended, proposed or expired grant denies, and expiry is
+checked against the clock as well as the stored state.
 
-### Classes
+</Step>
 
-None: this package exports only functions, types, and constants.
+<Step title="Check for drift">
 
-## Used by
+If the connector's spec or tool list changed since the grant pinned them, the call is denied (`spec-drift`).
+This runs before the scope check, so a renamed or redefined tool is caught as drift.
 
-- **`@clawboo/db`**, `board/repository.ts`, `board/verification.ts` (state-machine gate via `isVerdictPromotable`), `governance/budgets.ts` (`recordSpend` mirrors `budgetStatusAfter`).
-- **`@clawboo/evals`**, the ±verifier ablation scorecard.
-- **`apps/web` (server)**, `lib/verification/{index,critic,deterministicGate}.ts` (the verify gate), `lib/executorRunner.ts` (budget kill-switch + breaker feed), `lib/routines/openclawDispatch.ts`, `lib/teamChat/dispatchChatTurn.ts`, `lib/worktrees.ts`, `lib/defaults.ts` (`SOFT_CAP_PERCENT`), `api/runtimes.ts` (`breakerConfigSchema` validation).
-- **`@clawboo/team-orchestration`**, `boardOrchestration.ts` (`checkFanoutCap` for the per-turn delegation fan-out cap); the SPA reaches it through the re-export shim at `apps/web/src/features/group-chat/boardOrchestration.ts` and imports nothing from this package directly.
-- **`@clawboo/db`** also uses the cap predicates: `board/repository.ts` calls `checkDepthCap` / `checkFanoutCap` in `createCappedSubtask` and re-exports `DEFAULT_MAX_CHILDREN` / `DEFAULT_MAX_DEPTH` by name, so `@clawboo/mcp` reads them without taking its own dependency on this package.
+</Step>
 
-## Source
+<Step title="Check scope, mode and rate">
 
-Barrel: [`packages/governance/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/governance/src/index.ts) (re-exports `./verify`, `./budget`, `./caps`, `./breaker`).
+The tool must match the grant's allow and deny patterns, the tool's required mode must not exceed the grant's
+mode, and the grant's hourly call ceiling must not be reached.
 
-## See also
+</Step>
 
-- [Verification (builder≠judge)](/concepts/verification)
-- [Governance: budgets, breakers, caps](/concepts/governance)
-- [Governance REST API](/reference/rest-api/governance)
-- [`@clawboo/db`](/reference/packages/db), the DB authority for budgets/verification/audit
-- [`@clawboo/executor`](/reference/packages/executor), the `RuntimeEvent` union the breaker signals derive from
-- [Package overview](/reference/packages/index)
+<Step title="Check the run's risk">
+
+If the run's combined reach reads private data, ingests untrusted content and can send data out (the lethal
+trifecta), or the run is tainted and can send data out, the call needs a person's approval. These approvals are
+never remembered, and they run before the approval policy, so a policy of `never` cannot switch them off.
+
+</Step>
+
+<Step title="Apply standing rules and the policy">
+
+A standing deny rule denies, and a standing allow rule allows unless the tool is marked never-remember. A
+never-remember tool always asks, whatever the policy. Then the policy decides: `always` asks, `writes` asks for a
+mutating tool, `never` allows, and `risk` asks for a destructive tool or a mutating tool with external effects.
+
+</Step>
+
+</Steps>
+
+The broker's grant gate in `@clawboo/db` calls `decideGrant` for every call to a connector tool, and charges the
+hourly window in the same synchronous step as the decision. Clawboo's built-in tools are never grant-governed. Every
+decision is recorded as a `grant_decision` event. How users attach a connector to an agent is on
+[Connect tools to your agents](/using/connectors).
+
+## Test it
+
+Run `pnpm --filter @clawboo/governance test`. Each group has its own suite, and `grants/` tests the decision order
+case by case. A change to `decideGrant` usually needs a matching case in the grant gate tests in `@clawboo/db`.
+
+## Related
+
+- [Budgets and guardrails](/concepts/governance): budgets, caps and breakers as a model, and which run paths have them.
+- [How work is checked](/concepts/verification): when work is checked and what a verdict means.
+- [@clawboo/db](/reference/packages/db): where budgets, grants and verdicts are stored.
+- [Connect tools to your agents](/using/connectors): connecting a connector and granting it to agents.
+- [Budgets and spend](/using/budgets-and-spend): warn only and hard cap as users set them.

@@ -1,125 +1,120 @@
 ---
 title: '@clawboo/worktrees'
-description: Server-only per-task git-worktree lifecycle, system-of-record scaffold, and structured cross-runtime AGENT_HANDOFF.json bridge.
+sidebarTitle: 'worktrees'
+description: "Per-task git worktrees for the task runner: the lifecycle, the task's working files and handoff record, path safety, cleanup, and the keyed mutex."
+keywords:
+  [
+    '@clawboo/worktrees',
+    'worktrees',
+    'git worktree',
+    'AGENT_HANDOFF.json',
+    'TASK.md',
+    'init.sh',
+    'VERIFY_CMD',
+    'gcWorktrees',
+    'KeyedMutex',
+    'assertSafeTaskId',
+    'system-of-record files',
+  ]
 ---
 
-- **Version** `0.1.0`
-- **Purity** server-only (shells out to the `git` CLI via `node:child_process`, reads/writes files via `node:fs`)
-- **Purpose** Provision per-task git worktrees, write the runtime-agnostic system-of-record scaffold, and validate the structured `AGENT_HANDOFF.json` so any runtime, or a human, can pick up a task cold.
-- **Workspace deps** none
-- **External deps** `zod` `^3.25.0`
+`@clawboo/worktrees` gives a file-changing task its own git worktree and branch, writes the working files any
+runtime can resume the task from, and records a structured handoff when a run ends. It is server-only, because it
+runs `git` and writes files. The board decides what runs; this package is only the git and file mechanism, and the
+database bookkeeping (the task's `workspaces` row) lives in `apps/web/server/lib/worktrees.ts`.
 
-The board is the dispatcher; the task's worktree is the durable, on-disk world. A worktree gives _concurrency_ isolation (no write races between parallel teammates), NOT a privilege boundary; that escalation is the `container` tier, which this package never provisions. The package exposes a single `.` entry point (no subpath exports). DB-bound bookkeeping (the `workspaces` row, the task status drive) lives server-side in `apps/web/server/lib/worktrees.ts`; this package is purely the git/file mechanism.
+Use this page when you change how task runs are isolated, paused, resumed or cleaned up. The model behind it is on
+[Worktrees and handoff](/concepts/worktrees-and-handoff). A worktree keeps parallel teammates' file changes apart,
+but it is not a sandbox: see [What agents can do](/concepts/permissions).
 
-## Public API
+## When a task gets a worktree
 
-### Functions
+`isolationForTask(kind)` returns `none` for `research` and `review` tasks and `worktree` for `code` and any unknown
+kind; it never returns `container`. Worktrees are made by the task runner (a run of
+`POST /api/runtimes/<id>/run`, or an agent routine that names a repository) and by
+`POST /api/board/<taskId>/workspace`; team chat never makes one. The task runner refuses a file-changing task with
+no repository path (`workspace_unavailable`) rather than run it without isolation; see
+[The executor runner](/internals/executor-runner).
 
-**isolation** (`./isolation`)
+The package's default root is `<repo>/.clawboo/worktrees`, but the server always passes its own: task worktrees
+live at `<clawboo home>/worktrees/<hash of the repo path>/<task id>` and review checkouts under
+`<clawboo home>/reviews/`, so nothing is created inside your repository. Each task gets the branch
+`clawboo/task-<task id>`.
 
-| Signature                                          | Contract                                                                                                                                                           |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `isolationForTask(kind: TaskKind): IsolationLevel` | `research`/`review` → `none`; `code` → `worktree`; unknown kinds default to `worktree` (the safe-for-concurrency choice). Never returns `container` automatically. |
-| `needsWorktree(kind: TaskKind): boolean`           | True iff `isolationForTask(kind) === 'worktree'`.                                                                                                                  |
+## The lifecycle
 
-**scaffold** (`./scaffold`)
+| Function                  | What it does                                                                                                                                                                                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provisionWorktree`       | Branches from a commit (never the dirty working tree), writes the working files and commits them as the baseline. It clears leftovers of an earlier attempt, reuses a branch that already exists, checks that git registered the folder, and retries once. |
+| `resumeWorktree`          | Re-attaches a paused task's branch at its tip, keeping earlier commits. Throws when the branch is gone.                                                                                                                                                    |
+| `loadWorktree`            | Rebuilds the handle for a task that already has a worktree.                                                                                                                                                                                                |
+| `pauseWorktree`           | Commits any uncommitted work, removes the worktree folder and keeps the branch.                                                                                                                                                                            |
+| `commitWorktreeWork`      | Commits without removing anything; the critic's checkpoint before a review.                                                                                                                                                                                |
+| `completeWorktree`        | Diffs against the baseline, ignoring the working files. With no change it removes the worktree and the branch; otherwise the branch stays for a person to merge.                                                                                           |
+| `gcWorktrees`             | Reaps worktrees by age and by count (defaults: 72 hours, 25 worktrees), commits before it drops one, skips active tasks, and keeps going past a failure. It touches only the worktree root.                                                                |
+| `provisionReviewWorktree` | A detached checkout at one commit for the read-only reviewer, so there is no branch to push. It replaces any earlier checkout at the same path.                                                                                                            |
 
-| Signature                                                                      | Contract                                                                                                                                           |
-| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `renderTaskMd(input: TaskScaffoldInput): string`                               | Render `TASK.md`: what/why, acceptance criteria, known gotchas, how-to-work.                                                                       |
-| `renderProgressMd(input: TaskScaffoldInput): string`                           | Render `task-progress.md`: the running state log + the clock-in/clock-out ritual.                                                                  |
-| `renderDecisionsJson(): string`                                                | Render `DECISIONS.json`: an empty structured `clawboo/decisions@1` log for the "why" compaction drops.                                             |
-| `renderInitSh(input: TaskScaffoldInput): string`                               | Render the runtime-agnostic `init.sh` (`set -euo pipefail`, single-quoted `INSTALL_CMD`/`VERIFY_CMD`/`START_CMD`).                                 |
-| `renderVerificationMd(input: TaskScaffoldInput): string`                       | Render `VERIFICATION.md`: the evidence template the completion gate reads.                                                                         |
-| `writeScaffold(worktreePath: string, input: TaskScaffoldInput): Promise<void>` | Write all five SoR files into the worktree root + `chmod 0755` on `init.sh`. Does NOT write `AGENT_HANDOFF.json` (that is the clock-out artifact). |
+Clawboo never merges a task branch; finished work waits on `clawboo/task-<task id>`.
 
-**handoff** (`./handoff`)
+## The working files
 
-| Signature                                                                             | Contract                                                                                                                                                                                         |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `writeHandoff(worktreePath: string, input: AgentHandoffInput): Promise<AgentHandoff>` | Validate + write `AGENT_HANDOFF.json` at the worktree root (the clock-out artifact); `timestamp` defaults to now.                                                                                |
-| `readHandoff(worktreePath: string): Promise<AgentHandoff \| null>`                    | Read + zod-validate the handoff; `null` if absent (first pickup) or malformed.                                                                                                                   |
-| `reconstructState(worktreePath: string): Promise<ResumeState>`                        | The clock-in read: rebuild `{ done, broken, next, … }` from `AGENT_HANDOFF.json` (falling back to `task-progress.md`) + `init.sh`, with NO chat/board access. Proof the SoR is runtime-agnostic. |
+`SOR_FILES` names the system-of-record files, which any runtime (or a person) reads to pick a task up cold:
 
-**lifecycle** (`./lifecycle`)
+| File                 | Holds                                                                            |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `TASK.md`            | what and why, acceptance criteria, known gotchas                                 |
+| `task-progress.md`   | the running log of what was done                                                 |
+| `DECISIONS.json`     | a structured decision log (`clawboo/decisions@1`)                                |
+| `init.sh`            | `INSTALL_CMD`, `VERIFY_CMD` and `START_CMD`, as an executable script             |
+| `VERIFICATION.md`    | the evidence the verification gate reads and appends to                          |
+| `AGENT_HANDOFF.json` | written at the end of a run by `writeHandoff`, validated by `agentHandoffSchema` |
 
-| Signature                                                                                           | Contract                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `provisionWorktree(opts: ProvisionOptions): Promise<Worktree>`                                      | Branch a fresh worktree on `clawboo/task-<id>` from a SHA (never the dirty tree), write + commit the SoR scaffold as the baseline. Orphan-resilient pre-clean, branch-collision recovery, verify-both, cleanup-then-one-retry. Returns the scaffold-commit `baseCommit`. |
-| `resumeWorktree(opts: ResumeOptions): Promise<Worktree>`                                            | Re-attach a paused task's existing branch at its tip, NEVER `-b`/`-B`, so prior commits are preserved. Recovers `baseCommit` as the scaffold commit. Throws if the branch is gone.                                                                                       |
-| `loadWorktree(opts: LoadOptions): Promise<Worktree>`                                                | Reconstruct the `Worktree` handle (path/branch/recovered baseline) for an already-provisioned task, for callers (the board) that persisted only the path/branch.                                                                                                         |
-| `pauseWorktree(repoPath: string, worktree: Worktree): Promise<PauseResult>`                         | Commit any uncommitted work, drop the worktree to free disk/process slots, and KEEP the branch.                                                                                                                                                                          |
-| `commitWorktreeWork(repoPath: string, worktree: Worktree, message?: string): Promise<CommitResult>` | Commit uncommitted work and return the resulting HEAD sha WITHOUT dropping the worktree, the critic's checkpoint before a detached review. No-op (returns HEAD) when clean.                                                                                              |
-| `completeWorktree(repoPath: string, worktree: Worktree): Promise<CompleteResult>`                   | Diff vs baseline excluding the SoR files: empty → auto-cleanup (remove worktree + delete branch + prune); non-empty → retain + return the diff-stat.                                                                                                                     |
-| `gcWorktrees(opts: GcOptions): Promise<GcResult>`                                                   | Reap worktrees by age (default 72h) + count (default 25), commit-before-drop (keeps the branch), skip active tasks (re-checked under the per-path mutex), continue-on-failure. Only touches the clawboo worktree root.                                                   |
-| `provisionReviewWorktree(opts: ReviewOptions): Promise<Worktree>`                                   | Detached, read-only reviewer checkout at a SHA, no branch ⇒ a reviewer structurally cannot push.                                                                                                                                                                         |
-| `removeReviewWorktree(repoPath: string, worktree: Worktree): Promise<void>`                         | Tear down a review worktree (no branch to delete, it was detached).                                                                                                                                                                                                      |
+`writeScaffold` writes the first five. `reconstructState(path)` rebuilds what is done, what is broken and what comes
+next from the handoff (falling back to `task-progress.md`) and `init.sh`, with no access to chat or the board, which
+is what lets a different runtime resume the task. The scaffold's `VERIFY_CMD` is a placeholder: until the agent sets
+a real command, the verification gate reports that no verify command is configured and the attempt fails.
 
-**git** (`./git`, low-level plumbing, exported for the server orchestrator + tests)
+## Path safety
 
-| Signature                                                                                                     | Contract                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `isGitRepo(dir: string): Promise<boolean>`                                                                    | True when `dir` is inside a git work tree.                                                                                  |
-| `resolveBaseSha(repoPath: string, ref?: string): Promise<string>`                                             | Resolve a ref (default `HEAD`) to a full commit SHA.                                                                        |
-| `revParse(dir: string, ref?: string): Promise<string>`                                                        | Resolve the current HEAD commit (default `HEAD`) of a worktree.                                                             |
-| `branchExists(repoPath: string, branch: string): Promise<boolean>`                                            | True when a local branch exists.                                                                                            |
-| `branchNameForTask(taskId: string): string`                                                                   | The default branch name `clawboo/task-<taskId>`.                                                                            |
-| `worktreeRootFor(repoPath: string, rootDir?: string): string`                                                 | The clawboo worktree root, default `<repoPath>/.clawboo/worktrees`.                                                         |
-| `diffStat(worktreePath: string, baseCommit: string, opts?: { excludePaths?: string[] }): Promise<DiffStat>`   | Diff-stat vs the baseline (committed delta + untracked, minus `excludePaths`); `dirty` answers "did any real work happen?". |
-| `worktreeDiff(worktreePath: string, baseCommit: string, opts?: { excludePaths?: string[] }): Promise<string>` | The unified diff text vs the baseline, for read-only display.                                                               |
-| `isDetached(worktreePath: string): Promise<boolean>`                                                          | True when HEAD is detached (the read-only reviewer guarantee).                                                              |
-| `isWorktreeRegistered(repoPath: string, worktreePath: string): Promise<boolean>`                              | True when `worktreePath` is registered as a git worktree (compares realpaths).                                              |
+These functions remove folders recursively and run commands, so every path they act on is checked first:
 
-### Types & interfaces
+- **Task ids are one path segment.** `assertSafeTaskId` accepts only `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` and throws
+  for anything else rather than rewriting it. `branchNameForTask`, `worktreePathFor` and the lifecycle functions
+  all go through it.
+- **Task folders stay under the root.** `worktreePathFor(repo, taskId, rootDir)` resolves the task's folder and
+  throws if it would land anywhere but one segment below the root.
+- **Removal rebuilds the path.** Before their recursive remove, `pauseWorktree` and `completeWorktree` rebuild the
+  folder from the root and the task id, and throw if the stored record points somewhere else.
+- **Review checkouts are trusted input.** `removeReviewWorktree` removes the path in the record it is given without
+  that check, so pass it only a record `provisionReviewWorktree` returned.
+- **Verify commands run in Clawboo's folder only.** The server's verification gate refuses a worktree path outside
+  Clawboo's state folder before it runs `VERIFY_CMD`.
 
-| Name                | Shape / contract                                                                                                                                                                                                                                   |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IsolationLevel`    | `'none' \| 'worktree' \| 'container'`, execution-isolation tier (orthogonal to the security sandbox).                                                                                                                                              |
-| `TaskKind`          | `'code' \| 'research' \| 'review' \| (string & {})`, open set; drives the isolation decision.                                                                                                                                                      |
-| `Worktree`          | `{ taskId, worktreePath, branch, baseCommit, detached }`, a provisioned on-disk world for one task (empty `taskId`/`branch` for a detached reviewer).                                                                                              |
-| `DiffStat`          | `{ filesChanged, insertions, deletions, dirty }`, change summary relative to baseline.                                                                                                                                                             |
-| `TaskScaffoldInput` | `{ taskId, title, description?, acceptanceCriteria?, knownGotchas?, commands?: { install?; verify?; start? }, teamName? }`, inputs for rendering the SoR scaffold.                                                                                 |
-| `ResumeState`       | `{ hasHandoff, done, broken, next, whyBlocked?, commands: { init; verify; start }, warnings, lastRuntime?, nativeSessionId? }`, the clock-in reconstruction.                                                                                       |
-| `AgentHandoff`      | `z.infer` of `agentHandoffSchema`: `{ handoffFrom, runtime, timestamp, completedSubtasks, brokenOrUnverified, nextBestStep, whyBlocked?, commands, evidence, warnings, nativeSessionId?, roomCursor? }`. Role-neutral: `runtime` may be `'human'`. |
-| `AgentHandoffInput` | `Omit<AgentHandoff, 'timestamp'> & { timestamp?: string }`, `timestamp` defaults to now.                                                                                                                                                           |
-| `ProvisionOptions`  | `{ repoPath, taskId, baseSha?, baseRef?, rootDir?, scaffold: TaskScaffoldInput }`.                                                                                                                                                                 |
-| `ResumeOptions`     | `{ repoPath, taskId, rootDir? }`.                                                                                                                                                                                                                  |
-| `LoadOptions`       | `{ repoPath, taskId, rootDir? }`.                                                                                                                                                                                                                  |
-| `PauseResult`       | `{ committed: boolean; head: string }`.                                                                                                                                                                                                            |
-| `CommitResult`      | `{ head: string; committed: boolean }`.                                                                                                                                                                                                            |
-| `CompleteResult`    | `{ dirty: boolean; diffStat: DiffStat; cleaned: boolean }`.                                                                                                                                                                                        |
-| `GcOptions`         | `{ repoPath, rootDir?, maxAgeMs?, maxCount?, isActive?: (taskId) => boolean, now? }`.                                                                                                                                                              |
-| `GcResult`          | `{ reaped: string[]; skipped: { taskId; reason }[]; failed: { taskId; error }[] }`.                                                                                                                                                                |
-| `ReviewOptions`     | `{ repoPath, sha, rootDir? }`.                                                                                                                                                                                                                     |
+## Helpers you will reach for
 
-### Constants
+- **`KeyedMutex`.** `mutex.run(key, fn, { acquireTimeoutMs })` serializes work per key and throws
+  `MutexAcquireTimeoutError` when the wait runs out. The lifecycle functions lock per worktree path, the task runner
+  locks each agent's persistent home (the wait is `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`), and the OpenClaw routine
+  dispatcher locks per agent.
+- **`execGit(cwd, args)`.** Runs `git` with a timeout and an output cap and throws `GitError` with the command's
+  `stderr` and `args`. The Workspace tab's git status and file diffs use it.
+- **Diffs.** `diffStat` and `worktreeDiff` compare a worktree with its baseline, and `isDetached` confirms a review
+  checkout has no branch.
 
-| Name                 | Value / contract                                                                                                                                                                                                 |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SOR_FILES`          | `{ task: 'TASK.md', progress: 'task-progress.md', decisions: 'DECISIONS.json', init: 'init.sh', verification: 'VERIFICATION.md', handoff: 'AGENT_HANDOFF.json' }`, canonical SoR filenames at the worktree root. |
-| `agentHandoffSchema` | zod object validating `AGENT_HANDOFF.json`; `runtime` is any executor id (may be `'human'`); array/object fields default.                                                                                        |
+## Who uses it
 
-### Classes
+Only the server: the task runner, the board's workspace routes, the verification gate and critic, the Routines
+dispatchers, and the Workspace tab's file view. Agent chat and team chat import only `MutexAcquireTimeoutError`, to
+recognise a busy agent home.
 
-| Name         | Contract                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GitError`   | `Error` subclass thrown on non-zero git exit; carries `readonly stderr: string` and `readonly args: string[]`.                                                                                                                                                                                                                                                                                             |
-| `KeyedMutex` | Per-key async mutex (`run<T>(key, fn, opts?: { acquireTimeoutMs?: number }): Promise<T>`) serializing ops that share a key (a worktree path); a failed op does NOT poison the chain. `acquireTimeoutMs` bounds the WAIT, not the op: a caller stuck behind a wedged holder rejects with `MutexAcquireTimeoutError` instead of queueing forever, and the key stays held until that holder actually settles. |
+## Test it
 
-## Used by
+Run `pnpm --filter @clawboo/worktrees test`. The suite creates real git repositories in temporary folders, so it
+needs `git` on your `PATH`; CI also runs it on Windows and macOS.
 
-- **`apps/web` (server)**: `lib/worktrees.ts` (the board orchestrator: provision/load/pause/resume/complete/GC, scaffold, handoff round-trip, `SOR_FILES`, `IsolationLevel`), `lib/executorRunner.ts` (claim → worktree → run → verify → handoff), `lib/verification/{index,critic,deterministicGate}.ts` (`commitWorktreeWork`, `provisionReviewWorktree`/`removeReviewWorktree`, `DiffStat`/`Worktree`, `SOR_FILES`), `lib/routines/openclawDispatch.ts` (`KeyedMutex`), `api/board.ts` (`agentHandoffSchema`).
+## Related
 
-## Source
-
-Barrel: [`packages/worktrees/src/index.ts`](https://github.com/clawboo/clawboo/blob/main/packages/worktrees/src/index.ts) (re-exports `./types`, `./isolation`, `./scaffold`, `./handoff`, `./lifecycle`, `./git`).
-
-## See also
-
-- [Worktrees & cross-runtime handoff](/concepts/worktrees-and-handoff)
-- [Cross-runtime handoff guide](/guides/cross-runtime-handoff)
-- [Executor runner internals](/internals/executor-runner)
-- [Verification (builder≠judge)](/concepts/verification)
-- [`@clawboo/executor`](/reference/packages/executor), the `RuntimeAdapter` whose runs work inside a worktree
-- [`@clawboo/governance`](/reference/packages/governance), the verify gate that reviews a worktree's diff
-- [Package overview](/reference/packages/index)
+- [Worktrees and handoff](/concepts/worktrees-and-handoff): why tasks get worktrees and how handoff works.
+- [Hand a task from one runtime to another](/guides/cross-runtime-handoff): the handoff from start to finish.
+- [The executor runner](/internals/executor-runner): when the runner provisions, pauses and completes a worktree.
+- [How work is checked](/concepts/verification): how the verify command and the critic judge the work.

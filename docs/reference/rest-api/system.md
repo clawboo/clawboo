@@ -1,43 +1,51 @@
 ---
-title: System API
-description: 'REST reference for /api/system/*: OpenClaw status, install, configure, gateway lifecycle, config, device pairing, models, plus Clawboo self-version and self-update.'
+title: 'System API'
+description: 'REST reference for /api/system: OpenClaw status, install, setup, Gateway control, config, device pairing and models, plus Clawboo version and self-update.'
+keywords:
+  [
+    'openclaw',
+    'gateway',
+    'configure-openclaw',
+    'auto-configure-openclaw',
+    'device pairing',
+    'self-update',
+    'openclaw.json',
+  ]
 ---
 
-REST surface for the host itself. Most of it is the OpenClaw side: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. These routes are how the onboarding wizard and the System maintenance panel drive OpenClaw from the dashboard. The last two, `self-version` and `self-update`, are about **Clawboo itself** rather than OpenClaw: which release this server is running, and applying a newer one.
+Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last two routes, `self-version` and `self-update`, are about Clawboo itself: which release this server runs, and installing a newer one.
 
 <Note>
-Everything here except the two `self-*` routes is OpenClaw-specific. OpenClaw is a connected substrate driven over a Gateway process this server manages, so its lifecycle lives here, not under [`/api/runtimes`](/reference/rest-api/runtimes), which covers the four CLI/SDK runtimes you install and key. The agent registry is at [Agents API](/reference/rest-api/agents).
+
+Every route here except the two `self-*` routes is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
+
 </Note>
 
-Three of these routes stream **Server-Sent Events** rather than returning a JSON body: `POST /api/system/install-openclaw` and `POST /api/system/self-update` always, and `POST /api/system/gateway` for the `start` and `restart` actions. Each is documented below with an event-stream catalog (event `type` → payload), not a response body. All POST/PATCH routes read a JSON body parsed by `express.json({ limit: '2mb' })`.
-
-<Info>
-Every child process this group spawns (`openclaw`, `npm`) is launched with `shell: isWindows` + `windowsHide: isWindows`. On Windows the OpenClaw/npm binaries resolve to `.cmd` shims, which Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn without `shell: true` (the CVE-2024-27980 fix); the option is a no-op on Unix, and `windowsHide` suppresses the `cmd.exe` console window that would otherwise flash over the dashboard.
-</Info>
+Three routes stream **Server-Sent Events** instead of returning a JSON body: `POST /api/system/install-openclaw` and `POST /api/system/self-update` always, and `POST /api/system/gateway` for `start` and `restart`. Each is documented with an event catalog (event `type` and payload). Request bodies are JSON (up to 2 MB). Every route counts against the general [rate limit](/reference/rest-api/index#rate-limits) of 3,000 requests a minute per client address; routes marked **sensitive** also count against a limit of 60 a minute. The `curl` examples assume the access gate is off; with `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` (see [Authentication](/reference/rest-api/index#authentication)).
 
 ## Routes
 
-| Method | Path                                  | Summary                                                             | Stream?                   |
-| ------ | ------------------------------------- | ------------------------------------------------------------------- | ------------------------- |
-| GET    | `/api/system/status`                  | Node / OpenClaw / Gateway status snapshot                           | No                        |
-| POST   | `/api/system/install-openclaw`        | Install the OpenClaw CLI via `npm install -g`                       | SSE                       |
-| POST   | `/api/system/configure-openclaw`      | Write `openclaw.json` + `.env`, mint a Gateway token                | No                        |
-| POST   | `/api/system/auto-configure-openclaw` | Provision OpenClaw from an already-connected credential (no prompt) | No                        |
-| POST   | `/api/system/gateway`                 | Gateway lifecycle: `start` / `stop` / `restart` / `status`          | SSE for `start`/`restart` |
-| GET    | `/api/system/openclaw-config`         | Read `openclaw.json` + provider-key flags                           | No                        |
-| PATCH  | `/api/system/openclaw-config`         | Read-modify-write `openclaw.json` (model, port, keys, exec, a2a)    | No                        |
-| POST   | `/api/system/approve-device`          | Approve the latest pending device-pairing request                   | No                        |
-| GET    | `/api/system/models`                  | Model catalog (CLI-backed, falls back to static)                    | No                        |
-| GET    | `/api/system/self-version`            | Which Clawboo this server is, and whether a newer one exists        | No                        |
-| POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it             | SSE                       |
+| Method | Path                                  | Summary                                                        | Rate tier | Stream?                   |
+| ------ | ------------------------------------- | -------------------------------------------------------------- | --------- | ------------------------- |
+| GET    | `/api/system/status`                  | Node, OpenClaw and Gateway status                              | general   | No                        |
+| POST   | `/api/system/install-openclaw`        | Install the OpenClaw CLI with `npm install -g`                 | sensitive | SSE                       |
+| POST   | `/api/system/configure-openclaw`      | Replace `openclaw.json` and `.env` for one provider (API only) | sensitive | No                        |
+| POST   | `/api/system/auto-configure-openclaw` | Set up OpenClaw from a credential you already connected        | sensitive | No                        |
+| POST   | `/api/system/gateway`                 | Gateway control: `start`, `stop`, `restart`, `status`          | sensitive | SSE for `start`/`restart` |
+| GET    | `/api/system/openclaw-config`         | Read `openclaw.json`, key flags and the ChatGPT sign-in state  | general   | No                        |
+| PATCH  | `/api/system/openclaw-config`         | Change parts of `openclaw.json` (model, port, keys, exec, a2a) | sensitive | No                        |
+| POST   | `/api/system/approve-device`          | Approve the latest pending device-pairing request              | sensitive | No                        |
+| GET    | `/api/system/models`                  | Model catalog (from the OpenClaw CLI, else the built-in list)  | general   | No                        |
+| GET    | `/api/system/self-version`            | Which Clawboo this server runs, and whether a newer one exists | general   | No                        |
+| POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it        | sensitive | SSE                       |
 
 ---
 
 ## `GET /api/system/status`
 
-Returns a single snapshot: the Node runtime, OpenClaw install detection, and Gateway process state. The onboarding wizard polls this to decide which step to show; the System Health and maintenance panels poll it for the running/stopped dot. When the Gateway is running and a `.env` exists, this call also opportunistically syncs the Gateway auth token from `.env` into Clawboo's settings (so the proxy never holds a stale token).
+Returns one snapshot of the Node runtime, the OpenClaw install and the Gateway process. The dashboard reads it at startup to decide what to show, and the OpenClaw setup and the **System** panel read it for the Gateway's state. When the Gateway is running and `.env` exists, the call also copies the Gateway token from `.env` into Clawboo's settings, so Clawboo never connects with a stale token.
 
-OpenClaw detection is async, cached per resolved binary path, and bounded by a 6-second timeout; a cold-start `openclaw --version` can never freeze the single-threaded server. `installed` reflects whether the binary resolves on `PATH`; `version` is `null` if the probe timed out or failed (the binary is still reported installed).
+The OpenClaw check is cached per binary path and gives up on `openclaw --version` after 6 seconds, so a slow first start never holds up the server. `installed` says whether the binary resolves on `PATH`; `version` is `null` when the version check timed out or failed (the binary still reads installed).
 
 - **Path/query params**: none.
 - **Request body**: none.
@@ -89,34 +97,34 @@ curl http://localhost:18790/api/system/status
 
 ## `POST /api/system/install-openclaw`
 
-Installs the OpenClaw CLI by running `npm install -g openclaw@~2026.9`. The version is pinned to `~2026.9` (not `@latest`, and not `^2026.9`, which would mean any 2026.x) so a new install gets an OpenClaw whose config shape and `config.patch` contract match what Clawboo writes. On success the OpenClaw version cache is invalidated and re-read.
+Installs the OpenClaw CLI by running `npm install -g openclaw@~2026.9`. The pin is `~2026.9` (not `@latest`, and not `^2026.9`, which would allow any 2026.x) so a new install gets an OpenClaw whose config format matches what Clawboo writes. On success the installed version is read again and reported.
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK` + `text/event-stream`**: the handler sets `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, flushes headers, and streams SSE frames. Each frame is `data: <json>\n\n`. The child process is killed if the client closes the connection.
+**`200 OK` + `text/event-stream`**: the stream sends `data: <json>\n\n` frames with `Cache-Control: no-cache`. The install process is killed if the client closes the connection.
 
 #### Event catalog
 
-| `type`     | When                                                          | Payload fields                  |
-| ---------- | ------------------------------------------------------------- | ------------------------------- |
-| `progress` | Install start                                                 | `step: 'installing'`, `message` |
-| `output`   | Per non-empty stdout/stderr line                              | `line`                          |
-| `error`    | EACCES detected, spawn throws, child errors, or non-zero exit | `code`, `message`               |
-| `complete` | Process exits 0                                               | `success: true`, `version`      |
+| `type`     | When                                                 | Payload fields                  |
+| ---------- | ---------------------------------------------------- | ------------------------------- |
+| `progress` | Install start                                        | `step: 'installing'`, `message` |
+| `output`   | Each non-empty stdout or stderr line                 | `line`                          |
+| `error`    | Permission denied, spawn failure, or a non-zero exit | `code`, `message`               |
+| `complete` | Process exits 0                                      | `success: true`, `version`      |
 
-Terminal `error` `code` values:
+The `error` codes:
 
-| `code`        | Meaning                                                                                       |
-| ------------- | --------------------------------------------------------------------------------------------- |
-| `EACCES`      | stderr matched `EACCES` / "permission denied" (a global install needing elevated permissions) |
-| `SPAWN_THROW` | The `spawn` call threw synchronously                                                          |
-| `SPAWN_ERROR` | The child emitted an `error` event                                                            |
-| `EXIT_<code>` | Non-zero process exit (e.g. `EXIT_1`)                                                         |
+| `code`        | Meaning                                                                                  |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `EACCES`      | stderr mentioned `EACCES` or "permission denied" (a global install that needs elevation) |
+| `SPAWN_THROW` | The spawn call threw                                                                     |
+| `SPAWN_ERROR` | The child process emitted an error                                                       |
+| `EXIT_<code>` | The process exited with a non-zero code (for example `EXIT_1`)                           |
 
-On a clean exit the `complete` frame carries the freshly-detected version (`'unknown'` if the post-install version probe could not read it).
+On a clean exit, `complete` carries the newly installed version (`'unknown'` when the version check could not read it).
 
 Example frames:
 
@@ -125,12 +133,10 @@ data: {"type":"progress","step":"installing","message":"Installing OpenClaw..."}
 
 data: {"type":"output","line":"added 1 package in 4s"}
 
-data: {"type":"complete","success":true,"version":"2026.5.27"}
+data: {"type":"complete","success":true,"version":"2026.9.1"}
 ```
 
-<Note>
-The EACCES `error` frame is informational; it is emitted when stderr matches the pattern, but the stream still continues and the install's final outcome is decided by the process exit code (`complete` on 0, `EXIT_<code>` otherwise).
-</Note>
+An `EACCES` frame does not end the stream: the exit code still decides the outcome (`complete` on 0, `EXIT_<code>` otherwise), and its message suggests running the install with `sudo`.
 
 ### Example
 
@@ -142,31 +148,41 @@ curl -N -X POST http://localhost:18790/api/system/install-openclaw
 
 ## `POST /api/system/configure-openclaw`
 
-Writes a minimal `openclaw.json` and `.env` for a chosen provider, mints a fresh Gateway auth token, and saves the resulting `gatewayUrl` + token into Clawboo's settings. The written `openclaw.json` sets `gateway.mode: 'local'`, the agent default model, and turns on agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`). The raw token is persisted server-side only; it is never returned in the body (the same-origin proxy injects it on connect). This is the route that _prompts_ for a key: the onboarding wizard's configure step posts straight here, always asking for a provider and (except for keyless providers) a key. The inline OpenClaw setup rendered in the Settings Runtimes panel and the wizard's add-runtimes step does not use this route at all; it posts the no-prompt [`auto-configure-openclaw`](#post-apisystemauto-configure-openclaw) on mount, and when that answers `needsKey` it saves the pasted key through `POST /api/providers/:id/connect` and retries auto-configure.
+Writes a fresh `openclaw.json` and `.env` for one provider, makes a new Gateway token, and saves the Gateway URL and token in Clawboo's settings. No dashboard screen calls this route; it is for scripts and manual setup. The dashboard's OpenClaw setup (in **Settings > Runtimes** and onboarding's **Add more runtimes** step) uses `POST /api/system/auto-configure-openclaw` instead, and when that answers `needsKey` it saves the key you paste with `POST /api/providers/:id/connect` and calls auto-configure again.
+
+<Warning>
+
+This route replaces `~/.openclaw/openclaw.json` and `~/.openclaw/.env` entirely, and makes a new Gateway token on every call. On an existing install that drops the agent roster (`agents.entries`), channels, plugins, the exec policy and every other key in `.env`, including keys saved from **Providers**. Use it only on a fresh install. To keep existing settings, use `auto-configure-openclaw` or `PATCH /api/system/openclaw-config`. Restart the Gateway afterwards so it runs with the new config and token.
+
+</Warning>
+
+The written `openclaw.json` holds only: `gateway` (`mode: 'local'`, the port, token auth read from `GATEWAY_AUTH_TOKEN`), the default model under `agents.defaults.model.primary`, agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and for Ollama an optional `models.providers.ollama` entry. The written `.env` holds `GATEWAY_AUTH_TOKEN=<64 hex characters>` plus one key line. The route also creates `~/.openclaw/workspace`. The token is kept on the server and never returned.
 
 - **Path/query params**: none.
 - **Request body**:
 
 ```ts
 {
-  provider: string       // required (e.g. 'anthropic', 'openai', 'ollama', ...)
-  apiKey?: string        // required for every provider except 'ollama'
-  model?: string         // optional model override; else a per-provider default
-  gatewayPort?: number   // optional; default 18789
+  provider: string     // required: 'anthropic', 'openai', 'ollama', 'openai-codex', ...
+  apiKey?: string      // required except for the keyless 'ollama' and 'openai-codex'
+  model?: string       // default: the provider's default model (below)
+  gatewayPort?: number // default 18789
 }
 ```
 
-When `model` is omitted, the handler picks a per-provider default from its `MODEL_MAP` (e.g. `anthropic` → `anthropic/claude-sonnet-4-5`, `openai` → `openai/gpt-5.4`, `ollama` → `ollama/llama3.2`); an unmapped provider falls back to `<provider>/<model ?? 'default'>`. The provider's key is written to `.env` under the canonical env var name (e.g. `anthropic` → `ANTHROPIC_API_KEY`, `google` → `GEMINI_API_KEY`, `huggingface` → `HF_TOKEN`); a non-`ollama` provider with no name mapping falls back to `CUSTOM_API_KEY`.
+Default models when `model` is omitted: `anthropic/claude-sonnet-4-5`, `openai/gpt-5.4`, `google/gemini-2.0-flash`, `openrouter/anthropic/claude-sonnet-4-5`, `xai/grok-3`, `groq/llama-3.3-70b-versatile`, `mistral/mistral-large-latest`, `moonshot/kimi-k2.5`, `minimax/MiniMax-M2.5`, `together/meta-llama/Llama-3.3-70B-Instruct-Turbo`, `nvidia/llama-3.1-nemotron-70b-instruct`, `huggingface/deepseek-ai/DeepSeek-R1`, `cerebras/zai-glm-4.7`, `venice/llama-3.3-70b`, `openai-codex/gpt-5.5`, and for `ollama` a pulled model (below). Any other provider gets `<provider>/default`.
 
-`ollama` is handled differently, because OpenClaw runs only a model the local Ollama has pulled and registers its Ollama provider only when it has a credential:
+The key line in `.env` uses the provider's own variable (for example `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` for `google`, `HF_TOKEN` for `huggingface`). A provider with no known variable gets `CUSTOM_API_KEY`. `openai-codex` (the ChatGPT sign-in) writes no key line: OpenClaw uses its own sign-in profile, created with `openclaw models auth login --provider openai-codex`.
 
-- The default model is checked against Ollama's `/api/tags`. The requested model (or `llama3.2` when none is sent) is kept when it is pulled; otherwise the handler writes the most recently pulled model that can use tools, the same pick a new [native](/runtimes/native) agent gets. With no chat model pulled, or Ollama not answering, the request stands. The model is always written as an `ollama/<model>` ref.
+`ollama` works differently, because OpenClaw runs only a model the local Ollama has pulled and loads its Ollama provider only when it has a credential:
+
+- The model is checked against Ollama's `/api/tags`. The requested model (or `llama3.2` when none is sent) is kept when it is pulled; otherwise the route writes the most recently pulled model, preferring one that can use tools, the same pick a new [Clawboo Native](/runtimes/native) agent gets. With no chat model pulled, or Ollama not answering, the request stands. It is always written as an `ollama/<model>` ref.
 - `.env` gets `OLLAMA_API_KEY=ollama-local`, the marker OpenClaw accepts for a local Ollama. It is not a secret.
-- OpenClaw calls `http://127.0.0.1:11434` and never reads `OLLAMA_BASE_URL`. When that variable is set, the handler writes its native root (without `/v1`) to `models.providers.ollama.baseUrl`, so OpenClaw runs on the same Ollama whose models were checked.
+- OpenClaw calls `http://127.0.0.1:11434` and does not read `OLLAMA_BASE_URL`. When that variable is set, the route writes its address (without `/v1`) to `models.providers.ollama.baseUrl`, so OpenClaw uses the same Ollama whose models were checked.
 
 ### Responses
 
-**`400 Bad Request`**: body is missing or not an object:
+**`400 Bad Request`**: the body is missing or not an object:
 
 ```json
 { "error": "JSON body required" }
@@ -178,21 +194,21 @@ When `model` is omitted, the handler picks a per-provider default from its `MODE
 { "error": "provider is required" }
 ```
 
-**`400 Bad Request`**: a non-`ollama` provider with a missing or empty `apiKey`:
+**`400 Bad Request`**: a keyed provider with a missing or empty `apiKey`:
 
 ```json
-{ "error": "apiKey is required for non-ollama providers" }
+{ "error": "apiKey is required for non-keyless providers" }
 ```
 
-**`200 OK`**: config + `.env` written, token minted, settings saved:
+**`200 OK`**: both files written, the token made and saved:
 
 ```ts
-{ ok: true, gatewayUrl: string, model: string }   // gatewayUrl is `ws://localhost:<port>`
+{ ok: true, gatewayUrl: string, model: string } // gatewayUrl is ws://localhost:<port>
 ```
 
-`model` is the default written to `openclaw.json`. For `ollama` it can differ from the `model` you sent, when Ollama hasn't pulled that one.
+`model` is the default written to `openclaw.json`. For `ollama` it can differ from the model you sent, when Ollama has not pulled that one.
 
-**`500 Internal Server Error`**: a filesystem or token-generation failure:
+**`500 Internal Server Error`**: a file or token failure:
 
 ```json
 { "error": "<message>" }
@@ -210,45 +226,46 @@ curl -X POST http://localhost:18790/api/system/configure-openclaw \
 
 ## `POST /api/system/auto-configure-openclaw`
 
-The no-prompt counterpart to [`configure-openclaw`](#post-apisystemconfigure-openclaw): it provisions OpenClaw from a credential you have **already** connected, so the OpenClaw setup flow never re-asks for a key. The SPA's inline OpenClaw setup calls this first and only falls back to the key prompt when this route reports it has nothing to work with.
+Sets up OpenClaw from a credential you have already connected, so the OpenClaw setup never asks for a key it could find itself. The dashboard's OpenClaw setup calls it first and shows the key prompt only when this route finds nothing to use. Unlike `configure-openclaw`, it keeps what is already in `openclaw.json` and `.env` (see the list after the responses).
 
 - **Path/query params**: none.
-- **Request body**: none (the handler ignores the request entirely).
+- **Request body**: none (ignored).
 
-It resolves a credential in five rungs, in order, and stops at the first that matches:
+It looks for a credential in five steps, in order, and stops at the first that matches:
 
-| Rung | Condition                                                              | Outcome                                                                                               |
-| ---- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 1    | A connected provider key (encrypted vault **or** OpenClaw's `.env`)    | Key upserted into `.env` + every agent's `auth-profiles.json`, config written → `{ ok: true, ... }`   |
-| 2    | No key, but OpenClaw already holds an `openai-codex` OAuth profile     | Config writes only, **no** key write (the credential is OpenClaw's own profile) → `{ ok: true, ... }` |
-| 3    | No such profile, but the `codex` CLI is logged in                      | `{ ok: false, needsCodexAuth: true, loginCommand }`, so the UI offers a ChatGPT sign-in + a re-check  |
-| 4    | No codex login either, but a local Ollama is set up for Clawboo Native | Ollama's local marker in `.env`, a pulled default model, config written → `{ ok: true, ... }`         |
-| 5    | Nothing connected                                                      | `{ ok: false, needsKey: true }`, so the UI falls back to the key prompt                               |
+| Step | Condition                                                            | Outcome                                                                                                  |
+| ---- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 1    | A provider key is connected (in the vault or in `~/.openclaw/.env`)  | The key is written to `.env` and every OpenClaw agent's `auth-profiles.json`, config written, `ok: true` |
+| 2    | OpenClaw already holds an `openai-codex` (ChatGPT) sign-in profile   | Config written, no key written (OpenClaw uses its own profile), `ok: true`                               |
+| 3    | The `codex` CLI is signed in, but OpenClaw has no profile of its own | Nothing written; `needsCodexAuth: true` and `loginCommand`, so the dashboard offers a ChatGPT sign-in    |
+| 4    | Local Ollama is set up for Clawboo Native                            | Ollama's marker in `.env`, a pulled default model, config written, `ok: true`                            |
+| 5    | Nothing is connected                                                 | Nothing written; `needsKey: true`, so the dashboard shows the key prompt                                 |
 
-Rung 3 exists because a `codex login` in your terminal is a subscription OpenClaw cannot use until it holds a profile of its own; `loginCommand` is `openclaw models auth login --provider openai-codex`. The dashboard runs it for you over
-`POST /api/auth/cli-login/openclaw`, and surfaces the raw command only if that fails.
+In step 1, with several keys connected, the route takes the first in this fixed order, not your default native provider: anthropic, openai, google, openrouter, xai, groq, mistral, moonshot, minimax, together, nvidia, huggingface, cerebras, venice. A provider counts as connected when its key is in the vault or in `~/.openclaw/.env` (a variable only in the server's shell does not count), but the value written is the one that resolves first: the server's environment, then the vault, then `.env`.
 
-Rung 4 is the same Ollama setup the [native runtime](/runtimes/native#2-connect-the-key) reads: you picked **Ollama** at onboarding or pressed **Use** on it in the providers manager, or, with neither recorded, `OLLAMA_BASE_URL` is set. **Disconnect Ollama**, or disconnecting Clawboo Native entirely, takes it away again. It is the last resort before the key prompt: a key, the subscription profile and the ChatGPT sign-in offer all come first. It writes what [`configure-openclaw`](#post-apisystemconfigure-openclaw) writes for `ollama`: `OLLAMA_API_KEY=ollama-local` in `.env`, a default model your Ollama has pulled (the most recently pulled model that can use tools when `llama3.2` isn't there, always as `ollama/<model>`), and, when `OLLAMA_BASE_URL` is set, its native root as `models.providers.ollama.baseUrl`.
+Step 3 exists because a `codex login` in your terminal is a ChatGPT subscription that OpenClaw cannot use until it holds a sign-in profile of its own. `loginCommand` is `openclaw models auth login --provider openai-codex`. The dashboard runs it for you through `POST /api/auth/cli-login/openclaw` and shows the command only if that fails.
+
+Step 4 uses the same Ollama setup Clawboo Native reads: you picked **Ollama** in onboarding or pressed **Use** on it in Clawboo Native's **Manage**, or no choice is recorded and `OLLAMA_BASE_URL` is set. **Disconnect Ollama**, or a full disconnect of Clawboo Native, turns it off again. It is the last resort before the key prompt. It writes what `configure-openclaw` writes for `ollama`: `OLLAMA_API_KEY=ollama-local` in `.env`, a default model your Ollama has pulled (when `llama3.2` is not pulled, the most recently pulled model, preferring one that can use tools, always as `ollama/<model>`), and, when `OLLAMA_BASE_URL` is set, its address as `models.providers.ollama.baseUrl`.
 
 ### Responses
 
-**`200 OK` (rungs 1, 2 and 4)**: `openclaw.json` was written and the Gateway URL + token saved into Clawboo's settings. `provider` is the id that satisfied the rung (`'openai-codex'` for rung 2, `'ollama'` for rung 4):
+**`200 OK`** (steps 1, 2 and 4): `openclaw.json` was written and the Gateway URL and token saved in Clawboo's settings. `provider` is the provider that matched (`'openai-codex'` for step 2, `'ollama'` for step 4):
 
 ```ts
 {
   ok: true
-  gatewayUrl: string // e.g. `ws://localhost:18789`
+  gatewayUrl: string // e.g. ws://localhost:18789
   provider: string
-  // rung 4 only, when the default model is an `ollama/` model:
+  // step 4 only, when the default model is an ollama/ model:
   model?: string // the default in openclaw.json, kept or just written
-  modelPulled?: boolean // false when Ollama didn't list it, or isn't answering
-  pullCommand?: string // with modelPulled false: e.g. `ollama pull llama3.2`
+  modelPulled?: boolean // false when Ollama does not list it, or is not answering
+  pullCommand?: string // with modelPulled false, e.g. `ollama pull llama3.2`
 }
 ```
 
-An Ollama default that isn't pulled fails every OpenClaw turn, so the inline setup stops on `pullCommand` before it starts the Gateway, with **Check again** (which calls this route again) and **Continue anyway**.
+An Ollama default that is not pulled fails every OpenClaw turn, so the dashboard's setup stops on `pullCommand` before it starts the Gateway, with **Check again** (which calls this route again) and **Continue anyway**.
 
-**`200 OK` (rungs 3 and 5)**: nothing was written; the body tells the caller which prompt to show:
+**`200 OK`** (steps 3 and 5): nothing was written; the body says which prompt to show:
 
 ```ts
 { ok: false, needsCodexAuth: true, loginCommand: string }
@@ -256,15 +273,20 @@ An Ollama default that isn't pulled fails every OpenClaw turn, so the inline set
 { ok: false, needsKey: true }
 ```
 
-**`500 Internal Server Error`**: a filesystem or token-generation failure:
+**`500 Internal Server Error`**: a file or token failure:
 
 ```json
 { "error": "<message>" }
 ```
 
-<Note>
-Both writes are non-destructive read-modify-writes, which is what makes this safe to call on an existing install. The Gateway token is **reused** from `~/.openclaw/.env` when `GATEWAY_AUTH_TOKEN` is already set; a fresh one is minted only when it is absent. In `openclaw.json` only `gateway.mode` is forced (to `'local'`); `gateway.port`, `gateway.auth`, the default model, `tools.agentToAgent`, `tools.sessions` and (rung 4) `models.providers.ollama` are filled in **only when missing**, so fields you set by hand survive. Rung 4 likewise keeps an `OLLAMA_API_KEY` that already has a value, since any value registers OpenClaw's Ollama provider. Unlike `configure-openclaw`, there is no `gatewayPort` input: the port defaults to `18789` and an existing numeric `gateway.port` is left alone. The returned and saved `gatewayUrl` names the port the [Gateway route](#post-apisystemgateway) will use: the port in Clawboo's Gateway PID file, then `gateway.port` when it is a positive number, then `18789`. So a Gateway you moved to another port is the one Clawboo connects to.
-</Note>
+What this route keeps, which makes it safe on an existing install:
+
+- **The Gateway token.** `GATEWAY_AUTH_TOKEN` in `.env` is reused; a new token is made only when there is none.
+- **Your `openclaw.json` settings.** Only `gateway.mode` is set (to `'local'`). `gateway.port`, `gateway.auth`, the default model, `tools.agentToAgent`, `tools.sessions` and, in step 4, `models.providers.ollama` are filled in only when missing.
+- **An existing `OLLAMA_API_KEY`.** Step 4 keeps one that has a value, since any value lets OpenClaw load its Ollama provider.
+- **The port.** There is no `gatewayPort` input. A missing `gateway.port` becomes `18789`; an existing one is left alone.
+
+The returned and saved `gatewayUrl` uses the port the Gateway route will use: the port in Clawboo's Gateway PID file, then `gateway.port` when it is a positive number, then `18789`. So a Gateway you moved to another port is the one Clawboo connects to.
 
 ### Example
 
@@ -276,7 +298,7 @@ curl -X POST http://localhost:18790/api/system/auto-configure-openclaw
 
 ## `POST /api/system/gateway`
 
-Drives the Gateway process lifecycle. The `action` field selects the operation. `status` and `stop` return JSON; `start` and `restart` stream SSE (because they poll for the port to bind and emit progress). The default port is resolved from the PID file, then `openclaw.json`'s `gateway.port`, then `18789`.
+Starts, stops, restarts or reports on the Gateway process. `action` picks the operation. `status` and `stop` return JSON; `start` and `restart` stream SSE, because they wait for the port to open and report progress. The port comes from Clawboo's Gateway PID file, then `gateway.port` in `openclaw.json`, then `18789`.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -312,7 +334,7 @@ Drives the Gateway process lifecycle. The `action` field selects the operation. 
 }
 ```
 
-**`200 OK` (`action: 'stop'`)**: the stop result. `stopped` is `true` when a process was signalled (SIGTERM, then SIGKILL after a 2-second grace), `false` when none was found:
+**`200 OK` (`action: 'stop'`)**: the stop result. `stopped: true` means a process was signalled (SIGTERM, then SIGKILL after a 2-second grace). When none was found, the body is `{ ok: false, message }` instead:
 
 ```ts
 { ok: true, stopped: true }
@@ -320,38 +342,38 @@ Drives the Gateway process lifecycle. The `action` field selects the operation. 
 { ok: false, message: 'No gateway process found' }
 ```
 
-**`200 OK` + `text/event-stream` (`action: 'start'` or `'restart'`)**: the handler sets the SSE headers, flushes, and streams frames. For `restart` it first stops the running process. A detached child is spawned; it is **not** killed when the client disconnects (the Gateway is meant to outlive the request).
+**`200 OK` + `text/event-stream` (`action: 'start'` or `'restart'`)**: the stream sends `data: <json>\n\n` frames. `restart` first stops the running process. The route starts `openclaw gateway --port <port> --allow-unconfigured` as a detached process that keeps running when the client disconnects or Clawboo restarts. The Gateway's output goes to `~/.clawboo/gateway.log` (under `CLAWBOO_HOME` when set), and the stream relays new lines from that file as `output` frames.
 
 #### Event catalog (`start` / `restart`)
 
-| `type`     | When                                                                                                                                          | Payload fields                                                  |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `progress` | `restart` stop phase                                                                                                                          | `step: 'stopping'`, `message`                                   |
-| `progress` | Spawn start, or joining an in-flight launch                                                                                                   | `step: 'starting'`, `message`                                   |
-| `progress` | Each poll while waiting for the port to bind                                                                                                  | `step: 'waiting'`, `message` (`Waiting for gateway... (n/120)`) |
-| `progress` | The Gateway asked for `openclaw doctor --fix` and the repair is running, or another start is already running it                               | `step: 'repairing'`, `message`                                  |
-| `output`   | Per non-empty stdout/stderr line from the Gateway, and from the repair                                                                        | `line`                                                          |
-| `complete` | Port became reachable, or already running                                                                                                     | `success: true`, `pid` (or `port` / `message`)                  |
-| `error`    | OpenClaw missing, spawn throws/errors, the Gateway exits with a stated reason, the repair fails, an internal throw, or the 60s poll times out | `code`, `message`                                               |
+| `type`     | When                                                                                                                                        | Payload fields                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `progress` | `restart` stop phase                                                                                                                        | `step: 'stopping'`, `message`                                   |
+| `progress` | Spawn start, or joining an in-flight launch                                                                                                 | `step: 'starting'`, `message`                                   |
+| `progress` | Each poll while waiting for the port to bind                                                                                                | `step: 'waiting'`, `message` (`Waiting for gateway... (n/120)`) |
+| `progress` | The Gateway asked for `openclaw doctor --fix` and the repair is running, or another start is already running it                             | `step: 'repairing'`, `message`                                  |
+| `output`   | Each non-empty line of Gateway output (read from `gateway.log`) and of the repair                                                           | `line`                                                          |
+| `complete` | The port opened, or the Gateway was already running                                                                                         | `success: true`, `port`, and `pid` or `message`                 |
+| `error`    | OpenClaw missing, a spawn failure, the Gateway exits with a stated reason, the repair fails, an unexpected error, or the 60 s wait runs out | `code`, `message`                                               |
 
 Terminal `error` `code` values:
 
 | `code`                | Meaning                                                                                                                                 |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `NOT_INSTALLED`       | OpenClaw binary not found                                                                                                               |
-| `SPAWN_THROW`         | The `spawn` call threw synchronously                                                                                                    |
-| `SPAWN_ERROR`         | The child emitted an `error` event                                                                                                      |
+| `SPAWN_THROW`         | The spawn call threw                                                                                                                    |
+| `SPAWN_ERROR`         | The child process emitted an error                                                                                                      |
 | `TIMEOUT`             | The port did not become reachable within ~60s (120 × 500ms polls); the message carries the Gateway's stated reason when its log has one |
 | `GATEWAY_EXITED`      | The Gateway exited before binding and its log says why (`Gateway failed to start: ...`); reported at once rather than after the poll    |
 | `DOCTOR_FIX_FAILED`   | The Gateway asked for `openclaw doctor --fix` and running it failed; the message carries doctor's last line                             |
 | `DOCTOR_FIX_REQUIRED` | The Gateway still asked for `openclaw doctor --fix` after the repair ran once                                                           |
-| `INTERNAL`            | An unexpected throw after the SSE headers were sent                                                                                     |
+| `INTERNAL`            | An unexpected error after the stream opened                                                                                             |
 
-**Automatic repair.** After an OpenClaw upgrade the Gateway can refuse to start until its data is migrated (for example `Legacy workspace setup state requires migration for ~/.openclaw/workspace; run openclaw doctor --fix`). When a launch exits with that request, the handler runs `openclaw doctor --fix --non-interactive` once, with `OPENCLAW_SERVICE_REPAIR_POLICY=external` so doctor never installs, loads or restarts a launchd or systemd Gateway service, streams its output, and launches again. Only the failure line of that launch counts, so a passing mention of doctor elsewhere in the log never triggers it. A second `start` or `restart` that arrives while the repair runs waits for it instead of launching against data that is mid-migration. The repair has a 5-minute limit.
+**Automatic repair.** After an OpenClaw upgrade the Gateway can refuse to start until its data is migrated (for example `Legacy workspace setup state requires migration for ~/.openclaw/workspace; run openclaw doctor --fix`). When a launch exits with that request, the route runs `openclaw doctor --fix --non-interactive` once, with `OPENCLAW_SERVICE_REPAIR_POLICY=external` so doctor never installs, loads or restarts a launchd or systemd Gateway service, streams its output, and launches again. Only the failure line of that launch counts, so a passing mention of doctor elsewhere in the log never triggers it. A second `start` or `restart` that arrives while the repair runs waits for it instead of launching against data that is mid-migration. The repair has a 5-minute limit.
 
 Every launch, and the repair, runs with an explicit working directory that exists: the OpenClaw CLI refuses to start in a deleted one.
 
-When the port becomes reachable, the handler syncs the `.env` token into settings and best-effort reconnects the server-side AgentSource before emitting `complete`. A `start` that finds the port already reachable emits `complete` immediately with `message: 'Gateway already running'`; a `start` that finds an alive-but-not-yet-bound managed PID joins that in-flight launch instead of spawning a duplicate.
+When the port opens, the route copies the `.env` token into Clawboo's settings, starts reconnecting Clawboo's own Gateway connection (which then syncs the agent list), and sends `complete` without waiting for that reconnect. A `start` that finds the port already open sends `complete` at once with `message: 'Gateway already running'`. A `start` that finds a Gateway Clawboo launched still starting up waits for that launch instead of starting a second one.
 
 Example frames:
 
@@ -381,18 +403,18 @@ curl -N -X POST http://localhost:18790/api/system/gateway \
 
 ## `GET /api/system/openclaw-config`
 
-Reads `openclaw.json` and the provider-key flags derived from `.env` and per-agent `auth-profiles.json` files. The flags report key presence only; no key values are returned. The exec policy (`tools.exec.ask` / `tools.exec.security`) is surfaced for easy client consumption.
+Reads `openclaw.json`, flags for which provider keys OpenClaw holds (from `.env` and the agents' `auth-profiles.json`), the exec policy, and the state of OpenClaw's ChatGPT sign-in. The flags report presence only; no key value is returned.
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: the config and derived flags:
+**`200 OK`**: the config and flags:
 
 ```ts
 {
-  config: Record<string, unknown> | null // parsed openclaw.json, or null if missing/corrupt
+  config: Record<string, unknown> | null // the parsed openclaw.json, or null when missing or unreadable
   env: {
     hasAnthropicKey: boolean
     hasOpenAIKey: boolean
@@ -410,13 +432,19 @@ Reads `openclaw.json` and the provider-key flags derived from `.env` and per-age
     hasVeniceKey: boolean
     hasGatewayToken: boolean
   }
-  version: string | null // OpenClaw version (null if probe failed)
+  version: string | null // OpenClaw version; null when the check failed
   execAsk: unknown | null // tools.exec.ask from openclaw.json
   execSecurity: unknown | null // tools.exec.security
+  codexAuth: {
+    profile: boolean // OpenClaw holds its own openai-codex (ChatGPT) sign-in profile
+    codexCli: boolean // a `codex login` exists on this machine
+    bootstrapTrusted: boolean // currently false: Clawboo does not rely on OpenClaw making a profile from a codex login
+    loginCommand: string // 'openclaw models auth login --provider openai-codex'
+  }
 }
 ```
 
-A provider flag is `true` when its env var is set in `.env` **or** a matching `auth-profiles.json` entry exists. (`hasGoogleKey` matches `GEMINI_API_KEY` or `GOOGLE_API_KEY`; `hasHuggingFaceKey` matches `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`.)
+A provider flag is `true` when its variable has a value in `.env`, or an agent's `auth-profiles.json` holds a key for that provider. Only one agent's file counts: the scan stops at the first agent whose `auth-profiles.json` holds any key. `hasGoogleKey` matches `GEMINI_API_KEY` or `GOOGLE_API_KEY`; `hasHuggingFaceKey` matches `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`.
 
 **`500 Internal Server Error`**: a read failure:
 
@@ -434,42 +462,54 @@ curl http://localhost:18790/api/system/openclaw-config
 
 ## `PATCH /api/system/openclaw-config`
 
-Read-modify-writes `openclaw.json` and, when keys are supplied, `.env` plus every agent's `auth-profiles.json`. Every field is optional; only the supplied parts are touched. A missing or corrupt `openclaw.json` is treated as an empty object (started fresh).
+Changes parts of `openclaw.json` and, when keys are sent, writes them to `.env` and every OpenClaw agent's `auth-profiles.json`. Every field is optional and only the fields you send are touched. A missing or unreadable `openclaw.json` is treated as empty. Keys sent here go to OpenClaw's files only, not to Clawboo's vault.
 
 - **Path/query params**: none.
-- **Request body**: all fields optional:
+- **Request body** (all fields optional):
 
 ```ts
 {
-  model?: string        // → agents.defaults.model.primary
-  fallbacks?: string[]  // → agents.defaults.model.fallbacks (non-strings filtered out)
-  gatewayPort?: number  // → gateway.port (and Clawboo settings gatewayUrl)
-  apiKeys?: Array<{ provider: string; key: string }>  // → .env + auth-profiles.json
-  agentModel?: { agentId: string; model: string | null }  // per-agent override in agents.list[]
-  exec?: { ask?: string; security?: string }  // → tools.exec.*
-  agentToAgent?: { enabled: boolean }  // → tools.agentToAgent.enabled (and sessions.visibility on enable)
+  model?: string        // agents.defaults.model.primary (and agents.defaults.contextTokens, below)
+  fallbacks?: string[]  // agents.defaults.model.fallbacks (non-strings dropped)
+  gatewayPort?: number  // gateway.port, and Clawboo's saved Gateway URL
+  apiKeys?: Array<{ provider: string; key: string }> // .env and every agent's auth-profiles.json
+  agentModel?: { agentId: string; model: string | null } // agents.entries.<agentId>.model
+  exec?: { ask?: string; security?: string } // tools.exec.ask, tools.exec.security
+  agentToAgent?: { enabled: boolean } // tools.agentToAgent.enabled
 }
 ```
 
-Notes on behavior: `agentModel.model === null | ''` removes the per-agent override (and prunes the `agents.list[]` entry if only `id` remains). Enabling `agentToAgent` also sets `tools.sessions.visibility: 'all'`. An `apiKeys` entry whose `provider` has no canonical mapping is written under `<PROVIDER>_API_KEY`. When `gatewayPort` changes, the Clawboo settings `gatewayUrl` is updated to `ws://localhost:<port>`.
+What each field writes:
+
+- **`model`** sets the default model. It also sets `agents.defaults.contextTokens` to the context window the OpenClaw CLI's model catalog reports for that exact model; when the catalog has no entry, `contextTokens` is not written.
+- **`agentModel`** sets one agent's model override in OpenClaw's roster, `agents.entries.<agentId>.model`. A legacy `agents.list` array is folded into `agents.entries` and removed first, because OpenClaw rejects a config that has both. A `model` of `null` or `''` deletes only the override and keeps the agent's entry, since the entry is the agent's place in the roster. When the roster then holds more than one agent and has no `agents.ownership`, it is set to `'explicit'`.
+- **`gatewayPort`** sets `gateway.port` and saves `ws://localhost:<port>` as Clawboo's Gateway URL.
+- **`apiKeys`** upserts each key under its provider's variable (a provider with no known variable gets `<PROVIDER>_API_KEY`) and as the `<provider>:default` profile in each agent's `auth-profiles.json`.
+- **`agentToAgent`** with `enabled: true` also sets `tools.sessions.visibility: 'all'`.
 
 ### Responses
 
-**`400 Bad Request`**: body is missing or not an object:
+**`400 Bad Request`**: the body is missing or not an object:
 
 ```json
 { "error": "JSON body required" }
 ```
 
-**`200 OK`**: the config (and `.env` / profiles) was written. `hotReloadHint` is present only when the Gateway is currently reachable (the client should hot-reload its config):
+**`400 Bad Request`**: `agentModel.agentId` is `__proto__`, `constructor` or `prototype`. Nothing is written:
+
+```json
+{ "error": "invalid agentId" }
+```
+
+**`200 OK`**: written. `hotReloadHint` is present only when the Gateway is reachable, as a sign that a client can reload its config:
 
 ```ts
 { ok: true }
-// or, when the gateway is running:
+// or, when the Gateway is running:
 { ok: true, hotReloadHint: true }
 ```
 
-**`500 Internal Server Error`**: a filesystem failure:
+**`500 Internal Server Error`**: a file failure:
 
 ```json
 { "error": "<message>" }
@@ -481,15 +521,20 @@ Notes on behavior: `agentModel.model === null | ''` removes the per-agent overri
 curl -X PATCH http://localhost:18790/api/system/openclaw-config \
   -H 'Content-Type: application/json' \
   -d '{"model":"anthropic/claude-sonnet-4-5","agentToAgent":{"enabled":true}}'
+
+# Give one agent its own model
+curl -X PATCH http://localhost:18790/api/system/openclaw-config \
+  -H 'Content-Type: application/json' \
+  -d '{"agentModel":{"agentId":"<agent-id>","model":"openai/gpt-5.4"}}'
 ```
 
 ---
 
 ## `POST /api/system/approve-device`
 
-Approves the most-recently pending OpenClaw device-pairing request. Required since OpenClaw 2026.5.x dropped auto-pair-on-first-connect: a fresh device sits pending until a human approves it, and an unapproved device's WS connect fails with `NOT_PAIRED` ("pairing required: device is not approved yet"). This endpoint is the in-product remediation the SPA's pairing dialog calls.
+Approves the most recent pending OpenClaw device-pairing request. OpenClaw does not pair a new device on its own: the device waits until a person approves it, and until then its Gateway connection fails with `NOT_PAIRED` ("pairing required: device is not approved yet"). The dashboard's pairing card (**Approve this device**) calls this route.
 
-It is a two-step shell-out. Step 1 runs `openclaw devices approve --latest`, which on 2026.5.x is a **preview**; it prints the pending request UUID (in a line like `Approve this exact request with: openclaw devices approve <UUID>`) and exits non-zero. The handler regex-extracts the UUID from the combined stdout/stderr. Step 2 runs `openclaw devices approve <UUID>` to actually approve it.
+It runs two commands. First `openclaw devices approve --latest`, which only previews: it prints the pending request's UUID (in a line like `Approve this exact request with: openclaw devices approve <UUID>`) and exits non-zero. The route reads the UUID from that output, then runs `openclaw devices approve <UUID>` to approve it. The first command gets 5 seconds and the second 10.
 
 - **Path/query params**: none.
 - **Request body**: none.
@@ -502,33 +547,35 @@ It is a two-step shell-out. Step 1 runs `openclaw devices approve --latest`, whi
 { "error": "OpenClaw not installed" }
 ```
 
-**`500 Internal Server Error`**: the step-1 preview process failed to spawn (ENOENT, timeout, etc.):
+**`500 Internal Server Error`**: the preview command could not run (not found, or timed out):
 
 ```json
 { "error": "Failed to run openclaw: <message>" }
 ```
 
-**`404 Not Found`**: no pending request UUID was found in the preview output:
+**`404 Not Found`**: the preview output named no pending request. `details` is its first 500 characters:
 
 ```json
-{ "error": "No pending device pairing requests found", "details": "<truncated output>" }
+{ "error": "No pending device pairing requests found", "details": "<preview output>" }
 ```
 
-**`200 OK`**: the device was approved:
+**`200 OK`**: the device was approved. `output` is the command's output, up to 1,000 characters:
 
 ```ts
 { ok: true, requestId: string, output: string }
 ```
 
-**`500 Internal Server Error`**: step 2 (the real approval) failed; the cleaned stderr/stdout message is surfaced:
+**`500 Internal Server Error`**: the approval command failed. The message carries its error output, up to 500 characters:
 
 ```json
 { "error": "Failed to approve device: <message>", "requestId": "<uuid>" }
 ```
 
-<Warning>
-The pending-UUID parse depends on OpenClaw's CLI output wording (`/openclaw devices approve\s+([a-f0-9-]{36})/i`). If a future OpenClaw release changes that line, this route returns 404 and the SPA's pairing dialog falls back to showing the manual `openclaw devices approve <id>` command.
-</Warning>
+<Note>
+
+Finding the UUID depends on the wording of OpenClaw's output (the pattern `/openclaw devices approve\s+([a-f0-9-]{36})/i`). If an OpenClaw release changes that line, this route answers 404. The pairing card then shows the error, and its footer always lists the manual `openclaw devices approve` commands.
+
+</Note>
 
 ### Example
 
@@ -540,27 +587,31 @@ curl -X POST http://localhost:18790/api/system/approve-device
 
 ## `GET /api/system/models`
 
-Returns the model catalog used by the model pickers. The catalog is read from `openclaw models list --all --json` (cached 5 minutes); when the CLI is unavailable it falls back to the static catalog. Either way the result is filtered to known providers plus `ollama`, and CLI provider names are normalized to the static catalog's display casing. `configuredProviders` lists the providers that have a key configured (in `.env` or `auth-profiles.json`), always including `ollama`.
+The model catalog behind the OpenClaw model pickers. It comes from `openclaw models list --all --json` (cached for 5 minutes); without the CLI, the built-in catalog is used instead. The result keeps only the 14 key providers, `ollama` and `openai-codex`, with provider names in the built-in catalog's display spelling. A known provider the CLI does not list is filled in from the built-in catalog.
+
+`configuredProviders` lists the providers OpenClaw can use: those with a key in `.env` or in an agent's `auth-profiles.json`, those with a sign-in profile (for example `openai-codex` after a ChatGPT sign-in), and always `ollama`.
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: the grouped catalog. `groups` is `null` only when both the CLI and static catalog yield nothing:
+**`200 OK`**: the grouped catalog:
 
 ```ts
 {
   groups: Array<{
     provider: string
     models: Array<{ id: string; label: string }>
-  }> | null
-  configuredProviders: string[]   // provider ids with a key (always includes 'ollama')
+  }> | null // null only after an unexpected error
+  configuredProviders: string[] // always includes 'ollama'
 }
 ```
 
 <Note>
-This route never returns an error status. Any failure is caught and answered with `{ groups: null, configuredProviders: [] }` (HTTP 200), so the picker degrades gracefully rather than erroring.
+
+This route never answers with an error status. An unexpected error comes back as `{ "groups": null, "configuredProviders": [] }` with status **200**, so a picker can fall back to its own list.
+
 </Note>
 
 ### Example
@@ -573,7 +624,7 @@ curl http://localhost:18790/api/system/models
 
 ## `GET /api/system/self-version`
 
-Which Clawboo this server is running, how it was installed, and whether a newer release is published. Backs the dashboard's "update available" chip and the `clawboo` launcher's [version-aware attach](/reference/cli#what-clawboo-does).
+Which Clawboo this server runs, how it was installed, and whether a newer release is published. The dashboard's **Update available** chip reads it, and so does the `clawboo` command when it finds a server already running (see the [CLI reference](/reference/cli)).
 
 ### Query parameters
 
@@ -581,11 +632,11 @@ Which Clawboo this server is running, how it was installed, and whether a newer 
 | ------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
 | `local` | `1`    | Skip the npm-registry probe. `latest` and `checkedAt` come back `null` and `updateAvailable` `false`, i.e. "not checked". |
 
-`?local=1` exists for the CLI. The launcher reads this route on every attach purely to compare the running server against its own version, and never needs `latest`; the registry probe is capped at 5 s and deliberately does not cache failures, so without the opt-out an offline machine would pay that on every launch. Servers that predate the parameter ignore it and return the full payload, which the launcher also accepts.
+`?local=1` is for the CLI, which reads this route each time it attaches to a running server only to compare versions. The registry check is capped at 5 seconds and a failed check is not cached, so without it an offline machine would wait on every launch.
 
 ### Responses
 
-`200` always. Every failure is absorbed: an unreachable registry is a `null` latest, never an error status.
+Always `200`. An unreachable registry is a `null` `latest`, never an error status.
 
 | Field             | Type                         | Notes                                                                                                                  |
 | ----------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -599,7 +650,9 @@ Which Clawboo this server is running, how it was installed, and whether a newer 
 | `checkedAt`       | `number \| null`             | Epoch ms of the last registry fetch, `null` when `latest` is `null`.                                                   |
 
 <Note>
-A dev checkout reports `current: "0.0.0-dev"` and is never told an update is available. Both the chip and the CLI treat a `0.0.0*` version as "don't nag" — and the launcher additionally refuses to offer to restart such a server, so a contributor's `pnpm dev` process is never a target.
+
+A dev checkout reports `current: "0.0.0-dev"` and is never told an update is available. The chip and the CLI both treat a `0.0.0*` version as "don't nag", and the CLI never offers to restart such a server, so a contributor's `pnpm dev` process is never a target.
+
 </Note>
 
 ### Example
@@ -618,7 +671,7 @@ curl 'http://localhost:18790/api/system/self-version?local=1'
 
 Installs `clawboo@latest` globally and restarts the server into it. Streams **Server-Sent Events**; takes no request body.
 
-Only a `global` install can succeed: an `npx` run lives in npm's version-hashed `_npx` cache, so a global install lands somewhere the running process cannot reach, and a dev checkout must never self-update. Both get an `unsupported` event and the copy-paste command instead. That is defense in depth; the chip already hides its button in those cases.
+Only a `global` install can update itself. An `npx` run lives in npm's `_npx` cache, so a global install lands somewhere the running copy cannot reach, and a dev checkout never updates itself. Both get an `unsupported` event with the command to run instead (the chip hides its button in those cases anyway).
 
 ### Event stream
 
@@ -626,31 +679,33 @@ Only a `global` install can succeed: an `npx` run lives in npm's version-hashed 
 | --------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `unsupported`         | `installMethod` is not `global`                                                 | `method`, `command`, `message`                                    |
 | `progress`            | Install start                                                                   | `step: 'installing'`, `message`                                   |
-| `output`              | Per non-empty stdout/stderr line from npm                                       | `line`                                                            |
-| `error`               | Spawn throws, the child errors, or npm exits non-zero; at most one per stream   | `code`, `message`, and on a non-zero exit `exitCode` and `detail` |
+| `output`              | Each non-empty line of npm output                                               | `line`                                                            |
+| `error`               | A spawn failure, or npm exits non-zero; at most one per stream                  | `code`, `message`, and on a non-zero exit `exitCode` and `detail` |
 | `installed-elsewhere` | npm exited 0 but the on-disk version did not change, or the API port is unknown | `version`, `message`                                              |
 | `installed`           | npm exited 0 and the on-disk version changed                                    | `version`                                                         |
-| `restarting`          | Immediately before the successor is launched                                    | `port`, `version`                                                 |
+| `restarting`          | Just before the new server starts                                               | `port`, `version`                                                 |
 
 | `code`        | Meaning                                                                                  |
 | ------------- | ---------------------------------------------------------------------------------------- |
 | `EACCES`      | npm's output named `EACCES`, `EPERM` or "permission denied": the install needs elevation |
 | npm's code    | npm printed its own code (`ETARGET`, `ENOTFOUND`, ...)                                   |
 | `EXIT_<code>` | A non-zero npm exit that printed no code of its own (e.g. `EXIT_7`)                      |
-| `SPAWN_THROW` | The `spawn` call threw synchronously                                                     |
-| `SPAWN_ERROR` | The child emitted an `error` event                                                       |
+| `SPAWN_THROW` | The spawn call threw                                                                     |
+| `SPAWN_ERROR` | The child process emitted an error                                                       |
 
 On a non-zero exit, `detail` is npm's own reason in one line (the `Error:` line, or the first line of its error block, or the name of a package whose install script failed), and `message` leads with it, so the chip shows why rather than only an exit code. `detail` is `null` when npm's output named no reason.
 
-npm runs with an explicit working directory that exists. npm reads its working directory before anything else and exits with code 7 when it has been deleted, which is where a server started inside the replaced package folder used to sit.
+npm runs in a working directory that exists, because npm exits with code 7 when its working directory has been deleted.
 
-After `restarting`, the server launches a successor pinned to the same port (`CLAWBOO_API_PORT`) and told to wait for that port to free (`CLAWBOO_AWAIT_PORT`), then exits so the successor can bind. The successor gets an explicit working directory that exists, never the old server's, and a server that does start in a deleted directory moves into the Clawboo directory before loading anything else. The successor is started with `CLAWBOO_VERSION` deliberately **removed** so it recomputes its version from the freshly-installed manifest rather than inheriting the pre-update value. The browser is already polling the same origin and reloads once the successor answers.
+After `restarting`, the server starts a new server on the same port (`CLAWBOO_API_PORT`), told to wait until that port is free (`CLAWBOO_AWAIT_PORT`), and then exits so the new one can bind. The new server starts in a working directory that exists, and a server that does start in a deleted directory moves into the Clawboo directory before it loads anything. `CLAWBOO_VERSION` is removed from its environment, so it reads its version from the newly installed package. The browser keeps polling the same address and reloads when the new server answers.
 
 <Note>
-The `installed-elsewhere` event is the guard against a hot-swap into stale bytes: if the global install landed somewhere this running copy does not point at, restarting would just re-run the old code, so the server stays up and asks you to restart manually instead.
+
+`installed-elsewhere` means the global install landed somewhere this running copy does not point at, so a restart would run the old code again. The server stays up and asks you to restart it yourself.
+
 </Note>
 
-The equivalent from a terminal, which works for every install shape, is `npm install -g clawboo@latest && clawboo restart` — see the [CLI reference](/reference/cli#clawboo-restart).
+From a terminal, run the `updateCommand` that `self-version` reports, then `clawboo restart` (see the [CLI reference](/reference/cli)).
 
 ### Example
 
@@ -662,13 +717,15 @@ curl -N -X POST http://localhost:18790/api/system/self-update
 
 ## Error envelope
 
-Every error response on these routes is the standard envelope `{ error: string }`. Two routes attach extra fields alongside it: `approve-device` adds `details` (on the 404) and `requestId` (on the step-2 500). `GET /api/system/models` is the only route here that never returns an error status; it falls back to a `200` with a `null` catalog.
+Errors use the standard `{ "error": string }` body. `approve-device` adds `details` on its 404 and `requestId` on the 500 from the approval command. `GET /api/system/models` never returns an error status; it falls back to a `200` with a `null` catalog. The SSE routes report failures as `error` frames once the stream is open. Going over a rate limit answers **429** with `{ "error": "Too many requests. Wait a moment and retry." }` (general) or `{ "error": "Too many requests for this operation. Wait a moment and retry." }` (sensitive), plus a `Retry-After` header.
 
-## See also
+**Source of truth:** `apps/web/server/api/system.ts` and `systemUpdate.ts`; the version check in `apps/web/server/lib/updateCheck.ts`; key files in `apps/web/server/lib/openclawEnv.ts`.
 
-- [OpenClaw runtime: Gateway, device pairing, channels](/runtimes/openclaw)
-- [System maintenance (Gateway control, model, API keys)](/using/system-maintenance)
-- [System Health panel](/using/system-health), the boot-probe surface at [`/api/health`](/reference/rest-api/settings)
-- [Settings API](/reference/rest-api/settings), `gatewayUrl` + `hasToken`, the proxy token this group mints
-- [Runtimes API](/reference/rest-api/runtimes), the four CLI/SDK runtimes (OpenClaw is not in that group)
-- [REST API overview](/reference/rest-api/index)
+## Related
+
+- [OpenClaw](/runtimes/openclaw): set up OpenClaw, the Gateway and device pairing in the dashboard.
+- [System](/using/system): Gateway control and OpenClaw settings in the **System** panel.
+- [System Health](/using/system-health): the start-up checks behind `/api/health`.
+- [Settings API](/reference/rest-api/settings): the saved Gateway URL and token these routes write.
+- [Runtimes API](/reference/rest-api/runtimes): Clawboo Native, Claude Code, Codex and Hermes.
+- [REST API overview](/reference/rest-api/index): authentication, rate limits and conventions.

@@ -1,19 +1,14 @@
 ---
-title: Monorepo and build
-description: How Clawboo's TurboRepo + pnpm-workspaces monorepo is laid out, the build order, what publishes, and the root commands.
+title: 'Monorepo and build'
+description: 'How the pnpm and Turborepo workspace is wired, the real build order, what the npm package contains, the root commands, and the lint and schema rules.'
+keywords: ['turbo', 'turborepo', 'pnpm', 'workspace', 'tsup', 'build order', 'assemble']
 ---
 
-Clawboo is a TurboRepo + pnpm-workspaces monorepo. Shared libraries live under the `@clawboo/*` scope in `packages/`; the two consumers are `apps/web` (the dashboard SPA + Express API) and `apps/cli` (`npx clawboo`). This page is for people working _on_ Clawboo: how the workspace is wired, why the build runs in the order it does, what actually ships to npm, and the root commands you run day to day.
+Clawboo is one pnpm workspace built with Turborepo. Shared libraries live under the `@clawboo/*` scope in `packages/`, and two apps consume them: `apps/web` (the dashboard and its Express server) and `apps/cli` (the `clawboo` command). Use this page when you add a package, change a dependency edge, add a root command, or need to know what ends up in the npm package.
 
-If you want the per-package API surface and the dependency graph in detail, read [the package overview](/reference/packages/index); this page is the build mechanics, not the package catalog.
+What each package is for, who uses it, and the dependency layers are in the [package overview](/reference/packages/index), which links the deeper package guides. How the parts behave at runtime is on the [contributor overview](/internals/index).
 
-## What it is, and what it isn't
-
-The repo is a **single workspace** of many small packages, not a polyrepo with version pins. Every `@clawboo/*` library is consumed via `workspace:*` (or `workspace:^`) protocol from the two apps, so there is no internal npm publish-then-install loop; Turbo builds a package's `dist/` and the app that depends on it picks it up directly.
-
-It is **not** a "publish every package" monorepo. Despite 30 scoped packages, **all of them are `private: true`**; none publishes to npm. The **only** published artifact is the `clawboo` CLI in `apps/cli`, and it does not depend on its sibling packages at runtime the way the web app does. Instead, the build _inlines_ the libraries it needs into the CLI's shipped bundle. See [What publishes](#what-publishes).
-
-## The workspace layout
+## The workspace
 
 `pnpm-workspace.yaml` declares four globs:
 
@@ -25,54 +20,56 @@ packages:
   - 'docs'
 ```
 
-The second glob is load-bearing. The five runtime adapters live one level deeper, `packages/adapters/{native,openclaw,claude-code,codex,hermes}`, so without `packages/adapters/*` pnpm would not discover them and `workspace:*` resolution would fail. The result is **30 packages** (25 top-level under `packages/*` plus 5 nested adapters; `packages/adapters` itself is a glob container with no `package.json`), two apps, and the `docs/` Mintlify site (hand-edited Markdown, deployed as-is).
+The second glob matters. The runtime adapters sit one level deeper, in `packages/adapters/*`, so without it pnpm would not find them and `workspace:*` links to them would fail. `packages/adapters` itself has no `package.json`.
 
-### Two top-level folders that are deliberately NOT workspace members
+| Part                  | Count | Notes                                                                                                                                                        |
+| --------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/*`          | 27    | Includes the config-only `@clawboo/tsconfig` (`base.json`, `react.json`, `node.json`), which is a devDependency everywhere and has no code.                  |
+| `packages/adapters/*` | 6     | `native`, `openclaw`, `claude-code`, `codex`, `hermes`, and `mock`: a fault-injection runtime that appears only when `CLAWBOO_ENABLE_MOCK_RUNTIME=1` is set. |
+| `apps/*`              | 2     | `@clawboo/web` (private) and `clawboo` in `apps/cli` (the one public package).                                                                               |
+| `docs`                | 1     | `@clawboo/docs` (private): this Mintlify site, deployed as it is.                                                                                            |
 
-`website/` (the standalone Astro brand site, with its own lockfile) and
-`catalog/` (the marketplace content) are outside every glob above on purpose.
+All 33 packages under `packages/` are `private: true`, and so are `@clawboo/web` and `@clawboo/docs`. Apps depend on them through `workspace:` links, so there is no publish-then-install loop: Turbo builds a package's `dist/` and the app that depends on it reads that directly.
 
-For `catalog/` the reason is CI cost. It is JSON content: agent prose, team
-routing, and the generated artifacts built from it. Making it a workspace member
-would put every content pull request through `turbo lint`, `turbo typecheck` and
-`turbo test` for files that contain no code. It has no `package.json`, appears
-in no turbo task, and is reached only by `scripts/catalog/*` from the repo root.
-`.github/workflows/catalog-ci.yml` is its whole CI surface. See
-[the marketplace catalog reference](/reference/marketplace-catalog).
+### Folders that are not workspace members
 
-`@clawboo/tsconfig` is the shared TypeScript-config root, `base.json`, `react.json`, `node.json`. It is a devDependency everywhere and has no runtime edge, so it doesn't appear in the dependency graph that drives the build order.
+`website/` (the Astro marketing site, with its own lockfile) and `catalog/` (the marketplace content) sit outside every glob on purpose.
 
-### Layer boundaries (lint-enforced)
+`catalog/` is JSON content: agent prose, team routing, and the artifacts built from them. As a workspace member, every content pull request would run `turbo lint`, `turbo typecheck` and `turbo test` over files with no code. It has no `package.json` and appears in no Turbo task; `scripts/catalog/*` reach it from the repo root, and `.github/workflows/catalog-ci.yml` is its fast CI path. See [the marketplace catalog reference](/reference/marketplace-catalog).
 
-`apps/web` is two build targets in one workspace package: `server/` is bundled for Node by tsup, `src/` is bundled for the browser by Vite. Together with the one-way apps → packages rule, that gives three boundaries, all enforced in `eslint.config.mjs` rather than by reviewer vigilance:
+## Layer boundaries
 
-| Rule                                                  | Why                                                                                                                             |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web/server/**` may not import `apps/web/src/**` | Keeps the server portable (it is the basis of the planned thin clients) and stops browser code drifting into the server bundle. |
-| `apps/web/src/**` may not import `apps/web/server/**` | The load-bearing direction: server modules pull in `node:*` and native deps that would be dragged into the browser bundle.      |
-| `packages/**` may not import `apps/**`                | Dependencies flow one way; a package reaching back into an app would invert the build graph.                                    |
+`apps/web` is two build targets in one package: tsup bundles `server/` for Node, and Vite bundles `src/` for the browser. With the one-way rule between apps and packages, that gives three boundaries. `eslint.config.mjs` enforces all three:
 
-Anything two layers genuinely share is extracted into a `@clawboo/*` package instead. `@clawboo/model-catalog` is the worked example: the static model catalog used to live in SPA source and the server reached across for it, which was the only such import in the tree.
+| Rule                                                  | Why                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `apps/web/server/**` may not import `apps/web/src/**` | Keeps browser code out of the server bundle.                                                      |
+| `apps/web/src/**` may not import `apps/web/server/**` | Server modules pull in `node:*` and native modules that would be dragged into the browser bundle. |
+| `packages/**` may not import `apps/**`                | Dependencies flow one way; a package that reached into an app would invert the build graph.       |
 
-The rules use relative-only patterns on purpose, so a legitimate bare specifier such as `react-dom/server` is not mistaken for a layer crossing, and they pair `no-restricted-imports` with a `no-restricted-syntax` selector because the former does not visit dynamic `import()`. `apps/web`'s `lint` script must cover `server/` as well as `src/` for the server-side rule to run at all; [`importBoundary.test.ts`](/internals/testing#the-standing-guards) asserts exactly that.
+Code two layers both need goes into a `@clawboo/*` package instead. `@clawboo/model-catalog` is the example: the model catalog both the SPA and the server read.
 
-```mermaid
-graph TD
-  root["pnpm-workspace.yaml"]
-  root --> p["packages/*<br/>(25 top-level libs)"]
-  root --> a["packages/adapters/*<br/>(5 runtime adapters)"]
-  root --> apps["apps/*<br/>(web + cli)"]
-  p -. "@clawboo/* scope" .- a
-  apps -- "workspace:* deps" --> p
-  apps -- "workspace:* deps" --> a
-```
+The rules match relative paths only, so a bare specifier such as `react-dom/server` is not mistaken for a crossing. The two `apps/web` rules pair `no-restricted-imports` with a `no-restricted-syntax` selector, because `no-restricted-imports` does not see dynamic `import()`. The server rule runs only because `apps/web`'s `lint` script is `eslint src/ server/`; [`importBoundary.test.ts`](/internals/testing) fails if that script stops covering `server/`.
 
-## The build pipeline (Turbo)
+### Other SPA lint rules
 
-`turbo.json` defines five tasks, all of which `dependsOn` the upstream build:
+The same config holds three more rules for `apps/web/src`. Each one fails lint:
+
+| Rule                                                                  | Use instead                                                                      | Why                                                                                                                   |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| No capture-phase `keydown` or `keyup` listeners                       | Register the overlay with `useDismissableLayer()`, or listen in the bubble phase | A capture listener runs before the dismiss stack and every React `onKeyDown`, so two overlays act on one Escape.      |
+| No root-absolute `/api/...` URL in `fetch()` or `new EventSource()`   | `apiFetch()` and `apiUrl()` from `@clawboo/control-client`                       | Clawboo can be served under a path prefix (`CLAWBOO_BASE_PATH`); a hardcoded root path skips the prefix and 404s.     |
+| No root-absolute static asset path in a JSX `src`, `href` or `poster` | A relative path such as `logo.svg`                                               | A relative path resolves against the `<base href>` the server injects, which is right at the root and under a prefix. |
+
+The repo's own `scripts/` folder is linted too: `pnpm lint` ends with `pnpm lint:repo` (`eslint scripts/ --max-warnings 0`).
+
+## The build pipeline
+
+`turbo.json` defines five tasks, and each one depends on the upstream build:
 
 ```json
 {
+  "globalDependencies": ["eslint.config.mjs"],
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
     "dev": { "cache": false, "persistent": true, "dependsOn": ["^build"] },
@@ -83,144 +80,111 @@ graph TD
 }
 ```
 
-The `^build` prefix means **"build all of this package's dependencies first."** That single line is what makes the build order correct without anyone hand-maintaining it: Turbo reads each `package.json`'s `@clawboo/*` dependency edges and topologically sorts them. A package's `dist/` is always present before any task that depends on it runs. `lint`, `typecheck`, and `test` each depend on `^build` too, so they run against compiled dependency output, not stale `dist/` (or a missing one on a clean checkout).
+- **`^build`** means "build every dependency of this package first". Turbo reads each `package.json`'s `@clawboo/*` edges and sorts them, so nobody maintains the order by hand. `lint`, `typecheck` and `test` depend on it too, so they run against fresh `dist/` output, even on a clean checkout.
+- **`outputs: ["dist/**"]`** lets Turbo skip an unchanged package and restore its `dist/` from cache.
+- **`globalDependencies`** puts `eslint.config.mjs` into every task's cache key, so an ESLint config change invalidates the whole cache.
+- **`dev`** is a long-running watcher: never cached, always persistent.
 
-`build` declares `dist/**` as its cache output, so Turbo can skip rebuilding an unchanged package and restore its `dist/` from cache. `dev` is marked `cache: false` and `persistent: true` (it's a long-running watcher, never cached).
-
-Each library builds with **tsup**; the standard config emits CJS + ESM + `.d.ts` into `dist/`. The web app's build is bespoke: a Vite build for the SPA plus two tsup runs (the server bundle and the MCP stdio bins); the CLI is a single tsup run.
-
-<Note>
-Turbo derives the *exact* topological order from the `package.json` graph. The tiers below are the human-readable grouping; they are not a strict serial sequence, because edges like `db → obs` and `evals → db` interleave what would otherwise be neat layers.
-</Note>
+Each library builds with tsup, which writes CJS, ESM and `.d.ts` files to `dist/`. `apps/web` builds in three steps: `vite build` for the SPA, then one tsup run for the server bundle (`tsup.server.config.ts`) and one for the four MCP stdio bins (`tsup.mcp-bins.config.ts`). `apps/cli` is one tsup run with two entries, `src/index.ts` and `src/bootstrap.ts`.
 
 ## Build order
 
-Packages build before the apps that depend on them. Within a tier, no package has a `@clawboo/*` edge on a sibling in the same tier.
+Turbo computes the exact order from the `package.json` graph. The table groups packages by depth: the longest chain of `@clawboo/*` dependencies beneath each one (`tsconfig` left out, since it has no code).
 
-```mermaid
-graph TD
-  subgraph t1["1 · roots"]
-    tsconfig["tsconfig (config-only)"]
-    logger["logger"]
-  end
-  subgraph t2["2 · leaves"]
-    config["config"]
-    gc["gateway-client → logger"]
-    protocol["protocol"]
-    ar["agent-registry"]
-    bc["board-core"]
-    cr["capability-registry"]
-    pl["process-lookup"]
-  end
-  subgraph t3["3"]
-    events["events → gateway-client, logger, protocol"]
-    gp["gateway-proxy → config"]
-    cc["control-client → agent-registry"]
-  end
-  subgraph t4["4 · pure + adapters + db deps"]
-    executor["executor"]
-    compaction["compaction"]
-    modelcatalog["model-catalog"]
-    scheduler["scheduler"]
-    worktrees["worktrees"]
-    governance["governance"]
-    obs["obs"]
-    adapters["adapters/* → executor<br/>(openclaw also → events/gateway-client/logger/protocol)"]
-  end
-  subgraph t4b["4b · db + team-orchestration, after their deps"]
-    db["db → board-core, compaction, governance, obs"]
-    evals["evals → db, executor, governance, obs"]
-    to["team-orchestration → board-core, executor, governance"]
-  end
-  subgraph t5["5"]
-    booavatar["boo-avatar"]
-    ui["ui → boo-avatar"]
-  end
-  subgraph t6["6"]
-    mcp["mcp → db"]
-  end
-  subgraph t7["7 · apps"]
-    web["apps/web → 28 runtime packages (direct)"]
-    cli["apps/cli → config, process-lookup"]
-  end
+| Depth | Packages                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | `agent-registry`, `board-core`, `boo-avatar`, `capability-registry`, `compaction`, `config`, `connector-catalog`, `executor`, `governance`, `logger`, `model-catalog`, `obs`, `pack-format`, `process-lookup`, `protocol`, `scheduler`, `worktrees`                                                                                                                                                                                 |
+| 1     | `adapter-claude-code`, `adapter-codex`, `adapter-hermes`, `adapter-mock`, `adapter-native` (each needs `executor`); `control-client` (`agent-registry`); `db` (`board-core`, `compaction`, `governance`, `obs`); `gateway-client` (`logger`); `gateway-proxy` (`config`); `team-orchestration` (`board-core`, `executor`, `governance`); `ui` (`boo-avatar`); the `clawboo` CLI (`config` and `process-lookup`, as devDependencies) |
+| 2     | `evals` (`db`, `executor`, `governance`, `obs`); `events` (`gateway-client`, `logger`, `protocol`); `mcp` (`db`)                                                                                                                                                                                                                                                                                                                    |
+| 3     | `adapter-openclaw` (`events`, `executor`, `gateway-client`, `logger`, `protocol`)                                                                                                                                                                                                                                                                                                                                                   |
+| 4     | `@clawboo/web`                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
-  t1 --> t2 --> t3 --> t4 --> t4b --> t5 --> t6 --> t7
-```
+`apps/web` depends directly on 31 workspace packages, all six adapters included. `boo-avatar` reaches it through `ui`, so every package except the config-only `tsconfig` ends up in the app.
 
-1. **`tsconfig` + `logger`**: the shared TS-config root and the base logger. `logger` has no `@clawboo/*` runtime edge.
-2. **`config` · `gateway-client` · `protocol` · `agent-registry` · `board-core` · `capability-registry` · `process-lookup`**: `gateway-client` depends on `logger`; the rest carry no `@clawboo/*` edge. `board-core` holds the task state machine that `db`, `team-orchestration`, and the board UI all read.
-3. **`events` · `gateway-proxy` · `control-client`**: `events` → `gateway-client`/`logger`/`protocol`; `gateway-proxy` → `config`; `control-client` → `agent-registry`.
-4. **`executor` · `adapters/*` · `worktrees` · `compaction` · `model-catalog` · `scheduler` · `governance` · `obs`**: `executor` is pure (`.` + `./contract` + `./tiers` subpath exports); the five adapters depend only on `executor` (`adapter-openclaw` also on `events`/`gateway-client`/`logger`/`protocol`). `compaction`/`governance`/`obs` are the dependencies `db` pulls in, so `db` (and `evals`, which needs `db`/`executor`/`governance`/`obs`, and `team-orchestration`, which needs `board-core`/`executor`/`governance`) sequence after this tier. `model-catalog` is a zero-dep leaf both `apps/web` layers read, extracted so the server never imports SPA source.
-5. **`boo-avatar` + `ui`**: `ui` → `boo-avatar`.
-6. **`mcp`**: depends on `db`; its build also produces the stdio bins.
-7. **`apps/web` → `apps/cli`**: the web app directly depends on 28 of the `@clawboo/*` runtime packages (`boo-avatar` reaches it transitively via `ui`, so all 29 are consumed); the CLI's only `@clawboo/*` code edges are `config` and `process-lookup`.
+`board-core` holds the task state machine that `db`, `team-orchestration` and the board UI all import. `executor` has no runtime dependencies and exports three entry points: `.`, `./contract` and `./tiers`.
 
 ## What publishes
 
-Run `pnpm build` and you produce `dist/` for every package. But `npm publish` only ships **`clawboo`**, the CLI. Every `@clawboo/*` package carries `private: true`, so a `pnpm publish` (or Changesets publish) skips it.
+`pnpm build` produces a `dist/` for every package, but only `clawboo` (the CLI in `apps/cli`) reaches npm. Every other package is `private: true`, so `pnpm changeset publish` skips it, and `packagePosture.test.ts` fails the build if a second package goes public.
 
-The CLI ships as a self-contained bundle. The web server's tsup config (`tsup.server.config.ts`) marks the whole `@clawboo/*` scope `noExternal`, so `dist/server.js` **inlines** every workspace library it uses, `db`, `mcp`, `governance`, the adapters, and the rest, into one file. `assemble-cli.sh` then copies that `server.js`, the Vite `ui/`, and the four bundled MCP stdio bins into `apps/cli/dist/`. The published CLI tarball's `files` array is just `dist`, so the npm package is exactly: the CLI entrypoint, the inlined server bundle, the SPA assets, and the MCP bins.
+The server's libraries ship inside the CLI as one bundle. `tsup.server.config.ts` marks the whole `@clawboo/*` scope `noExternal`, so `dist/server.js` inlines every workspace library it uses. `scripts/assemble-cli.sh` (run by `pnpm assemble`) then copies the server bundle, the SPA, the four MCP bins and `THIRD_PARTY_NOTICES.md` into `apps/cli/dist/`. It fails if a `marketplace-catalog-*` chunk shows up in the SPA assets: only the small built-in seed may ship, and the full catalog is fetched at runtime.
 
-This is why the CLI's `package.json` carries only two workspace code dependencies, `@clawboo/config` and `@clawboo/process-lookup` (the shared cross-platform port → PID lookup behind `clawboo stop`/`restart`), plus the `@clawboo/tsconfig` config root; all three sit in `devDependencies`, because tsup inlines anything not listed in `dependencies` into the shipped bundle. Everything else reaches the published package already bundled into `server.js`, not as a separate npm install.
+`apps/cli/package.json` publishes `files: ["dist"]`, so the tarball holds:
 
-<Info>
-A few runtime deps stay **external** in the server bundle and must be present in the CLI's own `dependencies`: `better-sqlite3`, `ws`, `pino`, and `pino-pretty` (native or stream-y modules tsup shouldn't inline), plus the lazily-imported `@opentelemetry/*`. The provider SDKs `@anthropic-ai/sdk` + `openai` and the scheduler's `croner`, by contrast, **are** bundled (`noExternal`) so a clean `npx clawboo` install runs the native runtime and Routines with no extra `node_modules`.
-</Info>
+| File                                        | What it is                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `dist/bootstrap.js`                         | The `clawboo` bin. It checks the Node version before anything else loads, then loads `index.js`.       |
+| `dist/index.js`                             | The CLI itself.                                                                                        |
+| `dist/server.js`                            | The Express server with the workspace libraries inlined.                                               |
+| `dist/ui/`                                  | The built SPA.                                                                                         |
+| `dist/bin/{tasks,memory,tools,teamchat}.js` | The stdio MCP servers, published as the `clawboo-mcp-tasks`, `-memory`, `-tools` and `-teamchat` bins. |
+| `dist/THIRD_PARTY_NOTICES.md`               | Licenses of the bundled dependencies, which do not travel in `node_modules`.                           |
+
+npm adds its usual files on top (`package.json`, the README, the license).
+
+A few modules stay outside the server bundle (the CLI's own `dist/index.js` also leaves its declared `@clack/prompts`, `chalk`, `commander` and `ora` external):
+
+- **External and declared in the CLI's `dependencies`:** `better-sqlite3`, `ws`, `pino`, `pino-pretty` and `@composio/client`.
+- **External and optional:** `@opentelemetry/*` and `@anthropic-ai/claude-agent-sdk`. Both load lazily, and the npm package ships neither. Without OpenTelemetry, traces stay in the event log and OTLP export is unavailable. Without the Agent SDK, a Claude Code run fails with a message that says what to install (see [Claude Code](/runtimes/claude-code)).
+- **Inlined:** everything else, including `express` and its middleware, `drizzle-orm`, `@noble/ed25519`, the provider SDKs (`@anthropic-ai/sdk`, `openai`) and `croner`, so a clean install runs Clawboo Native and Routines with nothing extra.
+
+The CLI's only workspace edges are devDependencies (`@clawboo/config`, `@clawboo/process-lookup`, `@clawboo/tsconfig`). tsup inlines whatever is not listed in `dependencies`, so those reach the published package already bundled. `pnpm test:bundle-externals` checks the shipped bundles statically: every module they still load must be declared, a Node builtin, or on the optional list in `scripts/lib/bundle-externals.mjs`. [Testing](/internals/testing) covers that check and the clean-install gate.
 
 ## Root commands
 
-These run from the repo root. The Turbo-fronted ones fan out across the workspace honoring the build order.
+Run these from the repo root. The Turbo-backed ones fan out across the workspace in build order.
 
-| Command                      | What it does                                                                                                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm build`                 | `turbo build`, builds every package + app `dist/`, dependency-ordered, cached.                                                                                 |
-| `pnpm dev`                   | `turbo dev --concurrency=20`, runs each package/app dev task. For `apps/web` this is the dev orchestrator (below).                                             |
-| `pnpm lint`                  | `turbo lint`, ESLint across the workspace, plus the docs frontmatter + heading checks (the `docs` package's `lint` script).                                    |
-| `pnpm typecheck`             | `turbo typecheck`, `tsc --noEmit` across the workspace.                                                                                                        |
-| `pnpm test`                  | `turbo test`, per-package Vitest (the real path; each package has its own config).                                                                             |
-| `pnpm e2e`                   | `playwright test`, the Playwright end-to-end suite (sandboxed; see [Testing](#testing-strategy-pointer)).                                                      |
-| `pnpm assemble`              | `pnpm build && bash scripts/assemble-cli.sh`, full build, then copy the server bundle + UI + MCP bins into `apps/cli/dist/`.                                   |
-| `pnpm catalog:build`         | `scripts/catalog/build-index.ts` + `build-seed.ts`, rebuilds `catalog/dist/**` and the compiled marketplace seed.                                              |
-| `pnpm catalog:verify`        | `scripts/catalog/validate.ts`, every marketplace content rule, then a `--check` that `catalog/dist` and the seed are current. Offline.                         |
-| `pnpm verify:connectors`     | `tsx scripts/verify-connectors.ts`, fails if the committed connector catalog is inconsistent. Offline.                                                         |
-| `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`, fails on invalid YAML frontmatter or a bare `%` in a heading (the 404 class of bug).                                     |
-| `pnpm test:clean-install`    | `node scripts/test-clean-install.mjs`, packs + installs the CLI tarball and asserts the install works (see below).                                             |
-| `pnpm test:bundle-externals` | `node scripts/check-bundle-externals.mjs`, fails if a shipped bundle loads a module that isn't declared / builtin / documented-optional.                       |
-| `pnpm prepublish:check`      | `pnpm catalog:verify && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install`, the local content-and-artifact release check (not the full gate). |
+| Command                      | What it does                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm build`                 | `turbo build`: every package and app, in dependency order, cached.                                                                              |
+| `pnpm dev`                   | `turbo dev --concurrency=20`: builds the dependencies, then starts each member's `dev` script (see below).                                      |
+| `pnpm lint`                  | `turbo lint && pnpm lint:repo`: ESLint in every package, the docs frontmatter and heading check (the `docs` package's `lint`), then `scripts/`. |
+| `pnpm lint:repo`             | `eslint scripts/ --max-warnings 0`.                                                                                                             |
+| `pnpm format`                | `prettier --write .`: fixes formatting.                                                                                                         |
+| `pnpm format:check`          | `prettier --check .`: the first step of CI's Lint job. A formatting-only failure turns that job red while ESLint passes.                        |
+| `pnpm typecheck`             | `turbo typecheck`: `tsc --noEmit` in every package. The web app and CLI builds do not type-check, so their type errors surface here.            |
+| `pnpm test`                  | `turbo test`: each package's own Vitest suites.                                                                                                 |
+| `pnpm test:coverage`         | The same suites plus a per-package coverage table. CI's Test job runs this; there is no threshold.                                              |
+| `pnpm e2e`                   | `playwright test`: the sandboxed end-to-end suite. It needs `pnpm build` first.                                                                 |
+| `pnpm assemble`              | `pnpm build && bash scripts/assemble-cli.sh`: build, then copy the server bundle, SPA and MCP bins into `apps/cli/dist/`.                       |
+| `pnpm catalog:build`         | Rebuilds `catalog/dist/**` and the compiled marketplace seed from the packs.                                                                    |
+| `pnpm catalog:verify`        | Every marketplace content rule, then a `--check` that `catalog/dist` and the seed match a rebuild. Offline.                                     |
+| `pnpm verify:connectors`     | Checks the committed connector catalog. Offline; add `--live` to re-resolve pinned packages and dial remote endpoints.                          |
+| `pnpm check:docs`            | `docs/scripts/check-frontmatter.mjs`: fails on frontmatter that is not valid YAML, or a bare `%` in a heading.                                  |
+| `pnpm test:clean-install`    | Packs and installs the CLI tarball, then boots that install. Run `pnpm assemble` first.                                                         |
+| `pnpm test:bundle-externals` | The static check that the assembled bundles load only declared, builtin or optional modules.                                                    |
+| `pnpm prepublish:check`      | `pnpm catalog:verify && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install`.                                                    |
 
-`pnpm dev` for the web app does **not** start Vite and Express directly. It runs `scripts/dev-orchestrator.cjs`, which picks a free API port first (honoring `CLAWBOO_API_PORT`, else scanning from `CLAWBOO_API_PORT_START`), exports it into the child env, then `concurrently` runs `pnpm dev:api` (`tsx watch server/index.ts`) and `pnpm dev:ui` (`vite`) so both inherit the same port, no race over who binds first.
+A Husky pre-commit hook runs `lint-staged`, which applies `eslint --fix` and Prettier to staged code files and Prettier to staged JSON, `.md`, YAML and CSS files. Staged `.mdx` files get no Prettier pass, so run `pnpm format` before committing one.
 
-<Note>
-The repo requires Node `>=22` and pnpm `>=9` (`packageManager` pins `pnpm@9.15.0`). CI runs on Node 22 with `pnpm install --frozen-lockfile`, so the lockfile is authoritative.
-</Note>
+### The dev stack
 
-### `db:studio` is the only database script
+Two members have a `dev` script, so `pnpm dev` starts both:
 
-`@clawboo/db` exposes exactly one script: `db:studio` (`drizzle-kit studio`, a read-only browser over the dev DB). There is **no `db:migrate` and no `db:generate`**; both were removed.
+- **`apps/web`** runs `scripts/dev-orchestrator.cjs`. It picks the API port first: exactly `CLAWBOO_API_PORT` if set (and exits if that port is busy), otherwise the first free port of 20 from `CLAWBOO_API_PORT_START` (default 18790). It then runs `pnpm dev:api` (`tsx watch server/index.ts --dev`) and `pnpm dev:ui` (Vite on port 5173) with that port in their environment, so the UI's proxy and the API agree.
+- **`docs`** runs `mint dev --port 3111`, the Mintlify preview. It needs the Mintlify CLI (`npm i -g mint`, or `npx mint`).
 
-The reason is the schema model: Clawboo has **no migration ladder**. The schema is created by `ensureSchema`'s `CREATE TABLE IF NOT EXISTS` DDL (`packages/db/src/schemaBootstrap.ts`); that DDL is the _sole_ schema-creation source for all 35 tables. `schema.ts` is the Drizzle **type** layer used for typed queries, never to apply migrations. Upgrading an existing file is handled by `reconcileSchema`, which is derived from that same DDL rather than generated, so there is still nothing to generate or migrate.
+The repo needs Node `>=22.12.0` and pnpm `>=9`; `packageManager` pins `pnpm@9.15.0`, and `corepack enable` selects it. CI uses Node 22 and `pnpm install --frozen-lockfile`, so an out-of-date lockfile fails the install.
 
-A unit test (`schemaSource.test.ts`) guards this posture two ways: it builds a real in-memory DB via `createDb()` and asserts every `schema.ts` table and its column set matches the live DDL (catching drift between the type layer and the bootstrap), and it asserts the package ships no `db:migrate`/`db:generate` scripts, no `drizzle` entry in `files`, and no migration-ladder directory on disk. `drizzle.config.ts` remains only so `drizzle-kit studio` can find the schema.
+## Schema changes
 
-<Danger>
-Do not reintroduce a migration ladder or a `db:migrate` script casually. The "DDL is the schema, and the in-place upgrade is derived from it" decision is enforced by a test that will fail the build if you ship the migration-runner scripts. If a future change needs a migration that is not additive, it's a deliberate architectural shift; start by reading `schemaSource.test.ts` and `schemaReconcile.test.ts`.
-</Danger>
+Besides the usual build, lint, typecheck and test, `@clawboo/db` has one script: `db:studio` (`drizzle-kit studio`, a browser over `packages/db/dev.db`). There is no `db:migrate`, no `db:generate`, and no migration ladder.
 
-## The release gate
+The schema is the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`), and it is the only place tables are created. `schema.ts` is the Drizzle type layer for typed queries; it never applies a migration. When the server opens an older database, `reconcileSchema` (`packages/db/src/schemaReconcile.ts`) reads the column list back out of the same DDL and adds any column the file is missing.
 
-The release path layers two gates on top of the normal build. `pnpm assemble` produces the CLI bundle; `pnpm test:clean-install` then simulates `npx clawboo` on a real machine. It does that against a **real install**, not the repo build: it `pnpm pack`s `apps/cli` and `npm install`s the tarball into a throwaway directory under the OS temp dir, so nothing can resolve through the workspace's `node_modules` and the published `files` whitelist plus the published dependency closure are what get tested. Against that install it asserts the packaged `bin` entries exist with their npm shims, that every module the bundles still load is declared / builtin / documented-optional, that the CLI's HTTP-signature port probe skips a fake non-Clawboo listener on a nearby port, that the SPA renders at `/` and a deep route falls through to `index.html`, that `/api/settings` returns Clawboo-shaped JSON, that the SPA actually boots in headless Chromium rather than merely being served, that an installed MCP stdio bin completes a real JSON-RPC `tools/list` handshake, that a real `POST /api/runtimes/clawboo-native/run` drives a board task to `done` against a local stub provider, and that a SECOND launch against an already-running dashboard reuses it instead of forking a second server. It exists because v0.1.1 (`Cannot GET /`) and v0.1.2 (port-collision `Unauthorized`) shipped broken; this catches that whole class.
+That makes one rule load-bearing. A new column on an existing table must be addable to a database that already exists:
 
-CI mirrors the gate. The `ci.yml` workflow runs `lint`, `typecheck`, `test`, `test-cross-platform`, `build`, `verify-connectors`, `smoke-test-bundle`, and `e2e` as parallel jobs; the bundle smoke test runs on a `[ubuntu-latest, windows-latest, macos-latest]` matrix (the Windows leg guards spawn/path regressions; macOS is a primary user OS), while `e2e` is Ubuntu-only because Playwright's `webServer` command is POSIX shell syntax. The `publish.yml` workflow re-runs `build` → `lint` → `typecheck` → `test` → `assemble-cli.sh` → `test:clean-install` before the Changesets publish step, so a broken bundle can't reach npm even if a PR race let it through. Every check on the release path is offline by design: nothing fetches an upstream repository. `typecheck` earns its place there specifically because `pnpm build` is bundler-only and never runs `tsc`.
+- no `PRIMARY KEY`, no `UNIQUE`, and no `STORED` generated column;
+- a `DEFAULT` must be a literal, not an expression;
+- a `NOT NULL` column must have a non-NULL `DEFAULT`;
+- a `REFERENCES` column must not have a non-NULL `DEFAULT`.
 
-## Testing strategy pointer
+`schemaReconcile.test.ts` enforces it against the snapshot in `packages/db/src/__tests__/schemaBaseline.ts`; a column added after the snapshot counts as new and is held to the rule, so the snapshot needs no upkeep. The reconciler only adds columns. It leaves a column the DDL no longer declares in place, and it never changes a column's type, `NOT NULL`, `DEFAULT`, constraints or index definitions, so none of those changes is an in-place upgrade. `schemaSource.test.ts` checks that every `schema.ts` table and column matches the DDL, and that no migration scripts or `drizzle/` directory come back. The per-table reference is the [database schema](/reference/database-schema).
 
-The test layout follows the monorepo shape. Each library has its own `vitest.config.ts` and runs under `turbo test`; the root `vitest.config.ts` only globs `packages/*/src/**/*.test.ts` for ad-hoc package runs. `apps/web` uses a **two-project** Vitest config: a `node` project (the SPA logic in `src/` plus the Express-server integration tests in `server/`, all `.test.ts`, with widened timeouts for real-git/real-sqlite tests) and a `jsdom` project (React component tests, `.test.tsx`). On top of that sit the Playwright e2e suite (sandboxed into a throwaway `$HOME`), the clean-install bundle smoke test, and the `@clawboo/evals` orchestration harness. For the full picture see [Testing](/internals/testing).
+## Related
 
-## See also
-
-- [Package overview](/reference/packages/index), per-package version, purity, deps, and the full dependency graph
-- [Testing](/internals/testing), unit / component / e2e / clean-install / evals strategy
-- [Release process](/internals/release-process), Changesets, `publish.yml`, and the clean-install gate
-- [Marketplace catalog](/reference/marketplace-catalog), the pack format and the `catalog:build` / `catalog:verify` steps
-- [Database schema](/reference/database-schema), the 35 tables created by `createDb`'s DDL
-- [Internals overview](/internals/index), the contributor map
+- [Package overview](/reference/packages/index): what each package is for, who uses it, and the dependency layers.
+- [Testing](/internals/testing): the test layers and the CI job list.
+- [Release process](/internals/release-process): changesets and the publish workflow.
+- [Marketplace catalog](/reference/marketplace-catalog): the pack format behind `catalog:build` and `catalog:verify`.
+- [Contributor overview](/internals/index): the repo map and the runtime architecture.

@@ -1,50 +1,65 @@
 ---
-title: Tools & MCP API
-description: REST reference for the tools broker (list, approvals, audit) and the in-process Streamable-HTTP MCP transport plus attach-config endpoint.
+title: 'Tools and MCP API'
+sidebarTitle: 'Tools and MCP'
+description: 'REST reference for the tools broker (tools, approvals, audit) and the MCP transport: attach snippets, the attach token, session binding and /api/mcp.'
+keywords:
+  [
+    'mcp',
+    'tools',
+    'approvals',
+    'audit',
+    'attachToken',
+    'scopeSig',
+    'streamable http',
+    'mcp config',
+    'tools & mcp',
+  ]
 ---
 
-REST surface for two related systems. The **tools broker** REST routes (`/api/tools*`) are the UI-facing half of the broker's dual surface: list the builtin tools with their availability verdict, read the pending tool-approval queue, resolve an approval, and read the forensic audit log. The **MCP** routes (`/api/mcp/*`) are the in-process Streamable-HTTP transport for Clawboo's four MCP servers (`tasks`, `memory`, `tools`, `teamchat`), the same SQLite-backed servers an external runtime attaches to, plus a per-runtime attach-config snippet endpoint.
+Use these routes for two related things. The tools broker routes (`/api/tools*`) list Clawboo's built-in tools, show and answer the tool-approval queue, and read the tool-call audit log. The MCP routes (`/api/mcp/*`) carry Clawboo's four MCP servers (`tasks`, `memory`, `tools`, `teamchat`) over Streamable HTTP, which the runtimes Clawboo starts attach to. `GET /api/mcp/config` builds an attach snippet for an agent you connect yourself.
 
 <Note>
-The MCP routes are not request/response in the usual sense. They speak the Model Context Protocol over Streamable HTTP: a per-session JSON-RPC channel keyed by the `mcp-session-id` header. They are documented below with the transport mechanics + status codes, not a JSON response shape. The *tools and their input schemas* served over these channels are in [MCP tools reference](/reference/mcp-tools).
+
+The MCP routes speak the Model Context Protocol (JSON-RPC over Streamable HTTP), not a Clawboo request and response format, so they are documented by their transport rules and status codes. The tools each server offers, and their inputs, are in the [MCP tools reference](/reference/mcp-tools). To attach an outside agent step by step, see [MCP servers](/operating/mcp-servers).
+
 </Note>
 
-All POST bodies on these routes are parsed by `express.json({ limit: '2mb' })`. Error responses on the `/api/tools*` routes are masked at the rendering boundary by `redactValue` / `redactJsonString` (defense-in-depth over the write-time secret scrub).
+Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the approval resolve and the MCP transport; none is on the sensitive tier. Request bodies are JSON (up to 2 MB). Argument and result summaries are scrubbed when they are written; the approval queue and the audit log mask them again before they leave the server, and the `/api/tools*` routes mask their error messages. The `curl` examples assume the access gate is off. With `STUDIO_ACCESS_TOKEN` set, the `/api/tools*` routes and `GET /api/mcp/config` need the access cookie (`-b 'clawboo_access=<token>'`, see [Authentication](/reference/rest-api/index#authentication)), and the MCP transport takes the `attachToken` described below.
 
 ## Routes
 
-| Method | Path                               | Summary                                            | Stream?         |
-| ------ | ---------------------------------- | -------------------------------------------------- | --------------- |
-| GET    | `/api/tools`                       | List builtin tools + per-tool availability verdict | No              |
-| GET    | `/api/tools/approvals`             | The pending tool-approval queue                    | No              |
-| POST   | `/api/tools/approvals/:id/resolve` | Resolve a pending approval (allow/deny)            | No              |
-| GET    | `/api/tools/audit`                 | The before/after tool-call audit log               | No              |
-| GET    | `/api/mcp/config`                  | Emit a per-runtime, per-server attach snippet      | No              |
-| POST   | `/api/mcp/tasks`                   | MCP JSON-RPC POST (tasks server)                   | Streamable HTTP |
-| GET    | `/api/mcp/tasks`                   | MCP SSE stream (tasks session)                     | SSE             |
-| DELETE | `/api/mcp/tasks`                   | MCP session teardown (tasks)                       | No              |
-| POST   | `/api/mcp/memory`                  | MCP JSON-RPC POST (memory server)                  | Streamable HTTP |
-| GET    | `/api/mcp/memory`                  | MCP SSE stream (memory session)                    | SSE             |
-| DELETE | `/api/mcp/memory`                  | MCP session teardown (memory)                      | No              |
-| POST   | `/api/mcp/tools`                   | MCP JSON-RPC POST (tools server)                   | Streamable HTTP |
-| GET    | `/api/mcp/tools`                   | MCP SSE stream (tools session)                     | SSE             |
-| DELETE | `/api/mcp/tools`                   | MCP session teardown (tools)                       | No              |
-| POST   | `/api/mcp/teamchat`                | MCP JSON-RPC POST (teamchat server)                | Streamable HTTP |
-| GET    | `/api/mcp/teamchat`                | MCP SSE stream (teamchat session)                  | SSE             |
-| DELETE | `/api/mcp/teamchat`                | MCP session teardown (teamchat)                    | No              |
+| Method | Path                               | Summary                                                 | Stream?         |
+| ------ | ---------------------------------- | ------------------------------------------------------- | --------------- |
+| GET    | `/api/tools`                       | List the built-in tools and whether each is available   | No              |
+| GET    | `/api/tools/approvals`             | The pending tool-approval queue                         | No              |
+| POST   | `/api/tools/approvals/:id/resolve` | Answer a pending approval (allow once, always, or deny) | No              |
+| GET    | `/api/tools/audit`                 | The tool-call audit log (before and after each call)    | No              |
+| GET    | `/api/mcp/config`                  | Build an attach snippet for one runtime and one server  | No              |
+| POST   | `/api/mcp/tasks`                   | MCP JSON-RPC requests (Tasks server)                    | Streamable HTTP |
+| GET    | `/api/mcp/tasks`                   | MCP event stream for a Tasks session                    | SSE             |
+| DELETE | `/api/mcp/tasks`                   | End a Tasks session                                     | No              |
+| POST   | `/api/mcp/memory`                  | MCP JSON-RPC requests (Memory server)                   | Streamable HTTP |
+| GET    | `/api/mcp/memory`                  | MCP event stream for a Memory session                   | SSE             |
+| DELETE | `/api/mcp/memory`                  | End a Memory session                                    | No              |
+| POST   | `/api/mcp/tools`                   | MCP JSON-RPC requests (Tools server)                    | Streamable HTTP |
+| GET    | `/api/mcp/tools`                   | MCP event stream for a Tools session                    | SSE             |
+| DELETE | `/api/mcp/tools`                   | End a Tools session                                     | No              |
+| POST   | `/api/mcp/teamchat`                | MCP JSON-RPC requests (TeamChat server)                 | Streamable HTTP |
+| GET    | `/api/mcp/teamchat`                | MCP event stream for a TeamChat session                 | SSE             |
+| DELETE | `/api/mcp/teamchat`                | End a TeamChat session                                  | No              |
 
 ---
 
 ## `GET /api/tools`
 
-Lists every builtin tool with a server-evaluated availability verdict. The availability is computed against the current process env (`defaultAvailabilityContext()`), so a tool that requires an unconfigured provider reads `available: false` with a diagnostics list explaining why; the UI greys it out and the model's `tools/list` omits it. The four builtins are `echo` and `note` (`safe`), `web_search` (`external`, hidden until a search provider is configured), and `delete_path` (`destructive`).
+Lists every built-in tool with an availability verdict worked out from the server's environment. A tool that needs something not set up reads `available: false`, with `diagnostics` saying why; the dashboard greys it out, and the Tools MCP server leaves it out of `tools/list`. The four built-in tools are `echo` and `note` (risk `safe`), `web_search` (`external`, hidden until `TAVILY_API_KEY` is set or a Tavily sign-in exists) and `delete_path` (`destructive`).
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: the tool list with availability:
+**`200 OK`**: the tools and their availability:
 
 ```ts
 {
@@ -52,15 +67,15 @@ Lists every builtin tool with a server-evaluated availability verdict. The avail
   tools: Array<{
     name: string
     description: string
-    owner: 'core' | 'plugin' | 'channel' | 'mcp' // defaults to 'core'
-    risk: 'safe' | 'destructive' | 'external' // defaults to 'safe'
-    available: boolean // availability.visible
-    diagnostics: string[] // why it is hidden, if so
+    owner: 'core' | 'plugin' | 'channel' | 'mcp' // 'core' when not set
+    risk: 'safe' | 'destructive' | 'external' // 'safe' when not set
+    available: boolean
+    diagnostics: string[] // why it is hidden, when it is
   }>
 }
 ```
 
-**`500 Internal Server Error`**: any failure building the registry or evaluating availability:
+**`500 Internal Server Error`**: the tool list could not be built:
 
 ```json
 { "error": "<masked message>" }
@@ -76,40 +91,45 @@ curl http://localhost:18790/api/tools
 
 ## `GET /api/tools/approvals`
 
-Returns the pending tool-approval queue, the `tool_call_approvals` rows with `status = 'pending'` that have not passed their `expiresAt`, newest first. Each row's `argsSummary` (scrubbed JSON written by the broker) is masked again at this boundary via `redactJsonString`. This is the queue the board's Needs you column, the in-chat approval tray and the Governance dashboard render; the broker (in either the Express process or an MCP stdio bin) polls the same rows for resolution.
+The pending tool-approval queue: rows whose `status` is `pending` and whose `expiresAt` has not passed, newest first. Each row's `argsSummary` (scrubbed when it was written) is masked again here. The dashboard's approval cards read this queue, on the board's **Needs you** column and in team chat. A broker waiting on an approval, in this server or in an MCP stdio process, checks the same rows for the answer.
 
-The queue holds **two kinds of row**, told apart by `kind`. A `tool` row is held inside this process, either by the broker blocked in `waitForApproval` or by the native shell polling the row it just wrote; a `run_command` card is the second kind. An `exec` row is a shell command an OpenClaw agent asked to run: the **Gateway** is holding it, and clawboo mirrors the request into a row so the card survives a closed tab, a refresh, and a tab opened halfway through the window. A mirrored row carries `toolName: 'exec'`, `toolClass: 'destructive'`, and the command's first 200 characters as `toolSummary`.
+The queue holds two kinds of row, told apart by `kind`:
+
+- **`tool`**: Clawboo itself holds the call. Its tool broker is waiting for the answer, a native agent's `run_command` is waiting on the row it wrote, or a delegation is waiting for its approval.
+- **`exec`**: a shell command an OpenClaw agent asked to run. The OpenClaw Gateway holds the command; Clawboo copies the request into a row so the card survives a closed tab, a refresh, or a tab opened partway through. Such a row has `toolName: 'exec'`, `toolClass: 'destructive'`, and the command's first 200 characters as `toolSummary`.
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK`**: the pending approvals:
+**`200 OK`**: the pending approvals, each the whole stored row:
 
 ```ts
 {
   ok: true
   approvals: Array<{
     id: string
-    kind: 'tool' | 'exec' // who holds the call: clawboo's broker, or the Gateway
+    kind: 'tool' | 'exec' // who holds the call: Clawboo, or the OpenClaw Gateway
     toolName: string
     agentId: string | null
-    argsSummary: string | null // scrubbed + re-masked JSON
+    argsSummary: string | null // scrubbed JSON of the arguments, masked again here
     reason: string | null
-    status: 'pending' // only pending rows are returned
-    taskId: string | null // the board task this approval gates, if known
-    tenantId: string | null // dormant multi-tenant seam
+    status: 'pending' // this route returns pending rows only
+    taskId: string | null // the board task this approval holds up, when known
+    tenantId: string | null // unused
+    grantId: string | null // the connector grant the call runs under
+    connectorId: string | null
+    neverRemember: 0 | 1 // 1: an "always" answer is not remembered for this call
+    ruleReason: string | null // the reason code behind the prompt
+    toolClass: string | null // Clawboo's reading of the tool: 'read' | 'write' | 'destructive'
+    toolSummary: string | null // a one-line description for the card
     createdAt: number
     expiresAt: number
     resolvedAt: number | null
   }>
 }
 ```
-
-<Note>
-The row is returned whole, so it also carries the columns this shape leaves out, among them `toolClass`, `toolSummary`, `neverRemember`, `grantId`, `connectorId` and `ruleReason`.
-</Note>
 
 **`500 Internal Server Error`**:
 
@@ -127,18 +147,22 @@ curl http://localhost:18790/api/tools/approvals
 
 ## `POST /api/tools/approvals/:id/resolve`
 
-Resolves a still-pending approval. The decision is validated by a Zod schema; an unknown decision returns **400**. The handler then loads the row and **dispatches on its `kind`**, because the two kinds are held by different things and released by different means. The **404** (`approval not found`) fires only when **no row with that id exists** at all; an already-answered row is not a 404.
+Answers an approval. An unknown `decision` is a **400**. The route then loads the row and acts on its `kind`, because the two kinds are held by different things and released in different ways. The **404** means only that no row with that id exists; an approval that was already answered is not a 404.
 
-**A `kind: 'tool'` row** is released here. The `UPDATE` is guarded `status = 'pending'`, so resolving an already-resolved (or expired-but-still-present) row is a **no-op UPDATE**; but the handler still returns **200** with the existing row unchanged, because `resolveApproval` returns `getApproval(db, id)`, which has no status or expiry filter and is truthy for any row that exists. A blocking broker waiter sees the new status on its next poll.
+**A `kind: 'tool'` row** is answered here. The answer is written only while the row is still `pending`; any other row (already answered, or marked `expired`) comes back unchanged with **200**, so check `status` in the response. A waiting broker sees the answer the next time it checks.
 
-**A `kind: 'exec'` row** is held by the Gateway, and clawboo's mirrored row is not the thing that releases the command, so the decision is sent on as `exec.approval.resolve` in OpenClaw's own vocabulary (`allow_once` becomes `allow-once`, `allow_always` becomes `allow-always`, `deny` stays `deny`). Only once the Gateway has taken it does clawboo mark the mirrored row. Resolving one of these down the local path would mark the card answered while the Gateway went on holding the command, with nothing on screen to reveal it. This branch answers a **different 200 body** and is the only one that can answer **502**.
+For a `tool` row, `allow_always` also creates a standing allow rule tied to the row's grant: later calls of the same tool under that grant run without asking, whatever their arguments, for 30 days. No rule is made when the row has no `grantId`, when it has `neverRemember: 1`, or when this call did not change the row (it was already answered).
+
+**A `kind: 'exec'` row** is held by the OpenClaw Gateway, and answering Clawboo's copy alone would not release the command. So the answer goes to the Gateway as `exec.approval.resolve`, in OpenClaw's own words (`allow_once` becomes `allow-once`, `allow_always` becomes `allow-always`, `deny` stays `deny`), and Clawboo marks its copy only after the Gateway takes it. This branch answers a different **200** body and is the only one that can answer **502**.
 
 <Note>
-clawboo does not mint a durable rule of its own for an exec row. An `allow_always` is passed on as `allow-always` and any standing grant it produces is written into OpenClaw's own allowlist, which clawboo can then read and revoke through [`/api/exec-allowlist`](/reference/rest-api/misc).
+
+Clawboo makes no rule of its own for an `exec` row. An `allow_always` is passed on as `allow-always`, and any standing permission it creates lives in OpenClaw's own allowlist, which you can read and revoke through `/api/exec-allowlist` (see the [Agent settings API](/reference/rest-api/agent-settings)).
+
 </Note>
 
 - **Path params**: `id` (approval id).
-- **Request body**: validated by `resolveApprovalBody`:
+- **Request body**:
 
 ```ts
 {
@@ -148,47 +172,37 @@ clawboo does not mint a durable rule of its own for an exec row. An `allow_alway
 
 ### Responses
 
-**`400 Bad Request`**: the body fails Zod validation (missing/invalid `decision`):
+**`400 Bad Request`**: `decision` is missing or not one of the three values. `details` is the validation error:
 
 ```json
 {
   "error": "invalid body",
-  "details": {/* zod flatten() */}
+  "details": { "formErrors": [], "fieldErrors": { "decision": ["..."] } }
 }
 ```
 
-**`404 Not Found`**: no row with that id exists at all (`getApproval` returns nothing):
+**`404 Not Found`**: no approval with that id exists:
 
 ```json
 { "error": "approval not found" }
 ```
 
-**`200 OK`** (`kind: 'tool'`): the approval was resolved; the updated row is returned:
+**`200 OK`** (`kind: 'tool'`): the whole row after the answer, with the same fields as the queue. `argsSummary` is the stored, scrubbed value; this route does not mask it again:
 
 ```ts
 {
   ok: true
   approval: {
     id: string
-    toolName: string
-    agentId: string | null
-    argsSummary: string | null
-    reason: string | null
-    status: 'allow_once' | 'allow_always' | 'deny'
-    taskId: string | null
-    tenantId: string | null
-    createdAt: number
-    expiresAt: number
-    resolvedAt: number // set to Date.now() on resolution
+    kind: 'tool'
+    status: 'allow_once' | 'allow_always' | 'deny' | 'expired'
+    resolvedAt: number | null // when the row was answered, which may be earlier than this call
+    // ...and every other field shown under GET /api/tools/approvals
   }
 }
 ```
 
-<Note>
-The response `approval.argsSummary` here is the stored (scrubbed-at-write) value; unlike `GET /api/tools/approvals`, the resolve response is not re-masked at the boundary.
-</Note>
-
-**`200 OK`** (`kind: 'exec'`): the Gateway took the decision. There is **no `approval` object** on this branch:
+**`200 OK`** (`kind: 'exec'`): the Gateway took the answer. There is **no `approval` object** here:
 
 ```ts
 {
@@ -198,9 +212,9 @@ The response `approval.argsSummary` here is the stored (scrubbed-at-write) value
 }
 ```
 
-`alreadyResolved: true` means the Gateway reported the card as already answered. That is a normal race rather than a failure, because the same card is deliberately open in any browser tab holding its own Gateway socket. On that path this call leaves the mirrored row as it stands; clawboo settles it from the Gateway's `exec.approval.resolved` broadcast instead, which is also how a card answered here clears from the tab.
+`alreadyResolved: true` means the Gateway reports the command as already answered. That is a normal race, not a failure: the same card can be open in several browser tabs, each with its own Gateway connection. Clawboo then leaves its copy as it is and settles it from the Gateway's `exec.approval.resolved` broadcast, which is also how a card answered elsewhere clears from a tab.
 
-**`502 Bad Gateway`** (`kind: 'exec'` only): the Gateway did not take the decision, so the command is still held and the card is still open:
+**`502 Bad Gateway`** (`kind: 'exec'` only): the Gateway did not take the answer, so the command is still waiting and the card stays open:
 
 ```json
 { "error": "the Gateway did not accept that decision" }
@@ -224,14 +238,14 @@ curl -X POST http://localhost:18790/api/tools/approvals/<approval-id>/resolve \
 
 ## `GET /api/tools/audit`
 
-Returns the append-only tool-call audit log (before + after phases), newest first. Both `argsSummary` and `resultSummary` are masked at this boundary with `redactJsonString`. The default page size is 100 rows.
+The tool-call audit log: one row before and one after each brokered call, newest first. `argsSummary` and `resultSummary` are masked again before they are returned.
 
 - **Query params**:
 
-| Param      | Type   | Default     | Meaning                         |
-| ---------- | ------ | ----------- | ------------------------------- |
-| `toolName` | string | (all tools) | Filter to one tool's audit rows |
-| `limit`    | number | `100`       | Max rows returned               |
+| Param      | Type   | Default     | Meaning                 |
+| ---------- | ------ | ----------- | ----------------------- |
+| `toolName` | string | (all tools) | Only this tool's rows   |
+| `limit`    | number | `100`       | The most rows to return |
 
 - **Request body**: none.
 
@@ -247,11 +261,14 @@ Returns the append-only tool-call audit log (before + after phases), newest firs
     toolName: string
     agentId: string | null
     phase: 'before' | 'after'
-    decision: string | null // allow | deny | require_approval | rewrite (before phase)
-    argsSummary: string | null // scrubbed + re-masked JSON
-    resultSummary: string | null // scrubbed + compacted + re-masked (after phase)
+    decision: string | null // before rows: allow | deny | require_approval | rewrite | observe (allowed, but an inspector flagged it)
+    argsSummary: string | null // scrubbed JSON, masked again here
+    resultSummary: string | null // after rows: scrubbed, shortened, masked again here
     isError: number // 0 | 1
     tenantId: string | null
+    grantId: string | null // the grant the call ran under; null for a built-in tool
+    connectorId: string | null
+    ruleId: string | null // the standing rule that allowed it, if any
     createdAt: number
   }>
 }
@@ -273,122 +290,162 @@ curl 'http://localhost:18790/api/tools/audit?toolName=web_search&limit=20'
 
 ## MCP transport: `/api/mcp/{tasks,memory,tools,teamchat}`
 
-These four route groups are the in-process **Streamable HTTP** transport for Clawboo's MCP servers. The API server hosts and supervises the servers in-process; HTTP-capable runtimes (and the live smoke) attach over these paths. They are NOT a Clawboo-defined request/response API; they speak MCP's JSON-RPC over Streamable HTTP, with a stateful session per connection keyed by the `mcp-session-id` header.
+Twelve routes, `POST`, `GET` and `DELETE` on each of `/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools` and `/api/mcp/teamchat`, carry Clawboo's four MCP servers over Streamable HTTP. The servers run inside the Clawboo server. Each connection is a stateful session named by the `mcp-session-id` header.
 
-Each server name maps to a `(POST, GET, DELETE)` trio:
+| Method   | Role                                                                                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST`   | JSON-RPC requests. The first must be `initialize`, sent without a session id; the response's `mcp-session-id` header names the new session, and later requests send it back. |
+| `GET`    | The session's event stream from the server (notifications and streamed results). One per session.                                                                            |
+| `DELETE` | Ends the session.                                                                                                                                                            |
 
-| Method   | Role                                                                                                                                                                                                                            |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST`   | JSON-RPC request channel. The first POST must be an `initialize` request (no session id yet); the transport mints a session id and returns it via the `mcp-session-id` response header. Subsequent POSTs reuse that session id. |
-| `GET`    | The server-to-client SSE stream for the established session (server notifications + streamed results).                                                                                                                          |
-| `DELETE` | Tears down the session.                                                                                                                                                                                                         |
+Headers a client sends:
 
-<Info>
-The session lifecycle is enforced by the transport, not by Clawboo handlers:
-- A `POST` with no session id that is **not** an `initialize` request → JSON-RPC error, HTTP **400** (`"No valid session; send an initialize request first."`).
-- A `POST` with a session id that has no live transport → same **400**.
-- A `GET`/`DELETE` with a missing or unknown session id → JSON-RPC error, HTTP **400** (`"Invalid or missing MCP session id."`).
-- A handler-level throw before headers are sent → HTTP **500** `{ error: "<message>" }`.
-</Info>
+- Every `POST`: `Content-Type: application/json` and `Accept: application/json, text/event-stream`.
+- A `GET`: `Accept: text/event-stream`.
+- After `initialize`: the `mcp-session-id` it returned, and optionally `mcp-protocol-version`.
 
-A fresh MCP server instance is created per session (on the `initialize` request) and reused for that session's subsequent requests; closing the transport drops it from the session map.
+Each session gets its own server instance, made at `initialize` and dropped when the session closes. The servers bind the session to a caller when it starts (see the binding sections below). Sessions live in memory, so a restart of the Clawboo server ends them all and clients must send `initialize` again.
 
-### Access (the `attachToken`)
+Errors from the transport are JSON-RPC error bodies, `{ "jsonrpc": "2.0", "error": { "code": -32000, "message": "<message>" }, "id": null }`, except where the table says otherwise:
 
-With the access gate on (`STUDIO_ACCESS_TOKEN` set), a request to any of the four transport routes needs either the operator cookie or an `attachToken` query param: an HMAC-SHA256 the server derives from its per-install attach-signing secret and writes into every attach URL it mints, for its own spawned runtimes and in the `GET /api/mcp/config` snippet. It is the same value on every URL for a given install, it is checked on **every** request (the `initialize` and the session's later `POST`/`GET`/`DELETE` alike, which is why it rides the URL), and it is refused on a request from a non-loopback TCP peer or one carrying a proxy forwarding header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`). Without either credential the gate answers `401`. The token opens these four routes only; `GET /api/mcp/config` always needs the cookie. With the gate off, neither is required. The request log masks `attachToken`, `scopeSig` and `provSig` values.
+| Status | When                                                                                                                                                       |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | A `POST` with no session id that is not `initialize`, or with a session id that has no live session: `No valid session; send an initialize request first.` |
+| 400    | A `GET` or `DELETE` with a missing or unknown session id: `Invalid or missing MCP session id.`                                                             |
+| 400    | An `mcp-protocol-version` header the server does not support                                                                                               |
+| 401    | The access gate is on and the request has neither the cookie nor a valid `attachToken` (a plain `{ "error": ... }` body, below)                            |
+| 406    | A `POST` whose `Accept` lacks `application/json` or `text/event-stream`, or a `GET` whose `Accept` lacks `text/event-stream`                               |
+| 409    | A second `GET` stream for a session that already has one                                                                                                   |
+| 415    | A `POST` to a live session whose `Content-Type` is not `application/json` (an `initialize` sent that way gets the first 400)                               |
+| 500    | An error before the response started: `{ "error": "<message>" }`                                                                                           |
 
-### Per-server session binding (scoping query params)
+### Access: the `attachToken`
 
-The `memory` and `teamchat` POST handlers read authoritative binding from the attach URL's query string at session-initialize time. This is how Clawboo binds a run's MCP session to its team/agent; the model can neither widen its visibility nor spoof its identity through tool arguments, because the URL is Clawboo-written config. The other two servers (`tasks`, `tools`) take no scoping params.
+With the access gate on (`STUDIO_ACCESS_TOKEN` set), a request to one of the twelve transport routes needs either the access cookie or an `attachToken` query parameter. The token is an HMAC-SHA256 the server derives from a per-install secret, and it is the same on every attach URL of an install. Clawboo writes it into every attach URL it builds: for the runtimes it starts, and in the `GET /api/mcp/config` snippet. It is checked on every request (`initialize` and the session's later `POST`, `GET` and `DELETE` alike), which is why it rides in the URL.
 
-**Memory: visibility scope** (`parseBoundScope`):
+The token counts only on a request that reached the loopback port directly. It is refused from another machine, and on any request that carries a proxy header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or `X-Real-IP`). It opens these twelve routes only: `GET /api/mcp/config` always needs the cookie while the gate is on, because it signs attach URLs. With the gate off, neither is needed. The server log masks `attachToken`, `scopeSig` and `provSig` values.
 
-| Query param     | Binds                                                                          |
-| --------------- | ------------------------------------------------------------------------------ |
-| `scopeTeamId`   | The team whose facts/procedures are visible and the team a save is tagged with |
-| `scopeAgentId`  | The agent scope (team + agent + global are read inclusively)                   |
-| `scopeTenantId` | The dormant multi-tenant scope                                                 |
+Without either credential the gate answers **401**:
 
-When none are present the memory session is **unbound** (legacy model-arg behavior, used by the raw stdio bin / external attach).
+```json
+{ "error": "Clawboo access token required. Open /?access_token=<token> once to set a cookie." }
+```
 
-**TeamChat: room + author identity (anti-spoof)** (`parseTeamChatBinding`):
+Clawboo 0.5.0, the latest npm release, does not have this rule: on 0.5.0 any loopback request reaches every `/api/mcp/*` route, `/api/mcp/config` included, without the cookie. See [Security](/operating/security).
 
-| Query param         | Binds                                                    |
-| ------------------- | -------------------------------------------------------- |
-| `roomTeamId`        | The team room (`team:<teamId>` via `resolveRoomForTeam`) |
-| `postAuthorAgentId` | The author identity every post is attributed to          |
+### Session binding: who is calling
 
-**Both** `roomTeamId` and `postAuthorAgentId` are required for a bound TeamChat session, with a `scopeSig` that verifies. Without one, the HTTP session is served **no** TeamChat tools: its author and room could only come from tool args, so it could read any room and post as any agent. (The stdio bin keeps args mode; there the operator is the caller.) A bound TeamChat server also emits a `team_chat_post` orchestration event into the observability log on every post.
+Every server reads who is calling from the attach URL when the session starts, at `initialize`. A binding counts only when its `scopeSig` signature verifies. Clawboo signs the URLs it writes for the runtimes it starts, and `GET /api/mcp/config` signs the ones it builds for you. A parameter added or edited by hand, without a matching signature, is ignored, so neither the model nor the runtime can widen what a session sees by changing tool arguments or its own config.
 
-### Event stream
+| Server     | URL parameters                                                                                                       | What a verified binding does                                                                                                                                                                                    |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tasks`    | `scopeTeamId`, `scopeAgentId`, `scopeSig`                                                                            | Board reads and writes are limited to that team; a task from another team reads as not found. `scopeAgentId` also delivers the agent's undelivered inbox messages on its tool responses.                        |
+| `memory`   | `scopeTeamId`, `scopeAgentId`, `scopeTenantId`, `scopeSig`; `provRuntime`, `provTaskId`, `provSessionKey`, `provSig` | Saves are tagged with the team, so every teammate can recall them. Reads see that team, this agent's private facts and the global tier. The `prov*` stamps record which runtime, task and session saved a fact. |
+| `tools`    | `scopeTeamId`, `scopeAgentId`, `scopeSig`                                                                            | Connector grants scoped to that agent or team apply to its tool calls.                                                                                                                                          |
+| `teamchat` | `roomTeamId`, `postAuthorAgentId`, optional `delegate=1`, `scopeSig`                                                 | Posts go to that team's peer-chat room as that agent; both parameters are required. `delegate=1` adds the `team_delegate` tool; Clawboo sets it only for runs the team chat starts.                             |
 
-The MCP servers' SSE channel (the `GET` route) carries Model Context Protocol JSON-RPC notifications and streamed tool results, not Clawboo-shaped events. The tools each server exposes: `list_tasks` / `create_task` / `claim_task` / `add_comment` (tasks), `memory_save` / `memory_search` / `memory_browse` (memory), the brokered tool set (tools), and `team_chat_post` / `team_chat_subscribe` (teamchat), and their Zod input shapes are catalogued in the [MCP tools reference](/reference/mcp-tools).
+The provenance stamps have their own signature, `provSig`. They are dropped when it does not verify, and they never widen what a session can see. `delegate=1` is covered by `scopeSig`, so it cannot be added to a signed URL.
 
-### Example (raw initialize handshake)
+### What an unverified caller gets
+
+An HTTP session with no binding, or with a signature that does not verify, is an **unverified caller**:
+
+| Server     | Unverified HTTP caller                                                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tasks`    | No `claim_task` or `assign_task`. `add_comment` posts as a plain agent comment with no author id. Reads and writes are not limited to one team. |
+| `memory`   | Reads and saves use the global tier only; scope arguments in tool calls are ignored, and no provenance is recorded.                             |
+| `tools`    | No agent identity, so a grant scoped to an agent or a team never matches its calls.                                                             |
+| `teamchat` | No tools at all.                                                                                                                                |
+
+**OpenClaw agents are always unverified callers.** The Gateway's MCP config is one entry for the whole Gateway, so it cannot carry a per-agent binding. Clawboo registers `tasks`, `memory` and `tools` for OpenClaw with no binding, and never registers `teamchat`. The URL carries the `attachToken` only when the Gateway runs on this machine; a Gateway on another machine gets the bare URL.
+
+The stdio servers (the MCP bins) are different: there you, the operator, run the server, so scope comes from the tool arguments.
+
+### What each server offers
+
+Tasks serves board tools (12, including `list_tasks`, `create_task`, `claim_task` and `add_comment`), Memory serves `memory_save`, `memory_search`, `memory_browse` and `memory_feedback`, Tools serves the available built-in tools, the connector tools the caller's grants allow, and `read_tool_result` for a result too large to return at once, and TeamChat serves `team_chat_post`, `team_chat_subscribe` and, on a `delegate=1` session, `team_delegate`. The full list, with each tool's inputs, is in the [MCP tools reference](/reference/mcp-tools). The `GET` stream carries MCP notifications and streamed results, not Clawboo-shaped events.
+
+### Example (a raw `initialize`)
 
 ```bash
-# With the access gate on, append ?attachToken=<token> (from GET /api/mcp/config)
-# to the URL in BOTH calls.
+# With the access gate on, add ?attachToken=<token> (copy it from GET /api/mcp/config)
+# to the URL in both calls.
 
-# 1. Initialize — the response carries the mcp-session-id header.
+# 1. Initialize. The response carries the mcp-session-id header.
 curl -i -X POST http://localhost:18790/api/mcp/tasks \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 
-# 2. Reuse the returned session id on subsequent calls.
+# 2. Send the session id back on every later call.
 curl -X POST http://localhost:18790/api/mcp/tasks \
   -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
   -H 'mcp-session-id: <id-from-step-1>' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-In practice you do not hand-roll this; an MCP client library (or the runtime's own MCP support) speaks the protocol. Use `GET /api/mcp/config` to get the attach snippet for your runtime.
+Without a binding this session is an unverified caller, so its `tools/list` leaves out `claim_task` and `assign_task`. In practice an MCP client library, or the runtime's own MCP support, speaks the protocol for you; get its attach snippet from `GET /api/mcp/config`.
 
 ---
 
 ## `GET /api/mcp/config`
 
-Emits a copy-pasteable attach snippet so the consuming runtime can register one of Clawboo's MCP servers. Clawboo "hosts" the connection setup; the snippet differs per runtime and transport. The HTTP base URL is built from the server's **own bound loopback port** (`loopbackMcpBaseUrl(req)`, reading `req.app.locals.apiPort` set at boot), **never the client `Host` header**, since a forged `Host` could otherwise redirect a runtime's MCP traffic. It falls back to `http://127.0.0.1:<CLAWBOO_API_PORT or 18790>`. For the stdio transport the bin path uses `CLAWBOO_MCP_BIN_DIR`.
+Builds a copy-and-paste attach snippet for one runtime and one MCP server. The HTTP address uses the port this server is bound to (`http://127.0.0.1:<port>`), never the request's `Host` header, so a forged `Host` cannot send a runtime's MCP traffic elsewhere. If that port is unknown, it falls back to `CLAWBOO_API_PORT`, else `18790`.
+
+Every `http` URL it returns carries the `attachToken`. Send `scopeTeamId` or `scopeAgentId` and the URL also carries those parameters with a matching `scopeSig`, so the binding counts. Because the route signs whatever identity you ask for, it always needs the access cookie while the gate is on; the `attachToken` does not open it.
 
 - **Query params**:
 
-| Param          | Type   | Default       | Values                                       |
-| -------------- | ------ | ------------- | -------------------------------------------- |
-| `server`       | string | `tasks`       | `tasks` \| `memory` \| `tools` \| `teamchat` |
-| `runtime`      | string | `claude-code` | `claude-code` \| `codex` \| `openclaw`       |
-| `transport`    | string | `http`        | `http` \| `stdio`                            |
-| `scopeTeamId`  | string | none          | A team id to bind, signed into `scopeSig`    |
-| `scopeAgentId` | string | none          | An agent id to bind, signed into `scopeSig`  |
+| Param          | Type   | Default       | Values                                                              |
+| -------------- | ------ | ------------- | ------------------------------------------------------------------- |
+| `server`       | string | `tasks`       | `tasks`, `memory`, `tools`, `teamchat` (anything else is a **400**) |
+| `runtime`      | string | `claude-code` | `claude-code`, `codex`, `openclaw`                                  |
+| `transport`    | string | `http`        | `http`; any other value is treated as `stdio`                       |
+| `scopeTeamId`  | string | none          | A team to bind, covered by `scopeSig`                               |
+| `scopeAgentId` | string | none          | An agent to bind, covered by `scopeSig`                             |
+
+Only `server` is checked. An unknown `runtime` answers `200` with `{ "ok": true }` and no `config`.
+
+<Warning>
+
+Binding `scopeAgentId` to an existing agent makes your outside agent act as that agent: it uses that agent's grants, and the Tasks server delivers that agent's inbox messages to it, so the real agent no longer receives them. Use `scopeAgentId` only with an agent id that nothing else runs as.
+
+</Warning>
 
 - **Request body**: none.
-- **Auth**: the operator cookie when the access gate is on. This route signs an attach URL for whatever identity it is asked for, so the `attachToken` does **not** open it.
-
-Every `http` URL it emits carries the `attachToken` (see [Access](#access-the-attachtoken)); one requested with a scope also carries the `scopeSig` that makes the binding count.
 
 ### Responses
 
-**`400 Bad Request`**: `server` is not one of the four known MCP server names:
+**`400 Bad Request`**: `server` is not one of the four servers:
 
 ```json
 { "error": "unknown server: <server>" }
 ```
 
-**`200 OK`**: the attach config for the requested runtime/server/transport:
+**`200 OK`**: the attach config:
 
 ```ts
 {
   ok: true
-  config: {
+  config?: {
     id: string // 'clawboo-<server>'
     transport: 'http' | 'stdio'
-    snippet: string // a copy-pasteable command or config block
-    structured: Record<string, unknown> // programmatic form (e.g. Claude Code inline mcpServers)
-  }
+    snippet: string // a command or config block to copy
+    structured: Record<string, unknown> // the same thing as data, e.g. Claude Code's inline mcpServers entry
+  } // absent for an unknown runtime
 }
 ```
 
-The `snippet`/`structured` shape branches on `runtime` and `transport`; for example `claude-code` + `http` yields `claude mcp add --transport http clawboo-<server> <url>`, while `codex` + `stdio` yields a `[mcp_servers.clawboo-<server>]` TOML block. For `openclaw`, the snippet targets the top-level `mcp.servers` key with `transport: "streamable-http"`.
+What `snippet` holds:
+
+| `runtime`     | `http`                                                                                       | `stdio`                                                                   |
+| ------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `claude-code` | `claude mcp add --transport http clawboo-<server> '<url>'` (the URL is quoted for the shell) | `claude mcp add clawboo-<server> -e CLAWBOO_DB_PATH=<db> -- node <bin>`   |
+| `codex`       | a `[mcp_servers.clawboo-<server>]` block for `~/.codex/config.toml` with `url = "<url>"`     | a `[mcp_servers.clawboo-<server>]` block with `command`, `args` and `env` |
+| `openclaw`    | an entry for `mcp.servers` in `openclaw.json` with `"transport": "streamable-http"`          | an entry for `mcp.servers` with `command`, `args` and `env`               |
+
+An `http` URL looks like `http://127.0.0.1:18790/api/mcp/tasks?attachToken=<64 hex characters>`, with the scope parameters before the token when you ask for them. A `stdio` snippet runs `node <CLAWBOO_MCP_BIN_DIR>/<server>.js` (a `<path-to>/dist/bin/<server>.js` placeholder when `CLAWBOO_MCP_BIN_DIR` is not set) and sets `CLAWBOO_DB_PATH` to this server's database, because the stdio bins otherwise open a different default database (see [Data and state](/operating/data-and-state)).
 
 **`500 Internal Server Error`**:
 
@@ -400,20 +457,24 @@ The `snippet`/`structured` shape branches on `runtime` and `transport`; for exam
 
 ```bash
 curl 'http://localhost:18790/api/mcp/config?runtime=claude-code&server=tasks&transport=http'
+
+# A Memory attach bound to one team
+curl 'http://localhost:18790/api/mcp/config?runtime=claude-code&server=memory&scopeTeamId=<team-id>'
 ```
 
 ---
 
 ## Error envelope
 
-Every error response on these routes is the standard envelope `{ error: string }`. On the `/api/tools*` routes the error string (and, where present, the response body's JSON-string summaries) is masked through `redactValue` / `redactJsonString` so credential-shaped values never leak into a response. The MCP transport's protocol-level errors (bad/missing session) are JSON-RPC error objects (`{ jsonrpc: "2.0", error: { code: -32000, message } }`) at HTTP 400; a handler throw before headers are sent is the plain `{ error }` envelope at 500.
+The `/api/tools*` routes and `GET /api/mcp/config` use the standard `{ "error": string }` body; on the `/api/tools*` routes the message is masked. The resolve route's validation `400` adds `details`. The MCP transport answers with the JSON-RPC error bodies in its table, except for the gate's `401` and a `500`, which use the standard body. A rate-limited request answers **429** `{ "error": "Too many requests. Wait a moment and retry." }` with a `Retry-After` header.
 
-## See also
+**Source of truth:** `apps/web/server/api/tools.ts` and `mcp.ts`; the servers in `packages/mcp/src/` (`http.ts`, `config.ts`, `tasks/`, `memory/`, `tools/`, `teamchat/`); the gate in `packages/gateway-proxy/src/access-gate.ts`; approvals in `packages/db/src/tools/persistence.ts`.
 
-- [MCP tools reference](/reference/mcp-tools), the 4 servers, their tools, and Zod input shapes
-- [Operating: MCP servers as teammates](/operating/mcp-servers), attach config, transports, scoping in practice
-- [Memory API](/reference/rest-api/memory), the UI-facing memory REST surface over the same store
-- [Governance API](/reference/rest-api/governance), budgets, delegation-approval, and the shared approval queue
-- [Capabilities API](/reference/rest-api/capabilities), the unified capability inventory that surfaces broker tools
-- [Runtimes API](/reference/rest-api/runtimes), a `:id/run` attaches to these `/api/mcp/*` endpoints
-- [REST API overview](/reference/rest-api/index)
+## Related
+
+- [MCP tools reference](/reference/mcp-tools): every tool the four servers offer, and its inputs.
+- [MCP servers](/operating/mcp-servers): attach an outside agent, transports and scoping in practice.
+- [Security](/operating/security): the access gate, the attach token and reverse proxies.
+- [Approvals](/using/approvals): answering approval cards in the dashboard.
+- [Runtimes API](/reference/rest-api/runtimes): a task run attaches to these servers.
+- [REST API overview](/reference/rest-api/index): authentication, rate limits and conventions.

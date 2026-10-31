@@ -1,66 +1,49 @@
 ---
-title: The CapabilitySource and ScheduleSource seams
-description: The two read-fan-out multiplexers, CapabilitySource and ScheduleSource, that mirror AgentSource and merge per-source adapters into one normalized record stream.
+title: 'Capability and schedule sources'
+sidebarTitle: 'Capability and schedule sources'
+description: 'How CapabilitySource and ScheduleSource merge per-runtime adapters into one record stream, gate writes by manageability, and route by id prefix.'
+keywords:
+  [
+    'seams',
+    'CapabilitySource',
+    'ScheduleSource',
+    'CapabilityMultiplexer',
+    'ScheduleMultiplexer',
+    'manageability',
+  ]
 ---
 
-Clawboo has three "registry of record" seams that follow the same shape: a neutral record type, a per-source adapter trait, a multiplexer that fans the adapters into one stream, and a process-wide singleton that registers the concrete adapters. The first is [`AgentSource`](/internals/agent-source), _who exists_. This page covers the other two, which share `AgentSource`'s package shape but add a `read()` fan-in:
+Two server-side layers follow the same pattern as [AgentSource](/internals/agent-source): a neutral record type, a per-source adapter trait, a multiplexer that merges every adapter's records into one stream, and a process-wide singleton that registers the adapters.
 
-- **`CapabilitySource`**, what every runtime _can do_. Six adapters project a `CapabilityRecord` stream, five per-runtime plus one for Clawboo's own outbound connectors; the [Ghost Graph](/using/ghost-graph) and the [Capabilities dashboard](/concepts/capabilities) both consume it.
-- **`ScheduleSource`**, _when_ work fires. Two adapters project a `ScheduleRecord` stream: Clawboo Routines (team-task cron) and the OpenClaw Gateway cron (a runtime's own-life cron).
+- **`CapabilitySource`** projects what each runtime can do (skills, tools, connectors) as `CapabilityRecord`s. Six sources are registered: one for each of the five real runtimes (the test-only `clawboo-mock` has none) plus one for Clawboo's own outbound connectors. The [Org chart](/using/org-chart) and the [Capabilities panel](/using/capabilities) both read this stream.
+- **`ScheduleSource`** projects when work fires as `ScheduleRecord`s. Two sources are registered: Clawboo Routines and the OpenClaw Gateway's own cron.
 
-Both seams encode the same discipline: `read()` never rejects (degradation is data), writes are owner-routed by an id prefix, and the UI plus the write path are a pure function of a per-record or per-source _manageability_ tier; Clawboo may never offer an action the owning runtime forbids.
+Use this page when you add a source, change how a capability or schedule is written, or debug a degraded source.
 
-This page explains the seam shape, why a multiplexer over `AgentSource`'s `Map` registry, the manageability tiers, the two-domain split in the scheduler, and the invariants each seam is built to keep.
+## The shared shape
 
-## What these seams are, and what they aren't
+| Part               | `AgentSource`                                                                         | `CapabilitySource`                                         | `ScheduleSource`                              |
+| ------------------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------- |
+| Record type        | `AgentRecord`                                                                         | `CapabilityRecord`                                         | `ScheduleRecord`                              |
+| Registry           | `AgentRegistry` (a catalog)                                                           | `CapabilityMultiplexer` (merges `read()`)                  | `ScheduleMultiplexer` (merges `read()`)       |
+| Id composition     | the row's `sourceId`                                                                  | `${sourceId}:${rawKey}`                                    | `${source}:${sourceScheduleId}`               |
+| Singleton          | `getRegistry()`                                                                       | `getCapabilityMultiplexer()`                               | `getScheduleMultiplexer()`                    |
+| Registered sources | 5: OpenClaw, native, and one SQLite-backed source each for claude-code, codex, hermes | 6: native, hermes, claude-code, codex, openclaw, connector | 2: `clawboo-routine`, `openclaw-gateway-cron` |
 
-A seam is the line where Clawboo's neutral substrate meets a runtime's idiosyncratic reality. `CapabilitySource` and `ScheduleSource` are each a small, browser-safe, dependency-light package: the record types plus the trait plus the multiplexer, and a set of server-side concrete adapters that do the actual I/O. The packages know nothing about a Gateway, a Hermes home, or a SQLite path; the adapters know everything.
+The record and trait packages, `@clawboo/capability-registry` and `@clawboo/scheduler`, are dependency-light and browser-safe, because the dashboard imports the record types to type the REST responses. `@clawboo/capability-registry` has no runtime dependencies and re-declares the small foreign types it needs (`CapabilityAvailability` mirrors `@clawboo/db`'s `AvailabilityRequirement`). `@clawboo/scheduler` is the only package that imports `croner`, and only in `occurrence.ts`; everything downstream deals in precomputed epoch-millisecond timestamps. The concrete sources live in `apps/web/server/lib/capabilitySource/` and `apps/web/server/lib/scheduleSource/`.
 
-`@clawboo/capability-registry` is **browser-safe, zero runtime deps**; the SPA imports the record types to type the REST response, so the package mirrors `@clawboo/agent-registry`'s discipline of re-declaring small foreign types locally (`CapabilityAvailability` mirrors `@clawboo/db`'s `AvailabilityRequirement`) rather than taking a dependency. `@clawboo/scheduler` is the **only place in the monorepo that imports `croner`**; everything downstream deals in precomputed epoch-ms timestamps, so swapping the tick library changes exactly one file.
+These layers merge and route; they own no canonical rows. The capability projection is persisted to a `capabilities` table, but only as a cache for when a source is offline; each source's backing store (the tool broker's `tool_registry`, a Hermes home's `SKILL.md` files, the Gateway config) stays canonical. The Routines source reads the `scheduled_runs` ledger and the Gateway-cron source reads the live Gateway.
 
-These seams are **read-and-route, not store**. They own no durable rows of their own. The capability projection is _persisted_ by the server-side service into a `capabilities` table for disconnect tolerance, but that table is a cache of the merged read, not the source of truth; each adapter's backing store (the broker's `tool_registry`, a Hermes home's `SKILL.md` files, the Gateway config) remains canonical. The scheduler's Routines side projects over the `scheduled_runs` ledger; the Gateway-cron side projects over the live Gateway, owning nothing.
+### Routing by id prefix
 
-<Note>
-All `@clawboo/*` packages are `private: true`. The seam packages ship to npm only by being inlined into the `clawboo` CLI bundle, never as standalone published artifacts.
-</Note>
+The composite id is the routing key. `parseCapabilityId` and `parseScheduleId` find the owning source by matching the id against a fixed list of known source ids as a prefix. They do not split on the first colon: a raw key may itself contain colons (brokered ids look like `native:tool_registry:echo`), and an id whose prefix is not a registered source parses to `null`, so it routes nowhere instead of to a plausible wrong source.
 
-## The seam shape
+## `read()` never rejects
 
-All three seams instantiate the same five parts. `AgentSource`'s registry is a plain catalog, register one source, ask for it by id. The two seams here keep that catalog shape but make the registry a _multiplexer_: its job is the cross-source `read()` fan-in, not just a lookup.
-
-| Part                   | `AgentSource`                   | `CapabilitySource`                               | `ScheduleSource`                           |
-| ---------------------- | ------------------------------- | ------------------------------------------------ | ------------------------------------------ |
-| Record type            | `AgentRecord`                   | `CapabilityRecord`                               | `ScheduleRecord`                           |
-| Trait                  | `AgentSource`                   | `CapabilitySource`                               | `ScheduleSource`                           |
-| Registry / multiplexer | `AgentRegistry` (`Map` catalog) | `CapabilityMultiplexer` (`read()` fan-in)        | `ScheduleMultiplexer` (`read()` fan-in)    |
-| Id composition         | `source.id`                     | `${sourceId}:${rawKey}`                          | `${source}:${sourceScheduleId}`            |
-| Singleton              | `getRegistry()`                 | `getCapabilityMultiplexer()`                     | `getScheduleMultiplexer()`                 |
-| Concrete adapters      | 2 (OpenClaw, native)            | 5 (native, hermes, claude-code, codex, openclaw) | 2 (clawboo-routine, openclaw-gateway-cron) |
-
-The trait is the same idea in both: a typed `id`, a `read()` that returns records plus a status, and a `write()` that throws a small set of typed errors. The composite id is the routing key; split it on the first `:` to recover the owning source, which is all a write needs.
-
-```mermaid
-flowchart TD
-    subgraph cap["CapabilityMultiplexer.read()"]
-        n[native source]
-        h[hermes source]
-        cc[claude-code source]
-        cx[codex source]
-        oc[openclaw source]
-    end
-    n & h & cc & cx & oc -->|"CapabilityReadResult\n{ records, status }"| merge[per-source try/catch fan-in]
-    merge -->|"{ records[], sources[] }"| svc[loadCapabilities]
-    svc -->|persist OK sources<br/>serve last-good for degraded| rest[GET /api/capabilities]
-    rest --> graph[Ghost Graph]
-    rest --> dash[Capabilities dashboard]
-```
-
-### read() never rejects; degradation is data
-
-The load-bearing contract is that a source's `read()` returns degradation as a _value_, never as a thrown error. Each `read()` returns `{ records, status }`, where `status` is `{ sourceId, ok, degraded, reason?, at }`. A disconnected Gateway returns `[]` plus `{ ok: false, degraded: true, reason: 'gateway_disconnected' }`; the adapter does not throw. The multiplexer additionally wraps every `read()` in a per-source `try/catch`, so even a source that _violates_ its own never-reject contract becomes a degraded status entry rather than taking the whole merge down. The result is that one dead source can never blank the inventory or the schedule list.
+A source's `read()` returns degradation as a value. Each returns `{ records, status }`, where `status` is `{ sourceId, ok, degraded, reason?, at }`; a disconnected Gateway returns no records and `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` (the Gateway-cron source serves its last list instead, with reason `stale_cache`, when it has one). The multiplexer also wraps every `read()` in its own `try/catch`, so even a source that breaks the contract becomes a degraded status entry rather than failing the merge:
 
 ```ts
-// CapabilityMultiplexer.read() — the fan-in is defensive on both ends.
+// CapabilityMultiplexer.read(): defensive on both ends
 for (const source of this.sources.values()) {
   try {
     const result = await source.read()
@@ -71,7 +54,7 @@ for (const source of this.sources.values()) {
       sourceId: source.id,
       ok: false,
       degraded: true,
-      reason: String(err),
+      reason: err instanceof Error ? err.message : String(err),
       at: Date.now(),
     })
   }
@@ -79,129 +62,124 @@ for (const source of this.sources.values()) {
 return { records, sources }
 ```
 
-The REST layer reads `{ records, sources }` and always returns `200`; the per-source degradation rides in the `sources` array. For capabilities, the server-side `loadCapabilities` goes one step further: it persists each _OK_ source's records into the `capabilities` table (a source-scoped reconcile) and, for any _degraded_ source, serves that source's last-good table rows. A Gateway that blips for one read still shows its tools, stale-but-present, instead of vanishing.
+A degraded source never fails the request: it rides in the `sources` array and `GET /api/capabilities` or `GET /api/schedules` answers `200`. (`GET /api/capabilities` answers `500` only when the server-side merge itself throws, for example on a database error.)
+
+For capabilities, `loadCapabilities` (`capabilitySource/service.ts`) goes one step further. It persists each healthy source's records into the `capabilities` table (a reconcile scoped to that source) and, for a degraded source, serves that source's last-good rows. A Gateway that drops for one read still shows its tools, stale but present.
 
 ## Manageability: the write gate
 
-The seam's purpose is to let Clawboo _observe_ every runtime's capabilities and schedules while _managing_ only what the owning runtime cedes. That line is drawn by a manageability tier, and the rule is strict: the UI and the write path are a pure function of the tier; neither may offer an action the owner forbids.
+Clawboo observes every runtime's capabilities and schedules but manages only what the owning runtime allows. The line is a manageability tier, and the UI and the write path are both a pure function of it: neither may offer an action the owner forbids.
 
-This is the one place the two seams diverge in shape, and the divergence is documented in the source itself.
+**`ScheduleSource` declares manageability per source.** Each source is uniformly `managed`, `external-write` or `observe-only` through a `readonly manageability` field, so the multiplexer can refuse a write before touching the source.
 
-**`ScheduleSource` carries manageability per source.** A source is uniformly `managed`, `external-write`, or `observe-only`, declared as a `readonly manageability` field on the trait. The multiplexer can therefore gate the write _before touching the source_: an `observe-only` source's write throws `UnsupportedScheduleWriteError` up front.
+| Tier             | Meaning                                                    | Schedule source                                   |
+| ---------------- | ---------------------------------------------------------- | ------------------------------------------------- |
+| `managed`        | Clawboo owns the rows                                      | `clawboo-routine` (the `scheduled_runs` ledger)   |
+| `external-write` | The runtime owns the store; Clawboo writes through its API | `openclaw-gateway-cron` (operator `cron.*` calls) |
+| `observe-only`   | Clawboo can read but never write                           | none today                                        |
 
-| Tier             | Meaning                                                      | Schedule example                                  |
-| ---------------- | ------------------------------------------------------------ | ------------------------------------------------- |
-| `managed`        | Clawboo fully owns the rows                                  | Clawboo Routines (the `scheduled_runs` ledger)    |
-| `external-write` | The runtime owns the store; Clawboo writes _through_ its API | OpenClaw Gateway cron (via operator `cron.*` RPC) |
-| `observe-only`   | Clawboo can read but never write                             | _(no schedule source today)_                      |
+**`CapabilitySource` declares manageability per record**, because one source can emit records of mixed tiers (OpenClaw surfaces `runtime-of-record` `tools.*` records, `observe-only` `clawboo-*` servers and a built-ins record from the same `read()`). There is no `manageability` field on the capability trait. The REST layer resolves the target record and rejects `observe-only` or non-`writable` records, and each `source.write()` refuses again.
 
-**`CapabilitySource` carries manageability per record.** This is a deliberate deviation: a single adapter emits records of _mixed_ manageability. The Hermes adapter, for instance, surfaces its `SKILL.md` skills _and_ a rolled-up `observe-only` built-ins record from the same `read()`. So there is no `readonly manageability` on the capability trait; the gate is enforced upstream at the REST layer (resolve the target record → reject `observe-only` or non-`writable`) and defended again inside each `source.write()`.
+| Tier                | Meaning                                                           | Capability example                                         |
+| ------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- |
+| `managed`           | Clawboo owns the durable row                                      | brokered MCP tools and curated skills (native source)      |
+| `external-write`    | The runtime owns the store; Clawboo writes through it             | Codex's attached Clawboo MCP servers (refused today)       |
+| `runtime-of-record` | The runtime owns it; Clawboo changes it through the runtime's API | OpenClaw `tools.allow` and `tools.deny` via `config.patch` |
+| `observe-only`      | Clawboo can read but never write                                  | runtime built-ins, Hermes `SKILL.md`, connector records    |
 
-| Tier                | Meaning                                                               | Capability example                                       |
-| ------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
-| `managed`           | Clawboo owns the durable row                                          | brokered MCP tools, curated skills (native source)       |
-| `external-write`    | The runtime owns the store; Clawboo writes through it                 | Codex's attached MCP servers                             |
-| `runtime-of-record` | The runtime owns it; Clawboo drives changes through the runtime's API | OpenClaw `tools.allow`/`tools.deny` via `config.patch`   |
-| `observe-only`      | Clawboo can read but never write                                      | runtime built-ins, Hermes `SKILL.md`, attached MCP spine |
+A record also carries `writable` (default `true`). A source sets `writable: false` on a record it cannot write yet, such as an OpenClaw MCP server or plugin entry, so the panel renders no dead Enable or Disable button. The `writable` column is not persisted, so when the REST mapper serves last-good rows for an offline source it re-derives `writable` from the row's origin and kind with the same predicate that source's `write()` uses.
 
-A record also carries a `writable` flag (default `true`). A source that emits a record it cannot _yet_ write, an OpenClaw `runtime-of-record` MCP connector or plugin, whose `config.patch` toggle is a documented follow-up, sets `writable: false`. The dashboard then renders no dead Enable/Disable button. Because the `writable` column isn't persisted, the REST mapper _re-derives_ it from the row's origin and kind when serving the degraded last-good path, using the same predicate the owning source's `write()` gates on, so the gate stays a pure function of the record even when the live source is offline and cannot drift from what that source actually supports.
+## The six capability sources
 
-<Info>
-The action set the UI shows and the write the REST layer allows are both derived from `manageability` (+ `writable`), never from a per-runtime literal in the panel. Add a runtime, declare its records' tiers, and the surface follows. This is why `observe-only` records always render "built-in, managed by &lt;runtime&gt;" with no action; the panel never special-cases a runtime name.
-</Info>
+Each source projects the same `CapabilityRecord` shape. The origin and manageability of its records encode what Clawboo may do with that runtime. They are registered in this order in `apps/web/server/lib/capabilitySource/registry.ts`:
 
-## The five capability adapters
+| Source        | What it reads                                                                                                                                                    | Manageability                                                                                                                 | Can `write()`?                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `native`      | the tool broker's `tool_registry` (global tools), each native agent's MCP toggles, the per-agent `skills` table                                                  | `managed`                                                                                                                     | yes: install, enable and disable through the tool-broker pipeline |
+| `hermes`      | each per-identity Hermes home's `SKILL.md` files and `mcp.json` connectors                                                                                       | `observe-only`                                                                                                                | no: Clawboo never writes a Hermes skills directory                |
+| `claude-code` | the Clawboo MCP servers attached per run, plus Claude Code built-ins                                                                                             | `observe-only`                                                                                                                | no: Claude Code runs against the user's own `~/.claude`           |
+| `codex`       | the Clawboo MCP servers attached to Codex, plus Codex built-ins                                                                                                  | `external-write`, status `manageable-but-pending-auth`                                                                        | no: shown with the hint to run `codex login`; writes are refused  |
+| `openclaw`    | the Gateway's `tools.allow` and `tools.deny`, `mcp.servers` and `plugins.entries`, over the shared connection                                                    | `runtime-of-record` (`tools.*` writable; other MCP servers and plugins `writable: false`); `clawboo-*` servers `observe-only` | yes for `tools.*` through `config.patch`; nothing else yet        |
+| `connector`   | Clawboo's own live outbound MCP connections (from the connector supervisor, in memory) plus one record per app a connected Composio session reaches (from cache) | `observe-only`, `writable: false`                                                                                             | no: connect and disconnect live on the connectors REST surface    |
 
-The capability seam is where the five-runtime asymmetry is most visible. Each adapter projects the same `CapabilityRecord` shape, but the _origin_ and _manageability_ of its records encode what Clawboo is actually allowed to do with that runtime.
+Three details carry invariants the rest of the system depends on:
 
-| Source        | What it reads                                                                                            | Manageability of its records                                                            | Can `write()`?                                                                |
-| ------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `native`      | broker `tool_registry` (global tools), each native agent's MCP toggles, the per-agent `skills` table     | `managed` (all three)                                                                   | yes: install/enable/disable via the existing tool-broker pipeline             |
-| `openclaw`    | Gateway `tools.allow`/`tools.deny`, `mcp.servers`, `plugins.entries` over the shared operator connection | `runtime-of-record` (tools/plugins/connectors); the clawboo MCP spine is `observe-only` | yes for `tools.*` via `config.patch`; MCP/plugin toggles are not writable yet |
-| `hermes`      | each per-identity home's `SKILL.md` files + `mcp.json` connectors                                        | `observe-only`                                                                          | no: Clawboo never writes a Hermes skills dir                                  |
-| `claude-code` | the clawboo MCP servers attached per run + Claude built-ins                                              | `observe-only`                                                                          | no: Claude runs against the user's real `~/.claude`                           |
-| `codex`       | the clawboo MCP servers (stdio attach) + Codex built-ins                                                 | `external-write`, status `manageable-but-pending-auth`                                  | no: auth-blocked until `codex login`, home is ephemeral                       |
+- **The native source's curated-skill records carry the agent's runtime.** A curated catalog skill installed on an OpenClaw agent is a Clawboo-managed annotation, so the record's `runtime` is the agent's while its manageability stays `managed`. The panel groups it under the agent's runtime and Clawboo still owns the write.
+- **The OpenClaw source reuses the shared operator connection.** It is constructed with `getRegistry().source` and never opens a second Gateway connection. A `config.patch` carries the `{ raw, baseHash, replacePaths }` envelope the Gateway expects, where `replacePaths` names every array the patch replaces (OpenClaw 2026.9 refuses a patch that would shorten an undeclared array).
+- **The connector source reads no network.** The supervisor already holds every live connection and its tool list, and the Composio app list comes from a cache the connectors shelf refreshes, so a graph rebuild never waits on a remote server.
 
-Two details are worth their own note because they capture invariants the rest of the system depends on:
-
-- **The native source's curated-skill records carry the _agent's_ runtime, not `clawboo-native`.** A curated catalog skill installed onto an OpenClaw agent is an honest Clawboo-managed annotation (it is exactly what the `TOOLS.md` bullet always was), so the record's `runtime` is the agent's while its `manageability` stays `managed`. The dashboard groups it under the agent's runtime; Clawboo still owns the write.
-- **The OpenClaw source reuses the _shared_ operator connection.** It is constructed with `getRegistry().source`, the same `OpenClawAgentSource` slice the agent registry holds, and never opens a second Gateway connection. Its `config.get`/`config.patch` calls ride that one connection; a `config.patch` carries the `{ raw, baseHash, replacePaths }` envelope the Gateway expects, where `replacePaths` names every array being replaced (2026.9 refuses a patch that would shorten an undeclared one).
-
-The native adapter's `write()` is the seam's only genuinely durable managed write, and it is deliberately _not forked_ from the rest of the system: an install runs the existing `evaluateInjection` gate and writes the same `skills` table the `POST /api/skills` path writes, with the same `appendAudit` trail. The payload is scanned as two surfaces, not one blob: name and skill content on `prompt` (prose bound for an agent's context), a connector's command/args/env on `exec` (spawn-bound, so every rule that fires blocks). Scanning both at the `exec` setting is what made the gate refuse a skill for _describing_ a destructive command; scanning both at the `prompt` setting would let a connector command through.
+The native source's `write()` is the only durable managed write, and it reuses the existing pipeline rather than forking it: an install runs `evaluateInjection` and writes the same `skills` table the `POST /api/skills` path writes, with the same `appendAudit` trail. The payload is scanned as two surfaces. The name and skill content are scanned as `prompt` (prose bound for an agent's context); a connector's command, arguments and environment are scanned as `exec` (spawn-bound, so every rule that fires blocks).
 
 ## The two schedule domains
 
-The scheduler seam's invariant is captured by one field on `ScheduleRecord`: `domain`. There are exactly two cron _domains_, and conflating them is the mistake the seam exists to prevent.
+`ScheduleRecord.domain` separates two kinds of cron, and keeping them apart is the point of this layer:
 
-- **`team-task`**, Clawboo's own scheduler for team work, the `clawboo-routine` source over the `scheduled_runs` ledger. It is the single external wake for _every_ runtime class (native, the wrapped one-shots, and OpenClaw alike), whether a Routine posts to a team's chat or files a task for one agent.
-- **`runtime-own-life`**, a runtime's _own_ standalone cron, the `openclaw-gateway-cron` source over the live Gateway. The Routines view is an operator surface over these, not their owner.
+- **`team-task`**: Clawboo's own scheduler for team work, the `clawboo-routine` source over the `scheduled_runs` ledger. It is the one external wake for every runtime, whether a Routine posts into a team's chat or files a task for one agent.
+- **`runtime-own-life`**: a runtime's own cron, the `openclaw-gateway-cron` source over the live Gateway. The Routines view is an operator surface over these jobs, not their owner.
 
-There are deliberately only two sources. Claude Code, Codex, Hermes, and native have no live native scheduler of their own; scheduling them _is_ a Clawboo Routine; and `hermes gateway` is never launched, so there is no third adapter to write.
+There are only two sources because Claude Code, Codex, Hermes and Clawboo Native have no live scheduler of their own (scheduling them is a Clawboo Routine), and `hermes gateway` is never launched.
 
 ```mermaid
 flowchart TD
     subgraph mux["ScheduleMultiplexer"]
-        r["clawboo-routine\ndomain: team-task\nmanageability: managed"]
-        g["openclaw-gateway-cron\ndomain: runtime-own-life\nmanageability: external-write"]
+        r["clawboo-routine: team-task, managed"]
+        g["openclaw-gateway-cron: runtime-own-life, external-write"]
     end
-    r -->|scheduled_runs ledger| ledger[(SQLite)]
-    g -->|operator cron.* RPC| gw[OpenClaw Gateway]
-    mux -->|"GET /api/schedules\n{ schedules, sources }"| tab[Routines view]
+    r --> ledger[("scheduled_runs")]
+    g -->|"operator cron.* calls"| gw[OpenClaw Gateway]
+    mux -->|"GET /api/schedules"| tab[Routines view]
 ```
 
-The multiplexer's write gate enforces this domain split in order: unknown source → `UnknownScheduleError`; `observe-only` tier → `UnsupportedScheduleWriteError`; and a `team-task` _create_ aimed at a `runtime-own-life` source → `TeamTaskDomainViolationError`. The Gateway-cron source _also_ refuses a `team-task` create internally, so the domain rule is defended twice; Clawboo never registers a team task into a runtime's own scheduler.
+The multiplexer's write gate runs in order: an unknown source raises `UnknownScheduleError`; an `observe-only` source raises `UnsupportedScheduleWriteError`; a `team-task` create aimed at a `runtime-own-life` source raises `TeamTaskDomainViolationError`. The Gateway-cron source also refuses a `team-task` create itself, so the domain rule is defended twice and Clawboo never files a team task into a runtime's own scheduler.
 
-### Refusals are data, surfaced as typed errors
+### Typed errors
 
-The scheduler inherits the board's idiom that a refusal is _data, not an exception_; but the seam needs callers to branch structurally, so the data refusals are minted into typed errors carrying a `readonly code`. The REST layer maps each code to a precise status:
+Every scheduling error carries a `readonly code` so callers branch on structure, never on message text. The REST mapper (`mapScheduleError` in `apps/web/server/api/schedules.ts`) turns them into status codes:
 
-| Error (`code`)                                                    | REST status | Meaning                                                                             |
-| ----------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------- |
-| `InvalidCronSpecError` / `BoundRecurringScheduleError` / ZodError | `400`       | malformed spec, or a recurring schedule bound to an already-claimable task          |
-| `UnknownScheduleError`                                            | `404`       | unknown composite id / unknown source                                               |
-| `DuplicateFiringOwnerError` / `IllegalScheduleTransitionError`    | `409`       | the one-firing-owner refusal, or an illegal routine-state transition, never retried |
-| `TeamTaskDomainViolationError`                                    | `422`       | a team-task create aimed at a runtime-own-life source                               |
-| `UnsupportedScheduleWriteError`                                   | `403`       | a write against an `observe-only` source                                            |
-| `ScheduleSourceUnavailableError`                                  | `503`       | the backing Gateway connection is down                                              |
+| Error                                                            | Status | Meaning                                                                                                                        |
+| ---------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `InvalidCronSpecError`, a zod error                              | `400`  | A malformed spec or task template. The body's `code` is `invalid_body`.                                                        |
+| `BoundRecurringScheduleError` (`bound_recurring_schedule`)       | `400`  | A recurring routine bound to an already-claimable task.                                                                        |
+| `InvalidRoutineTargetError` (`invalid_routine_target`)           | `400`  | A team routine with no team, an agent routine with no agent, an agent not on the paired team, or a target that does not exist. |
+| `UnknownScheduleError` (`unknown_schedule`)                      | `404`  | An unknown composite id or source.                                                                                             |
+| `DuplicateFiringOwnerError`, `IllegalScheduleTransitionError`    | `409`  | The one-firing-owner refusal, or an illegal routine status change. Never retried.                                              |
+| `TeamTaskDomainViolationError` (`team_task_domain_violation`)    | `422`  | A team-task create aimed at a runtime-own-life source.                                                                         |
+| `UnsupportedScheduleWriteError` (`unsupported_schedule_write`)   | `403`  | A write against an `observe-only` source.                                                                                      |
+| `ScheduleSourceUnavailableError` (`schedule_source_unavailable`) | `503`  | The Gateway connection behind the source is down; the body's `error` is `gateway_disconnected`.                                |
+| `NotImplementedError` (`not_implemented`)                        | none   | Raised by the wake bridge at fire time for a human-participant Routine target, which is not built.                             |
 
-The **one-firing-owner** invariant is the scheduler's analog of the board's atomic claim. A board task carries a `scheduledBy` owner column; binding a Routine to a task whose `scheduledBy` is a _different_ non-`'manual'` owner is refused at registration time with `DuplicateFiringOwnerError`. Like the board's 409 conflict, this refusal is never retried; it means another engine legitimately owns that task's cadence. A runtime's own-life cron is a different domain and never trips the guard.
+The one-firing-owner rule is the scheduler's version of the board's atomic claim. A board task carries a `scheduledBy` owner; binding a Routine to a task whose `scheduledBy` is a different owner other than `'manual'` is refused at registration with `DuplicateFiringOwnerError`. Like a lost claim, it is never retried: another engine owns that task's cadence. A runtime's own cron is a different domain and never trips the rule.
 
-The capability seam's error taxonomy is the smaller mirror: `UnknownCapabilityError` → `404` and `UnsupportedCapabilityWriteError` → `422`, with the canonical `unsupported()` helper that every `observe-only` source's `write()` raises.
+The capability errors are the smaller mirror: `UnknownCapabilityError` answers `404`, `UnsupportedCapabilityWriteError` (raised by the shared `unsupported()` helper every `observe-only` source's `write()` calls) answers `422`, and a write that hits a disconnected Gateway answers `503 gateway_disconnected`.
 
-## How a runtime dispatch chooses its path, without a switch
+## How a Routine fire picks its path
 
-The scheduler seam's payoff shows up in the wake-bridge, the code that turns a Routine fire into a real dispatch. It must route a fire to the right execution path; but it does _not_ switch on a runtime id. It reads the runtime's _integration plan_ and branches on `resolveRuntimeIntegration(caps).home.kind`:
+The wake bridge (`apps/web/server/lib/routines/wakeBridge.ts`) turns a Routine fire into real work. It branches first on the Routine's target. A team Routine posts its instructions into the team's General chat through the team engine, addressed to the team's lead. An agent Routine becomes a board task for that agent, and the bridge then branches on the runtime's integration plan, `resolveRuntimeIntegration(caps).home.kind`, never on a runtime id:
 
-- a `persistent` or `ephemeral` home (native, the wrapped one-shots) → the standard executor runner, exactly as a manual `POST /api/runtimes/:id/run`;
-- a `connected` home (OpenClaw) → a thin operator dispatcher over the shared Gateway connection.
+- **`persistent` or `ephemeral` home** (Clawboo Native, Claude Code, Codex, Hermes): `runTaskOnRuntime`, the same [executor runner](/internals/executor-runner) a `POST /api/runtimes/:id/run` uses. That path has budget checks, circuit breakers, a worktree when the task changes files and has a repository path, and the verification gate when that worktree has a diff. A template with no `repoPath` runs without a worktree (a file-changing kind becomes `research`), so it gets no verification.
+- **`connected` home** (OpenClaw): a thin dispatcher on the shared Gateway connection (`routines/openclawDispatch.ts`). It runs a budget preflight, claims the task, beats it, records spend, and stops the run on a 10-minute watchdog (`CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`). It has no worktree, no verification gate and no circuit breakers; a finished run lands `done` with the comment "Completed without verification" and an unverified audit row.
 
-A fire is _just another task dispatch_ through the standard pipeline, so budgets, circuit breakers, verification, worktrees, and observability all apply. The capability seam and the runtime-integration seam compose here: the same capability declaration that tells the Capabilities dashboard "this runtime is `runtime-of-record` for its config" tells the wake-bridge "dispatch this fire over the connected path."
+The branch reads the adapter's declared `runtimeClass`, so a new connected runtime routes here without the bridge learning its name.
 
-## Design rationale and trade-offs
+## Design rationale
 
-**Why a multiplexer over `AgentSource`'s plain registry?** `AgentSource` answers "who exists" from a single source per phase; a `Map` catalog is enough. Capabilities and schedules are inherently _heterogeneous and partial_: five runtimes, two cron systems, any of which may be offline. The merged view is the product, so the registry's job becomes the fan-in: collect every source's `read()`, tolerate failures as status entries, and present one stream. Making this a multiplexer rather than a catalog is what lets the Ghost Graph and the dashboard both consume _one_ query instead of five, and what makes a degraded source a visible-but-non-fatal condition.
+**A multiplexer rather than a catalog.** Capabilities and schedules are heterogeneous and partial: six capability sources and two cron systems, any of which may be offline. The merged view is the product, so the registry's job is the merge: collect every `read()`, keep failures as status entries, and present one stream. That is what lets the Org chart and the Capabilities panel share one query and makes a degraded source visible but not fatal.
 
-**Why per-record manageability for capabilities but per-source for schedules?** The shape follows the data. A schedule source is uniform; every Routine is `managed`, every Gateway cron is `external-write`; so the cheaper per-source gate is honest. A capability adapter is not uniform: Hermes legitimately owns both an `observe-only` built-in and a `SKILL.md` it merely observes. Forcing a per-source tier there would either over-promise (offer to write a built-in) or under-promise (refuse to manage a managed skill). The per-record tier costs a `writable`-derivation in the REST mapper but keeps the gate truthful.
+**Per-record manageability for capabilities, per-source for schedules.** The shape follows the data. Every Routine is `managed` and every Gateway cron job is `external-write`, so a per-source gate is honest. A capability source is not uniform, and a per-source tier would either offer to write a built-in or refuse to manage a managed skill. The per-record tier costs the `writable` re-derivation in the REST mapper but keeps the gate truthful.
 
-**Why dependency-light, browser-safe packages?** The record types cross the wire to the SPA, so the package that defines them cannot drag in a Gateway client, a SQLite driver, or `croner`. Re-declaring small foreign types locally (the `CapabilityAvailability` mirror, the local Gateway cron-shape codec) is the cost; the benefit is a type contract the browser can import directly and a `croner` blast radius of exactly one file.
+**Browser-safe record packages.** The record types cross the wire to the dashboard, so the packages that define them cannot pull in a Gateway client, a SQLite driver or `croner`.
 
-## Boundaries and non-goals
+## Boundaries
 
-- **Not stores.** The seams route and merge; they own no canonical rows. The capability `capabilities` table is a disconnect-tolerance cache of the merged read; the schedule sources project over the `scheduled_runs` ledger and the live Gateway.
-- **Not a place to special-case a runtime.** The whole point is that the UI and write path are a pure function of `manageability` + `writable` (capabilities) or `manageability` + `domain` (schedules). A new runtime declares its records' or its source's tiers; nothing in the panel or the multiplexer learns its name.
-- **Single implicit tenant today.** `CapabilityRecord.tenantId` and the schedule `tenantId` seam are dormant, always `null` in v0.5.0. The `'human'` `CapabilityRuntime` and the human-participant Routine (`NotImplementedError`) are reachable seams, not shipped features.
-- **Some writes are follow-ups, not bugs.** OpenClaw MCP/plugin `config.patch` toggles and a durable Codex managed home are documented future work; those records are surfaced honestly as non-`writable` or `pending-auth` rather than offered with a dead button.
+- **Not stores.** The `capabilities` table is a cache for offline sources; the schedule sources read the `scheduled_runs` ledger and the live Gateway.
+- **No per-runtime special cases.** The UI and the write path depend only on `manageability` and `writable` (capabilities) or `manageability` and `domain` (schedules). A new runtime declares its tiers and nothing in the panel or the multiplexer learns its name.
+- **Reserved fields.** `CapabilityRecord.tenantId` and the schedule `tenantId` are always `null`. The `'human'` capability runtime and the human-participant Routine are typed but not built.
+- **Writes not offered yet.** OpenClaw MCP server and plugin toggles are not writable, and Codex capability writes are refused; both show as non-writable or pending-auth rather than as a dead button.
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+## Related
 
-## See also
-
-- [AgentSource internals](/internals/agent-source): the first seam these two mirror
-- [Capabilities](/concepts/capabilities): the concept-level view of the capability inventory
-- [Scheduling](/concepts/scheduling): Routines, the ticker, and the error-halts policy
-- [The board](/concepts/the-board): the atomic-claim idiom the one-firing-owner guard echoes
-- [The executor runner](/internals/executor-runner): where a Routine fire becomes a real run
-- [Schedules API](/reference/rest-api/schedules) · [Capabilities API](/reference/rest-api/capabilities): the REST surfaces over these seams
-- [Glossary](/appendices/glossary): canonical term definitions
+- [AgentSource](/internals/agent-source): the agent registry these two mirror
+- [The executor runner](/internals/executor-runner): where an agent Routine fire becomes a run
+- [Capabilities](/concepts/capabilities) and [Scheduling](/concepts/scheduling): the concepts behind these streams
+- [Adding a runtime](/internals/runtime-adapter#add-a-runtime): where a new capability source fits
+- [Schedules API](/reference/rest-api/schedules) and [Capabilities API](/reference/rest-api/capabilities): the REST surfaces

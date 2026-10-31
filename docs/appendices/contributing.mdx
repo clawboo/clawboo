@@ -1,60 +1,55 @@
 ---
-title: Contributing to Clawboo
-description: Clone, run the dev stack, pass the local gate, add a changeset, and respect the architecture invariants.
+title: 'Contributing to Clawboo'
+sidebarTitle: 'Contributing'
+description: 'Set up the repo, run the dev stack, pass the local gate, add a changeset, and open a pull request that keeps the architecture rules.'
+keywords:
+  ['contributing', 'pull request', 'changeset', 'dev setup', 'good first issue', 'local gate']
 ---
 
-Use this page when you want to make a change to Clawboo and open a pull request. It summarizes the contributor workflow and points at the canonical sources: the repo's [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) is the authority on process; the [Internals section](/internals/index) explains _why_ the code is shaped the way it is.
+Use this page when you want to change Clawboo and open a pull request. It walks the contributor workflow and links into the rest of the docs. The repo's [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) is the authority on process: if the two disagree, `CONTRIBUTING.md` and the root `package.json` win. Why the code is shaped the way it is lives in the [contributor overview](/internals/index).
 
-<Note>
-  The single source of truth for process is
-  [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md) at the repo
-  root. This page is a guided tour of it with cross-links into the rest of the docs. If the two ever
-  disagree, `CONTRIBUTING.md` and the root `package.json` win.
-</Note>
+## Before you begin
 
-## Prerequisites
+- **Node.js 22.12 or later** and **pnpm 9**. The root `package.json` declares `engines.node >=22.12.0` and `engines.pnpm >=9.0.0`, and pins `pnpm@9.15.0` as its package manager.
+- **No external runtime.** Clawboo Native runs agents inside the server, with a provider key or a local Ollama. Install OpenClaw, Claude Code, Codex or Hermes only when you work on that runtime.
 
-- **Node.js 22.12+** and **pnpm 9+** (the root `package.json` declares `engines.node >=22.12.0` and `engines.pnpm >=9.0.0`; the pinned package manager is `pnpm@9.15.0`).
-- No external runtime is required to develop or test. Clawboo runs agents natively; paste a provider key and the in-process [`clawboo-native`](/runtimes/native) harness handles execution. Connecting [OpenClaw](/runtimes/openclaw), [Claude Code](/runtimes/claude-code), [Codex](/runtimes/codex), or [Hermes](/runtimes/hermes) is only needed when you are working on those adapters.
+## Make a change
 
-## Steps
-
-### 1. Clone and install
+<Steps>
+<Step title="Clone and install">
 
 ```bash
 git clone https://github.com/clawboo/clawboo.git
 cd clawboo
+corepack enable
 pnpm install
 ```
 
-`pnpm install` resolves the whole workspace, the four globs `packages/*`, `packages/adapters/*`, `apps/*`, and `docs` (see [Monorepo and build](/internals/monorepo-and-build) for the layout).
+`corepack enable` makes `pnpm` the pinned 9.15.0, which keeps lockfile diffs clean. `pnpm install` links the whole workspace: `packages/*`, `packages/adapters/*`, `apps/*` and `docs` (see [Monorepo and build](/internals/monorepo-and-build)).
 
-### 2. Run the dev stack
+</Step>
+<Step title="Run the dev stack">
 
 ```bash
 pnpm dev
 ```
 
-The root `dev` script runs `turbo dev`. For the dashboard, `apps/web`'s dev orchestrator picks a free API port first, then starts the Express API and the Vite SPA on the same port so there is no race. It prints a banner like:
+The dashboard's dev orchestrator picks a free API port first, then starts the Express API and the Vite dev server with that port in their environment, so the UI's proxy and the API always agree. It prints a banner like this:
 
-```
+```text
 [clawboo-dev] API port: 18790  ·  UI port: 5173
 ```
 
-- The **Vite SPA** serves on `:5173`.
-- The **Express API** binds the resolved port: default **`18790`**, with an auto-fallback that scans up to 20 consecutive ports if `18790` is busy. Pin it with `CLAWBOO_API_PORT` (see [Environment variables](/reference/environment-variables)).
+- The **Vite SPA** serves on port 5173.
+- The **API** takes the first free port from 18790 to 18809. Pin it with `CLAWBOO_API_PORT` (see [Environment variables](/reference/environment-variables)).
+- `pnpm dev` also starts the docs preview (`mint dev --port 3111`), which needs the Mintlify CLI.
 
-Clawboo stores all of its state under `~/.clawboo/` (auto-created on first run). To point a dev instance at a throwaway directory, set [`CLAWBOO_HOME`](/reference/environment-variables). There are **no feature flags**; every subsystem ships on, so there is nothing to enable.
+Clawboo keeps its state in `~/.clawboo/`, created on first run. Set `CLAWBOO_HOME` to point a dev instance at a throwaway directory. There are no feature flags: every subsystem is on. Budgets track spend and warn, and nothing pauses a run until someone sets a hard cap.
 
-<Tip>
-  Governance ships in track-and-warn mode: budgets record spend and warn at thresholds, but nothing
-  auto-pauses a run until you set a hard cap. See [Production
-  defaults](/operating/production-defaults).
-</Tip>
+</Step>
+<Step title="Work on a branch">
 
-### 3. Make your change on a branch
-
-Clawboo follows [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flow): branch from `main`, push, open a PR, and squash-merge once CI is green. Use a descriptive prefix:
+Clawboo follows [GitHub Flow](https://docs.github.com/en/get-started/using-git/github-flow): branch from `main`, push, open a pull request, and squash-merge once CI is green. Name the branch with a prefix:
 
 | Prefix      | For                          |
 | ----------- | ---------------------------- |
@@ -65,122 +60,112 @@ Clawboo follows [GitHub Flow](https://docs.github.com/en/get-started/using-git/g
 | `test/`     | Tests only                   |
 | `refactor/` | Non-behavioral restructuring |
 
-### 4. Run the local gate before pushing
+</Step>
+<Step title="Run the local gate">
 
-Run the same checks CI runs, in this order. They are all root scripts in `package.json`:
+These are the checks CI runs, as root scripts:
 
 ```bash
-pnpm build                              # turbo build — all packages and apps
-pnpm typecheck                          # tsc --noEmit across the monorepo
-pnpm format:check                       # prettier --check .; CI runs this before pnpm lint
-pnpm lint                               # ESLint across all packages, plus the docs frontmatter + heading checks
-pnpm test                               # Vitest unit tests (node + jsdom projects)
-pnpm e2e                                # Playwright e2e (incl. board round-trip + eval smoke)
-pnpm verify:connectors                  # connector catalog consistency gate (offline)
-pnpm catalog:build                      # rebuild catalog/dist and the compiled marketplace seed
-pnpm catalog:verify                     # marketplace content gate (offline)
-pnpm assemble && pnpm test:clean-install  # bundle the CLI, pack it, install the tarball, smoke-test it
-pnpm test:bundle-externals              # fast check: the bundles load nothing that isn't declared (needs pnpm assemble first)
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm e2e
+pnpm catalog:verify
+pnpm verify:connectors
+pnpm assemble && pnpm test:clean-install
 ```
 
-What each one guards:
+- **`pnpm format:check`** runs Prettier; fix failures with `pnpm format`. CI's Lint job runs it before `pnpm lint`.
+- **`pnpm lint`** runs ESLint across the workspace, the docs frontmatter and heading check, and `scripts/`.
+- **`pnpm test`** runs every package's Vitest suites, including `apps/web`'s node project (`*.test.ts`) and jsdom project (`*.test.tsx`, with React Testing Library, msw, jest-dom and jest-axe). CI runs the same suites as `pnpm test:coverage`, which adds a coverage table and no threshold.
+- **`pnpm e2e`** runs Playwright in a sandboxed `$HOME`. It needs `pnpm build` first and a Chromium download (`pnpm exec playwright install chromium`).
+- **`pnpm catalog:verify`** checks every marketplace content rule, then that `catalog/dist` and the compiled seed match a rebuild. **`pnpm verify:connectors`** checks the committed connector catalog. Both are offline.
+- **`pnpm assemble && pnpm test:clean-install`** bundles the CLI, packs and installs the tarball in a temp directory, and boots that install, through a headless-Chromium check and one real agent run. It needs network access for its `npm install`, the same Chromium download, and no other Clawboo dashboard on ports 18790 to 18809 (stop `pnpm dev` first).
 
-- **`pnpm test`** runs two Vitest projects: a node project for pure logic (`*.test.ts`) and a jsdom project for React components (`*.test.tsx`, RTL + MSW + jest-dom + jest-axe). See [Testing](/internals/testing).
-- **`pnpm e2e`** runs Playwright end-to-end, including the durable-board round-trip and the eval smoke suite.
-- **`pnpm verify:connectors`** checks the committed connector catalog for internal consistency. It is offline, and it is the gate CI and the release path run.
-- **`pnpm catalog:build`** rebuilds `catalog/dist/**` and the compiled marketplace seed from the packs in `catalog/packs/**` (436 agents, 85 teams across nineteen packs). **`pnpm catalog:verify`** is the gate: every content rule, then a check that the committed artifacts are byte-for-byte what a rebuild would write. Both are offline. A pull request touching only `catalog/` skips the full CI matrix and runs `catalog-ci.yml` instead; see [the marketplace catalog reference](/reference/marketplace-catalog).
-- **`pnpm assemble && pnpm test:clean-install`** (aliased as `pnpm prepublish:check`) bundles the CLI, packs it, installs the tarball into a throwaway temp dir, and boots _that_ install to catch first-run regressions — through a headless-Chromium pass that fails on any uncaught exception or first-party console error, right up to one real agent run and a second-launch check that the CLI reuses a dashboard already running instead of forking another. It needs network access for the `npm install` and the same `pnpm exec playwright install chromium` download as `pnpm e2e`, and it refuses to run while another Clawboo dashboard holds `18790`–`18809` (stop your `pnpm dev` server first). This is the same gate the release workflow runs: see [Release process](/internals/release-process).
+`pnpm prepublish:check` runs the catalog and connector gates, then `pnpm assemble` and `pnpm test:clean-install`. [Testing](/internals/testing) lists every CI job, including the cross-platform tests and the website build that have no single local command.
 
-<Tip>
-  Running the full gate locally avoids review back-and-forth. Every PR must pass CI: `pnpm build`,
-  `pnpm format:check` and `pnpm lint` (two separate steps of CI's Lint job, format check first
-  because it takes seconds while `turbo lint` has to build every workspace dependency), `pnpm
-  typecheck`, `pnpm test:coverage` (the same suites as `pnpm test`, plus a coverage table in the
-  log: informational, not a threshold), `pnpm e2e`, and CodeQL code scanning. Not every one of those
-  blocks the merge button today, but a red check is a red check. Note `pnpm e2e` needs a built
-  workspace and a Chromium download (`pnpm build`, then `pnpm exec playwright install chromium`).
-</Tip>
+</Step>
+<Step title="Add a changeset">
 
-### 5. Add a changeset for user-facing changes
-
-Clawboo uses [Changesets](https://github.com/changesets/changesets) for versions and changelogs. Any change that affects a **published** package needs one:
+Clawboo uses [Changesets](https://github.com/changesets/changesets) for versions and changelogs:
 
 ```bash
 pnpm changeset
 ```
 
-The interactive CLI asks which packages changed, the bump type (`patch` / `minor` / `major`), and a one-line summary, then writes a file under `.changeset/`. Commit it alongside your code.
+Choose the `clawboo` package and a bump (`patch`, `minor` or `major`), write a short summary, and commit the new file under `.changeset/`. Every `@clawboo/*` library is private and only `clawboo` publishes, but the dashboard (`apps/web`) ships inside it. So add a changeset for any change a user of the npm package would notice, dashboard changes included. Docs-only, CI-only and test-only changes need none. [Release process](/internals/release-process) has the details.
 
-<Info>
-  Every `@clawboo/*` library is `private: true`; only the `clawboo` CLI publishes to npm, with the
-  libraries inlined into its bundle. So in practice a changeset matters when your change reaches the
-  `clawboo` CLI's bundled behavior. **Documentation-only, CI-only, and `apps/web`-only changes do
-  not need a changeset**; the dashboard package (`@clawboo/web`) and `@clawboo/docs` are in the
-  changeset `ignore` list, and the dashboard is not published.
-</Info>
+</Step>
+<Step title="Open the pull request">
 
-### 6. Open the pull request
+Push the branch and open a pull request; the template walks the checklist. Keep one concern per pull request, add a test for what you add (Vitest for logic, the jsdom project for components, Playwright for new end-to-end behavior), and get CI green before you ask for review. Pull requests are squash-merged into `main`.
 
-Push your branch and open a PR. The PR template walks the checklist. Keep it to **one concern per PR**; split unrelated changes. Add a test for anything you add (unit logic in Vitest, components in the jsdom project, new end-to-end behavior in Playwright). CI must be green before review, and PRs are squash-merged into `main`.
+Keep the `pnpm-lock.yaml` diff small. If it grows by thousands of lines, you are on a different pnpm: run `corepack enable`, then `pnpm install`, and commit only the intended change. Dependabot opens grouped dependency updates weekly, so you rarely need to touch the lockfile by hand.
+
+</Step>
+</Steps>
+
+## Your first contribution
+
+Issues labeled [`good first issue`](https://github.com/clawboo/clawboo/labels/good%20first%20issue) are scoped small and name the files to touch. Comment on the one you want and a maintainer assigns it to you. Good areas that rarely need core changes: a marketplace team template, a docs page, a provider or runtime icon, or a test for an uncovered component. If you are unsure whether an idea fits, open a [Discussion](https://github.com/clawboo/clawboo/discussions) before you write code. A half-finished pull request with a question is welcome.
 
 ## Documentation changes
 
-The page you are reading lives in the repo at `docs/`, and that directory **is** this site: hand-edited Mintlify Markdown with no build or generation step. Merging a docs PR to `main` redeploys [docs.claw.boo](https://docs.claw.boo) as-is, so the files in the diff are exactly what ships. See [Monorepo and build](/internals/monorepo-and-build) for where `docs/` sits in the workspace.
+The `docs/` directory is this site: hand-edited Mintlify pages with no build step. Merging to `main` redeploys [docs.claw.boo](https://docs.claw.boo) as it is, so the files in your diff are exactly what ships.
 
 <Warning>
-Frontmatter is parsed as YAML, so **quote any `title` or `description` value that contains a colon, or that starts with `@` or a backtick**. An unquoted `:` followed by a space parses as a nested mapping, and Mintlify serves the page as a 404 instead of rendering it. Single and double quotes are both valid YAML; Prettier normalizes them to single quotes when the pre-commit hook formats the page.
-
-Same class of breakage, opposite symptom: **never put a bare `%` in a body heading**. Mintlify URI-decodes headings into anchor slugs, so invalid percent-encoding fails the page. A `%` in prose is fine.
-
+  Two mistakes break a page. Quote any frontmatter `title` or `description` that contains `: ` or
+  starts with `@` or a backtick, or Mintlify serves the page as a 404. Never put a bare `%` in a
+  heading, or the page fails to build its anchors.
 </Warning>
 
-The two rules fail in opposite tools, which is why you want both. `mint broken-links` only validates links, so it misses the frontmatter one entirely; a full `mint dev` build catches that. The heading `%` is the reverse: `broken-links` reports it as a whole-page parse error, while a `mint dev` build can render straight past it. `pnpm check:docs` catches both without needing the Mintlify CLI: it is the `docs` package's `lint` script, so it also runs under `pnpm lint` and in CI's Lint job on every PR. The repo's [`docs/README.md`](https://github.com/clawboo/clawboo/blob/main/docs/README.md) covers the rest: the directory layout, the hand-maintained `docs.json` navigation, and local preview.
+`pnpm check:docs` catches both, and it also runs inside `pnpm lint` and CI's Lint job. For a full check, use the Mintlify CLI: `npx mint validate` runs a strict build, and `npx mint broken-links --check-anchors` checks links and anchors. Mintlify keeps `/` and quote characters in heading anchors, so link to the page rather than to a heading that contains them. [`docs/README.md`](https://github.com/clawboo/clawboo/blob/main/docs/README.md) covers the layout, the hand-maintained `docs.json` navigation and local preview.
 
-Documentation-only changes do not need a changeset (see the note in step 5).
+## Contributing a marketplace pack
+
+Agent and team content lives in `catalog/`, a plain content folder outside the workspace. Edit `catalog/packs/<publisher>/<slug>/**`, run `pnpm catalog:build` to regenerate `catalog/dist` and the compiled seed, run `pnpm catalog:verify`, and commit the regenerated `catalog/dist/**` with your change. A pull request that touches only `catalog/` runs the short `catalog-ci.yml` instead of the full matrix, except for `catalog/packs/clawboo/**` (the seed compiled into the npm package), which gets the full matrix.
+
+Packs are reviewed as writing and merged by hand. `CONTRIBUTING.md` has the review bar: a description is one or two sentences, `IDENTITY.md` is the full instruction body, a pack with `provenance.repo` ships a `NOTICE.md`, a team has at least two members, and new categories are declared. The format is in the [marketplace catalog reference](/reference/marketplace-catalog).
 
 ## Code guidelines
 
-These are enforced by review and, where possible, by lint:
+Review and, where possible, lint enforce these:
 
 - **TypeScript strict.** No `any`, no `@ts-ignore`, no leaking `unknown`.
-- **No `console.log`.** Log through [`@clawboo/logger`](/reference/packages/logger) (pino).
+- **No `console.log`.** Log through [`@clawboo/logger`](/reference/packages/index#logger) (pino).
 - **Lucide icons only**, never emoji in the UI.
-- **Theme tokens, never raw hex**: use the CSS variables and Tailwind tokens (brand marks are the only exception). See the [design system](/internals/design-system).
-- **Pure where it claims to be.** Policy and projection functions stay side-effect-free and unit-testable.
-- **No secrets in logs, responses, or storage.** A credential's _presence_ may be shown (the env-var name plus true/false), never its _value_. See [Security](/operating/security).
+- **Theme tokens, never raw hex.** Use the CSS variables and Tailwind tokens; brand marks are the only exception. See the [design system](/internals/design-system).
+- **Keep new database columns addable.** There is no migration ladder; [Schema changes](/internals/monorepo-and-build#schema-changes) lists the rules a new column must meet.
+- **Version every persisted client store.** A zustand `persist` store sets both `version` and `migrate`, and the migrate is a pure exported function with its own test.
+- **Pollers pause when the tab is hidden.** A new interval refresh uses `useVisiblePolling` from `apps/web/src/lib/useVisiblePolling.ts`, not a bare `setInterval`.
+- **Schema fixtures are append-only.** Never edit `packages/pack-format/src/__fixtures__/v1/*.json`; a changed shape gets a fixture under the new version's folder. Each version has a `minimal.json` and a `kitchen-sink.json` that sets every optional field.
+- **Pure where it claims to be.** Policy and projection functions stay free of side effects and unit-testable.
+- **No secrets in logs, responses or storage.** Show that a credential is present (the env var name and true or false), never its value. See [Security](/operating/security).
 
-## Architecture invariants to respect
+## Architecture rules
 
-A change must not break the [seven architecture invariants](/concepts/architecture-invariants). The ones most likely to bite a first contribution:
+A change must keep the [architecture invariants](/internals/architecture-invariants). The ones a first contribution is most likely to meet:
 
-- **The registry is the source of truth for who exists; the Gateway is the source of truth for how OpenClaw agents run.** Reads go through an [`AgentSource`](/internals/agent-source), not directly off the Gateway client.
-- **Packages never import apps.** Dependency flow is one-way (`apps/web` → `packages/**`, `packages/adapters/*` → `@clawboo/executor`). See the [package dependency graph](/reference/packages/index).
-- **A teammate is a [`RuntimeAdapter`](/internals/runtime-adapter).** New runtimes implement the trait and emit the normalized `RuntimeEvent` union rather than special-casing the orchestrator.
-- **The board is canonical for task/coordination state.** Prefer board mutations over prose-scanning heuristics: see [Board internals](/internals/board-internals) and [Delegation and orchestration](/concepts/delegation-and-orchestration).
-- **Schema changes are additive.** There is no migration ladder; the `CREATE TABLE IF NOT EXISTS` DDL in `ensureSchema` (`packages/db/src/schemaBootstrap.ts`) is the sole source of the schema, and `reconcileSchema` derives the in-place upgrade from it by adding whatever columns an existing database is missing. So a **new** column is fine as long as it is addable (it may not use `PRIMARY KEY`, `UNIQUE`, or a `STORED` generated column; any `DEFAULT` must be a literal rather than an expression; a `NOT NULL` column must carry one; and a `REFERENCES` column must not have a non-NULL one). A test fails the build on one that is not, comparing against the snapshot in `packages/db/src/__tests__/schemaBaseline.ts`, which needs no upkeep when you add a column. Changing or removing an existing column still means a fresh `~/.clawboo`. See the [database schema reference](/reference/database-schema#upgrading-an-existing-database).
+- **The agent registry says who exists; the OpenClaw Gateway says how OpenClaw agents run.** Read agents through an [`AgentSource`](/internals/agent-source), not straight off the Gateway client.
+- **Packages never import apps.** Dependencies flow one way: `apps/web` imports `packages/**`, and the adapters import `@clawboo/executor`. Lint enforces it; see [Monorepo and build](/internals/monorepo-and-build).
+- **Every runtime is a [`RuntimeAdapter`](/internals/runtime-adapter).** A new runtime implements the trait and emits the normalized `RuntimeEvent` stream instead of adding special cases to the orchestrator.
+- **The board is the record for task and coordination state.** Prefer board changes over parsing prose; see [Board internals](/internals/board-internals).
+- **Schema changes are additive.** An upgrade only adds missing columns. It never removes a column or changes one's type or constraints, so those are not in-place upgrades.
 
-<Warning>
-  The [Internals](/internals/index) pages flag "caution surfaces": files that encode load-bearing
-  fixes (cascade prevention, stop-generation, history-hydration gating, deterministic plan keys).
-  Read the relevant internals page before changing one, so you preserve the invariant or replace it
-  with a documented reason.
-</Warning>
+The [contributor overview](/internals/index#caution-surfaces) lists the caution surfaces: files that hold a rule whose breakage shows up far from the edit. Read the linked page before you change one.
 
-## Release process
+## Releases
 
-Releases are automated and maintainer-only: when changesets land on `main`, the `publish.yml` workflow opens a "Version Packages" PR; merging it bumps versions, updates changelogs, and publishes the `clawboo` CLI. No manual `npm publish`. The workflow re-runs the whole PR gate before publishing (`build`, `lint`, `typecheck`, `test`, then `assemble` and the `pnpm test:clean-install` gate), so a release cannot skip a check a pull request had to pass. Every check on that path is offline, so an upstream outage cannot block a release. See [Release process](/internals/release-process) for the full pipeline.
+Releases are automated and maintainer-only. When a changeset lands on `main`, `publish.yml` opens a pull request titled `chore: version packages`. Merging it bumps the version, updates the changelog and publishes the `clawboo` package to npm; nothing else publishes, and nobody runs `npm publish` by hand. Before it publishes, the workflow reruns the build, lint, typecheck, tests, the catalog gate and the clean-install gate. It does not rerun every pull request check, and it needs the network. See [Release process](/internals/release-process).
 
 ## License
 
-By contributing, you agree your contributions are licensed under the [MIT License](https://github.com/clawboo/clawboo/blob/main/LICENSE). See [License and notices](/appendices/license-and-notices).
+By contributing, you agree that your contributions are licensed under the [MIT License](https://github.com/clawboo/clawboo/blob/main/LICENSE). See [License and notices](/appendices/license-and-notices).
 
-## See also
+## Related
 
-- [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md), the canonical process doc this page summarizes
-- [Internals overview](/internals/index), the contributor's map of the monorepo
-- [Monorepo and build](/internals/monorepo-and-build), workspaces, build order, and commands
-- [Testing](/internals/testing), the unit / e2e / clean-install / evals strategy
-- [Release process](/internals/release-process), Changesets and the publish workflow
-- [Architecture invariants](/concepts/architecture-invariants), the rules a change must not break
-- [Environment variables](/reference/environment-variables), `CLAWBOO_HOME`, `CLAWBOO_API_PORT`, and the rest
-- [Design system](/internals/design-system), tokens, surfaces, motion, theming
+- [`CONTRIBUTING.md`](https://github.com/clawboo/clawboo/blob/main/CONTRIBUTING.md): the process document this page follows.
+- [Contributor overview](/internals/index): the repo map, the architecture and the caution surfaces.
+- [Testing](/internals/testing): the test layers and every CI job.
+- [Release process](/internals/release-process): changesets and the publish workflow.

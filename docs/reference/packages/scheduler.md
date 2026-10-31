@@ -1,110 +1,104 @@
 ---
 title: '@clawboo/scheduler'
-description: 'Pure scheduling primitives: cron-spec parsing, next-occurrence math, the TaskTemplate schema, and the ScheduleSource trait + ScheduleRecord + multiplexer.'
+sidebarTitle: 'scheduler'
+description: 'Routine spec parsing and next-run math, the calendar projection, the task template, and the schedule sources behind the Routines view.'
+keywords:
+  [
+    '@clawboo/scheduler',
+    'scheduler',
+    'Scheduler',
+    'routines',
+    'cron spec',
+    'once@',
+    'nextOccurrence',
+    'occurrencesInWindows',
+    'ScheduleSource',
+    'ScheduleMultiplexer',
+    'TaskTemplate',
+  ]
 ---
 
-|                    |                                                                                                                                                                              |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Version**        | `0.1.0`                                                                                                                                                                      |
-| **Purity**         | browser-safe (pure; the lone `croner` import is confined to `occurrence.ts`)                                                                                                 |
-| **Purpose**        | Cron-spec parsing + next-occurrence math + the `TaskTemplate` schema + the unified-Scheduler seam (`ScheduleSource` trait, normalized `ScheduleRecord`, fan-in multiplexer). |
-| **Workspace deps** | none                                                                                                                                                                         |
-| **External deps**  | `croner` `^10.0.0` · `zod` `^3.25.0`                                                                                                                                         |
+`@clawboo/scheduler` holds the pure scheduling rules behind Routines: how a schedule is written, when it fires
+next, how its runs land on the board calendar, what a fire creates, and the schedule-source layer that merges
+Clawboo's routines with an OpenClaw Gateway's own cron jobs. It is browser-safe, and it is the only place `croner`
+is imported, so the Routines view does next-run math in the browser with the same code the server fires on.
 
-The package is the _only_ place `croner` is imported in the monorepo. Every other consumer, the Routines ledger, the ticker, the REST layer, deals in precomputed epoch-ms timestamps, so swapping the tick library changes exactly one file (`occurrence.ts`).
+Use this page when you change how routines are scheduled or listed. The engine that fires them is on
+[How routines run](/concepts/scheduling), the REST surface on [Schedules API](/reference/rest-api/schedules), and the
+how-to on [Run work on a schedule with routines](/using/routines).
 
-<Note>
-A Routine cron spec is either a croner-parseable cron expression (5/6-field) or a one-shot `once@<ISO-8601>`. The richer canonical `cronSpec` on a `ScheduleRecord` also encodes the Gateway's `every:<ms>` / `at:<iso>` / `@tz:<tz>` forms via [`encodeCronSpec`](#functions).
-</Note>
+## Two spec forms
 
-## Public API
+| Where                              | Form                                                                                                                                          | Read with                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| A Clawboo routine                  | a cron expression (five or six fields) or a one-shot `once@<ISO-8601>`                                                                        | `parseCronSpec`, `probeCronSpec`, `nextOccurrence`, `isOnceSpec` |
+| A `ScheduleRecord` from any source | the routine forms, plus the Gateway's `every:<ms>` (optionally `@anchor:<ms>`), `at:<iso>`, and a cron expression with an `@tz:<zone>` suffix | `encodeCronSpec`, `decodeCronSpec`                               |
 
-Every export below comes from the `.` barrel ([`src/index.ts`](#source)). There are no subpath exports.
+`nextOccurrence(spec, fromMs)` returns the next run strictly after `fromMs`, or `null` when the spec will never fire
+again (a spent one-shot). `probeCronSpec` validates a spec when it is registered, and both throw
+`InvalidCronSpecError` for a malformed one. Every other part of the system (the routines ledger, the ticker, the
+REST layer) stores precomputed epoch-millisecond times, so a change of cron library touches one file,
+`src/occurrence.ts`.
 
-### Functions
+## The calendar projection
 
-| Export              | Signature                                                                        | Contract                                                                                                                                                                                                                                  |
-| ------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `parseCronSpec`     | `(spec: string) => ParsedSpec`                                                   | Parse a Routine cron spec into `{ kind: 'cron'; expr }` or `{ kind: 'once'; atMs }`. Throws `InvalidCronSpecError` on an empty spec or unparseable `once@` timestamp; cron-expression _syntax_ is validated by `probeCronSpec`, not here. |
-| `isOnceSpec`        | `(spec: string) => boolean`                                                      | True when the (trimmed) spec starts with `once@`.                                                                                                                                                                                         |
-| `nextOccurrence`    | `(spec: string, fromMs: number) => number \| null`                               | The next fire time strictly after `fromMs`, or `null` when the spec will never fire again (a spent `once@`, or an expression with no future occurrence). Throws `InvalidCronSpecError` on a malformed spec.                               |
-| `probeCronSpec`     | `(spec: string) => void`                                                         | Validate a spec at the registration boundary (no meaningful `from` anchor needed). Throws `InvalidCronSpecError` when malformed.                                                                                                          |
-| `parseTaskTemplate` | `(json: string) => TaskTemplate \| null`                                         | Parse + zod-validate a `task_template` JSON string. Returns `null` when invalid (never throws).                                                                                                                                           |
-| `routineTargetOf`   | `(template: { target?: RoutineTarget \| null }) => RoutineTarget`                | The target a template fires at. A template without one is an agent routine (the only kind older rows could be).                                                                                                                           |
-| `encodeCronSpec`    | `(schedule: GatewayCronScheduleShape) => string`                                 | Flatten the Gateway's discriminated schedule union into the canonical `cronSpec` string (`cron` / `every:<ms>[@anchor:<ms>]` / `at:<iso>`, with an optional `@tz:<tz>` suffix on cron).                                                   |
-| `decodeCronSpec`    | `(spec: string) => GatewayCronScheduleShape`                                     | Inverse of `encodeCronSpec`. An unprefixed spec is treated as a bare cron expression.                                                                                                                                                     |
-| `makeScheduleId`    | `(source: ScheduleSourceId, raw: string) => string`                              | Build the source-namespaced composite id `\`${source}:${raw}\``.                                                                                                                                                                          |
-| `parseScheduleId`   | `(id: string) => { source: ScheduleSourceId; sourceScheduleId: string } \| null` | Split a composite id back into source + raw id; `null` when it matches no known source prefix.                                                                                                                                            |
+`occurrencesInWindows(spec, bounds, { after, first, countCap, timesCap })` spreads a spec's future runs over
+consecutive windows, where window `i` runs from `bounds[i]` up to `bounds[i + 1]`. The board calendar sends the
+viewer's local midnights as the bounds, which keeps daylight-saving days right, and `GET /api/schedules/occurrences`
+serves the result. Each window reports a capped `count`, a `more` flag when the cap was hit, and the first few run
+`times`. Work is bounded by the windows and the cap, not by how often the spec fires. Bounds that are not at least
+two finite, strictly ascending numbers throw `RangeError`.
 
-### Types & interfaces
+## What a fire creates
 
-| Export                     | Kind      | Contract                                                                                                                                                                                                                                                                                                           |
-| -------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ParsedSpec`               | type      | `{ kind: 'cron'; expr: string } \| { kind: 'once'; atMs: number }`, the parse result.                                                                                                                                                                                                                              |
-| `TaskTemplate`             | type      | `z.infer<typeof taskTemplateSchema>`, the bounded per-fire spec (`title`, `description?`, `target?`, `kind` [default `'code'`], `priority` [default `0`], `repoPath?`, `model?`, `maxNodeCents?`, `teamTaskId?`).                                                                                                  |
-| `GatewayCronScheduleShape` | type      | The OpenClaw Gateway schedule union: `{ kind:'cron'; expr; tz? } \| { kind:'every'; everyMs; anchorMs? } \| { kind:'at'; at }`.                                                                                                                                                                                    |
-| `ScheduleDomain`           | type      | `'team-task' \| 'runtime-own-life'`, keeps the merged view honest (Routines vs a runtime's own cron, never conflated).                                                                                                                                                                                             |
-| `ScheduleManageability`    | type      | `'managed' \| 'external-write' \| 'observe-only'`, the write-gate tier the UI is a pure function of.                                                                                                                                                                                                               |
-| `ScheduleStatus`           | type      | `'queued' \| 'claimed' \| 'running' \| 'idle' \| 'paused' \| 'error'`.                                                                                                                                                                                                                                             |
-| `ScheduleSourceId`         | type      | `'clawboo-routine' \| 'openclaw-gateway-cron'`.                                                                                                                                                                                                                                                                    |
-| `RoutineTarget`            | type      | `'team' \| 'agent'`: who a Routine's fire goes to (the team chat's lead, or one agent's board task).                                                                                                                                                                                                               |
-| `ScheduleRecord`           | interface | The normalized row every source projects into (`id`, `sourceScheduleId`, `runtime`, `owner`, `source`, `agentId`, `target?`, `teamId?`, `teamName?`, `agentName?`, `teamTaskId?`, `label?`, `description?`, `cronSpec`, `nextRunAt`, `lastRunAt?`, `lastError?`, `status`, `manageability`, `domain`, `tenantId`). |
-| `ScheduleCreateSpec`       | interface | Create payload (`source`, `domain`, `cronSpec`, `agentId?`, `target?`, `label?`, `teamId?`, `teamTaskId?`, `taskTemplate?`, `payload?`, `tenantId?`). A team routine names a `teamId`; everything else names an `agentId`.                                                                                         |
-| `ScheduleUpdatePatch`      | interface | Partial update (`cronSpec?`, `label?`, `taskTemplate?`, `payload?`, and `target?` / `agentId?` / `teamId?` to re-point a Routine).                                                                                                                                                                                 |
-| `ScheduleWriteAction`      | type      | Discriminated write op: `create` / `update` / `pause` / `resume` / `remove` / `run`.                                                                                                                                                                                                                               |
-| `ScheduleSourceReadStatus` | interface | Per-source read outcome (`sourceId`, `ok`, `degraded`, `reason?`, `at`), degradation is _data_, not a thrown error.                                                                                                                                                                                                |
-| `ScheduleReadResult`       | interface | `{ records: ScheduleRecord[]; status: ScheduleSourceReadStatus }`, one source's read.                                                                                                                                                                                                                              |
-| `ScheduleSource`           | interface | The per-system adapter trait: readonly `id`/`domain`/`manageability`, `read()` (never rejects), `write(action)` (throws the typed errors; returns the fresh record or `null`).                                                                                                                                     |
-| `MergedScheduleRead`       | type      | `{ records: ScheduleRecord[]; sources: ScheduleSourceReadStatus[] }`, the multiplexer's fan-in result.                                                                                                                                                                                                             |
+`TaskTemplate` (validated by `taskTemplateSchema`, parsed with `parseTaskTemplate`, which returns `null` for an
+invalid one) is what each fire materializes:
 
-### Classes
+- `target` is `team` (the instructions go to the team's chat, where its lead picks them up) or `agent` (a board
+  task run through the task runner). A template with no target is an agent routine (`routineTargetOf`).
+- `title`, `description`, `kind` (default `code`), `priority` (default `0`), `repoPath` and `model` describe the
+  task. With a `repoPath`, a `code` fire gets its own worktree; without one, the wake bridge runs the fire as a
+  `research` task with no checkout (`runKindFor` in `apps/web/server/lib/routines/wakeBridge.ts`).
+- `maxNodeCents` sets a per-run cost ceiling, and `teamTaskId` binds the routine to an existing board task instead
+  of creating one per fire. A bound routine must be a one-shot (`BoundRecurringScheduleError`).
 
-| Export                | Contract                                                                                                                                                                                                                                                                                                                                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ScheduleMultiplexer` | Fan-in over every registered `ScheduleSource`. `register(source)`, `list()`, `read()` (per-source try/catch → degraded status, never rejects), `write(action)` (owner-routed; gates in order: unknown source → `UnknownScheduleError`, observe-only → `UnsupportedScheduleWriteError`, team-task create into a runtime-own-life source → `TeamTaskDomainViolationError`, then delegates to the source). |
+## Schedule sources
 
-### Errors
+The Routines view lists two kinds of schedule through one interface, `ScheduleSource`, each normalized to a
+`ScheduleRecord`:
 
-All extend `Error` and carry a readonly `code` for structural branching (never message prose).
+| Source id               | What it lists                                              | Manageability                                                             |
+| ----------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `clawboo-routine`       | Clawboo's own routines, which put work on the team's board | `managed`: Clawboo creates, edits, pauses and runs them                   |
+| `openclaw-gateway-cron` | the OpenClaw Gateway's own cron jobs for its agents        | `external-write`: Clawboo edits them through the Gateway, which owns them |
 
-| Export                           | `code`                        | Meaning                                                                                                                                 |
-| -------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `InvalidCronSpecError`           | `invalid_cron_spec`           | Spec parses as neither a croner expression nor `once@<iso>`.                                                                            |
-| `NotImplementedError`            | `not_implemented`             | A reachable-but-unimplemented branch (e.g. the human-participant Routine).                                                              |
-| `UnsupportedScheduleWriteError`  | `unsupported_schedule_write`  | `write()` on a source whose manageability tier forbids the action.                                                                      |
-| `TeamTaskDomainViolationError`   | `team_task_domain_violation`  | Creating a `team-task` schedule via a runtime-own-life source.                                                                          |
-| `ScheduleSourceUnavailableError` | `schedule_source_unavailable` | A write against a source whose backing connection is down (REST → 503).                                                                 |
-| `IllegalScheduleTransitionError` | `illegal_schedule_transition` | A transition the routine state machine forbids (REST → 409).                                                                            |
-| `UnknownScheduleError`           | `unknown_schedule`            | Unknown composite id / unknown source (REST → 404).                                                                                     |
-| `DuplicateFiringOwnerError`      | `duplicate_firing_owner`      | The registration-time one-firing-owner de-dup refusal. Never retried.                                                                   |
-| `BoundRecurringScheduleError`    | `bound_recurring_schedule`    | Binding a _recurring_ routine to an existing team task: a bound task is claimable once, so bound routines must be one-shot. REST → 400. |
-| `InvalidRoutineTargetError`      | `invalid_routine_target`      | A Routine's team or agent is missing, archived, or contradicts itself (an agent paired with a team it is not on). REST → 400.           |
+`ScheduleMultiplexer` merges every source's `read()`. A source that fails reports a degraded status instead of
+failing the whole list. Writes go to the source that owns the id (ids are `<source>:<raw id>`, built by
+`makeScheduleId` and split by `parseScheduleId`), after three checks in order: an unknown source throws
+`UnknownScheduleError`, an `observe-only` source throws `UnsupportedScheduleWriteError`, and creating a
+`team-task` schedule on a `runtime-own-life` source (the Gateway's) throws `TeamTaskDomainViolationError`. The
+pattern it shares with the capability sources is described on [Capability and schedule sources](/internals/seams).
 
-### Constants
+Every error class carries a `code` for callers to branch on. The REST layer maps them to statuses; note that a
+malformed spec comes back as a `400` whose body code is `invalid_body`, not `invalid_cron_spec`. The full mapping
+is on [Schedules API](/reference/rest-api/schedules).
 
-| Export               | Value               | Use                                                          |
-| -------------------- | ------------------- | ------------------------------------------------------------ |
-| `ONCE_PREFIX`        | `'once@'`           | The one-shot spec prefix; pair with `isOnceSpec`.            |
-| `taskTemplateSchema` | `z.ZodObject`       | The zod schema backing `TaskTemplate` / `parseTaskTemplate`. |
-| `ROUTINE_TARGETS`    | `['team', 'agent']` | The allowed `RoutineTarget` values.                          |
+## Who uses it
 
-## Used by
+Only `apps/web`. On the server: the routines ticker and wake bridge, the OpenClaw routine dispatcher, the two
+schedule sources, and the `/api/schedules` routes. In the SPA: the Routines view, which imports the spec helpers
+as well as the types, and the board calendar. `@clawboo/db` does not depend on this package; its routines ledger
+stores precomputed times.
 
-Only `apps/web` depends on `@clawboo/scheduler`. `@clawboo/db` deliberately takes no dependency on it (board/ledger rows carry precomputed epoch-ms). Server consumers:
+## Test it
 
-- `apps/web/server/lib/routines/`, `ticker.ts`, `wakeBridge.ts`, `openclawDispatch.ts` (the Routines actuator).
-- `apps/web/server/lib/scheduleSource/`, `registry.ts`, `clawbooRoutineScheduleSource.ts`, `openClawGatewayCronScheduleSource.ts` (the two concrete `ScheduleSource` implementations).
-- `apps/web/server/api/schedules.ts`, the `/api/schedules*` REST surface.
-- `apps/web/src/features/routines/routineHelpers.ts` + `apps/web/src/lib/schedulesClient.ts`, the SPA Routines view (the types cross into the browser, which is why the package stays browser-safe).
+Run `pnpm --filter @clawboo/scheduler test`. The spec, window, record, template and multiplexer cases each have
+their own file under `src/__tests__/`; pass explicit `fromMs` and `after` values in a new case so it does not
+depend on the current time.
 
-## Source
+## Related
 
-Barrel: [`packages/scheduler/src/index.ts`](https://github.com/clawboo/clawboo/tree/main/packages/scheduler/src/index.ts). Modules: `errors.ts`, `spec.ts`, `occurrence.ts`, `template.ts`, `records.ts`, `source.ts`, `multiplexer.ts`.
-
-## See also
-
-- [Scheduling concept](/concepts/scheduling), Routines: team-task cron vs runtime-own-life cron.
-- [Schedules REST API](/reference/rest-api/schedules), `/api/schedules*`.
-- [Routines](/using/routines), the Routines view.
-- [Seams (internals)](/internals/seams), `ScheduleSource` + `CapabilitySource` multiplexers.
-- [Package overview](/reference/packages/index)
+- [How routines run](/concepts/scheduling): the ledger, the ticker and the one-firing-owner rule.
+- [Run work on a schedule with routines](/using/routines): creating and running routines in the dashboard.
+- [Schedules API](/reference/rest-api/schedules): the routes and their error codes.
+- [Capability and schedule sources](/internals/seams): the source-plus-multiplexer pattern.

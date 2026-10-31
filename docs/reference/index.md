@@ -1,76 +1,40 @@
 ---
-title: Reference
-description: "Index of Clawboo's factual reference: REST API, CLI, configuration, env vars, database schema, MCP tools, marketplace catalog, events, and packages."
+title: 'Reference'
+sidebarTitle: 'Overview'
+description: 'Exact facts about Clawboo, checked against the code: commands, configuration, environment variables, limits, shortcuts, MCP tools, events, the database and the REST API.'
+icon: 'book-open'
+keywords: ['reference', 'cli', 'env vars', 'limits', 'shortcuts', 'rest api', 'mcp', 'schema']
 ---
 
-Factual, code-grounded reference for every public surface of Clawboo: the **191-route** REST API, the `clawboo` CLI, configuration and environment variables, the **35-table** SQLite schema, the **4** MCP servers and their tools, the marketplace catalog of **436 agents** and **85 teams**, the orchestration event and error vocabulary, and one page per workspace package (**30** in total). These pages describe what the code does, verified against source; they do not teach a workflow. For learning-oriented walkthroughs see [Getting Started](/getting-started/index); for the _why_ see [Concepts](/concepts/index).
+Reference pages state exact facts: names, defaults, limits and formats, checked against the code. Come here to look something up. For step-by-step help, start at [Use Clawboo](/using/index); for how the pieces fit together, see [Key concepts](/concepts/index).
 
-<Note>
-These docs describe Clawboo **v0.5.0**, the current release.
-</Note>
+## Pages in this section
 
-## At a glance
+| Page                                                      | Look here for                                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| [CLI](/reference/cli)                                     | Every `clawboo` command and flag, how it finds and stops the server, the server log, exit codes, and the MCP stdio bins                    |
+| [Configuration](/reference/configuration)                 | Where each setting lives: `settings.json`, the database, your browser, the files in `~/.clawboo`, and what Clawboo writes in `~/.openclaw` |
+| [Environment variables](/reference/environment-variables) | Every variable Clawboo reads or sets, with its type, default, effect and an example                                                        |
+| [Limits and defaults](/reference/limits-and-defaults)     | Every built-in number: delegation caps, watchdogs, breakers, approval windows, rate limits, ports and timeouts                             |
+| [Keyboard shortcuts](/reference/keyboard-shortcuts)       | Every dashboard shortcut, the chat slash commands, and Settings search                                                                     |
+| [MCP tools](/reference/mcp-tools)                         | The four MCP servers (Tasks, Memory, Tools, TeamChat) and every tool's inputs                                                              |
+| [Events and errors](/reference/events-and-errors)         | The 25 kinds of event in the event log and the error classes a run can end with                                                            |
+| [Database schema](/reference/database-schema)             | The 35 tables in `clawboo.db` and their columns                                                                                            |
+| [Marketplace catalog](/reference/marketplace-catalog)     | The 19 packs behind the marketplace's 436 agents and 85 teams, and how Clawboo fetches and checks them                                     |
 
-| Area          | Page                                                      | Scope                                                      |
-| ------------- | --------------------------------------------------------- | ---------------------------------------------------------- |
-| REST API      | [REST overview](/reference/rest-api/index)                | Base URL, auth/loopback, error envelope, 191-route summary |
-| CLI           | [CLI reference](/reference/cli)                           | `clawboo` + the bundled MCP bins                           |
-| Configuration | [Configuration](/reference/configuration)                 | `settings.json`, file/dir locations                        |
-| Environment   | [Environment variables](/reference/environment-variables) | `CLAWBOO_*` / `OPENCLAW_*` / provider keys                 |
-| Database      | [Database schema](/reference/database-schema)             | 35 tables + ERD                                            |
-| MCP           | [MCP tools](/reference/mcp-tools)                         | 4 servers, tool list, zod input shapes                     |
-| Marketplace   | [Marketplace catalog](/reference/marketplace-catalog)     | Pack format, sources, fetch and verification path          |
-| Events        | [Events & errors](/reference/events-and-errors)           | Orchestration event kinds + error taxonomy                 |
-| Packages      | [Packages overview](/reference/packages/index)            | Dependency graph + build order + 30 package pages          |
+## REST API and MCP
 
-## REST API
+The REST API has its own group in this section. Start at the [REST overview](/reference/rest-api/index) for the address, authentication, rate limits and errors, and an index of all 199 routes; each resource has its own page from there.
 
-Base URL, loopback posture, the shared `{ error: string }` envelope, and the route summary live in the [REST overview](/reference/rest-api/index). The surface is grouped by resource:
-
-- [Settings & health](/reference/rest-api/settings), `/api/settings`, `/api/health*`
-- [Agents](/reference/rest-api/agents), `/api/agents*` (registry, files, sessions, sync, cleanup-ghosts)
-- [Teams](/reference/rest-api/teams), `/api/teams*`, team-onboarding, team-rules, team-chat
-- [Board](/reference/rest-api/board), `/api/board*` (tasks, claim, comments, executions, deps, workspace)
-- [Runtimes](/reference/rest-api/runtimes), `/api/runtimes*`, `/api/onboarding/*`, `/api/providers*`
-- [Memory](/reference/rest-api/memory), `/api/memory*`
-- [Tools & MCP](/reference/rest-api/tools-and-mcp), `/api/tools*`, `/api/mcp*` (incl. SSE/WS)
-- [Governance](/reference/rest-api/governance), budgets, delegation-approval, approvals
-- [Capabilities](/reference/rest-api/capabilities), `/api/capabilities*`
-- [Observability](/reference/rest-api/observability), `/api/obs*` (incl. SSE), `/api/eval/smoke`
-- [Schedules](/reference/rest-api/schedules), `/api/schedules*`
-- [System](/reference/rest-api/system), `/api/system/*` (status, install, configure, gateway, device)
-- [Misc](/reference/rest-api/misc), cost-records, chat-history, graph-layout, personality, skills, exec-settings, fleet, boo-zero
-
-## CLI & configuration
-
-- [CLI reference](/reference/cli), the `clawboo` entry point, its `backup` / `stop` / `restart` subcommands, and the `clawboo-mcp-{tasks,memory,tools,teamchat}` stdio bins.
-- [Configuration](/reference/configuration), `settings.json`, the `~/.clawboo` state directory, and the file/dir locations Clawboo owns.
-- [Environment variables](/reference/environment-variables), every `CLAWBOO_*`, `OPENCLAW_*`, and provider key Clawboo reads, sourced only from `@clawboo/config`, the runtime descriptor, and the secrets vault.
-
-## Data, MCP & catalog
-
-- [Database schema](/reference/database-schema), the 35 SQLite tables with column-level detail and an ERD.
-- [MCP tools](/reference/mcp-tools), the Tasks / Memory / Tools / TeamChat servers, each tool's name, and its zod input shape.
-- [Marketplace catalog](/reference/marketplace-catalog), the pack format, the nineteen packs (seventeen pinned to upstream SHAs, two first-party local), and the runtime fetch-and-verify path.
-- [Events & errors](/reference/events-and-errors), the orchestration event kinds and the runtime-error taxonomy (unknown class = harness bug).
+MCP has two pages: [MCP tools](/reference/mcp-tools) lists every tool and its inputs, and [MCP servers](/operating/mcp-servers), under self-hosting, shows how to attach an agent you run yourself.
 
 ## Packages
 
-[Packages overview](/reference/packages/index) carries the dependency graph and build order. One page per `@clawboo/*` package documents its version, purity, public API, and consumers:
+Clawboo's code is split into 33 workspace packages under `packages/`: 27 at the top level and 6 runtime adapters, one of which is a test runtime. They are documented for contributors in the Contribute tab, starting at the [Packages overview](/reference/packages/index).
 
-- Adapters, [adapter-claude-code](/reference/packages/adapter-claude-code), [adapter-codex](/reference/packages/adapter-codex), [adapter-hermes](/reference/packages/adapter-hermes), [adapter-native](/reference/packages/adapter-native), [adapter-openclaw](/reference/packages/adapter-openclaw)
-- Registries & sources, [agent-registry](/reference/packages/agent-registry), [capability-registry](/reference/packages/capability-registry), [scheduler](/reference/packages/scheduler)
-- Core substrate, [executor](/reference/packages/executor), [db](/reference/packages/db), [events](/reference/packages/events), [protocol](/reference/packages/protocol), [config](/reference/packages/config)
-- Orchestration, [team-orchestration](/reference/packages/team-orchestration)
-- Gateway & clients, [gateway-client](/reference/packages/gateway-client), [gateway-proxy](/reference/packages/gateway-proxy), [control-client](/reference/packages/control-client)
-- Pure primitives, [board-core](/reference/packages/board-core), [compaction](/reference/packages/compaction), [governance](/reference/packages/governance), [model-catalog](/reference/packages/model-catalog), [obs](/reference/packages/obs), [process-lookup](/reference/packages/process-lookup), [worktrees](/reference/packages/worktrees)
-- MCP & evals, [mcp](/reference/packages/mcp), [evals](/reference/packages/evals)
-- UI & shared, [ui](/reference/packages/ui), [boo-avatar](/reference/packages/boo-avatar), [logger](/reference/packages/logger), [tsconfig](/reference/packages/tsconfig)
+## Related
 
-## See also
-
-- [Concepts](/concepts/index), the model behind the surfaces documented here
-- [Using Clawboo](/using/index), task-oriented guides for the dashboard features
-- [Operating Clawboo](/operating/index), deployment, security, and data/state
-- [Glossary](/appendices/glossary), canonical term definitions
-- [Known issues](/appendices/known-issues), candid limitations
+- [Use Clawboo](/using/index): how-to guides for every part of the dashboard
+- [Self-hosting](/operating/index): deployment, security, and data and state
+- [Help](/help/troubleshooting): fixes for errors you may see
+- [Glossary](/appendices/glossary): what each term means, including old names
