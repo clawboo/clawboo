@@ -781,6 +781,69 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     }
   })
 
+  it('a run the server ends that never answers the abort still says why', async () => {
+    // Silent through the idle window and through the grace after the abort: the
+    // stream ends with no terminal, and the reason the server knows is shown.
+    seedAgent('codex-q', 'codex')
+    const prev = process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+    process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = '20'
+    const gate = deferred()
+    try {
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          await gate.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+        })(),
+      )
+      await driveAgentChat({
+        db,
+        agentId: 'codex-q',
+        message: 'q',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      expect(adapter.aborted).toBe(1)
+      const meta = rowsFor(directChatSessionKey('codex-q', 'codex'))
+      expect(meta.map((r) => r.kind)).toEqual(['meta'])
+      expect(meta[0]?.text).toMatch(/went quiet/)
+    } finally {
+      gate.resolve()
+      if (prev === undefined) delete process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+      else process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = prev
+    }
+  }, 15_000)
+
+  it('a resumed coding-runtime turn the server ends keeps its resume pointer', async () => {
+    seedAgent('cc-q', 'claude-code')
+    setSetting(db, nativeChatSessionSettingKey('cc-q'), 'live-id')
+    const prev = process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+    process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = '20'
+    try {
+      const gate = deferred()
+      const adapter = new ResumableFakeAdapter(
+        (run) =>
+          (async function* () {
+            await gate.promise
+            yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+          })(),
+        'live-id',
+      )
+      adapter.onAbort = () => gate.resolve()
+      await driveAgentChat({
+        db,
+        agentId: 'cc-q',
+        message: 'q',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      expect(adapter.aborted).toBe(1)
+      expect(getSetting(db, nativeChatSessionSettingKey('cc-q'))).toBe('live-id')
+    } finally {
+      if (prev === undefined) delete process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+      else process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = prev
+    }
+  })
+
   it("/reset drops a coding-runtime agent's resume pointer", async () => {
     const key = nativeChatSessionSettingKey('cc-r')
     setSetting(db, key, 'session-abc')

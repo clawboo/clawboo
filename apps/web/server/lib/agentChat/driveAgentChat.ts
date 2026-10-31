@@ -348,9 +348,12 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     } else if (!committed && !userStopped && !succeeded) {
       const provider =
         runtime === NATIVE_RUNTIME ? loadAgentConfig(db, agentId)?.primaryProvider : null
-      // A stream that died without a terminal never said why, so say exactly that.
+      // A stream that died without a terminal never said why, so say exactly that,
+      // unless the server ended it (gone quiet, budget cap) and knows the reason.
       persist(
-        sawTerminal ? runFailureText(failure, runtime, provider) : RUN_ENDED_WITHOUT_RESULT,
+        sawTerminal || serverAbort
+          ? runFailureText(sawTerminal ? failure : serverAbort, runtime, provider)
+          : RUN_ENDED_WITHOUT_RESULT,
         true,
       )
     }
@@ -378,12 +381,13 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     // harness saved the session before emitting its terminal). Only for a runtime
     // that resumes and exposes a session codec (the fake test adapter does not).
     if (adapter.sessionCodec && adapter.capabilities().resume) {
-      if (failed && priorSessionId && runtime !== NATIVE_RUNTIME) {
+      if (failed && !serverAbort && priorSessionId && runtime !== NATIVE_RUNTIME) {
         // A failed turn that tried to resume most likely holds a dead handle (codex
         // `exec resume <unknown-id>` exits 1; the Claude SDK cannot find a session
         // from another working folder). Clear it so the next turn starts fresh
         // instead of failing the same way forever. Native reloads a missing
-        // transcript as an empty one, so its pointer is kept.
+        // transcript as an empty one, so its pointer is kept. A run the server
+        // ended (gone quiet, budget cap) had a live session, so it keeps it.
         setSetting(db, pointerKey, '')
       } else {
         try {
